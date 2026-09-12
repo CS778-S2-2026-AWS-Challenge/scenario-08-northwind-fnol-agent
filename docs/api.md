@@ -3160,6 +3160,36 @@ Provider acceptance is recorded before the Claim State compare-and-set. If a con
 mutation wins that compare-and-set, an unchanged retry reconciles the recorded result against
 the latest claim revision without creating a second provider task.
 
+### `POST /internal/v1/claims/{claim_id}/external-tasks/{task_id}/reconcile`
+
+Checks the provider-neutral status of one persisted `unknown_outcome` assessor request. The route
+requires integration-service authentication, `Idempotency-Key`, and `If-Match`, and accepts no
+request body. The client cannot supply a provider reference, routing state, consent, authority, or
+settlement choice. Runtime resolves the existing task, its single sent request, the assessor
+operation, the referenced consent and Northwind authority, and the current Claim before invoking
+the installed adapter's status-check operation.
+
+Response `200` returns the existing `AssessorRoutingResult` after the provider status path confirms
+acceptance. The same `task_id`, `request_id`, and operation identity are retained. Reconciliation
+adds the new provider reference, advances the task and operation from `unknown_outcome` to
+`accepted`, records the pending assessment material and immutable task-to-evidence link, and writes
+the routing result and claimant-safe next step to one new Claim revision. Those records are one
+persistence transaction; a revision or identity conflict leaves all of them unchanged. An
+identical replay returns the settled result without another status check, even though the first
+settlement advanced the Claim revision.
+
+If the status check remains inconclusive, the route returns `409 INVALID_STATE_TRANSITION` with
+`retryable: true` and `details[].reason` `unknown_outcome`. The task and operation stay
+`unknown_outcome`, and the existing refusal still prevents another assessor-routing request. An
+unavailable status dependency returns `503 DEPENDENCY_UNAVAILABLE`; a malformed, access-denied, or
+non-accepted status answer returns `502 DEPENDENCY_FAILED`. A missing task returns
+`404 RESOURCE_NOT_FOUND`; a stale first settlement returns `409 REVISION_CONFLICT`. None of these
+paths writes partial settlement state.
+
+This endpoint implements accepted settlement only. A provider statement that the original request
+was not submitted does not turn `unknown_outcome` into `retryable_failure` and cannot authorise a
+retry. That outcome requires a separate durable reconciliation-record contract.
+
 ### `POST /internal/v1/claims/{claim_id}/external-tasks/{task_id}/result`
 
 Receives the bounded result for one accepted assessor task through the configured assessor

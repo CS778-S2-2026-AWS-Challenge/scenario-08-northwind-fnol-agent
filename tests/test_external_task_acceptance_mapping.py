@@ -9,6 +9,7 @@ evidence.
 """
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -16,8 +17,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.adapters.claims_service import (
+    AdapterIdempotencyConflict,
     AssessorAdapterFailure,
     AssessorFixtureFailure,
+    AssessorReconciliationRequest,
     AssessorRoutingOutcome,
     MockAssessorServiceAdapter,
     ScriptedAssessorFailure,
@@ -30,12 +33,19 @@ from backend.domain.external_services import (
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
 )
-from backend.domain.models import AssessorRoutingOperationStatus, RouteAssessorRequest
+from backend.domain.models import (
+    AssessorRoutingOperationStatus,
+    AssessorRoutingResult,
+    AssessorRoutingStatus,
+    IntegrationSource,
+    RouteAssessorRequest,
+)
 from backend.repositories.fixture import FixtureRepository
-from backend.services.integrations import route_assessor
+from backend.services.integrations import reconcile_assessor_routing, route_assessor
 
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
+INTEGRATION_AUTH = {'Authorization': 'Bearer synthetic-integration'}
 DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
 JOURNEY_PATH = Path(__file__).parent / 'fixtures' / 'journeys' / 'AT-01-clear-motor-creation.json'
 
@@ -182,6 +192,7 @@ class CountingAssessorAdapter(MockAssessorServiceAdapter):
     def __init__(self, *, failure_sequence: tuple[ScriptedAssessorFailure, ...]) -> None:
         super().__init__(failure_sequence=failure_sequence)
         self.calls = 0
+        self.reconciliation_calls = 0
 
     def route_assessor(
         self,
@@ -190,6 +201,27 @@ class CountingAssessorAdapter(MockAssessorServiceAdapter):
     ) -> AssessorRoutingOutcome:
         self.calls += 1
         return super().route_assessor(command, request_fingerprint)
+
+    def reconcile_assessor(
+        self,
+        command: AssessorReconciliationRequest,
+        request_fingerprint: str,
+    ) -> AssessorRoutingOutcome | None:
+        """Count status checks while preserving the fixture's reconciliation result.
+
+        Args:
+            command: Persisted external-operation identity being checked.
+            request_fingerprint: Stable fingerprint of that persisted identity.
+
+        Returns:
+            The deterministic fixture status result.
+
+        Raises:
+            AdapterIdempotencyConflict: The persisted identity changed between checks.
+        """
+
+        self.reconciliation_calls += 1
+        return super().reconcile_assessor(command, request_fingerprint)
 
 
 def _operation_statuses(
@@ -505,3 +537,691 @@ def test_a_permitted_retry_keeps_the_original_operation_whatever_key_it_carries(
     ]
     assert len(routing_decisions) == 1
     assert routing_decisions[0].decision_id == requests[0].authorisation.northwind_authority_ref
+
+
+def _reconcile(
+    client: TestClient,
+    claim_id: str,
+    task_id: str,
+    *,
+    key: str,
+    revision: int,
+) -> Any:
+    return client.post(
+        f'/internal/v1/claims/{claim_id}/external-tasks/{task_id}/reconcile',
+        headers={
+            **INTEGRATION_AUTH,
+            'Idempotency-Key': key,
+            'If-Match': str(revision),
+        },
+    )
+
+
+def test_reconciliation_settles_the_existing_identity_without_another_route() -> None:
+    """A provider status check accepts the one task that produced the unknown outcome."""
+
+    repository = FixtureRepository()
+    adapter = CountingAssessorAdapter(failure_sequence=(SENT_THEN_LOST,))
+    key = 'accepted-reconciliation'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        failed = _route(client, claim_id, key=f'{key}-route', revision=consent_revision)
+        assert failed.status_code == 409
+        task_before = repository.list_external_tasks_internal(claim_id)[0]
+        request_before = repository.list_external_task_requests_internal(claim_id)[0]
+        claim_before = repository.get_claim_internal(claim_id)
+        assert claim_before is not None
+
+        settled = _reconcile(
+            client,
+            claim_id,
+            task_before.task_id,
+            key=f'{key}-check',
+            revision=claim_before.revision,
+        )
+        replay = _reconcile(
+            client,
+            claim_id,
+            task_before.task_id,
+            key=f'{key}-check',
+            revision=claim_before.revision,
+        )
+        claimant = client.get(f'/api/v1/claims/{claim_id}', headers=AUTH)
+        staff = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/external-requests',
+            headers=STAFF_AUTH,
+        )
+
+    assert settled.status_code == 200, settled.text
+    assert replay.status_code == 200, replay.text
+    assert replay.json() == settled.json()
+    assert adapter.calls == 1
+    assert adapter.reconciliation_calls == 1
+    assert len(repository.list_external_tasks_internal(claim_id)) == 1
+    assert repository.list_external_task_requests_internal(claim_id) == [request_before]
+
+    task_after = repository.list_external_tasks_internal(claim_id)[0]
+    assert task_after.task_id == task_before.task_id
+    assert task_after.status is ExternalTaskOperationStatus.ACCEPTED
+    assert task_after.provider_reference is not None
+    operation = repository.get_assessor_routing_operation(str(request_before.operation_id))
+    assert operation is not None
+    assert operation.status is AssessorRoutingOperationStatus.ACCEPTED
+    assert operation.result is not None
+    assert operation.result.model_dump(mode='json') == settled.json()
+
+    claim_after = repository.get_claim_internal(claim_id)
+    assert claim_after is not None
+    assert claim_after.revision == claim_before.revision + 1
+    assert claim_after.assessor_routing == operation.result
+    evidence = repository.list_evidence(claim_id, claim_after.customer_id)
+    links = repository.list_external_task_evidence_links_internal(claim_id)
+    assert len(evidence) == 1
+    assert evidence[0].status.value == 'pending'
+    assert evidence[0].provenance['external_task_id'] == task_after.task_id
+    assert len(links) == 1
+    assert links[0].task_id == task_after.task_id
+    assert links[0].evidence_id == evidence[0].evidence_id
+
+    assert claimant.status_code == 200
+    assert claimant.json()['external_service_action']['status'] == 'assigned'
+    assert staff.status_code == 200
+    assert staff.json()['items'][0]['task']['status'] == 'accepted'
+
+
+class InconclusiveAssessorAdapter(CountingAssessorAdapter):
+    """Status-check fixture that cannot yet establish the original request outcome."""
+
+    def reconcile_assessor(
+        self,
+        command: AssessorReconciliationRequest,
+        request_fingerprint: str,
+    ) -> AssessorRoutingOutcome | None:
+        """Return an inconclusive provider status without mutating fixture state.
+
+        Args:
+            command: Persisted external-operation identity being checked.
+            request_fingerprint: Stable fingerprint of that persisted identity.
+
+        Returns:
+            `None`, meaning the provider outcome remains unknown.
+
+        Raises:
+            ValueError: This controlled fixture does not raise.
+        """
+
+        del command, request_fingerprint
+        self.reconciliation_calls += 1
+        return None
+
+
+def test_inconclusive_reconciliation_preserves_unknown_and_resend_refusal() -> None:
+    """A status check that proves nothing cannot weaken the no-duplicate boundary."""
+
+    repository = FixtureRepository()
+    adapter = InconclusiveAssessorAdapter(failure_sequence=(SENT_THEN_LOST,))
+    key = 'inconclusive-reconciliation'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        assert (
+            _route(client, claim_id, key=f'{key}-route', revision=consent_revision).status_code
+            == 409
+        )
+        claim_before = repository.get_claim_internal(claim_id)
+        assert claim_before is not None
+        task = repository.list_external_tasks_internal(claim_id)[0]
+
+        unresolved = _reconcile(
+            client,
+            claim_id,
+            task.task_id,
+            key=f'{key}-check',
+            revision=claim_before.revision,
+        )
+        resend = _route(
+            client,
+            claim_id,
+            key=f'{key}-another-route',
+            revision=claim_before.revision,
+        )
+
+    assert unresolved.status_code == 409
+    error = unresolved.json()['error']
+    assert error['code'] == 'INVALID_STATE_TRANSITION'
+    assert error['retryable'] is True
+    assert [detail['reason'] for detail in error['details']] == ['unknown_outcome']
+    assert resend.status_code == 409
+    assert UNRESOLVED_MESSAGE in resend.json()['error']['message']
+    assert adapter.calls == 1
+    assert adapter.reconciliation_calls == 1
+    assert repository.get_claim_internal(claim_id) == claim_before
+    assert repository.list_evidence(claim_id, claim_before.customer_id) == []
+    assert repository.list_external_task_evidence_links_internal(claim_id) == []
+    assert (
+        repository.list_external_tasks_internal(claim_id)[0].status
+        is ExternalTaskOperationStatus.UNKNOWN_OUTCOME
+    )
+    assert _operation_statuses(repository, claim_id) == [
+        AssessorRoutingOperationStatus.UNKNOWN_OUTCOME
+    ]
+
+
+def test_reconciliation_requires_integration_identity_key_and_current_revision() -> None:
+    """Transport authority is checked before a provider status check can run."""
+
+    repository = FixtureRepository()
+    adapter = CountingAssessorAdapter(failure_sequence=(SENT_THEN_LOST,))
+    key = 'reconciliation-boundary'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        assert (
+            _route(client, claim_id, key=f'{key}-route', revision=consent_revision).status_code
+            == 409
+        )
+        task = repository.list_external_tasks_internal(claim_id)[0]
+        claim = repository.get_claim_internal(claim_id)
+        assert claim is not None
+        route = f'/internal/v1/claims/{claim_id}/external-tasks/{task.task_id}/reconcile'
+
+        unauthenticated = client.post(
+            route,
+            headers={'Idempotency-Key': f'{key}-check', 'If-Match': str(claim.revision)},
+        )
+        claimant = client.post(
+            route,
+            headers={
+                **AUTH,
+                'Idempotency-Key': f'{key}-check',
+                'If-Match': str(claim.revision),
+            },
+        )
+        missing_key = client.post(
+            route,
+            headers={**INTEGRATION_AUTH, 'If-Match': str(claim.revision)},
+        )
+        stale = client.post(
+            route,
+            headers={
+                **INTEGRATION_AUTH,
+                'Idempotency-Key': f'{key}-check',
+                'If-Match': str(claim.revision - 1),
+            },
+        )
+
+    assert unauthenticated.status_code == 401
+    assert claimant.status_code == 403
+    assert missing_key.status_code == 400
+    assert stale.status_code == 409
+    assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert stale.json()['error']['current_revision'] == claim.revision
+    assert adapter.reconciliation_calls == 0
+    assert repository.get_claim_internal(claim_id) == claim
+    assert repository.list_external_tasks_internal(claim_id)[0] == task
+
+
+class MalformedReconciliationAdapter(CountingAssessorAdapter):
+    """Status-check fixture that returns a state outside accepted routing."""
+
+    def reconcile_assessor(
+        self,
+        command: AssessorReconciliationRequest,
+        request_fingerprint: str,
+    ) -> AssessorRoutingOutcome | None:
+        """Return a non-accepted status to exercise fail-closed validation.
+
+        Args:
+            command: Persisted external-operation identity being checked.
+            request_fingerprint: Stable fingerprint of that persisted identity.
+
+        Returns:
+            A provider-neutral result that cannot settle the unknown request.
+
+        Raises:
+            ValueError: This controlled fixture does not raise.
+        """
+
+        del command, request_fingerprint
+        self.reconciliation_calls += 1
+        return AssessorRoutingOutcome(
+            result=AssessorRoutingResult(
+                routing_status=AssessorRoutingStatus.NOT_REQUIRED,
+                next_step='No accepted request was found.',
+            ),
+            replayed=False,
+        )
+
+
+class MissingReferenceReconciliationAdapter(CountingAssessorAdapter):
+    """Status-check fixture that claims acceptance without an acknowledgement."""
+
+    def reconcile_assessor(
+        self,
+        command: AssessorReconciliationRequest,
+        request_fingerprint: str,
+    ) -> AssessorRoutingOutcome | None:
+        """Return an accepted status without its required provider reference.
+
+        Args:
+            command: Persisted external-operation identity being checked.
+            request_fingerprint: Stable fingerprint of that persisted identity.
+
+        Returns:
+            An incomplete accepted answer used to verify fail-closed handling.
+
+        Raises:
+            ValueError: This controlled fixture does not raise.
+        """
+
+        del command, request_fingerprint
+        self.reconciliation_calls += 1
+        return AssessorRoutingOutcome(
+            result=AssessorRoutingResult(
+                routing_status=AssessorRoutingStatus.ASSIGNED,
+                next_step='The provider omitted its acknowledgement reference.',
+            ),
+            replayed=False,
+        )
+
+
+def test_malformed_reconciliation_result_leaves_all_persisted_state_unknown() -> None:
+    """A status answer that does not prove acceptance produces no partial settlement."""
+
+    repository = FixtureRepository()
+    adapter = MalformedReconciliationAdapter(failure_sequence=(SENT_THEN_LOST,))
+    key = 'malformed-reconciliation'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        assert (
+            _route(client, claim_id, key=f'{key}-route', revision=consent_revision).status_code
+            == 409
+        )
+        claim_before = repository.get_claim_internal(claim_id)
+        task_before = repository.list_external_tasks_internal(claim_id)[0]
+        assert claim_before is not None
+
+        response = _reconcile(
+            client,
+            claim_id,
+            task_before.task_id,
+            key=f'{key}-check',
+            revision=claim_before.revision,
+        )
+
+    assert response.status_code == 502
+    assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
+    assert adapter.calls == 1
+    assert adapter.reconciliation_calls == 1
+    assert repository.get_claim_internal(claim_id) == claim_before
+    assert repository.list_external_tasks_internal(claim_id)[0] == task_before
+    assert repository.list_evidence(claim_id, claim_before.customer_id) == []
+    assert _operation_statuses(repository, claim_id) == [
+        AssessorRoutingOperationStatus.UNKNOWN_OUTCOME
+    ]
+
+
+def test_accepted_reconciliation_without_reference_leaves_state_unknown() -> None:
+    """An accepted-looking status is unusable without a new provider reference."""
+
+    repository = FixtureRepository()
+    adapter = MissingReferenceReconciliationAdapter(failure_sequence=(SENT_THEN_LOST,))
+    key = 'reference-less-reconciliation'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        assert (
+            _route(client, claim_id, key=f'{key}-route', revision=consent_revision).status_code
+            == 409
+        )
+        claim_before = repository.get_claim_internal(claim_id)
+        task_before = repository.list_external_tasks_internal(claim_id)[0]
+        assert claim_before is not None
+
+        response = _reconcile(
+            client,
+            claim_id,
+            task_before.task_id,
+            key=f'{key}-check',
+            revision=claim_before.revision,
+        )
+
+    assert response.status_code == 502
+    assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
+    assert adapter.reconciliation_calls == 1
+    assert repository.get_claim_internal(claim_id) == claim_before
+    assert repository.list_external_tasks_internal(claim_id)[0] == task_before
+    assert _operation_statuses(repository, claim_id) == [
+        AssessorRoutingOperationStatus.UNKNOWN_OUTCOME
+    ]
+
+
+def test_fixture_status_check_rejects_incomplete_or_reused_identity() -> None:
+    """The fixture status path is keyed by the persisted operation, not caller input."""
+
+    adapter = MockAssessorServiceAdapter()
+    command = AssessorReconciliationRequest(
+        task_id='tsk_reconciliation_guard',
+        request_id='erq_reconciliation_guard',
+        operation_id='asr_op_reconciliation_guard',
+        claim_id='clm_reconciliation_guard',
+        external_claim_id='ext_reconciliation_guard',
+        authorisation_ref='dec_reconciliation_guard',
+        claimant_consent_ref='consent_reconciliation_guard',
+        requested_action='vehicle_damage_assessment_routing',
+        request_fingerprint='request-fingerprint',
+    )
+
+    with pytest.raises(ValueError, match='complete persisted identity'):
+        adapter.reconcile_assessor(
+            replace(command, task_id=''),
+            'status-fingerprint',
+        )
+
+    first = adapter.reconcile_assessor(command, 'status-fingerprint')
+    assert first is not None and first.replayed is False
+    replay = adapter.reconcile_assessor(command, 'status-fingerprint')
+    assert replay is not None and replay.replayed is True
+    with pytest.raises(AdapterIdempotencyConflict):
+        adapter.reconcile_assessor(command, 'changed-status-fingerprint')
+    assert adapter.reset_demo_state()['mock_assessor_reconciliations'] == 1
+
+
+class FailedStatusCheckAdapter(CountingAssessorAdapter):
+    """Status-check fixture that raises one bounded adapter error."""
+
+    def __init__(self, failure: Exception) -> None:
+        super().__init__(failure_sequence=(SENT_THEN_LOST,))
+        self.failure = failure
+
+    def reconcile_assessor(
+        self,
+        command: AssessorReconciliationRequest,
+        request_fingerprint: str,
+    ) -> AssessorRoutingOutcome | None:
+        """Raise the configured status-check failure.
+
+        Args:
+            command: Persisted external-operation identity being checked.
+            request_fingerprint: Stable fingerprint of that persisted identity.
+
+        Returns:
+            No result because the configured failure is always raised.
+
+        Raises:
+            Exception: The bounded failure configured by the test.
+        """
+
+        del command, request_fingerprint
+        self.reconciliation_calls += 1
+        raise self.failure
+
+
+@pytest.mark.parametrize(
+    ('failure', 'status_code', 'error_code', 'retryable'),
+    [
+        (
+            AssessorAdapterFailure(AssessorFixtureFailure.UNAVAILABLE),
+            503,
+            'DEPENDENCY_UNAVAILABLE',
+            True,
+        ),
+        (
+            AssessorAdapterFailure(AssessorFixtureFailure.ACCESS_DENIED),
+            502,
+            'DEPENDENCY_FAILED',
+            False,
+        ),
+        (ValueError('malformed status'), 502, 'DEPENDENCY_FAILED', False),
+        (AdapterIdempotencyConflict('changed identity'), 409, 'IDEMPOTENCY_CONFLICT', False),
+    ],
+)
+def test_status_check_failures_preserve_the_unresolved_operation(
+    failure: Exception,
+    status_code: int,
+    error_code: str,
+    retryable: bool,
+) -> None:
+    """Status dependency failures cannot partially settle or release a resend."""
+
+    repository = FixtureRepository()
+    adapter = FailedStatusCheckAdapter(failure)
+    key = f'status-check-failure-{status_code}-{error_code}'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        assert (
+            _route(client, claim_id, key=f'{key}-route', revision=consent_revision).status_code
+            == 409
+        )
+        task_before = repository.list_external_tasks_internal(claim_id)[0]
+        claim_before = repository.get_claim_internal(claim_id)
+        assert claim_before is not None
+
+        response = _reconcile(
+            client,
+            claim_id,
+            task_before.task_id,
+            key=f'{key}-check',
+            revision=claim_before.revision,
+        )
+
+    assert response.status_code == status_code
+    error = response.json()['error']
+    assert error['code'] == error_code
+    assert error['retryable'] is retryable
+    assert adapter.reconciliation_calls == 1
+    assert repository.get_claim_internal(claim_id) == claim_before
+    assert repository.list_external_tasks_internal(claim_id)[0] == task_before
+    assert _operation_statuses(repository, claim_id) == [
+        AssessorRoutingOperationStatus.UNKNOWN_OUTCOME
+    ]
+
+
+def test_reconciliation_service_refuses_missing_claim_and_task() -> None:
+    """Service lookup failures are explicit and never reach the assessor adapter."""
+
+    repository = FixtureRepository()
+    adapter = CountingAssessorAdapter(failure_sequence=())
+    with pytest.raises(ApiError) as missing_claim:
+        reconcile_assessor_routing(
+            repository,
+            adapter,
+            'clm_missing',
+            'tsk_missing',
+            'missing-claim-check',
+            1,
+        )
+    assert missing_claim.value.status_code == 404
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, _revision = _create_assessor_ready_claim(client, key='missing-task-check')
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    with pytest.raises(ApiError) as missing_task:
+        reconcile_assessor_routing(
+            repository,
+            adapter,
+            claim_id,
+            'tsk_missing',
+            'missing-task-check',
+            claim.revision,
+        )
+    assert missing_task.value.status_code == 404
+    assert adapter.reconciliation_calls == 0
+
+
+@pytest.mark.parametrize(
+    ('missing_record', 'error_code'),
+    [
+        ('request', 'IDEMPOTENCY_CONFLICT'),
+        ('operation', 'IDEMPOTENCY_CONFLICT'),
+        ('authority', 'INVALID_STATE_TRANSITION'),
+    ],
+)
+def test_reconciliation_refuses_an_incomplete_persisted_identity_graph(
+    monkeypatch: pytest.MonkeyPatch,
+    missing_record: str,
+    error_code: str,
+) -> None:
+    """Missing durable identity records fail closed before the provider status check."""
+
+    repository = FixtureRepository()
+    adapter = CountingAssessorAdapter(failure_sequence=(SENT_THEN_LOST,))
+    key = f'missing-reconciliation-{missing_record}'
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        assert (
+            _route(client, claim_id, key=f'{key}-route', revision=consent_revision).status_code
+            == 409
+        )
+    task = repository.list_external_tasks_internal(claim_id)[0]
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+
+    if missing_record == 'request':
+        monkeypatch.setattr(repository, 'list_external_task_requests_internal', lambda _claim: [])
+    elif missing_record == 'operation':
+        monkeypatch.setattr(repository, 'get_assessor_routing_operation', lambda _operation: None)
+    else:
+        monkeypatch.setattr(
+            repository,
+            'get_agent_decision_internal',
+            lambda _claim, _decision: None,
+        )
+
+    with pytest.raises(ApiError) as refused:
+        reconcile_assessor_routing(
+            repository,
+            adapter,
+            claim_id,
+            task.task_id,
+            f'{key}-check',
+            claim.revision,
+        )
+
+    assert refused.value.status_code == 409
+    assert refused.value.code == error_code
+    assert adapter.reconciliation_calls == 0
+    assert repository.get_claim_internal(claim_id) == claim
+    assert repository.list_external_tasks_internal(claim_id)[0] == task
+
+
+def test_reconciliation_refuses_a_status_source_different_from_the_original() -> None:
+    """A replacement adapter cannot settle an operation issued through another source."""
+
+    repository = FixtureRepository()
+    adapter = CountingAssessorAdapter(failure_sequence=(SENT_THEN_LOST,))
+    key = 'mismatched-status-source'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        assert (
+            _route(client, claim_id, key=f'{key}-route', revision=consent_revision).status_code
+            == 409
+        )
+        task = repository.list_external_tasks_internal(claim_id)[0]
+        claim = repository.get_claim_internal(claim_id)
+        assert claim is not None
+
+        # The request was persisted as fixture-sourced. Presenting this adapter as a
+        # configured service only for the status check must fail before it is called.
+        adapter.integration_source = IntegrationSource.CONFIGURED_SERVICE
+        response = _reconcile(
+            client,
+            claim_id,
+            task.task_id,
+            key=f'{key}-check',
+            revision=claim.revision,
+        )
+
+    assert response.status_code == 502
+    assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
+    assert adapter.reconciliation_calls == 0
+    assert repository.get_claim_internal(claim_id) == claim
+    assert repository.list_external_tasks_internal(claim_id)[0] == task
+
+
+def test_only_an_unresolved_task_can_be_reconciled() -> None:
+    """A failure that never reached the assessor is retried, not reconciled.
+
+    Reconciliation exists for a request whose outcome nobody knows. An `unavailable`
+    answer is a known outcome even when the request reached the assessor: the recovery
+    matrix keeps it retryable with the same operation identity. Settling it from a status
+    check would replace a failure the provider reported with an acceptance it never gave.
+    """
+
+    repository = FixtureRepository()
+    adapter = CountingAssessorAdapter(
+        failure_sequence=(
+            ScriptedAssessorFailure(
+                code=AssessorFixtureFailure.UNAVAILABLE,
+                delivery=ExternalTaskDelivery.SUBMITTED,
+                delivery_evidence='fixture send acknowledged; service reported unavailable',
+            ),
+        )
+    )
+    key = 'reconcile-not-unresolved'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        failed = _route(client, claim_id, key=f'{key}-route', revision=consent_revision)
+        assert failed.status_code == 503
+        task = repository.list_external_tasks_internal(claim_id)[0]
+        assert task.status is ExternalTaskOperationStatus.RETRYABLE_FAILURE
+        assert task.delivery is ExternalTaskDelivery.SUBMITTED
+        claim = repository.get_claim_internal(claim_id)
+        assert claim is not None
+
+        refused = _reconcile(
+            client,
+            claim_id,
+            task.task_id,
+            key=f'{key}-check',
+            revision=claim.revision,
+        )
+
+    assert refused.status_code == 409
+    error = refused.json()['error']
+    assert error['code'] == 'INVALID_STATE_TRANSITION'
+    # Several refusals on this route share that code, so the message is asserted rather
+    # than the status alone.
+    assert 'unresolved assessor task' in error['message']
+    assert adapter.reconciliation_calls == 0
+    after = repository.list_external_tasks_internal(claim_id)[0]
+    assert after == task
+    settled_claim = repository.get_claim_internal(claim_id)
+    assert settled_claim is not None
+    assert settled_claim.revision == claim.revision
+    assert settled_claim.assessor_routing is None

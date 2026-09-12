@@ -10,13 +10,18 @@ import pytest
 from pymongo import MongoClient
 from pymongo.errors import ConfigurationError, PyMongoError, ServerSelectionTimeoutError
 
-from backend.adapters.claims_service import MockAssessorServiceAdapter
+from backend.adapters.claims_service import (
+    MockAssessorServiceAdapter,
+    ScriptedAssessorFailure,
+)
 from backend.core.errors import ApiError
 from backend.core.runtime_profiles import RuntimeCapabilityStatus
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
     ASSESSOR_REQUESTED_ACTION,
     ASSESSOR_SERVICE_IDENTITY,
+    ExternalTaskDelivery,
+    ExternalTaskOperationStatus,
 )
 from backend.domain.models import (
     ActorReference,
@@ -76,7 +81,11 @@ from backend.repositories.protocols import (
     RevisionConflict,
 )
 from backend.services.external_service_entry import resolve_external_service_entry
-from backend.services.integrations import assessor_operation_id, route_assessor
+from backend.services.integrations import (
+    assessor_operation_id,
+    reconcile_assessor_routing,
+    route_assessor,
+)
 
 
 def _assert_persistence_contract(repository: MongoDBRepository) -> PersistenceRepository:
@@ -550,6 +559,107 @@ def test_assessor_routing_service_executes_with_mongodb_repository(
     stored_claim = repository.get_claim_internal(claim.claim_id)
     assert stored_claim is not None
     assert stored_claim.assessor_routing == result
+
+
+def test_assessor_reconciliation_is_one_atomic_mongodb_settlement(
+    repository: MongoDBRepository,
+) -> None:
+    """MongoDB advances task, operation, material, link, and Claim together."""
+
+    timestamp = _claim().created_at
+    consent = ExternalServiceConsent(
+        consent_ref='consent_reconciliation_001',
+        service_identity=ASSESSOR_SERVICE_IDENTITY,
+        requested_action=ASSESSOR_REQUESTED_ACTION,
+        permitted_fields=sorted(ASSESSOR_CONSENT_FIELDS),
+        status=ExternalServiceConsentStatus.GRANTED,
+        granted_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_mongo_001'),
+        granted_at=timestamp,
+    )
+    claim = _claim().model_copy(
+        update={
+            'external_claim': ExternalClaimResult(
+                external_claim_id='ext_reconciliation_001',
+                claim_number='NW-RECONCILIATION',
+                creation_status=ClaimCreationStatus.CREATED,
+                route='motor',
+                next_step='assessor',
+                source=IntegrationSource.FIXTURE,
+                created_at=timestamp,
+            ),
+            'external_service_consents': [consent],
+        }
+    )
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    decision = _decision(claim, session, _message(claim, session)).model_copy(
+        update={
+            'decision_id': 'dec_reconciliation_001',
+            'reason_codes': ['ASSESSOR_RULE_AUTHORISED'],
+        }
+    )
+    payload = RouteAssessorRequest(
+        claim_id=claim.claim_id,
+        external_claim_id='ext_reconciliation_001',
+        authorisation_ref=decision.decision_id,
+        claimant_consent_ref=consent.consent_ref,
+        requested_action=ASSESSOR_REQUESTED_ACTION,
+        location=AssessorLocation(region='Auckland'),
+    )
+    adapter = MockAssessorServiceAdapter(
+        failure_sequence=(
+            ScriptedAssessorFailure(
+                code=AssessorRoutingFailureCode.TIMEOUT,
+                delivery=ExternalTaskDelivery.SUBMITTED,
+                delivery_evidence='fixture accepted the original request',
+            ),
+        )
+    )
+    entry = resolve_external_service_entry(
+        capability_status=RuntimeCapabilityStatus.USING_FIXTURE,
+        allow_test_fixture=True,
+    )
+
+    with pytest.raises(ApiError) as unresolved:
+        route_assessor(
+            repository,
+            adapter,
+            entry,
+            payload,
+            authorisation_decision=decision,
+        )
+    assert unresolved.value.status_code == 409
+    task_before = repository.list_external_tasks_internal(claim.claim_id)[0]
+    request = repository.list_external_task_requests_internal(claim.claim_id)[0]
+    claim_before = repository.get_claim_internal(claim.claim_id)
+    assert claim_before is not None
+
+    result, replayed = reconcile_assessor_routing(
+        repository,
+        adapter,
+        claim.claim_id,
+        task_before.task_id,
+        'mongo-reconciliation',
+        claim_before.revision,
+    )
+
+    assert replayed is False
+    task_after = repository.list_external_tasks_internal(claim.claim_id)[0]
+    assert task_after.status is ExternalTaskOperationStatus.ACCEPTED
+    assert task_after.provider_reference == result.assessor_reference
+    operation = repository.get_assessor_routing_operation(str(request.operation_id))
+    assert operation is not None
+    assert operation.status is AssessorRoutingOperationStatus.ACCEPTED
+    assert operation.result == result
+    claim_after = repository.get_claim_internal(claim.claim_id)
+    assert claim_after is not None
+    assert claim_after.revision == claim_before.revision + 1
+    assert claim_after.assessor_routing == result
+    evidence = repository.list_evidence(claim.claim_id, claim.customer_id)
+    links = repository.list_external_task_evidence_links_internal(claim.claim_id)
+    assert len(evidence) == len(links) == 1
+    assert links[0].task_id == task_after.task_id
+    assert links[0].evidence_id == evidence[0].evidence_id
 
 
 @pytest.mark.parametrize(

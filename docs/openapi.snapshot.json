@@ -25119,6 +25119,106 @@
         ]
       }
     },
+    "/internal/v1/claims/{claim_id}/external-tasks/{task_id}/reconcile": {
+      "post": {
+        "description": "Reconcile one unresolved assessor task through its provider status path.\n\nArgs:\n    claim_id: Working Claim that owns the unresolved task.\n    task_id: Existing external task whose persisted identity is checked.\n    request: Authenticated HTTP request and configured Runtime dependencies.\n    idempotency_key: Required key for safely replaying the mutation.\n    if_match: Expected Working Claim revision before first settlement.\n    _principal: Verified integration-service principal supplied by FastAPI.\n\nReturns:\n    The accepted provider-neutral routing result.\n\nRaises:\n    ApiError: The task remains unknown, identity or revision conflicts, or the\n        status-check dependency cannot safely establish acceptance.",
+        "operationId": "reconcile_assessor_routing_integration_internal_v1_claims__claim_id__external_tasks__task_id__reconcile_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessorRoutingResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reconcile Assessor Routing Integration",
+        "tags": [
+          "internal-integrations"
+        ]
+      }
+    },
     "/internal/v1/claims/{claim_id}/external-tasks/{task_id}/result": {
       "post": {
         "description": "Receive and verify the controlled result for one accepted assessor task.\n\nArgs:\n    claim_id: Working Claim that owns the external task.\n    task_id: Accepted task whose provider-neutral result is being received.\n    request: Authenticated HTTP request and configured Runtime dependencies.\n    response: HTTP response whose status distinguishes creation from replay.\n    idempotency_key: Required identity for replaying this result receipt safely.\n    if_match: Expected Working Claim revision before a first receipt.\n    principal: Verified integration-service principal that scopes idempotency.\n\nReturns:\n    Persisted result after authoritative verification against its Evidence and Claim.\n\nRaises:\n    ApiError: The task cannot receive a result, the returned provenance conflicts,\n        Evidence storage is unavailable, or persistence cannot complete safely.",
