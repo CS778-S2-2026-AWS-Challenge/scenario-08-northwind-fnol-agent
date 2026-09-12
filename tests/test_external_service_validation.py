@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from backend.adapters.claims_service import (
     AssessorFixtureFailure,
+    AssessorReconciliationRequest,
     AssessorResultOutcome,
     AssessorResultRequest,
     AssessorRoutingOutcome,
@@ -139,6 +140,27 @@ class NeverCalledAssessorAdapter:
 
         del command, request_fingerprint
         raise AssertionError('The assessor adapter must not receive a result on this path.')
+
+    def reconcile_assessor(
+        self,
+        command: AssessorReconciliationRequest,
+        request_fingerprint: str,
+    ) -> AssessorRoutingOutcome | None:
+        """Reject reconciliation on a double that must never be invoked.
+
+        Args:
+            command: Persisted operation identity that must remain unused.
+            request_fingerprint: Status-check identity that must remain unused.
+
+        Returns:
+            This method never returns.
+
+        Raises:
+            AssertionError: Always, because this adapter must not be called.
+        """
+
+        del command, request_fingerprint
+        raise AssertionError('The assessor adapter must not reconcile on this path.')
 
 
 def test_declined_consent_preserves_the_claim_and_never_calls_the_adapter() -> None:
