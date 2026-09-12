@@ -1628,9 +1628,26 @@ assessor reference was returned and `queued` when only a queue accepted the requ
 
 Timeout and unavailable responses use `503 DEPENDENCY_UNAVAILABLE` with `retryable: true`.
 Access-denied and malformed responses use `502 DEPENDENCY_FAILED` with `retryable: false`. All
-four leave the consented Working Claim revision unchanged, do not report assignment, and retain
-the same operation identity for an unchanged permitted retry. Automatic retry counts remain
-unapproved; the claimant client offers only an explicit retry for retryable failures.
+four leave the consented Working Claim revision unchanged and do not report assignment.
+Automatic retry counts remain unapproved; the claimant client offers only an explicit retry for
+retryable failures.
+
+The operation identity is derived from the `Idempotency-Key` the claimant request carries, so an
+unchanged retry that presents the same key continues the same operation, task, and request
+record, while a retry presenting a new key begins a new operation. Beginning a new one is safe
+only while the previous attempt is known not to have reached the assessor, which is what the next
+paragraph governs.
+
+An attempt the adapter reports as having reached the assessor before it failed is not a failure
+the claimant may retry. Whether a request was submitted is reported by the adapter, never inferred
+from the failure code: the same `timeout` can describe an attempt that never left and one whose
+acknowledgement was lost. A submitted timeout, or any partial response, records the task and its
+routing operation as `unknown_outcome`, and the response is `409 INVALID_STATE_TRANSITION` with
+`retryable: false` and `details[].reason` `unknown_outcome`. While that task stands, every further
+request on the claim is refused the same way before any operation is prepared and before the
+assessor is contacted, whatever idempotency key it carries; no second task, operation, or request
+is created. The refusal is lifted by establishing what happened to the original request, not by
+repeating it.
 
 A replay of an accepted request succeeds only when its operational task ended accepted and the owed
 assessment material resolves to that task. Where an interrupted attempt left that state incomplete in a
@@ -1641,13 +1658,14 @@ report assignment.
 
 After a failed attempt the claimant state does not return to `ready_to_request`.
 `external_service_action.status` becomes `retryable_failure` for a timeout or unavailable
-response and `terminal_failure` for an access-denied or malformed one, and `failure_code`
-carries the provider-neutral reason. `can_request` stays true only for a retryable failure,
-because a terminal failure requires Northwind to review the request before another attempt.
+response that did not reach the assessor, `terminal_failure` for an access-denied or malformed
+one, and `awaiting_reconciliation` for an attempt that may already have reached the assessor, and
+`failure_code` carries the provider-neutral reason. `can_request` stays true only for a retryable
+failure, because a terminal failure requires Northwind to review the request before another
+attempt, and an unresolved outcome must be established before one is sent.
 The state is derived from the recorded external task rather than stored on the claim: a failed
 attempt leaves every claim field unchanged, so the claimant still sees what happened on a
-later read without the failure having altered the claim. An unresolved outcome has no approved
-claimant wording and is deliberately not projected.
+later read without the failure having altered the claim.
 
 The authorised decision and prepared operation identity are persisted together before the
 provider call. The service also persists one operational `tsk_` task and its `erq_` request,

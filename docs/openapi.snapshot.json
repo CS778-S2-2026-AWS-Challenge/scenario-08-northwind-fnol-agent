@@ -2696,7 +2696,8 @@
           "queued",
           "assigned",
           "retryable_failure",
-          "terminal_failure"
+          "terminal_failure",
+          "awaiting_reconciliation"
         ],
         "title": "ClaimantExternalServiceStatus",
         "type": "string"
