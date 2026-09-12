@@ -13,6 +13,7 @@ from backend.adapters.claims_service import (
     AssessorResultRequest,
     AssessorRoutingOutcome,
     MockAssessorServiceAdapter,
+    ScriptedAssessorFailure,
 )
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
@@ -24,7 +25,11 @@ from backend.domain.external_services import (
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
 )
-from backend.domain.models import IntegrationSource, RouteAssessorRequest
+from backend.domain.models import (
+    IntegrationSource,
+    ResponsibleParty,
+    RouteAssessorRequest,
+)
 from backend.repositories.fixture import FixtureRepository
 from backend.services.external_service_entry import MismatchedServiceAdapterError
 
@@ -710,3 +715,213 @@ def test_the_recorded_state_chain_matches_the_claimant_state_for_every_outcome(
     assert task.requested_action == ASSESSOR_REQUESTED_ACTION
     assert task.integration_source is IntegrationSource.FIXTURE
     assert 'fixture' in action['provider'].lower()
+
+
+STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
+INTEGRATION_AUTH = {'Authorization': 'Bearer synthetic-integration'}
+
+
+def _attempt(
+    client: TestClient,
+    claim_id: str,
+    revision: int,
+    *,
+    key: str,
+) -> Any:
+    return client.post(
+        f'/api/v1/claims/{claim_id}/assessor-routing',
+        headers={**AUTH, 'Idempotency-Key': f'{key}-route', 'If-Match': str(revision)},
+    )
+
+
+def _claimant_view(client: TestClient, claim_id: str) -> dict[str, Any]:
+    return cast(dict[str, Any], client.get(f'/api/v1/claims/{claim_id}', headers=AUTH).json())
+
+
+def _work_summary(client: TestClient, claim_id: str) -> dict[str, Any]:
+    detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
+    return cast(dict[str, Any], detail['work_summary'])
+
+
+def _failed_attempt(
+    repository: FixtureRepository,
+    failure: AssessorFixtureFailure,
+    *,
+    key: str,
+    delivery_evidence: str | None = None,
+) -> tuple[TestClient, str]:
+    """Drive one claim to a single failed assessor attempt and return the open client."""
+
+    scripted = (
+        ScriptedAssessorFailure(code=failure)
+        if delivery_evidence is None
+        else ScriptedAssessorFailure(
+            code=failure,
+            delivery=ExternalTaskDelivery.SUBMITTED,
+            delivery_evidence=delivery_evidence,
+        )
+    )
+    adapter = MockAssessorServiceAdapter(failure_sequence=(scripted,))
+    client = TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    )
+    client.__enter__()
+    claim_id, revision = _create_assessor_ready_claim(client, key=key)
+    consent_revision = _grant_consent(client, claim_id, revision, key=key)
+    _attempt(client, claim_id, consent_revision, key=key)
+    return client, claim_id
+
+
+def test_a_terminal_failure_stops_telling_the_claimant_to_send_the_request() -> None:
+    """The two halves of one claimant response must not contradict each other.
+
+    `customer_next_step` is stored when permission is recorded, and a failed attempt
+    changes no claim field, so it kept saying Northwind could now send the request while
+    the action beside it had withdrawn `can_request`. `docs/api.md` and AT-10 both say
+    what is actually true: Northwind must review before another attempt.
+    """
+
+    repository = FixtureRepository()
+    client, claim_id = _failed_attempt(
+        repository, AssessorFixtureFailure.ACCESS_DENIED, key='terminal-next-step'
+    )
+    with client:
+        claimant = _claimant_view(client, claim_id)
+
+    action = claimant['external_service_action']
+    next_step = claimant['customer_next_step']
+    assert action['status'] == 'terminal_failure'
+    assert action['can_request'] is False
+    assert next_step['responsible_party'] == 'claims_professional'
+    assert 'Northwind must review' in next_step['summary']
+    assert 'nothing for you to do' in next_step['summary']
+
+    # AT-10's `claim_state_effects.failure_may_change` is empty: the correction is
+    # derived for the read, and the stored field is untouched.
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    assert stored.customer_next_step.responsible_party is ResponsibleParty.CLAIMANT
+    assert 'Northwind can now send' in stored.customer_next_step.summary
+
+
+def test_a_retryable_failure_still_tells_the_claimant_the_request_can_be_sent() -> None:
+    """The correction applies only where the action was withdrawn."""
+
+    repository = FixtureRepository()
+    client, claim_id = _failed_attempt(
+        repository, AssessorFixtureFailure.UNAVAILABLE, key='retryable-next-step'
+    )
+    with client:
+        claimant = _claimant_view(client, claim_id)
+
+    assert claimant['external_service_action']['status'] == 'retryable_failure'
+    assert claimant['external_service_action']['can_request'] is True
+    assert claimant['customer_next_step']['responsible_party'] == 'claimant'
+    assert 'Northwind can now send' in claimant['customer_next_step']['summary']
+
+
+def test_an_unresolved_outcome_tells_the_claimant_northwind_is_checking() -> None:
+    """An attempt that may have arrived is not an invitation to send another."""
+
+    repository = FixtureRepository()
+    client, claim_id = _failed_attempt(
+        repository,
+        AssessorFixtureFailure.TIMEOUT,
+        key='unresolved-next-step',
+        delivery_evidence='fixture send acknowledged; no routing answer returned',
+    )
+    with client:
+        claimant = _claimant_view(client, claim_id)
+
+    assert claimant['external_service_action']['status'] == 'awaiting_reconciliation'
+    assert claimant['external_service_action']['can_request'] is False
+    assert claimant['customer_next_step']['responsible_party'] == 'claims_professional'
+    assert 'checking with the assessor' in claimant['customer_next_step']['summary']
+
+
+def test_a_terminal_failure_becomes_the_staff_blocker_without_a_second_gap() -> None:
+    """The gap the task already projects is reclassified, not duplicated.
+
+    A terminal failure is not something the external party resolves in its own time, so
+    the existing `external_service` item becomes Northwind's and required now, which is
+    what `primary_blocker` reads.
+    """
+
+    repository = FixtureRepository()
+    client, claim_id = _failed_attempt(
+        repository, AssessorFixtureFailure.MALFORMED, key='terminal-blocker'
+    )
+    with client:
+        summary = _work_summary(client, claim_id)
+
+    external_gaps = [
+        item for item in summary['missing_information'] if item['kind'] == 'external_service'
+    ]
+    assert len(external_gaps) == 1
+    gap = external_gaps[0]
+    assert gap['attention'] == 'required_now'
+    assert gap['responsible_party'] == 'claims_professional'
+    assert gap['blocked_action'] == ASSESSOR_REQUESTED_ACTION
+    assert summary['primary_blocker'] == gap['label']
+
+
+def test_a_retryable_failure_stays_a_follow_up_owned_by_the_external_party() -> None:
+    """Only the terminal case is reclassified."""
+
+    repository = FixtureRepository()
+    client, claim_id = _failed_attempt(
+        repository, AssessorFixtureFailure.UNAVAILABLE, key='retryable-blocker'
+    )
+    with client:
+        summary = _work_summary(client, claim_id)
+
+    external_gaps = [
+        item for item in summary['missing_information'] if item['kind'] == 'external_service'
+    ]
+    assert len(external_gaps) == 1
+    assert external_gaps[0]['attention'] == 'follow_up'
+    assert external_gaps[0]['responsible_party'] == 'external_party'
+    assert summary['primary_blocker'] != external_gaps[0]['label']
+
+
+def test_a_claim_whose_result_arrived_is_no_longer_waiting_on_the_assessor() -> None:
+    """One staff response must not say the answer is in and still be waiting for it.
+
+    The P3 catalogue keeps a provider result separate from task status, so the task stays
+    `accepted` after a result arrives. Reading task status alone left the claim counted as
+    waiting on the external party while the request lifecycle for that same task said the
+    result needed staff review.
+    """
+
+    repository = FixtureRepository()
+    adapter = MockAssessorServiceAdapter()
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key='result-wait')
+        consent_revision = _grant_consent(client, claim_id, revision, key='result-wait')
+        assert _attempt(client, claim_id, consent_revision, key='result-wait').status_code == 201
+        before = _work_summary(client, claim_id)
+        task = repository.list_external_tasks_internal(claim_id)[0]
+        claim = repository.get_claim_internal(claim_id)
+        assert claim is not None
+        received = client.post(
+            f'/internal/v1/claims/{claim_id}/external-tasks/{task.task_id}/result',
+            headers={
+                **INTEGRATION_AUTH,
+                'Idempotency-Key': 'result-wait-receive',
+                'If-Match': str(claim.revision),
+            },
+        )
+        after = _work_summary(client, claim_id)
+        lifecycle = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/external-requests',
+            headers=STAFF_AUTH,
+        ).json()['items'][0]['lifecycle']
+
+    assert received.status_code == 201, received.text
+    # Before the answer arrives the claim is genuinely waiting.
+    assert before['external_wait_count'] == 1
+    assert after['external_wait_count'] == 0
+    assert lifecycle['result_verification_state'] == 'review_required'
+    assert lifecycle['pending_owner'] == 'claims_professional'
