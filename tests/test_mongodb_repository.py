@@ -2143,30 +2143,31 @@ def test_mongodb_admits_one_dispatch_reserver_for_one_request(
     request = repository.list_external_task_requests_internal(claim.claim_id)[0]
     # A reservation cannot predate the preparation it belongs to.
     taken_at = request.prepared_at
+    operation_id = str(request.operation_id)
     # The unresolved attempt kept its hold, so nothing else may send this request.
     assert request.dispatch_reserved_at is not None
     assert (
         repository.reserve_external_dispatch(
-            claim.claim_id, request.request_id, claim.customer_id, taken_at
+            claim.claim_id, request.request_id, claim.customer_id, taken_at, operation_id
         )
         is None
     )
 
     repository.release_external_dispatch(claim.claim_id, request.request_id, claim.customer_id)
     won = repository.reserve_external_dispatch(
-        claim.claim_id, request.request_id, claim.customer_id, taken_at
+        claim.claim_id, request.request_id, claim.customer_id, taken_at, operation_id
     )
     lost = repository.reserve_external_dispatch(
-        claim.claim_id, request.request_id, claim.customer_id, taken_at
+        claim.claim_id, request.request_id, claim.customer_id, taken_at, operation_id
     )
     assert won is not None
     assert lost is None
 
     with pytest.raises(KeyError):
         repository.reserve_external_dispatch(
-            claim.claim_id, 'erq_missing', claim.customer_id, taken_at
+            claim.claim_id, 'erq_missing', claim.customer_id, taken_at, operation_id
         )
     with pytest.raises(KeyError):
         repository.reserve_external_dispatch(
-            'clm_missing', request.request_id, claim.customer_id, taken_at
+            'clm_missing', request.request_id, claim.customer_id, taken_at, operation_id
         )

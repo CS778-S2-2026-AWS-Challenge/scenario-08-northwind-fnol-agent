@@ -1390,19 +1390,20 @@ def test_the_fixture_repository_admits_one_reserver_and_then_releases() -> None:
     claim = repository.get_claim_internal(claim_id)
     assert claim is not None
     taken_at = request.prepared_at
+    operation_id = str(request.operation_id)
 
     first = repository.reserve_external_dispatch(
-        claim_id, request.request_id, claim.customer_id, taken_at
+        claim_id, request.request_id, claim.customer_id, taken_at, operation_id
     )
     second = repository.reserve_external_dispatch(
-        claim_id, request.request_id, claim.customer_id, taken_at
+        claim_id, request.request_id, claim.customer_id, taken_at, operation_id
     )
     assert first is not None and first.dispatch_reserved_at == taken_at
     assert second is None
 
     repository.release_external_dispatch(claim_id, request.request_id, claim.customer_id)
     third = repository.reserve_external_dispatch(
-        claim_id, request.request_id, claim.customer_id, taken_at
+        claim_id, request.request_id, claim.customer_id, taken_at, operation_id
     )
     assert third is not None
 
@@ -1412,10 +1413,12 @@ def test_the_fixture_repository_admits_one_reserver_and_then_releases() -> None:
     repository.release_external_dispatch(claim_id, request.request_id, claim.customer_id)
 
     with pytest.raises(KeyError):
-        repository.reserve_external_dispatch(claim_id, 'erq_missing', claim.customer_id, taken_at)
+        repository.reserve_external_dispatch(
+            claim_id, 'erq_missing', claim.customer_id, taken_at, operation_id
+        )
     with pytest.raises(KeyError):
         repository.reserve_external_dispatch(
-            'clm_missing', request.request_id, claim.customer_id, taken_at
+            'clm_missing', request.request_id, claim.customer_id, taken_at, operation_id
         )
 
 
@@ -1437,6 +1440,8 @@ def test_a_reservation_cannot_predate_the_request_it_belongs_to() -> None:
             authorised_revision=1,
         ),
         prepared_at=prepared_at,
+        operation_id='asr_op_reservation_guard',
+        dispatch_reserved_at=prepared_at,
     )
 
     with pytest.raises(ValidationError, match='cannot be reserved before it was prepared'):
@@ -1446,3 +1451,94 @@ def test_a_reservation_cannot_predate_the_request_it_belongs_to() -> None:
                 'dispatch_reserved_at': prepared_at - timedelta(seconds=1),
             }
         )
+
+
+class InterruptedDispatchAdapter(CountingAssessorAdapter):
+    """Dies inside the provider call, the way a process does.
+
+    The reservation is taken and nothing records what became of it. Raising something
+    the routing service does not catch is the faithful shape of that: an
+    `AssessorAdapterFailure` would be an answer, and this is the absence of one.
+    """
+
+    def route_assessor(
+        self,
+        command: RouteAssessorRequest,
+        request_fingerprint: str,
+    ) -> AssessorRoutingOutcome:
+        self.calls += 1
+        raise RuntimeError('the dispatching process did not return')
+
+
+def test_an_interrupted_dispatch_is_reconcilable_rather_than_stranded() -> None:
+    """A reservation that never settles must still be recoverable.
+
+    Reported as blocking on #766: the reservation closed the race, but an attempt that
+    died between reserving and recording left a claim that could neither route nor
+    reconcile. Routing refused it because the reservation was held, and reconciliation
+    refused it because it had no sent request and no unresolved task, so the only repair
+    was editing persistence by hand.
+    """
+
+    repository = FixtureRepository()
+    adapter = InterruptedDispatchAdapter(failure_sequence=())
+    key = 'interrupted-dispatch'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter),
+        raise_server_exceptions=False,
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        interrupted = _route(client, claim_id, key=f'{key}-route', revision=consent_revision)
+        held = repository.list_external_task_requests_internal(claim_id)[0]
+        stalled_task = repository.list_external_tasks_internal(claim_id)[0]
+
+        # The second caller cannot reach the assessor, whatever key it presents.
+        blocked = _route(client, claim_id, key=f'{key}-again', revision=consent_revision)
+        calls_after_block = adapter.calls
+
+        claim = repository.get_claim_internal(claim_id)
+        assert claim is not None
+        settled = _reconcile(
+            client,
+            claim_id,
+            stalled_task.task_id,
+            key=f'{key}-reconcile',
+            revision=claim.revision,
+        )
+
+    assert interrupted.status_code == 500
+    # The attempt held the dispatch and named the operation it was dispatching under,
+    # which is what makes it recoverable.
+    assert held.dispatch_reserved_at is not None
+    assert held.operation_id is not None
+    assert held.sent_at is None
+    assert stalled_task.status is ExternalTaskOperationStatus.PREPARED
+
+    assert blocked.status_code == 409
+    assert [detail['reason'] for detail in blocked.json()['error']['details']] == [
+        'dispatch_in_progress'
+    ]
+    # Nothing about the stalled record was read as a safe retry.
+    assert calls_after_block == 1
+    assert repository.get_claim_internal(claim_id) is not None
+
+    assert settled.status_code == 200, settled.text
+    # Reconciled from the same identity, with no second routing call.
+    assert adapter.calls == 1
+    tasks = repository.list_external_tasks_internal(claim_id)
+    requests = repository.list_external_task_requests_internal(claim_id)
+    assert len(tasks) == 1 and len(requests) == 1
+    assert tasks[0].task_id == stalled_task.task_id
+    assert tasks[0].status is ExternalTaskOperationStatus.ACCEPTED
+    assert requests[0].request_id == held.request_id
+    assert requests[0].operation_id == held.operation_id
+    # The send is recorded now that the status check established the assessor had it.
+    assert requests[0].sent_at is not None
+    assert _operation_statuses(repository, claim_id) == [AssessorRoutingOperationStatus.ACCEPTED]
+
+    # No longer stuck: the claim carries its routing and the claimant sees it.
+    reconciled_claim = repository.get_claim_internal(claim_id)
+    assert reconciled_claim is not None
+    assert reconciled_claim.assessor_routing is not None

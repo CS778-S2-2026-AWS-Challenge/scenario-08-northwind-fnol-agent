@@ -1646,7 +1646,9 @@ reach the assessor once: the caller that does not win the reservation returns
 call, and creates no second task, request, or operation. The reservation is released when the
 attempt settles with a known outcome, so a failure that never reached the assessor can be retried
 on the same identity; it is kept when the outcome is not established, so such a request never
-becomes sendable again without reconciliation.
+becomes sendable again without reconciliation. The reservation records the operation identity it
+dispatches under, so an attempt interrupted between reserving and sending still names itself and is
+reconcilable rather than stranded.
 
 An attempt the adapter reports as having reached the assessor before it failed is not a failure
 the claimant may retry. Whether a request was submitted is reported by the adapter, never inferred
@@ -3224,6 +3226,14 @@ unavailable status dependency returns `503 DEPENDENCY_UNAVAILABLE`; a malformed,
 non-accepted status answer returns `502 DEPENDENCY_FAILED`. A missing task returns
 `404 RESOURCE_NOT_FOUND`; a stale first settlement returns `409 REVISION_CONFLICT`. None of these
 paths writes partial settlement state.
+
+Two states are reconcilable. One is a task recorded as `unknown_outcome`. The other is an attempt
+that reserved its dispatch and never settled, whose task and operation are still `prepared` and
+whose request holds the reservation with no send time: the provider may have been reached and
+nothing recorded what came of it. Both are refused a further routing request, so both are accepted
+here, checked through the same status path, and settled on the same task, request, and operation
+identity. Settling an interrupted attempt also records the send the status check has just
+established.
 
 This endpoint implements accepted settlement only. A provider statement that the original request
 was not submitted does not turn `unknown_outcome` into `retryable_failure` and cannot authorise a

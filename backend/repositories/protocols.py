@@ -412,6 +412,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         expected_revision: int,
         task: ExternalTaskRecord,
         operation: AssessorRoutingOperation,
+        request: ExternalTaskRequest,
         evidence: EvidenceRecord,
         link: ExternalTaskEvidenceLink,
         branch_evaluation: BranchEvaluationRecord,
@@ -591,6 +592,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         request_id: str,
         customer_id: str,
         reserved_at: datetime,
+        operation_id: str,
     ) -> ExternalTaskRequest | None:
         """Atomically claim the sole right to send one prepared external request.
 
@@ -603,6 +605,8 @@ class PersistenceRepository(ClaimRepository, Protocol):
             request_id: Request whose dispatch is being reserved.
             customer_id: Customer who owns the parent claim.
             reserved_at: Moment the reservation is taken.
+            operation_id: Operation this attempt dispatches under, recorded with the
+                reservation so an interrupted attempt still names its own identity.
 
         Returns:
             The reserved request when this caller won, or `None` when another attempt

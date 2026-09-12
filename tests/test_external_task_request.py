@@ -47,6 +47,7 @@ def _request(
     purpose: str = 'Request an assessor for the recorded vehicle damage.',
     sent_at: datetime | None = None,
     operation_id: str | None = None,
+    dispatch_reserved_at: datetime | None = None,
     service_identity: str = SERVICE,
     requested_action: str = ACTION,
     authorisation: ExternalTaskAuthorisation | None = None,
@@ -62,6 +63,7 @@ def _request(
         authorisation=authorisation or _authorisation(),
         prepared_at=PREPARED_AT,
         sent_at=sent_at,
+        dispatch_reserved_at=dispatch_reserved_at,
         operation_id=operation_id,
     )
 
@@ -105,14 +107,29 @@ def test_the_two_authorities_cannot_be_the_same_reference() -> None:
         _authorisation(northwind='same_ref', consent='same_ref')
 
 
-def test_send_time_and_operation_identity_travel_together() -> None:
+def test_the_operation_identity_appears_when_the_dispatch_is_reserved_or_sent() -> None:
+    """Three states, not two.
+
+    The identity used to appear only with the send time. The dispatch reservation now
+    records it earlier, so an attempt interrupted between reserving and sending still
+    names the operation it was dispatching under and can be reconciled. What is still
+    refused is an identity that belongs to neither state.
+    """
+
     sent = _request(sent_at=SENT_AT, operation_id='ext_op_1')
     assert sent.operation_id == 'ext_op_1'
 
-    with pytest.raises(ValueError, match='records both a send time and an operation'):
+    reserved = _request(dispatch_reserved_at=SENT_AT, operation_id='ext_op_1')
+    assert reserved.operation_id == 'ext_op_1'
+    assert reserved.sent_at is None
+
+    with pytest.raises(ValueError, match='records its operation identity'):
         _request(sent_at=SENT_AT)
 
-    with pytest.raises(ValueError, match='records both a send time and an operation'):
+    with pytest.raises(ValueError, match='records its operation identity'):
+        _request(dispatch_reserved_at=SENT_AT)
+
+    with pytest.raises(ValueError, match='only once its dispatch is'):
         _request(operation_id='ext_op_1')
 
 

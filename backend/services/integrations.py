@@ -1131,9 +1131,19 @@ def reconcile_assessor_routing(
     if len(requests) != 1:
         raise _idempotency_error()
     external_request = requests[0]
-    if external_request.operation_id is None or external_request.sent_at is None:
+    # A reserved request that was never recorded as sent is the interruption window:
+    # the attempt held the right to dispatch and nothing recorded what came of it. That
+    # is precisely what needs reconciling, so it is admitted here rather than refused;
+    # refusing it left the claim unable to route and unable to reconcile, which is the
+    # blocking finding on #766.
+    interrupted_dispatch = (
+        external_request.sent_at is None and external_request.dispatch_reserved_at is not None
+    )
+    if external_request.operation_id is None or not (
+        external_request.sent_at is not None or interrupted_dispatch
+    ):
         raise _authorisation_error(
-            'Assessor reconciliation requires the persisted sent request identity.'
+            'Assessor reconciliation requires the persisted sent or reserved request identity.'
         )
     operation = repository.get_assessor_routing_operation(external_request.operation_id)
     if operation is None:
@@ -1159,7 +1169,12 @@ def reconcile_assessor_routing(
     identity_is_valid = (
         request_matches_operation
         and task.service_identity == ASSESSOR_SERVICE_IDENTITY
-        and task.delivery is ExternalTaskDelivery.SUBMITTED
+        # An interrupted dispatch never recorded a delivery, which is the whole of its
+        # problem; a settled unknown outcome recorded one.
+        and (
+            task.delivery is ExternalTaskDelivery.SUBMITTED
+            or task.status is ExternalTaskOperationStatus.PREPARED
+        )
         and claim.external_claim is not None
         and claim.external_claim.external_claim_id == operation.external_claim_id
         and consent is not None
@@ -1198,11 +1213,21 @@ def reconcile_assessor_routing(
         ):
             return operation.result, True
         raise _idempotency_error()
-    if (
-        task.status is not ExternalTaskOperationStatus.UNKNOWN_OUTCOME
-        or operation.status is not AssessorRoutingOperationStatus.UNKNOWN_OUTCOME
-        or claim.assessor_routing is not None
-    ):
+    # Two shapes are unresolved. One settled into `unknown_outcome` because the adapter
+    # reported a delivery it could not account for. The other never settled at all: its
+    # dispatch was reserved and the attempt did not return. Both mean the same thing —
+    # the provider may have been reached and nobody knows — and both are refused a
+    # further routing request, so both must be reconcilable.
+    settled_unknown = (
+        task.status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME
+        and operation.status is AssessorRoutingOperationStatus.UNKNOWN_OUTCOME
+    )
+    reserved_unsettled = (
+        interrupted_dispatch
+        and task.status is ExternalTaskOperationStatus.PREPARED
+        and operation.status is AssessorRoutingOperationStatus.PREPARED
+    )
+    if not (settled_unknown or reserved_unsettled) or claim.assessor_routing is not None:
         raise _authorisation_error(
             'Only a matching unresolved assessor task and operation can be reconciled.'
         )
@@ -1322,6 +1347,14 @@ def reconcile_assessor_routing(
         result=result,
     )
     awaited, link = _awaited_material_records(task=accepted_task, claim=updated_claim)
+    # An interrupted dispatch never recorded its send. The status check has just
+    # established that the provider did receive it, so the record says so now rather
+    # than leaving an accepted task whose request claims it was never sent.
+    settled_request = (
+        external_request
+        if external_request.sent_at is not None
+        else external_request.model_copy(update={'sent_at': external_request.dispatch_reserved_at})
+    )
     branch_evaluation = build_applied_branch_evaluation(
         updated_claim,
         repository=repository,
@@ -1333,6 +1366,7 @@ def reconcile_assessor_routing(
             expected_revision,
             accepted_task,
             accepted_operation,
+            settled_request,
             awaited,
             link,
             branch_evaluation,
@@ -1737,6 +1771,7 @@ def route_assessor(
         external_request.request_id,
         claim.customer_id,
         now_utc(),
+        operation.operation_id,
     )
     if reserved is None:
         raise _dispatch_in_progress_error()

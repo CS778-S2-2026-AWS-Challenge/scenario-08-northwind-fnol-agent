@@ -515,9 +515,12 @@ class ExternalTaskRequest(ContractModel):
     the authorisation, and the purpose a claimant can read. A request that cannot
     say all five is not preparable.
 
-    Preparation and sending are separate states. An unsent request holds no
-    operation identity, because the identity is what makes a retry the same
-    request rather than a second one.
+    Preparation, reserving the dispatch, and sending are three states. A merely
+    prepared request holds no operation identity, because the identity is what makes
+    a retry the same request rather than a second one. The identity appears when the
+    dispatch is reserved, so a reservation says which operation holds it and an
+    attempt interrupted between reserving and sending still names itself; the send
+    time appears only when the request was actually sent.
     """
 
     request_id: str = Field(min_length=1, max_length=100)
@@ -547,10 +550,18 @@ class ExternalTaskRequest(ContractModel):
             raise ValueError('A disclosed field must name something readable.')
         if not self.purpose.strip():
             raise ValueError('An external request must state a readable purpose.')
-        if (self.sent_at is None) != (self.operation_id is None):
+        if self.sent_at is not None and self.operation_id is None:
+            raise ValueError('A sent external request records its operation identity.')
+        if self.dispatch_reserved_at is not None and self.operation_id is None:
+            raise ValueError('A reserved external request records its operation identity.')
+        if (
+            self.operation_id is not None
+            and self.sent_at is None
+            and self.dispatch_reserved_at is None
+        ):
             raise ValueError(
-                'A sent external request records both a send time and an operation '
-                'identity; an unsent one records neither.'
+                'An external request holds an operation identity only once its dispatch is '
+                'reserved or sent.'
             )
         if self.sent_at is not None and self.sent_at < self.prepared_at:
             raise ValueError('An external request cannot be sent before it was prepared.')

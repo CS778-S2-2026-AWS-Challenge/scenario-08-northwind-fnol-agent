@@ -534,7 +534,10 @@ Evidence record or protected object.
   that settles with a known outcome releases the reservation, so a failure that definitely never
   reached the provider may be retried on the same identity. An attempt whose outcome is not
   established keeps it, which is why a reserved request can never fall back to a sendable
-  `prepared` state; establishing that outcome is reconciliation's work.
+  `prepared` state; establishing that outcome is reconciliation's work. The reservation records the
+  operation identity the attempt dispatches under, so a request holds that identity once its
+  dispatch is reserved rather than only once it is sent, and an attempt interrupted between the two
+  still names the operation it must be reconciled against.
 - An external response cannot mutate Claim State until provenance, request linkage,
   schema, current revision, field conflicts, and required authority are validated.
 - An external task uses an opaque `tsk_` identifier and remains separate from Claim State. Its
