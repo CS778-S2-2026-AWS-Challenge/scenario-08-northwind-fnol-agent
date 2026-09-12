@@ -1644,9 +1644,13 @@ atomic persistence operation rather than a check. Two concurrent requests on one
 reach the assessor once: the caller that does not win the reservation returns
 `409 INVALID_STATE_TRANSITION` with `details[].reason` `dispatch_in_progress` before any provider
 call, and creates no second task, request, or operation. The reservation is released when the
-attempt settles with a known outcome, so a failure that never reached the assessor can be retried
-on the same identity; it is kept when the outcome is not established, so such a request never
-becomes sendable again without reconciliation. The reservation records the operation identity it
+attempt settles with a known outcome, acceptance included, so a settled request never claims a
+dispatch is still in progress; it is kept only when the outcome is not established, so such a
+request never becomes sendable again without reconciliation. A failure that never reached the
+assessor can therefore be retried on the same identity, and a routing answer this runtime cannot
+turn into an assignment — a `not_required` or `failed` routing status — is recorded as a terminal
+failure on the task and its operation rather than left holding the request: the provider answered,
+so the outcome is known even though it cannot be used, and Northwind reviews it. The reservation records the operation identity it
 dispatches under, so an attempt interrupted between reserving and sending still names itself and is
 reconcilable rather than stranded.
 

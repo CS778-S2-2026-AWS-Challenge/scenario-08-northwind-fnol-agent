@@ -531,8 +531,9 @@ Evidence record or protected object.
   dispatch and the other fails before the provider is reached. It preserves the existing task,
   request, and operation identity; no second task or operation is created to resolve a race, and
   there is no uniqueness rule over `(claim_id, service_identity, requested_action)`. An attempt
-  that settles with a known outcome releases the reservation, so a failure that definitely never
-  reached the provider may be retried on the same identity. An attempt whose outcome is not
+  that settles with a known outcome releases the reservation, acceptance and an unusable provider
+  answer included, so a settled request never records a dispatch still in progress and a failure
+  that definitely never reached the provider may be retried on the same identity. An attempt whose outcome is not
   established keeps it, which is why a reserved request can never fall back to a sendable
   `prepared` state; establishing that outcome is reconciliation's work. The reservation records the
   operation identity the attempt dispatches under, so a request holds that identity once its

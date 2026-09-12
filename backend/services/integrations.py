@@ -962,6 +962,28 @@ def unreconciled_assessor_task(
     )
 
 
+def _release_dispatch(
+    repository: PersistenceRepository,
+    *,
+    claim: WorkingClaim,
+    request: ExternalTaskRequest,
+) -> None:
+    """Give up the hold once this attempt has a known outcome.
+
+    Every settled outcome releases, acceptance included: the hold says a dispatch is in
+    progress, and after an answer none is. What keeps a settled request from being sent
+    again is its own state — an accepted routing short-circuits the route, a terminal
+    failure withdraws the claimant action — not a lock left lying on it. Only an outcome
+    nobody established keeps the hold.
+    """
+
+    repository.release_external_dispatch(
+        claim.claim_id,
+        request.request_id,
+        claim.customer_id,
+    )
+
+
 def _dispatch_in_progress_error() -> ApiError:
     """Refuse a caller that did not win the right to send this request.
 
@@ -1350,10 +1372,11 @@ def reconcile_assessor_routing(
     # An interrupted dispatch never recorded its send. The status check has just
     # established that the provider did receive it, so the record says so now rather
     # than leaving an accepted task whose request claims it was never sent.
-    settled_request = (
-        external_request
-        if external_request.sent_at is not None
-        else external_request.model_copy(update={'sent_at': external_request.dispatch_reserved_at})
+    settled_request = external_request.model_copy(
+        update={
+            'sent_at': external_request.sent_at or external_request.dispatch_reserved_at,
+            'dispatch_reserved_at': None,
+        }
     )
     branch_evaluation = build_applied_branch_evaluation(
         updated_claim,
@@ -1814,11 +1837,7 @@ def route_assessor(
         # which is the point of holding it at all — nothing establishes that the
         # provider was not reached, so nothing may send again until reconciliation.
         if failed_task.status is not ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
-            repository.release_external_dispatch(
-                claim.claim_id,
-                external_request.request_id,
-                claim.customer_id,
-            )
+            _release_dispatch(repository, claim=claim, request=external_request)
         raise _assessor_failure_error(failure.code, task=failed_task) from failure
 
     _record_external_send(
@@ -1832,6 +1851,33 @@ def route_assessor(
         AssessorRoutingStatus.ASSIGNED,
         AssessorRoutingStatus.QUEUED,
     }:
+        # The provider answered, and the answer is one this runtime cannot turn into an
+        # assignment. That is a known outcome, not an unknown one, so it is settled here
+        # rather than left holding a reservation nobody can lift. The recovery matrix
+        # settles an unusable response as a terminal failure, which puts the claim in
+        # front of a claims professional through the blocker #763 added instead of in
+        # front of the claimant as a retry.
+        refused_task = _record_external_failure(
+            repository,
+            task=task,
+            customer_id=claim.customer_id,
+            failure_code=ExternalTaskFailureCode.MALFORMED,
+            delivery=ExternalTaskDelivery.SUBMITTED,
+            delivery_evidence=(
+                f'{task.integration_source.value} routing answer: '
+                f'{outcome.result.routing_status.value}'
+            ),
+        )
+        repository.save_assessor_routing_operation(
+            operation.model_copy(
+                update={
+                    'status': _OPERATION_STATUS_BY_TASK_STATUS[refused_task.status],
+                    'failure_code': AssessorRoutingFailureCode.MALFORMED,
+                    'updated_at': now_utc(),
+                }
+            )
+        )
+        _release_dispatch(repository, claim=claim, request=external_request)
         raise ApiError(
             status_code=502,
             code='DEPENDENCY_FAILED',
@@ -1862,6 +1908,9 @@ def route_assessor(
         provider_reference=provider_reference,
     )
     _record_awaited_material(repository, task=accepted_task, claim=claim)
+    # Acceptance is a settled outcome too. Leaving the hold would leave the stored
+    # request claiming a dispatch is in progress after the answer arrived.
+    _release_dispatch(repository, claim=claim, request=external_request)
     return _save_assessor_result(
         repository,
         payload.claim_id,

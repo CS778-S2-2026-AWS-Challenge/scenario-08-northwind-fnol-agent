@@ -49,6 +49,7 @@ from backend.domain.models import (
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.services.integrations import reconcile_assessor_routing, route_assessor
+from backend.services.support import now_utc
 
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
@@ -609,7 +610,14 @@ def test_reconciliation_settles_the_existing_identity_without_another_route() ->
     assert adapter.calls == 1
     assert adapter.reconciliation_calls == 1
     assert len(repository.list_external_tasks_internal(claim_id)) == 1
-    assert repository.list_external_task_requests_internal(claim_id) == [request_before]
+    settled_requests = repository.list_external_task_requests_internal(claim_id)
+    assert len(settled_requests) == 1
+    # The same request, with its identity and send record intact. What the settlement
+    # changes is the hold: an answered request is not a dispatch in progress.
+    assert settled_requests[0].request_id == request_before.request_id
+    assert settled_requests[0].operation_id == request_before.operation_id
+    assert settled_requests[0].sent_at == request_before.sent_at
+    assert settled_requests[0].dispatch_reserved_at is None
 
     task_after = repository.list_external_tasks_internal(claim_id)[0]
     assert task_after.task_id == task_before.task_id
@@ -1536,9 +1544,106 @@ def test_an_interrupted_dispatch_is_reconcilable_rather_than_stranded() -> None:
     assert requests[0].operation_id == held.operation_id
     # The send is recorded now that the status check established the assessor had it.
     assert requests[0].sent_at is not None
+    # Settled means settled: the hold this attempt took is gone.
+    assert requests[0].dispatch_reserved_at is None
     assert _operation_statuses(repository, claim_id) == [AssessorRoutingOperationStatus.ACCEPTED]
 
     # No longer stuck: the claim carries its routing and the claimant sees it.
     reconciled_claim = repository.get_claim_internal(claim_id)
     assert reconciled_claim is not None
     assert reconciled_claim.assessor_routing is not None
+
+
+class NotRequiredAssessorAdapter(CountingAssessorAdapter):
+    """Answers with a routing status this runtime cannot turn into an assignment."""
+
+    def route_assessor(
+        self,
+        command: RouteAssessorRequest,
+        request_fingerprint: str,
+    ) -> AssessorRoutingOutcome:
+        self.calls += 1
+        return AssessorRoutingOutcome(
+            result=AssessorRoutingResult(
+                routing_status=AssessorRoutingStatus.NOT_REQUIRED,
+                assessor_reference=None,
+                queue_reference=None,
+                next_step='No assessor is required for this claim.',
+                expected_by=now_utc() + timedelta(hours=48),
+                limitations=['Synthetic fixture routing; no production assessor was contacted.'],
+            ),
+            replayed=False,
+        )
+
+
+def test_a_routing_answer_that_cannot_be_used_is_settled_not_left_holding() -> None:
+    """A provider that answered has given a known outcome, even an unusable one.
+
+    Reported as blocking on #766: this branch raised without settling anything, so the
+    reservation stayed held over a task still `prepared`. Routing then refused as a
+    dispatch in progress and reconciliation refused because nothing was unresolved,
+    which is the same permanent lock as the crash window, one step later.
+    """
+
+    repository = FixtureRepository()
+    adapter = NotRequiredAssessorAdapter(failure_sequence=())
+    key = 'unusable-routing'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        refused = _route(client, claim_id, key=f'{key}-route', revision=consent_revision)
+        again = _route(client, claim_id, key=f'{key}-again', revision=consent_revision)
+        claimant = client.get(f'/api/v1/claims/{claim_id}', headers=AUTH).json()
+        summary = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()[
+            'work_summary'
+        ]
+
+    assert refused.status_code == 502
+    assert refused.json()['error']['details'][0]['reason'] == 'not_required'
+
+    # Settled, not held: the outcome is recorded and the hold is gone.
+    request = repository.list_external_task_requests_internal(claim_id)[0]
+    task = repository.list_external_tasks_internal(claim_id)[0]
+    assert request.dispatch_reserved_at is None
+    assert request.sent_at is not None
+    assert task.status is ExternalTaskOperationStatus.TERMINAL_FAILURE
+    assert _operation_statuses(repository, claim_id) == [
+        AssessorRoutingOperationStatus.TERMINAL_FAILURE
+    ]
+
+    # Not stranded: the claim is in the terminal-failure state the contract describes,
+    # where Northwind reviews, rather than refused as a dispatch in progress forever.
+    assert again.status_code == 409
+    assert 'already in progress' not in again.json()['error']['message']
+    assert claimant['external_service_action']['status'] == 'terminal_failure'
+    assert claimant['external_service_action']['can_request'] is False
+    assert summary['primary_blocker'] is not None
+    assert adapter.calls == 1
+
+
+def test_an_accepted_dispatch_does_not_leave_a_hold_behind() -> None:
+    """A settled acceptance is not a dispatch in progress."""
+
+    repository = FixtureRepository()
+    adapter = CountingAssessorAdapter(failure_sequence=())
+    key = 'accepted-releases'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        accepted = _route(client, claim_id, key=f'{key}-route', revision=consent_revision)
+
+    assert accepted.status_code == 201
+    request = repository.list_external_task_requests_internal(claim_id)[0]
+    assert request.dispatch_reserved_at is None
+    # The identity and the send record are untouched by the release.
+    assert request.sent_at is not None
+    assert request.operation_id is not None
+    assert repository.list_external_tasks_internal(claim_id)[0].status is (
+        ExternalTaskOperationStatus.ACCEPTED
+    )
