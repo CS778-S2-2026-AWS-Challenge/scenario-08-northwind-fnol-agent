@@ -5,8 +5,6 @@ import { ISSUE_POLICY_MARKER, evaluateIssuePolicy } from "../src/issue-policy";
 import type { IssueEvent } from "../src/types";
 import { parseIssueEvent } from "../src/validation";
 
-const MAINTAINER = "Ysoseri1224";
-
 const validBody = `### Issue type
 Regression validation
 
@@ -90,53 +88,40 @@ function clientWithComments(
 }
 
 describe("Worker issue policy adapter", () => {
-  it("accepts a maintainer issue with a complete body and posts no comment", async () => {
+  it("accepts a complete issue from any contributor without a Discussion approval", async () => {
     const calls: { url: string; init?: RequestInit }[] = [];
     const client = clientWithComments([], calls);
-    const approvedBody = validBody.replace("@someone-else", `@${MAINTAINER}`);
 
-    const result = await evaluateIssuePolicy(event(approvedBody, MAINTAINER), client, MAINTAINER);
+    const result = await evaluateIssuePolicy(event(validBody), client);
 
     expect(result.errors).toEqual([]);
     expect(calls).toEqual([]);
   });
 
-  it("comments once when a non-maintainer issue lacks a discussion approval", async () => {
+  it("comments once when an issue body is incomplete", async () => {
     const calls: { url: string; init?: RequestInit }[] = [];
     const client = clientWithComments([], calls);
 
-    const result = await evaluateIssuePolicy(event(validBody), client, MAINTAINER);
+    const incompleteBody = validBody.replace("### Deliverable\nOne pytest covering the fallback path.", "### Deliverable\n");
+    const result = await evaluateIssuePolicy(event(incompleteBody), client);
 
-    expect(result.errors.some((error) => error.includes("Discussion approval"))).toBe(true);
+    expect(result.errors.some((error) => error.includes("Deliverable"))).toBe(true);
     const postCall = calls.find((call) => call.init?.method === "POST");
     expect(postCall).toBeDefined();
     const body = JSON.parse(requestBody(postCall?.init)) as { body: string };
     expect(body.body).toContain(ISSUE_POLICY_MARKER);
-    expect(body.body).toContain("Discussion approval");
+    expect(body.body).toContain("Deliverable");
   });
 
   it("does not repeat an existing policy comment", async () => {
     const calls: { url: string; init?: RequestInit }[] = [];
     const client = clientWithComments([{ body: `${ISSUE_POLICY_MARKER}\nEarlier finding.` }], calls);
 
-    const result = await evaluateIssuePolicy(event(validBody), client, MAINTAINER);
+    const incompleteBody = validBody.replace("### Deliverable\nOne pytest covering the fallback path.", "### Deliverable\n");
+    const result = await evaluateIssuePolicy(event(incompleteBody), client);
 
     expect(result.errors.length).toBeGreaterThan(0);
     expect(calls.some((call) => call.init?.method === "POST")).toBe(false);
-  });
-
-  it("accepts a non-maintainer issue that records an approved discussion thread", async () => {
-    const calls: { url: string; init?: RequestInit }[] = [];
-    const client = clientWithComments([], calls);
-    const approvedBody = `${validBody}
-### Discussion approval
-https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/discussions/12
-`;
-
-    const result = await evaluateIssuePolicy(event(approvedBody), client, MAINTAINER);
-
-    expect(result.errors).toEqual([]);
-    expect(calls).toEqual([]);
   });
 
   it("parses a GitHub issues webhook payload", () => {

@@ -5,7 +5,7 @@ description: Repository governance for the Northwind FNOL repository (scenario-0
 
 # Northwind FNOL repository governance
 
-Version: v1.3 · 2026-09-02
+Version: v1.4 · 2026-09-13
 
 This version line is incremented whenever a rule changes substantively. The
 "Governance confirmation" section of the PR template cites the version you read
@@ -70,7 +70,7 @@ messages, and test evidence must be written in English.
 | --- | --- |
 | `authority-boundary.md` | §1 What the agent may and may not change; operations that require explicit authorization |
 | `before-work.md` | §2 Required reading, branch synchronization, validation, context management |
-| `issue-kanban.md` | §3 Task entry: responsibilities of issues, Kanban, and PRs; issue-creation approval flow |
+| `issue-kanban.md` | §3 Task entry: responsibilities of issues, Kanban, and technical-alignment Discussions |
 | `branching.md` | §4 Branch creation, naming, discipline, and parallel development |
 | `pr-workflow.md` | §5 Commits, PR structure, validation, PR template, requesting review |
 | `review-merge.md` | §6 Review rules, merge conditions, CODEOWNERS, broken-main protocol |

@@ -12,8 +12,8 @@ below are **mandatory for new components and styles; existing styles are not
 retrofitted**. When touching an existing file, any newly introduced values must
 go through tokens, but do not use the occasion for wholesale refactoring
 (`branching.md` section 4.3). Migrating existing styles wholesale is separate
-work: open its own issue through the approval flow in `issue-kanban.md`
-section 3.3.
+work: open its own bounded issue and use a Discussion only when technical or
+contract alignment is needed (see `issue-kanban.md` section 3.3).
 
 Structure: 11.0 is the token charter governing every visual value; 11.1–11.6
 are standing constraints (checkable in review and CI); 11.7 contains triggered

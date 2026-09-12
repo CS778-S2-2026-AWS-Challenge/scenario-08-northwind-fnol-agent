@@ -23,6 +23,8 @@ rules, or sprint commitments.
 The current time-bound direction and weekly execution records are maintained under `sprint/`:
 
 - [Sprint 3 Validation Prototype Overview](../sprint/sprint3.md)
+- [Sprint 4 Rubric Convergence and Journey Validation](../sprint/sprint4.md)
+- [Sprint 4 Week 7 Daily Card Prompt](../sprint/week7-daily-card-prompt.md)
 - [Sprint 3 Week 5 Plan](../sprint/week5/sprint3-week5-plan.md)
 - [Sprint 3 Week 5 Kanban Draft](../sprint/week5/sprint3-week5-kanban-draft.md)
 - [Sprint 3 Week 6 Kanban Draft](../sprint/week6/sprint3-week6-kanban-draft.md)
