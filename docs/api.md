@@ -1523,10 +1523,10 @@ an electronic signature.
 When the claimant continues without any supporting file, the guided Motor client registers one
 claimant-owned `pending` evidence item needed for a `later_action`. The created claim therefore
 remains visible in the Workbench `awaiting_evidence` view without blocking controlled creation.
-The `standard_motor_intake` fixture route assigns the created Working Claim deterministically to
-`stf_demo`. This is a repeatable prototype allocation rule, not an approved Northwind workforce
-routing policy; configured production allocation requires an authenticated assignment service and
-an approved routing rule.
+The `standard_motor_intake` fixture route leaves a newly created Working Claim unassigned. An
+online staff member takes ownership only through the explicit, authorised handoff-acceptance
+action. This preserves the same ownership contract for fixture and normal identity modes without
+pretending that the prototype has an approved workforce-allocation policy.
 
 Creates an external claim through the configured provider-neutral claims adapter. The endpoint
 accepts no provider payload. It derives the confirmed form, evidence references, pending evidence,
