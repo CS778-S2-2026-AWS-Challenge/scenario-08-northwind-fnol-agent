@@ -406,6 +406,39 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """Persist an immutable operation identity and valid outcome transition."""
         raise NotImplementedError
 
+    def save_assessor_reconciliation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        task: ExternalTaskRecord,
+        operation: AssessorRoutingOperation,
+        evidence: EvidenceRecord,
+        link: ExternalTaskEvidenceLink,
+        branch_evaluation: BranchEvaluationRecord,
+        customer_id: str,
+    ) -> None:
+        """Atomically settle one unknown assessor request as accepted.
+
+        Args:
+            claim: Resulting Claim carrying the reconciled routing result.
+            expected_revision: Claim revision that must still be current.
+            task: Existing external task advanced to accepted.
+            operation: Existing assessor operation advanced to accepted.
+            evidence: Pending material now owed by the accepted task.
+            link: Immutable task-to-evidence relationship for that material.
+            branch_evaluation: Applied branch projection for the new Claim revision.
+            customer_id: Customer who owns every persisted record.
+
+        Returns:
+            None.
+
+        Raises:
+            RevisionConflict: The stored Claim revision changed first.
+            IdempotencyConflict: Stored state does not match this settlement.
+            KeyError: A record is missing, belongs to another Claim, or is invalid.
+        """
+        raise NotImplementedError
+
     def save_assessor_routing_preparation(
         self,
         operation: AssessorRoutingOperation,

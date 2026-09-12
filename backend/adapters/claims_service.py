@@ -91,6 +91,21 @@ class AssessorRoutingOutcome:
 
 
 @dataclass(frozen=True, slots=True)
+class AssessorReconciliationRequest:
+    """Persisted identity used to check one unresolved assessor request."""
+
+    task_id: str
+    request_id: str
+    operation_id: str
+    claim_id: str
+    external_claim_id: str
+    authorisation_ref: str
+    claimant_consent_ref: str
+    requested_action: str
+    request_fingerprint: str
+
+
+@dataclass(frozen=True, slots=True)
 class AssessorResultRequest:
     """Immutable task identity used to obtain one provider-neutral result."""
 
@@ -157,6 +172,27 @@ class AssessorServiceAdapter(Protocol):
         command: RouteAssessorRequest,
         request_fingerprint: str,
     ) -> AssessorRoutingOutcome:
+        raise NotImplementedError
+
+    def reconcile_assessor(
+        self,
+        command: AssessorReconciliationRequest,
+        request_fingerprint: str,
+    ) -> AssessorRoutingOutcome | None:
+        """Check whether one unresolved request was accepted by the assessor.
+
+        Args:
+            command: Persisted task, request, and operation identity to check.
+            request_fingerprint: Stable identity derived from those persisted records.
+
+        Returns:
+            The accepted routing result, or `None` when the outcome is still unknown.
+
+        Raises:
+            AdapterIdempotencyConflict: The persisted identity is reused differently.
+            AssessorAdapterFailure: The status-check capability cannot return safely.
+        """
+
         raise NotImplementedError
 
     def receive_result(
@@ -250,6 +286,7 @@ class MockAssessorServiceAdapter(AssessorServiceAdapter):
             raise ValueError('The assessor fixture supports assigned or queued success only.')
         self._routed: dict[str, tuple[str, AssessorRoutingResult]] = {}
         self._returned: dict[str, tuple[str, AssessorReturnedReport]] = {}
+        self._reconciled: dict[str, tuple[str, AssessorRoutingResult]] = {}
         self._accepted_fingerprints: dict[str, str] = {}
         self._attempts: dict[str, int] = {}
         self._failure_sequence = tuple(
@@ -264,9 +301,11 @@ class MockAssessorServiceAdapter(AssessorServiceAdapter):
         cleared = {
             'mock_assessor_results': len(self._routed),
             'mock_assessment_reports': len(self._returned),
+            'mock_assessor_reconciliations': len(self._reconciled),
         }
         self._routed.clear()
         self._returned.clear()
+        self._reconciled.clear()
         self._accepted_fingerprints.clear()
         self._attempts.clear()
         return cleared
@@ -319,6 +358,68 @@ class MockAssessorServiceAdapter(AssessorServiceAdapter):
             limitations=['Synthetic fixture routing; no production assessor was contacted.'],
         )
         self._routed[route_key] = (request_fingerprint, result)
+        return AssessorRoutingOutcome(result=result, replayed=False)
+
+    def reconcile_assessor(
+        self,
+        command: AssessorReconciliationRequest,
+        request_fingerprint: str,
+    ) -> AssessorRoutingOutcome | None:
+        """Confirm fixture acceptance for one persisted unresolved operation.
+
+        The fixture derives its acknowledgement from the persisted operation identity,
+        so a process restart does not turn a status check into a new routing attempt.
+
+        Args:
+            command: Persisted task, request, and operation identity to check.
+            request_fingerprint: Stable identity derived from those persisted records.
+
+        Returns:
+            One deterministic accepted routing result and its replay state.
+
+        Raises:
+            AdapterIdempotencyConflict: The operation identity is reused differently.
+            ValueError: A required persisted identity value is empty.
+        """
+
+        if not all(
+            value.strip()
+            for value in (
+                command.task_id,
+                command.request_id,
+                command.operation_id,
+                command.claim_id,
+                command.external_claim_id,
+                command.authorisation_ref,
+                command.claimant_consent_ref,
+                command.requested_action,
+                command.request_fingerprint,
+            )
+        ):
+            raise ValueError('Assessor reconciliation requires complete persisted identity.')
+        held = self._reconciled.get(command.operation_id)
+        if held is not None:
+            fingerprint, result = held
+            if fingerprint != request_fingerprint:
+                raise AdapterIdempotencyConflict(command.operation_id)
+            return AssessorRoutingOutcome(result=result, replayed=True)
+
+        digest = sha256(command.operation_id.encode('utf-8')).hexdigest()[:10].upper()
+        timestamp = now_utc()
+        assigned = self._routing_status is AssessorRoutingStatus.ASSIGNED
+        result = AssessorRoutingResult(
+            routing_status=self._routing_status,
+            assessor_reference=f'asr_fixture_{digest.lower()}' if assigned else None,
+            queue_reference=f'QUE-REC-{digest[:5]}',
+            next_step=(
+                'An assessor will review the confirmed claim information.'
+                if assigned
+                else 'An assessor coordinator must assign the next available assessor.'
+            ),
+            expected_by=timestamp + timedelta(hours=48),
+            limitations=['Synthetic fixture reconciliation; no production assessor was contacted.'],
+        )
+        self._reconciled[command.operation_id] = (request_fingerprint, result)
         return AssessorRoutingOutcome(result=result, replayed=False)
 
     def receive_result(
