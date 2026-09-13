@@ -36,6 +36,10 @@ For product-direction or user-behaviour work, read [Northwind FNOL Product Soul]
 before the relevant files in `SPEC/`. It is the concise product-direction index; `SPEC/` remains
 the normative requirement and acceptance source.
 
+For Sprint 4 work, also read [Sprint 4 Execution Guide](sprint/sprint4-execution-guide.md). It
+provides the shared project context, research framing, suggested daily work, and evidence
+expectations; it does not replace `SPEC/`, current API contracts, or explicit ownership decisions.
+
 For any frontend or frontend-runtime design, implementation, review, or refactoring task, you
 MUST read [Frontend and Runtime Quality Standard](docs/frontend-and-runtime-quality-standard.md)
 before acting. This document defines the required product big picture, Agent-first claimant
