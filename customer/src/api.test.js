@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { setClaimantAccessToken, streamClaimUpdates } from './api.js'
+import { createClaim, setClaimantAccessToken, streamClaimUpdates } from './api.js'
 
 
 function eventStreamResponse(frames, status = 200) {
@@ -74,5 +74,41 @@ describe('claimant live-update stream', () => {
     expect(url).not.toContain('claimant-session-token')
     expect(request.headers.Authorization).toBe('Bearer claimant-session-token')
     expect(request.headers['X-Northwind-Anonymous-Session']).toBeUndefined()
+  })
+})
+
+describe('claim creation contract', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken(null)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('sends the selected product family to the backend when starting a claim', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ claim: {}, session: {} }), { status: 201 }))
+
+    await createClaim({
+      idempotencyKey: 'claim-family-contract',
+      incidentType: 'home',
+      modelProfileId: 'qwen-local',
+    })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/claims',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'Idempotency-Key': 'claim-family-contract' }),
+        body: JSON.stringify({
+          channel: 'web_agent',
+          locale: 'en-NZ',
+          incident_type: 'home',
+          model_profile_id: 'qwen-local',
+        }),
+      }),
+    )
   })
 })

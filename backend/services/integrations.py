@@ -1543,9 +1543,7 @@ def create_external_claim(
                 else None
             ),
             'route': outcome.result.route,
-            'assignee_id': (
-                'stf_demo' if payload.route == 'standard_motor_intake' else claim.assignee_id
-            ),
+            'assignee_id': claim.assignee_id,
             'claim_state': claim.claim_state.model_copy(
                 update={
                     'workflow_state': (

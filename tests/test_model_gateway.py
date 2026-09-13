@@ -16,7 +16,7 @@ from backend.adapters.model_gateway import (
 )
 from backend.app import create_app
 from backend.core.auth import Principal
-from backend.core.config import AgentRuntimeProfile, Settings
+from backend.core.config import AgentRuntimeProfile, DataRuntimeProfile, Settings
 from backend.core.model_gateway import ConfigurationBackedModelGateway
 from backend.domain.branch_registry import BranchRuleEvaluator
 from backend.domain.configuration import (
@@ -624,7 +624,10 @@ def test_bedrock_converse_rejects_malformed_provider_payloads(
 
 
 def test_openai_compatible_gateway_normalises_tool_calls() -> None:
-    def handler(_request: httpx.Request) -> httpx.Response:
+    observed: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed['payload'] = json.loads(request.content)
         return httpx.Response(
             200,
             json={
@@ -665,11 +668,36 @@ def test_openai_compatible_gateway_normalises_tool_calls() -> None:
                     },
                 )
             ],
+            required_tool_name='find_policy',
         )
     )
 
+    payload = cast(dict[str, object], observed['payload'])
+    assert payload['tool_choice'] == {
+        'type': 'function',
+        'function': {'name': 'find_policy'},
+    }
+    assert payload['parallel_tool_calls'] is False
     assert response.tool_calls[0].name == 'find_policy'
     assert response.tool_calls[0].arguments == {'policy_id': 'pol-1'}
+
+
+def test_openai_compatible_rejects_required_tool_outside_request_manifest() -> None:
+    gateway = OpenAICompatibleModelGateway(
+        gateway_config(),
+        transport=httpx.MockTransport(lambda _: httpx.Response(500)),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(
+                messages=[ModelMessage(role=ModelRole.USER, content='Read the claim.')],
+                tools=[ModelTool(name='claim.read', description='Read.', input_schema={})],
+                required_tool_name='policy.read',
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
 
 
 @pytest.mark.parametrize(
@@ -1014,6 +1042,57 @@ def _runtime_model_output() -> dict[str, object]:
         },
         'source_refs': [],
     }
+
+
+def test_gateway_runtime_can_request_deterministic_handoff() -> None:
+    gateway = RuntimeSequenceGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='handoff-read',
+                        name='claim.read',
+                        arguments={},
+                    )
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output={
+                    'action_code': 'human.create_handoff',
+                    'runtime_action_code': 'runtime.pause_for_review',
+                    'reason_codes': ['HUMAN_SUPPORT_REQUESTED'],
+                    'customer_reason': 'The claimant asked for human support.',
+                    'customer_response': 'I will connect you with a claims professional.',
+                    'customer_next_step': {
+                        'status': 'human_support_requested',
+                        'summary': 'A claims professional will continue with you.',
+                        'responsible_party': 'claims_professional',
+                        'required_items': [],
+                    },
+                    'form_changes': [],
+                    'contents_item_changes': [],
+                    'source_refs': [],
+                    'handoff_priority': 'standard',
+                },
+            ),
+        ]
+    )
+    proposal = GatewayAgent(gateway).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim(),
+            session_id='ses-runtime-handoff',
+            trigger_message_id='msg-runtime-handoff',
+            message_text='Please connect me with a person.',
+            evidence_refs=[],
+        )
+    )
+
+    assert proposal.action is AgentAction.HANDOFF
+    assert proposal.action_code == 'human.create_handoff'
+    assert proposal.controlled_rule_authorised is True
+    assert validate_proposal(proposal).outcome is AuthorityOutcome.AUTHORISED
 
 
 class FailingGateway:
@@ -1634,6 +1713,8 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
         'knowledge_limitations',
         'tool_results',
         'provenance_messages',
+        'conversation_history',
+        'field_value_contracts',
     }
     assert model_context['branch'] is None
     assert model_context['evidence_reference_count'] == 1
@@ -2684,6 +2765,79 @@ def test_snapshot_gateway_rejects_missing_model_configuration() -> None:
     assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
 
 
+def test_explicit_gpt_profile_never_falls_back_to_active_qwen_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('NORTHWIND_MODEL_API_KEY', 'synthetic-gpt-key')
+    settings = Settings(
+        environment='test',
+        data_runtime_profile=DataRuntimeProfile.FIXTURE,
+        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_protocol_adapter='openai_compatible',
+        model_profile_id='qwen-local',
+        model_provider='qwen-local',
+        model_identifier='qwen3.8-27b',
+        model_base_url='http://qwen.example.test/v1',
+    )
+    repository = ConfigurationRepository()
+    repository.create(
+        ConfigurationRecord(
+            configuration_id='cfg_qwen_active',
+            configuration_key='qwen-local',
+            revision=1,
+            state=ConfigurationState.PUBLISHED,
+            impact=ConfigurationImpact.HIGH,
+            domain='model',
+            values={
+                'protocol': 'openai_compatible',
+                'provider': 'qwen-local',
+                'model_identifier': 'qwen3.8-27b',
+                'base_url': 'http://qwen.example.test/v1',
+                'credential_environment_variable': None,
+                'profile_id': 'qwen-local',
+                'purpose': 'agent_turn',
+                'privacy_class': 'synthetic_fnol',
+                'prompt_version': settings.model_prompt_version,
+                'evaluation_status': 'configured',
+                'timeout_seconds': 30,
+                'structured_output': True,
+                'tools': True,
+            },
+            author='test',
+            reason='Published Qwen profile must not capture an explicit GPT turn.',
+            updated_at=now_utc(),
+        )
+    )
+    constructed: list[ModelGatewayConfig] = []
+    registry = ModelGatewayRegistry()
+
+    def build_recording_gateway(config: ModelGatewayConfig) -> ModelGateway:
+        constructed.append(config)
+        return StaticGateway(
+            ModelResponse(text='ok', completion_status=ModelCompletionStatus.COMPLETE)
+        )
+
+    registry.register('openai_compatible', build_recording_gateway)
+    gateway = ConfigurationBackedModelGateway(
+        settings,
+        repository,
+        registry,
+        runtime_configuration_resolver=RuntimeConfigurationResolver(
+            repository,
+            ReleaseSetRepository(),
+            environment='test',
+            runtime_profile='fixture',
+        ),
+    )
+
+    gateway.complete(ModelRequest(model_profile_id='nowcoding-gpt54mini', messages=[]))
+
+    assert len(constructed) == 1
+    assert constructed[0].profile.profile_id == 'nowcoding-gpt54mini'
+    assert constructed[0].model == 'gpt-5.4-mini'
+    assert constructed[0].base_url == 'https://nowcoding.ai/v1'
+
+
 def test_gateway_agent_requires_structured_output_at_composition() -> None:
     registry = ModelGatewayRegistry()
     registry.register(
@@ -2980,12 +3134,12 @@ def test_gateway_agent_preserves_claimant_support_and_marks_inference() -> None:
                     },
                     {
                         'field_code': 'property.affected_areas',
-                        'value': ['kitchen', 'roof'],
+                        'value': 'kitchen and roof',
                         'reported_text': 'the kitchen and roof',
                     },
                     {
                         'field_code': 'incident.injury_or_danger',
-                        'value': False,
+                        'value': 'false',
                         'reported_text': 'nobody was injured',
                     },
                     {
@@ -3019,7 +3173,20 @@ def test_gateway_agent_preserves_claimant_support_and_marks_inference() -> None:
     assert sources['incident.description'] is FormSource.CLAIMANT
     assert sources['claim.product_family'] is FormSource.CLAIMANT
     assert sources['property.affected_areas'] is FormSource.CLAIMANT
+    assert next(
+        change.value
+        for change in proposal.form_changes
+        if change.field_code == 'property.affected_areas'
+    ) == ['kitchen', 'roof']
     assert sources['incident.injury_or_danger'] is FormSource.CLAIMANT
+    assert (
+        next(
+            change.value
+            for change in proposal.form_changes
+            if change.field_code == 'incident.injury_or_danger'
+        )
+        is False
+    )
     assert sources['parties.other_parties'] is FormSource.CLAIMANT
     assert sources['incident.occurred_at'] is FormSource.INFERENCE
 

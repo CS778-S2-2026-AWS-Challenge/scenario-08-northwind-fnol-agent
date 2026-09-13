@@ -225,7 +225,7 @@
       "conflicting": ["incident.cause"],
       "not_applicable": ["vehicle.registration", "property.address"]
     },
-    "claimant_hidden_fields": ["contents_items.confidence", "contents_items.updated_by"],
-    "workbench_only_fields": ["contents_items.confidence", "contents_items.updated_by"]
+    "claimant_hidden_fields": ["incident.location", "contents_items.confidence", "contents_items.updated_by"],
+    "workbench_only_fields": ["incident.location", "contents_items.confidence", "contents_items.updated_by"]
   }
 }

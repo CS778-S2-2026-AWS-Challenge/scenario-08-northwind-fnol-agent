@@ -174,6 +174,7 @@ class AgentTurnContext:
     knowledge_status: str = 'not_requested'
     knowledge_limitations: tuple[str, ...] = ()
     provenance_messages: tuple[MessageRecord, ...] = ()
+    conversation_messages: tuple[MessageRecord, ...] = ()
     runtime_configuration_snapshot: RuntimeConfigurationSnapshot | None = None
     runtime_policy: RuntimeAgentPolicySnapshot | None = None
     tool_results: tuple[dict[str, object], ...] = ()
@@ -996,7 +997,31 @@ def validate_proposal(proposal: AgentProposal) -> AgentAuthority:
                 validated_by='deterministic_rule_engine',
                 outcome=AuthorityOutcome.BLOCKED,
             )
-        if proposal.action_code != 'conversation.answer' or contract.state_effect.value != 'none':
+        if proposal.action_code == 'conversation.answer' and contract.state_effect.value == 'none':
+            return AgentAuthority(
+                proposed_by='agent',
+                validated_by='deterministic_rule_engine',
+                outcome=AuthorityOutcome.AUTHORISED,
+            )
+        if (
+            proposal.action_code == 'human.create_handoff'
+            and proposal.action in {AgentAction.HANDOFF, AgentAction.URGENT_HANDOFF}
+            and proposal.controlled_rule_authorised
+            and proposal.reason_codes
+            and set(proposal.reason_codes).issubset(CONTROLLED_HANDOFF_REASONS)
+        ):
+            return AgentAuthority(
+                proposed_by='agent',
+                validated_by='deterministic_rule_engine',
+                outcome=AuthorityOutcome.AUTHORISED,
+            )
+        if contract.requires_confirmation:
+            return AgentAuthority(
+                proposed_by='agent',
+                validated_by='deterministic_rule_engine',
+                outcome=AuthorityOutcome.REVIEW_REQUIRED,
+            )
+        if contract.state_effect.value != 'none':
             return AgentAuthority(
                 proposed_by='agent',
                 validated_by='deterministic_rule_engine',
@@ -1005,7 +1030,7 @@ def validate_proposal(proposal: AgentProposal) -> AgentAuthority:
         return AgentAuthority(
             proposed_by='agent',
             validated_by='deterministic_rule_engine',
-            outcome=AuthorityOutcome.AUTHORISED,
+            outcome=AuthorityOutcome.BLOCKED,
         )
     if (
         proposal.action in {AgentAction.HANDOFF, AgentAction.URGENT_HANDOFF}

@@ -16,6 +16,10 @@ from backend.repositories.protocols import (
     IdempotencyRecord,
     PersistenceRepository,
     RevisionConflict,
+    StaffAgentDraftSource,
+    idempotency_source_matches,
+    staff_agent_execution_for,
+    with_staff_agent_source,
 )
 from backend.services.staff_access import require_claim_collaborator
 from backend.services.staff_actions import decide_signal
@@ -66,11 +70,12 @@ def _retry(
     route: str,
     key: str,
     fingerprint: str,
+    source: StaffAgentDraftSource | None = None,
 ) -> dict[str, Any] | None:
     record = repository.find_idempotency(actor_id, route, key)
     if record is None:
         return None
-    if record.request_fingerprint != fingerprint:
+    if record.request_fingerprint != fingerprint or not idempotency_source_matches(record, source):
         raise ApiError(
             status_code=409,
             code='IDEMPOTENCY_CONFLICT',
@@ -92,13 +97,18 @@ def _save_decision(
     expected_revision: int,
     idempotency: IdempotencyRecord,
     decision: SignalDecisionRecord,
+    source: StaffAgentDraftSource | None = None,
 ) -> None:
     try:
+        linked_idempotency = with_staff_agent_source(idempotency, source)
         repository.save_staff_mutation(
             claim,
             expected_revision,
-            idempotency,
+            linked_idempotency,
             signal_decision=decision,
+            staff_agent_execution=staff_agent_execution_for(
+                claim, expected_revision, linked_idempotency, source
+            ),
         )
     except RevisionConflict as conflict:
         raise ApiError(
@@ -132,6 +142,7 @@ def decide_review_signal(
     payload: SignalDecisionRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    source: StaffAgentDraftSource | None = None,
 ) -> SignalDecisionResponse:
     claim = _staff_claim(repository, principal, claim_id)
     require_claim_collaborator(repository, claim, principal)
@@ -145,13 +156,14 @@ def decide_review_signal(
             payload,
             idempotency_key,
             if_match,
+            source,
         )
 
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
     route = f'/api/v1/workbench/claims/{claim_id}/signals/{signal_id}/decisions'
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
-    replay = _retry(repository, principal.subject, route, key, fingerprint)
+    replay = _retry(repository, principal.subject, route, key, fingerprint, source)
     if replay is not None:
         return SignalDecisionResponse.model_validate(replay)
     if claim.revision != expected:
@@ -187,5 +199,5 @@ def decide_review_signal(
         session_id='',
         response_payload=response.model_dump(mode='json'),
     )
-    _save_decision(repository, updated, expected, idempotency, decision)
+    _save_decision(repository, updated, expected, idempotency, decision, source)
     return response

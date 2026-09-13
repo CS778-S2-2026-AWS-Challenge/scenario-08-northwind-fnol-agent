@@ -1,11 +1,17 @@
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
 
+import backend.services.staff_agent as staff_agent_service
 from backend.adapters.model_gateway import ModelGatewayRegistry
 from backend.app import create_app
+from backend.core.auth import Principal
 from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
+from backend.core.errors import ApiError
 from backend.domain.model_gateway import (
     ModelCapabilities,
     ModelCompletionStatus,
@@ -13,9 +19,15 @@ from backend.domain.model_gateway import (
     ModelResponse,
 )
 from backend.domain.staff_agent import (
+    ExecuteStaffAgentDraftRequest,
     StaffAgentDraft,
+    StaffAgentDraftExecutionOutcome,
     StaffAgentDraftKind,
+    StaffAgentExecutionRecord,
+    StaffAgentMessage,
+    StaffAgentMessageRole,
     StaffAgentModelOutput,
+    StaffAgentSession,
 )
 from backend.prompts import STAFF_ASSISTANT_PROMPT_ID
 from backend.repositories.fixture import FixtureRepository
@@ -33,6 +45,10 @@ CLAIMANT_HEADERS = {'Authorization': 'Bearer synthetic-claimant'}
 @dataclass
 class RecordingStaffAgent(StaffAgentTurnProvider):
     draft_claim_id: str | None = None
+    draft_kind: StaffAgentDraftKind = StaffAgentDraftKind.INTERNAL_NOTE
+    draft_action_code: str | None = None
+    draft_target_ref: str | None = None
+    draft_payload: dict[str, object] = field(default_factory=dict)
     contexts: list[StaffAgentContext] = field(default_factory=list)
 
     def respond(self, context: StaffAgentContext) -> StaffAgentProviderResult:
@@ -41,10 +57,13 @@ class RecordingStaffAgent(StaffAgentTurnProvider):
         if self.draft_claim_id is not None:
             drafts.append(
                 StaffAgentDraft(
-                    kind=StaffAgentDraftKind.INTERNAL_NOTE,
+                    kind=self.draft_kind,
                     title='Review note',
                     content='Check the source before taking action.',
                     claim_id=self.draft_claim_id,
+                    action_code=self.draft_action_code,
+                    target_ref=self.draft_target_ref,
+                    payload=self.draft_payload,
                 )
             )
         return StaffAgentProviderResult(
@@ -163,7 +182,10 @@ def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body['default_model_profile_id'] == 'qwen-local'
-    assert [item['id'] for item in body['models']] == ['qwen-local']
+    assert [item['id'] for item in body['models']] == [
+        'qwen-local',
+        'nowcoding-gpt54mini',
+    ]
 
 
 def test_staff_agent_capabilities_is_empty_for_controlled_runtime() -> None:
@@ -439,6 +461,136 @@ def test_staff_agent_rejects_an_out_of_scope_draft_without_saving_the_turn() -> 
     assert messages.json()['items'] == []
 
 
+def test_staff_agent_draft_requires_confirmation_and_executes_registered_action_once() -> None:
+    repository = FixtureRepository()
+    provider = RecordingStaffAgent()
+    with _client(repository, provider) as client:
+        claim_id = _create_claim(client, 'staff-agent-draft-execution')
+        support = client.post(
+            f'/api/v1/claims/{claim_id}/support-requests',
+            headers={
+                **CLAIMANT_HEADERS,
+                'Idempotency-Key': 'staff-agent-support',
+                'If-Match': '1',
+            },
+            json={
+                'reason': 'I would like a staff member to help me.',
+                'support_need': 'human_requested',
+                'preferred_channel': 'in_app',
+            },
+        )
+        assert support.status_code == 201, support.text
+        handoff_id = support.json()['handoff']['handoff_id']
+        presence = client.patch(
+            '/api/v1/workbench/staff/presence',
+            headers=STAFF_HEADERS,
+            json={'online': True, 'available': True, 'lease_seconds': 60},
+        )
+        assert presence.status_code == 200, presence.text
+
+        provider.draft_claim_id = claim_id
+        provider.draft_action_code = 'human.accept_handoff'
+        provider.draft_target_ref = handoff_id
+        provider.draft_payload = {}
+        session_id = _create_session(client)
+        turn = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'accept-draft-request',
+                'content': 'Prepare the Claim acceptance action.',
+                'claim_ids': [claim_id],
+            },
+        )
+        assert turn.status_code == 201, turn.text
+        assistant = turn.json()['assistant_message']
+        draft = assistant['drafts'][0]
+        assert draft['draft_id'].startswith('sdr_')
+        endpoint = (
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages/'
+            f'{assistant["message_id"]}/drafts/{draft["draft_id"]}/execute'
+        )
+
+        unconfirmed = client.post(endpoint, headers=STAFF_HEADERS, json={'confirmed': False})
+        assert unconfirmed.status_code == 409
+        assert unconfirmed.json()['error']['code'] == 'CONFIRMATION_REQUIRED'
+        unconfirmed_claim = repository.get_claim_internal(claim_id)
+        assert unconfirmed_claim is not None
+        assert unconfirmed_claim.revision == 2
+
+        headers = {
+            **STAFF_HEADERS,
+            'Idempotency-Key': 'execute-staff-agent-draft',
+            'If-Match': '2',
+        }
+        executed = client.post(endpoint, headers=headers, json={'confirmed': True})
+        replay = client.post(endpoint, headers=headers, json={'confirmed': True})
+
+        assert executed.status_code == 200, executed.text
+        assert replay.status_code == 200, replay.text
+        assert replay.json() == executed.json()
+        assert executed.json()['action_code'] == 'human.accept_handoff'
+        assert executed.json()['outcome'] == 'executed'
+        assert executed.json()['result']['handoff']['status'] == 'accepted'
+        runtime_execution = executed.json()['runtime_execution']
+        assert runtime_execution['execution_id'] == f'sax_{draft["draft_id"]}'
+        assert runtime_execution['confirmation'] == 'staff_confirmed'
+        assert runtime_execution['action_code'] == 'human.accept_handoff'
+        assert runtime_execution['expected_revision'] == 2
+        assert runtime_execution['resulting_revision'] == 3
+        assert runtime_execution['result'] == executed.json()['result']
+        assert (
+            repository.get_staff_agent_execution(runtime_execution['execution_id'], 'stf_other')
+            is None
+        )
+        workbench_claim = client.get(
+            f'/api/v1/workbench/claims/{claim_id}',
+            headers=STAFF_HEADERS,
+        )
+        assert workbench_claim.status_code == 200, workbench_claim.text
+        assert workbench_claim.json()['claim_id'] == claim_id
+        assert workbench_claim.json()['revision'] == 3
+        assert workbench_claim.json()['work_summary']['queue_key'] == 'processing'
+        assert workbench_claim.json()['customer_next_step']['status']
+        executed_claim = repository.get_claim_internal(claim_id)
+        assert executed_claim is not None
+        assert executed_claim.revision == 3
+        execution_record = repository.find_idempotency(
+            'stf_demo',
+            f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
+            'execute-staff-agent-draft',
+        )
+        assert execution_record is not None
+        assert execution_record.staff_agent_session_id == session_id
+        assert execution_record.staff_agent_message_id == assistant['message_id']
+        assert execution_record.staff_agent_draft_id == draft['draft_id']
+
+        second_turn = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'accept-draft-request-2',
+                'content': 'Prepare the same Claim acceptance action again.',
+                'claim_ids': [claim_id],
+            },
+        )
+        assert second_turn.status_code == 201, second_turn.text
+        second_assistant = second_turn.json()['assistant_message']
+        second_draft = second_assistant['drafts'][0]
+        conflicting_replay = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages/'
+            f'{second_assistant["message_id"]}/drafts/{second_draft["draft_id"]}/execute',
+            headers={
+                **STAFF_HEADERS,
+                'Idempotency-Key': 'execute-staff-agent-draft',
+                'If-Match': '3',
+            },
+            json={'confirmed': True},
+        )
+        assert conflicting_replay.status_code == 409
+        assert conflicting_replay.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+
+
 def test_staff_agent_fails_closed_when_no_model_profile_is_configured() -> None:
     repository = FixtureRepository()
     with _client(repository, None) as client:
@@ -455,6 +607,395 @@ def test_staff_agent_fails_closed_when_no_model_profile_is_configured() -> None:
 
     assert response.status_code == 503
     assert response.json()['error']['code'] == 'DEPENDENCY_UNAVAILABLE'
+
+
+def test_staff_agent_rejects_informational_draft_without_mutating_claim() -> None:
+    repository = FixtureRepository()
+    provider = RecordingStaffAgent()
+    with _client(repository, provider) as client:
+        claim_id = _create_claim(client, 'staff-agent-informational-draft')
+        provider.draft_claim_id = claim_id
+        session_id = _create_session(client)
+        turn = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'informational-draft',
+                'content': 'Prepare an internal note only.',
+                'claim_ids': [claim_id],
+            },
+        )
+        assert turn.status_code == 201, turn.text
+        draft = turn.json()['assistant_message']['drafts'][0]
+        endpoint = (
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages/'
+            f'{turn.json()["assistant_message"]["message_id"]}/drafts/{draft["draft_id"]}/execute'
+        )
+        response = client.post(
+            endpoint,
+            headers={**STAFF_HEADERS, 'Idempotency-Key': 'informational-draft-execution'},
+            json={'confirmed': True},
+        )
+
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'VALIDATION_ERROR'
+    stored_claim = repository.get_claim_internal(claim_id)
+    assert stored_claim is not None
+    assert stored_claim.revision == 1
+
+
+def test_staff_agent_execution_surfaces_stale_revision_without_claim_mutation() -> None:
+    repository = FixtureRepository()
+    provider = RecordingStaffAgent()
+    with _client(repository, provider) as client:
+        claim_id = _create_claim(client, 'staff-agent-stale-draft')
+        support = client.post(
+            f'/api/v1/claims/{claim_id}/support-requests',
+            headers={
+                **CLAIMANT_HEADERS,
+                'Idempotency-Key': 'staff-agent-stale-support',
+                'If-Match': '1',
+            },
+            json={
+                'reason': 'I would like a staff member to help me.',
+                'support_need': 'human_requested',
+                'preferred_channel': 'in_app',
+            },
+        )
+        assert support.status_code == 201, support.text
+        handoff_id = support.json()['handoff']['handoff_id']
+        provider.draft_claim_id = claim_id
+        provider.draft_action_code = 'human.accept_handoff'
+        provider.draft_target_ref = handoff_id
+        session_id = _create_session(client)
+        turn = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'stale-draft',
+                'content': 'Prepare the handoff acceptance action.',
+                'claim_ids': [claim_id],
+            },
+        )
+        assert turn.status_code == 201, turn.text
+        assistant = turn.json()['assistant_message']
+        draft = assistant['drafts'][0]
+        response = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages/'
+            f'{assistant["message_id"]}/drafts/{draft["draft_id"]}/execute',
+            headers={
+                **STAFF_HEADERS,
+                'Idempotency-Key': 'stale-draft-execution',
+                'If-Match': '1',
+            },
+            json={'confirmed': True},
+        )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'REVISION_CONFLICT'
+    stored_claim = repository.get_claim_internal(claim_id)
+    assert stored_claim is not None
+    assert stored_claim.revision == 2
+
+
+def test_staff_agent_execution_surfaces_permission_denial_without_claim_mutation() -> None:
+    repository = FixtureRepository()
+    provider = RecordingStaffAgent()
+    with _client(repository, provider) as client:
+        claim_id = _create_claim(client, 'staff-agent-permission-draft')
+        support = client.post(
+            f'/api/v1/claims/{claim_id}/support-requests',
+            headers={
+                **CLAIMANT_HEADERS,
+                'Idempotency-Key': 'staff-agent-permission-support',
+                'If-Match': '1',
+            },
+            json={
+                'reason': 'I would like a staff member to help me.',
+                'support_need': 'human_requested',
+                'preferred_channel': 'in_app',
+            },
+        )
+        assert support.status_code == 201, support.text
+        handoff_id = support.json()['handoff']['handoff_id']
+        presence = client.patch(
+            '/api/v1/workbench/staff/presence',
+            headers=STAFF_HEADERS,
+            json={'online': True, 'available': True, 'lease_seconds': 60},
+        )
+        assert presence.status_code == 200, presence.text
+        accepted = client.post(
+            f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
+            headers={
+                **STAFF_HEADERS,
+                'Idempotency-Key': 'staff-agent-permission-accept',
+                'If-Match': '2',
+            },
+            json={},
+        )
+        assert accepted.status_code == 200, accepted.text
+        stored_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+        assert stored_handoff is not None
+        repository.save_handoff(
+            stored_handoff.model_copy(update={'assigned_to': 'stf_other'}), 'cus_demo'
+        )
+        provider.draft_claim_id = claim_id
+        provider.draft_action_code = 'human.resolve_handoff'
+        provider.draft_target_ref = handoff_id
+        provider.draft_payload = {
+            'result': {
+                'outcome': 'support_completed',
+                'summary': 'Support completed.',
+                'reason_codes': ['SUPPORT_NEED_MET'],
+                'source_refs': [handoff_id],
+            },
+            'customer_update': {
+                'summary': 'Support completed.',
+                'responsible_party': 'claims_professional',
+                'related_refs': [handoff_id],
+            },
+            'state_changes': [],
+        }
+        session_id = _create_session(client)
+        turn = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'permission-draft',
+                'content': 'Resolve the handoff without accepting it first.',
+                'claim_ids': [claim_id],
+            },
+        )
+        assert turn.status_code == 201, turn.text
+        assistant = turn.json()['assistant_message']
+        draft = assistant['drafts'][0]
+        response = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages/'
+            f'{assistant["message_id"]}/drafts/{draft["draft_id"]}/execute',
+            headers={
+                **STAFF_HEADERS,
+                'Idempotency-Key': 'permission-draft-execution',
+                'If-Match': '3',
+            },
+            json={'confirmed': True},
+        )
+
+    assert response.status_code == 403, response.text
+    assert response.json()['error']['code'] == 'ACCESS_DENIED'
+    stored_claim = repository.get_claim_internal(claim_id)
+    assert stored_claim is not None
+    assert stored_claim.revision == 3
+
+
+def test_staff_agent_rejects_unknown_action_without_claim_mutation() -> None:
+    repository = FixtureRepository()
+    provider = RecordingStaffAgent()
+    with _client(repository, provider) as client:
+        claim_id = _create_claim(client, 'staff-agent-unknown-action')
+        provider.draft_claim_id = claim_id
+        provider.draft_action_code = 'claim.unregistered_action'
+        session_id = _create_session(client)
+        turn = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'unknown-action',
+                'content': 'Apply an action that is not registered.',
+                'claim_ids': [claim_id],
+            },
+        )
+        assert turn.status_code == 201, turn.text
+        assistant = turn.json()['assistant_message']
+        draft = assistant['drafts'][0]
+        response = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages/'
+            f'{assistant["message_id"]}/drafts/{draft["draft_id"]}/execute',
+            headers={**STAFF_HEADERS, 'Idempotency-Key': 'unknown-action-execution'},
+            json={'confirmed': True},
+        )
+
+    assert response.status_code == 422, response.text
+    assert response.json()['error']['code'] == 'VALIDATION_ERROR'
+    stored_claim = repository.get_claim_internal(claim_id)
+    assert stored_claim is not None
+    assert stored_claim.revision == 1
+
+
+def test_staff_agent_dependency_failure_preserves_claim_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = FixtureRepository()
+    provider = RecordingStaffAgent()
+    with _client(repository, provider) as client:
+        claim_id = _create_claim(client, 'staff-agent-dependency-failure')
+        support = client.post(
+            f'/api/v1/claims/{claim_id}/support-requests',
+            headers={
+                **CLAIMANT_HEADERS,
+                'Idempotency-Key': 'staff-agent-dependency-support',
+                'If-Match': '1',
+            },
+            json={
+                'reason': 'I would like a staff member to help me.',
+                'support_need': 'human_requested',
+                'preferred_channel': 'in_app',
+            },
+        )
+        assert support.status_code == 201, support.text
+        handoff_id = support.json()['handoff']['handoff_id']
+        provider.draft_claim_id = claim_id
+        provider.draft_action_code = 'human.accept_handoff'
+        provider.draft_target_ref = handoff_id
+        session_id = _create_session(client)
+        turn = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'dependency-failure',
+                'content': 'Accept this handoff.',
+                'claim_ids': [claim_id],
+            },
+        )
+        assert turn.status_code == 201, turn.text
+        assistant = turn.json()['assistant_message']
+        draft = assistant['drafts'][0]
+
+        def unavailable(*args: object, **kwargs: object) -> object:
+            raise ApiError(
+                status_code=503,
+                code='DEPENDENCY_UNAVAILABLE',
+                message='The handoff service is unavailable.',
+                retryable=True,
+            )
+
+        monkeypatch.setattr(staff_agent_service, 'accept_handoff', unavailable)
+        response = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages/'
+            f'{assistant["message_id"]}/drafts/{draft["draft_id"]}/execute',
+            headers={**STAFF_HEADERS, 'Idempotency-Key': 'dependency-failure-execution'},
+            json={'confirmed': True},
+        )
+
+    assert response.status_code == 503, response.text
+    assert response.json()['error']['code'] == 'DEPENDENCY_UNAVAILABLE'
+    stored_claim = repository.get_claim_internal(claim_id)
+    assert stored_claim is not None
+    assert stored_claim.revision == 2
+
+
+@pytest.mark.parametrize(
+    ('action_code', 'handler_name'),
+    [
+        ('human.accept_handoff', 'accept_handoff'),
+        ('conversation.send_claimant_message', 'send_staff_message'),
+        ('human.resolve_handoff', 'resolve_handoff'),
+        ('signal.record_decision', 'decide_review_signal'),
+        ('work_item.create', 'create_staff_action'),
+        ('work_item.update', 'update_staff_action'),
+        ('ownership.request_cowork', 'create_cowork_request'),
+        ('ownership.invite_cowork', 'create_cowork_request'),
+        ('ownership.request_transfer', 'create_transfer_request'),
+        ('ownership.decide_cowork', 'decide_collaboration_request'),
+        ('ownership.decide_transfer', 'decide_collaboration_request'),
+        ('ownership.requeue', 'requeue_claim'),
+    ],
+)
+def test_staff_agent_dispatches_each_registered_action_with_durable_source(
+    action_code: str,
+    handler_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every registered dispatch path receives the explicit draft provenance."""
+
+    class RequestStub:
+        @classmethod
+        def model_validate(cls, value: object) -> object:
+            return value
+
+    for request_name in (
+        'AcceptHandoffRequest',
+        'CreateStaffMessageRequest',
+        'ResolveHandoffRequest',
+        'SignalDecisionRequest',
+        'CreateStaffActionRequest',
+        'UpdateStaffActionRequest',
+        'CreateCoworkRequest',
+        'CreateTransferRequest',
+        'DecideCollaborationRequest',
+        'RequeueClaimRequest',
+    ):
+        monkeypatch.setattr(staff_agent_service, request_name, RequestStub)
+
+    handler = Mock(return_value=StaffAgentModelOutput(answer='Executed.', drafts=[]))
+    monkeypatch.setattr(staff_agent_service, handler_name, handler)
+    repository = Mock()
+    timestamp = datetime.now(UTC)
+    repository.get_staff_agent_session.return_value = StaffAgentSession(
+        session_id='sas_test',
+        staff_id='stf_demo',
+        title='Test',
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    repository.list_staff_agent_messages.return_value = [
+        StaffAgentMessage(
+            message_id='sam_test',
+            session_id='sas_test',
+            staff_id='stf_demo',
+            role=StaffAgentMessageRole.ASSISTANT,
+            content='Draft.',
+            claim_ids=['clm_test'],
+            drafts=[
+                StaffAgentDraft(
+                    draft_id='sdr_test',
+                    kind=StaffAgentDraftKind.INTERNAL_NOTE,
+                    title='Action',
+                    content='Execute.',
+                    claim_id='clm_test',
+                    action_code=action_code,
+                    target_ref='target_test',
+                )
+            ],
+            created_at=timestamp,
+        )
+    ]
+    repository.get_claim_internal.return_value = SimpleNamespace(active_session_id='target_test')
+    repository.get_staff_agent_execution.return_value = StaffAgentExecutionRecord(
+        execution_id='sax_sdr_test',
+        session_id='sas_test',
+        message_id='sam_test',
+        draft_id='sdr_test',
+        staff_id='stf_demo',
+        claim_id='clm_test',
+        action_code=action_code,
+        target_ref='target_test',
+        expected_revision=1,
+        resulting_revision=2,
+        outcome=StaffAgentDraftExecutionOutcome.EXECUTED,
+        result={'answer': 'Executed.', 'drafts': []},
+        source_refs=[
+            'staff-agent-session:sas_test',
+            'staff-agent-message:sam_test',
+            'staff-agent-draft:sdr_test',
+        ],
+        created_at=timestamp,
+    )
+
+    response = staff_agent_service.execute_staff_agent_draft(
+        repository,
+        Principal(subject='stf_demo', actor_type='staff'),
+        'sas_test',
+        'sam_test',
+        'sdr_test',
+        ExecuteStaffAgentDraftRequest(confirmed=True),
+        f'key-{action_code}',
+        '1',
+    )
+
+    assert response.outcome.value == 'executed'
+    assert handler.call_args.kwargs['source'].session_id == 'sas_test'
+    assert handler.call_args.kwargs['source'].message_id == 'sam_test'
+    assert handler.call_args.kwargs['source'].draft_id == 'sdr_test'
 
 
 def test_staff_agent_routes_require_staff_identity() -> None:

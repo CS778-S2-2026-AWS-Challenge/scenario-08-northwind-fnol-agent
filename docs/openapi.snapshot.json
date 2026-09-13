@@ -3734,6 +3734,19 @@
             "maxItems": 20,
             "title": "Evidence Refs",
             "type": "array"
+          },
+          "model_profile_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Profile Id"
           }
         },
         "required": [
@@ -5270,6 +5283,23 @@
         ],
         "title": "EvidenceWaitType",
         "type": "string"
+      },
+      "ExecuteStaffAgentDraftRequest": {
+        "additionalProperties": false,
+        "description": "Explicit staff confirmation and optional edits for one Agent draft.",
+        "properties": {
+          "confirmed": {
+            "default": false,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "payload": {
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "title": "ExecuteStaffAgentDraftRequest",
+        "type": "object"
       },
       "ExternalClaimResult": {
         "additionalProperties": false,
@@ -7611,6 +7641,12 @@
       "ModelCapability": {
         "additionalProperties": false,
         "properties": {
+          "availability": {
+            "default": "available",
+            "pattern": "^(available|unavailable)$",
+            "title": "Availability",
+            "type": "string"
+          },
           "id": {
             "minLength": 1,
             "title": "Id",
@@ -9702,6 +9738,18 @@
       "StaffAgentDraft": {
         "additionalProperties": false,
         "properties": {
+          "action_code": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Code"
+          },
           "claim_id": {
             "anyOf": [
               {
@@ -9719,8 +9767,38 @@
             "title": "Content",
             "type": "string"
           },
+          "draft_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Id"
+          },
           "kind": {
             "$ref": "#/components/schemas/StaffAgentDraftKind"
+          },
+          "payload": {
+            "title": "Payload",
+            "type": "object"
+          },
+          "target_ref": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Ref"
           },
           "title": {
             "maxLength": 200,
@@ -9737,6 +9815,65 @@
         "title": "StaffAgentDraft",
         "type": "object"
       },
+      "StaffAgentDraftExecutionOutcome": {
+        "enum": [
+          "executed"
+        ],
+        "title": "StaffAgentDraftExecutionOutcome",
+        "type": "string"
+      },
+      "StaffAgentDraftExecutionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "action_code": {
+            "title": "Action Code",
+            "type": "string"
+          },
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "draft_id": {
+            "title": "Draft Id",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/StaffAgentDraftExecutionOutcome"
+          },
+          "result": {
+            "title": "Result",
+            "type": "object"
+          },
+          "runtime_execution": {
+            "$ref": "#/components/schemas/StaffAgentExecutionRecord"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "target_ref": {
+            "title": "Target Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "message_id",
+          "draft_id",
+          "claim_id",
+          "action_code",
+          "target_ref",
+          "outcome",
+          "result",
+          "runtime_execution"
+        ],
+        "title": "StaffAgentDraftExecutionResponse",
+        "type": "object"
+      },
       "StaffAgentDraftKind": {
         "enum": [
           "claimant_message",
@@ -9745,6 +9882,114 @@
         ],
         "title": "StaffAgentDraftKind",
         "type": "string"
+      },
+      "StaffAgentExecutionRecord": {
+        "additionalProperties": false,
+        "description": "Immutable evidence that one confirmed draft used a registered handler.",
+        "properties": {
+          "action_code": {
+            "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$",
+            "title": "Action Code",
+            "type": "string"
+          },
+          "claim_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "confirmation": {
+            "default": "staff_confirmed",
+            "pattern": "^staff_confirmed$",
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "draft_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Draft Id",
+            "type": "string"
+          },
+          "execution_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Execution Id",
+            "type": "string"
+          },
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "message_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Message Id",
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/StaffAgentDraftExecutionOutcome"
+          },
+          "result": {
+            "title": "Result",
+            "type": "object"
+          },
+          "resulting_revision": {
+            "minimum": 1.0,
+            "title": "Resulting Revision",
+            "type": "integer"
+          },
+          "session_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Session Id",
+            "type": "string"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "minItems": 3,
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "staff_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Staff Id",
+            "type": "string"
+          },
+          "target_ref": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Target Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "execution_id",
+          "session_id",
+          "message_id",
+          "draft_id",
+          "staff_id",
+          "claim_id",
+          "action_code",
+          "target_ref",
+          "expected_revision",
+          "resulting_revision",
+          "outcome",
+          "result",
+          "source_refs",
+          "created_at"
+        ],
+        "title": "StaffAgentExecutionRecord",
+        "type": "object"
       },
       "StaffAgentMessage": {
         "additionalProperties": false,
@@ -13011,6 +13256,42 @@
         "title": "WorkbenchResourcePage[WorkbenchHandoff]",
         "type": "object"
       },
+      "WorkbenchResourcePage_WorkbenchRuntimeWorkItem_": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchRuntimeWorkItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limitation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limitation"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ResourceAvailability",
+            "default": "available"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "WorkbenchResourcePage[WorkbenchRuntimeWorkItem]",
+        "type": "object"
+      },
       "WorkbenchResourcePage_WorkbenchSession_": {
         "additionalProperties": false,
         "properties": {
@@ -13140,6 +13421,82 @@
           "summary"
         ],
         "title": "WorkbenchRiskSignal",
+        "type": "object"
+      },
+      "WorkbenchRuntimeWorkItem": {
+        "additionalProperties": false,
+        "description": "Staff projection of claimant Runtime WorkItem evidence.",
+        "properties": {
+          "blocked_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Action"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "owner_role": {
+            "$ref": "#/components/schemas/WorkbenchResponsibility"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "subject_ref": {
+            "title": "Subject Ref",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "work_item_id": {
+            "title": "Work Item Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_item_id",
+          "subject_ref",
+          "type",
+          "status",
+          "owner_role",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WorkbenchRuntimeWorkItem",
         "type": "object"
       },
       "WorkbenchSectionSummaries": {
@@ -17089,6 +17446,124 @@
         ]
       }
     },
+    "/api/v1/workbench/agent/sessions/{session_id}/messages/{message_id}/drafts/{draft_id}/execute": {
+      "post": {
+        "operationId": "execute_draft_api_v1_workbench_agent_sessions__session_id__messages__message_id__drafts__draft_id__execute_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteStaffAgentDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffAgentDraftExecutionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Execute Draft",
+        "tags": [
+          "workbench-agent"
+        ]
+      }
+    },
     "/api/v1/workbench/claims": {
       "get": {
         "operationId": "read_workbench_claims_api_v1_workbench_claims_get",
@@ -18967,6 +19442,92 @@
           }
         },
         "summary": "Read Workbench Retrievals",
+        "tags": [
+          "workbench"
+        ]
+      }
+    },
+    "/api/v1/workbench/claims/{claim_id}/runtime-work-items": {
+      "get": {
+        "operationId": "read_workbench_runtime_work_items_api_v1_workbench_claims__claim_id__runtime_work_items_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchResourcePage_WorkbenchRuntimeWorkItem_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Workbench Runtime Work Items",
         "tags": [
           "workbench"
         ]

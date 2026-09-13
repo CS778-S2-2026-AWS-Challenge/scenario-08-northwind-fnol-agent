@@ -212,7 +212,7 @@
       "conflicting": ["incident.cause"],
       "not_applicable": ["vehicle.registration", "contents.items"]
     },
-    "claimant_hidden_fields": [],
-    "workbench_only_fields": []
+    "claimant_hidden_fields": ["property.habitable"],
+    "workbench_only_fields": ["property.habitable"]
   }
 }

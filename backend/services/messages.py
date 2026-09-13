@@ -1,3 +1,4 @@
+import re
 from dataclasses import replace
 from datetime import datetime
 
@@ -60,6 +61,16 @@ from backend.domain.retrieval import (
     PolicyRetrievalRecord,
     PolicySearchRequest,
     RetrievalStatus,
+)
+from backend.domain.runtime import (
+    ActionEnvelopeRecord,
+    AgentProposalRecord,
+    ExecutionPlanRecord,
+    RuntimeTurnRecords,
+    RuntimeWorkItemRecord,
+    ToolResultRecord,
+    TurnPlanRecord,
+    TurnResultRecord,
 )
 from backend.domain.support_intent import detect_support_intent, support_need_for_intent
 from backend.repositories.protocols import (
@@ -401,6 +412,20 @@ _MODEL_FIELD_QUESTIONS: dict[str, tuple[str, str, str]] = {
         'Describe what was damaged or lost.',
     ),
 }
+
+
+def _with_single_runtime_question(response: str, question: str) -> str:
+    """Keep model acknowledgement while making Runtime own the next question."""
+
+    statements = [
+        sentence.strip()
+        for sentence in re.split(r'(?<=[.!?])\s+', response.strip())
+        if sentence.strip() and '?' not in sentence
+    ]
+    acknowledgement = ' '.join(statements).strip()
+    if not acknowledgement:
+        acknowledgement = 'Thanks. I have recorded what you shared.'
+    return f'{acknowledgement.rstrip()} {question}'.strip()
 
 
 def _validated_model_question(
@@ -1287,6 +1312,14 @@ def submit_message(
             code='INVALID_STATE_TRANSITION',
             message='Messages can only be submitted to an active session.',
         )
+    if (
+        payload.model_profile_id is not None
+        and payload.model_profile_id != session.model_profile_id
+    ):
+        # The API boundary has already validated this profile against the published
+        # catalog. The selected profile is part of this turn's durable provenance;
+        # save_agent_turn persists it with the Claim mutation below.
+        session = session.model_copy(update={'model_profile_id': payload.model_profile_id})
     if claim.active_session_id != session_id:
         raise ApiError(
             status_code=409,
@@ -1421,6 +1454,14 @@ def submit_message(
         recomputation_reason='claimant_message',
         previous_evaluation=previous_evaluation,
     )
+    conversation_messages = tuple(
+        message
+        for message in sorted(
+            repository.list_messages(claim_id, session_id, principal.subject),
+            key=lambda item: (item.created_at, item.message_id),
+        )
+        if message.visibility is not MessageVisibility.INTERNAL_ONLY
+    )[-12:]
     persisted_review_signals = repository.list_review_signals(claim_id, principal.subject)
     agent_context = AgentTurnContext(
         claim=claim,
@@ -1445,6 +1486,7 @@ def submit_message(
                 fields=claim.form.values(),
             )
         ),
+        conversation_messages=conversation_messages,
     )
     proposal = agent.propose_turn(agent_context)
     if runtime_policy is not None:
@@ -1524,27 +1566,21 @@ def submit_message(
             proposal = replace(proposal, tool_results=context_tool_results)
     _validate_failed_retrieval_changes(proposal, message_text)
     authority = validate_proposal(proposal)
+    runtime_trace = proposal.runtime_trace
     if proposal.action_code is not None:
-        return _submit_namespaced_runtime_turn(
-            repository,
-            principal,
-            claim_id,
-            session_id,
-            claim,
-            session,
-            claimant_message,
-            proposal,
-            authority,
-            runtime_policy,
-            branch_evaluator,
-            previous_evaluation,
-            message_text,
-            route,
-            key,
-            fingerprint,
-            expected_revision,
-        )
-    if proposal.proposal_source is AgentProposalSource.MODEL_GATEWAY:
+        # The namespaced model contract is now executed by the same validated,
+        # revision-checked mutation path as controlled turns. The action code is
+        # retained in RuntimeTraceRecord; clearing it here only selects the shared
+        # compatibility decision serializer and never grants the model authority.
+        if runtime_trace is None:
+            raise ApiError(
+                status_code=503,
+                code='AGENT_RUNTIME_UNAVAILABLE',
+                message='The namespaced Agent Runtime did not produce an auditable trace.',
+                retryable=True,
+            )
+        proposal = replace(proposal, action_code=None)
+    if proposal.proposal_source is AgentProposalSource.MODEL_GATEWAY and runtime_trace is None:
         raise ApiError(
             status_code=422,
             code='LEGACY_AGENT_ACTION_DEPRECATED',
@@ -1668,6 +1704,7 @@ def submit_message(
             )
             next_action = AgentAction(str(raw_action))
     handoff: HandoffRecord | None = None
+    professional_review = False
     if authority.outcome is AuthorityOutcome.AUTHORISED and proposal.action in {
         AgentAction.HANDOFF,
         AgentAction.URGENT_HANDOFF,
@@ -1776,8 +1813,9 @@ def submit_message(
             else:
                 next_field = intake_field_for_requirement(requirements.next_required_item)
                 if next_field is not None:
-                    effective_customer_response = (
-                        f'{effective_customer_response.rstrip()} {next_field.prompt}'
+                    effective_customer_response = _with_single_runtime_question(
+                        effective_customer_response,
+                        next_field.prompt,
                     )
         updated_claim = claim.model_copy(
             update={
@@ -1920,6 +1958,173 @@ def submit_message(
         status=BranchEvaluationStatus.APPLIED,
         created_at=timestamp,
     )
+    runtime_turn_id = new_id('turn')
+    runtime_directive = (
+        runtime_trace.runtime_action_code if runtime_trace is not None else 'runtime.continue'
+    )
+    runtime_proposal = AgentProposalRecord(
+        proposal_id=new_id('apr'),
+        turn_id=runtime_turn_id,
+        claim_id=claim_id,
+        session_id=session_id,
+        action_code=runtime_trace.action_code
+        if runtime_trace is not None
+        else 'conversation.answer',
+        runtime_directive=runtime_directive,
+        reason_codes=list(proposal.reason_codes),
+        customer_reason=effective_customer_reason,
+        customer_response=effective_customer_response,
+        customer_next_step=effective_next_step,
+        form_changes=list(proposal.form_changes),
+        contents_item_changes=list(proposal.contents_item_changes),
+        source_refs=sorted(_tool_source_refs(proposal.tool_results)),
+        proposal_source=proposal.proposal_source,
+        model_profile_id=session.model_profile_id,
+        runtime_configuration=(runtime_policy.provenance() if runtime_policy else None),
+        created_at=timestamp,
+    )
+    runtime_turn_plan = TurnPlanRecord(
+        turn_id=runtime_turn_id,
+        claim_id=claim_id,
+        session_id=session_id,
+        trigger_message_id=claimant_message.message_id,
+        model_profile_id=session.model_profile_id,
+        intents=['report_incident'],
+        conversation_moves=['acknowledge', 'collect_or_confirm_facts'],
+        candidate_fields=sorted({change.field_code for change in proposal.form_changes}),
+        tool_requests=list(proposal.required_tools),
+        runtime_directive=runtime_directive,
+        limitations=list(
+            dict.fromkeys(
+                [
+                    *(['model_runtime_trace_only'] if runtime_trace is not None else []),
+                    *(['professional_review_required'] if professional_review else []),
+                ]
+            )
+        ),
+        created_at=timestamp,
+    )
+    primary_action_code = (
+        runtime_trace.action_code
+        if runtime_trace is not None
+        else (
+            'human.create_handoff'
+            if proposal.action in {AgentAction.HANDOFF, AgentAction.URGENT_HANDOFF}
+            else 'conversation.answer'
+        )
+    )
+    primary_namespace = primary_action_code.split('.', 1)[0]
+    envelope_records = [
+        ActionEnvelopeRecord(
+            envelope_id=new_id('env'),
+            turn_id=runtime_turn_id,
+            claim_id=claim_id,
+            namespace=primary_namespace,
+            action_code=primary_action_code,
+            target_ref=agent_message.message_id,
+            expected_revision=expected_revision,
+            source_refs=[claimant_message.message_id],
+            authority=authority,
+            status='approved' if authority.outcome is AuthorityOutcome.AUTHORISED else 'rejected',
+            idempotency_key=key,
+            created_at=timestamp,
+        )
+    ]
+    envelope_records.extend(
+        ActionEnvelopeRecord(
+            envelope_id=new_id('env'),
+            turn_id=runtime_turn_id,
+            claim_id=claim_id,
+            namespace='claim',
+            action_code='claim.propose_fact_patch',
+            target_ref=change.field_code,
+            expected_revision=expected_revision,
+            source_refs=[claimant_message.message_id],
+            authority=authority,
+            status='executed' if change.field_code in form_changes else 'rejected',
+            idempotency_key=key,
+            created_at=timestamp,
+        )
+        for change in proposal.form_changes
+    )
+    tool_records: list[ToolResultRecord] = []
+    if runtime_trace is not None:
+        tool_records.append(
+            ToolResultRecord(
+                result_id=new_id('toolres'),
+                turn_id=runtime_turn_id,
+                claim_id=claim_id,
+                tool_call_id=runtime_trace.tool_call_id,
+                tool_name=runtime_trace.tool_name,
+                status=runtime_trace.tool_result_status,
+                output=dict(runtime_trace.tool_output),
+                source_refs=[f'claim:{claim_id}:revision:{expected_revision}'],
+                limitations=[],
+                created_at=timestamp,
+            )
+        )
+    work_items = [
+        RuntimeWorkItemRecord(
+            work_item_id=new_id('wki'),
+            claim_id=claim_id,
+            turn_id=runtime_turn_id,
+            kind='question' if item in effective_next_step.required_items else 'system',
+            subject_ref=item,
+            owner=(
+                'claimant'
+                if effective_next_step.responsible_party is ResponsibleParty.CLAIMANT
+                else 'staff'
+            ),
+            status='open',
+            blocks_action=effective_next_step.status,
+            source_refs=[claimant_message.message_id],
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+        for item in effective_next_step.required_items
+    ]
+    execution_plan = ExecutionPlanRecord(
+        execution_plan_id=new_id('xpl'),
+        turn_id=runtime_turn_id,
+        claim_id=claim_id,
+        expected_revision=expected_revision,
+        envelope_ids=[item.envelope_id for item in envelope_records],
+        approved_envelope_ids=[
+            item.envelope_id for item in envelope_records if item.status in {'approved', 'executed'}
+        ],
+        rejected_envelope_ids=[
+            item.envelope_id for item in envelope_records if item.status == 'rejected'
+        ],
+        status=('executed' if authority.outcome is AuthorityOutcome.AUTHORISED else 'rejected'),
+        created_at=timestamp,
+        finished_at=timestamp,
+    )
+    turn_result = TurnResultRecord(
+        result_id=new_id('res'),
+        turn_id=runtime_turn_id,
+        claim_id=claim_id,
+        session_id=session_id,
+        trigger_message_id=claimant_message.message_id,
+        agent_message_id=agent_message.message_id,
+        execution_plan_id=execution_plan.execution_plan_id,
+        status=('succeeded' if authority.outcome is AuthorityOutcome.AUTHORISED else 'blocked'),
+        resulting_claim_revision=resulting_revision,
+        customer_response=effective_customer_response,
+        state_change_refs=[f'claim:{claim_id}:revision:{resulting_revision}'],
+        tool_result_refs=[item.result_id for item in tool_records],
+        work_item_refs=[item.work_item_id for item in work_items],
+        limitations=[],
+        created_at=timestamp,
+    )
+    runtime_records = RuntimeTurnRecords(
+        turn_plan=runtime_turn_plan,
+        proposal=runtime_proposal,
+        execution_plan=execution_plan,
+        action_envelopes=envelope_records,
+        tool_results=tool_records,
+        result=turn_result,
+        work_items=work_items,
+    )
     try:
         repository.save_agent_turn(
             updated_claim,
@@ -1932,6 +2137,8 @@ def submit_message(
             handoff,
             pending_evidence,
             evaluation_record,
+            runtime_trace,
+            runtime_records,
         )
     except RevisionConflict as conflict:
         raise ApiError(

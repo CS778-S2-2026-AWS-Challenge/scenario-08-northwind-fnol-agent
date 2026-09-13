@@ -1,6 +1,6 @@
 from typing import cast
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Header, Request, status
 
 from backend.core.auth import Principal, require_staff
 from backend.core.config import AgentRuntimeProfile
@@ -10,6 +10,8 @@ from backend.domain.models import ContractModel
 from backend.domain.staff_agent import (
     CreateStaffAgentMessageRequest,
     CreateStaffAgentSessionRequest,
+    ExecuteStaffAgentDraftRequest,
+    StaffAgentDraftExecutionResponse,
     StaffAgentMessagesResponse,
     StaffAgentSession,
     StaffAgentSessionsResponse,
@@ -17,10 +19,15 @@ from backend.domain.staff_agent import (
 )
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.knowledge_manifest import approved_version_for_product
-from backend.services.model_profiles import model_catalog, select_model_profile
+from backend.services.model_profiles import (
+    default_model_profile_id,
+    model_catalog,
+    select_model_profile,
+)
 from backend.services.staff_agent import (
     StaffAgentTurnProvider,
     create_staff_agent_session,
+    execute_staff_agent_draft,
     list_staff_agent_messages,
     list_staff_agent_sessions,
     submit_staff_agent_message,
@@ -99,6 +106,7 @@ def read_capabilities(
 ) -> StaffAgentCapabilitiesResponse:
     if request.app.state.settings.agent_runtime_profile is not AgentRuntimeProfile.MODEL_GATEWAY:
         return StaffAgentCapabilitiesResponse(models=[])
+    catalog = model_catalog(request)
     models = [
         StaffAgentModelCapability(
             id=configuration.profile_id,
@@ -107,16 +115,12 @@ def read_capabilities(
             structured_output=configuration.structured_output,
             tools=configuration.tools,
         )
-        for record in model_catalog(request)
+        for record in catalog
         if (configuration := ModelRuntimeConfiguration.model_validate(record.values))
     ]
     return StaffAgentCapabilitiesResponse(
         models=models,
-        default_model_profile_id=(
-            'qwen-local'
-            if any(item.id == 'qwen-local' for item in models)
-            else (models[0].id if models else None)
-        ),
+        default_model_profile_id=default_model_profile_id(request, catalog),
     )
 
 
@@ -159,4 +163,30 @@ def create_message(
         session_id,
         payload,
         knowledge_version_for=lambda product: knowledge_version_for(request, product),
+    )
+
+
+@router.post(
+    '/sessions/{session_id}/messages/{message_id}/drafts/{draft_id}/execute',
+    response_model=StaffAgentDraftExecutionResponse,
+)
+def execute_draft(
+    session_id: str,
+    message_id: str,
+    draft_id: str,
+    payload: ExecuteStaffAgentDraftRequest,
+    request: Request,
+    principal: Principal = Depends(require_staff),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> StaffAgentDraftExecutionResponse:
+    return execute_staff_agent_draft(
+        repository_for(request),
+        principal,
+        session_id,
+        message_id,
+        draft_id,
+        payload,
+        idempotency_key,
+        if_match,
     )

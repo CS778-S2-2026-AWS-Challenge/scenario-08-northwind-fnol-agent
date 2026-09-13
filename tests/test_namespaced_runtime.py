@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -84,7 +85,58 @@ class SequenceToolGateway:
         return self.responses.pop(0)
 
 
-def test_namespaced_runtime_persists_tool_loop_without_legacy_decision_or_revision() -> None:
+class RepeatableToolGateway:
+    """Provider-neutral gateway used to prove per-turn model selection."""
+
+    def __init__(self) -> None:
+        self.requests: list[ModelRequest] = []
+        self.turn_number = 0
+
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return ModelCapabilities(structured_output=True, tools=True)
+
+    def complete(self, request: ModelRequest) -> ModelResponse:
+        self.requests.append(request)
+        if request.required_tool_name:
+            return ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id=f'call-read-{len(self.requests)}',
+                        name='claim.read',
+                        arguments={},
+                    )
+                ],
+                provider_model=request.model_profile_id,
+                provider_request_id=f'request-{len(self.requests)}',
+            )
+        self.turn_number += 1
+        return ModelResponse(
+            completion_status=ModelCompletionStatus.COMPLETE,
+            structured_output={
+                'action_code': 'conversation.answer',
+                'runtime_action_code': 'runtime.continue',
+                'reason_codes': ['CLAIM_CONTEXT_READ'],
+                'customer_reason': 'The current report was reviewed.',
+                'customer_response': f'Turn {self.turn_number} reviewed.',
+                'customer_next_step': {
+                    'status': 'continue_current_report',
+                    'summary': 'Continue the report when ready.',
+                    'responsible_party': 'claimant',
+                    'required_items': [],
+                },
+                'form_changes': [],
+                'contents_item_changes': [],
+                'source_refs': [],
+                'handoff_priority': None,
+            },
+            provider_model=request.model_profile_id,
+            provider_request_id=f'request-{len(self.requests)}',
+        )
+
+
+def test_namespaced_runtime_applies_claim_mutation_and_persists_runtime_records() -> None:
     gateway = SequenceToolGateway()
     registry = ModelGatewayRegistry()
     registry.register('openai_compatible', lambda _config: gateway)
@@ -137,16 +189,16 @@ def test_namespaced_runtime_persists_tool_loop_without_legacy_decision_or_revisi
         )
         assert response.status_code == 200, response.text
         body = response.json()
-        assert body['claim_revision'] == 1
-        assert body['decision'] is None
+        assert body['claim_revision'] == 2
+        assert body['decision'] is not None
         assert body['agent_message']['content']['text'] == (
             'I have read the current claim context.'
         )
 
         stored_claim = repository.get_claim(claim_id, 'cus_demo')
         assert stored_claim is not None
-        assert stored_claim.revision == 1
-        assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
+        assert stored_claim.revision == 2
+        assert len(repository.list_agent_decisions(claim_id, 'cus_demo')) == 1
         trace = repository.find_runtime_trace_for_trigger(
             claim_id,
             body['claimant_message']['message_id'],
@@ -156,10 +208,23 @@ def test_namespaced_runtime_persists_tool_loop_without_legacy_decision_or_revisi
         assert trace.tool_name == 'claim.read'
         assert trace.action_code == 'conversation.answer'
         assert trace.runtime_action_code == 'runtime.continue'
+        runtime_turn = repository.get_runtime_turn_for_trigger(
+            claim_id,
+            body['claimant_message']['message_id'],
+            'cus_demo',
+        )
+        assert runtime_turn is not None
+        assert runtime_turn.execution_plan.status == 'executed'
+        assert runtime_turn.result.resulting_claim_revision == 2
+        assert runtime_turn.tool_results[0].output['claim_id'] == claim_id
+        assert runtime_turn.tool_results[0].output['workflow_state'] == 'collecting'
+        assert runtime_turn.tool_results[0].output['form'] == {}
 
         assert len(gateway.requests) == 2
+
         first = gateway.requests[0]
         assert [tool.name for tool in first.tools] == ['claim.read']
+        assert first.required_tool_name == 'claim.read'
         assert first.response_schema is None
         second = gateway.requests[1]
         assert second.response_schema is not None
@@ -183,6 +248,74 @@ def test_namespaced_runtime_persists_tool_loop_without_legacy_decision_or_revisi
         assert replay.status_code == 200
         assert replay.json() == body
         assert len(gateway.requests) == 2
+
+
+def test_model_profile_can_change_between_turns_without_new_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('NORTHWIND_MODEL_API_KEY', 'test-gpt-key')
+    gateway = RepeatableToolGateway()
+    registry = ModelGatewayRegistry()
+    registry.register('openai_compatible', lambda _config: gateway)
+    settings = Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_protocol_adapter='openai_compatible',
+        model_profile_id='qwen-local',
+        model_base_url='http://model.example.test/v1',
+        model_identifier='qwen3.8-27b',
+        model_supports_tools=True,
+    )
+
+    with TestClient(
+        create_app(settings, repository=FixtureRepository(), model_gateway_registry=registry)
+    ) as client:
+        headers = {'Authorization': 'Bearer synthetic-claimant'}
+        created = client.post(
+            '/api/v1/claims',
+            headers={**headers, 'Idempotency-Key': 'switch-claim'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'model_profile_id': 'qwen-local'},
+        )
+        assert created.status_code == 201, created.text
+        claim_id = created.json()['claim']['claim_id']
+        session_id = created.json()['session']['session_id']
+
+        for index, profile_id in enumerate(('qwen-local', 'nowcoding-gpt54mini'), start=1):
+            response = client.post(
+                f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+                headers={
+                    **headers,
+                    'Idempotency-Key': f'switch-message-{index}',
+                    'If-Match': str(index),
+                },
+                json={
+                    'client_message_id': f'switch-client-{index}',
+                    'model_profile_id': profile_id,
+                    'content': {'type': 'text', 'text': f'Please review turn {index}.'},
+                },
+            )
+            assert response.status_code == 200, response.text
+
+        stored_claim = client.get(f'/api/v1/claims/{claim_id}', headers=headers)
+        assert stored_claim.status_code == 200
+        assert stored_claim.json()['revision'] == 3
+        session = client.get(f'/api/v1/claims/{claim_id}/sessions/{session_id}', headers=headers)
+        assert session.status_code == 200
+        assert session.json()['model_profile_id'] == 'nowcoding-gpt54mini'
+        assert [request.model_profile_id for request in gateway.requests] == [
+            'qwen-local',
+            'qwen-local',
+            'nowcoding-gpt54mini',
+            'nowcoding-gpt54mini',
+        ]
+        second_turn_content = gateway.requests[2].messages[1].content
+        assert second_turn_content is not None
+        second_turn_context = json.loads(second_turn_content)
+        history = second_turn_context['conversation_history']
+        assert len(history) == 2
+        history_actors = {json.loads(item['content'])['actor'] for item in history}
+        assert history_actors == {'claimant', 'agent'}
 
 
 def test_session_model_catalog_exposes_qwen_default_and_gpt_selection() -> None:
@@ -281,6 +414,25 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection() -> None:
         )
         assert unknown.status_code == 422
         assert unknown.json()['error']['code'] == 'MODEL_PROFILE_UNAVAILABLE'
+
+    gpt_default_app = create_app(
+        replace(settings, model_profile_id='nowcoding-gpt54mini'),
+        repository=FixtureRepository(),
+        configuration_repository=configurations,
+        model_gateway_registry=registry,
+    )
+    with TestClient(gpt_default_app) as client:
+        capabilities = client.get(
+            '/api/v1/claims/capabilities',
+            headers={'Authorization': 'Bearer synthetic-claimant'},
+        )
+
+    assert capabilities.status_code == 200
+    assert capabilities.json()['default_model_profile_id'] == 'nowcoding-gpt54mini'
+    assert [item['id'] for item in capabilities.json()['models']] == [
+        'nowcoding-gpt54mini',
+        'qwen-local',
+    ]
 
 
 def test_model_catalog_filters_unpublished_and_invalid_profiles_before_bootstrap() -> None:

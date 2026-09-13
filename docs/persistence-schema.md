@@ -8,7 +8,7 @@ Physical mappings belong inside the selected runtime-profile adapters and must p
 this contract.
 
 The MongoDB repository is selected only by the explicit `local_mvp` development profile. Its
-method surface covers Claim, Session, Message, read-only Runtime Trace, Agent Decision, Branch Evaluation, Audit Event, Evidence metadata,
+method surface covers Claim, Session, Message, applied Runtime turn records and compatibility Runtime Trace, Agent Decision, Branch Evaluation, Audit Event, Evidence metadata,
 External Task, external request, and task-to-evidence link records, Retrieval, Review Signal, Handoff, Staff
 Action, Customer Update, Signal Decision, and Idempotency records. Mock-backed tests verify
 document mapping, ownership filters,
@@ -42,8 +42,10 @@ Public APIs expose domain identifiers and typed projections only. They never exp
 collection names, table names, partition keys, indexes, bucket keys, vector-index names,
 provider payloads, or SDK types.
 
-The TurnPlan, namespaced ActionEnvelope, WorkItem, Model Profile, and complete external
-request lifecycle described below are target logical contracts. The implemented external-task
+The TurnPlan, AgentProposal, ExecutionPlan, namespaced ActionEnvelope, ToolResult, TurnResult,
+and claimant-question WorkItem records are implemented as one atomic Runtime turn bundle. The
+records are immutable execution evidence and never become a second Claim State. Repository
+readback is ownership-filtered and idempotent in both Fixture and Mongo adapters. The external-task
 slice stores the task's claim, service/action, source class, operation and delivery state,
 failure/provider reference, timestamps, one immutable originating task per evidence item, and
 one `erq_` request per task. The request records its purpose, disclosed field names, independent
@@ -52,9 +54,6 @@ time, first send time, and stable operation identity. The controlled assessor pa
 returned result per task, its source and receipt time, linked Evidence identifiers, verification
 state, verification time, and checked Claim revision. Later provider attempts and reconciliation
 records remain target contracts.
-The current persistence implementation still stores the legacy Agent Decision shape and must not
-be represented as supporting those target records until migrations, repository methods, API
-projections, fixtures, and transaction tests change together.
 
 ## Logical Record Groups
 
@@ -68,7 +67,8 @@ projections, fixtures, and transaction tests change together.
 | Claim | Working Claim State, structured facts, independent attributes, lifecycle status, optional source-linked terminal disposition, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
 | Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
-| Staff Agent interaction | staff-owned persistent sessions, session-bound published model profile, explicitly scoped questions, source-aware answers, and editable non-executing drafts | `staff_id`, `session_id`, and `message_id`; Claim IDs are per-message scope only |
+| Staff Agent interaction | staff-owned persistent sessions, session-bound published model profile, explicitly scoped questions, source-aware answers, and drafts with stable identity; executable drafts carry a registered action proposal but remain non-executing until staff confirmation | `staff_id`, `session_id`, `message_id`, and `draft_id`; Claim IDs are per-message scope only |
+| Staff Agent execution | immutable readback evidence for one explicitly confirmed draft and its registered Workbench handler result | `execution_id = sax_{draft_id}`; linked to the owned assistant message, exact draft, Claim, action, target, expected/resulting revision, and idempotency record |
 | Agent turn | Target TurnPlan/AgentProposal/ExecutionPlan/ActionEnvelopes plus the implemented bounded Runtime Trace, ToolRequests and results, TurnResult, policy and Registry versions, usage, latency, limitations | `turn_id`/`trace_id`, linked to session and optional Claim |
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
 | Retrieval | structured policy/history results, knowledge citations, limitations, source versions | `claim_id` and retrieval identity |
@@ -141,8 +141,9 @@ the append-only audit collection through a bounded, filterable projection.
 8. Read staff queues by priority, state, owner, next action, and service timing.
 9. Accept and resolve handoffs and staff work through the same claim revision boundary.
 10. Record idempotency results by actor, operation, client key, and request fingerprint.
-11. Persist a namespaced read-only Runtime turn atomically with its claimant/agent messages,
-    Session activity, Runtime trace, and idempotency response without advancing Claim revision.
+11. Persist an applied namespaced Runtime turn atomically with its claimant/agent messages,
+    Claim revision, Session activity, Runtime trace, target turn records, WorkItems, and
+    idempotency response.
 12. Resolve a current task-specific claimant consent before invoking an external participant.
 13. Reserve an immutable external-operation identity and fingerprint before invocation, then
     recover its accepted result independently of a later Claim State compare-and-set.
@@ -175,7 +176,9 @@ the append-only audit collection through a bounded, filterable projection.
     another staff member's sessions.
 29. Append one Staff Agent question and answer atomically, resolve retries by
     `(staff_id, session_id, client_message_id)`, and preserve the explicit zero-to-five Claim scope
-    used for that turn.
+    used for that turn. Persist stable draft identities and route an explicitly confirmed draft
+    through the existing revision-checked Workbench action handler; do not grant the model direct
+    mutation authority.
 30. Create a unique Customer or Staff account through its identity repository without exposing the
     password hash or allowing an administration retry to create a duplicate account.
 31. Conditionally update approved Customer or Staff account fields by account revision; a stale
@@ -232,6 +235,15 @@ the append-only audit collection through a bounded, filterable projection.
   `action_code`, and exact `target_ref` resolved before execution. These fields preserve the
   runtime authorization decision with the existing atomic Claim mutation; they do not create a
   second action-state record or concurrency token.
+- When a Workbench mutation originates from a confirmed Staff Agent draft, the same atomic
+  idempotency record additionally retains `staff_agent_session_id`, `staff_agent_message_id`,
+  `staff_agent_draft_id`, and `staff_agent_execution_id`. The same mutation writes an immutable
+  `StaffAgentExecutionRecord` containing the registered action, target, expected and resulting
+  Claim revisions, confirmation state, authoritative result, and stable source references.
+  Persistence resolves the source to an existing staff-owned session and assistant message, then
+  verifies that the message contains exactly one matching Claim-scoped draft. Replaying with a
+  different draft, reusing the key through a non-Agent entry point, or executing the same draft
+  under another key is an idempotency conflict rather than a second execution or attribution.
 - External-service consent records are claim-scoped and retain service identity, requested
   action, minimum permitted fields, grant or withdrawal state, actor, and timestamps. A
   consent change advances the Working Claim revision; an adapter result cannot invent or
@@ -344,6 +356,16 @@ the append-only audit collection through a bounded, filterable projection.
 - Advice and drafts are not business-state authority. Sending, assignment, Claim mutation,
   third-party contact, Signal decision, and other effects require a separate Runtime-authorised,
   revision-checked and audited operation.
+- A confirmed Staff Agent draft is passed as explicit source metadata to the existing Workbench
+  action handler. The handler persists that source metadata together with its normal action,
+  revision, idempotency, and audit boundary; an execution response alone is not considered durable
+  attribution.
+- The immutable execution identity is derived from the draft identity. It can be stored only when
+  the referenced assistant message belongs to the same staff-owned session and contains one draft
+  whose Claim, registered action, and target match the execution. A missing message, a staff-role
+  message, a cross-session reference, or a changed draft contract rejects the complete mutation.
+- A successful execution response is built from repository readback of the persisted execution
+  record. Claimant routes never expose Staff Agent execution evidence or its internal source links.
 
 ## Claim Lifecycle, Follow-up, and Retention Invariants
 

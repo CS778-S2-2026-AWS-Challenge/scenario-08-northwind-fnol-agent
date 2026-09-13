@@ -263,6 +263,21 @@ class WorkbenchCurrentWorkItem(ContractModel):
     source_refs: list[str] = Field(default_factory=list)
 
 
+class WorkbenchRuntimeWorkItem(ContractModel):
+    """Staff projection of claimant Runtime WorkItem evidence."""
+
+    work_item_id: str
+    subject_ref: str
+    type: str
+    status: str
+    owner_role: WorkbenchResponsibility
+    blocked_action: str | None = None
+    source_refs: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+
+
 class WorkbenchMissingInformation(ContractModel):
     kind: str
     code: str
@@ -575,6 +590,7 @@ WorkbenchRetrievalsResponse = WorkbenchResourcePage[RetrievalRecord]
 WorkbenchSignalsResponse = WorkbenchResourcePage[WorkbenchSignalDetail]
 WorkbenchHandoffsResponse = WorkbenchResourcePage[WorkbenchHandoff]
 WorkbenchWorkItemsResponse = WorkbenchResourcePage[StaffActionRecord]
+WorkbenchRuntimeWorkItemsResponse = WorkbenchResourcePage[WorkbenchRuntimeWorkItem]
 WorkbenchCustomerUpdatesResponse = WorkbenchResourcePage[CustomerUpdateRecord]
 WorkbenchExternalRequestsResponse = WorkbenchResourcePage[WorkbenchExternalRequest]
 WorkbenchEventsResponse = WorkbenchResourcePage[WorkbenchActivityEvent]

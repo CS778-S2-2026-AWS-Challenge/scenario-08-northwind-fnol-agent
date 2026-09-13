@@ -9,6 +9,7 @@ from typing import Any, cast
 from pydantic import TypeAdapter, ValidationError
 
 from backend.domain.agent_tool_registry import tool_contract
+from backend.domain.branch_registry import build_default_registry
 from backend.domain.ids import new_id
 from backend.domain.intake import infer_controlled_product_family
 from backend.domain.knowledge import (
@@ -69,6 +70,51 @@ _PROPOSAL_ADAPTER = TypeAdapter(ModelAgentProposal)
 _RUNTIME_PROPOSAL_ADAPTER = TypeAdapter(ModelRuntimeProposal)
 _SYSTEM_INSTRUCTION = load_motor_claimant_prompt()
 _CONTEXT_TOOL_NAMES = frozenset({'knowledge_search', 'policy_history', 'claim_history'})
+
+_FIELD_DEFINITIONS = build_default_registry().field_by_code
+
+
+def _normalise_model_field_value(field_code: str, value: Any) -> Any:
+    """Normalise provider scalar spellings without changing the registered contract."""
+
+    definition = _FIELD_DEFINITIONS.get(field_code)
+    value_type = definition.value_type if definition is not None else None
+    if value_type == 'boolean' and isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {'true', 'yes', 'y', '1'}:
+            return True
+        if normalized in {'false', 'no', 'n', '0'}:
+            return False
+        negative = re.search(
+            r"\b(?:no|none|nobody|not|never|without|isn't|wasn't|cannot|can't)\b",
+            normalized,
+        )
+        if field_code == 'incident.injury_or_danger' and re.search(
+            r'\b(?:injur(?:y|ies|ed)|hurt|danger|unsafe|emergency)\b', normalized
+        ):
+            return not bool(negative)
+        if field_code == 'vehicle.drivable' and re.search(
+            r'\b(?:driv(?:e|en|able)|roadworthy|safe|unsafe)\b', normalized
+        ):
+            return not bool(negative or re.search(r'\bunsafe\b', normalized))
+        if field_code == 'parties.other_parties' and re.search(
+            r'\b(?:another|other|second|person|people|vehicle|party)\b', normalized
+        ):
+            return not bool(negative)
+        if field_code == 'property.habitable' and re.search(
+            r'\b(?:habitable|live|safe|unsafe|uninhabitable)\b', normalized
+        ):
+            return not bool(negative or re.search(r'\b(?:unsafe|uninhabitable)\b', normalized))
+    if value_type == 'enum' and isinstance(value, str):
+        return value.strip().casefold()
+    if value_type == 'text_list' and isinstance(value, str):
+        return [
+            item.strip()
+            for item in re.split(r'\s*(?:,|;|\band\b)\s*', value, flags=re.IGNORECASE)
+            if item.strip()
+        ]
+    return value
+
 
 _MODEL_CONTEXT_FIELD_CODES = frozenset(
     {
@@ -227,6 +273,24 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
             ModelProvenanceMessage(message_id=message.message_id, content=message.content)
             for message in context.provenance_messages
         ],
+        conversation_history=[
+            ModelProvenanceMessage(
+                message_id=message.message_id,
+                content=json.dumps(
+                    {'actor': message.actor.value, 'content': message.content},
+                    separators=(',', ':'),
+                ),
+            )
+            for message in context.conversation_messages
+        ],
+        field_value_contracts={
+            code: {
+                'value_type': definition.value_type,
+                'allowed_values': sorted(definition.allowed_values),
+            }
+            for code in sorted(model_field_codes)
+            if (definition := _FIELD_DEFINITIONS.get(code)) is not None
+        },
     )
 
 
@@ -248,7 +312,7 @@ def _agent_proposal(
         quote = ' '.join(change.reported_text.split()).casefold()
         if not quote or quote not in normalized_message:
             return False
-        value: Any = change.value
+        value: Any = _normalise_model_field_value(change.field_code, change.value)
         if isinstance(value, str):
             normalised_value = ' '.join(value.split()).casefold()
             if normalised_value in quote:
@@ -286,7 +350,7 @@ def _agent_proposal(
         source = source_for(change)
         return ProposedFormChange(
             field_code=change.field_code,
-            value=change.value,
+            value=_normalise_model_field_value(change.field_code, change.value),
             source=source,
             status=(FormStatus.CONFIRMED if source is FormSource.CLAIMANT else FormStatus.PROPOSED),
             needed_for=change.needed_for,
@@ -355,10 +419,18 @@ class GatewayAgent:
         instruction = (
             f'{instruction}\n\n'
             'Runtime contract: first call the read-only claim.read tool with an empty object. '
-            'After its result, return JSON with action_code="conversation.answer", '
-            'runtime_action_code="runtime.continue", reason_codes, customer_reason, '
-            'customer_response, and customer_next_step. Do not emit ASK, CLARIFY, CONFIRM, '
-            'PROCEED, UPDATE, HANDOFF, URGENT_HANDOFF, or CREATE_CLAIM.'
+            'After its result, return JSON with action_code="conversation.answer" for ordinary '
+            'intake, or action_code="human.create_handoff" only when the claimant explicitly '
+            'requests human help or a deterministic safety/support rule requires it. '
+            'runtime_action_code, reason_codes, customer_reason, customer_response, '
+            'customer_next_step, and only registered form_changes or contents_item_changes '
+            'grounded in the claimant message. Preserve approximate values and reported_text. '
+            'Do not claim that a formal Claim was created, an external provider was contacted, '
+            'or a staff member accepted the handoff unless the Runtime returns that result. '
+            'Use conversation_history only as context; Claim State and registered facts are '
+            'authoritative, and do not repeat a question already answered by a confirmed fact. '
+            'Every form change value must match field_value_contracts exactly: use JSON booleans '
+            'for boolean fields and only a listed string for enum fields.'
         )
         prompt_version = (
             context.runtime_policy.instruction.prompt_version
@@ -399,12 +471,14 @@ class GatewayAgent:
                 None if self._gateway.capabilities.tools else _PROPOSAL_ADAPTER.json_schema()
             ),
             tools=[tool] if self._gateway.capabilities.tools else [],
+            required_tool_name=claim_read.name if self._gateway.capabilities.tools else None,
         )
         started_at = perf_counter()
         response: ModelResponse | None = None
         invocations: list[RuntimeInvocationTrace] = []
         tool_call_id: str | None = None
         tool_arguments: dict[str, object] = {}
+        tool_output: dict[str, object] = {}
         try:
             complete_for_snapshot = getattr(self._gateway, 'complete_for_snapshot', None)
             if context.runtime_configuration_snapshot is not None and callable(
@@ -442,6 +516,7 @@ class GatewayAgent:
                     tool_result = read_claim_for_runtime(context.claim, tool_call.arguments)
                 except (TypeError, ValueError) as error:
                     raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from error
+                tool_output = dict(tool_result)
                 continuation_messages = [
                     *messages,
                     ModelMessage(
@@ -499,23 +574,73 @@ class GatewayAgent:
                     )
                 except ValidationError:
                     raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
-                if runtime_proposal.action_code != 'conversation.answer':
-                    raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY) from None
-                if runtime_proposal.runtime_action_code != 'runtime.continue':
+                if runtime_proposal.runtime_action_code not in {
+                    'runtime.continue',
+                    'runtime.wait_for_user',
+                    'runtime.pause_for_review',
+                }:
                     raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
                 result = AgentProposal(
-                    action=AgentAction.UPDATE,
+                    action=(
+                        AgentAction.HANDOFF
+                        if runtime_proposal.action_code == 'human.create_handoff'
+                        else AgentAction.UPDATE
+                    ),
                     action_code=runtime_proposal.action_code,
                     reason_codes=runtime_proposal.reason_codes,
                     customer_reason=runtime_proposal.customer_reason,
                     customer_response=runtime_proposal.customer_response,
                     customer_next_step=runtime_proposal.customer_next_step,
-                    form_changes=[],
+                    form_changes=[
+                        ProposedFormChange(
+                            field_code=change.field_code,
+                            value=_normalise_model_field_value(change.field_code, change.value),
+                            source=(
+                                FormSource.CLAIMANT
+                                if change.reported_text
+                                and ' '.join(change.reported_text.split()).casefold()
+                                in ' '.join((context.message_text or '').split()).casefold()
+                                else FormSource.INFERENCE
+                            ),
+                            status=(
+                                FormStatus.CONFIRMED
+                                if change.reported_text
+                                and ' '.join(change.reported_text.split()).casefold()
+                                in ' '.join((context.message_text or '').split()).casefold()
+                                else FormStatus.PROPOSED
+                            ),
+                            needed_for=change.needed_for,
+                            confidence=change.confidence,
+                            precision=change.precision,
+                            relation=change.relation,
+                            reported_text=change.reported_text,
+                        )
+                        for change in runtime_proposal.form_changes
+                    ],
+                    contents_item_changes=[
+                        ProposedContentsItem(
+                            item_id=item.item_id,
+                            description=item.description,
+                            category=item.category,
+                            quantity=item.quantity,
+                            loss_type=item.loss_type,
+                            ownership=item.ownership,
+                            estimated_value=item.estimated_value,
+                            confidence=item.confidence,
+                            relation=item.relation,
+                            reported_text=item.reported_text,
+                        )
+                        for item in runtime_proposal.contents_item_changes
+                    ],
                     state_changes=[],
                     proposed_signals=[],
                     required_tools=[],
                     next_action_requirements=[],
                     proposal_source=AgentProposalSource.MODEL_GATEWAY,
+                    handoff_priority=runtime_proposal.handoff_priority,
+                    controlled_rule_authorised=(
+                        runtime_proposal.action_code == 'human.create_handoff'
+                    ),
                     model_provenance=ModelDecisionProvenance(
                         provider_model=response.provider_model,
                         provider_request_id=response.provider_request_id,
@@ -531,6 +656,7 @@ class GatewayAgent:
                         tool_call_id=tool_call_id or 'unknown',
                         tool_name=claim_read.name,
                         tool_arguments=tool_arguments,
+                        tool_output=tool_output,
                         tool_result_status='succeeded',
                         action_code=runtime_proposal.action_code,
                         runtime_action_code=runtime_proposal.runtime_action_code,
