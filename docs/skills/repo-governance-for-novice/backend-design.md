@@ -7,8 +7,9 @@ data modeling, and code style for the backend.
 
 The API rules below are **mandatory for new endpoints; existing endpoints are
 not retrofitted**. Modifying an existing endpoint to align with these rules is
-a shared-contract change: open a separate issue through the approval flow in
-`issue-kanban.md` section 3.3, and update the contract documents in the same
+a shared-contract change: open a separate bounded issue and use a technical
+Discussion for alignment when needed (see `issue-kanban.md` section 3.3), and
+update the contract documents in the same
 PR (`docs-contract.md` section 7.1). Where an existing endpoint conflicts with
 a rule, consistency within the same resource follows the existing behavior.
 

@@ -1,0 +1,105 @@
+name: Sprint 4 daily delivery
+description: Define one person's bounded daily contribution to a Sprint 4 super-issue.
+title: "[Sprint 4 Day N] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue is a daily subissue of exactly one Sprint 4 super-issue. Describe a user-observable
+        outcome and the evidence that will exist at the end of the day. Do not create a second backend
+        implementation path: backend changes belong to the backend owner.
+
+  - type: dropdown
+    id: workstream
+    attributes:
+      label: Super-issue
+      options:
+        - Backend and AWS integration (40 hours)
+        - Agent behaviour and runtime (40 hours)
+        - Full user journey, frontend, and testing (120 hours)
+    validations:
+      required: true
+
+  - type: input
+    id: day
+    attributes:
+      label: Sprint day
+      placeholder: "Day 1"
+    validations:
+      required: true
+
+  - type: input
+    id: parent
+    attributes:
+      label: Super-issue URL or number
+      description: Link exactly one Week 7 super-issue.
+      placeholder: "https://github.com/.../issues/123"
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: User-observable outcome
+      description: State what becomes possible or measurably better today.
+      placeholder: "For scenario M03, ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: scenarios
+    attributes:
+      label: Scenario and rubric mapping
+      description: Identify the complete-journey scenario IDs and expected-outcome metric affected.
+      placeholder: "M03; no follow-up target; claim creation evidence"
+    validations:
+      required: true
+
+  - type: textarea
+    id: deliverable
+    attributes:
+      label: Deliverable and evidence
+      description: Name the PR, document, replay, test result, or other durable evidence expected.
+      placeholder: "PR plus replay record and test output..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and requests
+      description: List exact inputs needed from another owner. Use a Discussion for technical alignment, not approval.
+      placeholder: "Need liyang6620 to expose field X with visibility Y; None"
+    validations:
+      required: true
+
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Non-goals and ownership boundary
+      description: State what this issue will not change and who owns adjacent implementation.
+      placeholder: "No backend implementation in this issue; backend request goes to liyang6620."
+    validations:
+      required: true
+
+  - type: input
+    id: owner
+    attributes:
+      label: Owner
+      placeholder: "@username"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk class
+      options:
+        - Standard
+        - Shared contract
+        - Persistence or concurrency
+        - External side effect
+        - Identity, authority, security, or privacy
+        - Repository governance or deployment
+    validations:
+      required: true

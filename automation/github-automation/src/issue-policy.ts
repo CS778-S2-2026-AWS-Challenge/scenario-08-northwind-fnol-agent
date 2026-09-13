@@ -1,7 +1,4 @@
-import {
-  validateDiscussionApproval,
-  validateIssueBody,
-} from "../../../.github/scripts/issue_policy.cjs";
+import { validateIssueBody } from "../../../.github/scripts/issue_policy.cjs";
 
 import type { GitHubClient } from "./github";
 import type { IssueEvent } from "./types";
@@ -18,16 +15,10 @@ function splitRepository(repository: string): { owner: string; repo: string } {
 export async function evaluateIssuePolicy(
   event: IssueEvent,
   client: GitHubClient,
-  maintainer: string,
 ): Promise<{ errors: string[] }> {
   const { owner, repo } = splitRepository(event.repository.fullName);
   const result = validateIssueBody({ body: event.issue.body });
-  const approval = validateDiscussionApproval({
-    body: event.issue.body,
-    creator: event.issue.creator,
-    maintainer,
-  });
-  const errors = [...result.errors, ...approval.errors];
+  const errors = [...result.errors];
   if (errors.length === 0) return { errors };
 
   const comments = await client.listIssueComments(owner, repo, event.issue.number);

@@ -45,53 +45,28 @@ for, and how they are linked.
 
 ## 3.3 Issue creation
 
-The agent **may** create new issues, but must first post in GitHub Discussions
-and explain to the maintainer: why no existing issue can carry the work (it must
-not be expressible as remaining work), the proposed issue title, and the owned
-behavior and acceptance boundary. Only **after the maintainer's explicit
-agreement** may the agent create the issue. Before agreement, creation is
-forbidden.
+The agent may create a new issue directly through the appropriate Issue Form.
+There is no maintainer-approval gate for issue creation. Required fields still
+must be complete and must state the owned behavior, impact area, non-goals,
+shared contracts, dependencies, risk level, and observable acceptance criteria.
+When acceptance criteria are unfinished, update the existing issue instead of
+opening a duplicate. A follow-up issue must explain its relationship to the
+original issue and define its own boundary.
 
-When creating, all structural constraints still apply: use the `Code work`
-Issue Form, leave no required field as a placeholder, and declare the owned
-behavior, impact area, non-goals, shared contracts, dependencies, and risk
-level. When acceptance criteria are unfinished, update the existing issue
-instead of opening a new one. A follow-up issue must explain why it stands
-alone, link the original issue or PR, and define its own observable acceptance
-criteria — an agent's follow-up goes through the same Discussions approval
-flow. While waiting for approval, leave a review finding or comment under the
-original issue or PR per §1.3; the current delivery is not blocked.
+GitHub Discussions are for technical discussion and requirements alignment,
+not issue-creation approval. Use a Discussion when a design choice, API field,
+permission, visibility rule, or cross-owner dependency needs agreement. For
+example, a frontend owner may ask `@liyang6620` to provide a backend field and
+document the required request/response and visibility semantics. The issue may
+be created before or after that discussion; the discussion link is evidence of
+alignment, not an authorization gate.
 
 A PR carrying new task requirements may use `Refs` against an existing issue.
+The Kanban board remains maintained exclusively by the maintainer.
 
-The Kanban board is maintained exclusively by the maintainer. GitHub Discussions
-(enabled 2026-08-29) is the approval entry point for issue creation.
-
-**Approval flow** (deliberately lightweight — fixed format plus the existing
-audit workflow, no new automation):
-
-1. The agent posts in the `Issue requests` category of Discussions, with the
-   title format `[issue-request] <proposed issue title>` and a body of exactly
-   three parts: why no existing issue can carry the work / the proposed owned
-   behavior and acceptance boundary / related issues or PRs.
-2. Wait for the maintainer to reply in the thread with explicit agreement
-   (containing the word "approve" or "approved"). Before agreement, creation is
-   forbidden.
-3. After agreement, the agent creates the issue and fills the `Discussion
-   approval` field in the issue body with the URL of that Discussion thread
-   (the `Code work` Issue Form includes this field).
-4. Mechanical check, attached to the **existing** Issue policy audit workflow
-   (whose mandate is "may comment, may fail the check, must not close or
-   rewrite issues"): an issue whose creator is not the maintainer and which lacks
-   a `Discussion approval` link fails the check and receives a comment.
-5. Optional hardening (not urgent): the audit verifies via GraphQL that the
-   linked thread actually contains an approval reply from the maintainer.
-
-**Discussions category governance**: categories are defined once —
-`Issue requests` (issue-creation approval, above), `Design` (design discussion
-and tonality consultation, see `frontend-design.md` section 11.7), and `Q&A`
-(all other questions and uncertainty reports). Agent posts must go into the
-matching category; agents must not create new categories.
+**Discussion categories**: use `Design` for technical and product-contract
+alignment and `Q&A` for other questions or uncertainty reports. Agents must not
+use Discussions as an approval queue for ordinary issue creation.
 
 ## 3.4 Kanban workflow
 

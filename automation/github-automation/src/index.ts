@@ -25,7 +25,7 @@ async function processIssueEvent(message: GitHubQueueMessage, env: WorkerEnv): P
   if (!ISSUE_POLICY_ACTIONS.includes(event.action)) return;
 
   const client = new GitHubClient(env.GITHUB_TOKEN);
-  const policy = await evaluateIssuePolicy(event, client, env.MAINTAINER_LOGIN);
+  const policy = await evaluateIssuePolicy(event, client);
   console.log(JSON.stringify({
     event: "issue_processed",
     deliveryId: message.deliveryId,
