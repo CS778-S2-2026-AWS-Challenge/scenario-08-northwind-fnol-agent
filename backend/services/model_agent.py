@@ -638,9 +638,9 @@ class GatewayAgent:
                     next_action_requirements=[],
                     proposal_source=AgentProposalSource.MODEL_GATEWAY,
                     handoff_priority=runtime_proposal.handoff_priority,
-                    controlled_rule_authorised=(
-                        runtime_proposal.action_code == 'human.create_handoff'
-                    ),
+                    # Model output is advisory. Deterministic support/safety interrupts are
+                    # evaluated before this provider and are the only source of handoff authority.
+                    controlled_rule_authorised=False,
                     model_provenance=ModelDecisionProvenance(
                         provider_model=response.provider_model,
                         provider_request_id=response.provider_request_id,

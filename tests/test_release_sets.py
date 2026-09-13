@@ -7,19 +7,29 @@ from fastapi.testclient import TestClient
 
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
+from backend.core.errors import ApiError
+from backend.domain.configuration import (
+    ConfigurationImpact,
+    ConfigurationRecord,
+    ConfigurationState,
+)
 from backend.domain.knowledge_admin import KnowledgeSourceRecord, KnowledgeVersionState
 from backend.domain.release import (
     ConfigurationReference,
     KnowledgeReference,
     ReleaseSetAuditEvent,
+    ReleaseSetCreate,
     ReleaseSetRecord,
     ReleaseSetState,
 )
+from backend.repositories.configuration import ConfigurationRepository
+from backend.repositories.knowledge_admin import KnowledgeAdminRepository
 from backend.repositories.release_set import (
     ReleaseSetIdempotencyRecord,
     ReleaseSetRepository,
     SQLiteReleaseSetRepository,
 )
+from backend.services import release_sets
 
 
 def _client() -> TestClient:
@@ -131,6 +141,75 @@ def test_release_set_validates_publishes_and_resolves_runtime_snapshot() -> None
         assert snapshot.status_code == 200
         assert snapshot.json()['release_set_id'] == release_id
         assert snapshot.json()['configurations']['feature']['state'] == 'published'
+
+
+def test_release_set_accepts_keyed_model_profiles_and_rejects_profile_mismatch() -> None:
+    configurations = ConfigurationRepository()
+    releases = ReleaseSetRepository()
+    knowledge = KnowledgeAdminRepository()
+
+    def model_record(profile_id: str) -> ConfigurationRecord:
+        return ConfigurationRecord(
+            configuration_id=f'cfg_{profile_id}',
+            domain='model',
+            configuration_key=profile_id,
+            revision=1,
+            state=ConfigurationState.PUBLISHED,
+            impact=ConfigurationImpact.HIGH,
+            values={'profile_id': profile_id},
+            author='test-admin',
+            reason='Publish a model profile for Release Set selection.',
+            updated_at=datetime.now(UTC),
+        )
+
+    qwen = model_record('qwen-local')
+    gpt = model_record('nowcoding-gpt56terra')
+    configurations.create(qwen)
+    configurations.create(gpt)
+    refs = {
+        'model:qwen-local': ConfigurationReference(
+            configuration_id=qwen.configuration_id,
+            revision=qwen.revision,
+        ),
+        'model:nowcoding-gpt56terra': ConfigurationReference(
+            configuration_id=gpt.configuration_id,
+            revision=gpt.revision,
+        ),
+    }
+
+    release = release_sets.create(
+        releases,
+        configurations,
+        knowledge,
+        ReleaseSetCreate(
+            environment='test',
+            runtime_profile='fixture',
+            configuration_refs=refs,
+            reason='Publish both selectable claimant model profiles.',
+        ),
+        'test-admin',
+    )
+    assert release.configuration_refs == refs
+
+    with pytest.raises(ApiError) as captured:
+        release_sets.create(
+            releases,
+            configurations,
+            knowledge,
+            ReleaseSetCreate(
+                environment='test',
+                runtime_profile='fixture',
+                configuration_refs={
+                    'model:nowcoding-gpt56terra': ConfigurationReference(
+                        configuration_id=qwen.configuration_id,
+                        revision=qwen.revision,
+                    )
+                },
+                reason='Reject a slot that names a different model profile.',
+            ),
+            'test-admin',
+        )
+    assert captured.value.code == 'RELEASE_SET_CONFIGURATION_NOT_FOUND'
 
 
 def test_release_set_rejects_unpublished_configuration_reference() -> None:

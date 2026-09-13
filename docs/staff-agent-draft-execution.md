@@ -74,19 +74,18 @@ handler has committed the corresponding result.
 - The OpenAPI snapshot and API catalogue describe the execution route and the role boundary.
 
 The backend and claimant API suites provide contract and integration evidence for the three VP
-families. A browser-level claimant journey is a separate evidence level and must be recorded only
-after the existing customer client is exercised against the running API; component or API tests do
-not get relabelled as browser evidence.
+families. The maintainer's #608 ruling accepts exact-head API/Runtime readback plus claimant
+component rerendering as the state and projection acceptance oracle. A browser-level journey is a
+separate evidence level and the broader ten-scenario product package remains tracked under #733.
 
 ## Current evidence boundary
 
-The claimant client now has an integration test that starts an anonymous Claim, consumes a backend
-Dynamic Form projection, displays the backend-owned current requirement and progress, and submits a
+The claimant client integration test starts an anonymous Claim, consumes a backend Dynamic Form
+projection, displays the backend-owned current requirement and progress, and submits a
 natural-language-equivalent field correction through the authoritative update route. The backend
 journey suite covers motor, home, and contents branch selection, confirmation, correction, and
-Claim creation.
+Claim creation. The Staff Agent suite covers explicit confirmation, registered execution,
+source-linked persistence, replay, and the resulting Workbench projection.
 
-The remaining #608 evidence requirement is a full browser journey for each motor, home, and contents
-path against the running customer and backend services. The supported in-app browser harness was
-unavailable in this environment, so that evidence is intentionally still open and is not represented
-as complete by the API or jsdom tests above.
+The full browser and ten-scenario product evidence is intentionally not claimed by #608; it belongs
+to the product-level #733 acceptance package.

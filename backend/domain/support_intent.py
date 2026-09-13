@@ -17,11 +17,13 @@ class SupportIntent(str, Enum):
 
 _EXPLICIT_HUMAN_PATTERNS = (
     re.compile(
-        r'\b(?:speak|talk)\s+(?:to|with)\s+(?:a\s+)?(?:person|human|representative)\b',
+        r'\b(?:speak|talk)\s+(?:to|with)\s+(?:a\s+)?'
+        r'(?:person|human|representative|staff\s+member|claims?\s+professional)\b',
         re.IGNORECASE,
     ),
     re.compile(
-        r'\b(?:want|need|request)\s+(?:a\s+)?(?:person|human|representative)\b',
+        r'\b(?:want|need|request)\s+(?:a\s+)?'
+        r'(?:person|human|representative|staff\s+member|claims?\s+professional)\b',
         re.IGNORECASE,
     ),
     re.compile(r'\bhuman\s+(?:help|support)\b', re.IGNORECASE),
@@ -30,7 +32,8 @@ _NEGATED_HUMAN_PATTERNS = (
     re.compile(
         r"\b(?:do\s+not|don'?t|dont|no\s+longer)\s+(?:need|want|request)\s+"
         r'(?:to\s+)?(?:speak|talk)?\s*(?:to|with)?\s*(?:a\s+)?'
-        r'(?:person|human|representative|human\s+(?:help|support))\b',
+        r'(?:person|human|representative|staff\s+member|claims?\s+professional|'
+        r'human\s+(?:help|support))\b',
         re.IGNORECASE,
     ),
     re.compile(r"\b(?:do\s+not|don'?t|dont)\s+need\s+human\s+(?:help|support)\b", re.I),

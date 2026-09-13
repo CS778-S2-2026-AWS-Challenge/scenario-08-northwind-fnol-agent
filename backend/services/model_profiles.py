@@ -1,6 +1,5 @@
 """Resolve the published claimant model catalog without exposing credentials."""
 
-import os
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
@@ -15,8 +14,6 @@ from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationResolver,
 )
-
-GPT_MODEL_PROFILE_ID = 'nowcoding-gpt54mini'
 
 
 def _settings_configuration(settings: Settings) -> ConfigurationRecord | None:
@@ -46,47 +43,6 @@ def _settings_configuration(settings: Settings) -> ConfigurationRecord | None:
         },
         author='runtime-bootstrap',
         reason='Deployment-owned bootstrap profile.',
-        updated_at=datetime.now(UTC),
-    )
-
-
-def _secondary_settings_configuration(settings: Settings) -> ConfigurationRecord:
-    """Describe the optional GPT profile without claiming provider readiness.
-
-    The endpoint and secret name are configuration, never a provider response.  The
-    profile is listed so the client can explain availability; selection remains gated
-    by ``evaluation_status`` until a real credential is present.
-    """
-    endpoint = os.getenv('NOWCODING_MODEL_BASE_URL', 'https://nowcoding.ai/v1').strip()
-    credential_name = os.getenv(
-        'NOWCODING_MODEL_API_KEY_ENV',
-        'NORTHWIND_MODEL_API_KEY',
-    ).strip()
-    configured = bool(endpoint and credential_name and os.getenv(credential_name, '').strip())
-    return ConfigurationRecord(
-        configuration_id='bootstrap-nowcoding-gpt54mini',
-        domain='model',
-        configuration_key=GPT_MODEL_PROFILE_ID,
-        revision=1,
-        state=ConfigurationState.PUBLISHED,
-        impact='high',
-        values={
-            'protocol': 'openai_compatible',
-            'provider': 'nowcoding',
-            'model_identifier': 'gpt-5.4-mini',
-            'base_url': endpoint,
-            'credential_environment_variable': credential_name,
-            'profile_id': GPT_MODEL_PROFILE_ID,
-            'purpose': settings.model_purpose,
-            'privacy_class': settings.model_privacy_class,
-            'prompt_version': settings.model_prompt_version,
-            'evaluation_status': 'configured' if configured else 'unavailable',
-            'timeout_seconds': settings.model_timeout_seconds,
-            'structured_output': True,
-            'tools': True,
-        },
-        author='runtime-bootstrap',
-        reason='Deployment-owned optional GPT claimant profile.',
         updated_at=datetime.now(UTC),
     )
 
@@ -135,12 +91,13 @@ def model_catalog(request: object) -> list[ConfigurationRecord]:
     if snapshot.release_set_id is not None:
         records = _parse(snapshot.configurations.values())
     else:
-        records = _parse(app.state.configuration_repository.list_configurations('model'))
+        records = [
+            record
+            for record in _parse(app.state.configuration_repository.list_configurations('model'))
+            if record.values.get('profile_id') == settings.model_profile_id
+        ]
         if not records and (bootstrap := _settings_configuration(settings)):
             records = [bootstrap]
-        if not any(record.values.get('profile_id') == GPT_MODEL_PROFILE_ID for record in records):
-            records.append(_secondary_settings_configuration(settings))
-        records = _parse(records)
     return _default_first(records, settings.model_profile_id)
 
 

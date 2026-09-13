@@ -33,8 +33,9 @@ validated form changes, the compatibility decision projection, a bounded `Runtim
 the TurnPlan/AgentProposal/ExecutionPlan/ActionEnvelope/ToolResult/TurnResult/WorkItem family,
 Session activity, and the idempotency response atomically. `claim.read` is observational, but it
 is followed by the validated Claim mutation path rather than a read-only turn. A model may
-request `human.create_handoff` only when deterministic support rules authorise it; the existing
-handoff builder remains the side-effect handler.
+propose `human.create_handoff`, but model output never authorises that action. A server-owned
+support or safety interrupt runs before the provider and is the only Runtime path that authorises
+the handoff builder.
 
 Every adapter maps provider termination data to `complete`, `incomplete`, `refused`, or
 `unknown`. `GatewayAgent` accepts a proposal only from a `complete` response. Truncated,
@@ -92,10 +93,11 @@ tool-call side channel for `claim.read` and never mixes it with the legacy eight
 The first request names `claim.read` as the required tool; compatible adapters force that exact
 tool choice and disable parallel tool calls rather than relying on prompt compliance. The
 continuation is then constrained to the currently wired `conversation.answer` and
-`runtime.continue` literal action codes. The continuation may also request
-`human.create_handoff` when the deterministic support boundary authorises it. Claim creation
-and external participant actions remain separate handlers and are never reported as complete
-merely because a model requested them.
+`runtime.continue` literal action codes. The continuation may propose `human.create_handoff`, but
+that proposal remains advisory and is blocked from mutation; matching deterministic support or
+safety input is handled before the provider call. Claim creation and external participant actions
+remain separate handlers and are never reported as complete merely because a model requested
+them.
 
 The default `controlled` profile continues to use `ControlledAgent`. The
 `model_gateway` profile is enabled only through explicit startup configuration. A
@@ -163,13 +165,15 @@ Both published claimant profiles use this adapter contract:
 | Profile | Model | Role | Required capabilities |
 | --- | --- | --- | --- |
 | `qwen-local` | `qwen3.8-27b` at `http://100.71.25.5:8080/v1` | deployment default through `MODEL_PROFILE_ID` | structured output and tools |
-| `nowcoding-gpt54mini` | `gpt-5.4-mini` through the existing nowcoding endpoint | selectable | structured output and tools |
+| `nowcoding-gpt56terra` | `gpt-5.6-terra` through the existing nowcoding endpoint | selectable | structured output and tools |
 
-The credential reference is stored as a secret environment-variable name only. The selected
-profile is the default for a Session, but each message may explicitly select another published
-profile in the same conversation. The Runtime persists the actual profile used for every turn and
-updates the Session's latest selection; it never silently switches providers or falls back to a
-different profile.
+The nowcoding profile was verified on 14 September 2026 with live strict structured-output and
+forced tool-call requests before publication. The credential reference is stored as a secret
+environment-variable name only. A Release Set binds each selectable model in a keyed
+`model:<profile_id>` slot. The selected profile is the default for a Session, but each message may
+explicitly select another published profile in the same conversation. The Runtime persists the
+actual profile used for every turn and updates the Session's latest selection; it never silently
+switches providers or falls back to a different profile.
 
 The Workbench Staff Agent uses the same published profile catalog under its separate
 `staff_assistant` purpose and `staff_internal_fnol` privacy class. Its selected profile is

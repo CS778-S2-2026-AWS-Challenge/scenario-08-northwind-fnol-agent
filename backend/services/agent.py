@@ -1003,18 +1003,6 @@ def validate_proposal(proposal: AgentProposal) -> AgentAuthority:
                 validated_by='deterministic_rule_engine',
                 outcome=AuthorityOutcome.AUTHORISED,
             )
-        if (
-            proposal.action_code == 'human.create_handoff'
-            and proposal.action in {AgentAction.HANDOFF, AgentAction.URGENT_HANDOFF}
-            and proposal.controlled_rule_authorised
-            and proposal.reason_codes
-            and set(proposal.reason_codes).issubset(CONTROLLED_HANDOFF_REASONS)
-        ):
-            return AgentAuthority(
-                proposed_by='agent',
-                validated_by='deterministic_rule_engine',
-                outcome=AuthorityOutcome.AUTHORISED,
-            )
         if contract.requires_confirmation:
             return AgentAuthority(
                 proposed_by='agent',

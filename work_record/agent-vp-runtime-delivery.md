@@ -113,7 +113,7 @@ success, fixture claim number, or invented third-party response.
 The claimant experience follows ChatGPT-style conversation semantics:
 
 - `qwen-local` is the backend-published default;
-- `nowcoding-gpt54mini` remains a backend-published selectable profile;
+- `nowcoding-gpt56terra` is a backend-published selectable profile;
 - the list and availability come from the Control Plane/runtime capabilities API;
 - a claimant may switch model within the same conversation without creating a new
   Claim or clearing messages;
@@ -162,7 +162,7 @@ Session activity, and the target Runtime record family: TurnPlan, AgentProposal,
 ExecutionPlan, ActionEnvelope, ToolResult, TurnResult, and RuntimeWorkItem.
 
 The published capability projection now exposes the backend model catalog. `qwen-local`
-is the default when published, while `nowcoding-gpt54mini` remains a separately
+is the default when published, while `nowcoding-gpt56terra` remains a separately
 selectable profile and unavailable profiles are rejected rather than silently replaced.
 Model selection may change inside an existing conversation and the actual profile is
 recorded per turn. `New chat` creates a new Claim conversation when the current one

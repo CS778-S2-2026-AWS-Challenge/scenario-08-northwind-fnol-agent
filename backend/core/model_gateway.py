@@ -20,10 +20,6 @@ from backend.domain.model_gateway import (
 from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.release_set import ReleaseSetRepository
-from backend.services.model_profiles import (
-    GPT_MODEL_PROFILE_ID,
-    _secondary_settings_configuration,
-)
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationResolver,
@@ -244,12 +240,16 @@ class ConfigurationBackedModelGateway:
             if self._runtime_configuration_resolver is not None:
                 snapshot = self._runtime_configuration_resolver.snapshot()
                 if snapshot.release_set_id is not None:
-                    configuration = snapshot.model(profile_id)
+                    if profile_id is not None:
+                        configuration = snapshot.model(profile_id)
+                    else:
+                        configuration = (
+                            snapshot.configurations.get(f'model:{self._settings.model_profile_id}')
+                            or snapshot.model()
+                        )
                 else:
                     selected_profile = profile_id or self._settings.model_profile_id
                     configuration = self._configuration_repository.active('model', selected_profile)
-                    if configuration is None and profile_id == GPT_MODEL_PROFILE_ID:
-                        configuration = _secondary_settings_configuration(self._settings)
                     if configuration is None and profile_id is None:
                         configuration = self._configuration_repository.active('model')
                 authoritative = snapshot.release_set_id is not None
@@ -300,8 +300,6 @@ class ConfigurationBackedModelGateway:
             return configuration
         selected_profile = profile_id or self._settings.model_profile_id
         configuration = self._configuration_repository.active('model', selected_profile)
-        if configuration is None and profile_id == GPT_MODEL_PROFILE_ID:
-            configuration = _secondary_settings_configuration(self._settings)
         if configuration is None and profile_id is None:
             configuration = self._configuration_repository.active('model')
         return configuration
@@ -311,10 +309,8 @@ class ConfigurationBackedModelGateway:
         configuration, authoritative = self._active_model_configuration()
         if configuration is None:
             return build_model_gateway(self._settings, self._registry).capabilities
-        if (
-            not authoritative
-            and configuration.profile_id != GPT_MODEL_PROFILE_ID
-            and not _runtime_configuration_matches_settings(configuration, self._settings)
+        if not authoritative and not _runtime_configuration_matches_settings(
+            configuration, self._settings
         ):
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
         return ModelCapabilities(
@@ -325,12 +321,15 @@ class ConfigurationBackedModelGateway:
     def complete(self, request: ModelRequest) -> ModelResponse:
         configuration, authoritative = self._active_model_configuration(request.model_profile_id)
         if configuration is None:
+            if (
+                request.model_profile_id is not None
+                and request.model_profile_id != self._settings.model_profile_id
+            ):
+                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
             gateway = build_model_gateway(self._settings, self._registry)
         else:
-            if (
-                not authoritative
-                and configuration.profile_id != GPT_MODEL_PROFILE_ID
-                and not _runtime_configuration_matches_settings(configuration, self._settings)
+            if not authoritative and not _runtime_configuration_matches_settings(
+                configuration, self._settings
             ):
                 raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
             registry = self._registry or default_model_gateway_registry()

@@ -107,7 +107,7 @@ describe('claimant intake projection', () => {
       claim_types: ['motor', 'home', 'contents'],
       models: [
         { id: 'qwen-local', label: 'qwen3.8-27b', availability: 'available' },
-        { id: 'nowcoding-gpt54mini', label: 'gpt-5.4-mini', availability: 'available' },
+        { id: 'nowcoding-gpt56terra', label: 'gpt-5.6-terra', availability: 'available' },
       ],
       default_model_profile_id: 'qwen-local',
     })
@@ -130,13 +130,13 @@ describe('claimant intake projection', () => {
 
     await user.click(model)
     expect(screen.getByRole('listbox', { name: 'Model' })).toBeInTheDocument()
-    await user.click(screen.getByRole('option', { name: /gpt-5\.4-mini.*nowcoding-gpt54mini/ }))
-    expect(model).toHaveTextContent('gpt-5.4-mini')
+    await user.click(screen.getByRole('option', { name: /gpt-5\.6-terra.*nowcoding-gpt56terra/ }))
+    expect(model).toHaveTextContent('gpt-5.6-terra')
 
     await waitFor(() => expect(model).toHaveFocus())
     await user.keyboard('{ArrowDown}')
     const selectedGpt = screen.getByRole('option', {
-      name: /gpt-5\.4-mini.*nowcoding-gpt54mini/,
+      name: /gpt-5\.6-terra.*nowcoding-gpt56terra/,
     })
     await waitFor(() => expect(selectedGpt).toHaveFocus())
     await user.keyboard('{Home}{Enter}')

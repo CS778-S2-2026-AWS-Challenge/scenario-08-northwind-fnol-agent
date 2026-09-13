@@ -679,7 +679,7 @@ components use the existing independent approval record and publication guard; n
 write production Claim State.
 
 Model records use `domain=model` and `configuration_key=profile_id`, so one published Release
-Set can bind both `qwen-local` and `nowcoding-gpt54mini` without overwriting either profile.
+Set can bind both `qwen-local` and `nowcoding-gpt56terra` without overwriting either profile.
 Claimant profiles must declare `structured_output=true` and `tools=true`; a Session stores the
 selected profile ID and Runtime resolves that exact key for every turn.
 

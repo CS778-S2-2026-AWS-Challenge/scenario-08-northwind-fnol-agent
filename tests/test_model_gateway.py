@@ -16,7 +16,7 @@ from backend.adapters.model_gateway import (
 )
 from backend.app import create_app
 from backend.core.auth import Principal
-from backend.core.config import AgentRuntimeProfile, DataRuntimeProfile, Settings
+from backend.core.config import AgentRuntimeProfile, DataRuntimeProfile, IdentityMode, Settings
 from backend.core.model_gateway import ConfigurationBackedModelGateway
 from backend.domain.branch_registry import BranchRuleEvaluator
 from backend.domain.configuration import (
@@ -64,6 +64,7 @@ from backend.domain.models import (
     NeededFor,
     ResponsibleParty,
     StructuredFormField,
+    SupportNeed,
     WorkingClaim,
 )
 from backend.prompts import (
@@ -1044,7 +1045,7 @@ def _runtime_model_output() -> dict[str, object]:
     }
 
 
-def test_gateway_runtime_can_request_deterministic_handoff() -> None:
+def test_gateway_runtime_handoff_proposal_remains_advisory() -> None:
     gateway = RuntimeSequenceGateway(
         [
             ModelResponse(
@@ -1091,8 +1092,8 @@ def test_gateway_runtime_can_request_deterministic_handoff() -> None:
 
     assert proposal.action is AgentAction.HANDOFF
     assert proposal.action_code == 'human.create_handoff'
-    assert proposal.controlled_rule_authorised is True
-    assert validate_proposal(proposal).outcome is AuthorityOutcome.AUTHORISED
+    assert proposal.controlled_rule_authorised is False
+    assert validate_proposal(proposal).outcome is AuthorityOutcome.BLOCKED
 
 
 class FailingGateway:
@@ -1112,6 +1113,8 @@ class FailingGateway:
 
 def model_gateway_settings(protocol: str) -> Settings:
     return Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
         model_protocol_adapter=protocol,
         model_base_url='https://model.example.test/v1',
@@ -1363,6 +1366,7 @@ def submit_model_message(
     *,
     protocol: str,
     message_text: str = 'A synthetic rear-end incident.',
+    tools: bool = False,
 ) -> tuple[httpx.Response, FixtureRepository, WorkingClaim, str, str]:
     registry = ModelGatewayRegistry()
     registry.register(protocol, lambda _config: gateway)
@@ -1370,7 +1374,7 @@ def submit_model_message(
     headers = {'Authorization': 'Bearer synthetic-claimant'}
     with TestClient(
         create_app(
-            model_gateway_settings(protocol),
+            replace(model_gateway_settings(protocol), model_supports_tools=tools),
             repository=repository,
             model_gateway_registry=registry,
         ),
@@ -2262,23 +2266,22 @@ def test_deterministic_interrupts_precede_model_gateway(
         gateway = StaticGateway(ModelResponse(structured_output=None))
     protocol = f'interrupt_{failure_kind}_{expected_action.lower()}'
 
-    response, repository, before_claim, claim_id, session_id = submit_model_message(
+    response, repository, before_claim, claim_id, _session_id = submit_model_message(
         gateway,
         protocol=protocol,
         message_text=message_text,
     )
 
-    expected_status = 503 if failure_kind == 'timeout' else 502
-    assert response.status_code == expected_status
-    assert_model_message_failure_is_atomic(
-        repository,
-        before_claim,
-        claim_id,
-        session_id,
-        protocol,
-    )
-    assert repository.list_handoffs(claim_id, 'cus_demo') == []
-    assert gateway.call_count == 1
+    assert response.status_code == 200
+    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert stored_claim is not None
+    assert stored_claim.revision == before_claim.revision + 1
+    handoffs = repository.list_handoffs(claim_id, 'cus_demo')
+    assert len(handoffs) == 1
+    assert handoffs[0].type.value == expected_type
+    assert handoffs[0].trigger.value == expected_trigger
+    assert handoffs[0].reason_codes == [expected_reason]
+    assert gateway.call_count == 0
 
 
 @pytest.mark.parametrize(
@@ -2343,6 +2346,78 @@ def test_model_proposed_handoffs_remain_advisory(action: str, reason_code: str) 
     assert candidate.proposal_source is AgentProposalSource.MODEL_GATEWAY
     assert authority.outcome is AuthorityOutcome.REVIEW_REQUIRED
     assert authorised_state_changes(candidate, authority) == []
+
+
+def test_namespaced_model_handoff_on_routine_message_does_not_create_handoff() -> None:
+    gateway = RuntimeSequenceGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='routine-read',
+                        name='claim.read',
+                        arguments={},
+                    )
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output={
+                    'action_code': 'human.create_handoff',
+                    'runtime_action_code': 'runtime.pause_for_review',
+                    'reason_codes': ['HUMAN_SUPPORT_REQUESTED'],
+                    'customer_reason': 'Human support was requested.',
+                    'customer_response': 'A staff member will review this report.',
+                    'customer_next_step': {
+                        'status': 'human_support_requested',
+                        'summary': 'A staff member will review this report.',
+                        'responsible_party': 'claims_professional',
+                        'required_items': [],
+                    },
+                    'form_changes': [],
+                    'contents_item_changes': [],
+                    'source_refs': [],
+                    'handoff_priority': 'standard',
+                },
+            ),
+        ]
+    )
+
+    response, repository, before_claim, claim_id, _session_id = submit_model_message(
+        gateway,
+        protocol='runtime_forged_handoff',
+        message_text='A routine update with no request for support.',
+        tools=True,
+    )
+
+    assert response.status_code == 200
+    assert repository.list_handoffs(claim_id, 'cus_demo') == []
+    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert stored_claim is not None
+    assert stored_claim.revision == before_claim.revision + 1
+    messages = repository.list_messages(claim_id, _session_id, 'cus_demo')
+    assert any(message.actor is ActorType.CLAIMANT for message in messages)
+
+
+def test_explicit_human_request_uses_runtime_interrupt_before_model_gateway() -> None:
+    gateway = RuntimeSequenceGateway([])
+
+    response, repository, before_claim, claim_id, _session_id = submit_model_message(
+        gateway,
+        protocol='runtime_explicit_handoff',
+        message_text='I want to speak to a staff member now.',
+        tools=True,
+    )
+
+    assert response.status_code == 200
+    assert gateway.requests == []
+    handoffs = repository.list_handoffs(claim_id, 'cus_demo')
+    assert len(handoffs) == 1
+    assert handoffs[0].support_need is SupportNeed.HUMAN_REQUESTED
+    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert stored_claim is not None
+    assert stored_claim.revision == before_claim.revision + 1
 
 
 def test_legacy_model_motor_journey_is_rejected_before_side_effects() -> None:
@@ -2765,10 +2840,7 @@ def test_snapshot_gateway_rejects_missing_model_configuration() -> None:
     assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
 
 
-def test_explicit_gpt_profile_never_falls_back_to_active_qwen_configuration(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv('NORTHWIND_MODEL_API_KEY', 'synthetic-gpt-key')
+def test_explicit_unpublished_profile_fails_closed_instead_of_falling_back() -> None:
     settings = Settings(
         environment='test',
         data_runtime_profile=DataRuntimeProfile.FIXTURE,
@@ -2830,12 +2902,11 @@ def test_explicit_gpt_profile_never_falls_back_to_active_qwen_configuration(
         ),
     )
 
-    gateway.complete(ModelRequest(model_profile_id='nowcoding-gpt54mini', messages=[]))
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(ModelRequest(model_profile_id='nowcoding-gpt54mini', messages=[]))
 
-    assert len(constructed) == 1
-    assert constructed[0].profile.profile_id == 'nowcoding-gpt54mini'
-    assert constructed[0].model == 'gpt-5.4-mini'
-    assert constructed[0].base_url == 'https://nowcoding.ai/v1'
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
+    assert constructed == []
 
 
 def test_gateway_agent_requires_structured_output_at_composition() -> None:

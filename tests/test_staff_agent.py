@@ -12,12 +12,18 @@ from backend.app import create_app
 from backend.core.auth import Principal
 from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
 from backend.core.errors import ApiError
+from backend.domain.configuration import (
+    ConfigurationImpact,
+    ConfigurationRecord,
+    ConfigurationState,
+)
 from backend.domain.model_gateway import (
     ModelCapabilities,
     ModelCompletionStatus,
     ModelRequest,
     ModelResponse,
 )
+from backend.domain.release import ConfigurationReference, ReleaseSetRecord, ReleaseSetState
 from backend.domain.staff_agent import (
     ExecuteStaffAgentDraftRequest,
     StaffAgentDraft,
@@ -30,7 +36,9 @@ from backend.domain.staff_agent import (
     StaffAgentSession,
 )
 from backend.prompts import STAFF_ASSISTANT_PROMPT_ID
+from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.release_set import ReleaseSetRepository
 from backend.services.agent import ControlledAgent
 from backend.services.staff_agent import (
     StaffAgentContext,
@@ -141,14 +149,14 @@ def test_staff_agent_session_persists_selected_model_profile() -> None:
         response = client.post(
             '/api/v1/workbench/agent/sessions',
             headers=STAFF_HEADERS,
-            json={'title': 'GPT review', 'model_profile_id': 'nowcoding-gpt54mini'},
+            json={'title': 'GPT review', 'model_profile_id': 'nowcoding-gpt56terra'},
         )
         assert response.status_code == 201
         session_id = response.json()['session_id']
-        assert response.json()['model_profile_id'] == 'nowcoding-gpt54mini'
+        assert response.json()['model_profile_id'] == 'nowcoding-gpt56terra'
         listed = client.get('/api/v1/workbench/agent/sessions', headers=STAFF_HEADERS)
         assert listed.status_code == 200
-        assert listed.json()['items'][0]['model_profile_id'] == 'nowcoding-gpt54mini'
+        assert listed.json()['items'][0]['model_profile_id'] == 'nowcoding-gpt56terra'
 
         message = client.post(
             f'/api/v1/workbench/agent/sessions/{session_id}/messages',
@@ -161,8 +169,8 @@ def test_staff_agent_session_persists_selected_model_profile() -> None:
         )
 
     assert message.status_code == 201
-    assert provider.contexts[0].model_profile_id == 'nowcoding-gpt54mini'
-    assert message.json()['session']['model_profile_id'] == 'nowcoding-gpt54mini'
+    assert provider.contexts[0].model_profile_id == 'nowcoding-gpt56terra'
+    assert message.json()['session']['model_profile_id'] == 'nowcoding-gpt56terra'
 
 
 def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
@@ -173,7 +181,69 @@ def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
         model_base_url='http://model.example.test/v1',
         model_identifier='qwen3.8-27b',
     )
-    with TestClient(create_app(settings, repository=FixtureRepository())) as client:
+    configurations = ConfigurationRepository()
+    releases = ReleaseSetRepository()
+    records: dict[str, ConfigurationRecord] = {}
+    for profile_id, model_identifier, base_url in (
+        ('qwen-local', 'qwen3.8-27b', 'http://model.example.test/v1'),
+        ('nowcoding-gpt56terra', 'gpt-5.6-terra', 'https://nowcoding.ai/v1'),
+    ):
+        record = ConfigurationRecord(
+            configuration_id=f'cfg_{profile_id}',
+            domain='model',
+            configuration_key=profile_id,
+            revision=1,
+            state=ConfigurationState.PUBLISHED,
+            impact=ConfigurationImpact.HIGH,
+            values={
+                'protocol': 'openai_compatible',
+                'provider': 'test-provider',
+                'model_identifier': model_identifier,
+                'base_url': base_url,
+                'credential_environment_variable': None,
+                'profile_id': profile_id,
+                'purpose': 'agent_turn',
+                'privacy_class': 'synthetic_fnol',
+                'prompt_version': settings.model_prompt_version,
+                'evaluation_status': 'configured',
+                'timeout_seconds': 30,
+                'structured_output': True,
+                'tools': False,
+            },
+            author='test-admin',
+            reason='Publish a Staff Agent model catalog.',
+            updated_at=datetime.now(UTC),
+        )
+        configurations.create(record)
+        records[profile_id] = record
+    releases.create(
+        ReleaseSetRecord(
+            release_set_id='rel_staff_model_catalog',
+            environment='test',
+            runtime_profile='fixture',
+            revision=1,
+            state=ReleaseSetState.PUBLISHED,
+            configuration_refs={
+                f'model:{profile_id}': ConfigurationReference(
+                    configuration_id=record.configuration_id,
+                    revision=record.revision,
+                )
+                for profile_id, record in records.items()
+            },
+            author='test-admin',
+            reason='Activate the published Staff Agent model catalog.',
+            effective_time=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+    )
+    with TestClient(
+        create_app(
+            settings,
+            repository=FixtureRepository(),
+            configuration_repository=configurations,
+            release_set_repository=releases,
+        )
+    ) as client:
         response = client.get(
             '/api/v1/workbench/agent/capabilities',
             headers=STAFF_HEADERS,
@@ -184,7 +254,7 @@ def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
     assert body['default_model_profile_id'] == 'qwen-local'
     assert [item['id'] for item in body['models']] == [
         'qwen-local',
-        'nowcoding-gpt54mini',
+        'nowcoding-gpt56terra',
     ]
 
 
@@ -309,7 +379,7 @@ def test_staff_agent_rejects_model_override_in_message_request() -> None:
     repository = FixtureRepository()
     provider = RecordingStaffAgent()
     with _client(repository, provider) as client:
-        session_id = _create_session(client, 'nowcoding-gpt54mini')
+        session_id = _create_session(client, 'nowcoding-gpt56terra')
         response = client.post(
             f'/api/v1/workbench/agent/sessions/{session_id}/messages',
             headers=STAFF_HEADERS,
