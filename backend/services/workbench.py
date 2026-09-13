@@ -631,21 +631,41 @@ def _missing_information(
         status = _external_gap_status(task)
         if status is None:
             continue
+        # A terminal failure is not something the external party will resolve in its own
+        # time. `docs/api.md` requires that "a terminal failure requires Northwind to
+        # review the request before another attempt", and AT-10 says the same to the
+        # claimant, so the gap this task already projects is reclassified rather than
+        # duplicated: it belongs to a claims professional, now, and is what
+        # `primary_blocker` should surface.
+        terminal = task.status is ExternalTaskOperationStatus.TERMINAL_FAILURE
         items.append(
             WorkbenchMissingInformation(
                 kind='external_service',
                 code=task.service_identity,
                 label=_human_label(task.service_identity),
                 status=status,
-                attention=MissingInformationAttention.FOLLOW_UP,
+                attention=(
+                    MissingInformationAttention.REQUIRED_NOW
+                    if terminal
+                    else MissingInformationAttention.FOLLOW_UP
+                ),
                 blocked_action=(
                     task.requested_action
                     if status in {WorkbenchGapStatus.UNAVAILABLE, WorkbenchGapStatus.UNCERTAIN}
                     else None
                 ),
-                responsible_party=WorkbenchResponsibility.EXTERNAL_PARTY,
+                responsible_party=(
+                    WorkbenchResponsibility.CLAIMS_PROFESSIONAL
+                    if terminal
+                    else WorkbenchResponsibility.EXTERNAL_PARTY
+                ),
                 source_refs=_unique_refs(
-                    [task.task_id, task.provider_reference, task.delivery_evidence]
+                    [
+                        task.task_id,
+                        task.provider_reference,
+                        task.delivery_evidence,
+                        task.failure_code.value if terminal and task.failure_code else None,
+                    ]
                 ),
             )
         )
@@ -879,7 +899,27 @@ def _external_tasks(
 def _integration_summary(
     claim: WorkingClaim,
     external_tasks: Sequence[ExternalTaskRecord],
+    results: Sequence[ExternalTaskResult] = (),
 ) -> WorkbenchIntegrationSummary:
+    """Say which external services this claim is still waiting on.
+
+    A task whose answer has arrived is not one of them. The merged P3 catalogue keeps a
+    provider result "separate from task status and separate from Claim State", so the
+    task correctly stays `accepted` after a result is received; reading task status alone
+    then told staff the claim was waiting on the external party while the same response's
+    request lifecycle said the answer was in and needed their review. `external_wait_count`
+    is the length of this list, so the contradiction was also a count staff act on.
+
+    Args:
+        claim: Working Claim being projected.
+        external_tasks: Tasks recorded for the claim.
+        results: Provider results recorded for the claim.
+
+    Returns:
+        The integration summary, counting only tasks with no answer yet.
+    """
+
+    answered = {result.task_id for result in results}
     waiting = [
         WorkbenchWaitingExternalService(
             task_id=item.task_id,
@@ -888,7 +928,8 @@ def _integration_summary(
             status=item.status.value,
         )
         for item in external_tasks
-        if item.status
+        if item.task_id not in answered
+        and item.status
         in {
             ExternalTaskOperationStatus.PREPARED,
             ExternalTaskOperationStatus.ACCEPTED,
@@ -1584,7 +1625,8 @@ def _build_projection(
     actions = repository.list_staff_actions(claim.claim_id)
     projected_risk_signals = risk_signals(repository, claim)
     external_tasks, external_limitation = _external_tasks(repository, claim.claim_id)
-    integration_summary = _integration_summary(claim, external_tasks)
+    external_results = repository.list_external_task_results_internal(claim.claim_id)
+    integration_summary = _integration_summary(claim, external_tasks, external_results)
     computed_at = now_utc()
     collaboration_requests = repository.list_collaboration_requests(claim.claim_id)
     ownership = _ownership(repository, claim, principal, active_handoffs)

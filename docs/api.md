@@ -1639,6 +1639,21 @@ key is the same operation, not a second one, and a claimant who reloads the page
 A retry that changed the request is refused, because the operation holds the first attempt's
 request fingerprint and it is compared before anything else.
 
+Runtime reserves the prepared request before contacting the assessor, and the reservation is an
+atomic persistence operation rather than a check. Two concurrent requests on one claim therefore
+reach the assessor once: the caller that does not win the reservation returns
+`409 INVALID_STATE_TRANSITION` with `details[].reason` `dispatch_in_progress` before any provider
+call, and creates no second task, request, or operation. The reservation is released when the
+attempt settles with a known outcome, acceptance included, so a settled request never claims a
+dispatch is still in progress; it is kept only when the outcome is not established, so such a
+request never becomes sendable again without reconciliation. A failure that never reached the
+assessor can therefore be retried on the same identity, and a routing answer this runtime cannot
+turn into an assignment — a `not_required` or `failed` routing status — is recorded as a terminal
+failure on the task and its operation rather than left holding the request: the provider answered,
+so the outcome is known even though it cannot be used, and Northwind reviews it. The reservation records the operation identity it
+dispatches under, so an attempt interrupted between reserving and sending still names itself and is
+reconcilable rather than stranded.
+
 An attempt the adapter reports as having reached the assessor before it failed is not a failure
 the claimant may retry. Whether a request was submitted is reported by the adapter, never inferred
 from the failure code: the same `timeout` can describe an attempt that never left and one whose
@@ -1667,6 +1682,23 @@ attempt, and an unresolved outcome must be established before one is sent.
 The state is derived from the recorded external task rather than stored on the claim: a failed
 attempt leaves every claim field unchanged, so the claimant still sees what happened on a
 later read without the failure having altered the claim.
+
+Once the assessor has returned a result, `customer_next_step` reports that it arrived and that
+Northwind is reviewing it, with `responsible_party` `claims_professional` and no `expected_by`: the
+claim is no longer waiting on the external party, and the time the request was expected by has
+already been met. The routing status is unchanged, because the assessor assignment still stands.
+The report itself is not projected to the claimant. It is `simulation_only` and its verification
+state is `review_required` by construction, so the claimant is told that an answer exists and is
+being checked, never what it says; the record stays internal to the staff Evidence surface.
+
+`customer_next_step` is corrected against that state for the two cases in which the action is
+withdrawn. It is a stored field written when permission is recorded, and a failed attempt changes
+no claim field, so on its own it keeps saying that Northwind can now send the request. Where
+`external_service_action.status` is `terminal_failure` or `awaiting_reconciliation`, the projected
+next step instead reports that Northwind is reviewing or checking the request, with
+`responsible_party` `claims_professional` and no required items. A `retryable_failure` keeps the
+stored next step, which agrees with `can_request`. The correction is derived for the read; the
+stored field is not rewritten, so a failed attempt still changes nothing on the claim.
 
 The authorised decision and prepared operation identity are persisted together before the
 provider call. The service also persists one operational `tsk_` task and its `erq_` request,
@@ -2142,6 +2174,19 @@ large resources are loaded from the dedicated sub-resources below:
   "updated_at": "2026-08-10T03:50:00Z"
 }
 ```
+
+`work_summary.missing_information` carries one `external_service` item per recorded external task.
+A terminal external failure is classified `required_now` with `claims_professional` responsibility
+and the blocked requested action, so it becomes `work_summary.primary_blocker`: the contract
+requires Northwind to review such a request before another attempt, and waiting on the external
+party is not what happens next. Every other external state stays `follow_up` owned by the external
+party. No second item is created for the same task.
+
+`integration_summary.waiting_external_services`, and the `external_wait_count` derived from it,
+exclude a task whose provider result has been received. A result is separate from task status, so
+the task remains `accepted`; counting it as waiting would tell staff the claim is waiting on the
+external party while the same claim's external-request lifecycle reports that the result requires
+their review.
 
 `section_summaries` reports availability, counts, and attention totals. Complete records are loaded
 only when staff opens a section:
@@ -3159,6 +3204,44 @@ idempotency conflict even when the first attempt timed out or the provider was u
 Provider acceptance is recorded before the Claim State compare-and-set. If a concurrent claim
 mutation wins that compare-and-set, an unchanged retry reconciles the recorded result against
 the latest claim revision without creating a second provider task.
+
+### `POST /internal/v1/claims/{claim_id}/external-tasks/{task_id}/reconcile`
+
+Checks the provider-neutral status of one persisted `unknown_outcome` assessor request. The route
+requires integration-service authentication, `Idempotency-Key`, and `If-Match`, and accepts no
+request body. The client cannot supply a provider reference, routing state, consent, authority, or
+settlement choice. Runtime resolves the existing task, its single sent request, the assessor
+operation, the referenced consent and Northwind authority, and the current Claim before invoking
+the installed adapter's status-check operation.
+
+Response `200` returns the existing `AssessorRoutingResult` after the provider status path confirms
+acceptance. The same `task_id`, `request_id`, and operation identity are retained. Reconciliation
+adds the new provider reference, advances the task and operation from `unknown_outcome` to
+`accepted`, records the pending assessment material and immutable task-to-evidence link, and writes
+the routing result and claimant-safe next step to one new Claim revision. Those records are one
+persistence transaction; a revision or identity conflict leaves all of them unchanged. An
+identical replay returns the settled result without another status check, even though the first
+settlement advanced the Claim revision.
+
+If the status check remains inconclusive, the route returns `409 INVALID_STATE_TRANSITION` with
+`retryable: true` and `details[].reason` `unknown_outcome`. The task and operation stay
+`unknown_outcome`, and the existing refusal still prevents another assessor-routing request. An
+unavailable status dependency returns `503 DEPENDENCY_UNAVAILABLE`; a malformed, access-denied, or
+non-accepted status answer returns `502 DEPENDENCY_FAILED`. A missing task returns
+`404 RESOURCE_NOT_FOUND`; a stale first settlement returns `409 REVISION_CONFLICT`. None of these
+paths writes partial settlement state.
+
+Two states are reconcilable. One is a task recorded as `unknown_outcome`. The other is an attempt
+that reserved its dispatch and never settled, whose task and operation are still `prepared` and
+whose request holds the reservation with no send time: the provider may have been reached and
+nothing recorded what came of it. Both are refused a further routing request, so both are accepted
+here, checked through the same status path, and settled on the same task, request, and operation
+identity. Settling an interrupted attempt also records the send the status check has just
+established.
+
+This endpoint implements accepted settlement only. A provider statement that the original request
+was not submitted does not turn `unknown_outcome` into `retryable_failure` and cannot authorise a
+retry. That outcome requires a separate durable reconciliation-record contract.
 
 ### `POST /internal/v1/claims/{claim_id}/external-tasks/{task_id}/result`
 

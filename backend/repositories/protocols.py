@@ -406,6 +406,40 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """Persist an immutable operation identity and valid outcome transition."""
         raise NotImplementedError
 
+    def save_assessor_reconciliation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        task: ExternalTaskRecord,
+        operation: AssessorRoutingOperation,
+        request: ExternalTaskRequest,
+        evidence: EvidenceRecord,
+        link: ExternalTaskEvidenceLink,
+        branch_evaluation: BranchEvaluationRecord,
+        customer_id: str,
+    ) -> None:
+        """Atomically settle one unknown assessor request as accepted.
+
+        Args:
+            claim: Resulting Claim carrying the reconciled routing result.
+            expected_revision: Claim revision that must still be current.
+            task: Existing external task advanced to accepted.
+            operation: Existing assessor operation advanced to accepted.
+            evidence: Pending material now owed by the accepted task.
+            link: Immutable task-to-evidence relationship for that material.
+            branch_evaluation: Applied branch projection for the new Claim revision.
+            customer_id: Customer who owns every persisted record.
+
+        Returns:
+            None.
+
+        Raises:
+            RevisionConflict: The stored Claim revision changed first.
+            IdempotencyConflict: Stored state does not match this settlement.
+            KeyError: A record is missing, belongs to another Claim, or is invalid.
+        """
+        raise NotImplementedError
+
     def save_assessor_routing_preparation(
         self,
         operation: AssessorRoutingOperation,
@@ -550,6 +584,64 @@ class PersistenceRepository(ClaimRepository, Protocol):
             KeyError: The parent claim is missing or not owned by the customer.
             IdempotencyConflict: The write changes immutable identity or is stale.
         """
+        raise NotImplementedError
+
+    def reserve_external_dispatch(
+        self,
+        claim_id: str,
+        request_id: str,
+        customer_id: str,
+        reserved_at: datetime,
+        operation_id: str,
+    ) -> ExternalTaskRequest | None:
+        """Atomically claim the sole right to send one prepared external request.
+
+        This is a compare-and-set, not a read followed by a write: two callers racing
+        on the same request must not both be told they may dispatch. Whoever loses gets
+        `None` and must fail before reaching the provider.
+
+        Args:
+            claim_id: Claim that owns the request.
+            request_id: Request whose dispatch is being reserved.
+            customer_id: Customer who owns the parent claim.
+            reserved_at: Moment the reservation is taken.
+            operation_id: Operation this attempt dispatches under, recorded with the
+                reservation so an interrupted attempt still names its own identity.
+
+        Returns:
+            The reserved request when this caller won, or `None` when another attempt
+            already holds the reservation.
+
+        Raises:
+            KeyError: The claim or request is missing or belongs to another customer.
+        """
+
+        raise NotImplementedError
+
+    def release_external_dispatch(
+        self,
+        claim_id: str,
+        request_id: str,
+        customer_id: str,
+    ) -> None:
+        """Give up a reservation whose attempt established that nothing was sent.
+
+        Only a definitely unsubmitted attempt may release. A reservation left in place
+        says an attempt may have reached the provider, which is what keeps a crashed
+        dispatch from being repeated as though it had never happened.
+
+        Args:
+            claim_id: Claim that owns the request.
+            request_id: Request whose reservation is being released.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim or request is missing or belongs to another customer.
+        """
+
         raise NotImplementedError
 
     def save_external_task_request(

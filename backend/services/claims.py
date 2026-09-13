@@ -65,7 +65,7 @@ from backend.services.branching import (
 )
 from backend.services.claimant_form_projection import project_claimant_form_fields
 from backend.services.evidence_visibility import claimant_visible_evidence
-from backend.services.external_services import claimant_assessor_action
+from backend.services.external_services import claimant_assessor_action, claimant_next_step
 from backend.services.fact_resolution import (
     confirm_contents_item,
     confirm_form_field,
@@ -224,6 +224,9 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
     claimant_evidence = claimant_visible_evidence(
         repository.list_evidence(claim.claim_id, claim.customer_id)
     )
+    # Derived once and passed to both fields: the next step is corrected against the
+    # action, so reading the action twice could let the two disagree again.
+    external_service_action = claimant_assessor_action(repository, claim)
     handoff: ClaimantHandoff | None = None
     if claim.active_session_id is not None:
         # Claimant receives only the public lifecycle state, never staff routing data.
@@ -244,9 +247,9 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         contents_items=_claimant_contents_items(repository, claim),
         evidence_summary=evidence_summary_for(claimant_evidence),
         external_claim=claim.external_claim,
-        external_service_action=claimant_assessor_action(repository, claim),
+        external_service_action=external_service_action,
         dynamic_form=claimant_dynamic_form_projection(repository, claim),
-        customer_next_step=claim.customer_next_step,
+        customer_next_step=claimant_next_step(repository, claim, external_service_action),
         incomplete_context=_claimant_incomplete_context(repository, claim),
         handoff=handoff,
         created_at=claim.created_at,

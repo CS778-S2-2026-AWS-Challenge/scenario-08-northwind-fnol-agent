@@ -16,6 +16,7 @@ from backend.domain.external_services import (
     assert_result_advance_is_permitted,
     assert_result_evidence_is_linked,
     assert_result_matches_task,
+    assert_task_transition_is_permitted,
 )
 from backend.domain.models import (
     ActorType,
@@ -1134,6 +1135,106 @@ class FixtureRepository(PersistenceRepository):
             return
         self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
 
+    def save_assessor_reconciliation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        task: ExternalTaskRecord,
+        operation: AssessorRoutingOperation,
+        request: ExternalTaskRequest,
+        evidence: EvidenceRecord,
+        link: ExternalTaskEvidenceLink,
+        branch_evaluation: BranchEvaluationRecord,
+        customer_id: str,
+    ) -> None:
+        """Atomically settle one unknown assessor operation in fixture storage.
+
+        Args:
+            claim: Resulting Claim carrying the reconciled routing result.
+            expected_revision: Claim revision that must still be current.
+            task: External task advanced from unknown to accepted.
+            operation: Assessor operation advanced from unknown to accepted.
+            request: Request record carrying the send this settlement establishes.
+            evidence: Pending assessment material owed by the task.
+            link: Immutable relationship between the task and material.
+            branch_evaluation: Applied branch projection for the new Claim revision.
+            customer_id: Customer who owns every record.
+
+        Returns:
+            None.
+
+        Raises:
+            RevisionConflict: The stored Claim revision changed first.
+            IdempotencyConflict: Stored identity or lifecycle state conflicts.
+            KeyError: A record is missing, belongs elsewhere, or is malformed.
+        """
+
+        with self._claim_mutation_lock:
+            current_claim = self._validate_claim_mutation(claim, expected_revision)
+            current_task = self._external_tasks.get(task.task_id)
+            current_operation = self._assessor_routing_operations.get(operation.operation_id)
+            if (
+                current_claim.customer_id != customer_id
+                or current_task is None
+                or current_task.claim_id != claim.claim_id
+                or current_operation is None
+                or current_operation.claim_id != claim.claim_id
+                or evidence.claim_id != claim.claim_id
+                or link.claim_id != claim.claim_id
+                or link.task_id != task.task_id
+                or link.evidence_id != evidence.evidence_id
+                or claim.assessor_routing != operation.result
+                or claim.assessor_routing_fingerprint != operation.request_fingerprint
+            ):
+                raise KeyError(claim.claim_id)
+            try:
+                assert_task_transition_is_permitted(current_task, task)
+            except ValueError as conflict:
+                raise IdempotencyConflict(task.task_id) from conflict
+            immutable_operation = (
+                'claim_id',
+                'external_claim_id',
+                'authorisation_ref',
+                'claimant_consent_ref',
+                'requested_action',
+                'authorised_revision',
+                'request_fingerprint',
+                'created_at',
+            )
+            if (
+                current_operation.status
+                not in {
+                    AssessorRoutingOperationStatus.UNKNOWN_OUTCOME,
+                    AssessorRoutingOperationStatus.PREPARED,
+                }
+                or operation.status is not AssessorRoutingOperationStatus.ACCEPTED
+                or operation.updated_at <= current_operation.updated_at
+                or any(
+                    getattr(current_operation, name) != getattr(operation, name)
+                    for name in immutable_operation
+                )
+            ):
+                raise IdempotencyConflict(operation.operation_id)
+            held_evidence = self._evidence.get(evidence.evidence_id)
+            held_link = self._external_task_evidence_links.get((link.claim_id, link.evidence_id))
+            if (held_evidence is not None and held_evidence != evidence) or (
+                held_link is not None and held_link != link
+            ):
+                raise IdempotencyConflict(evidence.evidence_id)
+            self._validate_branch_evaluation(claim, branch_evaluation)
+
+            held_request = self._external_task_requests.get(request.request_id)
+            if held_request is None or held_request.claim_id != claim.claim_id:
+                raise KeyError(request.request_id)
+
+            self._claims[claim.claim_id] = deepcopy(claim)
+            self._external_tasks[task.task_id] = deepcopy(task)
+            self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
+            self._external_task_requests[request.request_id] = deepcopy(request)
+            self._evidence[evidence.evidence_id] = deepcopy(evidence)
+            self._external_task_evidence_links[(link.claim_id, link.evidence_id)] = deepcopy(link)
+            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
+
     def save_assessor_routing_preparation(
         self,
         operation: AssessorRoutingOperation,
@@ -1576,6 +1677,85 @@ class FixtureRepository(PersistenceRepository):
                 raise IdempotencyConflict(task.task_id)
         self._external_tasks[task.task_id] = deepcopy(task)
 
+    def reserve_external_dispatch(
+        self,
+        claim_id: str,
+        request_id: str,
+        customer_id: str,
+        reserved_at: datetime,
+        operation_id: str,
+    ) -> ExternalTaskRequest | None:
+        """Atomically claim the sole right to dispatch one prepared request.
+
+        The read and the write are inside the claim mutation lock together, because a
+        reservation that could be read by one caller and written by another is not a
+        reservation.
+
+        Args:
+            claim_id: Claim that owns the request.
+            request_id: Request whose dispatch is being reserved.
+            customer_id: Customer who owns the parent claim.
+            reserved_at: Moment the reservation is taken.
+            operation_id: Operation this attempt dispatches under, recorded with the
+                reservation so an interrupted attempt still names its own identity.
+
+        Returns:
+            The reserved request, or None when another attempt already holds it.
+
+        Raises:
+            KeyError: The claim or request is missing or belongs to another customer.
+        """
+
+        with self._claim_mutation_lock:
+            request = self._held_request(claim_id, request_id, customer_id)
+            if request.dispatch_reserved_at is not None:
+                return None
+            reserved = request.model_copy(
+                update={'dispatch_reserved_at': reserved_at, 'operation_id': operation_id}
+            )
+            self._external_task_requests[request_id] = deepcopy(reserved)
+            return reserved
+
+    def release_external_dispatch(
+        self,
+        claim_id: str,
+        request_id: str,
+        customer_id: str,
+    ) -> None:
+        """Release a reservation whose attempt established that nothing was sent.
+
+        Args:
+            claim_id: Claim that owns the request.
+            request_id: Request whose reservation is being released.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim or request is missing or belongs to another customer.
+        """
+
+        with self._claim_mutation_lock:
+            request = self._held_request(claim_id, request_id, customer_id)
+            if request.dispatch_reserved_at is None:
+                return
+            released = request.model_copy(update={'dispatch_reserved_at': None})
+            self._external_task_requests[request_id] = deepcopy(released)
+
+    def _held_request(
+        self,
+        claim_id: str,
+        request_id: str,
+        customer_id: str,
+    ) -> ExternalTaskRequest:
+        if self.get_claim(claim_id, customer_id) is None:
+            raise KeyError(claim_id)
+        request = self._external_task_requests.get(request_id)
+        if request is None or request.claim_id != claim_id:
+            raise KeyError(request_id)
+        return request
+
     def save_external_task_request(
         self,
         request: ExternalTaskRequest,
@@ -1647,11 +1827,14 @@ class FixtureRepository(PersistenceRepository):
             changed_identity = any(
                 getattr(existing, name) != getattr(request, name) for name in immutable_identity
             )
+            # The reservation records the operation identity before the send, so a
+            # first send now advances a record that may already carry it. What must not
+            # change is which operation it names.
             first_send = (
                 existing.sent_at is None
-                and existing.operation_id is None
                 and request.sent_at is not None
                 and request.operation_id is not None
+                and existing.operation_id in {None, request.operation_id}
             )
             if changed_identity or not first_send:
                 raise IdempotencyConflict(request.request_id)

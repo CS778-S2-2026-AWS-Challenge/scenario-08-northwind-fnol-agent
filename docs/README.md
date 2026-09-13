@@ -23,6 +23,10 @@ rules, or sprint commitments.
 The current time-bound direction and weekly execution records are maintained under `sprint/`:
 
 - [Sprint 3 Validation Prototype Overview](../sprint/sprint3.md)
+- [Sprint 4 Execution Guide](../sprint/sprint4-execution-guide.md)
+- [Sprint 4 Governance and Week 7](../sprint/sprint4.md)
+- [Sprint 4 Rubric Convergence and Journey Validation](../sprint/sprint4.md)
+- [Sprint 4 Week 7 Daily Card Prompt](../sprint/week7-daily-card-prompt.md)
 - [Sprint 3 Week 5 Plan](../sprint/week5/sprint3-week5-plan.md)
 - [Sprint 3 Week 5 Kanban Draft](../sprint/week5/sprint3-week5-kanban-draft.md)
 - [Sprint 3 Week 6 Kanban Draft](../sprint/week6/sprint3-week6-kanban-draft.md)
@@ -38,7 +42,7 @@ them:
   [AGENT.md](../AGENT.md); where an archived document disagrees with it, the skill prevails
 - [Current API Contract](api.md)
 - [Documentation Index](README.md)
-- [Northwind FNOL Product Soul](product-soul.md) — product direction and principles shared by the repository and the project plan
+- [Northwind FNOL Product Soul](product-soul.md) — product direction, journey principles, and authority boundaries shared by the repository and the project plan
 - [Frontend and Runtime Quality Standard](frontend-and-runtime-quality-standard.md) — authoritative big-picture, claimant/workbench, component, token, routing, runtime-boundary, and acceptance standard for frontend and runtime design
 
 ## Current Engineering Documents
