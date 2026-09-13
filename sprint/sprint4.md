@@ -6,6 +6,10 @@ Sprint 4 是 Scenario 8 的收敛与验证阶段。目标不是继续扩大抽�
 Scenario 8 rubric 固定设计边界，完成可重复的完整用户旅程，并产生可以直接进入
 poster 的验证数据。
 
+贡献者和 coding agent 在开始 Sprint 4 工作前，应阅读
+[Sprint 4 执行指导](sprint4-execution-guide.md)，以获得共享上下文、研究框架和建议性任务
+拆解；该指导不替代本文件的容量、ownership、验收和治理约束。
+
 本 Sprint 以 2026-09-14 开始的 Week 7 为第一周，随后进入 Week 8 的整合、复跑和
 展示准备。Week 7 只建立三个 super-issue；每天的工作由各 owner 自己提出一个
 8 小时 bounded subissue，由 maintainer 当天创建或同步到 Kanban。
