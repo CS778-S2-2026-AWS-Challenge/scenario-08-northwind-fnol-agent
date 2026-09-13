@@ -286,11 +286,21 @@ export default function WorkbenchPage() {
   }, [])
 
   const loadConversationResources = useCallback(async (id, requestedSessionId) => {
-    const sessions = await loadResource('sessions', id, () => workbenchApi.sessions(token, id))
+    const sessions = await loadResource(
+      'sessions',
+      id,
+      () => workbenchApi.sessionsForTarget(
+        token,
+        id,
+        requestedSessionId,
+      ),
+    )
+
     if (!sessions) {
       if (currentClaimIdRef.current === id) {
         setResources((current) => {
           const previous = current.messages || {}
+
           return {
             ...current,
             messages: {
@@ -301,19 +311,52 @@ export default function WorkbenchPage() {
               loading: false,
               stale: Boolean(previous.items?.length),
               error: current.sessions?.error || null,
+              resolved_session_id:
+                previous.resolved_session_id || null,
             },
           }
         })
       }
       return
     }
-    const session = sessions?.items?.find((item) => item.session_id === requestedSessionId)
-      || sessions?.items?.at(-1)
-    if (session) {
-      await loadResource('messages', id, () => workbenchApi.messages(token, id, session.session_id))
-    } else if (currentClaimIdRef.current === id) {
-      setResources((current) => ({ ...current, messages: resourceState({ items: [] }) }))
+
+    const session = sessions.resolved_session || null
+
+    if (!session) {
+      if (currentClaimIdRef.current === id) {
+        const message = requestedSessionId
+          ? 'The requested claimant session is not available. Return to the Claim and open an available conversation.'
+          : 'No claimant session is available for this Claim.'
+
+        setResources((current) => ({
+          ...current,
+          messages: {
+            items: [],
+            page: { next_cursor: null },
+            status: 'unavailable',
+            limitation: null,
+            loading: false,
+            stale: false,
+            error: new Error(message),
+            resolved_session_id: null,
+          },
+        }))
+      }
+      return
     }
+
+    await loadResource(
+      'messages',
+      id,
+      async () => ({
+        ...(await workbenchApi.messages(
+          token,
+          id,
+          session.session_id,
+        )),
+        resolved_session_id: session.session_id,
+      }),
+    )
   }, [loadResource, token])
 
   const loadSectionResources = useCallback(async (id, section) => {
@@ -331,11 +374,20 @@ export default function WorkbenchPage() {
       ],
     }
     if (section === 'conversation') {
-      await loadConversationResources(id, selectedSessionId)
+      await loadConversationResources(
+        id,
+        selectedSessionId || detail?.active_session_id || null,
+      )
       return
     }
     await Promise.all((loaders[section] || []).map(([name, loader]) => loadResource(name, id, loader)))
-  }, [loadConversationResources, loadResource, selectedSessionId, token])
+  }, [
+    detail?.active_session_id,
+    loadConversationResources,
+    loadResource,
+    selectedSessionId,
+    token,
+  ])
 
   const loadConversations = useCallback(async () => {
     setConversationsLoading(true)
@@ -583,10 +635,45 @@ export default function WorkbenchPage() {
     return workbenchApi.evidenceContent(token, detail.claim_id, evidenceId)
   }
 
-  async function sendMessage(message) {
-    await runClaimMutation('Sending the claimant message', (current) => (
-      workbenchApi.sendMessage(token, current.claim_id, message, current.revision)
-    ))
+  async function sendMessage(operation) {
+    try {
+      await runClaimMutation('Sending the claimant message', (current) => (
+        workbenchApi.sendMessage(
+          token,
+          current.claim_id,
+          operation,
+          current.revision,
+        )
+      ))
+    } catch (error) {
+      if (error.code === 'REVISION_CONFLICT') {
+        const current = detailRef.current
+
+        if (
+          current?.claim_id
+          && currentClaimIdRef.current === current.claim_id
+        ) {
+          await loadConversationResources(
+            current.claim_id,
+            operation.sessionId,
+          )
+        }
+      }
+
+      throw error
+    }
+
+    const current = detailRef.current
+
+    if (
+      current?.claim_id
+      && currentClaimIdRef.current === current.claim_id
+    ) {
+      await loadConversationResources(
+        current.claim_id,
+        operation.sessionId,
+      )
+    }
   }
 
   async function performOwnershipAction(action, payload) {
@@ -810,6 +897,7 @@ function resourceState(response = {}) {
     loading: false,
     stale: false,
     error: null,
+    resolved_session_id: response.resolved_session_id || null,
   }
 }
 
