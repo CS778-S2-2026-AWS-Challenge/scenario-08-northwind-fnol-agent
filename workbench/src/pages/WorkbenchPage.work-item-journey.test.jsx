@@ -3,11 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import WorkbenchPage from './WorkbenchPage.jsx'
-
-const tabs = vi.hoisted(() => ({
-  tabs: [], activeId: null, open: vi.fn(), activate: vi.fn(), close: vi.fn(), update: vi.fn(),
-}))
-
+const tabs = vi.hoisted(() => ({ tabs: [], activeId: null, open: vi.fn(), activate: vi.fn(), close: vi.fn(), update: vi.fn() }))
 vi.mock('../auth/auth-context.js', () => ({
   useAuth: () => ({
     token: 'staff-token',
@@ -19,25 +15,16 @@ vi.mock('../hooks/usePersistentTabs.js', () => ({ usePersistentTabs: () => tabs 
 vi.mock('../components/NavigationRail.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimTabs.jsx', () => ({ default: () => null }))
 vi.mock('../components/StaffAgent.jsx', () => ({ default: () => null }))
-
 const metadata = {
-  views: [
-    { value: 'all', label: 'All active work', group: 'overview' },
-    { value: 'processing', label: 'Processing', group: 'active' },
-  ],
-  workflow_states: [
-    { value: 'professional_review', label: 'Professional review' },
-    { value: 'ready_for_next', label: 'Ready for next' },
-  ],
+  views: [{ value: 'all', label: 'All active work', group: 'overview' }, { value: 'processing', label: 'Processing', group: 'active' }],
+  workflow_states: [{ value: 'professional_review', label: 'Professional review' }, { value: 'ready_for_next', label: 'Ready for next' }],
   priorities: [{ value: 'standard', label: 'Standard' }],
   tags: [],
   tag_registry_version: '0.3',
 }
-
 function jsonResponse(status, payload) {
   return { status, ok: status >= 200 && status < 300, json: vi.fn().mockResolvedValue(payload) }
 }
-
 function updateAction(revision) {
   return {
     registry_version: '2026-09-11.1',
@@ -98,7 +85,6 @@ function updateAction(revision) {
     based_on_revision: revision,
   }
 }
-
 function workItem(state) {
   return {
     action_id: 'act_review',
@@ -115,7 +101,6 @@ function workItem(state) {
     result: state.result,
   }
 }
-
 function claimProjection(state) {
   const completed = state.phase === 'completed'
   const action = completed ? null : updateAction(state.revision)
@@ -141,11 +126,7 @@ function claimProjection(state) {
       workflow_state: workflow,
       next_action: 'PROCEED',
     },
-    ownership: {
-      state: 'assigned',
-      current_staff_access: 'primary',
-      primary_assignee: { staff_id: 'stf_demo', display_name: 'Demo Staff' },
-    },
+    ownership: { state: 'assigned', current_staff_access: 'primary', primary_assignee: { staff_id: 'stf_demo', display_name: 'Demo Staff' } },
     priority_projection: {
       level: 'standard', rank: 0, reasons: [], due_at: null, is_overdue: false,
       computed_at: '2026-09-14T02:19:00Z',
@@ -164,9 +145,7 @@ function claimProjection(state) {
       risk_signals: [],
     },
     allowed_actions: action ? [action] : [],
-    integration_summary: {
-      claim_creation_status: null, assessor_routing_status: null, waiting_external_services: [],
-    },
+    integration_summary: { claim_creation_status: null, assessor_routing_status: null, waiting_external_services: [] },
     customer_next_step: {
       status: completed ? 'staff_update' : 'professional_review',
       responsible_party: completed ? 'claimant' : 'claims_professional',
@@ -188,7 +167,6 @@ function claimProjection(state) {
     tags: [],
   }
 }
-
 function queueProjection(state) {
   const detail = claimProjection(state)
   return {
@@ -209,7 +187,6 @@ function queueProjection(state) {
     updated_at: detail.updated_at,
   }
 }
-
 function createService() {
   const state = {
     revision: 2,
@@ -223,11 +200,9 @@ function createService() {
     eventReads: [],
   }
   const page = (items) => ({ items, page: { next_cursor: null } })
-
   const fetchMock = vi.fn(async (url, options = {}) => {
     const path = String(url)
     const method = options.method || 'GET'
-
     if (path === '/api/v1/workbench/claims/filter-metadata') return jsonResponse(200, metadata)
     if (method === 'GET' && (path === '/api/v1/workbench/claims' || path.startsWith('/api/v1/workbench/claims?'))) {
       return jsonResponse(200, {
@@ -327,7 +302,6 @@ function createService() {
   })
   return { fetchMock, state }
 }
-
 function renderJourney() {
   return render(
     <MemoryRouter initialEntries={['/workbench']}>
@@ -339,7 +313,6 @@ function renderJourney() {
     </MemoryRouter>,
   )
 }
-
 describe('WorkbenchPage WorkItem browser/API journey', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -360,27 +333,22 @@ describe('WorkbenchPage WorkItem browser/API journey', () => {
       if (tab) Object.assign(tab, patch)
     })
   })
-
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
-
   it('progresses and completes the exact projected WorkItem with authoritative readback', async () => {
     const { fetchMock, state } = createService()
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
     renderJourney()
-
     await user.click(await screen.findByText('NW-WORKITEM'))
     expect(await screen.findByRole('heading', { name: 'WorkItem Journey Claimant' })).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Update assigned work' })).toBeVisible()
-
     await user.click(screen.getByRole('button', { name: 'Open work activity' }))
     await user.click(await screen.findByText('Coverage Review'))
     await user.selectOptions(screen.getByLabelText('Status'), 'in_progress')
     await user.click(screen.getByRole('button', { name: 'Update action' }))
-
     await waitFor(() => {
       expect(state.mutations).toHaveLength(1)
       expect(state.mutations[0]).toMatchObject({
@@ -394,7 +362,6 @@ describe('WorkbenchPage WorkItem browser/API journey', () => {
     expect(state.workItemReads.some((read) => (
       read.revision === 3 && read.status === 'in_progress'
     ))).toBe(true)
-
     await user.click(screen.getByText('Coverage Review'))
     await user.selectOptions(screen.getByLabelText('Status'), 'completed')
     await user.type(
@@ -406,7 +373,6 @@ describe('WorkbenchPage WorkItem browser/API journey', () => {
       'The policy review is complete and your report can continue.',
     )
     await user.click(screen.getByRole('button', { name: 'Update action' }))
-
     await waitFor(() => {
       expect(state.mutations).toHaveLength(2)
       expect(state.mutations[1]).toMatchObject({
@@ -433,7 +399,6 @@ describe('WorkbenchPage WorkItem browser/API journey', () => {
       expect(screen.getByText('Revision 4')).toBeVisible()
     })
     expect(state.mutations[1].idempotencyKey).toBeTruthy()
-
     expect(await screen.findByText('Completed')).toBeVisible()
     expect(await screen.findByText(
       'The policy review is complete and your report can continue.',
@@ -441,7 +406,6 @@ describe('WorkbenchPage WorkItem browser/API journey', () => {
     expect(await screen.findByText(
       'Coverage review completed and the Claim returned to ready for next.',
     )).toBeVisible()
-
     await waitFor(() => {
       expect(state.workItemReads.at(-1)).toEqual({ revision: 4, status: 'completed' })
       expect(state.customerUpdateReads.at(-1).summaries).toContain(
