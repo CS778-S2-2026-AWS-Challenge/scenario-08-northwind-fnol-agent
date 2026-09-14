@@ -176,10 +176,35 @@ def test_staff_agent_reuses_empty_session_until_first_turn_is_persisted() -> Non
             },
         )
         listed = client.get('/api/v1/workbench/agent/sessions', headers=STAFF_HEADERS)
+        next_session = client.post(
+            '/api/v1/workbench/agent/sessions',
+            headers=STAFF_HEADERS,
+            json={'title': 'GPT review', 'model_profile_id': 'nowcoding-gpt56terra'},
+        )
+        different_model = client.post(
+            '/api/v1/workbench/agent/sessions',
+            headers=STAFF_HEADERS,
+            json={'title': 'GPT review', 'model_profile_id': 'qwen-local'},
+        )
+        different_title = client.post(
+            '/api/v1/workbench/agent/sessions',
+            headers=STAFF_HEADERS,
+            json={'title': 'Separate review', 'model_profile_id': 'nowcoding-gpt56terra'},
+        )
 
     assert message.status_code == 201
     assert listed.status_code == 200
     assert listed.json()['items'][0]['model_profile_id'] == 'nowcoding-gpt56terra'
+    assert next_session.json()['session_id'] != session_id
+    assert different_model.json()['session_id'] not in {
+        session_id,
+        next_session.json()['session_id'],
+    }
+    assert different_title.json()['session_id'] not in {
+        session_id,
+        next_session.json()['session_id'],
+        different_model.json()['session_id'],
+    }
     assert provider.contexts[0].model_profile_id == 'nowcoding-gpt56terra'
     assert message.json()['session']['model_profile_id'] == 'nowcoding-gpt56terra'
 
