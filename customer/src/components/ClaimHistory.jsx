@@ -75,12 +75,12 @@ export default function ClaimHistory({ claims, error, loading, refreshing, onRet
 export function ClaimFeatureDirectory({ claim, onOpenEvidence }) {
   const nextStep = claim.customer_next_step || {}
   const claimNumber = claim.external_claim?.claim_number || claim.claim_id
-  const statusLabel = formatIdentifierLabel(nextStep.status || claim.workflow_state || 'status unavailable')
+  const statusLabel = formatIdentifierLabel(nextStep.status || 'status unavailable')
   const responsibleParty = {
     claimant: 'You',
-    northwind: 'Northwind claims team',
     claims_professional: 'Claims professional',
     external_party: 'External service provider',
+    system: 'System',
   }[nextStep.responsible_party] || 'Not available'
 
   return (

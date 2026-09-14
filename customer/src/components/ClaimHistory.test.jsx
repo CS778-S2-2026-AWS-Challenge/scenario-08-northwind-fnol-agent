@@ -75,3 +75,47 @@ it('does not invent an estimated wait when the server omits it', () => {
   expect(screen.getByRole('heading', { name: olderClaim.claim_id })).toBeInTheDocument()
   expect(screen.getByText('No estimate available')).toBeInTheDocument()
 })
+
+it.each([
+  ['claimant', 'You'],
+  ['claims_professional', 'Claims professional'],
+  ['external_party', 'External service provider'],
+  ['system', 'System'],
+  ['future_party', 'Not available'],
+  [undefined, 'Not available'],
+])('renders claimant-safe responsibility %s as %s', (responsibleParty, expectedLabel) => {
+  render(
+    <ClaimFeatureDirectory
+      claim={{
+        ...olderClaim,
+        customer_next_step: {
+          ...olderClaim.customer_next_step,
+          status: 'in_progress',
+          responsible_party: responsibleParty,
+        },
+      }}
+      onOpenEvidence={vi.fn()}
+    />,
+  )
+
+  expect(screen.getByText(expectedLabel)).toBeInTheDocument()
+})
+
+it('does not substitute internal workflow state when claimant-safe status is missing', () => {
+  render(
+    <ClaimFeatureDirectory
+      claim={{
+        ...olderClaim,
+        workflow_state: 'professional_review',
+        customer_next_step: {
+          ...olderClaim.customer_next_step,
+          responsible_party: 'system',
+        },
+      }}
+      onOpenEvidence={vi.fn()}
+    />,
+  )
+
+  expect(screen.getByText('Status unavailable')).toBeInTheDocument()
+  expect(screen.queryByText('Professional Review')).not.toBeInTheDocument()
+})
