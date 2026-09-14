@@ -847,6 +847,14 @@ Claim result. Workbench reads the persisted record directly and never derives te
 from workflow text, session absence, or action history. `purged_or_anonymised` is not represented
 by this field and remains outside listable Workbench data.
 
+MongoDB deployments upgraded from a version before this contract use
+`scripts/backfill_terminal_dispositions.py` to repair only legacy created Claims whose persisted
+external result, source revision, stable external reference, and unique authorised creation
+decision prove the missing disposition. The command is read-only unless `--apply` is supplied,
+uses a revision-checked conditional update, and refuses incomplete or contradictory provenance.
+This schema repair preserves the Claim revision and update time because it records the terminal
+fact at the original creation revision rather than introducing a new Claim mutation.
+
 The `claim.reopen` mutation is staff-scoped and stores, in one Fixture lock or MongoDB transaction:
 
 - the same Claim at revision `N + 1` with only `terminal_disposition` cleared;
