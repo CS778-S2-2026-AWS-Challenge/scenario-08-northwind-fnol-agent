@@ -5,6 +5,7 @@ from enum import Enum
 from pydantic import Field, model_validator
 
 from backend.domain.evidence import is_in_conflict
+from backend.domain.external_service_registry import assert_operation_status_registered
 from backend.domain.models import (
     ActorType,
     ContractModel,
@@ -286,6 +287,7 @@ class ExternalTaskRecord(ContractModel):
 
     @model_validator(mode='after')
     def validate_task_state(self) -> 'ExternalTaskRecord':
+        assert_operation_status_registered(self.status.value)
         if self.updated_at < self.created_at:
             raise ValueError('External task update cannot precede creation.')
         if self.delivery is ExternalTaskDelivery.SUBMITTED:
