@@ -185,16 +185,16 @@ the append-only audit collection through a bounded, filterable projection.
     password hash or allowing an administration retry to create a duplicate account.
 32. Conditionally update approved Customer or Staff account fields by account revision; a stale
     write returns the current revision without changing the record.
-32. List identity sessions for exactly one Customer or Staff account in stable newest-first order
+33. List identity sessions for exactly one Customer or Staff account in stable newest-first order
     without returning bearer values or token hashes.
-33. Resolve and revoke one active identity session by opaque `ias_` ID and expected revision; a
+34. Resolve and revoke one active identity session by opaque `ias_` ID and expected revision; a
     session under another account is not exposed and a retry cannot reactivate it.
-34. Receive one accepted assessor task's returned report through the installed adapter, store its
+35. Receive one accepted assessor task's returned report through the installed adapter, store its
     bytes under the task-linked Evidence identity, recover an interrupted unchanged retry, and
     verify the immutable result against the current Claim revision without promoting Claim facts.
-35. List authorised Claims by the server-projected completed, abandoned, or closed disposition
+36. List authorised Claims by the server-projected completed, abandoned, or closed disposition
     without scanning action history or inferring terminal state from a missing Session.
-36. Resolve and atomically reopen one eligible abandoned/closed Claim by staff actor, exact action,
+37. Resolve and atomically reopen one eligible abandoned/closed Claim by staff actor, exact action,
     target, expected revision, and idempotency key while preserving the active-session pointer.
 
 ## Development/Test Identity Invariants
