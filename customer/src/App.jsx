@@ -33,7 +33,7 @@ import {
 import './App.css'
 import './styles/frontend-refactor.css'
 import MessageComposer from './components/MessageComposer.jsx'
-import ExternalServiceAction from './components/ExternalServiceAction.jsx'
+import ExternalServiceAction, { ExternalServiceOverview } from './components/ExternalServiceAction.jsx'
 import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
 
@@ -1696,6 +1696,8 @@ function App() {
               <button type="button" onClick={startNewChat} disabled={isBusy}>New chat</button>
               <button type="button" onClick={() => setWorkspaceView('privacy')}>Privacy policy</button>
               <button type="button" onClick={openClaimHistory}>Claim history</button>
+              <button type="button" onClick={() => setWorkspaceView('external-services')}>External services</button>
+              <button type="button" onClick={() => setWorkspaceView('files')}>Uploaded files</button>
             </div>
             <div className="intake-history-label">Conversation history</div>
             <div className="intake-history-list">
@@ -1759,9 +1761,11 @@ function App() {
                     ? 'Claim history'
                     : workspaceView === 'claim-features'
                       ? 'Claim features'
-                      : workspaceView === 'account'
-                        ? 'Your account'
-                        : 'Evidence history'}
+                      : workspaceView === 'external-services'
+                        ? 'External services'
+                        : workspaceView === 'account'
+                          ? 'Your account'
+                          : 'Evidence history'}
               </h1>
               <p>
                 {workspaceView === 'privacy'
@@ -1770,11 +1774,13 @@ function App() {
                     ? 'Your Claims are listed by their latest server-recorded update. Open a Claim to review its available features.'
                     : workspaceView === 'claim-features'
                       ? 'Choose the information you want to review for this Claim.'
-                      : workspaceView === 'account'
-                        ? 'Manage your profile and communication preferences.'
-                        : workspaceView === 'claim-evidence'
-                          ? 'Review the files and supporting material recorded for the selected Claim.'
-                          : 'Review files retained across your Northwind Claims, including where they came from and their latest processing state.'}
+                      : workspaceView === 'external-services'
+                        ? 'See the external service currently recorded for this Claim, including what may be shared and what happens next.'
+                        : workspaceView === 'account'
+                          ? 'Manage your profile and communication preferences.'
+                          : workspaceView === 'claim-evidence'
+                            ? 'Review the files and supporting material recorded for the selected Claim.'
+                            : 'Review files retained across your Northwind Claims, including where they came from and their latest processing state.'}
               </p>
               {workspaceView === 'history' && (
                 account ? (
@@ -1827,6 +1833,11 @@ function App() {
               )}
               {workspaceView === 'claim-evidence' && selectedHistoryClaim && (
                 <EvidenceHistory claimId={selectedHistoryClaim.claim_id} />
+              )}
+              {workspaceView === 'external-services' && (
+                claim.external_service_action
+                  ? <ExternalServiceOverview action={claim.external_service_action} />
+                  : <p className="empty-details">No external service is currently recorded for this claim.</p>
               )}
               {workspaceView === 'files' && (
                 account ? (

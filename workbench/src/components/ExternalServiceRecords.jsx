@@ -79,7 +79,10 @@ function ExternalServiceRecord({ record }) {
         <section className="external-disclosure" aria-label="External request detail">
           <div className="section-heading"><div><p className="eyebrow">Request detail</p><h3>Disclosure and delivery</h3></div><ExternalLink size={18} /></div>
           <dl>
+            <dt>Catalogue reference</dt><dd>{lifecycle.catalogue_reference || 'Not mapped'}</dd>
             <dt>Integration source</dt><dd>{words(task.integration_source)}</dd>
+            <dt>Observed provenance</dt><dd>{words(lifecycle.provenance)}</dd>
+            <dt>Operation status</dt><dd>{words(task.status)}</dd>
             <dt>Stakeholder</dt><dd>{words(lifecycle.stakeholder)}</dd>
             <dt>Submission</dt><dd>{words(lifecycle.delivery_state)}</dd>
             <dt>Prepared</dt><dd>{request ? formatDateTime(request.prepared_at) : 'Not recorded'}</dd>
