@@ -1,7 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { workbenchApi } from '../api.js'
+import { ApiError, workbenchApi } from '../api.js'
 import StaffAgent from './StaffAgent.jsx'
 
 afterEach(() => vi.restoreAllMocks())
@@ -23,6 +24,20 @@ function renderAgent(overrides = {}) {
       onConversationChanged={vi.fn()}
       {...overrides}
     />,
+  )
+}
+
+function StatefulAgentHarness() {
+  const [requestedSessionId, setRequestedSessionId] = useState(null)
+  return (
+    <StaffAgent
+      open
+      onOpenChange={vi.fn()}
+      requestedSessionId={requestedSessionId}
+      token="staff-token"
+      onSessionChange={(sessionId) => setRequestedSessionId(sessionId)}
+      onConversationChanged={vi.fn()}
+    />
   )
 }
 
@@ -89,8 +104,18 @@ describe('StaffAgent', () => {
 
     renderAgent()
     await waitFor(() => expect(workbenchApi.claims).toHaveBeenCalled())
-    await user.click(screen.getByRole('button', { name: /claim scope/i }))
-    await user.click(screen.getByRole('checkbox', { name: /NW-1042/i }))
+    const scopeToggle = screen.getByRole('button', { name: /claim scope/i })
+    expect(scopeToggle).toHaveAttribute('aria-expanded', 'false')
+    await user.click(scopeToggle)
+    expect(scopeToggle).toHaveAttribute('aria-expanded', 'true')
+    const claimCheckbox = screen.getByRole('checkbox', { name: /NW-1042/i })
+    await user.click(claimCheckbox)
+    expect(claimCheckbox).toBeChecked()
+    expect(scopeToggle).toHaveTextContent('1 Claim attached · NW-1042')
+    expect(screen.getByText('1 of 5')).toBeInTheDocument()
+    expect(screen.getByText('1 Claim attached. Changes apply immediately.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Done' }))
+    expect(scopeToggle).toHaveAttribute('aria-expanded', 'false')
     await user.type(screen.getByLabelText('Message Staff Agent'), 'What evidence is still missing?')
     await user.click(screen.getByRole('button', { name: 'Send to Staff Agent' }))
 
@@ -101,5 +126,91 @@ describe('StaffAgent', () => {
       ['clm_1'],
     )
     expect(await screen.findByText('The police report is still pending.')).toBeInTheDocument()
+  })
+
+  it('labels the model for new sessions and applies it only after the explicit New action', async () => {
+    const user = userEvent.setup()
+    let resolveCreateSession
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({
+      items: [{ session_id: 'sas_1', title: 'Evidence review', model_profile_id: 'staff-secondary' }],
+    })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({
+      models: [
+        { id: 'qwen-local', label: 'qwen3.8-27b' },
+        { id: 'staff-secondary', label: 'Staff secondary' },
+      ],
+      default_model_profile_id: 'qwen-local',
+    })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    vi.spyOn(workbenchApi, 'staffAgentMessages').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'createStaffAgentSession').mockImplementation(() => new Promise((resolve) => {
+      resolveCreateSession = resolve
+    }))
+
+    render(<StatefulAgentHarness />)
+    await screen.findByRole('option', { name: 'Staff secondary' })
+    const sessionSelect = screen.getByLabelText('Session')
+    const newSessionModelSelect = screen.getByLabelText('New session model')
+    expect(sessionSelect).toHaveValue('sas_1')
+    expect(newSessionModelSelect).toHaveValue('qwen-local')
+
+    await user.selectOptions(newSessionModelSelect, 'staff-secondary')
+
+    expect(sessionSelect).toHaveValue('sas_1')
+    expect(workbenchApi.createStaffAgentSession).not.toHaveBeenCalled()
+    const newSessionButton = screen.getByRole('button', { name: 'Start a new Staff Agent session' })
+    await user.click(newSessionButton)
+
+    expect(newSessionButton).toBeDisabled()
+    expect(newSessionButton).toHaveTextContent('Starting...')
+    resolveCreateSession({
+      session_id: 'sas_new',
+      title: 'New Staff Agent session',
+      model_profile_id: 'staff-secondary',
+      created_at: '2026-09-14T00:10:00Z',
+    })
+
+    await waitFor(() => expect(workbenchApi.createStaffAgentSession).toHaveBeenCalledWith(
+      'staff-token',
+      'New Staff Agent session',
+      'staff-secondary',
+    ))
+    expect(workbenchApi.staffAgentMessages).toHaveBeenCalledWith('staff-token', 'sas_new')
+    expect(await screen.findByText('New session ready')).toBeInTheDocument()
+    expect(screen.getByText('Ask a general question or attach Claim context to begin.')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /^Created .*2026/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('Message Staff Agent')).toHaveFocus()
+  })
+
+  it('preserves the draft and identifies a model service failure accurately', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({
+      items: [{ session_id: 'sas_1', title: 'Evidence review', model_profile_id: 'qwen-local' }],
+    })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({
+      models: [{ id: 'qwen-local', label: 'qwen3.8-27b' }],
+      default_model_profile_id: 'qwen-local',
+    })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    vi.spyOn(workbenchApi, 'staffAgentMessages').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'sendStaffAgentMessage').mockRejectedValue(new ApiError(
+      'The model service could not complete the request. The claim is unchanged.',
+      { status: 502, code: 'DEPENDENCY_FAILED', requestId: 'req-model-42' },
+    ))
+
+    renderAgent()
+    await waitFor(() => expect(workbenchApi.staffAgentMessages).toHaveBeenCalledWith('staff-token', 'sas_1'))
+    const composer = screen.getByLabelText('Message Staff Agent')
+    await user.type(composer, '1111')
+    await user.click(screen.getByRole('button', { name: 'Send to Staff Agent' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('The model could not complete this request')
+    expect(alert).toHaveTextContent('Claim Scope was not the cause.')
+    expect(alert).toHaveTextContent('ask the runtime administrator to check the selected model')
+    expect(alert).not.toHaveTextContent('choose another model')
+    expect(alert).toHaveTextContent('Reference: req-model-42')
+    expect(composer).toHaveValue('1111')
+    expect(screen.getByRole('button', { name: 'Send to Staff Agent' })).toBeEnabled()
   })
 })
