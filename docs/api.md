@@ -1752,6 +1752,21 @@ The `status_url` returned by upload completion is this Claim Evidence collection
 projection for the same Evidence record: clients reread it after `202` and do
 not manufacture `processing`, `ready`, `failed`, or retry state locally.
 
+### `GET /api/v1/evidence`
+
+Returns the authenticated claimant's history of completed or processing file
+uploads across Claims. The response is paginated with `limit` and an opaque
+`cursor`. Entries retain the source Claim, Evidence identity, safe file
+metadata, processing state, and a bounded provenance summary. The endpoint
+filters by the authenticated customer and claimant-owned source before
+projection; it never returns storage keys, internal object paths, checksums,
+or unrestricted provenance. Registration-only Evidence with no uploaded file
+is not included.
+
+`can_reuse` is true only for a claimant-owned file in a reusable processing
+state. `can_remove` remains false until a governed remove operation is
+available; clients must not delete an object-storage key directly.
+
 ### `POST /api/v1/claims/{claim_id}/evidence`
 
 Registers evidence when no file is currently available.
