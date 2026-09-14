@@ -1,7 +1,9 @@
 const SESSION_KEY = 'northwind.workbench.session'
 const retryableMutationKeys = new Map()
 const STAFF_MESSAGE_OPERATIONS_KEY = 'northwind.workbench.staff-message-operations.v2'
+const STAFF_DRAFT_EXECUTION_OPERATIONS_KEY = 'northwind.workbench.staff-draft-execution-operations.v1'
 let volatileStaffMessageOperations = {}
+let volatileStaffDraftExecutionOperations = {}
 
 export class ApiError extends Error {
   constructor(message, {
@@ -46,6 +48,7 @@ export function storeSession(session) {
   if (existing?.access_token !== session.access_token) {
     retryableMutationKeys.clear()
     clearStaffMessageOperations()
+    clearStaffDraftExecutionOperations()
   }
   localStorage.setItem(SESSION_KEY, JSON.stringify(session))
 }
@@ -53,6 +56,7 @@ export function storeSession(session) {
 export function clearStoredSession() {
   retryableMutationKeys.clear()
   clearStaffMessageOperations()
+  clearStaffDraftExecutionOperations()
   localStorage.removeItem(SESSION_KEY)
 }
 
@@ -178,21 +182,38 @@ export const workbenchApi = {
       },
     )
   },
-  executeStaffAgentDraft(token, sessionId, messageId, draftId, revision, payload = {}) {
-    return mutationRequest(
-      `/api/v1/workbench/agent/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/drafts/${encodeURIComponent(draftId)}/execute`,
-      {
+  async executeStaffAgentDraft(token, sessionId, messageId, draftId, revision, payload = {}) {
+    const body = JSON.stringify({
+      confirmed: true,
+      payload,
+    })
+    const operation = pendingStaffDraftExecutionOperation(
+      sessionId,
+      messageId,
+      draftId,
+      revision,
+      body,
+    )
+    const path = `/api/v1/workbench/agent/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/drafts/${encodeURIComponent(draftId)}/execute`
+
+    try {
+      const response = await mutationRequest(path, {
         method: 'POST',
         token,
         headers: {
-          'If-Match': String(revision),
+          'Idempotency-Key': operation.key,
+          'If-Match': String(operation.revision),
         },
-        body: JSON.stringify({
-          confirmed: true,
-          payload,
-        }),
-      },
-    )
+        body: operation.body,
+      })
+      clearPendingStaffDraftExecutionOperation(sessionId, messageId, draftId)
+      return response
+    } catch (error) {
+      if (!ambiguousDraftExecutionFailure(error)) {
+        clearPendingStaffDraftExecutionOperation(sessionId, messageId, draftId)
+      }
+      throw error
+    }
   },
   claim(token, claimId) {
     return request(`/api/v1/workbench/claims/${encodeURIComponent(claimId)}`, { token })
@@ -449,6 +470,120 @@ function pagedWorkbenchResource(token, path, cursor, limit) {
   return request(`/api/v1/workbench/claims/${path}?${params}`, { token })
 }
 
+
+function staffDraftExecutionOperationId(sessionId, messageId, draftId) {
+  return JSON.stringify([sessionId, messageId, draftId])
+}
+
+function pendingStaffDraftExecutionOperation(
+  sessionId,
+  messageId,
+  draftId,
+  revision,
+  body,
+) {
+  const operations = readStaffDraftExecutionOperations()
+  const operationId = staffDraftExecutionOperationId(sessionId, messageId, draftId)
+  const existing = operations[operationId]
+
+  if (existing) {
+    if (existing.body !== body) {
+      throw new ApiError(
+        'The previous execution attempt for this Staff Agent draft has an unknown outcome. Retry the saved draft unchanged before preparing another execution.',
+        { code: 'DRAFT_EXECUTION_UNKNOWN' },
+      )
+    }
+    return existing
+  }
+
+  const operation = {
+    revision,
+    body,
+    key: crypto.randomUUID(),
+  }
+
+  operations[operationId] = operation
+  writeStaffDraftExecutionOperations(operations)
+  return operation
+}
+
+function clearPendingStaffDraftExecutionOperation(sessionId, messageId, draftId) {
+  const operations = readStaffDraftExecutionOperations()
+  const operationId = staffDraftExecutionOperationId(sessionId, messageId, draftId)
+
+  if (!(operationId in operations)) return
+
+  delete operations[operationId]
+  writeStaffDraftExecutionOperations(operations)
+}
+
+function clearStaffDraftExecutionOperations() {
+  volatileStaffDraftExecutionOperations = {}
+
+  try {
+    sessionStorage.removeItem(STAFF_DRAFT_EXECUTION_OPERATIONS_KEY)
+  } catch {
+    // In-memory state is still cleared.
+  }
+}
+
+function readStaffDraftExecutionOperations() {
+  try {
+    const operations = JSON.parse(
+      sessionStorage.getItem(STAFF_DRAFT_EXECUTION_OPERATIONS_KEY) || '{}',
+    )
+
+    if (
+      operations
+      && typeof operations === 'object'
+      && !Array.isArray(operations)
+    ) {
+      volatileStaffDraftExecutionOperations = { ...operations }
+      return operations
+    }
+  } catch {
+    // Fall through to the in-memory copy.
+  }
+
+  return { ...volatileStaffDraftExecutionOperations }
+}
+
+function writeStaffDraftExecutionOperations(operations) {
+  volatileStaffDraftExecutionOperations = { ...operations }
+
+  try {
+    sessionStorage.setItem(
+      STAFF_DRAFT_EXECUTION_OPERATIONS_KEY,
+      JSON.stringify(operations),
+    )
+  } catch {
+    // In-memory state preserves retry identity for this page lifetime.
+  }
+}
+
+function ambiguousDraftExecutionFailure(error) {
+  if (
+    [
+      'REVISION_CONFLICT',
+      'ACCESS_DENIED',
+      'CONFIRMATION_REQUIRED',
+      'VALIDATION_ERROR',
+      'IDEMPOTENCY_CONFLICT',
+      'DEPENDENCY_UNAVAILABLE',
+      'DEPENDENCY_FAILED',
+      'STAFF_NOT_AVAILABLE',
+      'OWNERSHIP_CONFLICT',
+    ].includes(error?.code)
+  ) {
+    return false
+  }
+  return Boolean(
+    error?.code === 'NETWORK_ERROR'
+    || error?.status === 0
+    || error?.status === 429
+    || error?.status >= 500
+  )
+}
 
 function pendingStaffMessageOperation(
   claimId,
