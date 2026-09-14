@@ -279,4 +279,147 @@ describe('StaffAgent', () => {
     expect(composer).toHaveValue('1111')
     expect(screen.getByRole('button', { name: 'Send to Staff Agent' })).toBeEnabled()
   })
+
+  function mockDraftConversation(draft) {
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({
+      items: [{ session_id: 'sas_1', title: 'Action review', model_profile_id: 'qwen-local' }],
+    })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({
+      models: [{ id: 'qwen-local', label: 'qwen3.8-27b' }],
+      default_model_profile_id: 'qwen-local',
+    })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    vi.spyOn(workbenchApi, 'staffAgentMessages').mockResolvedValue({
+      items: [{
+        session_id: 'sas_1',
+        message_id: 'sam_action',
+        role: 'assistant',
+        content: 'I prepared a bounded staff action.',
+        claim_ids: ['clm_1'],
+        drafts: [draft],
+        source_refs: ['claim:clm_1:revision:4'],
+      }],
+    })
+  }
+
+  function executableDraft(overrides = {}) {
+    return {
+      draft_id: 'sad_1',
+      claim_id: 'clm_1',
+      action_code: 'work_item.update',
+      target_ref: 'wki_1',
+      kind: 'staff_action',
+      title: 'Progress work item',
+      content: 'Move the assigned work item to in progress.',
+      payload: { status: 'in_progress', note: 'Staff confirmed.' },
+      ...overrides,
+    }
+  }
+
+  it('keeps informational drafts copy/edit-only without an execution control', async () => {
+    mockDraftConversation({
+      kind: 'claimant_message',
+      title: 'Claimant reply',
+      content: 'Please send the repair estimate.',
+      claim_id: 'clm_1',
+    })
+
+    renderAgent()
+
+    expect(await screen.findByLabelText('Edit Claimant reply')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Review action' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Confirm and execute' })).not.toBeInTheDocument()
+  })
+
+  it('requires two-step confirmation, re-reads the Claim, and renders authoritative success', async () => {
+    const user = userEvent.setup()
+    const draft = executableDraft()
+    mockDraftConversation(draft)
+    vi.spyOn(workbenchApi, 'claim').mockResolvedValue({ ...claim, revision: 9 })
+    vi.spyOn(workbenchApi, 'executeStaffAgentDraft').mockResolvedValue({
+      claim_id: 'clm_1',
+      action_code: 'work_item.update',
+      runtime_execution: { resulting_revision: 10 },
+    })
+
+    renderAgent()
+
+    const review = await screen.findByRole('button', { name: 'Review action' })
+    expect(screen.queryByRole('button', { name: 'Confirm and execute' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Review Progress work item')).toHaveAttribute('readonly')
+
+    await user.click(review)
+    const confirm = screen.getByRole('button', { name: 'Confirm and execute' })
+    expect(workbenchApi.claim).not.toHaveBeenCalled()
+    expect(workbenchApi.executeStaffAgentDraft).not.toHaveBeenCalled()
+
+    await user.click(confirm)
+
+    await waitFor(() => expect(workbenchApi.claim).toHaveBeenCalledWith('staff-token', 'clm_1'))
+    expect(workbenchApi.executeStaffAgentDraft).toHaveBeenCalledWith(
+      'staff-token',
+      'sas_1',
+      'sam_action',
+      'sad_1',
+      9,
+      draft.payload,
+    )
+    const result = await screen.findByRole('status')
+    expect(result).toHaveTextContent('Executed by Workbench')
+    expect(result).toHaveTextContent('Claim revision 10')
+  })
+
+  it.each([
+    ['CONFIRMATION_REQUIRED', 'nothing was executed'],
+    ['ACCESS_DENIED', 'not authorised'],
+    ['REVISION_CONFLICT', 'Claim changed before execution'],
+    ['DEPENDENCY_UNAVAILABLE', 'required service is unavailable'],
+    ['IDEMPOTENCY_CONFLICT', 'was not run again'],
+    ['UNEXPECTED_FAILURE', 'Unexpected execution failure'],
+  ])('keeps %s failures visibly unexecuted', async (code, expected) => {
+    const user = userEvent.setup()
+    mockDraftConversation(executableDraft())
+    vi.spyOn(workbenchApi, 'claim').mockResolvedValue({ ...claim, revision: 9 })
+    vi.spyOn(workbenchApi, 'executeStaffAgentDraft').mockRejectedValue(new ApiError(
+      code === 'UNEXPECTED_FAILURE' ? 'Unexpected execution failure' : 'Execution rejected',
+      { status: 409, code, requestId: 'req-action-1' },
+    ))
+
+    renderAgent()
+    await user.click(await screen.findByRole('button', { name: 'Review action' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm and execute' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Action not executed')
+    expect(alert).toHaveTextContent(expected)
+    expect(screen.queryByText('Executed by Workbench')).not.toBeInTheDocument()
+  })
+
+  it('preserves authoritative success when the post-execution refresh fails', async () => {
+    const user = userEvent.setup()
+    mockDraftConversation(executableDraft())
+    vi.spyOn(workbenchApi, 'claim').mockResolvedValue({ ...claim, revision: 9 })
+    vi.spyOn(workbenchApi, 'executeStaffAgentDraft').mockResolvedValue({
+      claim_id: 'clm_1',
+      action_code: 'work_item.update',
+      runtime_execution: { resulting_revision: 10 },
+    })
+    const refreshError = Object.assign(
+      new Error('Action executed, but refresh failed for Claim queue, open Claim. Refresh before taking another action.'),
+      { requestId: 'req-refresh-1' },
+    )
+
+    renderAgent({
+      onBusinessActionExecuted: vi.fn().mockRejectedValue(refreshError),
+    })
+    await user.click(await screen.findByRole('button', { name: 'Review action' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm and execute' }))
+
+    expect(await screen.findByText('Executed by Workbench')).toBeInTheDocument()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Action executed; refresh required')
+    expect(alert).toHaveTextContent('Claim queue, open Claim')
+    expect(alert).toHaveTextContent('Reference: req-refresh-1')
+  })
+
 })
