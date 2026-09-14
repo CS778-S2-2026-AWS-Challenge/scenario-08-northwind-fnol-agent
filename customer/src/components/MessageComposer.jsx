@@ -186,9 +186,7 @@ export default function MessageComposer({
     const textarea = textareaRef.current
     if (!textarea) return
     textarea.style.height = 'auto'
-    const minHeight = 52
-    const maxHeight = 220
-    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight)}px`
+    textarea.style.height = `${textarea.scrollHeight}px`
   }, [draft, attachments.length])
 
   function startVoiceInput() {
@@ -330,8 +328,29 @@ export default function MessageComposer({
               event.target.value = ''
             }}
           />
-          <button className="tool-btn tool-attach" type="button" aria-label="Attach a file" onClick={() => fileInput.current?.click()}><span aria-hidden="true">+</span></button>
-          <button className="tool-btn tool-voice" type="button" aria-label="Voice input" onClick={startVoiceInput}>Voice</button>
+          <button
+            className="tool-btn tool-attach"
+            type="button"
+            aria-label="Attach a file"
+            title="Attach a file"
+            onClick={() => fileInput.current?.click()}
+          >
+            <svg className="tool-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+          <button
+            className="tool-btn tool-voice"
+            type="button"
+            aria-label="Use voice input"
+            title="Use voice input"
+            onClick={startVoiceInput}
+          >
+            <svg className="tool-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="9" y="3" width="6" height="11" rx="3" />
+              <path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" />
+            </svg>
+          </button>
           {(isWorkspace || showClaimTypeControl) && setClaimType && (
             <OptionMenu
               value={claimType}
