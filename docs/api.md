@@ -2761,6 +2761,16 @@ and `assigned` do not mean completed or verified. Result receipt, verification,
 and Claim/Evidence write-back remain separate stages. Manual and simulation-only
 capabilities cannot be represented as live provider success.
 
+The canonical projection exposes operation status, result lifecycle status, and
+result verification outcome as separate typed values. A received result is
+`unverified`; a verified result is `consistent`, `inconsistent`, or
+`review_required`. The task/result projection does not claim `written_back`
+without a separate authorised Claim/Evidence write-back record. Registry entries
+also distinguish transient statuses such as `submitting` from task statuses that
+can be persisted and projected. Definitions publish current-state invariants
+separately from transition preconditions; notably, `operation_id` and
+`dispatch_reserved_at` arise only when a prepared request reserves submission.
+
 Internal endpoints are service-to-service only. The backend MAY implement an adapter in-process, but it MUST preserve these typed request and response boundaries so fixture repositories can be replaced without changing product clients.
 
 | Method | Path | Purpose |

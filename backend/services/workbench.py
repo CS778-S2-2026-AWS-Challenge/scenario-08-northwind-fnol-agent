@@ -9,6 +9,7 @@ from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.evidence import is_in_conflict, unresolved_conflicts
 from backend.domain.external_service_registry import (
     ExternalCapabilityProvenance,
+    ExternalLifecycleStatus,
     build_lifecycle_projection,
     projection_metadata,
     service_registry_entry,
@@ -2207,11 +2208,20 @@ def _external_lifecycle(
 ) -> WorkbenchExternalLifecycle:
     status = task.status
     projection = projection_metadata(status.value)
+    result_status = None
+    if result is not None:
+        result_status = (
+            ExternalLifecycleStatus.RESULT_RECEIVED
+            if result.verification is ExternalTaskResultVerification.UNVERIFIED
+            else ExternalLifecycleStatus.RESULT_VERIFIED
+        )
     try:
         registry_entry = service_registry_entry(task.service_identity)
         canonical_projection = build_lifecycle_projection(
             service_identity=task.service_identity,
             operation_status=status.value,
+            result_status=result_status,
+            result_verification=result.verification if result is not None else None,
         )
         expected_source = (
             'fixture'

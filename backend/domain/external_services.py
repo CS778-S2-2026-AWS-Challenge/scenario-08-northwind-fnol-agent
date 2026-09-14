@@ -6,6 +6,9 @@ from pydantic import Field, model_validator
 
 from backend.domain.evidence import is_in_conflict
 from backend.domain.external_service_registry import (
+    ExternalTaskResultVerification as _ExternalTaskResultVerification,
+)
+from backend.domain.external_service_registry import (
     assert_operation_status_registered,
     assert_persisted_operation_transition,
 )
@@ -20,6 +23,8 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.domain.retrieval import RetrievalSource
+
+ExternalTaskResultVerification = _ExternalTaskResultVerification
 
 ASSESSOR_SERVICE_IDENTITY = 'vehicle_damage_assessment_routing'
 
@@ -687,23 +692,6 @@ def assert_disclosure_within_consent(
             f'{request.request_id}: consent {consent.consent_ref} does not permit '
             f'{", ".join(beyond)}.'
         )
-
-
-class ExternalTaskResultVerification(str, Enum):
-    """How far a provider result has been checked against the claim.
-
-    There is deliberately no value meaning "this is now a confirmed claim fact".
-    A provider answer is evidence about the claim, never the claim's own record
-    of what is true, and `docs/agent-behaviour-catalogue.md` keeps material facts
-    proposed until the claim's own confirmation path accepts them. Promotion to a
-    confirmed fact is a claim-level decision made elsewhere, so this enum cannot
-    express it and no caller can shortcut to it.
-    """
-
-    UNVERIFIED = 'unverified'
-    CONSISTENT = 'consistent'
-    INCONSISTENT = 'inconsistent'
-    REVIEW_REQUIRED = 'review_required'
 
 
 class ExternalTaskResult(ContractModel):

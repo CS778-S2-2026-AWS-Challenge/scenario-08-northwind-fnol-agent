@@ -47,6 +47,19 @@ class ExternalCapabilityProvenance(str, Enum):
     UNAVAILABLE = 'unavailable'
 
 
+class ExternalTaskResultVerification(str, Enum):
+    """Canonical outcomes from checking a provider result against the Claim.
+
+    No value promotes a provider answer into confirmed Claim State. Write-back
+    remains a separate, authorised lifecycle stage.
+    """
+
+    UNVERIFIED = 'unverified'
+    CONSISTENT = 'consistent'
+    INCONSISTENT = 'inconsistent'
+    REVIEW_REQUIRED = 'review_required'
+
+
 class ExternalLifecycleDefinition(ContractModel):
     """Stable meaning and legal recovery metadata for one lifecycle status."""
 
@@ -59,7 +72,8 @@ class ExternalLifecycleDefinition(ContractModel):
     allowed_next: tuple[ExternalLifecycleStatus, ...] = ()
     recovery: str = Field(min_length=1, max_length=200)
     claim_state_effect: str = Field(min_length=1, max_length=300)
-    required_preconditions: tuple[str, ...] = ('claim_scope',)
+    state_invariants: tuple[str, ...] = ('claim_scope',)
+    transition_preconditions: tuple[str, ...] = ()
     requires_reconciliation: bool = False
     implies_completion: bool = False
 
@@ -92,15 +106,19 @@ class ExternalServiceRegistryEntry(ContractModel):
     provenance: ExternalCapabilityProvenance
     access_form: str = Field(min_length=1, max_length=200)
     uses_external_task: bool = True
-    supported_statuses: tuple[ExternalLifecycleStatus, ...] = ()
+    projectable_statuses: tuple[ExternalLifecycleStatus, ...] = ()
+    transient_statuses: tuple[ExternalLifecycleStatus, ...] = ()
     limitation: str = Field(min_length=1, max_length=500)
 
     @model_validator(mode='after')
     def validate_task_boundary(self) -> 'ExternalServiceRegistryEntry':
-        if self.uses_external_task and not self.supported_statuses:
-            raise ValueError('An external-task service must declare supported statuses.')
-        if not self.uses_external_task and self.supported_statuses:
+        declared_statuses = self.projectable_statuses + self.transient_statuses
+        if self.uses_external_task and not self.projectable_statuses:
+            raise ValueError('An external-task service must declare projectable statuses.')
+        if not self.uses_external_task and declared_statuses:
             raise ValueError('A manual path must not declare external-task statuses.')
+        if set(self.projectable_statuses) & set(self.transient_statuses):
+            raise ValueError('A lifecycle status cannot be both projectable and transient.')
         return self
 
 
@@ -115,9 +133,11 @@ class ExternalServiceLifecycleProjection(ContractModel):
     limitation: str = Field(min_length=1, max_length=500)
     operation_status: ExternalLifecycleStatus
     result_status: ExternalLifecycleStatus | None = None
+    result_verification: ExternalTaskResultVerification | None = None
     claimant_meaning: str = Field(min_length=1, max_length=500)
     agent_meaning: str = Field(min_length=1, max_length=500)
-    required_preconditions: tuple[str, ...] = ('claim_scope',)
+    state_invariants: tuple[str, ...] = ('claim_scope',)
+    transition_preconditions: tuple[str, ...] = ()
     pending_owner: str = Field(min_length=1, max_length=80)
     next_action: str = Field(min_length=1, max_length=500)
     requires_reconciliation: bool = False
@@ -299,50 +319,52 @@ _DEFINITIONS = (
 )
 
 
-_STATE_PRECONDITIONS: Final = {
+_STATE_INVARIANTS: Final = {
     ExternalLifecycleStatus.CONSENT_REQUIRED: ('claim_scope', 'consent_pending'),
     ExternalLifecycleStatus.AUTHORISED: ('claim_scope', 'consent_ref', 'authorised_revision'),
     ExternalLifecycleStatus.PREPARED: (
         'claim_scope',
-        'consent_ref',
-        'authorised_revision',
-        'operation_identity',
+        'request_id',
+        'authorisation',
+        'disclosed_fields',
+        'prepared_at',
     ),
     ExternalLifecycleStatus.SUBMITTING: (
         'claim_scope',
-        'operation_identity',
-        'idempotency_identity',
-        'authorised_disclosure',
-        'dispatch_reservation',
+        'operation_id',
+        'idempotency_key',
+        'authorisation',
+        'dispatch_reserved_at',
     ),
-    ExternalLifecycleStatus.ACCEPTED: ('claim_scope', 'delivery_evidence', 'provider_reference'),
-    ExternalLifecycleStatus.QUEUED: ('claim_scope', 'delivery_evidence', 'operation_identity'),
+    ExternalLifecycleStatus.ACCEPTED: ('claim_scope', 'delivery', 'delivery_evidence'),
+    ExternalLifecycleStatus.QUEUED: ('claim_scope', 'delivery_evidence', 'operation_id'),
     ExternalLifecycleStatus.ASSIGNED: ('claim_scope', 'delivery_evidence', 'provider_reference'),
     ExternalLifecycleStatus.RETRYABLE_FAILURE: (
         'claim_scope',
         'failure_code',
-        'retry_same_operation',
+        'delivery',
     ),
     ExternalLifecycleStatus.TERMINAL_FAILURE: (
         'claim_scope',
         'failure_code',
-        'professional_review',
+        'delivery',
     ),
     ExternalLifecycleStatus.UNKNOWN_OUTCOME: (
         'claim_scope',
-        'operation_identity',
-        'reconciliation_evidence',
+        'failure_code',
+        'delivery',
     ),
     ExternalLifecycleStatus.RESULT_RECEIVED: (
         'claim_scope',
-        'result_source',
+        'source',
         'received_at',
-        'evidence_links',
+        'evidence_ids',
     ),
     ExternalLifecycleStatus.RESULT_VERIFIED: (
         'claim_scope',
-        'verification_at',
-        'checked_claim_revision',
+        'verification',
+        'verified_at',
+        'verified_against_revision',
     ),
     ExternalLifecycleStatus.WRITTEN_BACK: (
         'claim_scope',
@@ -352,8 +374,36 @@ _STATE_PRECONDITIONS: Final = {
     ),
 }
 
+_TRANSITION_PRECONDITIONS: Final = {
+    ExternalLifecycleStatus.CONSENT_REQUIRED: ('consent_ref', 'granted_at'),
+    ExternalLifecycleStatus.AUTHORISED: ('disclosed_fields', 'purpose', 'prepared_at'),
+    ExternalLifecycleStatus.PREPARED: (
+        'operation_id',
+        'idempotency_key',
+        'dispatch_reserved_at',
+    ),
+    ExternalLifecycleStatus.SUBMITTING: ('sent_at', 'delivery_evidence'),
+    ExternalLifecycleStatus.ACCEPTED: ('source', 'received_at'),
+    ExternalLifecycleStatus.QUEUED: ('provider_reference',),
+    ExternalLifecycleStatus.ASSIGNED: ('source', 'received_at'),
+    ExternalLifecycleStatus.RETRYABLE_FAILURE: ('operation_id', 'retry_same_operation'),
+    ExternalLifecycleStatus.TERMINAL_FAILURE: (),
+    ExternalLifecycleStatus.UNKNOWN_OUTCOME: ('reconciliation_evidence',),
+    ExternalLifecycleStatus.RESULT_RECEIVED: (
+        'verified_at',
+        'verified_against_revision',
+    ),
+    ExternalLifecycleStatus.RESULT_VERIFIED: ('authorised_decision', 'resulting_revision'),
+    ExternalLifecycleStatus.WRITTEN_BACK: (),
+}
+
 LIFECYCLE_REGISTRY: Final[tuple[ExternalLifecycleDefinition, ...]] = tuple(
-    item.model_copy(update={'required_preconditions': _STATE_PRECONDITIONS[item.status]})
+    item.model_copy(
+        update={
+            'state_invariants': _STATE_INVARIANTS[item.status],
+            'transition_preconditions': _TRANSITION_PRECONDITIONS[item.status],
+        }
+    )
     for item in _DEFINITIONS
 )
 LIFECYCLE_BY_STATUS: Final = MappingProxyType({item.status: item for item in LIFECYCLE_REGISTRY})
@@ -365,9 +415,8 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
         catalogue_reference='P3-ASSESSOR',
         provenance=ExternalCapabilityProvenance.SIMULATED,
         access_form='controlled assessor simulation',
-        supported_statuses=(
+        projectable_statuses=(
             ExternalLifecycleStatus.PREPARED,
-            ExternalLifecycleStatus.SUBMITTING,
             ExternalLifecycleStatus.ACCEPTED,
             ExternalLifecycleStatus.QUEUED,
             ExternalLifecycleStatus.ASSIGNED,
@@ -375,6 +424,7 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
             ExternalLifecycleStatus.TERMINAL_FAILURE,
             ExternalLifecycleStatus.UNKNOWN_OUTCOME,
         ),
+        transient_statuses=(ExternalLifecycleStatus.SUBMITTING,),
         limitation='Simulation-only; it must not be described as a production provider.',
     ),
     ExternalServiceRegistryEntry(
@@ -422,6 +472,29 @@ OPERATION_STATUS_IDS: Final = frozenset(
 # post-send outcome.  This mapping makes that boundary explicit instead of
 # letting repositories infer it from an unrelated transition table.
 PERSISTED_OPERATION_STATUS_IDS: Final = frozenset(OPERATION_STATUS_IDS)
+
+# The result record can coexist only with task states that the authoritative
+# ``ExternalTaskResult`` contract accepts. Write-back is intentionally absent:
+# proving it needs an authorised Claim/Evidence record, not only a task/result.
+_LEGAL_RESULT_STATUSES_BY_OPERATION: Final = MappingProxyType(
+    {
+        ExternalLifecycleStatus.PREPARED: frozenset(),
+        ExternalLifecycleStatus.ACCEPTED: frozenset(
+            {
+                ExternalLifecycleStatus.RESULT_RECEIVED,
+                ExternalLifecycleStatus.RESULT_VERIFIED,
+            }
+        ),
+        ExternalLifecycleStatus.RETRYABLE_FAILURE: frozenset(),
+        ExternalLifecycleStatus.TERMINAL_FAILURE: frozenset(),
+        ExternalLifecycleStatus.UNKNOWN_OUTCOME: frozenset(
+            {
+                ExternalLifecycleStatus.RESULT_RECEIVED,
+                ExternalLifecycleStatus.RESULT_VERIFIED,
+            }
+        ),
+    }
+)
 
 
 class InvalidExternalLifecycleTransition(ValueError):
@@ -586,23 +659,50 @@ def build_lifecycle_projection(
     service_identity: str,
     operation_status: ExternalLifecycleStatus | str,
     result_status: ExternalLifecycleStatus | str | None = None,
+    result_verification: ExternalTaskResultVerification | str | None = None,
 ) -> ExternalServiceLifecycleProjection:
     """Build one projection from the registered service and canonical status."""
 
     entry = service_registry_entry(service_identity)
     operation = lifecycle_definition(operation_status)
-    if not entry.uses_external_task or operation.status not in entry.supported_statuses:
+    if not entry.uses_external_task or operation.status not in entry.projectable_statuses:
         raise InvalidExternalLifecycleTransition(
-            f'{operation.status.value} is not supported by {service_identity}.'
+            f'{operation.status.value} is not projectable for {service_identity}.'
         )
     metadata = projection_metadata(operation.status)
     result = ExternalLifecycleStatus(result_status) if result_status is not None else None
+    verification = (
+        ExternalTaskResultVerification(result_verification)
+        if result_verification is not None
+        else None
+    )
     if (
         result is not None
         and lifecycle_definition(result).stage is not ExternalLifecycleStage.RESULT
     ):
         raise InvalidExternalLifecycleTransition(
             f'{result.value} is not a result-stage lifecycle status.'
+        )
+    legal_results = _LEGAL_RESULT_STATUSES_BY_OPERATION.get(operation.status, frozenset())
+    if result is not None and result not in legal_results:
+        raise InvalidExternalLifecycleTransition(
+            f'{operation.status.value} cannot be projected with {result.value}.'
+        )
+    if result is None and verification is not None:
+        raise InvalidExternalLifecycleTransition(
+            'A verification outcome requires a result lifecycle status.'
+        )
+    if result is ExternalLifecycleStatus.RESULT_RECEIVED and verification is not (
+        ExternalTaskResultVerification.UNVERIFIED
+    ):
+        raise InvalidExternalLifecycleTransition('result_received requires the unverified outcome.')
+    if result is ExternalLifecycleStatus.RESULT_VERIFIED and verification not in {
+        ExternalTaskResultVerification.CONSISTENT,
+        ExternalTaskResultVerification.INCONSISTENT,
+        ExternalTaskResultVerification.REVIEW_REQUIRED,
+    }:
+        raise InvalidExternalLifecycleTransition(
+            'result_verified requires a checked verification outcome.'
         )
     return ExternalServiceLifecycleProjection(
         service_identity=service_identity,
@@ -612,9 +712,11 @@ def build_lifecycle_projection(
         limitation=entry.limitation,
         operation_status=operation.status,
         result_status=result,
+        result_verification=verification,
         claimant_meaning=operation.claimant_meaning,
         agent_meaning=operation.agent_meaning,
-        required_preconditions=operation.required_preconditions,
+        state_invariants=operation.state_invariants,
+        transition_preconditions=operation.transition_preconditions,
         pending_owner=metadata.pending_owner,
         next_action=metadata.next_action,
         requires_reconciliation=operation.requires_reconciliation,

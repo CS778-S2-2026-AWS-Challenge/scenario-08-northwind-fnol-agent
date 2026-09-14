@@ -6,6 +6,7 @@ from backend.domain.external_service_registry import (
     REGISTRY_VERSION,
     ExternalCapabilityProvenance,
     ExternalLifecycleStatus,
+    ExternalTaskResultVerification,
     InvalidExternalLifecycleTransition,
     assert_lifecycle_transition,
     assert_persisted_operation_transition,
@@ -13,6 +14,12 @@ from backend.domain.external_service_registry import (
     lifecycle_definition,
     projection_metadata,
     service_registry_entry,
+)
+from backend.domain.external_services import (
+    ASSESSOR_SERVICE_IDENTITY,
+)
+from backend.domain.external_services import (
+    ExternalTaskResultVerification as PersistedResultVerification,
 )
 
 
@@ -25,6 +32,7 @@ def test_registry_has_one_complete_definition_for_each_status() -> None:
     assert all(definition.claimant_meaning for definition in LIFECYCLE_REGISTRY)
     assert all(definition.staff_meaning for definition in LIFECYCLE_REGISTRY)
     assert all(definition.agent_meaning for definition in LIFECYCLE_REGISTRY)
+    assert PersistedResultVerification is ExternalTaskResultVerification
 
 
 def test_unknown_outcome_requires_reconciliation_and_cannot_imply_completion() -> None:
@@ -113,21 +121,160 @@ def test_projection_metadata_is_complete_for_persisted_statuses() -> None:
 
 def test_lifecycle_projection_carries_registry_and_role_safe_contract() -> None:
     projection = build_lifecycle_projection(
-        service_identity='vehicle_damage_assessment_routing',
+        service_identity=ASSESSOR_SERVICE_IDENTITY,
         operation_status=ExternalLifecycleStatus.ACCEPTED,
         result_status=ExternalLifecycleStatus.RESULT_RECEIVED,
+        result_verification=ExternalTaskResultVerification.UNVERIFIED,
     )
     assert projection.registry_version == REGISTRY_VERSION
     assert projection.operation_status is ExternalLifecycleStatus.ACCEPTED
     assert projection.result_status is ExternalLifecycleStatus.RESULT_RECEIVED
-    assert projection.required_preconditions
+    assert projection.result_verification is ExternalTaskResultVerification.UNVERIFIED
+    assert projection.state_invariants
     assert projection.allowed_next
+
+
+@pytest.mark.parametrize(
+    'status',
+    [
+        ExternalLifecycleStatus.PREPARED,
+        ExternalLifecycleStatus.ACCEPTED,
+        ExternalLifecycleStatus.QUEUED,
+        ExternalLifecycleStatus.ASSIGNED,
+        ExternalLifecycleStatus.RETRYABLE_FAILURE,
+        ExternalLifecycleStatus.TERMINAL_FAILURE,
+        ExternalLifecycleStatus.UNKNOWN_OUTCOME,
+    ],
+)
+def test_assessor_every_advertised_projectable_status_builds(
+    status: ExternalLifecycleStatus,
+) -> None:
+    entry = service_registry_entry(ASSESSOR_SERVICE_IDENTITY)
+
+    assert status in entry.projectable_statuses
+    assert (
+        build_lifecycle_projection(
+            service_identity=ASSESSOR_SERVICE_IDENTITY,
+            operation_status=status,
+        ).operation_status
+        is status
+    )
+
+
+def test_assessor_declares_submitting_as_transient_not_projectable() -> None:
+    entry = service_registry_entry(ASSESSOR_SERVICE_IDENTITY)
+
+    assert entry.transient_statuses == (ExternalLifecycleStatus.SUBMITTING,)
+    assert ExternalLifecycleStatus.SUBMITTING not in entry.projectable_statuses
+    with pytest.raises(InvalidExternalLifecycleTransition, match='not projectable'):
+        build_lifecycle_projection(
+            service_identity=ASSESSOR_SERVICE_IDENTITY,
+            operation_status=ExternalLifecycleStatus.SUBMITTING,
+        )
+
+
+@pytest.mark.parametrize(
+    ('operation_status', 'result_status', 'verification'),
+    [
+        (operation_status, result_status, verification)
+        for operation_status in (
+            ExternalLifecycleStatus.ACCEPTED,
+            ExternalLifecycleStatus.UNKNOWN_OUTCOME,
+        )
+        for result_status, verification in (
+            (ExternalLifecycleStatus.RESULT_RECEIVED, ExternalTaskResultVerification.UNVERIFIED),
+            (ExternalLifecycleStatus.RESULT_VERIFIED, ExternalTaskResultVerification.CONSISTENT),
+            (ExternalLifecycleStatus.RESULT_VERIFIED, ExternalTaskResultVerification.INCONSISTENT),
+            (
+                ExternalLifecycleStatus.RESULT_VERIFIED,
+                ExternalTaskResultVerification.REVIEW_REQUIRED,
+            ),
+        )
+    ],
+)
+def test_projection_preserves_every_result_verification_outcome(
+    operation_status: ExternalLifecycleStatus,
+    result_status: ExternalLifecycleStatus,
+    verification: ExternalTaskResultVerification,
+) -> None:
+    projection = build_lifecycle_projection(
+        service_identity=ASSESSOR_SERVICE_IDENTITY,
+        operation_status=operation_status,
+        result_status=result_status,
+        result_verification=verification,
+    )
+
+    assert projection.result_status is result_status
+    assert projection.result_verification is verification
+
+
+@pytest.mark.parametrize(
+    ('operation_status', 'result_status', 'verification'),
+    [
+        (
+            ExternalLifecycleStatus.PREPARED,
+            ExternalLifecycleStatus.RESULT_RECEIVED,
+            ExternalTaskResultVerification.UNVERIFIED,
+        ),
+        (
+            ExternalLifecycleStatus.ACCEPTED,
+            ExternalLifecycleStatus.WRITTEN_BACK,
+            ExternalTaskResultVerification.CONSISTENT,
+        ),
+        (
+            ExternalLifecycleStatus.ACCEPTED,
+            ExternalLifecycleStatus.RESULT_RECEIVED,
+            ExternalTaskResultVerification.CONSISTENT,
+        ),
+        (
+            ExternalLifecycleStatus.ACCEPTED,
+            ExternalLifecycleStatus.RESULT_VERIFIED,
+            ExternalTaskResultVerification.UNVERIFIED,
+        ),
+        (
+            ExternalLifecycleStatus.ACCEPTED,
+            ExternalLifecycleStatus.ACCEPTED,
+            ExternalTaskResultVerification.UNVERIFIED,
+        ),
+    ],
+)
+def test_projection_rejects_illegal_operation_result_coordinates(
+    operation_status: ExternalLifecycleStatus,
+    result_status: ExternalLifecycleStatus,
+    verification: ExternalTaskResultVerification,
+) -> None:
+    with pytest.raises(InvalidExternalLifecycleTransition):
+        build_lifecycle_projection(
+            service_identity=ASSESSOR_SERVICE_IDENTITY,
+            operation_status=operation_status,
+            result_status=result_status,
+            result_verification=verification,
+        )
+
+
+def test_projection_rejects_verification_without_result_stage() -> None:
+    with pytest.raises(InvalidExternalLifecycleTransition, match='requires a result'):
+        build_lifecycle_projection(
+            service_identity=ASSESSOR_SERVICE_IDENTITY,
+            operation_status=ExternalLifecycleStatus.ACCEPTED,
+            result_verification=ExternalTaskResultVerification.UNVERIFIED,
+        )
+
+
+def test_prepared_state_does_not_claim_reserved_operation_identity() -> None:
+    prepared = lifecycle_definition(ExternalLifecycleStatus.PREPARED)
+
+    assert 'operation_id' not in prepared.state_invariants
+    assert 'dispatch_reserved_at' not in prepared.state_invariants
+    assert {'operation_id', 'idempotency_key', 'dispatch_reserved_at'} <= set(
+        prepared.transition_preconditions
+    )
 
 
 def test_lifecycle_projection_rejects_unknown_or_unsupported_service_state() -> None:
     with pytest.raises(KeyError, match='No canonical external-service entry'):
         build_lifecycle_projection(service_identity='fake', operation_status='accepted')
-    with pytest.raises(InvalidExternalLifecycleTransition, match='not supported'):
+    with pytest.raises(InvalidExternalLifecycleTransition, match='not projectable'):
         build_lifecycle_projection(
             service_identity='repairer_information_or_link',
             operation_status=ExternalLifecycleStatus.PREPARED,
