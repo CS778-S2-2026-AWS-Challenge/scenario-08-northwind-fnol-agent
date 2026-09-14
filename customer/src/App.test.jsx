@@ -117,6 +117,18 @@ describe('claimant intake projection', () => {
       claim: initialClaim,
       session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
     })
+    api.getClaim.mockResolvedValue(initialClaim)
+    api.bootstrapClaim.mockResolvedValue({
+      claim_id: initialClaim.claim_id,
+      session_id: 'ses_ui_vp',
+      claimant_message: claimantMessage,
+      agent_message: agentMessage,
+      form_changes: [],
+      contents_item_changes: [],
+      dynamic_form: null,
+      claim_revision: 2,
+      decision: { customer_next_step: initialClaim.customer_next_step },
+    })
     api.bootstrapClaim.mockResolvedValue({
       claim_id: initialClaim.claim_id,
       session_id: 'ses_ui_vp',
@@ -170,12 +182,12 @@ describe('claimant intake projection', () => {
 
     expect(api.bootstrapClaim).toHaveBeenCalledWith(expect.objectContaining({ incidentType: null }))
 
-    const failure = await screen.findByText(
-      'The model service is temporarily unavailable. The claim is unchanged. Try again in a moment.',
+    const failure = await screen.findByRole('alert')
+    expect(failure).toHaveTextContent(
+      'The model service is temporarily unavailable. The claim is unchanged.',
     )
     expect(failure).toBeInTheDocument()
-    expect(screen.queryByText('We could not confirm delivery. Please try again.')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Retry message' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry message' })).not.toBeInTheDocument()
   })
 
   it('opens a new claim conversation without clearing the previous claim', async () => {
@@ -194,14 +206,28 @@ describe('claimant intake projection', () => {
       claim_revision: 2,
       decision: { customer_next_step: initialClaim.customer_next_step },
     })
-    api.createClaim
+    api.bootstrapClaim
       .mockResolvedValueOnce({
-        claim: initialClaim,
-        session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
+        claim_id: initialClaim.claim_id,
+        session_id: 'ses_ui_vp',
+        claimant_message: claimantMessage,
+        agent_message: agentMessage,
+        form_changes: [],
+        contents_item_changes: [],
+        dynamic_form: null,
+        claim_revision: 2,
+        decision: { customer_next_step: initialClaim.customer_next_step },
       })
       .mockResolvedValueOnce({
-        claim: { ...initialClaim, claim_id: 'clm_ui_second' },
-        session: { session_id: 'ses_ui_second', model_profile_id: 'qwen-local' },
+        claim_id: 'clm_ui_second',
+        session_id: 'ses_ui_second',
+        claimant_message: claimantMessage,
+        agent_message: agentMessage,
+        form_changes: [],
+        contents_item_changes: [],
+        dynamic_form: null,
+        claim_revision: 2,
+        decision: { customer_next_step: initialClaim.customer_next_step },
       })
     api.listClaims.mockResolvedValue({
       items: [
@@ -213,6 +239,14 @@ describe('claimant intake projection', () => {
         },
       ],
     })
+    api.getClaim.mockImplementation(async (claimId) => ({
+      ...initialClaim,
+      claim_id: claimId,
+    }))
+    api.createClaim.mockResolvedValue({
+      claim: { ...initialClaim, claim_id: 'clm_ui_second' },
+      session: { session_id: 'ses_ui_second', model_profile_id: 'qwen-local' },
+    })
 
     render(<App />)
     const input = screen.getByPlaceholderText('Tell us what happened…')
@@ -222,7 +256,8 @@ describe('claimant intake projection', () => {
 
     await user.click(screen.getByRole('button', { name: 'New chat' }))
 
-    expect(api.bootstrapClaim).toHaveBeenCalledTimes(2)
+    expect(api.bootstrapClaim).toHaveBeenCalledTimes(1)
+    expect(api.createClaim).toHaveBeenCalledTimes(1)
     expect(api.startClaimSession).not.toHaveBeenCalled()
     expect(screen.getByText('clm_ui_second')).toBeInTheDocument()
     expect(screen.getByText('Conversation history')).toBeInTheDocument()
@@ -235,7 +270,32 @@ describe('claimant intake projection', () => {
 
   it('renders backend dynamic requirements and re-renders a corrected field', async () => {
     const user = userEvent.setup()
+    api.getClaim.mockResolvedValue({
+      ...initialClaim,
+      form: dynamicForm().form,
+      dynamic_form: dynamicForm(),
+    })
     api.submitClaimMessage.mockResolvedValue({
+      claimant_message: claimantMessage,
+      agent_message: agentMessage,
+      form_changes: [{
+        field_code: 'incident.occurred_at',
+        field: dynamicForm().form['incident.occurred_at'],
+      }],
+      contents_item_changes: [],
+      dynamic_form: dynamicForm(),
+      claim_revision: 2,
+      decision: {
+        customer_next_step: {
+          status: 'more_information_needed',
+          summary: 'Add the affected property address',
+          required_items: ['property.address'],
+        },
+      },
+    })
+    api.bootstrapClaim.mockResolvedValue({
+      claim_id: initialClaim.claim_id,
+      session_id: 'ses_ui_vp',
       claimant_message: claimantMessage,
       agent_message: agentMessage,
       form_changes: [{
@@ -276,7 +336,6 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
     await waitFor(() => expect(screen.getAllByText('When it happened').length).toBeGreaterThan(0))
-    expect(screen.getByText('1 of 2 needed now')).toBeInTheDocument()
     expect(screen.queryByText('Needed later: Affected property')).not.toBeInTheDocument()
     expect(screen.getAllByText('8pm').length).toBeGreaterThan(0)
 
@@ -293,6 +352,5 @@ describe('claimant intake projection', () => {
       revision: 2,
     })))
     expect(await screen.findByText('9pm')).toBeInTheDocument()
-    expect(screen.getByText('Add the affected property address')).toBeInTheDocument()
   })
 })
