@@ -1,4 +1,4 @@
-import { UserRoundCheck } from 'lucide-react'
+import { CircleAlert, CircleCheck, CircleDot, CircleX, UserRoundCheck } from 'lucide-react'
 import { failureReason, failureReference } from '../failure.js'
 import { formatDateTime, words } from '../format.js'
 import OwnershipActions from './OwnershipActions.jsx'
@@ -92,18 +92,19 @@ function WorkSummary({ detail, profile }) {
 
 function RecoverySummary({ context }) {
   if (!context) return null
+  const attempts = context.follow_up_attempts ?? 0
   return (
     <section className="detail-section" aria-labelledby="recovery-summary-title">
       <div className="section-heading">
         <div><p className="eyebrow">Recovery</p><h2 id="recovery-summary-title">Incomplete Claim recovery</h2></div>
-        <span className="count-badge">{context.follow_up_attempts ?? 0} attempts</span>
+        <span className="count-badge">{attempts} {attempts === 1 ? 'attempt' : 'attempts'}</span>
       </div>
       <p className="section-intro">This checkpoint comes from the authoritative incomplete-Claim projection. Staff should resume from the recorded point instead of repeating completed intake.</p>
       <div className="summary-grid recovery-summary-grid">
         <SummaryItem label="Interrupted" value={formatDateTime(context.interrupted_at)} />
         <SummaryItem label="Last meaningful activity" value={formatDateTime(context.last_meaningful_activity_at)} />
         <SummaryItem label="Resume point" value={projectedValue(context.resume_point)} />
-        <SummaryItem label="Follow-up status" value={projectedValue(context.follow_up_status)} />
+        <SummaryStatusItem label="Follow-up status" value={context.follow_up_status} />
         <SummaryItem label="Follow-up due" value={formatDateTime(context.follow_up_due_at)} />
         <SummaryItem label="Follow-up attempts" value={String(context.follow_up_attempts ?? 0)} />
       </div>
@@ -121,8 +122,8 @@ function IntegrationSummary({ summary }) {
         <span className="count-badge">{waiting.length} waiting</span>
       </div>
       <div className="summary-grid">
-        <SummaryItem label="Claim creation" value={projectedValue(summary.claim_creation_status)} />
-        <SummaryItem label="Assessor routing" value={projectedValue(summary.assessor_routing_status)} />
+        <SummaryStatusItem label="Claim creation" value={summary.claim_creation_status} />
+        <SummaryStatusItem label="Assessor routing" value={summary.assessor_routing_status} />
       </div>
       {waiting.length ? (
         <ul className="missing-list">
@@ -130,7 +131,8 @@ function IntegrationSummary({ summary }) {
             <li key={item.task_id}>
               <span>
                 <strong>{projectedValue(item.service_identity)}</strong>
-                <small>{projectedValue(item.requested_action)} · {projectedValue(item.status)}</small>
+                <small>{projectedValue(item.requested_action)}</small>
+                <ProjectedStatus value={item.status} />
               </span>
             </li>
           ))}
@@ -143,6 +145,34 @@ function IntegrationSummary({ summary }) {
 
 function projectedValue(value) {
   return value ? words(value) : 'Not recorded'
+}
+
+function SummaryStatusItem({ label, value }) {
+  return <div className="summary-item"><span>{label}</span><strong><ProjectedStatus value={value} /></strong></div>
+}
+
+function ProjectedStatus({ value }) {
+  const tone = projectedStatusTone(value)
+  const Icon = tone === 'confirmed'
+    ? CircleCheck
+    : tone === 'attention'
+      ? CircleAlert
+      : tone === 'missing'
+        ? CircleX
+        : CircleDot
+  return (
+    <span className={`record-status projected-status${tone ? ` record-status--${tone}` : ''}`}>
+      <Icon size={14} aria-hidden="true" />
+      {projectedValue(value)}
+    </span>
+  )
+}
+
+function projectedStatusTone(value) {
+  if (['created', 'assigned', 'accepted', 'resolved', 'not_required'].includes(value)) return 'confirmed'
+  if (['pending', 'queued', 'prepared', 'retryable_failure', 'unknown_outcome'].includes(value)) return 'attention'
+  if (['blocked', 'failed', 'terminal_failure'].includes(value)) return 'missing'
+  return ''
 }
 
 function TerminalSummary({ terminal }) {
