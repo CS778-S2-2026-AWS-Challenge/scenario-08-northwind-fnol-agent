@@ -308,9 +308,17 @@ def _second_process(
             200,
             'staff projection recovery',
         )
+        staff_retrievals = _expect(
+            client.get(
+                f'/api/v1/workbench/claims/{claim_id}/retrievals',
+                headers=STAFF_AUTH,
+            ),
+            200,
+            'staff retrieval recovery',
+        )
         if 'retrievals' in claim or 'signals' in claim:
             raise RuntimeError('Staff-only retrieval evidence leaked into the claimant projection.')
-        recovered_retrievals = cast(list[dict[str, Any]], staff['retrievals'])
+        recovered_retrievals = cast(list[dict[str, Any]], staff_retrievals['items'])
         if {str(item['retrieval_id']) for item in recovered_retrievals} != set(retrieval_ids):
             raise RuntimeError(
                 'Policy and history retrieval records did not recover after restart.'

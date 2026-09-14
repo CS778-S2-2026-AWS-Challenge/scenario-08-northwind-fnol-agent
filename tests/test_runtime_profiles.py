@@ -11,7 +11,7 @@ from backend.adapters.knowledge import (
 )
 from backend.adapters.policy_history import MockPolicyHistoryAdapter
 from backend.app import create_app
-from backend.core.config import DataRuntimeProfile, ObjectStorageAdapter, Settings
+from backend.core.config import DataRuntimeProfile, IdentityMode, ObjectStorageAdapter, Settings
 from backend.core.runtime_profiles import (
     RUNTIME_CAPABILITIES,
     DataRuntimeBundle,
@@ -24,6 +24,7 @@ from backend.core.runtime_profiles import (
 )
 from backend.domain.knowledge import KnowledgeChunk, KnowledgeSearch, KnowledgeSearchRequest
 from backend.repositories.fixture import FixtureRepository
+from backend.services.external_service_entry import ExternalServiceEntry
 from backend.services.knowledge_search import search_knowledge
 
 
@@ -248,6 +249,7 @@ def test_local_mvp_builds_mongodb_minio_and_synthetic_lookup_bundle(
     monkeypatch.setenv('NORTHWIND_MONGODB_URI', 'mongodb://unused')
     monkeypatch.setenv('NORTHWIND_MONGODB_DATABASE', 'northwind_test')
     monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ENDPOINT', 'http://minio:9000')
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_PRESIGN_ENDPOINT', 'http://localhost:9000')
     monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'local-access')
     monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY', 'local-secret')
 
@@ -269,6 +271,26 @@ def test_local_mvp_builds_mongodb_minio_and_synthetic_lookup_bundle(
         'knowledge_documents': 'configured_service',
         'knowledge_retrieval': 'configured_service',
     }
+
+
+def test_local_mvp_composition_explicitly_uses_the_controlled_assessor_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture_bundle = build_data_runtime_bundle(Settings())
+    local_bundle = replace(fixture_bundle, profile=DataRuntimeProfile.LOCAL_MVP)
+    monkeypatch.setattr('backend.app.build_data_runtime_bundle', lambda _settings: local_bundle)
+
+    app = create_app(
+        Settings(
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+            data_runtime_profile=DataRuntimeProfile.LOCAL_MVP,
+            object_storage_adapter=ObjectStorageAdapter.S3_COMPATIBLE,
+        )
+    )
+
+    assert app.state.assessor_service_entry.entry is ExternalServiceEntry.TEST_FIXTURE
+    assert app.state.assessor_service_entry.integration_source.value == 'fixture'
 
 
 def test_local_mvp_requires_explicit_minio_selection(
@@ -337,6 +359,7 @@ def test_local_mvp_fails_closed_when_a_selected_provider_is_unavailable(
     monkeypatch.setenv('NORTHWIND_MONGODB_URI', 'mongodb://unused')
     monkeypatch.setenv('NORTHWIND_MONGODB_DATABASE', 'northwind_test')
     monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ENDPOINT', 'http://minio:9000')
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_PRESIGN_ENDPOINT', 'http://localhost:9000')
     monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'local-access')
     monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY', 'local-secret')
 
@@ -366,6 +389,7 @@ def test_fixture_profile_fails_closed_when_explicit_s3_storage_is_unavailable(
         'backend.core.runtime_profiles.MinioEvidenceStorage', UnavailableEvidenceStorage
     )
     monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ENDPOINT', 'http://minio:9000')
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_PRESIGN_ENDPOINT', 'http://localhost:9000')
     monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'local-access')
     monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY', 'local-secret')
 

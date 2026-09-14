@@ -26,6 +26,7 @@ The local API is available at `http://localhost:9000` and the MinIO console at
 | --- | --- | --- |
 | `NORTHWIND_OBJECT_STORAGE_ADAPTER` | Explicit object-store adapter selection | `s3_compatible` |
 | `NORTHWIND_OBJECT_STORAGE_ENDPOINT` | S3-compatible HTTP(S) endpoint | `http://localhost:9000` |
+| `NORTHWIND_OBJECT_STORAGE_PRESIGN_ENDPOINT` | Optional browser-reachable endpoint used only to sign upload capabilities | `https://uploads.example.invalid` |
 | `NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID` | Runtime access key | `minioadmin` |
 | `NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY` | Runtime secret | `minioadmin` |
 | `NORTHWIND_OBJECT_STORAGE_BUCKET` | Bucket for protected evidence bytes | `northwind-evidence` |
@@ -38,6 +39,12 @@ The secret access key is never returned by the API; the access-key identity can 
 only inside the short-lived SigV4 capability described below. Endpoint URLs containing
 embedded user-info credentials are rejected; credentials have one controlled environment
 source.
+
+When the backend reaches MinIO through a container-only hostname, set
+`NORTHWIND_OBJECT_STORAGE_PRESIGN_ENDPOINT` to the browser-reachable origin. The adapter creates a
+second signing client for that origin; it never rewrites a generated URL because the HTTP Host is
+part of the Signature Version 4 signature. Backend health checks, completion, and byte reads keep
+using `NORTHWIND_OBJECT_STORAGE_ENDPOINT`.
 
 The default adapter is `fixture`. Endpoint or credential variables alone do not switch
 the running application. Selecting `s3_compatible` is explicit and fails startup when

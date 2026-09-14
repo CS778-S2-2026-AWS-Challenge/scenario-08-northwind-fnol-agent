@@ -64,6 +64,7 @@ class S3CompatibleObjectStorageConfig:
     access_key_id: str = field(repr=False)
     secret_access_key: str = field(repr=False)
     bucket: str
+    presign_endpoint_url: str | None = None
     region: str = 'us-east-1'
     presign_expiry_seconds: int = DEFAULT_PRESIGN_EXPIRY_SECONDS
 
@@ -73,6 +74,17 @@ class S3CompatibleObjectStorageConfig:
             raise ValueError('endpoint_url must be an absolute HTTP(S) URL.')
         if parsed.username is not None or parsed.password is not None:
             raise ValueError('endpoint_url must not contain embedded credentials.')
+        if self.presign_endpoint_url is not None:
+            presign_endpoint = urlparse(self.presign_endpoint_url)
+            if presign_endpoint.scheme not in {'http', 'https'} or not presign_endpoint.netloc:
+                raise ValueError('presign_endpoint_url must be an absolute HTTP(S) URL.')
+            if presign_endpoint.username is not None or presign_endpoint.password is not None:
+                raise ValueError('presign_endpoint_url must not contain embedded credentials.')
+        elif parsed.hostname == 'minio':
+            raise ValueError(
+                'NORTHWIND_OBJECT_STORAGE_PRESIGN_ENDPOINT is required when the storage '
+                'endpoint uses the container-only minio hostname.'
+            )
         if not self.access_key_id.strip() or not self.secret_access_key.strip():
             raise ValueError('access_key_id and secret_access_key must be non-empty.')
         if not _BUCKET_NAME.fullmatch(self.bucket):
@@ -119,6 +131,9 @@ class S3CompatibleObjectStorageConfig:
             access_key_id=required['NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID'] or '',
             secret_access_key=required['NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY'] or '',
             bucket=os.getenv('NORTHWIND_OBJECT_STORAGE_BUCKET', 'northwind-evidence'),
+            presign_endpoint_url=(
+                os.getenv('NORTHWIND_OBJECT_STORAGE_PRESIGN_ENDPOINT', '').strip() or None
+            ),
             region=os.getenv('NORTHWIND_OBJECT_STORAGE_REGION', 'us-east-1'),
             presign_expiry_seconds=expiry,
         )
@@ -395,7 +410,12 @@ class MinioEvidenceStorage(EvidenceStorage):
     allowed_media_types = ALLOWED_MEDIA_TYPES
     supports_content_proxy = False
 
-    def __init__(self, config: S3CompatibleObjectStorageConfig, client: Any = None) -> None:
+    def __init__(
+        self,
+        config: S3CompatibleObjectStorageConfig,
+        client: Any = None,
+        presign_client: Any = None,
+    ) -> None:
         self._config = config
         self._client = client or boto3.client(
             's3',
@@ -404,6 +424,22 @@ class MinioEvidenceStorage(EvidenceStorage):
             aws_secret_access_key=config.secret_access_key,
             region_name=config.region,
             config=BotoClientConfig(signature_version='s3v4'),
+        )
+        self._presign_client = (
+            presign_client
+            or client
+            or (
+                boto3.client(
+                    's3',
+                    endpoint_url=config.presign_endpoint_url,
+                    aws_access_key_id=config.access_key_id,
+                    aws_secret_access_key=config.secret_access_key,
+                    region_name=config.region,
+                    config=BotoClientConfig(signature_version='s3v4'),
+                )
+                if config.presign_endpoint_url is not None
+                else self._client
+            )
         )
 
     @staticmethod
@@ -472,7 +508,7 @@ class MinioEvidenceStorage(EvidenceStorage):
         storage_key = self._storage_key(claim_id, evidence_id)
         metadata = self._metadata(claim_id, evidence_id, media_type, size_bytes)
         try:
-            url = self._client.generate_presigned_url(
+            url = self._presign_client.generate_presigned_url(
                 'put_object',
                 Params={
                     'Bucket': self._config.bucket,

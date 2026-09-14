@@ -838,7 +838,12 @@ def _queue_key(
     claim: WorkingClaim,
     lifecycle: ClaimLifecycleState,
     missing_information: Sequence[WorkbenchMissingInformation],
+    active_handoffs: Sequence[HandoffRecord],
 ) -> WorkbenchQueueKey:
+    # Claim creation remains terminal for the external-claim contract, but a later
+    # claimant-requested handoff is active staff work and must remain actionable.
+    if active_handoffs:
+        return WorkbenchQueueKey.PROCESSING
     terminal = claim.terminal_disposition
     if terminal is not None:
         created_external_claim = (
@@ -1022,7 +1027,7 @@ def _allowed_actions(
     principal: Principal,
 ) -> list[WorkbenchAllowedAction]:
     terminal = claim.terminal_disposition
-    if terminal is not None:
+    if terminal is not None and not active_handoffs:
         if terminal.value is TerminalDispositionValue.COMPLETED:
             return []
         blocker = None
@@ -1662,7 +1667,7 @@ def _build_projection(
     lifecycle = _lifecycle(claim, active_handoffs, pending_evidence)
     incomplete_context = _incomplete_context(repository, claim, sessions)
     work_summary = WorkbenchWorkSummary(
-        queue_key=_queue_key(claim, lifecycle, missing),
+        queue_key=_queue_key(claim, lifecycle, missing, active_handoffs),
         current_work_item=current_work,
         primary_action_code=primary_action.action_code if primary_action else None,
         primary_action_target_ref=primary_action.target_ref if primary_action else None,
