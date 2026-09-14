@@ -34,6 +34,8 @@ import './App.css'
 import './styles/frontend-refactor.css'
 import MessageComposer from './components/MessageComposer.jsx'
 import ExternalServiceAction, { ExternalServiceOverview } from './components/ExternalServiceAction.jsx'
+import EvidenceHistory from './components/EvidenceHistory.jsx'
+import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
 
 const FIELD_LABELS = {
   'incident.description': 'What happened',
@@ -110,6 +112,28 @@ function evidenceFileStatusLabel(fileStatus, status) {
   return status === 'received' ? 'Received' : status
 }
 
+async function fetchClaimHistory({ signal } = {}) {
+  const claimsById = new Map()
+  const seenCursors = new Set()
+  let cursor
+
+  do {
+    const response = await listClaims({ cursor, signal })
+    for (const item of response.items) claimsById.set(item.claim_id, item)
+    const nextCursor = response.page?.next_cursor || null
+    if (nextCursor && seenCursors.has(nextCursor)) {
+      throw new ApiRequestError(
+        'Northwind returned an invalid Claim-history page. Try loading the history again.',
+        { code: 'INVALID_PAGINATION' },
+      )
+    }
+    if (nextCursor) seenCursors.add(nextCursor)
+    cursor = nextCursor
+  } while (cursor)
+
+  return [...claimsById.values()]
+}
+
 function mergeFields(current, changes) {
   return changes.reduce(
     (fields, change) => ({ ...fields, [change.field_code]: change.field }),
@@ -145,6 +169,10 @@ function App() {
     if (path === '/auth/login') return 'login'
     if (path === '/auth/register') return 'register'
     if (path === '/account') return 'account'
+    if (/^\/account\/claims\/[^/]+\/evidence$/.test(path)) return 'claim-evidence'
+    if (/^\/account\/claims\/[^/]+$/.test(path)) return 'claim-features'
+    if (path === '/account/claims') return 'claim-history'
+    if (path === '/files') return 'files'
     if (path === '/how-it-works') return 'how-it-works'
     return 'home'
   })()
@@ -166,7 +194,12 @@ function App() {
   const [editingField, setEditingField] = useState(null)
   const [editValue, setEditValue] = useState('')
   const [handoff, setHandoff] = useState(null)
-  const [savedReports, setSavedReports] = useState(null)
+  const [claimHistory, setClaimHistory] = useState(null)
+  const [claimHistoryError, setClaimHistoryError] = useState('')
+  const [selectedHistoryClaimId, setSelectedHistoryClaimId] = useState(() => {
+    const match = globalThis.location?.pathname?.match(/^\/account\/claims\/([^/]+)/)
+    return match ? decodeURIComponent(match[1]) : null
+  })
   const [detailsOpen, setDetailsOpen] = useState(true)
   const [mobileView, setMobileView] = useState('chat')
   const [workspaceView, setWorkspaceView] = useState('chat')
@@ -177,7 +210,7 @@ function App() {
   })
   const [selectedModel, setSelectedModel] = useState('')
   const [attachments, setAttachments] = useState([])
-  const [evidenceItems, setEvidenceItems] = useState([])
+  const [, setEvidenceItems] = useState([])
   const [evidenceSyncNotice, setEvidenceSyncNotice] = useState('')
   const [evidencePollingKey, setEvidencePollingKey] = useState(0)
   const [resumeContext, setResumeContext] = useState(null)
@@ -199,13 +232,45 @@ function App() {
   const latestEvidenceItems = useRef([])
   const evidenceHasLocalMutation = useRef(false)
   const evidenceClaimId = useRef(null)
+  const evidenceUploadControllers = useRef(new Map())
+  const dismissedComposerEvidenceIds = useRef(new Set())
+  const confirmedClaimProjections = useRef(new Map())
   const hasStarted = claim !== null
+  const savedReports = claimHistory === null
+    ? null
+    : claimHistory.filter((item) => item.can_resume)
+  const selectedHistoryClaim = claimHistory?.find((item) => item.claim_id === selectedHistoryClaimId)
+    || (claim?.claim_id === selectedHistoryClaimId ? claim : null)
+
+  function rememberClaimInHistory(createdClaim) {
+    if (!hasClaimantAccessToken()) return
+    confirmedClaimProjections.current.set(createdClaim.claim_id, createdClaim)
+    setClaimHistory((current) => [
+      createdClaim,
+      ...(current || []).filter((item) => item.claim_id !== createdClaim.claim_id),
+    ])
+    setClaimHistoryError('')
+  }
+
+  function replaceClaimHistory(items) {
+    const merged = new Map(items.map((item) => [item.claim_id, item]))
+    for (const [claimId, createdClaim] of confirmedClaimProjections.current) {
+      if (!merged.has(claimId)) merged.set(claimId, createdClaim)
+    }
+    setClaimHistory([...merged.values()])
+  }
 
   useEffect(() => {
     if (!hasClaimantAccessToken()) return
     getAuthenticatedAccount()
       .then((currentAccount) => setAccount(currentAccount))
-      .catch(() => setClaimantAccessToken(null))
+      .catch(() => {
+        setClaimantAccessToken(null)
+        if (globalThis.location?.pathname === '/files' || globalThis.location?.pathname?.startsWith('/account/claims')) {
+          setPageState('login')
+          globalThis.history?.replaceState({ northwindRoute: 'login' }, '', '/auth/login')
+        }
+      })
   }, [])
 
   useEffect(() => {
@@ -220,6 +285,10 @@ function App() {
     if (nextPage === 'login') return '/auth/login'
     if (nextPage === 'register') return '/auth/register'
     if (nextPage === 'account') return '/account'
+    if (nextPage === 'claim-history') return '/account/claims'
+    if (nextPage === 'claim-features' && selectedHistoryClaimId) return `/account/claims/${encodeURIComponent(selectedHistoryClaimId)}`
+    if (nextPage === 'claim-evidence' && selectedHistoryClaimId) return `/account/claims/${encodeURIComponent(selectedHistoryClaimId)}/evidence`
+    if (nextPage === 'files') return '/files'
     if (nextPage === 'how-it-works') return '/how-it-works'
     if (claim?.claim_id) return `/claims/${claim.claim_id}`
     return '/'
@@ -237,6 +306,10 @@ function App() {
     if (pathname === '/auth/login') return 'login'
     if (pathname === '/auth/register') return 'register'
     if (pathname === '/account') return account ? 'account' : 'login'
+    if (pathname === '/account/claims') return account ? 'claim-history' : 'login'
+    if (/^\/account\/claims\/[^/]+\/evidence$/.test(pathname)) return account ? 'claim-evidence' : 'login'
+    if (/^\/account\/claims\/[^/]+$/.test(pathname)) return account ? 'claim-features' : 'login'
+    if (pathname === '/files') return account ? 'files' : 'login'
     if (pathname === '/how-it-works') return hasStarted ? 'home' : 'how-it-works'
     if (pathname.startsWith('/claims/')) return claim?.claim_id ? 'home' : 'home'
     return 'home'
@@ -246,10 +319,14 @@ function App() {
     const onPopState = () => {
       const path = globalThis.location?.pathname || '/'
       const nextPage = pageForPath(path)
+      const historyClaimMatch = path.match(/^\/account\/claims\/([^/]+)/)
+      setSelectedHistoryClaimId(historyClaimMatch ? decodeURIComponent(historyClaimMatch[1]) : null)
       setPageState(nextPage)
-      const canonicalPath = nextPage === 'home' && claim?.claim_id
-        ? `/claims/${claim.claim_id}`
-        : routeForPage(nextPage)
+      const canonicalPath = ['claim-history', 'claim-features', 'claim-evidence'].includes(nextPage)
+        ? path
+        : nextPage === 'home' && claim?.claim_id
+          ? `/claims/${claim.claim_id}`
+          : routeForPage(nextPage)
       if (path !== canonicalPath) {
         globalThis.history?.replaceState({ northwindRoute: nextPage }, '', canonicalPath)
       }
@@ -267,13 +344,21 @@ function App() {
         ? '/auth/register'
         : page === 'account'
           ? '/account'
-          : page === 'how-it-works'
-            ? '/how-it-works'
-            : claim?.claim_id ? `/claims/${claim.claim_id}` : '/'
+          : page === 'claim-history'
+            ? '/account/claims'
+            : page === 'claim-features' && selectedHistoryClaimId
+              ? `/account/claims/${encodeURIComponent(selectedHistoryClaimId)}`
+              : page === 'claim-evidence' && selectedHistoryClaimId
+                ? `/account/claims/${encodeURIComponent(selectedHistoryClaimId)}/evidence`
+                : page === 'files'
+                  ? '/files'
+                  : page === 'how-it-works'
+                    ? '/how-it-works'
+                    : claim?.claim_id ? `/claims/${claim.claim_id}` : '/'
     if (globalThis.location?.pathname !== expectedPath) {
       globalThis.history?.replaceState({ northwindRoute: page }, '', expectedPath)
     }
-  }, [page, claim?.claim_id])
+  }, [page, claim?.claim_id, selectedHistoryClaimId])
 
   const isBusy = [
     'starting',
@@ -373,7 +458,9 @@ function App() {
           return evidence ? attachmentForEvidence(evidence, item) : item
         })
       }
-      return items.map((item) => attachmentForEvidence(item, currentByEvidenceId.get(item.evidence_id)))
+      return items
+        .filter((item) => !dismissedComposerEvidenceIds.current.has(item.evidence_id))
+        .map((item) => attachmentForEvidence(item, currentByEvidenceId.get(item.evidence_id)))
     })
     return true
   }
@@ -468,14 +555,23 @@ function App() {
   useEffect(() => {
     if (!account) return undefined
     let active = true
-    listClaims()
-      .then((response) => {
-        if (active) setSavedReports(response.items.filter((item) => item.can_resume))
+    const controller = new AbortController()
+    fetchClaimHistory({ signal: controller.signal })
+      .then((items) => {
+        if (active) {
+          replaceClaimHistory(items)
+          setClaimHistoryError('')
+        }
       })
-      .catch(() => {
-        if (active) setSavedReports(null)
+      .catch((requestError) => {
+        if (active && requestError?.name !== 'AbortError') {
+          setClaimHistoryError(requestError.message || 'The Claim service did not respond.')
+        }
       })
-    return () => { active = false }
+    return () => {
+      active = false
+      controller.abort()
+    }
   }, [account])
 
   useEffect(() => {
@@ -511,6 +607,7 @@ function App() {
       latestEvidenceRevision.current = 0
       latestEvidenceItems.current = []
       evidenceHasLocalMutation.current = false
+      dismissedComposerEvidenceIds.current.clear()
     }
     let active = true
     getClaimEvidence(claim.claim_id)
@@ -578,6 +675,9 @@ function App() {
       completeKey: requestId('evidence-complete'),
     }
     const localId = attempt.localId
+    evidenceUploadControllers.current.get(localId)?.abort()
+    const uploadController = new AbortController()
+    evidenceUploadControllers.current.set(localId, uploadController)
     setAttachments((current) => existingAttempt
       ? current.map((item) => item.id === localId
         ? { ...item, status: 'uploading', statusLabel: 'Uploading…', retry: null }
@@ -588,6 +688,7 @@ function App() {
       if (!activeClaim) {
         const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType, modelProfileId: selectedModel })
         activeClaim = created.claim
+        rememberClaimInHistory(created.claim)
         setClaim(activeClaim)
         setSessionId(created.session.session_id)
         if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
@@ -626,12 +727,17 @@ function App() {
         file,
         kind: file.type.startsWith('image/') ? 'incident_photo' : 'other_document',
         idempotencyKey: attempt.uploadKey,
+        signal: uploadController.signal,
       })
       evidenceHasLocalMutation.current = true
       latestEvidenceRevision.current = requested.revision
       attempt.evidenceId = requested.evidence_id
+      dismissedComposerEvidenceIds.current.delete(requested.evidence_id)
+      setAttachments((current) => current.map((item) => item.id === localId
+        ? { ...item, evidenceId: requested.evidence_id, uploadAttempt: attempt }
+        : item))
       setClaimRevision(requested.revision)
-      await uploadEvidenceContent({ upload: requested.upload, file })
+      await uploadEvidenceContent({ upload: requested.upload, file, signal: uploadController.signal })
       const fileBytes = new Uint8Array(await file.arrayBuffer())
       const checksumBuffer = await globalThis.crypto.subtle.digest('SHA-256', fileBytes)
       const checksum = `sha256:${Array.from(new Uint8Array(checksumBuffer), (byte) => byte.toString(16).padStart(2, '0')).join('')}`
@@ -641,6 +747,7 @@ function App() {
         revision: requested.revision,
         checksum,
         idempotencyKey: attempt.completeKey,
+        signal: uploadController.signal,
       })
       latestEvidenceRevision.current = completed.revision
       attempt.evidenceId = completed.evidence.evidence_id
@@ -657,11 +764,41 @@ function App() {
         : item))
       setStatus('idle')
     } catch (requestError) {
+      if (requestError?.name === 'AbortError') return
       setAttachments((current) => current.map((item) => item.id === localId
         ? { ...item, status: 'failed', statusLabel: requestError.message || 'Upload failed', retry: () => handleFileSelected(file, attempt) }
         : item))
       showError(requestError)
+    } finally {
+      if (evidenceUploadControllers.current.get(localId) === uploadController) {
+        evidenceUploadControllers.current.delete(localId)
+      }
     }
+  }
+
+  function removeComposerAttachment(attachment) {
+    evidenceUploadControllers.current.get(attachment.id)?.abort()
+    evidenceUploadControllers.current.delete(attachment.id)
+    const evidenceId = attachment.evidenceId || attachment.uploadAttempt?.evidenceId
+    if (evidenceId) dismissedComposerEvidenceIds.current.add(evidenceId)
+    setAttachments((current) => current.filter((item) => item.id !== attachment.id))
+  }
+
+  function clearComposerAttachments() {
+    for (const controller of evidenceUploadControllers.current.values()) controller.abort()
+    evidenceUploadControllers.current.clear()
+    dismissedComposerEvidenceIds.current.clear()
+    setAttachments([])
+  }
+
+  function cancelComposerDraftAttachments() {
+    for (const controller of evidenceUploadControllers.current.values()) controller.abort()
+    evidenceUploadControllers.current.clear()
+    setAttachments((current) => current.filter((item) => {
+      const isDraft = item.status === 'uploading' || (item.status === 'failed' && !item.evidenceId)
+      if (isDraft && item.evidenceId) dismissedComposerEvidenceIds.current.add(item.evidenceId)
+      return !isDraft
+    }))
   }
 
   async function refreshAfterConflict() {
@@ -714,6 +851,7 @@ function App() {
         })
         activeClaim = created.claim
         activeSessionId = created.session.session_id
+        rememberClaimInHistory(created.claim)
         setClaim(created.claim)
         setSessionId(activeSessionId)
         if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
@@ -791,9 +929,12 @@ function App() {
     }
     setError('')
     setFailedMessage(null)
+    cancelComposerDraftAttachments()
     setStatus('starting')
     try {
       const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null, modelProfileId: selectedModel })
+      clearComposerAttachments()
+      rememberClaimInHistory(created.claim)
       setClaim(created.claim)
       setSessionId(created.session.session_id)
       if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
@@ -804,12 +945,6 @@ function App() {
       setNextStep(created.claim.customer_next_step)
       setHandoff(null)
       setEvidenceItems([])
-      setAttachments([])
-      if (account) {
-        listClaims()
-          .then((response) => setSavedReports(response.items.filter((item) => item.can_resume)))
-          .catch(() => {})
-      }
       setWorkspaceView('chat')
       setMobileView('chat')
       setDraft('')
@@ -1040,34 +1175,13 @@ function App() {
   async function loadSavedReports() {
     if (isBusy) return
     setError('')
+    setClaimHistoryError('')
     setStatus('loading-reports')
     try {
-      const reportsByClaimId = new Map()
-      const seenCursors = new Set()
-      let cursor
-
-      do {
-        const response = await listClaims({ cursor })
-        for (const item of response.items) {
-          if (item.can_resume && !reportsByClaimId.has(item.claim_id)) {
-            reportsByClaimId.set(item.claim_id, item)
-          }
-        }
-
-        const nextCursor = response.page?.next_cursor || null
-        if (nextCursor && seenCursors.has(nextCursor)) {
-          throw new ApiRequestError(
-            'We could not finish loading your saved reports. Please try again.',
-            { code: 'INVALID_PAGINATION' },
-          )
-        }
-        if (nextCursor) seenCursors.add(nextCursor)
-        cursor = nextCursor
-      } while (cursor)
-
-      setSavedReports([...reportsByClaimId.values()])
+      replaceClaimHistory(await fetchClaimHistory())
       setStatus('idle')
     } catch (requestError) {
+      setClaimHistoryError(requestError.message || 'The Claim service did not respond.')
       showError(requestError)
     }
   }
@@ -1075,11 +1189,13 @@ function App() {
   async function resumeSavedReport(claimId) {
     if (isBusy) return
     setError('')
+    cancelComposerDraftAttachments()
     setStatus('resuming')
     try {
       const session = await resumeClaimSession({ claimId })
       const current = await getClaim(claimId)
       const conversation = await getClaimMessages(claimId, session.session_id)
+      clearComposerAttachments()
       latestRevision.current = current.revision
       setClaim(current)
       setSessionId(session.session_id)
@@ -1091,7 +1207,6 @@ function App() {
       setNextStep(current.customer_next_step)
       setHandoff(current.handoff || null)
       setResumeContext(session.resume)
-      setSavedReports(null)
       setStatus('idle')
     } catch (requestError) {
       showError(requestError)
@@ -1123,6 +1238,7 @@ function App() {
       setAccount(await getAuthenticatedAccount())
       if (!claim) {
         const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null, modelProfileId: selectedModel })
+        rememberClaimInHistory(created.claim)
         setClaim(created.claim)
         setSessionId(created.session.session_id)
         if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
@@ -1171,6 +1287,7 @@ function App() {
       setAccount(await getAuthenticatedAccount())
       if (!claim) {
         const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null, modelProfileId: selectedModel })
+        rememberClaimInHistory(created.claim)
         setClaim(created.claim)
         setSessionId(created.session.session_id)
         if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
@@ -1191,7 +1308,10 @@ function App() {
     setAuthStatus('loading'); setAuthError('')
     try { await logoutClaimant() } catch (requestError) { setAuthError(requestError.message) }
     setAccount(null)
-    setSavedReports(null)
+    setClaimHistory(null)
+    setClaimHistoryError('')
+    setSelectedHistoryClaimId(null)
+    confirmedClaimProjections.current.clear()
     setClaim(null)
     setSessionId(null)
     setMessages([])
@@ -1200,7 +1320,7 @@ function App() {
     setDynamicForm(null)
     setNextStep(null)
     setHandoff(null)
-    setAttachments([])
+    clearComposerAttachments()
     setEvidenceItems([])
     setResumeContext(null)
     setWorkspaceView('chat')
@@ -1210,8 +1330,51 @@ function App() {
   }
 
   async function openSavedClaims() {
-    setPage('home')
+    setSelectedHistoryClaimId(null)
+    setPage('claim-history')
     await loadSavedReports()
+  }
+
+  function openClaimHistory() {
+    setSelectedHistoryClaimId(null)
+    if (hasStarted) {
+      setWorkspaceView('history')
+      setMobileView('chat')
+    } else {
+      setPage('claim-history')
+    }
+    if (account) loadSavedReports().catch(() => {})
+  }
+
+  function openClaimFeatures(selectedClaim) {
+    setSelectedHistoryClaimId(selectedClaim.claim_id)
+    if (hasStarted) {
+      setWorkspaceView('claim-features')
+      setMobileView('chat')
+    } else {
+      setPageState('claim-features')
+      globalThis.history?.pushState(
+        { northwindRoute: 'claim-features' },
+        '',
+        `/account/claims/${encodeURIComponent(selectedClaim.claim_id)}`,
+      )
+    }
+  }
+
+  function openClaimEvidence() {
+    if (!selectedHistoryClaim) return
+    if (hasStarted) {
+      setWorkspaceView('claim-evidence')
+      setMobileView('chat')
+    } else {
+      setPage('claim-evidence')
+    }
+  }
+
+  function leaveWorkspaceUtility() {
+    setWorkspaceView('chat')
+    setSelectedHistoryClaimId(null)
+    setPage('home')
   }
 
   async function saveProfile(event) {
@@ -1272,6 +1435,95 @@ function App() {
             <p>Our claims assistant keeps track of the details, asks only for what is still needed, and explains the next step clearly. You can start without an account and log in later if you want to save your progress.</p>
           </section>
         </main>
+      ) : !hasStarted && ['claim-history', 'claim-features', 'claim-evidence'].includes(page) ? (
+        <main className="evidence-history-page">
+          {account ? (
+            <section className="evidence-history-page-content" aria-labelledby="account-claim-view-title">
+              <button
+                className="back-link"
+                type="button"
+                onClick={page === 'claim-evidence'
+                  ? () => setPage('claim-features')
+                  : page === 'claim-features'
+                    ? openClaimHistory
+                    : () => setPage('account')}
+              >
+                <span className="back-link-arrow" aria-hidden="true">←</span>
+                {page === 'claim-evidence'
+                  ? 'Back to Claim features'
+                  : page === 'claim-features'
+                    ? 'Back to Claim history'
+                    : 'Back to account'}
+              </button>
+              <p className="eyebrow">Northwind account</p>
+              <h1 id="account-claim-view-title">
+                {page === 'claim-history' ? 'Claim history' : page === 'claim-features' ? 'Claim features' : 'Evidence history'}
+              </h1>
+              <p>
+                {page === 'claim-history'
+                  ? 'Your Claims are listed by their latest server-recorded update. Open a Claim to review its available features.'
+                  : page === 'claim-features'
+                    ? 'Choose the information you want to review for this Claim.'
+                    : 'Review the files and supporting material recorded for the selected Claim.'}
+              </p>
+              {page === 'claim-history' && (
+                <ClaimHistory
+                  claims={claimHistory}
+                  error={claimHistoryError}
+                  loading={claimHistory === null && !claimHistoryError}
+                  refreshing={status === 'loading-reports'}
+                  onRetry={loadSavedReports}
+                  onSelect={openClaimFeatures}
+                />
+              )}
+              {page === 'claim-features' && (
+                selectedHistoryClaim ? (
+                  <ClaimFeatureDirectory claim={selectedHistoryClaim} onOpenEvidence={openClaimEvidence} />
+                ) : claimHistory === null && !claimHistoryError ? (
+                  <p className="claim-history-state" role="status">Loading this Claim…</p>
+                ) : (
+                  <div className="claim-history-state is-error" role="alert">
+                    <h2>This Claim is no longer available</h2>
+                    <p>Return to Claim history and choose a Claim that is available to your account.</p>
+                    <button className="secondary-button" type="button" onClick={openClaimHistory}>Return to Claim history</button>
+                  </div>
+                )
+              )}
+              {page === 'claim-evidence' && (
+                selectedHistoryClaim ? (
+                  <EvidenceHistory claimId={selectedHistoryClaim.claim_id} />
+                ) : claimHistory === null && !claimHistoryError ? (
+                  <p className="claim-history-state" role="status">Loading this Claim…</p>
+                ) : (
+                  <div className="claim-history-state is-error" role="alert">
+                    <h2>This Claim is no longer available</h2>
+                    <p>Return to Claim history and choose a Claim that is available to your account.</p>
+                    <button className="secondary-button" type="button" onClick={openClaimHistory}>Return to Claim history</button>
+                  </div>
+                )
+              )}
+            </section>
+          ) : (
+            <p className="claim-history-state" role="status">Checking your account…</p>
+          )}
+        </main>
+      ) : !hasStarted && page === 'files' ? (
+        <main className="evidence-history-page">
+          {account ? (
+            <section className="evidence-history-page-content" aria-labelledby="account-evidence-history-title">
+              <button className="back-link" type="button" onClick={() => setPage('account')}>
+                <span className="back-link-arrow" aria-hidden="true">←</span>
+                Back to account
+              </button>
+              <p className="eyebrow">Northwind account</p>
+              <h1 id="account-evidence-history-title">Evidence history</h1>
+              <p>Review files retained across your Northwind claims, including where they came from and their latest processing state.</p>
+              <EvidenceHistory currentClaimId={null} />
+            </section>
+          ) : (
+            <p className="evidence-history-state" role="status">Checking your account…</p>
+          )}
+        </main>
       ) : !hasStarted && page === 'account' && account ? (
         <main className="auth-page auth-page-account">
           <section className="login-card account-card" aria-labelledby="account-title">
@@ -1295,7 +1547,10 @@ function App() {
             </form>
             {authError && <p className="backend-status is-error" role="alert">{authError}</p>}
             <button className="secondary-button" type="button" onClick={openSavedClaims} disabled={isBusy}>
-              View saved claims
+              View Claim history
+            </button>
+            <button className="secondary-button" type="button" onClick={() => setPage('files')}>
+              View evidence history
             </button>
             <button className="secondary-button" type="button" onClick={signOut} disabled={authStatus !== 'idle'}>Log out</button>
           </section>
@@ -1375,6 +1630,7 @@ function App() {
                   claimTypeLocked={Boolean(sessionId)}
                   attachments={attachments}
                   onFileSelected={handleFileSelected}
+                  onRemoveAttachment={removeComposerAttachment}
                 />
                 <div className="entry-hint-row">
                   <span>Press Enter to start, or ask anything about a claim</span>
@@ -1439,7 +1695,7 @@ function App() {
             <div className="history-actions" aria-label="Claim tools">
               <button type="button" onClick={startNewChat} disabled={isBusy}>New chat</button>
               <button type="button" onClick={() => setWorkspaceView('privacy')}>Privacy policy</button>
-              <button type="button" onClick={() => setWorkspaceView('history')}>Claim history</button>
+              <button type="button" onClick={openClaimHistory}>Claim history</button>
               <button type="button" onClick={() => setWorkspaceView('external-services')}>External services</button>
               <button type="button" onClick={() => setWorkspaceView('files')}>Uploaded files</button>
             </div>
@@ -1478,10 +1734,83 @@ function App() {
             </div>
           </aside>
           <section className={`conversation-panel mobile-view-${mobileView} ${workspaceView !== 'chat' ? 'is-utility' : ''}`} aria-labelledby="conversation-title">
-            <div className="workspace-utility-page" hidden={workspaceView === 'chat'}>
-              <button className="back-link" type="button" onClick={() => { setWorkspaceView('chat'); setPage('home') }}>← Back to conversation</button>
-              <h1>{workspaceView === 'privacy' ? 'Privacy policy' : workspaceView === 'history' ? 'Claim history' : workspaceView === 'external-services' ? 'External services' : workspaceView === 'account' ? 'Your account' : 'Uploaded files'}</h1>
-              <p>{workspaceView === 'privacy' ? 'We only use the information needed to handle your claim and show you what has been recorded.' : workspaceView === 'history' ? 'Your claim conversations will appear here as they are saved.' : workspaceView === 'external-services' ? 'See the external service currently recorded for this claim, including what may be shared and what happens next.' : workspaceView === 'account' ? 'Manage your profile and communication preferences.' : 'Files you share for this claim appear here with their upload and processing status.'}</p>
+            <div
+              className={`workspace-utility-page ${['history', 'claim-features', 'claim-evidence', 'files'].includes(workspaceView) ? 'is-claim-record-page' : ''}`}
+              hidden={workspaceView === 'chat'}
+            >
+              <button
+                className="back-link"
+                type="button"
+                onClick={workspaceView === 'claim-evidence'
+                  ? () => setWorkspaceView('claim-features')
+                  : workspaceView === 'claim-features'
+                    ? openClaimHistory
+                    : leaveWorkspaceUtility}
+              >
+                <span className="back-link-arrow" aria-hidden="true">←</span>
+                {workspaceView === 'claim-evidence'
+                  ? 'Back to Claim features'
+                  : workspaceView === 'claim-features'
+                    ? 'Back to Claim history'
+                    : 'Back to conversation'}
+              </button>
+              <h1>
+                {workspaceView === 'privacy'
+                  ? 'Privacy policy'
+                  : workspaceView === 'history'
+                    ? 'Claim history'
+                    : workspaceView === 'claim-features'
+                      ? 'Claim features'
+                      : workspaceView === 'external-services'
+                        ? 'External services'
+                        : workspaceView === 'account'
+                          ? 'Your account'
+                          : 'Evidence history'}
+              </h1>
+              <p>
+                {workspaceView === 'privacy'
+                  ? 'We only use the information needed to handle your Claim and show you what has been recorded.'
+                  : workspaceView === 'history'
+                    ? 'Your Claims are listed by their latest server-recorded update. Open a Claim to review its available features.'
+                    : workspaceView === 'claim-features'
+                      ? 'Choose the information you want to review for this Claim.'
+                      : workspaceView === 'external-services'
+                        ? 'See the external service currently recorded for this Claim, including what may be shared and what happens next.'
+                        : workspaceView === 'account'
+                          ? 'Manage your profile and communication preferences.'
+                          : workspaceView === 'claim-evidence'
+                            ? 'Review the files and supporting material recorded for the selected Claim.'
+                            : 'Review files retained across your Northwind Claims, including where they came from and their latest processing state.'}
+              </p>
+              {workspaceView === 'history' && (
+                account ? (
+                  <ClaimHistory
+                    claims={claimHistory}
+                    error={claimHistoryError}
+                    loading={claimHistory === null && !claimHistoryError}
+                    refreshing={status === 'loading-reports'}
+                    onRetry={loadSavedReports}
+                    onSelect={openClaimFeatures}
+                  />
+                ) : (
+                  <div className="claim-history-state">
+                    <h2>Sign in to view Claim history</h2>
+                    <p>Your current Claim remains available. Sign in to review the Claims saved to your account.</p>
+                    <button className="secondary-button" type="button" onClick={() => setPage('login')}>Log in</button>
+                  </div>
+                )
+              )}
+              {workspaceView === 'claim-features' && (
+                selectedHistoryClaim ? (
+                  <ClaimFeatureDirectory claim={selectedHistoryClaim} onOpenEvidence={openClaimEvidence} />
+                ) : (
+                  <div className="claim-history-state is-error" role="alert">
+                    <h2>This Claim is no longer available</h2>
+                    <p>Northwind could not find it in the latest Claim history. Return to the list and choose another Claim.</p>
+                    <button className="secondary-button" type="button" onClick={openClaimHistory}>Return to Claim history</button>
+                  </div>
+                )
+              )}
               {workspaceView === 'account' && account && (
                 <div className="workspace-account-content">
                   <form className="login-form" onSubmit={saveProfile}>
@@ -1502,31 +1831,24 @@ function App() {
                   {authError && <p className="backend-status is-error" role="alert">{authError}</p>}
                 </div>
               )}
+              {workspaceView === 'claim-evidence' && selectedHistoryClaim && (
+                <EvidenceHistory claimId={selectedHistoryClaim.claim_id} />
+              )}
               {workspaceView === 'external-services' && (
                 claim.external_service_action
                   ? <ExternalServiceOverview action={claim.external_service_action} />
                   : <p className="empty-details">No external service is currently recorded for this claim.</p>
               )}
               {workspaceView === 'files' && (
-                evidenceItems.length > 0 ? (
-                  <ul className="uploaded-files-list">
-                    {evidenceItems.map((item) => (
-                      <li key={item.evidence_id} className="uploaded-file-row">
-                        <div><strong>{item.original_filename || item.kind}</strong><span>{item.media_type || 'File'} · {item.file_status || item.status}</span></div>
-                        <span className="file-status">{evidenceFileStatusLabel(item.file_status, item.status)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : attachments.length > 0 ? (
-                  <ul className="uploaded-files-list">
-                    {attachments.map((item) => (
-                      <li key={item.id} className="uploaded-file-row">
-                        <div><strong>{item.name}</strong><span>Claim evidence</span></div>
-                        <span className="file-status">{item.statusLabel}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : <p className="empty-details">No files have been uploaded for this claim.</p>
+                account ? (
+                  <EvidenceHistory currentClaimId={claim.claim_id} />
+                ) : (
+                  <div className="evidence-history-state">
+                    <h2>Sign in to view your evidence history</h2>
+                    <p>Your current claim remains available. Sign in to see files retained across your other claims.</p>
+                    <button className="secondary-button" type="button" onClick={() => setPage('login')}>Log in</button>
+                  </div>
+                )
               )}
             </div>
             <div className="conversation-heading">
@@ -1728,6 +2050,7 @@ function App() {
               claimTypeLocked={Boolean(sessionId)}
               attachments={attachments}
               onFileSelected={handleFileSelected}
+              onRemoveAttachment={removeComposerAttachment}
             />
           </section>
 

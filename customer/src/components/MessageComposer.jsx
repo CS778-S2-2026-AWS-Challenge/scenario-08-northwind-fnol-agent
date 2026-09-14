@@ -174,11 +174,13 @@ export default function MessageComposer({
   setSelectedModel,
   attachments = [],
   onFileSelected,
+  onRemoveAttachment,
 }) {
   const isWorkspace = variant === 'workspace'
   const fileInput = useRef(null)
   const textareaRef = useRef(null)
   const [voiceStatus, setVoiceStatus] = useState('')
+  const [selectedAttachmentId, setSelectedAttachmentId] = useState(null)
 
   useEffect(() => {
     const textarea = textareaRef.current
@@ -207,6 +209,19 @@ export default function MessageComposer({
     recognition.onerror = () => setVoiceStatus('Voice input could not be started.')
     recognition.onend = () => setVoiceStatus('')
     recognition.start()
+  }
+
+  function removeAttachment(attachment) {
+    if (!onRemoveAttachment) return
+    onRemoveAttachment(attachment)
+    setSelectedAttachmentId(null)
+    textareaRef.current?.focus()
+  }
+
+  function handleAttachmentKeyDown(event, attachment) {
+    if (event.key !== 'Backspace') return
+    event.preventDefault()
+    removeAttachment(attachment)
   }
 
   const modelDisplayName = (model) => model?.label || model?.id
@@ -241,16 +256,55 @@ export default function MessageComposer({
       <div className={isWorkspace ? 'composer-input-surface' : undefined}>
         {isWorkspace && attachments.length > 0 && (
           <div className="composer-attachments" aria-label="Attached files">
-            {attachments.map((attachment) => (
-              <div className={`composer-file composer-file-${attachment.status || 'uploaded'}`} key={attachment.id || attachment.name}>
-                <span className="composer-file-icon" aria-hidden="true">↗</span>
-                <span className="composer-file-copy">
-                  <strong>{attachment.name}</strong>
-                  <small>{attachment.statusLabel || attachment.status || 'Uploaded'}</small>
-                </span>
+            {attachments.map((attachment) => {
+              const attachmentId = attachment.id || attachment.name
+              const canRemoveFromDraft = Boolean(onRemoveAttachment) && (
+                attachment.status === 'uploading'
+                || (attachment.status === 'failed' && !attachment.evidenceId)
+              )
+              const content = (
+                <>
+                  <span className="composer-file-icon" aria-hidden="true">↗</span>
+                  <span className="composer-file-copy">
+                    <strong>{attachment.name}</strong>
+                    <small>{attachment.statusLabel || attachment.status || 'Uploaded'}</small>
+                  </span>
+                </>
+              )
+              return (
+                <div
+                  className={`composer-file composer-file-${attachment.status || 'uploaded'} ${selectedAttachmentId === attachmentId ? 'is-selected' : ''}`}
+                  key={attachmentId}
+                >
+                  {canRemoveFromDraft ? (
+                    <button
+                      type="button"
+                      className="composer-file-select"
+                      aria-label={`Select ${attachment.name}`}
+                      aria-pressed={selectedAttachmentId === attachmentId}
+                      onClick={() => setSelectedAttachmentId(attachmentId)}
+                      onFocus={() => setSelectedAttachmentId(attachmentId)}
+                      onKeyDown={(event) => handleAttachmentKeyDown(event, attachment)}
+                    >
+                      {content}
+                    </button>
+                  ) : (
+                    <div className="composer-file-static">{content}</div>
+                  )}
                 {attachment.retry && <button type="button" className="text-button" onClick={attachment.retry}>{attachment.retryLabel || 'Retry'}</button>}
-              </div>
-            ))}
+                {canRemoveFromDraft && (
+                  <button
+                    type="button"
+                    className="composer-file-remove"
+                    aria-label={`Remove ${attachment.name}`}
+                    onClick={() => removeAttachment(attachment)}
+                  >
+                    <span aria-hidden="true">×</span>
+                  </button>
+                )}
+                </div>
+              )
+            })}
           </div>
         )}
         <textarea
