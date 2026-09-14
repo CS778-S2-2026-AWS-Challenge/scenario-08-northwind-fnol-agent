@@ -518,6 +518,13 @@ def test_runtime_rewrites_false_reuse_success_and_rejects_terminal_claim() -> No
 
     terminal_target = _claim(workflow_state=WorkflowState.CREATED)
     repository._claims[terminal_target.claim_id] = terminal_target
+    assert validate_evidence_proposal(
+        repository,
+        terminal_target,
+        action_code='claim.propose_evidence_reuse',
+        evidence_id='evd_ready',
+        source_claim_id=source.claim_id,
+    ) == {'status': 'rejected', 'reason': 'CLAIM_LIFECYCLE_STATE_NOT_ALLOWED'}
     with pytest.raises(ApiError) as terminal:
         _validate_evidence_history_action(
             repository,
@@ -525,7 +532,7 @@ def test_runtime_rewrites_false_reuse_success_and_rejects_terminal_claim() -> No
             replace(false_success, source_claim_id=source.claim_id, tool_results=[history]),
         )
     assert terminal.value.code == 'VALIDATION_ERROR'
-    assert 'lifecycle state' in terminal.value.message
+    assert 'ownership, state, or input contract' in terminal.value.message
 
 
 def test_runtime_marks_truncated_history_as_non_exhaustive() -> None:

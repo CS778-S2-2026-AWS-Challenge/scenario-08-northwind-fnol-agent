@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 
 from backend.core.auth import Principal
+from backend.domain.agent_action_registry import action_contract
 from backend.domain.agent_tool_registry import tool_contract
 from backend.domain.models import EvidenceFileStatus, EvidenceSource, EvidenceStatus, WorkingClaim
 from backend.repositories.protocols import PersistenceRepository
@@ -85,6 +86,9 @@ def validate_evidence_proposal(
 
     if action_code not in {'claim.propose_evidence_reuse', 'claim.propose_evidence_remove'}:
         raise ValueError(f'Unsupported Evidence proposal: {action_code}.')
+    contract = action_contract(action_code)
+    if claim.claim_state.workflow_state not in contract.allowed_lifecycle_states:
+        return {'status': 'rejected', 'reason': 'CLAIM_LIFECYCLE_STATE_NOT_ALLOWED'}
     if not isinstance(evidence_id, str) or not evidence_id.strip():
         return {'status': 'rejected', 'reason': 'EVIDENCE_ID_REQUIRED'}
     record = next(

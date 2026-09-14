@@ -5,7 +5,6 @@ from datetime import datetime
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
-from backend.domain.agent_action_registry import action_contract
 from backend.domain.branch_registry import (
     BranchRuleEvaluator,
     validate_registered_field_value,
@@ -871,16 +870,6 @@ def _validate_evidence_history_action(
             code='AGENT_TOOL_NOT_PERMITTED',
             message=(
                 'The Agent cannot propose an Evidence action without a successful history lookup.'
-            ),
-            retryable=False,
-        )
-    contract = action_contract(proposal.action_code)
-    if claim.claim_state.workflow_state not in contract.allowed_lifecycle_states:
-        raise ApiError(
-            status_code=422,
-            code='VALIDATION_ERROR',
-            message=(
-                'The proposed Evidence action is not allowed in the current Claim lifecycle state.'
             ),
             retryable=False,
         )
