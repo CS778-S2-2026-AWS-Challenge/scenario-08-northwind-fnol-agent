@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 const api = vi.hoisted(() => ({
@@ -69,6 +69,28 @@ const agentMessage = {
   actor: 'agent',
   content: { type: 'text', text: 'Thanks. I need the incident time next.' },
   created_at: '2026-09-10T01:00:01Z',
+}
+
+function assistanceHandoff(status = 'queued') {
+  return {
+    handoff_id: 'hnd_customer_support',
+    status,
+    support_need: 'human_requested',
+    summary: 'A Northwind support request has been queued with the details already provided.',
+    created_at: '2026-09-14T01:01:00Z',
+  }
+}
+
+function initialTurn() {
+  return {
+    claimant_message: claimantMessage,
+    agent_message: agentMessage,
+    form_changes: [],
+    contents_item_changes: [],
+    dynamic_form: null,
+    claim_revision: 2,
+    decision: { customer_next_step: initialClaim.customer_next_step },
+  }
 }
 
 function dynamicForm({ value = '8pm', valueState = 'proposed' } = {}) {
@@ -168,6 +190,167 @@ describe('claimant intake projection', () => {
     expect(failure).toBeInTheDocument()
     expect(screen.queryByText('We could not confirm delivery. Please try again.')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Retry message' })).toBeInTheDocument()
+  })
+
+  it('replaces Staff assistance with a waiting status and prevents duplicate requests', async () => {
+    const user = userEvent.setup()
+    let resolveSupport
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.requestHumanSupport.mockImplementation(() => new Promise((resolve) => {
+      resolveSupport = resolve
+    }))
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+
+    await user.click(screen.getByRole('button', { name: 'Staff assistance' }))
+
+    expect(await screen.findByRole('heading', { name: 'Waiting for staff' })).toBeInTheDocument()
+    expect(screen.getByText(
+      'Your request has been sent. You can continue adding information while you wait.',
+    )).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Staff assistance' })).not.toBeInTheDocument()
+    expect(api.requestHumanSupport).toHaveBeenCalledTimes(1)
+
+    await act(async () => resolveSupport({
+      revision: 3,
+      handoff: assistanceHandoff(),
+      customer_next_step: {
+        status: 'human_support_queued',
+        summary: 'A Northwind support request has been queued.',
+        responsible_party: 'claims_professional',
+      },
+    }))
+
+    expect(await screen.findByText('Staff assistance requested')).toBeInTheDocument()
+    expect(api.requestHumanSupport).toHaveBeenCalledWith(expect.objectContaining({
+      claimId: initialClaim.claim_id,
+      revision: 2,
+    }))
+    expect(initialClaim.external_claim).toBeNull()
+  })
+
+  it('renders staff, response-needed, reviewing-reply, and completed assistance states', async () => {
+    const user = userEvent.setup()
+    let pushLiveUpdate
+    let resolveReply
+    const staffMessage = {
+      message_id: 'msg_staff',
+      actor: 'staff',
+      visibility: 'shared',
+      content: { type: 'text', text: 'Could you confirm whether the kitchen is still usable?' },
+      created_at: '2026-09-14T01:03:00Z',
+    }
+    const claimantReply = {
+      message_id: 'msg_claimant_reply',
+      actor: 'claimant',
+      visibility: 'shared',
+      content: { type: 'text', text: 'Yes, the kitchen is still usable.' },
+      created_at: '2026-09-14T01:04:00Z',
+    }
+    api.streamClaimUpdates.mockImplementation(({ onEvent }) => {
+      pushLiveUpdate = onEvent
+      return new Promise(() => {})
+    })
+    api.submitClaimMessage
+      .mockResolvedValueOnce(initialTurn())
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveReply = resolve
+      }))
+    api.requestHumanSupport.mockResolvedValue({
+      revision: 3,
+      handoff: assistanceHandoff(),
+      customer_next_step: {
+        status: 'human_support_queued',
+        summary: 'A Northwind support request has been queued.',
+        responsible_party: 'claims_professional',
+      },
+    })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Staff assistance' }))
+    await screen.findByText('Staff assistance requested')
+    await waitFor(() => expect(pushLiveUpdate).toBeTypeOf('function'))
+
+    api.getClaim.mockResolvedValueOnce({
+      ...initialClaim,
+      revision: 4,
+      handoff: assistanceHandoff('accepted'),
+      customer_next_step: {
+        status: 'human_support_in_progress',
+        summary: 'A Northwind staff member is now assisting you.',
+        responsible_party: 'claims_professional',
+      },
+    })
+    api.getClaimMessages.mockResolvedValueOnce({ items: [claimantMessage, agentMessage] })
+    await act(async () => pushLiveUpdate({ claim_revision: 4 }))
+
+    expect(await screen.findByRole('heading', { name: 'Staff is helping you' })).toBeInTheDocument()
+    expect(screen.getByText('A Northwind staff member is reviewing your information.')).toBeInTheDocument()
+    expect(screen.getByText('Northwind staff joined the conversation')).toBeInTheDocument()
+
+    api.getClaim.mockResolvedValueOnce({
+      ...initialClaim,
+      revision: 5,
+      handoff: assistanceHandoff('in_progress'),
+      customer_next_step: {
+        status: 'more_information_needed',
+        summary: 'Please reply to the staff question.',
+        responsible_party: 'claimant',
+      },
+    })
+    api.getClaimMessages.mockResolvedValueOnce({
+      items: [claimantMessage, agentMessage, staffMessage],
+    })
+    await act(async () => pushLiveUpdate({ claim_revision: 5 }))
+
+    expect(await screen.findByRole('heading', { name: 'Your response is needed' })).toBeInTheDocument()
+    expect(screen.getByText(staffMessage.content.text)).toBeInTheDocument()
+    expect(screen.getByText('Northwind staff')).toBeInTheDocument()
+    const replyBox = screen.getByPlaceholderText('Reply to Northwind staff...')
+    await user.type(replyBox, claimantReply.content.text)
+    await user.click(screen.getByRole('button', { name: 'Send reply' }))
+
+    expect(await screen.findByRole('heading', { name: 'Staff is reviewing your reply' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Your response is needed' })).not.toBeInTheDocument()
+    expect(screen.getByText('No action needed from you right now.')).toBeInTheDocument()
+
+    await act(async () => resolveReply({
+      claimant_message: claimantReply,
+      agent_message: null,
+      form_changes: [],
+      contents_item_changes: [],
+      dynamic_form: null,
+      claim_revision: 6,
+      decision: null,
+      handoff: null,
+    }))
+
+    api.getClaim.mockResolvedValueOnce({
+      ...initialClaim,
+      revision: 7,
+      handoff: null,
+      customer_next_step: {
+        status: 'staff_update',
+        summary: 'Your report is ready to continue online.',
+        responsible_party: 'claimant',
+      },
+    })
+    api.getClaimMessages.mockResolvedValueOnce({
+      items: [claimantMessage, agentMessage, staffMessage, claimantReply],
+    })
+    await act(async () => pushLiveUpdate({ claim_revision: 7 }))
+
+    expect(await screen.findByRole('heading', { name: 'Staff assistance completed' })).toBeInTheDocument()
+    expect(screen.getByText('You can continue your claim below.')).toBeInTheDocument()
+    expect(screen.getAllByText('Staff assistance completed')).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Staff assistance' })).toBeEnabled()
+    expect(screen.queryByText('Claim created')).not.toBeInTheDocument()
   })
 
   it('opens a new claim conversation without clearing the previous claim', async () => {
