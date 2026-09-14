@@ -24,6 +24,7 @@ export default function StaffAgent({
   token,
   onSessionChange,
   onConversationChanged,
+  onBusinessActionExecuted,
 }) {
   const [sessions, setSessions] = useState([])
   const [activeSessionId, setActiveSessionId] = useState(null)
@@ -167,6 +168,41 @@ export default function StaffAgent({
     }
   }
 
+  async function executeDraft(sourceMessage, draft) {
+    if (
+      !sourceMessage?.session_id
+      || !sourceMessage?.message_id
+      || !draft?.draft_id
+      || !draft?.claim_id
+      || !draft?.action_code
+      || !draft?.target_ref
+    ) {
+      throw new Error('This Staff Agent draft is informational and cannot execute a business action.')
+    }
+
+    const latestClaim = await workbenchApi.claim(token, draft.claim_id)
+    const response = await workbenchApi.executeStaffAgentDraft(
+      token,
+      sourceMessage.session_id,
+      sourceMessage.message_id,
+      draft.draft_id,
+      latestClaim.revision,
+      draft.payload || {},
+    )
+
+    try {
+      await onBusinessActionExecuted?.(response)
+    } catch (refreshError) {
+      setError({
+        title: 'Action executed; refresh required',
+        message: refreshError?.message
+          || 'The registered action succeeded, but the latest Workbench projection could not be loaded automatically. Refresh the Claim before taking another action.',
+        requestId: refreshError?.requestId || null,
+      })
+    }
+    return response
+  }
+
   function toggleClaim(claimId) {
     setSelectedClaimIds((current) => {
       if (current.includes(claimId)) return current.filter((item) => item !== claimId)
@@ -286,10 +322,16 @@ export default function StaffAgent({
                 <div className="agent-empty">
                   <span className="agent-empty__icon" aria-hidden="true"><Bot size={20} /></span>
                   <p>Ask a general question or explicitly attach up to five Claims.</p>
-                  <small>The Agent can advise and draft, but cannot execute business actions.</small>
+                  <small>The Agent can advise and draft. Registered business actions execute only after explicit staff confirmation.</small>
                 </div>
               )}
-              {messages.map((item) => <AgentMessage message={item} key={item.message_id} />)}
+              {messages.map((item) => (
+                <AgentMessage
+                  message={item}
+                  key={item.message_id}
+                  onExecuteDraft={executeDraft}
+                />
+              ))}
             </div>
 
             {sessionNotice && (
@@ -324,26 +366,119 @@ export default function StaffAgent({
   )
 }
 
-function AgentMessage({ message }) {
+function AgentMessage({ message, onExecuteDraft }) {
   return (
     <article className={`agent-message agent-message--${message.role}`}>
       <header><strong>{message.role === 'assistant' ? 'Staff Agent' : 'You'}</strong><small>{message.claim_ids?.length ? `${message.claim_ids.length} Claim${message.claim_ids.length > 1 ? 's' : ''} attached` : 'General scope'}</small></header>
       <p>{message.content}</p>
-      {message.drafts?.map((draft, index) => <AgentDraft draft={draft} key={`${message.message_id}-draft-${index}`} />)}
+      {message.drafts?.map((draft, index) => (
+        <AgentDraft
+          draft={draft}
+          sourceMessage={message}
+          onExecute={onExecuteDraft}
+          key={draft.draft_id || `${message.message_id}-draft-${index}`}
+        />
+      ))}
       {!!message.source_refs?.length && <details><summary>Sources used</summary><ul>{message.source_refs.map((source) => <li key={source}>{source}</li>)}</ul></details>}
     </article>
   )
 }
 
-function AgentDraft({ draft }) {
+function AgentDraft({ draft, sourceMessage, onExecute }) {
   const [content, setContent] = useState(draft.content)
+  const [reviewing, setReviewing] = useState(false)
+  const [executing, setExecuting] = useState(false)
+  const [execution, setExecution] = useState(null)
+  const [executionError, setExecutionError] = useState(null)
+  const executable = Boolean(
+    draft.draft_id
+    && draft.claim_id
+    && draft.action_code
+    && draft.target_ref
+    && sourceMessage?.session_id
+    && sourceMessage?.message_id
+  )
+
+  async function execute() {
+    if (!executable || executing || execution) return
+    setExecuting(true)
+    setExecutionError(null)
+    try {
+      const result = await onExecute(sourceMessage, draft)
+      setExecution(result)
+      setReviewing(false)
+    } catch (error) {
+      setExecutionError(draftExecutionError(error))
+    } finally {
+      setExecuting(false)
+    }
+  }
+
   return (
-    <section className="agent-draft">
-      <header><span><strong>{draft.title}</strong><small>{draft.kind.replaceAll('_', ' ')}</small></span><button type="button" className="icon-button icon-button--small" onClick={() => navigator.clipboard.writeText(content)} aria-label={`Copy ${draft.title}`}><Clipboard size={14} /></button></header>
-      <textarea value={content} onChange={(event) => setContent(event.target.value)} aria-label={`Edit ${draft.title}`} />
+    <section className={`agent-draft${executable ? ' agent-draft--executable' : ''}`}>
+      <header>
+        <span><strong>{draft.title}</strong><small>{draft.kind.replaceAll('_', ' ')}</small></span>
+        <button type="button" className="icon-button icon-button--small" onClick={() => navigator.clipboard.writeText(content)} aria-label={`Copy ${draft.title}`}><Clipboard size={14} /></button>
+      </header>
+      <textarea
+        value={content}
+        readOnly={executable}
+        onChange={executable ? undefined : (event) => setContent(event.target.value)}
+        aria-label={executable ? `Review ${draft.title}` : `Edit ${draft.title}`}
+      />
       {draft.claim_id && <small>Draft for {draft.claim_id}</small>}
+      {executable && (
+        <div className="agent-draft__action">
+          <div>
+            <strong>Registered action</strong>
+            <small>{draft.action_code} · target {draft.target_ref}</small>
+          </div>
+          {!reviewing && !execution && (
+            <button className="button button--quiet" type="button" onClick={() => setReviewing(true)}>
+              Review action
+            </button>
+          )}
+        </div>
+      )}
+      {executable && reviewing && !execution && (
+        <div className="agent-draft__confirm">
+          <p>The Agent proposed this action. The Workbench will reload the Claim, use its current revision, and let the registered backend action decide whether execution is authorised.</p>
+          <div className="form-actions">
+            <button className="button button--ghost" type="button" disabled={executing} onClick={() => setReviewing(false)}>Cancel</button>
+            <button className="button button--primary" type="button" disabled={executing} onClick={execute}>
+              {executing ? 'Executing...' : 'Confirm and execute'}
+            </button>
+          </div>
+        </div>
+      )}
+      {execution && (
+        <div className="agent-draft__execution" role="status">
+          <CheckCircle2 size={16} aria-hidden="true" />
+          <span>
+            <strong>Executed by Workbench</strong>
+            <small>{execution.action_code} completed at Claim revision {execution.runtime_execution?.resulting_revision ?? 'not reported'}.</small>
+          </span>
+        </div>
+      )}
+      {executionError && (
+        <div className="agent-draft__execution agent-draft__execution--error" role="alert">
+          <AlertCircle size={16} aria-hidden="true" />
+          <span><strong>Action not executed</strong><small>{executionError}</small></span>
+        </div>
+      )}
+      {executable && <small>The saved registered payload is executed unchanged. To change the business action, ask Staff Agent to prepare a new draft.</small>}
     </section>
   )
+}
+
+function draftExecutionError(error) {
+  const reference = error?.requestId ? ` Reference: ${error.requestId}` : ''
+  if (error?.code === 'REVISION_CONFLICT') return `The Claim changed before execution. The latest Claim projection was kept; review the draft again.${reference}`
+  if (error?.code === 'ACCESS_DENIED') return `This staff identity is not authorised to execute the proposed action.${reference}`
+  if (error?.code === 'IDEMPOTENCY_CONFLICT') return `This draft no longer matches the original execution identity and was not run again.${reference}`
+  if (error?.code === 'DEPENDENCY_UNAVAILABLE' || error?.code === 'DEPENDENCY_FAILED') return `A required service is unavailable, so the action was not reported as completed.${reference}`
+  if (error?.code === 'CONFIRMATION_REQUIRED') return `The backend did not receive valid explicit confirmation, so nothing was executed.${reference}`
+  return `${error?.message || 'The registered action could not be executed.'}${reference}`
 }
 
 function scopeLabel(selectedClaimIds, claims) {

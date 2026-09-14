@@ -178,6 +178,22 @@ export const workbenchApi = {
       },
     )
   },
+  executeStaffAgentDraft(token, sessionId, messageId, draftId, revision, payload = {}) {
+    return mutationRequest(
+      `/api/v1/workbench/agent/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/drafts/${encodeURIComponent(draftId)}/execute`,
+      {
+        method: 'POST',
+        token,
+        headers: {
+          'If-Match': String(revision),
+        },
+        body: JSON.stringify({
+          confirmed: true,
+          payload,
+        }),
+      },
+    )
+  },
   claim(token, claimId) {
     return request(`/api/v1/workbench/claims/${encodeURIComponent(claimId)}`, { token })
   },
