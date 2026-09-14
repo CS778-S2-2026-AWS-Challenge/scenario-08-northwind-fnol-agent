@@ -1571,6 +1571,18 @@ class MongoDBRepository:
             'created_at',
         )
 
+    def list_evidence_for_customer(self, customer_id: str) -> list[EvidenceRecord]:
+        documents = self._collection.find(
+            {'record_type': 'evidence', 'customer_id': customer_id, 'source': 'claimant'}
+        ).sort([('created_at', 1), ('_id', 1)])
+        return [
+            evidence
+            for evidence in (
+                self._model_from_document(document, EvidenceRecord) for document in documents
+            )
+            if evidence is not None
+        ]
+
     def save_external_task(self, task: ExternalTaskRecord, customer_id: str) -> None:
         """Create or conditionally advance one claim-owned external task.
 

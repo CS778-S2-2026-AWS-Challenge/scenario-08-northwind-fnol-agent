@@ -94,6 +94,57 @@ def test_pending_evidence_is_saved_visible_and_does_not_block_current_work(
     }
 
 
+def test_claimant_can_read_evidence_history_across_owned_claims(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    first = create_claim(client, auth_headers, 'history-first-claim')
+    second = create_claim(client, auth_headers, 'history-second-claim')
+    first_id = str(cast(dict[str, object], first['claim'])['claim_id'])
+    second_id = str(cast(dict[str, object], second['claim'])['claim_id'])
+
+    evidence_ids = []
+    for claim_id, key in (
+        (first_id, 'history-first-evidence'),
+        (second_id, 'history-second-evidence'),
+    ):
+        response = client.post(
+            f'/api/v1/claims/{claim_id}/evidence/uploads',
+            headers={**auth_headers, 'Idempotency-Key': key, 'If-Match': '1'},
+            json={
+                'kind': 'other_document',
+                'original_filename': 'history.jpg',
+                'media_type': 'image/jpeg',
+                'size_bytes': 7,
+            },
+        )
+        assert response.status_code == 201
+        evidence_id = str(response.json()['evidence_id'])
+        evidence_ids.append(evidence_id)
+        checksum = put_fixture_upload(client, claim_id, evidence_id, 7)
+        complete = client.post(
+            f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
+            headers={**auth_headers, 'Idempotency-Key': f'{key}-complete', 'If-Match': '2'},
+            json={'upload_checksum': checksum},
+        )
+        assert complete.status_code == 202
+
+    response = client.get('/api/v1/evidence?limit=1', headers=auth_headers)
+    assert response.status_code == 200
+    assert len(response.json()['items']) == 1
+    assert response.json()['items'][0]['source_claim_id'] == first_id
+    assert response.json()['items'][0]['evidence_id'] == evidence_ids[0]
+    assert 'storage_key' not in response.json()['items'][0]
+    assert response.json()['page']['next_cursor'] is not None
+
+    second_page = client.get(
+        f'/api/v1/evidence?cursor={response.json()["page"]["next_cursor"]}',
+        headers=auth_headers,
+    )
+    assert second_page.status_code == 200
+    assert second_page.json()['items'][0]['source_claim_id'] == second_id
+
+
 @pytest.mark.parametrize(
     ('status', 'file_status'),
     [

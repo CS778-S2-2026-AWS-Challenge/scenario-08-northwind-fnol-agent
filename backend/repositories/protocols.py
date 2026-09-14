@@ -740,6 +740,10 @@ class PersistenceRepository(ClaimRepository, Protocol):
     def list_evidence(self, claim_id: str, customer_id: str) -> list[EvidenceRecord]:
         raise NotImplementedError
 
+    def list_evidence_for_customer(self, customer_id: str) -> list[EvidenceRecord]:
+        """Return Evidence owned by a customer across all of their Claims."""
+        raise NotImplementedError
+
     def save_evidence_mutation(
         self,
         claim: WorkingClaim,

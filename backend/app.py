@@ -33,6 +33,7 @@ from backend.api.admin_release_sets import router as admin_release_sets_router
 from backend.api.capabilities import router as capabilities_router
 from backend.api.claims import router as claims_router
 from backend.api.demo import router as demo_router
+from backend.api.evidence import account_router as evidence_account_router
 from backend.api.evidence import router as evidence_router
 from backend.api.handoffs import router as handoffs_router
 from backend.api.health import router as health_router
@@ -439,6 +440,7 @@ def create_app(
     app.include_router(claims_router)
     app.include_router(integrations_router)
     app.include_router(evidence_router)
+    app.include_router(evidence_account_router)
     app.include_router(workbench_router)
     app.include_router(workbench_conversation_router)
     app.include_router(demo_router)

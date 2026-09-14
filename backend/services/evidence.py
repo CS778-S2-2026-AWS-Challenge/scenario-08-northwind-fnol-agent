@@ -15,6 +15,8 @@ from backend.domain.models import (
     ActorReference,
     ActorType,
     ClaimantEvidence,
+    ClaimantEvidenceHistoryItem,
+    ClaimantEvidenceHistoryResponse,
     CompleteEvidenceProcessingRequest,
     CompleteEvidenceUploadRequest,
     EvidenceCompleteResponse,
@@ -32,6 +34,7 @@ from backend.domain.models import (
     FormSource,
     FormStatus,
     NeededFor,
+    PageInfo,
     RegisterEvidenceRequest,
     RequestEvidenceUploadRequest,
     ResponsibleParty,
@@ -49,6 +52,8 @@ from backend.repositories.protocols import (
 from backend.services.branching import build_applied_branch_evaluation
 from backend.services.evidence_visibility import claimant_visible_evidence
 from backend.services.support import (
+    decode_cursor,
+    encode_cursor,
     now_utc,
     parse_if_match,
     request_fingerprint,
@@ -223,6 +228,76 @@ def list_evidence(
         revision=claim.revision,
         items=[_claimant_evidence(record) for record in evidence],
         customer_next_step=claim.customer_next_step,
+    )
+
+
+def list_evidence_history(
+    repository: PersistenceRepository,
+    principal: Principal,
+    *,
+    limit: int,
+    cursor: str | None,
+) -> ClaimantEvidenceHistoryResponse:
+    """List claimant-owned uploaded Evidence across all Claims.
+
+    Args:
+        repository: Authoritative Claim and Evidence repository.
+        principal: Authenticated claimant whose records may be returned.
+        limit: Maximum number of records in this page.
+        cursor: Opaque offset cursor returned by a previous call.
+
+    Returns:
+        A claimant-safe, paginated Evidence history projection.
+
+    Raises:
+        ApiError: If the cursor is invalid or the principal is not eligible for
+            durable claimant storage.
+    """
+    require_durable_claimant(principal)
+    records = [
+        record
+        for record in repository.list_evidence_for_customer(principal.subject)
+        if record.file_status
+        in {
+            EvidenceFileStatus.UPLOADED,
+            EvidenceFileStatus.PROCESSING,
+            EvidenceFileStatus.READY,
+            EvidenceFileStatus.FAILED,
+        }
+    ]
+    offset = decode_cursor(cursor)
+    page_records = records[offset : offset + min(max(limit, 1), 100)]
+    next_offset = offset + len(page_records)
+    return ClaimantEvidenceHistoryResponse(
+        items=[_history_item(record) for record in page_records],
+        page=PageInfo(
+            next_cursor=encode_cursor(next_offset) if next_offset < len(records) else None
+        ),
+    )
+
+
+def _history_item(record: EvidenceRecord) -> ClaimantEvidenceHistoryItem:
+    reusable = (
+        record.source is EvidenceSource.CLAIMANT
+        and record.file_status is EvidenceFileStatus.READY
+        and record.status
+        not in {EvidenceStatus.INVALID, EvidenceStatus.EXPIRED, EvidenceStatus.SUPERSEDED}
+    )
+    return ClaimantEvidenceHistoryItem(
+        evidence_id=record.evidence_id,
+        source_claim_id=record.claim_id,
+        kind=record.kind,
+        status=record.status,
+        file_status=record.file_status,
+        original_filename=record.original_filename,
+        media_type=record.media_type,
+        size_bytes=record.size_bytes,
+        source=record.source,
+        provenance_summary=['claimant_upload'] if record.source is EvidenceSource.CLAIMANT else [],
+        can_reuse=reusable,
+        can_remove=False,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
     )
 
 

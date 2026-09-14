@@ -1712,6 +1712,20 @@ class FixtureRepository(PersistenceRepository):
         ]
         return sorted(evidence_records, key=lambda evidence: evidence.created_at)
 
+    def list_evidence_for_customer(self, customer_id: str) -> list[EvidenceRecord]:
+        claims = {
+            claim.claim_id for claim in self._claims.values() if claim.customer_id == customer_id
+        }
+        evidence_records = [
+            deepcopy(evidence)
+            for evidence in self._evidence.values()
+            if evidence.claim_id in claims and evidence.source.value == 'claimant'
+        ]
+        return sorted(
+            evidence_records,
+            key=lambda evidence: (evidence.created_at, evidence.evidence_id),
+        )
+
     def save_evidence_mutation(
         self,
         claim: WorkingClaim,
