@@ -407,38 +407,57 @@ describe('workbenchApi Staff Agent draft execution', () => {
     })
   })
 
-  it('reuses the mutation idempotency key only for an identical ambiguous retry', async () => {
+  it('replays the original draft operation after an ambiguous result even when the Claim revision advanced', async () => {
+    const authoritative = {
+      claim_id: 'clm_1',
+      action_code: 'work_item.update',
+      outcome: 'executed',
+      result: {
+        action: { action_id: 'wki_1', status: 'in_progress' },
+        revision: 10,
+      },
+      runtime_execution: {
+        outcome: 'executed',
+        resulting_revision: 10,
+        result: {
+          action: { action_id: 'wki_1', status: 'in_progress' },
+          revision: 10,
+        },
+      },
+    }
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError('connection lost'))
-      .mockResolvedValueOnce(jsonResponse(200, {
-        claim_id: 'clm_1',
-        action_code: 'work_item.update',
-        runtime_execution: { resulting_revision: 10 },
-      }))
+      .mockResolvedValueOnce(jsonResponse(200, authoritative))
     vi.stubGlobal('fetch', fetchMock)
 
-    const args = [
+    const source = [
       'staff-token',
       'sas_retry',
       'sam_retry',
       'sad_retry',
-      9,
-      { status: 'in_progress' },
     ]
+    const payload = { status: 'in_progress' }
 
     await expect(
-      workbenchApi.executeStaffAgentDraft(...args),
+      workbenchApi.executeStaffAgentDraft(...source, 9, payload),
     ).rejects.toMatchObject({
       code: 'NETWORK_ERROR',
       retryable: true,
     })
 
-    await workbenchApi.executeStaffAgentDraft(...args)
+    const replay = await workbenchApi.executeStaffAgentDraft(
+      ...source,
+      10,
+      payload,
+    )
 
+    expect(replay).toEqual(authoritative)
     expect(fetchMock.mock.calls[1][1].headers['Idempotency-Key']).toBe(
       fetchMock.mock.calls[0][1].headers['Idempotency-Key'],
     )
+    expect(fetchMock.mock.calls[0][1].headers['If-Match']).toBe('9')
     expect(fetchMock.mock.calls[1][1].headers['If-Match']).toBe('9')
     expect(fetchMock.mock.calls[1][1].body).toBe(fetchMock.mock.calls[0][1].body)
+    expect(sessionStorage.getItem('northwind.workbench.staff-draft-execution-operations.v1')).toBe('{}')
   })
 })
