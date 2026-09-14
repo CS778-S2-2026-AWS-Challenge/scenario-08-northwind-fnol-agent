@@ -8,6 +8,8 @@ Issue #775 owns this selection and implementation handoff. Issue #776 owns the c
 
 The selected Sprint 4 capabilities are:
 
+Each selected capability below records scenario, sources, real service, current form, required input, observable output, evidence, timing, failure possibilities, authority and consent, minimum disclosure, limitation, status, recommended form, rejected form, next owner, and write-back.
+
 | P3 ID | Scenario | Capability status | Recommended access form |
 | --- | --- | --- | --- |
 | `P3-ASSESSOR` | Motor; Home | Existing motor path is `simulation-only`; production access is `unavailable` | Governed external request only for the existing controlled motor fixture; staff/manual otherwise |
@@ -33,6 +35,9 @@ Public service existence is not Northwind procurement. Credentials are not autho
 - **Current form:** Motor controlled fixture only; other assessor paths have no implemented Runtime identity.
 - **Required input:** For the existing fixture, exactly `claim_id`, `external_claim_id`, `authorisation_ref`, `claimant_consent_ref`, `requested_action`, and `location.region`.
 - **Observable output:** Controlled routing result/provider reference; any later result remains separate from verified Claim facts until governed verification/write-back.
+- **Evidence:** The governed operation may carry `ExternalTaskRecord` timestamps, delivery state, delivery evidence where applicable, provider reference where applicable, and evidence links/results under the existing external-task Evidence contract. The current fixture provenance remains synthetic; it is not production-provider evidence.
+- **Timing:** No production assessor SLA is established. The operation records `created_at`/`updated_at`; any fixture turnaround is synthetic demonstration timing only and must not be presented as a real provider service level.
+- **Failure possibilities:** The existing provider-neutral contract recognises `timeout`, `unavailable`, `access_denied`, `malformed`, `partial`, and `conflicting`. A submitted timeout or any partial side effect may become `unknown_outcome` and requires reconciliation before another side-effecting attempt; access-denied, malformed, or conflicting results require review rather than invented success.
 - **Authority and consent:** Current Northwind routing authority plus matching claimant consent are required. No production assessor appointment authority is established.
 - **Minimum disclosure:** Only the six published fields above. Damage images/descriptions are not silently added.
 - **Limitation:** The fixture does not contact a production assessor, decide cover, approve repairs, guarantee timing, or prove production provider status access.
@@ -50,6 +55,9 @@ Public service existence is not Northwind procurement. Credentials are not autho
 - **Current form:** No generic Runtime identity; claimant/manual or staff-assisted only.
 - **Required input:** Existing damage/loss information and explicitly selected Evidence. Current mappings cover `claim_id`, applicable `vehicle.damage_description` or `property.affected_areas`, `loss.description`, and selected `Evidence.evidence_id`. Appointment/contact/approval remain unmapped.
 - **Observable output:** Quote, scope, invoice, appointment information, or progress/completion evidence when later supplied by the claimant or staff.
+- **Evidence:** Claimant/staff-supplied appointment confirmation, quote or scope, invoice, progress/completion material, photographs, or a provider statement that work cannot proceed. Northwind has no direct provider-status evidence in the selected form.
+- **Timing:** Claimant/provider-controlled manual timing. Northwind has no appointment, quotation, repair-completion, or status SLA and observes progress only when the claimant or staff supplies an update.
+- **Failure possibilities:** Repairer unavailable or declines, appointment/quote delayed, no response, incomplete quote/scope, work cannot proceed, or later material conflicts with existing claim evidence. These remain manual outcomes and do not create ExternalTask failure states.
 - **Authority and consent:** No generic Northwind repair appointment, repair approval, disclosure, or provider-status authority. No Northwind send occurs in the selected manual form.
 - **Minimum disclosure:** Northwind sends no claim data to a repairer in the selected manual form. Only claimant/staff-supplied material later enters the existing Evidence boundary.
 - **Limitation:** No verified Northwind network, appointment authority, repair approval, live status feed, provider SLA, or production retention contract is established.
@@ -67,6 +75,9 @@ Public service existence is not Northwind procurement. Credentials are not autho
 - **Current form:** Official claimant-led channel; no Northwind submission/read Runtime identity or API.
 - **Required input:** The Police channel determines the claimant-supplied incident/reporting information. Northwind does not define or send a substitute provider payload.
 - **Observable output:** Police acknowledgement/reference and later claimant-supplied Police material where available.
+- **Evidence:** Police acknowledgement/reference and any later claimant-supplied Police update, document, photograph, or correspondence. Northwind does not have direct Police status evidence in this form.
+- **Timing:** Reporting and acknowledgement/case handling are Police- and claimant-controlled. Northwind has no response-time SLA or live timing feed and treats a report as pending until the claimant supplies an official reference or later material.
+- **Failure possibilities:** Claimant cannot complete the official process, the channel is temporarily unavailable, required information is incomplete, acknowledgement/reference is delayed, or no later report material is available. Because Northwind does not submit the report, these are not ExternalTask `unknown_outcome` states.
 - **Authority and consent:** No evidence establishes Northwind authority to submit a 105 report or read its status. Northwind external-send consent is not applicable because Northwind sends nothing.
 - **Minimum disclosure:** Northwind sends no claim data to Police in the selected form. The claimant decides what to provide through the official Police process.
 - **Limitation:** Northwind cannot promise Police acceptance, response time, case progress, report availability, or live status visibility.
@@ -84,6 +95,9 @@ Public service existence is not Northwind procurement. Credentials are not autho
 - **Current form:** Claimant-led or staff-prepared manual request only; no standing Northwind TCR Runtime/provider integration.
 - **Required input:** Location/time, Police file number where known, request reason, identity, and representative-authority evidence may be required depending on requester.
 - **Observable output:** Request decision and, where releasable, a TCR supplied through the official pathway.
+- **Evidence:** Request/authority material, Police request decision, a released TCR, or a withholding/no-release outcome supplied through the official pathway.
+- **Timing:** Claimant/Police-controlled manual timing with no Northwind service-level guarantee. A request may remain pending, require further identity/authority evidence, or take longer than the claimant expects.
+- **Failure possibilities:** Insufficient identity or representative authority, request withheld/refused, report unavailable, delayed decision/release, incomplete material, or no released TCR. These are manual request outcomes, not new Runtime states.
 - **Authority and consent:** Public representative rules do not establish standing claimant-specific Northwind authority. A future staff representative request would require real request-specific authority evidence.
 - **Minimum disclosure:** Northwind sends no data in the selected claimant-led form. Agent/staff preparation may explain official requirements but must not transmit identity/authority material through an unapproved integration.
 - **Limitation:** Release may be withheld, additional identity/authority evidence may be required, and Northwind has no guaranteed response time or direct status/read access.
@@ -101,6 +115,9 @@ Public service existence is not Northwind procurement. Credentials are not autho
 - **Current form:** Safety/drivability guidance with claimant-led or staff-assisted manual coordination; no Northwind dispatch Runtime identity.
 - **Required input:** The manual journey may use existing vehicle location/condition, registration, drivability, damage description, and claim context to help the claimant/staff choose the next step. Provider eligibility, contact, safe-access, destination, and dispatch fields remain unapproved for a governed Northwind request.
 - **Observable output:** Claimant/staff-observed towing/recovery outcome, provider decline/unavailability, or later towing receipt/material.
+- **Evidence:** Claimant/staff confirmation that recovery occurred or could not be arranged, towing receipt/invoice, destination information, and any later recovery material supplied into Evidence. Northwind has no dispatch telemetry.
+- **Timing:** Safety action is immediate when the vehicle is unsafe, but provider arrival and transport timing are claimant/provider-controlled. Northwind has no collision-recovery dispatch SLA, ETA feed, or completion clock.
+- **Failure possibilities:** Recovery provider unavailable or declines, dispatch is delayed, destination/eligibility cannot be resolved, towing cannot safely proceed, or later receipt/outcome evidence is missing or conflicting. No ExternalTask is created for these manual outcomes.
 - **Authority and consent:** No verified Northwind recovery network, dispatch authority, or telemetry. Northwind external-send consent is not applicable because Northwind sends nothing in the selected form.
 - **Minimum disclosure:** Northwind sends no claim data to a recovery provider in the selected manual form.
 - **Limitation:** No provider eligibility, dispatch SLA, destination control, telemetry, provider acknowledgement, or reimbursement/coverage decision is established.
@@ -118,6 +135,9 @@ Public service existence is not Northwind procurement. Credentials are not autho
 - **Current form:** Safety guidance plus claimant-arranged or staff-assisted manual handling; no Northwind contractor dispatch Runtime identity.
 - **Required input:** Existing candidate mapping covers `claim_id`, `property.address`, `property.affected_areas`, `property.ongoing_risk`, `property.habitable`, `loss.description`, `requested_action`, and selected Evidence. Contractor identity, safe access, scope, contact, and spending authority remain unmapped.
 - **Observable output:** Claimant/staff-observed completion or inability to proceed, plus later work record, photos, invoice, or contractor material where supplied.
+- **Evidence:** Claimant/staff confirmation, before/after photographs, contractor work record, invoice, or other material showing work performed or inability to proceed.
+- **Timing:** Immediate safety/mitigation guidance must not wait for a Northwind workflow. Contractor attendance/completion timing is claimant/provider-controlled and Northwind has no dispatch or completion SLA.
+- **Failure possibilities:** Contractor unavailable or declines, unsafe access, work delayed or incomplete, authority/spending approval unresolved, or required work/invoice evidence missing or conflicting. The selected manual form does not create ExternalTask failure states.
 - **Authority and consent:** No generic contractor dispatch, spending, or reimbursement authority. Safety guidance must not wait for consent. No Northwind send occurs in the selected manual form.
 - **Minimum disclosure:** Northwind sends no claim data to a contractor in the selected manual form.
 - **Limitation:** No provider network, dispatch SLA, spending authority, reimbursement promise, approved work scope, or production provider status feed is established.
@@ -135,6 +155,9 @@ Public service existence is not Northwind procurement. Credentials are not autho
 - **Current form:** Explanatory/insurer-mediated coordination. Northwind partner status and technical exchange are unverified.
 - **Required input:** Existing candidate mapping may use `claim_id`, `policy.policy_number`, `property.address`, incident type/time/description, `loss.description`, and selected Evidence. Partner identity and routing remain unmapped.
 - **Observable output:** Claim-manager update, assessment/specialist report, scope of works, settlement advice, or other material supplied through the insurer/NHC process.
+- **Evidence:** Claim-manager update, assessment, expert/specialist report, scope of works, settlement advice, non-acceptance explanation, or other material supplied through the insurer/NHC process.
+- **Timing:** Insurer/NHC-controlled timing. Northwind has no verified partner exchange, response SLA, or live status feed and observes progress only through claimant/staff or insurer-supplied updates.
+- **Failure possibilities:** Northwind direct exchange unavailable, partner/routing path unresolved, request/claim handling delayed or pending, non-acceptance, incomplete response, or no observable result supplied back to Northwind. These remain insurer/manual outcomes rather than a new external-task vocabulary.
 - **Authority and consent:** Public NHC guidance does not prove Northwind partner status, credentials, or direct exchange authority. No new Northwind-to-NHC send is selected by this brief.
 - **Minimum disclosure:** Northwind sends no data through a new NHC integration in the selected manual/insurer-mediated form.
 - **Limitation:** Northwind-specific partner status, credentials, routing, technical exchange, SLA, retention, and status feed are unverified; NHC relevance does not itself determine Northwind policy cover.
@@ -152,6 +175,9 @@ Public service existence is not Northwind procurement. Credentials are not autho
 - **Current form:** Claimant-led retrieval plus the existing Evidence upload path; no generic Northwind direct-retrieval Runtime identity.
 - **Required input:** The claimant identifies the affected contents item and the type of supporting material needed. Northwind does not define a generic direct-provider request payload.
 - **Observable output:** Receipt, statement, service record, valuation, other supplied proof, or inability to obtain the requested material.
+- **Evidence:** Receipt, warranty, purchase/delivery record, photograph, service record, bank/retailer record where claimant-obtained, or independent valuation uploaded through the existing Evidence path.
+- **Timing:** Claimant/external-source-controlled manual timing with no Northwind retrieval SLA. The item remains outstanding until the claimant obtains and uploads material or staff records that it cannot be obtained.
+- **Failure possibilities:** Source no longer retains or will not release the material, claimant cannot match the item/account, response is delayed, record is incomplete/illegible/conflicting, or no evidence can be obtained. These outcomes remain evidence gaps and do not create a synthetic provider task.
 - **Authority and consent:** No generic Northwind direct-retrieval relationship. Northwind external-send consent is not applicable because Northwind sends nothing.
 - **Minimum disclosure:** Northwind sends no claim data to the external source in the selected form.
 - **Limitation:** External sources may not retain or release the requested material; Northwind has no generic provider identity, matching key, response SLA, direct retrieval authority, or live status access.
@@ -289,7 +315,7 @@ The selected public sources were rechecked on 2026-09-14.
 
 | #775 acceptance criterion | Evidence |
 | --- | --- |
-| Every selected row cites source, scenario, service form, authority, consent, minimum disclosure, output, limitation, and capability status | Decision summary and selected service decisions |
+| Every selected row cites source, scenario, service form, inputs, output, evidence, timing, failure possibilities, authority, consent, minimum disclosure, limitation, and capability status | Decision summary and selected service decisions |
 | Each row has a recommended access form and rejected/unsafe alternative | Selected service decisions |
 | Collision example includes assessor, repairer, Police without unverified access | Worked collision journey |
 | Capability is separated from procurement, credentials, authority, production readiness | Decision summary, authority boundaries, unsafe interpretations |
