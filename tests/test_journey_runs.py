@@ -1,4 +1,4 @@
-"""A complete-journey run record must not claim more than its own evidence."""
+"""A complete-journey run must reach its end, and its record must not overstate it."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from journey_runs.motor_collision import run_motor_collision
 from journey_runs.record import (
     AgentTurn,
     Arrival,
@@ -15,11 +16,28 @@ from journey_runs.record import (
     RunConfiguration,
     SeamCheck,
     SeamVerdict,
+    StepOutcome,
     VisibilityCheck,
 )
 from pydantic import ValidationError
 
 _NOW = datetime(2026, 9, 15, tzinfo=UTC)
+
+
+def test_the_motor_collision_journey_reaches_its_end_and_reports_every_disagreement() -> None:
+    record = run_motor_collision(head='test')
+
+    assert {step.outcome for step in record.steps} == {StepOutcome.SUCCEEDED}
+    assert record.final_state.claim_number is not None
+    assert record.final_state.customer_next_step == 'assessor_result_under_review'
+    assert record.effort.uploads == 3
+    assert [consent.granted for consent in record.consents] == [True]
+    assert all(check.holds for check in record.visibility_checks)
+    # A disagreement nobody has reported must fail here, so it reaches its owner.
+    assert [check.seam for check in record.seam_checks if check.defect_ref == 'untracked'] == []
+    # The fixture runtime can never produce a completed run.
+    assert record.result_class is not ResultClass.COMPLETED
+    assert JourneyRunRecord.model_validate_json(record.model_dump_json()) == record
 
 
 def _configuration(runtime: str, provider_mode: str) -> RunConfiguration:

@@ -57,4 +57,29 @@ so the record never implies they were.
 
 A runner drives one scenario through the API and returns a `JourneyRunRecord`. The record and its
 classification rules are shared, so runs from different runners and families can be counted
-together. The first runner, for the motor collision journey, follows in a separate PR.
+together.
+
+```bash
+python -m tests.journey_runs --runs 10 --out ../journey-runs
+python -m tests.journey_runs --schema
+```
+
+Each run starts a fresh fixture runtime and writes one `<run_id>.json`; `--schema` prints the
+record's JSON Schema. `tests/test_journey_runs.py` runs one journey in the ordinary suite and fails
+on any `untracked` disagreement: report it to its owner, then add it to the runner's known defects.
+
+| Runner | Journey | Evidence level |
+|---|---|---|
+| `motor_collision.py` | Create, describe (`AT-01-clear-motor-creation` input), upload the claimant's pack, confirm, create, consent, route the assessor, receive the assessment | API projections on the fixture runtime; not browser; no provider contacted |
+
+The motor pack (`motor-collision-provisional-2`) is provisional until an owner freezes the rubric
+anchors. It uses the `received` motor materials in `backend/demo_data/materials/`:
+
+- the two incident photos and the police event report are uploaded by the claimant. The Police
+  form is claimant-supplied material (`P3-NZP-REPORT`,
+  `docs/research/sprint4-third-party-integration-forms.md`);
+- the consent record is Northwind's record of the consent route;
+- the assessment arrives as the fixture assessor's own result.
+
+The deliberately defective variants (unreadable, conflicting, superseded, not obtainable) belong to
+failure-path runs.
