@@ -31,7 +31,7 @@ def test_binding_table_distinguishes_registered_actions_from_runtime_handlers() 
     row = next(item for item in executable if item.action_code == 'claim.apply_fact_patch')
     assert row.status is ActionBindingStatus.RUNTIME_EXECUTABLE
     assert row.tool_name == 'claim_store.compare_and_set'
-    assert row.handler_name is not None and row.handler_name.endswith('<lambda>')
+    assert row.handler_name == '_binding_handler'
 
 
 def test_binding_table_rejects_unknown_or_overlapping_status_labels() -> None:
@@ -63,17 +63,18 @@ def test_runtime_proposal_accepts_all_registered_runtime_directives() -> None:
         responsible_party='claimant',
         required_items=[],
     )
-    for directive in (
-        'runtime.continue',
-        'runtime.wait_for_user',
-        'runtime.wait_for_external',
-        'runtime.pause_for_review',
-        'runtime.interrupt_urgent',
-        'runtime.stop_no_claim',
-        'runtime.fail_safe',
-    ):
+    pairs = (
+        ('conversation.answer', 'runtime.continue'),
+        ('conversation.answer', 'runtime.wait_for_user'),
+        ('human.create_handoff', 'runtime.pause_for_review'),
+        ('claim.create', 'runtime.continue'),
+        ('claim.create', 'runtime.wait_for_external'),
+        ('runtime.stop_no_claim', 'runtime.stop_no_claim'),
+        ('runtime.fail_safe', 'runtime.fail_safe'),
+    )
+    for action_code, directive in pairs:
         proposal = ModelRuntimeProposal(
-            action_code='conversation.answer',
+            action_code=action_code,
             runtime_action_code=directive,
             reason_codes=['TEST'],
             customer_reason='A bounded reason.',
@@ -81,3 +82,30 @@ def test_runtime_proposal_accepts_all_registered_runtime_directives() -> None:
             customer_next_step=next_step,
         )
         assert proposal.runtime_action_code == directive
+
+
+def test_runtime_proposal_rejects_protected_or_mismatched_directives() -> None:
+    next_step = CustomerNextStep(
+        status='continue_current_report',
+        summary='Continue the report.',
+        responsible_party='claimant',
+        required_items=[],
+    )
+    with pytest.raises(ValueError, match='published-rule-only'):
+        ModelRuntimeProposal(
+            action_code='conversation.answer',
+            runtime_action_code='runtime.interrupt_urgent',
+            reason_codes=['TEST'],
+            customer_reason='A bounded reason.',
+            customer_response='A bounded response.',
+            customer_next_step=next_step,
+        )
+    with pytest.raises(ValueError, match='not valid'):
+        ModelRuntimeProposal(
+            action_code='conversation.answer',
+            runtime_action_code='runtime.pause_for_review',
+            reason_codes=['TEST'],
+            customer_reason='A bounded reason.',
+            customer_response='A bounded response.',
+            customer_next_step=next_step,
+        )

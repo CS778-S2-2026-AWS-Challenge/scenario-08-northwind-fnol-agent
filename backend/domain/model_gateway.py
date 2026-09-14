@@ -345,9 +345,31 @@ class ModelRuntimeProposal(ModelContract):
 
         try:
             action_contract(self.action_code)
-            action_contract(self.runtime_action_code)
+            runtime_contract = action_contract(self.runtime_action_code)
         except ValueError as error:
             raise ValueError(f'Unregistered Runtime action: {error}') from error
+        # Protected interrupts are emitted only by deterministic published
+        # rules.  A model proposal has no rule-evaluation authority, so it must
+        # never be able to pair an ordinary conversation move with one.
+        if runtime_contract.authority_requirement.value == 'published_rule':
+            raise ValueError(
+                'A model proposal cannot select a published-rule-only runtime directive.'
+            )
+        allowed_directives = {
+            'conversation.answer': {'runtime.continue', 'runtime.wait_for_user'},
+            'conversation.explain': {'runtime.continue', 'runtime.wait_for_user'},
+            'conversation.summarise': {'runtime.continue', 'runtime.wait_for_user'},
+            'human.create_handoff': {
+                'runtime.pause_for_review',
+            },
+            'claim.prepare_creation': {'runtime.continue', 'runtime.wait_for_external'},
+            'claim.create': {'runtime.continue', 'runtime.wait_for_external'},
+        }
+        permitted = allowed_directives.get(self.action_code)
+        if permitted is not None and self.runtime_action_code not in permitted:
+            raise ValueError(
+                f'Runtime directive {self.runtime_action_code} is not valid for {self.action_code}.'
+            )
         return self
 
 
