@@ -299,8 +299,64 @@ _DEFINITIONS = (
 )
 
 
-LIFECYCLE_REGISTRY: Final[tuple[ExternalLifecycleDefinition, ...]] = _DEFINITIONS
-LIFECYCLE_BY_STATUS: Final = MappingProxyType({item.status: item for item in _DEFINITIONS})
+_STATE_PRECONDITIONS: Final = {
+    ExternalLifecycleStatus.CONSENT_REQUIRED: ('claim_scope', 'consent_pending'),
+    ExternalLifecycleStatus.AUTHORISED: ('claim_scope', 'consent_ref', 'authorised_revision'),
+    ExternalLifecycleStatus.PREPARED: (
+        'claim_scope',
+        'consent_ref',
+        'authorised_revision',
+        'operation_identity',
+    ),
+    ExternalLifecycleStatus.SUBMITTING: (
+        'claim_scope',
+        'operation_identity',
+        'idempotency_identity',
+        'authorised_disclosure',
+        'dispatch_reservation',
+    ),
+    ExternalLifecycleStatus.ACCEPTED: ('claim_scope', 'delivery_evidence', 'provider_reference'),
+    ExternalLifecycleStatus.QUEUED: ('claim_scope', 'delivery_evidence', 'operation_identity'),
+    ExternalLifecycleStatus.ASSIGNED: ('claim_scope', 'delivery_evidence', 'provider_reference'),
+    ExternalLifecycleStatus.RETRYABLE_FAILURE: (
+        'claim_scope',
+        'failure_code',
+        'retry_same_operation',
+    ),
+    ExternalLifecycleStatus.TERMINAL_FAILURE: (
+        'claim_scope',
+        'failure_code',
+        'professional_review',
+    ),
+    ExternalLifecycleStatus.UNKNOWN_OUTCOME: (
+        'claim_scope',
+        'operation_identity',
+        'reconciliation_evidence',
+    ),
+    ExternalLifecycleStatus.RESULT_RECEIVED: (
+        'claim_scope',
+        'result_source',
+        'received_at',
+        'evidence_links',
+    ),
+    ExternalLifecycleStatus.RESULT_VERIFIED: (
+        'claim_scope',
+        'verification_at',
+        'checked_claim_revision',
+    ),
+    ExternalLifecycleStatus.WRITTEN_BACK: (
+        'claim_scope',
+        'authorised_decision',
+        'resulting_revision',
+        'provenance_refs',
+    ),
+}
+
+LIFECYCLE_REGISTRY: Final[tuple[ExternalLifecycleDefinition, ...]] = tuple(
+    item.model_copy(update={'required_preconditions': _STATE_PRECONDITIONS[item.status]})
+    for item in _DEFINITIONS
+)
+LIFECYCLE_BY_STATUS: Final = MappingProxyType({item.status: item for item in LIFECYCLE_REGISTRY})
 
 
 REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
@@ -315,6 +371,8 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
             ExternalLifecycleStatus.ACCEPTED,
             ExternalLifecycleStatus.QUEUED,
             ExternalLifecycleStatus.ASSIGNED,
+            ExternalLifecycleStatus.RETRYABLE_FAILURE,
+            ExternalLifecycleStatus.TERMINAL_FAILURE,
             ExternalLifecycleStatus.UNKNOWN_OUTCOME,
         ),
         limitation='Simulation-only; it must not be described as a production provider.',
@@ -480,6 +538,16 @@ _PROJECTION_METADATA: Final = MappingProxyType(
             pending_owner='external_party',
             next_action='Track the provider result and verify it before reconciling Claim State.',
         ),
+        ExternalLifecycleStatus.QUEUED: ExternalProjectionMetadata(
+            label='Awaiting service assignment',
+            pending_owner='external_party',
+            next_action='Track the queued operation by its operation identity.',
+        ),
+        ExternalLifecycleStatus.ASSIGNED: ExternalProjectionMetadata(
+            label='Assessor assigned',
+            pending_owner='external_party',
+            next_action='Await the assessor result and verify it against the Claim.',
+        ),
         ExternalLifecycleStatus.RETRYABLE_FAILURE: ExternalProjectionMetadata(
             label='Failed',
             pending_owner='claims_professional',
@@ -529,6 +597,13 @@ def build_lifecycle_projection(
         )
     metadata = projection_metadata(operation.status)
     result = ExternalLifecycleStatus(result_status) if result_status is not None else None
+    if (
+        result is not None
+        and lifecycle_definition(result).stage is not ExternalLifecycleStage.RESULT
+    ):
+        raise InvalidExternalLifecycleTransition(
+            f'{result.value} is not a result-stage lifecycle status.'
+        )
     return ExternalServiceLifecycleProjection(
         service_identity=service_identity,
         catalogue_reference=entry.catalogue_reference,
