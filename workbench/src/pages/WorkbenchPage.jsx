@@ -815,6 +815,15 @@ export default function WorkbenchPage() {
         onConversationChanged={() => {
           if (isConversations) loadConversations()
         }}
+        onBusinessActionExecuted={async (execution) => {
+          await loadClaims()
+          if (claimId && execution.claim_id === claimId) {
+            await loadDetail(claimId)
+          }
+          if (isConversations) {
+            await loadConversations()
+          }
+        }}
       />
     </div>
   )
