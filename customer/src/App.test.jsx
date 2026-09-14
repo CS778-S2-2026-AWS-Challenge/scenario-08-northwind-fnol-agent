@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({
   getClaimEvidence: vi.fn(),
   getRuntimeCapabilities: vi.fn(),
   listClaims: vi.fn(),
+  listEvidenceHistory: vi.fn(),
   loginClaimant: vi.fn(),
   logoutClaimant: vi.fn(),
   requestId: vi.fn((prefix) => `${prefix}-test`),
@@ -51,6 +52,8 @@ const initialClaim = {
     summary: 'Describe what happened',
     required_items: [],
   },
+  created_at: '2026-09-14T01:00:00Z',
+  updated_at: '2026-09-14T01:00:00Z',
   external_claim: null,
 }
 
@@ -112,6 +115,7 @@ describe('claimant intake projection', () => {
       default_model_profile_id: 'qwen-local',
     })
     api.getClaimEvidence.mockResolvedValue({ items: [], revision: 1 })
+    api.listEvidenceHistory.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.createClaim.mockResolvedValue({
       claim: initialClaim,
       session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
@@ -282,5 +286,156 @@ describe('claimant intake projection', () => {
     })))
     expect(await screen.findByText('9pm')).toBeInTheDocument()
     expect(screen.getByText('Add the affected property address')).toBeInTheDocument()
+  })
+
+  it('aborts an in-flight draft upload when its remove control is used', async () => {
+    const user = userEvent.setup()
+    let uploadSignal
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.requestEvidenceUpload.mockImplementation(({ signal }) => {
+      uploadSignal = signal
+      return new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+      })
+    })
+
+    render(<App />)
+    const fileInput = document.querySelector('input[type="file"]')
+    await user.upload(fileInput, new File(['image'], 'draft-damage.jpg', { type: 'image/jpeg' }))
+    expect(await screen.findByText('draft-damage.jpg')).toBeInTheDocument()
+    await waitFor(() => expect(uploadSignal).toBeInstanceOf(AbortSignal))
+
+    await user.click(screen.getByRole('button', { name: 'Remove draft-damage.jpg' }))
+
+    expect(uploadSignal.aborted).toBe(true)
+    expect(screen.queryByText('draft-damage.jpg')).not.toBeInTheDocument()
+    expect(api.uploadEvidenceContent).not.toHaveBeenCalled()
+    expect(api.completeEvidenceUpload).not.toHaveBeenCalled()
+  })
+
+  it('opens account Evidence history directly without creating an empty Claim', async () => {
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listEvidenceHistory.mockResolvedValue({
+      items: [{
+        evidence_id: 'evd_account_history',
+        source_claim_id: 'clm_previous',
+        kind: 'receipt',
+        status: 'received',
+        file_status: 'ready',
+        original_filename: 'receipt.pdf',
+        media_type: 'application/pdf',
+        size_bytes: 2048,
+        source: 'claimant',
+        provenance_summary: ['claimant_upload'],
+        can_reuse: true,
+        can_remove: false,
+        created_at: '2026-09-12T01:00:00Z',
+        updated_at: '2026-09-12T01:01:00Z',
+      }],
+      page: { next_cursor: null },
+    })
+    globalThis.history.replaceState({}, '', '/files')
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Evidence history' })).toBeInTheDocument()
+    expect(await screen.findByText('receipt.pdf')).toBeInTheDocument()
+    expect(api.createClaim).not.toHaveBeenCalled()
+  })
+
+  it('adds a server-confirmed Claim to Claim history and drills into its Evidence', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.getClaimEvidence.mockResolvedValue({
+      claim_id: initialClaim.claim_id,
+      revision: 1,
+      items: [{
+        evidence_id: 'evd_current_claim',
+        claim_id: initialClaim.claim_id,
+        kind: 'incident_photo',
+        status: 'received',
+        file_status: 'ready',
+        original_filename: 'kitchen-damage.jpg',
+        media_type: 'image/jpeg',
+        size_bytes: 2048,
+        source: 'claimant',
+        created_at: '2026-09-14T01:05:00Z',
+        updated_at: '2026-09-14T01:06:00Z',
+      }],
+      customer_next_step: initialClaim.customer_next_step,
+    })
+    api.requestEvidenceUpload.mockReturnValue(new Promise(() => {}))
+
+    render(<App />)
+    await user.upload(
+      document.querySelector('input[type="file"]'),
+      new File(['image'], 'new-damage.jpg', { type: 'image/jpeg' }),
+    )
+    expect(await screen.findByText(initialClaim.claim_id)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Claim history' }))
+    expect(await screen.findByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: `Open Home claim ${initialClaim.claim_id}` }))
+
+    expect(screen.getByRole('heading', { name: 'Claim features' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Evidence history/ }))
+
+    expect(await screen.findByText('kitchen-damage.jpg')).toBeInTheDocument()
+    expect(api.getClaimEvidence).toHaveBeenCalledWith(
+      initialClaim.claim_id,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+  })
+
+  it('restores a protected Claim Evidence deep link without creating or resuming a Claim', async () => {
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({
+      items: [{ ...initialClaim, can_resume: true }],
+      page: { next_cursor: null },
+    })
+    api.getClaimEvidence.mockResolvedValue({
+      claim_id: initialClaim.claim_id,
+      revision: 1,
+      items: [{
+        evidence_id: 'evd_deep_link',
+        claim_id: initialClaim.claim_id,
+        kind: 'repair_quote',
+        status: 'received',
+        file_status: 'ready',
+        original_filename: 'repair-quote.pdf',
+        media_type: 'application/pdf',
+        size_bytes: 4096,
+        source: 'claimant',
+        created_at: '2026-09-14T01:05:00Z',
+        updated_at: '2026-09-14T01:06:00Z',
+      }],
+      customer_next_step: initialClaim.customer_next_step,
+    })
+    globalThis.history.replaceState({}, '', `/account/claims/${initialClaim.claim_id}/evidence`)
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Evidence history' })).toBeInTheDocument()
+    expect(await screen.findByText('repair-quote.pdf')).toBeInTheDocument()
+    expect(api.createClaim).not.toHaveBeenCalled()
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
   })
 })

@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { createClaim, setClaimantAccessToken, streamClaimUpdates } from './api.js'
+import {
+  createClaim,
+  listEvidenceHistory,
+  listClaims,
+  setClaimantAccessToken,
+  streamClaimUpdates,
+} from './api.js'
 
 
 function eventStreamResponse(frames, status = 200) {
@@ -108,6 +114,66 @@ describe('claim creation contract', () => {
           incident_type: 'home',
           model_profile_id: 'qwen-local',
         }),
+      }),
+    )
+  })
+})
+
+describe('Evidence history contract', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken('claimant-session-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('uses the account-scoped route, opaque cursor, bearer identity, and abort signal', async () => {
+    const controller = new AbortController()
+    fetch.mockResolvedValue(new Response(JSON.stringify({
+      items: [],
+      page: { next_cursor: null },
+    }), { status: 200 }))
+
+    await listEvidenceHistory({ cursor: 'opaque-cursor', limit: 10, signal: controller.signal })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/evidence?limit=10&cursor=opaque-cursor',
+      expect.objectContaining({
+        signal: controller.signal,
+        headers: expect.objectContaining({ Authorization: 'Bearer claimant-session-token' }),
+      }),
+    )
+  })
+})
+
+describe('Claim history contract', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken('claimant-session-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('passes the opaque page cursor and cancellation signal to the claimant Claim list', async () => {
+    const controller = new AbortController()
+    fetch.mockResolvedValue(new Response(JSON.stringify({
+      items: [],
+      page: { next_cursor: null },
+    }), { status: 200 }))
+
+    await listClaims({ cursor: 'claim-cursor', limit: 10, signal: controller.signal })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/claims?limit=10&cursor=claim-cursor',
+      expect.objectContaining({
+        signal: controller.signal,
+        headers: expect.objectContaining({ Authorization: 'Bearer claimant-session-token' }),
       }),
     )
   })
