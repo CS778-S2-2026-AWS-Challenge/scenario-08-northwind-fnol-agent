@@ -288,6 +288,53 @@ describe('claimant intake projection', () => {
     expect(screen.getByText('Add the affected property address')).toBeInTheDocument()
   })
 
+  it('shows what to provide from the Evidence projection and supports keyboard tab navigation', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue({
+      claimant_message: claimantMessage,
+      agent_message: agentMessage,
+      form_changes: [],
+      contents_item_changes: [],
+      dynamic_form: null,
+      claim_revision: 2,
+      decision: { customer_next_step: initialClaim.customer_next_step },
+    })
+    api.getClaimEvidence.mockResolvedValue({
+      claim_id: initialClaim.claim_id,
+      revision: 2,
+      items: [{
+        evidence_id: 'evd_required_document',
+        kind: 'repair_quote',
+        status: 'missing',
+        file_status: 'awaiting_upload',
+        needed_for: ['current_action'],
+        claimant_note: 'A repair quote is needed for this step.',
+      }],
+    })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    const summaryTab = await screen.findByRole('tab', { name: 'Summary' })
+    const documentsTab = screen.getByRole('tab', { name: 'What to provide' })
+    expect(summaryTab).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('What we have so far')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'What to provide, 1 outstanding' })).toBeInTheDocument()
+
+    summaryTab.focus()
+    await user.keyboard('{ArrowRight}')
+    expect(documentsTab).toHaveFocus()
+    expect(documentsTab).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('Repair Quote')).toBeInTheDocument()
+    expect(screen.getByText('1 item needs your attention')).toBeInTheDocument()
+
+    await user.keyboard('{Home}')
+    expect(summaryTab).toHaveFocus()
+    expect(summaryTab).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('What we have so far')).toBeInTheDocument()
+  })
+
   it('aborts an in-flight draft upload when its remove control is used', async () => {
     const user = userEvent.setup()
     let uploadSignal
