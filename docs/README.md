@@ -61,6 +61,7 @@ them:
   audit, and account projections.
 - [Shared Claim State Transaction Boundary](claim-state-transaction-boundary.md)
 - [Staff Agent Draft Execution](staff-agent-draft-execution.md)
+- [Staff Agent Tool Registry](staff-agent-tool-registry.md)
 - [Data Architecture](data-architecture.md)
 - [Demonstration Material Catalogue](demonstration-material-catalogue.md)
 - [Fixtures and Test Conventions](fixtures_convention.md)
