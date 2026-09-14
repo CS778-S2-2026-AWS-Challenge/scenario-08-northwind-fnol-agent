@@ -1554,6 +1554,32 @@ class EvidenceListResponse(ContractModel):
     customer_next_step: CustomerNextStep
 
 
+class ClaimantEvidenceHistoryItem(ContractModel):
+    """Claimant-safe metadata for Evidence retained across Claims."""
+
+    evidence_id: str
+    source_claim_id: str
+    kind: str
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    original_filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = None
+    source: EvidenceSource
+    provenance_summary: list[str] = Field(default_factory=list, max_length=20)
+    can_reuse: bool = False
+    can_remove: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class ClaimantEvidenceHistoryResponse(ContractModel):
+    """Account-scoped claimant Evidence history projection."""
+
+    items: list[ClaimantEvidenceHistoryItem]
+    page: PageInfo
+
+
 class EvidenceMutationResponse(ContractModel):
     evidence: ClaimantEvidence
     revision: int

@@ -2584,6 +2584,128 @@
         "title": "ClaimantEvidence",
         "type": "object"
       },
+      "ClaimantEvidenceHistoryItem": {
+        "additionalProperties": false,
+        "description": "Claimant-safe metadata for Evidence retained across Claims.",
+        "properties": {
+          "can_remove": {
+            "default": false,
+            "title": "Can Remove",
+            "type": "boolean"
+          },
+          "can_reuse": {
+            "default": false,
+            "title": "Can Reuse",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "evidence_id": {
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "file_status": {
+            "$ref": "#/components/schemas/EvidenceFileStatus"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "media_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Type"
+          },
+          "original_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Filename"
+          },
+          "provenance_summary": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Provenance Summary",
+            "type": "array"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "source": {
+            "$ref": "#/components/schemas/EvidenceSource"
+          },
+          "source_claim_id": {
+            "title": "Source Claim Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/EvidenceStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "source_claim_id",
+          "kind",
+          "status",
+          "file_status",
+          "source",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ClaimantEvidenceHistoryItem",
+        "type": "object"
+      },
+      "ClaimantEvidenceHistoryResponse": {
+        "additionalProperties": false,
+        "description": "Account-scoped claimant Evidence history projection.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimantEvidenceHistoryItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "ClaimantEvidenceHistoryResponse",
+        "type": "object"
+      },
       "ClaimantExternalServiceAction": {
         "additionalProperties": false,
         "properties": {
@@ -16985,6 +17107,99 @@
         "summary": "Request Support",
         "tags": [
           "claimant-support"
+        ]
+      }
+    },
+    "/api/v1/evidence": {
+      "get": {
+        "operationId": "read_evidence_history_api_v1_evidence_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Northwind-Anonymous-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Northwind-Anonymous-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimantEvidenceHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Evidence History",
+        "tags": [
+          "claimant-evidence"
         ]
       }
     },
