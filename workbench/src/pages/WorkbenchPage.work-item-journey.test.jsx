@@ -149,20 +149,13 @@ function claimProjection(state) {
     customer_next_step: {
       status: completed ? 'staff_update' : 'professional_review',
       responsible_party: completed ? 'claimant' : 'claims_professional',
-      summary: completed
-        ? state.customerUpdates.at(-1).summary
-        : 'A claims professional is reviewing the applicable policy wording.',
-      can_resume: true,
-      required_items: [],
+      summary: completed ? state.customerUpdates.at(-1).summary : 'A claims professional is reviewing the applicable policy wording.',
+      can_resume: true, required_items: [],
     },
     source_summary: { status: 'empty', items: [], limitation: null },
     section_summaries: {
-      fields: { status: 'available', total: 0, needs_attention: 0 },
-      conversation: { status: 'available', total: 0, needs_attention: 0 },
-      evidence: { status: 'available', total: 0, needs_attention: 0 },
-      reference_checks: { status: 'available', total: 0, needs_attention: 0 },
-      external_services: { status: 'available', total: 0, needs_attention: 0 },
-      activity: { status: 'available', total: 1 + state.events.length, needs_attention: 0 },
+      fields: { status: 'available', total: 0, needs_attention: 0 }, conversation: { status: 'available', total: 0, needs_attention: 0 }, evidence: { status: 'available', total: 0, needs_attention: 0 },
+      reference_checks: { status: 'available', total: 0, needs_attention: 0 }, external_services: { status: 'available', total: 0, needs_attention: 0 }, activity: { status: 'available', total: 1 + state.events.length, needs_attention: 0 },
     },
     tags: [],
   }
@@ -189,15 +182,8 @@ function queueProjection(state) {
 }
 function createService() {
   const state = {
-    revision: 2,
-    phase: 'open',
-    result: null,
-    customerUpdates: [],
-    events: [],
-    mutations: [],
-    workItemReads: [],
-    customerUpdateReads: [],
-    eventReads: [],
+    revision: 2, phase: 'open', result: null, customerUpdates: [], events: [],
+    mutations: [], workItemReads: [], customerUpdateReads: [], eventReads: [],
   }
   const page = (items) => ({ items, page: { next_cursor: null } })
   const fetchMock = vi.fn(async (url, options = {}) => {
@@ -318,13 +304,7 @@ describe('WorkbenchPage WorkItem browser/API journey', () => {
     vi.clearAllMocks()
     localStorage.clear()
     sessionStorage.clear()
-    tabs.tabs = [{
-      claimId: 'clm_work_item',
-      displayReference: 'NW-WORKITEM',
-      section: 'summary',
-      sessionId: null,
-      draft: '',
-    }]
+    tabs.tabs = [{ claimId: 'clm_work_item', displayReference: 'NW-WORKITEM', section: 'summary', sessionId: null, draft: '' }]
     tabs.activeId = null
     tabs.open.mockImplementation((claim) => { tabs.activeId = claim.claim_id })
     tabs.activate.mockImplementation((claimId) => { tabs.activeId = claimId })
@@ -364,14 +344,8 @@ describe('WorkbenchPage WorkItem browser/API journey', () => {
     ))).toBe(true)
     await user.click(screen.getByText('Coverage Review'))
     await user.selectOptions(screen.getByLabelText('Status'), 'completed')
-    await user.type(
-      screen.getByLabelText('Result summary'),
-      'The applicable policy wording was reviewed.',
-    )
-    await user.type(
-      screen.getByLabelText('Claimant update'),
-      'The policy review is complete and your report can continue.',
-    )
+    await user.type(screen.getByLabelText('Result summary'), 'The applicable policy wording was reviewed.')
+    await user.type(screen.getByLabelText('Claimant update'), 'The policy review is complete and your report can continue.')
     await user.click(screen.getByRole('button', { name: 'Update action' }))
     await waitFor(() => {
       expect(state.mutations).toHaveLength(2)
