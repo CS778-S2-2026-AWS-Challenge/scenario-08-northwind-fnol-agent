@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { workbenchApi } from '../api.js'
-import { formatDateTime } from '../format.js'
+import { formatDateTime, words } from '../format.js'
 
 const MAX_CLAIM_SCOPE = 5
 const NEW_SESSION_TITLE = 'New Staff Agent session'
@@ -451,15 +451,18 @@ function AgentDraft({ draft, sourceMessage, onExecute }) {
           </div>
         </div>
       )}
-      {execution && (
-        <div className="agent-draft__execution" role="status">
-          <CheckCircle2 size={16} aria-hidden="true" />
-          <span>
-            <strong>Executed by Workbench</strong>
-            <small>{execution.action_code} completed at Claim revision {execution.runtime_execution?.resulting_revision ?? 'not reported'}.</small>
-          </span>
-        </div>
-      )}
+      {execution && (() => {
+        const presentation = draftExecutionPresentation(execution)
+        return (
+          <div className="agent-draft__execution" role="status">
+            <CheckCircle2 size={16} aria-hidden="true" />
+            <span>
+              <strong>Workbench outcome: {presentation.outcome}</strong>
+              {presentation.details.map((detail) => <small key={detail}>{detail}</small>)}
+            </span>
+          </div>
+        )
+      })()}
       {executionError && (
         <div className="agent-draft__execution agent-draft__execution--error" role="alert">
           <AlertCircle size={16} aria-hidden="true" />
@@ -471,9 +474,54 @@ function AgentDraft({ draft, sourceMessage, onExecute }) {
   )
 }
 
+function draftExecutionPresentation(execution) {
+  const runtimeExecution = execution?.runtime_execution || {}
+  const result = runtimeExecution.result || execution?.result || {}
+  const details = []
+  const add = (label, value) => {
+    if (value === undefined || value === null || value === '') return
+    details.push(`${label}: ${value}`)
+  }
+
+  add('Handoff status', result.handoff?.status ? words(result.handoff.status) : null)
+  add('Handoff', result.handoff?.handoff_id)
+  add('Work item status', result.action?.status ? words(result.action.status) : null)
+  add('Work item', result.action?.action_id)
+  add(
+    'Signal decision',
+    result.signal_decision?.decision ? words(result.signal_decision.decision) : null,
+  )
+  add('Decision', result.signal_decision?.signal_decision_id)
+  add('Request status', result.request?.status ? words(result.request.status) : null)
+  add('Request', result.request?.request_id)
+  add('Message recorded', result.message?.message_id)
+  add(
+    'Result',
+    result.action?.result?.summary
+      || result.signal_decision?.summary
+      || result.customer_update?.summary
+      || null,
+  )
+
+  const revision = runtimeExecution.resulting_revision
+    ?? result.revision
+    ?? result.claim_revision
+    ?? null
+  add('Claim revision', revision)
+
+  if (!details.length) {
+    details.push('The registered handler returned a persisted result with no additional staff-facing fields.')
+  }
+
+  return {
+    outcome: words(runtimeExecution.outcome || execution?.outcome || 'executed'),
+    details,
+  }
+}
+
 function draftExecutionError(error) {
   const reference = error?.requestId ? ` Reference: ${error.requestId}` : ''
-  if (error?.code === 'REVISION_CONFLICT') return `The Claim changed before execution. The latest Claim projection was kept; review the draft again.${reference}`
+  if (error?.code === 'REVISION_CONFLICT') return `The Claim changed before execution. Reload the latest Claim and review the draft again.${reference}`
   if (error?.code === 'ACCESS_DENIED') return `This staff identity is not authorised to execute the proposed action.${reference}`
   if (error?.code === 'IDEMPOTENCY_CONFLICT') return `This draft no longer matches the original execution identity and was not run again.${reference}`
   if (error?.code === 'DEPENDENCY_UNAVAILABLE' || error?.code === 'DEPENDENCY_FAILED') return `A required service is unavailable, so the action was not reported as completed.${reference}`
