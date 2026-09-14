@@ -123,8 +123,17 @@ export default function WorkbenchPage() {
     return response
   }, [openTab])
 
-  const loadClaims = useCallback(async ({ cursor = null, append = false } = {}) => {
-    if (!filterMetadata || !viewAvailable) return
+  const loadClaims = useCallback(async ({
+    cursor = null,
+    append = false,
+    propagateError = false,
+  } = {}) => {
+    if (!filterMetadata || !viewAvailable) {
+      if (propagateError) {
+        throw new Error('The Claim queue projection is unavailable and could not be refreshed.')
+      }
+      return
+    }
     const requestId = ++queueRequestId.current
     const snapshotKey = queueFilterKey(queueFilters)
     const sameSnapshot = queueSnapshotKeyRef.current === snapshotKey
@@ -160,17 +169,21 @@ export default function WorkbenchPage() {
           setQueueNotice('The saved queue page was invalid or stale, so current work was reloaded from the start.')
           return
         } catch (recoveryError) {
-          if (requestId === queueRequestId.current) setQueueError(recoveryError)
+          if (requestId === queueRequestId.current) {
+            setQueueError(recoveryError)
+            if (propagateError) throw recoveryError
+          }
           return
         }
       }
       setQueueError(error)
+      if (propagateError) throw error
     } finally {
       if (requestId === queueRequestId.current) setQueueLoading(false)
     }
   }, [filterMetadata, queueFilters, token, viewAvailable])
 
-  const loadDetail = useCallback(async (id) => {
+  const loadDetail = useCallback(async (id, { propagateError = false } = {}) => {
     const requestId = ++detailRequestId.current
     if (!id) {
       detailRef.current = null
@@ -222,6 +235,7 @@ export default function WorkbenchPage() {
         setDetailStale(true)
       }
       setDetailError(error)
+      if (propagateError) throw error
     } finally {
       if (requestId === detailRequestId.current) setDetailLoading(false)
     }
@@ -389,7 +403,7 @@ export default function WorkbenchPage() {
     token,
   ])
 
-  const loadConversations = useCallback(async () => {
+  const loadConversations = useCallback(async ({ propagateError = false } = {}) => {
     setConversationsLoading(true)
     setConversationsError(null)
     try {
@@ -397,6 +411,7 @@ export default function WorkbenchPage() {
       setConversations(response.items || [])
     } catch (error) {
       setConversationsError(error)
+      if (propagateError) throw error
     } finally {
       setConversationsLoading(false)
     }
@@ -816,12 +831,36 @@ export default function WorkbenchPage() {
           if (isConversations) loadConversations()
         }}
         onBusinessActionExecuted={async (execution) => {
-          await loadClaims()
+          const refreshes = [
+            ['Claim queue', loadClaims({ propagateError: true })],
+          ]
           if (claimId && execution.claim_id === claimId) {
-            await loadDetail(claimId)
+            refreshes.push([
+              'open Claim',
+              loadDetail(claimId, { propagateError: true }),
+            ])
           }
           if (isConversations) {
-            await loadConversations()
+            refreshes.push([
+              'conversations',
+              loadConversations({ propagateError: true }),
+            ])
+          }
+
+          const results = await Promise.allSettled(
+            refreshes.map(([, refresh]) => refresh),
+          )
+          const failures = results.flatMap((result, index) => (
+            result.status === 'rejected'
+              ? [{ label: refreshes[index][0], error: result.reason }]
+              : []
+          ))
+          if (failures.length) {
+            const refreshError = new Error(
+              `Action executed, but refresh failed for ${failures.map(({ label }) => label).join(', ')}. Refresh before taking another action.`,
+            )
+            refreshError.requestId = failures.find(({ error }) => error?.requestId)?.error?.requestId || null
+            throw refreshError
           }
         }}
       />
