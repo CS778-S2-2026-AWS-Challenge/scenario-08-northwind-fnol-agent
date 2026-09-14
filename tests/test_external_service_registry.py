@@ -9,6 +9,7 @@ from backend.domain.external_service_registry import (
     InvalidExternalLifecycleTransition,
     assert_lifecycle_transition,
     assert_persisted_operation_transition,
+    build_lifecycle_projection,
     lifecycle_definition,
     projection_metadata,
     service_registry_entry,
@@ -108,3 +109,20 @@ def test_projection_metadata_is_complete_for_persisted_statuses() -> None:
     ):
         metadata = projection_metadata(status)
         assert metadata.label and metadata.pending_owner and metadata.next_action
+
+
+def test_lifecycle_projection_carries_registry_and_role_safe_contract() -> None:
+    projection = build_lifecycle_projection(
+        service_identity='vehicle_damage_assessment_routing',
+        catalogue_reference='P3-ASSESSOR',
+        provenance=ExternalCapabilityProvenance.SIMULATED,
+        access_form='controlled assessor simulation',
+        limitation='Simulation-only.',
+        operation_status=ExternalLifecycleStatus.ACCEPTED,
+        result_status=ExternalLifecycleStatus.RESULT_RECEIVED,
+    )
+    assert projection.registry_version == REGISTRY_VERSION
+    assert projection.operation_status is ExternalLifecycleStatus.ACCEPTED
+    assert projection.result_status is ExternalLifecycleStatus.RESULT_RECEIVED
+    assert projection.required_preconditions
+    assert projection.allowed_next

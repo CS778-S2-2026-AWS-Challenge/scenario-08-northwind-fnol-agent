@@ -7,7 +7,12 @@ from typing import Any, TypeVar
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.evidence import is_in_conflict, unresolved_conflicts
-from backend.domain.external_service_registry import projection_metadata
+from backend.domain.external_service_registry import (
+    ExternalCapabilityProvenance,
+    build_lifecycle_projection,
+    projection_metadata,
+    service_registry_entry,
+)
 from backend.domain.external_services import (
     ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
@@ -2202,6 +2207,26 @@ def _external_lifecycle(
 ) -> WorkbenchExternalLifecycle:
     status = task.status
     projection = projection_metadata(status.value)
+    try:
+        registry_entry = service_registry_entry(task.service_identity)
+        canonical_projection = build_lifecycle_projection(
+            service_identity=task.service_identity,
+            catalogue_reference=registry_entry.catalogue_reference,
+            provenance=(
+                ExternalCapabilityProvenance.SIMULATED
+                if task.integration_source.value == 'fixture'
+                else ExternalCapabilityProvenance.CONFIGURED
+            ),
+            access_form=registry_entry.access_form,
+            limitation=registry_entry.limitation,
+            operation_status=status.value,
+            result_status=None,
+        )
+        projection = projection_metadata(canonical_projection.operation_status.value)
+    except (KeyError, ValueError):
+        # Older task records may name a service not yet present in this registry;
+        # preserve their bounded projection until that service is registered.
+        pass
     label = projection.label
     owner = WorkbenchResponsibility(projection.pending_owner)
     next_action = projection.next_action

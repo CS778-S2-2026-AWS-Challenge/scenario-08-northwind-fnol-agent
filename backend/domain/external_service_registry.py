@@ -59,6 +59,7 @@ class ExternalLifecycleDefinition(ContractModel):
     allowed_next: tuple[ExternalLifecycleStatus, ...] = ()
     recovery: str = Field(min_length=1, max_length=200)
     claim_state_effect: str = Field(min_length=1, max_length=300)
+    required_preconditions: tuple[str, ...] = ('claim_scope',)
     requires_reconciliation: bool = False
     implies_completion: bool = False
 
@@ -101,6 +102,26 @@ class ExternalServiceRegistryEntry(ContractModel):
         if not self.uses_external_task and self.supported_statuses:
             raise ValueError('A manual path must not declare external-task statuses.')
         return self
+
+
+class ExternalServiceLifecycleProjection(ContractModel):
+    """Role-safe, bounded projection shared by Agent and staff consumers."""
+
+    registry_version: str = REGISTRY_VERSION
+    service_identity: str = Field(min_length=1, max_length=100)
+    catalogue_reference: str | None = None
+    provenance: ExternalCapabilityProvenance
+    access_form: str = Field(min_length=1, max_length=200)
+    limitation: str = Field(min_length=1, max_length=500)
+    operation_status: ExternalLifecycleStatus
+    result_status: ExternalLifecycleStatus | None = None
+    claimant_meaning: str = Field(min_length=1, max_length=500)
+    agent_meaning: str = Field(min_length=1, max_length=500)
+    required_preconditions: tuple[str, ...] = ('claim_scope',)
+    pending_owner: str = Field(min_length=1, max_length=80)
+    next_action: str = Field(min_length=1, max_length=500)
+    requires_reconciliation: bool = False
+    allowed_next: tuple[ExternalLifecycleStatus, ...] = ()
 
 
 def _definition(
@@ -490,3 +511,36 @@ def projection_metadata(status: ExternalLifecycleStatus | str) -> ExternalProjec
         raise InvalidExternalLifecycleTransition(
             f'{operation_status.value} has no persisted operation projection.'
         ) from exc
+
+
+def build_lifecycle_projection(
+    *,
+    service_identity: str,
+    operation_status: ExternalLifecycleStatus | str,
+    provenance: ExternalCapabilityProvenance,
+    access_form: str,
+    limitation: str,
+    catalogue_reference: str | None = None,
+    result_status: ExternalLifecycleStatus | str | None = None,
+) -> ExternalServiceLifecycleProjection:
+    """Build one canonical projection without exposing raw task/provider data."""
+
+    operation = lifecycle_definition(operation_status)
+    metadata = projection_metadata(operation.status)
+    result = ExternalLifecycleStatus(result_status) if result_status is not None else None
+    return ExternalServiceLifecycleProjection(
+        service_identity=service_identity,
+        catalogue_reference=catalogue_reference,
+        provenance=provenance,
+        access_form=access_form,
+        limitation=limitation,
+        operation_status=operation.status,
+        result_status=result,
+        claimant_meaning=operation.claimant_meaning,
+        agent_meaning=operation.agent_meaning,
+        required_preconditions=operation.required_preconditions,
+        pending_owner=metadata.pending_owner,
+        next_action=metadata.next_action,
+        requires_reconciliation=operation.requires_reconciliation,
+        allowed_next=operation.allowed_next,
+    )
