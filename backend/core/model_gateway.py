@@ -33,6 +33,8 @@ def _model_gateway_config_from_runtime(
     capabilities = ModelCapabilities(
         structured_output=configuration.structured_output,
         tools=configuration.tools,
+        image_input=configuration.image_input,
+        document_input=configuration.document_input,
     )
     profile = ModelProfile(
         profile_id=configuration.profile_id,
@@ -71,6 +73,8 @@ def _runtime_configuration_matches_settings(
         and configuration.privacy_class == CLAIMANT_AGENT_PRIVACY_CLASS
         and configuration.prompt_version == MOTOR_CLAIMANT_PROMPT_ID
         and configuration.structured_output
+        and configuration.image_input == settings.model_supports_image_input
+        and configuration.document_input == settings.model_supports_document_input
     )
 
 
@@ -82,6 +86,8 @@ def build_model_gateway(
     capabilities = ModelCapabilities(
         structured_output=settings.model_supports_structured_output,
         tools=settings.model_supports_tools,
+        image_input=settings.model_supports_image_input,
+        document_input=settings.model_supports_document_input,
     )
     profile = ModelProfile(
         profile_id=settings.model_profile_id,
@@ -149,6 +155,16 @@ def build_scoped_model_gateway(
             runtime_configuration.tools
             if runtime_configuration is not None
             else settings.model_supports_tools
+        ),
+        image_input=(
+            runtime_configuration.image_input
+            if runtime_configuration is not None
+            else settings.model_supports_image_input
+        ),
+        document_input=(
+            runtime_configuration.document_input
+            if runtime_configuration is not None
+            else settings.model_supports_document_input
         ),
     )
     profile_id = (
@@ -316,6 +332,8 @@ class ConfigurationBackedModelGateway:
         return ModelCapabilities(
             structured_output=configuration.structured_output,
             tools=configuration.tools,
+            image_input=configuration.image_input,
+            document_input=configuration.document_input,
         )
 
     def complete(self, request: ModelRequest) -> ModelResponse:

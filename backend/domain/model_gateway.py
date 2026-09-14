@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.domain.models import (
     AgentAction,
@@ -44,12 +44,48 @@ class ModelRole(str, Enum):
     TOOL = 'tool'
 
 
+class ModelTextContent(ModelContract):
+    type: Literal['text'] = 'text'
+    text: str = Field(min_length=1, max_length=100000)
+
+
+class ModelEvidenceContent(ModelContract):
+    """An authorised reference to immutable Evidence content.
+
+    The resolver is supplied by the service boundary after ownership, Claim,
+    lifecycle, and visibility checks. This contract never contains an object
+    storage key, URL, or raw bytes.
+    """
+
+    type: Literal['evidence'] = 'evidence'
+    evidence_id: str = Field(min_length=1, max_length=100)
+    media_type: str = Field(min_length=1, max_length=100)
+
+
+ModelContentBlock = Annotated[
+    ModelTextContent | ModelEvidenceContent,
+    Field(discriminator='type'),
+]
+
+
+class ModelEvidenceContentResolver(Protocol):
+    def resolve(self, evidence_id: str, media_type: str) -> bytes | None:
+        """Return bytes for an already-authorised Evidence reference."""
+
+
 class ModelMessage(ModelContract):
     role: ModelRole
     content: str | None = None
+    content_blocks: list[ModelContentBlock] = Field(default_factory=list, max_length=50)
     tool_calls: list[ModelToolCall] = Field(default_factory=list)
     tool_call_id: str | None = None
     name: str | None = None
+
+    @model_validator(mode='after')
+    def validate_content_sources(self) -> ModelMessage:
+        if self.content is not None and self.content_blocks:
+            raise ValueError('ModelMessage must use content or content_blocks, not both.')
+        return self
 
 
 class ModelTool(ModelContract):
@@ -80,6 +116,8 @@ class ModelCompletionStatus(str, Enum):
 class ModelCapabilities(ModelContract):
     structured_output: bool = False
     tools: bool = False
+    image_input: bool = False
+    document_input: bool = False
 
 
 class ModelProfileStatus(str, Enum):
@@ -309,6 +347,7 @@ class ModelGatewayErrorCode(str, Enum):
     REFUSED_RESPONSE = 'refused_response'
     MALFORMED_RESPONSE = 'malformed_response'
     UNSUPPORTED_CAPABILITY = 'unsupported_capability'
+    EVIDENCE_UNAVAILABLE = 'evidence_unavailable'
     CONFIGURATION = 'configuration'
 
 
@@ -324,6 +363,9 @@ _ERROR_MESSAGES = {
     ModelGatewayErrorCode.MALFORMED_RESPONSE: 'The model endpoint returned an invalid response.',
     ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY: (
         'The selected model endpoint does not support a required capability.'
+    ),
+    ModelGatewayErrorCode.EVIDENCE_UNAVAILABLE: (
+        'The referenced Evidence content is unavailable for model processing.'
     ),
     ModelGatewayErrorCode.CONFIGURATION: 'The model gateway configuration is invalid.',
 }

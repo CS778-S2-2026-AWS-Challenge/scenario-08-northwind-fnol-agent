@@ -434,7 +434,8 @@ combinations return `422 PROVIDER_CONFIGURATION_INVALID`.
 For the `model` domain, `values` is a closed provider-neutral object containing
 `protocol`, `provider`, `model_identifier`, `base_url`, `credential_environment_variable`,
 `profile_id`, `purpose`, `privacy_class`, `prompt_version`, `evaluation_status`,
-`timeout_seconds`, `structured_output`, and `tools`. The credential field contains only an
+`timeout_seconds`, `structured_output`, `tools`, `image_input`, and `document_input`. The
+credential field contains only an
 environment-variable name; the secret itself remains outside the configuration record. Every
 model configuration must declare `impact=high`; an omitted or normal impact returns `422
 PROVIDER_CONFIGURATION_INVALID` and cannot enter the lifecycle. Model validation permits
@@ -1161,7 +1162,7 @@ Returns the published claimant model catalog without endpoint credentials. The r
 `default_model_profile_id` (selected by the deployment `MODEL_PROFILE_ID` when that profile is
 published and configured, otherwise the first available published profile) and each
 profile's stable ID, provider model label, protocol, structured-output capability, tool-call
-capability, and `availability`. The frontend uses the default when creating a Session, while a
+capability, image-input capability, document-input capability, and `availability`. The frontend uses the default when creating a Session, while a
 message may select another published and available profile in the same conversation.
 
 ### `POST /api/v1/claims`
@@ -2082,7 +2083,9 @@ existing handler runs. The request requires `Idempotency-Key`; Claim-mutating ac
 the current `If-Match` Claim revision.
 
 `GET /api/v1/workbench/agent/capabilities` returns the credential-free published model profile
-catalog for Staff authentication.
+catalog for Staff authentication. Each model declares `structured_output`, `tools`, `image_input`,
+and `document_input` directly from the validated published configuration. These fields do not
+grant permission to access Evidence or execute an action.
 
 ### `GET /api/v1/workbench/claims`
 

@@ -54,6 +54,8 @@ def _model_runtime_binding(request: Request) -> ModelRuntimeBinding:
         prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
         structured_output=True,
         tools=settings.model_supports_tools,
+        image_input=settings.model_supports_image_input,
+        document_input=settings.model_supports_document_input,
     )
 
 
