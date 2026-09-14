@@ -338,6 +338,12 @@ OPERATION_STATUS_IDS: Final = frozenset(
     }
 )
 
+# ``submitting`` is an observable lifecycle stage, but the existing persisted
+# task record intentionally stores only the pre-send snapshot and the adapter's
+# post-send outcome.  This mapping makes that boundary explicit instead of
+# letting repositories infer it from an unrelated transition table.
+PERSISTED_OPERATION_STATUS_IDS: Final = frozenset(OPERATION_STATUS_IDS)
+
 
 class InvalidExternalLifecycleTransition(ValueError):
     """A proposed lifecycle move is not in the canonical registry."""
@@ -388,3 +394,99 @@ def assert_operation_status_registered(status: str) -> None:
         raise InvalidExternalLifecycleTransition(
             f'{operation_status.value} is not an operation status in the persisted task contract.'
         )
+
+
+def assert_persisted_operation_transition(current: str, proposed: str) -> None:
+    """Validate a persisted task move through the canonical lifecycle.
+
+    ``submitting`` is transient and therefore never appears in
+    ``ExternalTaskRecord``.  Persisted direct edges that cross that transient
+    stage are nevertheless checked against its canonical outgoing transitions.
+    """
+
+    assert_operation_status_registered(current)
+    assert_operation_status_registered(proposed)
+    current_status = ExternalLifecycleStatus(current)
+    proposed_status = ExternalLifecycleStatus(proposed)
+    if current_status is proposed_status:
+        return
+    if current_status is ExternalLifecycleStatus.PREPARED:
+        if proposed_status not in {
+            ExternalLifecycleStatus.ACCEPTED,
+            ExternalLifecycleStatus.RETRYABLE_FAILURE,
+            ExternalLifecycleStatus.UNKNOWN_OUTCOME,
+            ExternalLifecycleStatus.TERMINAL_FAILURE,
+        }:
+            raise InvalidExternalLifecycleTransition(
+                f'{current_status.value} cannot transition to {proposed_status.value}.'
+            )
+        if proposed_status is not ExternalLifecycleStatus.TERMINAL_FAILURE:
+            assert_lifecycle_transition(ExternalLifecycleStatus.SUBMITTING, proposed_status)
+        return
+    if current_status is ExternalLifecycleStatus.RETRYABLE_FAILURE:
+        if proposed_status not in {
+            ExternalLifecycleStatus.ACCEPTED,
+            ExternalLifecycleStatus.RETRYABLE_FAILURE,
+            ExternalLifecycleStatus.UNKNOWN_OUTCOME,
+        }:
+            raise InvalidExternalLifecycleTransition(
+                f'{current_status.value} cannot transition to {proposed_status.value}.'
+            )
+        assert_lifecycle_transition(ExternalLifecycleStatus.SUBMITTING, proposed_status)
+        return
+    assert_lifecycle_transition(current_status, proposed_status)
+
+
+class ExternalProjectionMetadata(ContractModel):
+    """Canonical staff projection metadata for one persisted operation status."""
+
+    label: str = Field(min_length=1, max_length=120)
+    pending_owner: str = Field(min_length=1, max_length=80)
+    next_action: str = Field(min_length=1, max_length=500)
+
+
+_PROJECTION_METADATA: Final = MappingProxyType(
+    {
+        ExternalLifecycleStatus.PREPARED: ExternalProjectionMetadata(
+            label='Pending',
+            pending_owner='claims_professional',
+            next_action=(
+                'Review the projected disclosure, authority, and consent before submission.'
+            ),
+        ),
+        ExternalLifecycleStatus.ACCEPTED: ExternalProjectionMetadata(
+            label='Completion not confirmed',
+            pending_owner='external_party',
+            next_action='Track the provider result and verify it before reconciling Claim State.',
+        ),
+        ExternalLifecycleStatus.RETRYABLE_FAILURE: ExternalProjectionMetadata(
+            label='Failed',
+            pending_owner='claims_professional',
+            next_action=(
+                'Correct the dependency problem, then retry with the same operation identity.'
+            ),
+        ),
+        ExternalLifecycleStatus.TERMINAL_FAILURE: ExternalProjectionMetadata(
+            label='Failed',
+            pending_owner='claims_professional',
+            next_action='Review the failure before another request is attempted.',
+        ),
+        ExternalLifecycleStatus.UNKNOWN_OUTCOME: ExternalProjectionMetadata(
+            label='Outcome not confirmed',
+            pending_owner='claims_professional',
+            next_action='Reconcile by operation or provider reference before any retry.',
+        ),
+    }
+)
+
+
+def projection_metadata(status: ExternalLifecycleStatus | str) -> ExternalProjectionMetadata:
+    """Return the canonical projection metadata for a persisted operation status."""
+
+    operation_status = ExternalLifecycleStatus(status)
+    try:
+        return _PROJECTION_METADATA[operation_status]
+    except KeyError as exc:
+        raise InvalidExternalLifecycleTransition(
+            f'{operation_status.value} has no persisted operation projection.'
+        ) from exc

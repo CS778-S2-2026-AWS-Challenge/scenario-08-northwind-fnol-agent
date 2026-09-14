@@ -5,7 +5,10 @@ from enum import Enum
 from pydantic import Field, model_validator
 
 from backend.domain.evidence import is_in_conflict
-from backend.domain.external_service_registry import assert_operation_status_registered
+from backend.domain.external_service_registry import (
+    assert_operation_status_registered,
+    assert_persisted_operation_transition,
+)
 from backend.domain.models import (
     ActorType,
     ContractModel,
@@ -1509,6 +1512,11 @@ def assert_task_transition_is_permitted(
                     f'{current.provider_reference} already, so accepting it on the same '
                     'reference records no reconciliation.'
                 )
+
+    try:
+        assert_persisted_operation_transition(current.status.value, proposed.status.value)
+    except ValueError as exc:
+        raise TaskTransitionNotPermittedError(str(exc)) from exc
 
 
 class TaskHasNotFailedError(ValueError):

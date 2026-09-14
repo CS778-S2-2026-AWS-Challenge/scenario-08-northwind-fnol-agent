@@ -7,6 +7,7 @@ from typing import Any, TypeVar
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.evidence import is_in_conflict, unresolved_conflicts
+from backend.domain.external_service_registry import projection_metadata
 from backend.domain.external_services import (
     ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
@@ -2200,40 +2201,29 @@ def _external_lifecycle(
     result_evidence: Sequence[EvidenceRecord] = (),
 ) -> WorkbenchExternalLifecycle:
     status = task.status
+    projection = projection_metadata(status.value)
+    label = projection.label
+    owner = WorkbenchResponsibility(projection.pending_owner)
+    next_action = projection.next_action
     if status is ExternalTaskOperationStatus.PREPARED:
-        label = 'Pending'
         detail = 'The request is prepared and has not been submitted.'
         verification = 'not_started'
-        owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
-        next_action = 'Review the projected disclosure, authority, and consent before submission.'
         attention = False
     elif status is ExternalTaskOperationStatus.ACCEPTED:
-        label = 'Completion not confirmed'
         detail = 'The provider acknowledged the request; no verified completed result is recorded.'
         verification = 'pending_verification'
-        owner = WorkbenchResponsibility.EXTERNAL_PARTY
-        next_action = 'Track the provider result and verify it before reconciling Claim State.'
         attention = False
     elif status is ExternalTaskOperationStatus.RETRYABLE_FAILURE:
-        label = 'Failed'
         detail = 'The request failed before a verified result; the same operation may be retried.'
         verification = 'failed_unverified'
-        owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
-        next_action = 'Correct the dependency problem, then retry with the same operation identity.'
         attention = True
     elif status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
-        label = 'Outcome not confirmed'
         detail = 'Submission may have occurred; the result remains unknown.'
         verification = 'reconciliation_required'
-        owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
-        next_action = 'Reconcile by operation or provider reference before any retry.'
         attention = True
     else:
-        label = 'Failed'
         detail = 'The request failed and requires staff review.'
         verification = 'review_required'
-        owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
-        next_action = 'Review the failure before another request is attempted.'
         attention = True
     if result is not None and status is ExternalTaskOperationStatus.ACCEPTED:
         verification = result.verification.value
