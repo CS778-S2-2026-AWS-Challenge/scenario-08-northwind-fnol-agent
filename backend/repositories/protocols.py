@@ -273,9 +273,7 @@ class ClaimRepository(Protocol):
         """Return claims for an authorised staff projection."""
         raise NotImplementedError
 
-    def search_claims_internal(
-        self, filters: dict[str, object], limit: int
-    ) -> list[WorkingClaim]:
+    def search_claims_internal(self, filters: dict[str, object], limit: int) -> list[WorkingClaim]:
         """Return only bounded Claim candidates matching registered staff filters."""
         raise NotImplementedError
 

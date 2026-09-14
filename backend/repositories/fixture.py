@@ -851,9 +851,7 @@ class FixtureRepository(PersistenceRepository):
             reverse=True,
         )
 
-    def search_claims_internal(
-        self, filters: dict[str, object], limit: int
-    ) -> list[WorkingClaim]:
+    def search_claims_internal(self, filters: dict[str, object], limit: int) -> list[WorkingClaim]:
         """Apply registered Claim filters before returning a bounded candidate set."""
         matches: list[WorkingClaim] = []
         for claim in sorted(self._claims.values(), key=lambda item: item.updated_at, reverse=True):
@@ -879,13 +877,17 @@ class FixtureRepository(PersistenceRepository):
                 incident = claim.form.get('incident.occurred_at')
                 if incident is None or str(incident.value)[:10] != filters['incident_date']:
                     continue
-            if filters.get('product_family') and (
-                (
-                    claim.form.get('claim.product_family')
-                    and claim.form['claim.product_family'].value
+            if (
+                filters.get('product_family')
+                and (
+                    (
+                        claim.form.get('claim.product_family')
+                        and claim.form['claim.product_family'].value
+                    )
+                    or claim.incident_type
                 )
-                or claim.incident_type
-            ) != filters['product_family']:
+                != filters['product_family']
+            ):
                 continue
             matches.append(deepcopy(claim))
             if len(matches) >= limit:

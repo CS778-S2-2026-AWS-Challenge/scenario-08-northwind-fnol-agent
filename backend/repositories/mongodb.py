@@ -740,9 +740,7 @@ class MongoDBRepository:
     def list_claims_internal(self) -> list[WorkingClaim]:
         return self._list('claim', WorkingClaim, {}, '-updated_at')
 
-    def search_claims_internal(
-        self, filters: dict[str, object], limit: int
-    ) -> list[WorkingClaim]:
+    def search_claims_internal(self, filters: dict[str, object], limit: int) -> list[WorkingClaim]:
         """Query registered Claim keys at MongoDB and return only bounded candidates."""
         query: dict[str, Any] = {'record_type': 'claim'}
         claim_reference = filters.get('claim_reference')
@@ -761,9 +759,7 @@ class MongoDBRepository:
                 '$gte': f'{created}T00:00:00',
                 '$lt': f'{created}T23:59:59.999999',
             }
-        cursor = self._collection.find(query).sort(
-            [('updated_at', -1), ('_id', -1)]
-        ).limit(limit)
+        cursor = self._collection.find(query).sort([('updated_at', -1), ('_id', -1)]).limit(limit)
         records: list[WorkingClaim] = []
         for document in cursor:
             record = self._model_from_document(document, WorkingClaim)
