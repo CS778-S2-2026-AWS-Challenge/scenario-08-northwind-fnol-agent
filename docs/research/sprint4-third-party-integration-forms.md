@@ -27,13 +27,15 @@ Public service existence is not Northwind procurement. Credentials are not autho
 
 ### P3-ASSESSOR
 
+- **Scenario:** Motor collision; professional assessment in Home where applicable.
 - **Sources:** Existing P3 sources `S06-S07`: ICNZ *Making a Claim* and FMA *Weather Events Claims Insights*.
 - **Real service:** Professional damage/loss assessment, scope, request for more information, or delay/status result.
 - **Current form:** Motor controlled fixture only; other assessor paths have no implemented Runtime identity.
 - **Required input:** For the existing fixture, exactly `claim_id`, `external_claim_id`, `authorisation_ref`, `claimant_consent_ref`, `requested_action`, and `location.region`.
-- **Output:** Controlled routing result/provider reference; any later result remains separate from verified Claim facts.
+- **Observable output:** Controlled routing result/provider reference; any later result remains separate from verified Claim facts until governed verification/write-back.
 - **Authority and consent:** Current Northwind routing authority plus matching claimant consent are required. No production assessor appointment authority is established.
 - **Minimum disclosure:** Only the six published fields above. Damage images/descriptions are not silently added.
+- **Limitation:** The fixture does not contact a production assessor, decide cover, approve repairs, guarantee timing, or prove production provider status access.
 - **Status:** `simulation-only` for the motor fixture; production use `unavailable`.
 - **Recommended form:** Governed external request for the existing fixture; staff/manual path otherwise.
 - **Rejected form:** Generic “Book assessor” or real-provider “Assessment complete”. That would invent provider identity, procurement, appointment authority, and production status access.
@@ -42,12 +44,15 @@ Public service existence is not Northwind procurement. Credentials are not autho
 
 ### P3-REPAIRER
 
-- **Sources:** `S06-S07`.
+- **Scenario:** Motor collision and Home property repair.
+- **Sources:** Existing P3 sources `S06-S07`.
 - **Real service:** Inspection, quote/scope, repair, invoice, and progress/completion evidence. Claimant-selected and insurer-authorised paths are distinct.
 - **Current form:** No generic Runtime identity; claimant/manual or staff-assisted only.
-- **Input:** Existing damage/loss information and explicitly selected Evidence. Current mappings cover `claim_id`, applicable `vehicle.damage_description` or `property.affected_areas`, `loss.description`, and selected `Evidence.evidence_id`. Appointment/contact/approval remain unmapped.
-- **Output:** Quote, scope, invoice, appointment information, or progress/completion evidence when later supplied.
+- **Required input:** Existing damage/loss information and explicitly selected Evidence. Current mappings cover `claim_id`, applicable `vehicle.damage_description` or `property.affected_areas`, `loss.description`, and selected `Evidence.evidence_id`. Appointment/contact/approval remain unmapped.
+- **Observable output:** Quote, scope, invoice, appointment information, or progress/completion evidence when later supplied by the claimant or staff.
 - **Authority and consent:** No generic Northwind repair appointment, repair approval, disclosure, or provider-status authority. No Northwind send occurs in the selected manual form.
+- **Minimum disclosure:** Northwind sends no claim data to a repairer in the selected manual form. Only claimant/staff-supplied material later enters the existing Evidence boundary.
+- **Limitation:** No verified Northwind network, appointment authority, repair approval, live status feed, provider SLA, or production retention contract is established.
 - **Status:** `manual`; Northwind appointment/status access `unavailable`.
 - **Recommended form:** Explanatory service card plus claimant-led contact; staff handoff where insurer-authorised appointment is required.
 - **Rejected form:** “Book repair”, “Repair authorised”, or invented live repair progress.
@@ -56,34 +61,49 @@ Public service existence is not Northwind procurement. Credentials are not autho
 
 ### P3-NZP-REPORT
 
-- **Source:** `S01`, New Zealand Police 105.
+- **Scenario:** Motor collision/theft, Contents theft, and other losses where Police reporting is relevant.
+- **Sources:** Existing P3 source `S01`, New Zealand Police 105 / All online options.
 - **Real service:** Claimant-led non-emergency reporting through 105 online/phone. Emergency situations use 111. Once a reference exists, Police provide a case/report update route.
-- **Current form:** Official claimant-led channel; no Northwind submission/read API.
-- **Output:** Police acknowledgement/reference and later claimant-supplied Police material where available.
-- **Authority and consent:** No evidence establishes Northwind authority to submit a 105 report or read its status. Northwind sends nothing.
+- **Current form:** Official claimant-led channel; no Northwind submission/read Runtime identity or API.
+- **Required input:** The Police channel determines the claimant-supplied incident/reporting information. Northwind does not define or send a substitute provider payload.
+- **Observable output:** Police acknowledgement/reference and later claimant-supplied Police material where available.
+- **Authority and consent:** No evidence establishes Northwind authority to submit a 105 report or read its status. Northwind external-send consent is not applicable because Northwind sends nothing.
+- **Minimum disclosure:** Northwind sends no claim data to Police in the selected form. The claimant decides what to provide through the official Police process.
+- **Limitation:** Northwind cannot promise Police acceptance, response time, case progress, report availability, or live status visibility.
 - **Status:** `manual`.
 - **Recommended form:** Official 105 link/phone guidance.
 - **Rejected form:** Northwind “Submit Police report” or status claiming Northwind submitted/read the report.
-- **Next owner:** Claimant until an official reference/result is obtained.
+- **Next owner:** Claimant until an official reference/result is obtained; staff only when later claim handling requires review of supplied material.
 - **Write-back:** Existing Police-reference Claim field where permitted; Police documents may be Evidence.
 
 ### P3-NZP-TCR
 
-- **Sources:** `S02-S03`, official Police TCR request and representative path.
+- **Scenario:** Motor collision where a held Traffic Crash Report is needed later in the claim.
+- **Sources:** Existing P3 sources `S02-S03`, official Police TCR request and representative path.
 - **Real service:** A person or authorised representative may request a held Traffic Crash Report. Release is not guaranteed.
-- **Input:** Location/time, Police file number where known, request reason, identity, and representative-authority evidence may be required.
-- **Authority and consent:** Public representative rules do not establish standing claimant-specific Northwind authority.
+- **Current form:** Claimant-led or staff-prepared manual request only; no standing Northwind TCR Runtime/provider integration.
+- **Required input:** Location/time, Police file number where known, request reason, identity, and representative-authority evidence may be required depending on requester.
+- **Observable output:** Request decision and, where releasable, a TCR supplied through the official pathway.
+- **Authority and consent:** Public representative rules do not establish standing claimant-specific Northwind authority. A future staff representative request would require real request-specific authority evidence.
+- **Minimum disclosure:** Northwind sends no data in the selected claimant-led form. Agent/staff preparation may explain official requirements but must not transmit identity/authority material through an unapproved integration.
+- **Limitation:** Release may be withheld, additional identity/authority evidence may be required, and Northwind has no guaranteed response time or direct status/read access.
 - **Status:** `manual`.
 - **Recommended form:** Official request guidance plus Agent-assisted preparation; staff handoff where an authorised representative route is needed.
 - **Rejected form:** Automatic TCR retrieval or API inferred from the public request page.
 - **Next owner:** Claimant for self-request; authorised staff only where real representative authority exists.
-- **Write-back:** Returned TCR may become Police-report Evidence.
+- **Write-back:** Returned TCR may become Police-report Evidence; receipt remains separate from verified Claim facts.
 
 ### P3-VEHICLE-RECOVERY
 
-- **Sources:** `S04` AA Insurance collision guidance and `S05` AMI Roadside Rescue.
-- **Real service:** Collision towing/recovery for an unsafe or undriveable vehicle. Collision recovery and roadside breakdown assistance are not interchangeable.
-- **Authority and consent:** No verified Northwind recovery network, dispatch authority, or telemetry. Northwind sends nothing in the selected form.
+- **Scenario:** Motor collision with an unsafe or undriveable vehicle.
+- **Sources:** Existing P3 sources `S04` AA Insurance collision guidance and `S05` AMI Roadside Rescue.
+- **Real service:** Collision towing/recovery to move an unsafe vehicle to a safe location or repairer. Collision recovery and roadside breakdown assistance are not interchangeable.
+- **Current form:** Safety/drivability guidance with claimant-led or staff-assisted manual coordination; no Northwind dispatch Runtime identity.
+- **Required input:** The manual journey may use existing vehicle location/condition, registration, drivability, damage description, and claim context to help the claimant/staff choose the next step. Provider eligibility, contact, safe-access, destination, and dispatch fields remain unapproved for a governed Northwind request.
+- **Observable output:** Claimant/staff-observed towing/recovery outcome, provider decline/unavailability, or later towing receipt/material.
+- **Authority and consent:** No verified Northwind recovery network, dispatch authority, or telemetry. Northwind external-send consent is not applicable because Northwind sends nothing in the selected form.
+- **Minimum disclosure:** Northwind sends no claim data to a recovery provider in the selected manual form.
+- **Limitation:** No provider eligibility, dispatch SLA, destination control, telemetry, provider acknowledgement, or reimbursement/coverage decision is established.
 - **Status:** `manual`; Northwind dispatch `unavailable`.
 - **Recommended form:** Drivability/safety guidance plus claimant-led or staff-assisted recovery.
 - **Rejected form:** Reusing roadside rescue for a collision or showing “Tow dispatched”.
@@ -92,22 +112,32 @@ Public service existence is not Northwind procurement. Credentials are not autho
 
 ### P3-EMERGENCY-WORKS
 
-- **Sources:** `S06` ICNZ and current NHC urgent-repair guidance.
+- **Scenario:** Home loss requiring urgent mitigation to reduce continuing damage or make the property safe.
+- **Sources:** Existing P3 source `S06` ICNZ and current NHC urgent-repair guidance used by the P3 catalogue.
 - **Real service:** Urgent mitigation to make property safe, sanitary, secure, or weathertight.
-- **Input:** Existing candidate mapping covers `claim_id`, `property.address`, `property.affected_areas`, `property.ongoing_risk`, `property.habitable`, `loss.description`, `requested_action`, and selected Evidence. Contractor identity, safe access, scope, contact, and spending authority remain unmapped.
-- **Authority and consent:** No generic contractor dispatch, spending, or reimbursement authority. Safety guidance must not wait for consent.
+- **Current form:** Safety guidance plus claimant-arranged or staff-assisted manual handling; no Northwind contractor dispatch Runtime identity.
+- **Required input:** Existing candidate mapping covers `claim_id`, `property.address`, `property.affected_areas`, `property.ongoing_risk`, `property.habitable`, `loss.description`, `requested_action`, and selected Evidence. Contractor identity, safe access, scope, contact, and spending authority remain unmapped.
+- **Observable output:** Claimant/staff-observed completion or inability to proceed, plus later work record, photos, invoice, or contractor material where supplied.
+- **Authority and consent:** No generic contractor dispatch, spending, or reimbursement authority. Safety guidance must not wait for consent. No Northwind send occurs in the selected manual form.
+- **Minimum disclosure:** Northwind sends no claim data to a contractor in the selected manual form.
+- **Limitation:** No provider network, dispatch SLA, spending authority, reimbursement promise, approved work scope, or production provider status feed is established.
 - **Status:** `manual`; dispatch/spending authority `unavailable`.
 - **Recommended form:** Safety guidance first, then claimant-led or staff-assisted urgent work.
 - **Rejected form:** Delaying safety for consent, auto-booking work, or auto-approving reimbursement.
 - **Next owner:** Claimant for immediate safe action; claims professional where insurer authority is needed.
-- **Write-back:** Work photos/invoice/contractor record may become Evidence.
+- **Write-back:** Work photos/invoice/contractor record may become Evidence; mitigation evidence is not a coverage decision.
 
 ### P3-NHC
 
-- **Sources:** `S12-S14`, Natural Hazards Commission public claims guidance.
+- **Scenario:** Home natural-hazard damage affecting eligible residential building/land pathways.
+- **Sources:** Existing P3 sources `S12-S14`, Natural Hazards Commission public claims guidance.
 - **Real service:** For most partner-insurer claims, the private insurer is the main point of contact. NHC directly manages defined exceptions.
 - **Current form:** Explanatory/insurer-mediated coordination. Northwind partner status and technical exchange are unverified.
-- **Authority and consent:** Public NHC guidance does not prove Northwind partner status, credentials, or direct exchange authority.
+- **Required input:** Existing candidate mapping may use `claim_id`, `policy.policy_number`, `property.address`, incident type/time/description, `loss.description`, and selected Evidence. Partner identity and routing remain unmapped.
+- **Observable output:** Claim-manager update, assessment/specialist report, scope of works, settlement advice, or other material supplied through the insurer/NHC process.
+- **Authority and consent:** Public NHC guidance does not prove Northwind partner status, credentials, or direct exchange authority. No new Northwind-to-NHC send is selected by this brief.
+- **Minimum disclosure:** Northwind sends no data through a new NHC integration in the selected manual/insurer-mediated form.
+- **Limitation:** Northwind-specific partner status, credentials, routing, technical exchange, SLA, retention, and status feed are unverified; NHC relevance does not itself determine Northwind policy cover.
 - **Status:** `manual`; direct Northwind exchange `unavailable` unless separately proven.
 - **Recommended form:** Explanatory service card plus insurer/staff-mediated coordination.
 - **Rejected form:** “Send to NHC”, “NHC accepted”, or applying building/land NHCover to generic contents evidence.
@@ -116,9 +146,15 @@ Public service existence is not Northwind procurement. Credentials are not autho
 
 ### P3-CONTENTS-EVIDENCE
 
-- **Source:** `S06`, ICNZ *Making a Claim*.
-- **Real service:** Claimant obtains receipt, statement, service record, valuation, or similar proof from an external source.
-- **Authority and consent:** No generic Northwind direct-retrieval relationship. Northwind sends nothing.
+- **Scenario:** Contents loss where proof of ownership, purchase, condition, repair, or value is needed.
+- **Sources:** Existing P3 source `S06`, ICNZ *Making a Claim*.
+- **Real service:** Claimant obtains receipt, statement, service record, valuation, or similar proof from a retailer, bank, manufacturer, service centre, valuer, or other external source.
+- **Current form:** Claimant-led retrieval plus the existing Evidence upload path; no generic Northwind direct-retrieval Runtime identity.
+- **Required input:** The claimant identifies the affected contents item and the type of supporting material needed. Northwind does not define a generic direct-provider request payload.
+- **Observable output:** Receipt, statement, service record, valuation, other supplied proof, or inability to obtain the requested material.
+- **Authority and consent:** No generic Northwind direct-retrieval relationship. Northwind external-send consent is not applicable because Northwind sends nothing.
+- **Minimum disclosure:** Northwind sends no claim data to the external source in the selected form.
+- **Limitation:** External sources may not retain or release the requested material; Northwind has no generic provider identity, matching key, response SLA, direct retrieval authority, or live status access.
 - **Status:** `manual`.
 - **Recommended form:** Agent-assisted preparation plus claimant retrieval and existing Evidence upload.
 - **Rejected form:** Automatic retailer/bank/manufacturer retrieval without provider identity, matching, authority, and consent.
@@ -140,7 +176,7 @@ The collision example is implemented conceptually as follows.
 
 ## Canonical lifecycle boundary
 
-#775 defines no second external-service state machine. #777 must consume #776.
+Issue #775 defines no second external-service state machine. Issue #777 must consume #776.
 
 The #776 contract owns:
 
@@ -165,7 +201,7 @@ Research/authority gaps that code must not invent:
 - Northwind NHC partner/technical-exchange status.
 - Generic direct retailer/bank/manufacturer contents-evidence retrieval.
 
-#775 justifies **no new provider-specific Claim Context business field**.
+Issue #775 justifies **no new provider-specific Claim Context business field**.
 
 Future automation-only details belong in the external-task/request/provider-adapter boundary unless separate product evidence makes them durable Claim facts:
 
@@ -263,6 +299,6 @@ The selected public sources were rechecked on 2026-09-14.
 
 ## Follow-up boundary
 
-#775 stops at research-backed selection and implementation contract.
+Issue #775 stops at research-backed selection and implementation contract.
 
-#777 may implement only the forms selected here and the lifecycle published by #776. A later provider/procurement decision may expand one service from manual/unavailable to a governed external request, but that requires fresh authority, consent, provider-access, disclosure, retention, failure/recovery, and provenance evidence. It must not be inferred from this document.
+Issue #777 may implement only the forms selected here and the lifecycle published by #776. A later provider/procurement decision may expand one service from manual/unavailable to a governed external request, but that requires fresh authority, consent, provider-access, disclosure, retention, failure/recovery, and provenance evidence. It must not be inferred from this document.
