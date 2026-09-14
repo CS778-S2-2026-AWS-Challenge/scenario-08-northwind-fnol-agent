@@ -129,17 +129,6 @@ describe('claimant intake projection', () => {
       claim_revision: 2,
       decision: { customer_next_step: initialClaim.customer_next_step },
     })
-    api.bootstrapClaim.mockResolvedValue({
-      claim_id: initialClaim.claim_id,
-      session_id: 'ses_ui_vp',
-      claimant_message: claimantMessage,
-      agent_message: agentMessage,
-      form_changes: [],
-      contents_item_changes: [],
-      dynamic_form: null,
-      claim_revision: 2,
-      decision: { customer_next_step: initialClaim.customer_next_step },
-    })
   })
 
   it('shows the backend default model before creating a session', async () => {
