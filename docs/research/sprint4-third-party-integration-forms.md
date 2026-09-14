@@ -163,7 +163,7 @@ Public service existence is not Northwind procurement. Credentials are not autho
 
 ## Worked collision journey
 
-The collision example is implemented conceptually as follows.
+The collision example follows this implementation-facing sequence.
 
 1. **Claimant account.** “I was in a crash; the front of my car is badly damaged and I have photos” does not establish drivability, injury status, professional assessment, repair authority, Police reporting, or coverage.
 2. **Safety first.** If injury, immediate danger, or emergency help may be required, ordinary intake pauses. Show appropriate emergency guidance. Keep 111 emergency help distinct from 105 non-emergency Police reporting.
