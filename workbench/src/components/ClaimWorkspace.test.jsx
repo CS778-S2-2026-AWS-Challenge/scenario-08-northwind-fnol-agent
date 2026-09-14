@@ -399,7 +399,7 @@ describe('ClaimWorkspace navigation', () => {
         allowed_actions: [acceptAction],
         integration_summary: {
           claim_creation_status: 'created',
-          assessor_routing_status: 'routed',
+          assessor_routing_status: 'assigned',
           waiting_external_services: [{
             task_id: 'tsk_assessor_1',
             service_identity: 'vehicle_damage_assessor',
@@ -423,17 +423,25 @@ describe('ClaimWorkspace navigation', () => {
     expect(within(recoverySection).getByText('Resume point')).toBeVisible()
     expect(within(recoverySection).getByText('Collect Vehicle Damage Evidence')).toBeVisible()
     expect(within(recoverySection).getByText('Follow-up status')).toBeVisible()
-    expect(within(recoverySection).getByText('Pending')).toBeVisible()
+    const followUpStatus = within(recoverySection).getByText('Pending')
+    expect(followUpStatus).toBeVisible()
+    expect(followUpStatus).toHaveClass('record-status--attention')
     expect(within(recoverySection).getByText('Follow-up due')).toBeVisible()
     expect(within(recoverySection).getByText(formatDateTime('2026-09-15T00:00:00Z'))).toBeVisible()
     expect(within(recoverySection).getByText('Follow-up attempts')).toBeVisible()
     expect(within(recoverySection).getByText('2')).toBeVisible()
 
-    expect(screen.getByRole('heading', { name: 'Claim and external progress' })).toBeVisible()
-    expect(screen.getByText('Created')).toBeVisible()
-    expect(screen.getByText('Routed')).toBeVisible()
+    const integrationHeading = screen.getByRole('heading', { name: 'Claim and external progress' })
+    const integrationSection = integrationHeading.closest('section')
+    expect(integrationHeading).toBeVisible()
+    const createdStatus = within(integrationSection).getByText('Created')
+    const assignedStatus = within(integrationSection).getByText('Assigned')
+    const unknownStatus = within(integrationSection).getByText('Unknown Outcome')
+    expect(createdStatus).toHaveClass('record-status--confirmed')
+    expect(assignedStatus).toHaveClass('record-status--confirmed')
     expect(screen.getByText('Vehicle Damage Assessor')).toBeVisible()
-    expect(screen.getByText(/Vehicle Damage Assessment.*Unknown Outcome/i)).toBeVisible()
+    expect(screen.getByText('Vehicle Damage Assessment')).toBeVisible()
+    expect(unknownStatus).toHaveClass('record-status--attention')
     expect(screen.getByText('Projection limit')).toBeVisible()
     expect(screen.getByText(/Claim number and provider timeline are not published/i)).toBeVisible()
   })
@@ -467,6 +475,7 @@ describe('ClaimWorkspace navigation', () => {
     expect(within(recoverySection).getByText('Not recorded')).toBeVisible()
     expect(within(recoverySection).getByText('Follow-up attempts')).toBeVisible()
     expect(within(recoverySection).getByText('1')).toBeVisible()
+    expect(within(recoverySection).getByText('1 attempt')).toBeVisible()
   })
 
   it('keeps partial integration values explicit instead of inferring them from lifecycle state', () => {
