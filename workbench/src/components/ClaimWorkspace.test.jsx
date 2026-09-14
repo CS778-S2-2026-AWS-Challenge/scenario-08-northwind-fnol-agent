@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import ClaimWorkspace from './ClaimWorkspace.jsx'
+import { formatDateTime } from '../format.js'
 
 const detail = {
   claim_id: 'clm_1',
@@ -366,4 +367,136 @@ describe('ClaimWorkspace navigation', () => {
     expect(onReopen.mock.calls[1][0]).toBe(latestAction)
     expect(onReopen.mock.calls[1][2]).not.toBe(onReopen.mock.calls[0][2])
   })
+
+  it('keeps the projected primary action ahead of authoritative recovery and integration context', () => {
+    const acceptAction = {
+      action_code: 'human.accept_handoff',
+      target_type: 'handoff',
+      target_ref: 'hnd_1',
+      label: 'Accept Claim',
+      purpose: 'Accept the projected handoff.',
+      availability: 'confirmation_required',
+      confirmation: { message: 'Accept this Claim?' },
+      based_on_revision: 4,
+    }
+    render(<ClaimWorkspace
+      {...props}
+      detail={{
+        ...detail,
+        work_summary: {
+          ...detail.work_summary,
+          primary_action_code: acceptAction.action_code,
+          primary_action_target_ref: acceptAction.target_ref,
+          incomplete_context: {
+            interrupted_at: '2026-09-14T00:00:00Z',
+            last_meaningful_activity_at: '2026-09-13T23:55:00Z',
+            resume_point: 'collect_vehicle_damage_evidence',
+            follow_up_due_at: '2026-09-15T00:00:00Z',
+            follow_up_status: 'pending',
+            follow_up_attempts: 2,
+          },
+        },
+        allowed_actions: [acceptAction],
+        integration_summary: {
+          claim_creation_status: 'created',
+          assessor_routing_status: 'routed',
+          waiting_external_services: [{
+            task_id: 'tsk_assessor_1',
+            service_identity: 'vehicle_damage_assessor',
+            requested_action: 'vehicle_damage_assessment',
+            status: 'unknown_outcome',
+          }],
+        },
+      }}
+      resources={{ handoffs: { items: [{ handoff_id: 'hnd_1', status: 'pending' }] } }}
+    />)
+
+    const primarySection = screen.getByRole('heading', { name: 'Accept Claim' }).closest('section')
+    const recoveryHeading = screen.getByRole('heading', { name: 'Incomplete Claim recovery' })
+    const recoverySection = recoveryHeading.closest('section')
+
+    expect(primarySection.nextElementSibling).toBe(recoverySection)
+    expect(within(recoverySection).getByText('Interrupted')).toBeVisible()
+    expect(within(recoverySection).getByText(formatDateTime('2026-09-14T00:00:00Z'))).toBeVisible()
+    expect(within(recoverySection).getByText('Last meaningful activity')).toBeVisible()
+    expect(within(recoverySection).getByText(formatDateTime('2026-09-13T23:55:00Z'))).toBeVisible()
+    expect(within(recoverySection).getByText('Resume point')).toBeVisible()
+    expect(within(recoverySection).getByText('Collect Vehicle Damage Evidence')).toBeVisible()
+    expect(within(recoverySection).getByText('Follow-up status')).toBeVisible()
+    expect(within(recoverySection).getByText('Pending')).toBeVisible()
+    expect(within(recoverySection).getByText('Follow-up due')).toBeVisible()
+    expect(within(recoverySection).getByText(formatDateTime('2026-09-15T00:00:00Z'))).toBeVisible()
+    expect(within(recoverySection).getByText('Follow-up attempts')).toBeVisible()
+    expect(within(recoverySection).getByText('2')).toBeVisible()
+
+    expect(screen.getByRole('heading', { name: 'Claim and external progress' })).toBeVisible()
+    expect(screen.getByText('Created')).toBeVisible()
+    expect(screen.getByText('Routed')).toBeVisible()
+    expect(screen.getByText('Vehicle Damage Assessor')).toBeVisible()
+    expect(screen.getByText(/Vehicle Damage Assessment.*Unknown Outcome/i)).toBeVisible()
+    expect(screen.getByText('Projection limit')).toBeVisible()
+    expect(screen.getByText(/Claim number and provider timeline are not published/i)).toBeVisible()
+  })
+
+  it('keeps partial recovery fields explicit when an optional due time is absent', () => {
+    render(<ClaimWorkspace
+      {...props}
+      detail={{
+        ...detail,
+        work_summary: {
+          ...detail.work_summary,
+          incomplete_context: {
+            interrupted_at: '2026-09-14T00:00:00Z',
+            last_meaningful_activity_at: '2026-09-13T23:55:00Z',
+            resume_point: 'collect_vehicle_damage_evidence',
+            follow_up_due_at: null,
+            follow_up_status: 'pending',
+            follow_up_attempts: 1,
+          },
+        },
+      }}
+    />)
+
+    const recoveryHeading = screen.getByRole('heading', { name: 'Incomplete Claim recovery' })
+    const recoverySection = recoveryHeading.closest('section')
+    expect(within(recoverySection).getByText(formatDateTime('2026-09-14T00:00:00Z'))).toBeVisible()
+    expect(within(recoverySection).getByText(formatDateTime('2026-09-13T23:55:00Z'))).toBeVisible()
+    expect(within(recoverySection).getByText('Collect Vehicle Damage Evidence')).toBeVisible()
+    expect(within(recoverySection).getByText('Pending')).toBeVisible()
+    expect(within(recoverySection).getByText('Follow-up due')).toBeVisible()
+    expect(within(recoverySection).getByText('Not recorded')).toBeVisible()
+    expect(within(recoverySection).getByText('Follow-up attempts')).toBeVisible()
+    expect(within(recoverySection).getByText('1')).toBeVisible()
+  })
+
+  it('keeps partial integration values explicit instead of inferring them from lifecycle state', () => {
+    render(<ClaimWorkspace
+      {...props}
+      detail={{
+        ...detail,
+        lifecycle_state: 'created',
+        workflow_state: 'created',
+        integration_summary: {
+          claim_creation_status: null,
+          assessor_routing_status: null,
+          waiting_external_services: [],
+        },
+      }}
+    />)
+
+    const integrationHeading = screen.getByRole('heading', { name: 'Claim and external progress' })
+    const integrationSection = integrationHeading.closest('section')
+    expect(integrationHeading).toBeVisible()
+    expect(within(integrationSection).getAllByText('Not recorded')).toHaveLength(2)
+    expect(within(integrationSection).getByText('No external service is currently projected as waiting.')).toBeVisible()
+    expect(within(integrationSection).queryByText('Created')).not.toBeInTheDocument()
+  })
+
+  it('does not invent recovery or integration sections when those projections are absent', () => {
+    render(<ClaimWorkspace {...props} />)
+
+    expect(screen.queryByRole('heading', { name: 'Incomplete Claim recovery' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Claim and external progress' })).not.toBeInTheDocument()
+  })
+
 })
