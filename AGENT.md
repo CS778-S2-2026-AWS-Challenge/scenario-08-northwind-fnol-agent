@@ -64,14 +64,19 @@ a new review round begins, or context is compacted, the agent MUST repeat this a
 continuing. A passing check, a pre-filled PR field, or a short context summary does not replace
 this step.
 
-Before editing code or protected configuration, the agent MUST also create or update a GitHub
-Discussion describing the intended change, affected contracts and owners, source-of-truth
-documents, and acceptance evidence. The agent MUST wait for the appropriate direction or Code
-Owner agreement before making the edit. A post-hoc review request does not satisfy this
-pre-change Discussion requirement. This applies to substantive changes to application code,
-tests that define shared behavior, CI/workflows, protected paths, and shared API, persistence,
-agent, or projection contracts. Purely local inspection, formatting-only edits, and changes
-explicitly authorized as part of an already-approved governance operation are exempt.
+For ordinary implementation whose boundary and source of truth are already settled by the current
+Issue and authoritative documents, the Issue body or an Issue comment is a sufficient durable task
+record. The agent MUST NOT create or update a Discussion, or wait for maintainer or Code Owner
+pre-approval, merely because the work changes application code, tests, or a protected path. Normal
+pull-request review, CODEOWNERS, and repository protection requirements still apply.
+
+Create or update a Discussion only when a material technical or product decision remains unresolved,
+such as a design or architecture choice, shared API, persistence, agent, or projection contract,
+permission or visibility rule, or cross-owner dependency. State the exact decision and affected
+owners; use the result to update the applicable authoritative document when required. Once the
+decision is already settled by an authoritative document or approved Discussion, the agent MUST NOT
+request approval again unless new evidence reveals a contradiction or the task boundary changes.
+Discussions MUST NOT become an approval queue for Issue creation or routine implementation.
 
 ## Cross-cutting implementation rules
 
