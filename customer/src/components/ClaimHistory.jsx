@@ -1,4 +1,9 @@
-import { claimTitle, formatDateTime, sortClaimsByLatestUpdate } from '../formatters.js'
+import {
+  claimTitle,
+  formatDateTime,
+  formatIdentifierLabel,
+  sortClaimsByLatestUpdate,
+} from '../formatters.js'
 
 export default function ClaimHistory({ claims, error, loading, refreshing, onRetry, onSelect }) {
   if (loading) {
@@ -68,13 +73,53 @@ export default function ClaimHistory({ claims, error, loading, refreshing, onRet
 }
 
 export function ClaimFeatureDirectory({ claim, onOpenEvidence }) {
+  const nextStep = claim.customer_next_step || {}
+  const claimNumber = claim.external_claim?.claim_number || claim.claim_id
+  const statusLabel = formatIdentifierLabel(nextStep.status || claim.workflow_state || 'status unavailable')
+  const responsibleParty = {
+    claimant: 'You',
+    northwind: 'Northwind claims team',
+    claims_professional: 'Claims professional',
+    external_party: 'External service provider',
+  }[nextStep.responsible_party] || 'Not available'
+
   return (
     <section className="claim-feature-directory" aria-labelledby="claim-features-title">
       <div className="claim-feature-summary">
-        <p className="eyebrow">{claim.claim_id}</p>
-        <h2 id="claim-features-title">{claimTitle(claim)}</h2>
-        <p>{claim.customer_next_step?.summary || 'Choose an available Claim feature to continue.'}</p>
-        <time dateTime={claim.updated_at}>Last updated {formatDateTime(claim.updated_at)}</time>
+        <header className="claim-status-header">
+          <div>
+            <p className="claim-status-kicker">
+              {claim.external_claim?.claim_number ? 'Claim number' : 'Claim reference'}
+            </p>
+            <h2 id="claim-features-title">{claimNumber}</h2>
+          </div>
+          <span className="claim-status-badge">
+            <span aria-hidden="true" />
+            {statusLabel}
+          </span>
+        </header>
+        <dl className="claim-status-details">
+          <div>
+            <dt>Responsible now</dt>
+            <dd>{responsibleParty}</dd>
+          </div>
+          <div>
+            <dt>Estimated wait</dt>
+            <dd>
+              {nextStep.expected_by
+                ? `Expected by ${formatDateTime(nextStep.expected_by)}`
+                : 'No estimate available'}
+            </dd>
+          </div>
+          <div className="claim-status-next-step">
+            <dt>Next step</dt>
+            <dd>{nextStep.summary || 'No next step is available yet.'}</dd>
+          </div>
+        </dl>
+        <p className="claim-status-updated">
+          <span aria-hidden="true">↻</span>
+          <time dateTime={claim.updated_at}>Last updated {formatDateTime(claim.updated_at)}</time>
+        </p>
       </div>
       <div className="claim-feature-list" aria-label="Features available for this Claim">
         <button className="claim-feature-card" type="button" onClick={onOpenEvidence}>

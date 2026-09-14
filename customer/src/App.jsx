@@ -1463,7 +1463,7 @@ function App() {
                 {page === 'claim-history'
                   ? 'Your Claims are listed by their latest server-recorded update. Open a Claim to review its available features.'
                   : page === 'claim-features'
-                    ? 'Choose the information you want to review for this Claim.'
+                    ? 'Review this Claim\'s current status and available information.'
                     : 'Review the files and supporting material recorded for the selected Claim.'}
               </p>
               {page === 'claim-history' && (
@@ -1773,7 +1773,7 @@ function App() {
                   : workspaceView === 'history'
                     ? 'Your Claims are listed by their latest server-recorded update. Open a Claim to review its available features.'
                     : workspaceView === 'claim-features'
-                      ? 'Choose the information you want to review for this Claim.'
+                      ? 'Review this Claim\'s current status and available information.'
                       : workspaceView === 'external-services'
                         ? 'See the external service currently recorded for this Claim, including what may be shared and what happens next.'
                         : workspaceView === 'account'

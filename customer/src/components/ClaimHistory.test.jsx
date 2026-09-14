@@ -14,7 +14,14 @@ const olderClaim = {
 const newerClaim = {
   claim_id: 'clm_motor_newer',
   incident_type: 'motor',
-  customer_next_step: { summary: 'Review the incident details.' },
+  workflow_state: 'professional_review',
+  external_claim: { claim_number: 'NWF-2026-001042' },
+  customer_next_step: {
+    status: 'claims_review',
+    summary: 'Review the incident details.',
+    responsible_party: 'claims_professional',
+    expected_by: '2026-09-15T03:30:00Z',
+  },
   updated_at: '2026-09-14T03:30:00Z',
 }
 
@@ -46,14 +53,25 @@ it('keeps earlier Claim records visible when a refresh fails', () => {
   expect(screen.getByRole('button', { name: 'Open Home claim clm_home_older' })).toBeInTheDocument()
 })
 
-it('opens Evidence history from the selected Claim feature directory', async () => {
+it('shows the selected Claim status summary and opens Evidence history', async () => {
   const user = userEvent.setup()
   const onOpenEvidence = vi.fn()
   render(<ClaimFeatureDirectory claim={newerClaim} onOpenEvidence={onOpenEvidence} />)
 
-  expect(screen.getByRole('heading', { name: 'Motor claim' })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'NWF-2026-001042' })).toBeInTheDocument()
+  expect(screen.getByText('Claims Review')).toBeInTheDocument()
+  expect(screen.getByText('Claims professional')).toBeInTheDocument()
+  expect(screen.getByText('Review the incident details.')).toBeInTheDocument()
+  expect(screen.getByText('Expected by 15 Sept 2026, 3:30 pm')).toBeInTheDocument()
   expect(screen.getByText('Last updated 14 Sept 2026, 3:30 pm')).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: /Evidence history/ }))
 
   expect(onOpenEvidence).toHaveBeenCalledOnce()
+})
+
+it('does not invent an estimated wait when the server omits it', () => {
+  render(<ClaimFeatureDirectory claim={olderClaim} onOpenEvidence={vi.fn()} />)
+
+  expect(screen.getByRole('heading', { name: olderClaim.claim_id })).toBeInTheDocument()
+  expect(screen.getByText('No estimate available')).toBeInTheDocument()
 })

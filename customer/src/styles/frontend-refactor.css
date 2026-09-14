@@ -222,10 +222,19 @@
 .claim-history-state p, .claim-history-stale p { margin-bottom: var(--space-4); color: var(--color-text-secondary); line-height: var(--line-height-body); }
 .claim-history-stale { border: var(--border-component); border-color: var(--color-warning); background: var(--color-warning-soft); }
 .claim-feature-directory { display: grid; gap: var(--space-6); margin-top: var(--space-4); }
-.claim-feature-summary { padding: var(--space-5); border-radius: var(--radius-xl); background: var(--color-panel); }
-.claim-feature-summary h2 { margin: var(--space-2) 0; font-size: var(--font-size-section); }
-.claim-feature-summary > p:not(.eyebrow) { max-width: var(--measure-reading); color: var(--color-text-secondary); line-height: var(--line-height-body); }
-.claim-feature-summary time { color: var(--color-text-muted); font-size: var(--font-size-caption); font-variant-numeric: tabular-nums; }
+.claim-feature-summary { display: grid; gap: var(--space-6); padding: var(--space-6); border-radius: var(--radius-xl); color: var(--color-on-accent); background: var(--color-workbench-nav); box-shadow: var(--shadow-subtle); }
+.claim-status-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-6); }
+.claim-feature-summary .claim-status-kicker { margin: 0 0 var(--space-2); color: var(--color-workbench-nav-muted); font-size: var(--font-size-caption); font-weight: var(--font-weight-medium); line-height: var(--line-height-body); }
+.claim-feature-summary h2 { margin: 0; overflow-wrap: anywhere; color: var(--color-on-accent); font-size: var(--font-size-page); font-variant-numeric: tabular-nums; }
+.claim-status-badge { display: inline-flex; align-items: center; gap: var(--space-2); flex: 0 0 auto; padding: var(--space-2) var(--space-3); border-radius: var(--radius-round); color: var(--color-accent-strong); background: var(--color-accent-soft); font-size: var(--font-size-caption); font-weight: var(--font-weight-semibold); }
+.claim-status-badge > span { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-round); background: currentColor; }
+.claim-status-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5) var(--space-8); margin: 0; }
+.claim-status-details > div { display: grid; gap: var(--space-1); min-width: 0; }
+.claim-status-details dt { color: var(--color-workbench-nav-muted); font-size: var(--font-size-caption); }
+.claim-status-details dd { margin: 0; color: var(--color-on-accent); font-size: var(--font-size-body); line-height: var(--line-height-body); }
+.claim-status-next-step { grid-column: 1 / -1; }
+.claim-status-next-step dd { max-width: var(--measure-reading); font-size: var(--font-size-message); }
+.claim-feature-summary .claim-status-updated { display: flex; align-items: center; gap: var(--space-2); margin: 0; color: var(--color-workbench-nav-muted); font-size: var(--font-size-caption); font-variant-numeric: tabular-nums; line-height: var(--line-height-body); }
 .claim-feature-list { margin-top: 0; }
 .claim-feature-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-4); }
 .claim-feature-icon { display: grid; width: var(--size-control-touch); height: var(--size-control-touch); place-items: center; border-radius: var(--radius-md); color: var(--color-accent-strong); background: var(--color-accent-soft); }
@@ -416,6 +425,9 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   .evidence-history-page-content { padding: var(--space-4); }
   .claim-history-card-meta { align-items: flex-start; flex-direction: column; gap: var(--space-1); }
   .claim-history-toolbar { align-items: stretch; flex-direction: column; }
+  .claim-status-header { align-items: flex-start; flex-direction: column; gap: var(--space-4); }
+  .claim-status-details { grid-template-columns: 1fr; }
+  .claim-status-next-step { grid-column: auto; }
   .claim-feature-card { grid-template-columns: auto minmax(0, 1fr); }
   .claim-feature-open { grid-column: 2; }
 }
