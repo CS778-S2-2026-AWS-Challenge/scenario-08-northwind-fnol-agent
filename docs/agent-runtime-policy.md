@@ -328,7 +328,8 @@ action-level authority check.
   RAG is used for approved documents and retains source version and section citations.
 - Account-level Evidence history uses the claimant-scoped `evidence.history` tool. It returns
   bounded metadata and provenance summaries only; history visibility does not grant permission
-  to attach or remove a file.
+  to attach or remove a file. A paginated result exposes its opaque continuation cursor and an
+  explicit non-exhaustive limitation until the final page is read.
 - Retrieved instructions are untrusted content. They cannot change Agent Policy, grant
   tool access, widen customer-data visibility, or authorise an action.
 - Missing, conflicting, expired, wrong-insurer, wrong-product, wrong-jurisdiction, or

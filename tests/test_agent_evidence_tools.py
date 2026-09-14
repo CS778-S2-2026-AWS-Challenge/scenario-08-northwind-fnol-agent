@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import cast
@@ -16,6 +17,7 @@ from backend.domain.agent_action_registry import (
     ActionVisibility,
     action_contract,
 )
+from backend.domain.agent_tool_registry import tool_contract
 from backend.domain.model_gateway import (
     ModelCapabilities,
     ModelCompletionStatus,
@@ -28,12 +30,14 @@ from backend.domain.models import (
     AuthorityOutcome,
     BranchEvaluationResult,
     Channel,
+    ClaimState,
     CustomerNextStep,
     EvidenceFileStatus,
     EvidenceRecord,
     EvidenceSource,
     EvidenceStatus,
     ResponsibleParty,
+    WorkflowState,
     WorkingClaim,
 )
 from backend.repositories.fixture import FixtureRepository
@@ -109,13 +113,19 @@ class EvidenceHistoryGateway:
         )
 
 
-def _claim(claim_id: str = 'clm_target', customer_id: str = 'cus_owner') -> WorkingClaim:
+def _claim(
+    claim_id: str = 'clm_target',
+    customer_id: str = 'cus_owner',
+    *,
+    workflow_state: WorkflowState = WorkflowState.COLLECTING,
+) -> WorkingClaim:
     now = datetime.now(UTC)
     return WorkingClaim(
         claim_id=claim_id,
         customer_id=customer_id,
         channel=Channel.WEB_AGENT,
         locale='en-NZ',
+        claim_state=ClaimState(workflow_state=workflow_state),
         customer_next_step=CustomerNextStep(
             status='describe_incident',
             summary='Describe the incident.',
@@ -209,6 +219,33 @@ def test_history_tool_is_bounded_to_authenticated_claimant_records() -> None:
     assert set(source_refs) == {'evd_ready', 'evd_processing'}
     assert all('storage_key' not in item for item in items)
     assert all(item['can_remove'] is False for item in items)
+    assert result['page'] == {'next_cursor': None}
+
+
+def test_history_tool_exposes_truncation_and_supports_cursor_continuation() -> None:
+    repository = FixtureRepository()
+    target = _claim()
+    repository._claims[target.claim_id] = target
+    for evidence_id in ('evd_one', 'evd_two', 'evd_three'):
+        repository.save_evidence(_evidence(evidence_id, target.claim_id), target.customer_id)
+
+    first = read_evidence_history_for_runtime(repository, target, {'limit': 2})
+
+    first_page = cast(dict[str, object], first['page'])
+    assert isinstance(first_page['next_cursor'], str)
+    assert any('not-found conclusion' in item for item in cast(list[str], first['limitations']))
+    second = read_evidence_history_for_runtime(
+        repository,
+        target,
+        {'limit': 2, 'cursor': first_page['next_cursor']},
+    )
+    assert second['page'] == {'next_cursor': None}
+    assert len(cast(list[dict[str, object]], second['items'])) == 1
+    assert {
+        item['evidence_id']
+        for result in (first, second)
+        for item in cast(list[dict[str, object]], result['items'])
+    } == {'evd_one', 'evd_two', 'evd_three'}
 
 
 @pytest.mark.parametrize('limit', [0, 51, True])
@@ -229,6 +266,8 @@ def test_history_tool_rejects_invalid_repository_and_argument_container() -> Non
         read_evidence_history_for_runtime(object(), target, {})  # type: ignore[arg-type]
     with pytest.raises(TypeError, match='mapping'):
         read_evidence_history_for_runtime(FixtureRepository(), target, [])  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match='cursor must be a non-empty string'):
+        read_evidence_history_for_runtime(FixtureRepository(), target, {'cursor': ''})
 
 
 def test_evidence_proposal_contracts_are_proposal_only_and_execution_confirmation_bound() -> None:
@@ -248,6 +287,8 @@ def test_evidence_proposal_contracts_are_proposal_only_and_execution_confirmatio
     ]
     assert remove.requires_confirmation is False
     assert remove.permitted_tools == ('evidence.history',)
+    history_schema = tool_contract('evidence.history').input_schema
+    assert set(cast(dict[str, object], history_schema['properties'])) == {'limit', 'cursor'}
     assert [field.name for field in remove.input_schema.fields] == [
         'claim_id',
         'evidence_id',
@@ -439,7 +480,75 @@ def test_runtime_requires_successful_history_before_accepting_evidence_proposal(
         ),
     )
     assert checked.action_code == 'claim.propose_evidence_reuse'
+    assert checked.customer_reason == 'The selected Evidence is eligible for a reuse proposal only.'
+    assert 'has not been attached or copied' in checked.customer_response
+    assert 'Please confirm whether you want Northwind to reuse' in checked.customer_response
+    assert checked.customer_next_step.status == 'confirm_evidence_reuse'
     assert validate_proposal(checked).outcome is AuthorityOutcome.AUTHORISED
+
+
+def test_runtime_rewrites_false_reuse_success_and_rejects_terminal_claim() -> None:
+    repository = FixtureRepository()
+    source = _claim('clm_source')
+    target = _claim()
+    repository._claims[source.claim_id] = source
+    repository._claims[target.claim_id] = target
+    repository.save_evidence(_evidence('evd_ready', source.claim_id), source.customer_id)
+    history: dict[str, object] = {
+        'tool': 'evidence.history',
+        'status': 'succeeded',
+        'items': [{'evidence_id': 'evd_ready'}],
+        'page': {'next_cursor': None},
+    }
+    false_success = replace(
+        _proposal(
+            target,
+            action_code='claim.propose_evidence_reuse',
+            evidence_id='evd_ready',
+            source_claim_id=source.claim_id,
+            tool_results=[history],
+        ),
+        customer_response='Done. I attached the prior file to this claim.',
+    )
+
+    checked = _validate_evidence_history_action(repository, target, false_success)
+
+    assert 'Done' not in checked.customer_response
+    assert 'has not been attached or copied' in checked.customer_response
+
+    terminal_target = _claim(workflow_state=WorkflowState.CREATED)
+    repository._claims[terminal_target.claim_id] = terminal_target
+    with pytest.raises(ApiError) as terminal:
+        _validate_evidence_history_action(
+            repository,
+            terminal_target,
+            replace(false_success, source_claim_id=source.claim_id, tool_results=[history]),
+        )
+    assert terminal.value.code == 'VALIDATION_ERROR'
+    assert 'lifecycle state' in terminal.value.message
+
+
+def test_runtime_marks_truncated_history_as_non_exhaustive() -> None:
+    target = _claim()
+    proposal = replace(
+        _proposal(
+            target,
+            tool_results=[
+                {
+                    'tool': 'evidence.history',
+                    'status': 'succeeded',
+                    'items': [],
+                    'page': {'next_cursor': 'opaque-next-page'},
+                }
+            ],
+        ),
+        customer_response='I did not find that file.',
+    )
+
+    checked = _validate_evidence_history_action(FixtureRepository(), target, proposal)
+
+    assert checked.customer_response.startswith('I did not find that file.')
+    assert 'not a complete not-found result' in checked.customer_response
 
 
 @pytest.mark.parametrize(
@@ -485,6 +594,7 @@ def test_evidence_history_tool_request_validation_and_execution() -> None:
     target = _claim()
     repository._claims[target.claim_id] = target
     repository.save_evidence(_evidence('evd_ready', target.claim_id), target.customer_id)
+    repository.save_evidence(_evidence('evd_second', target.claim_id), target.customer_id)
     branch = cast(
         BranchEvaluationResult,
         SimpleNamespace(permitted_tools=['evidence.history']),
@@ -498,11 +608,30 @@ def test_evidence_history_tool_request_validation_and_execution() -> None:
     outcome = _execute_evidence_history_search(repository, target, valid)
     assert outcome is not None
     assert outcome[1]['source_refs'] == ['evd_ready']
+    next_cursor = cast(dict[str, object], outcome[1]['page'])['next_cursor']
+    assert isinstance(next_cursor, str)
+    continuation = _proposal(
+        target,
+        required_tools=[
+            {
+                'tool': 'evidence.history',
+                'operation': 'list',
+                'limit': 1,
+                'cursor': next_cursor,
+            }
+        ],
+    )
+    _validate_tool_requests(continuation, branch)
+    continued_outcome = _execute_evidence_history_search(repository, target, continuation)
+    assert continued_outcome is not None
+    assert continued_outcome[1]['source_refs'] == ['evd_second']
+    assert continued_outcome[1]['page'] == {'next_cursor': None}
     assert _execute_evidence_history_search(repository, target, _proposal(target)) is None
 
     invalid_requests: list[dict[str, object]] = [
         {'tool': 'evidence.history', 'operation': 'list', 'customer_id': target.customer_id},
         {'tool': 'evidence.history', 'operation': 'list', 'limit': 0},
+        {'tool': 'evidence.history', 'operation': 'list', 'cursor': ''},
     ]
     for request in invalid_requests:
         with pytest.raises(ApiError) as invalid:
@@ -585,7 +714,10 @@ def test_model_runtime_queries_history_then_proposes_reuse_without_mutating_evid
         )
 
         assert response.status_code == 200, response.text
-        assert 'Confirm if you want' in response.json()['agent_message']['content']['text']
+        assert (
+            'It has not been attached or copied'
+            in response.json()['agent_message']['content']['text']
+        )
         assert len(gateway.requests) == 4
         replanned_context = json.loads(gateway.requests[2].messages[-1].content or '{}')
         history_result = next(

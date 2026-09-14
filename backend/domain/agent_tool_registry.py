@@ -40,7 +40,10 @@ AGENT_TOOL_REGISTRY = MappingProxyType(
             purpose='claimant_evidence_reuse_and_removal',
             input_schema={
                 'type': 'object',
-                'properties': {'limit': {'type': 'integer', 'minimum': 1, 'maximum': 50}},
+                'properties': {
+                    'limit': {'type': 'integer', 'minimum': 1, 'maximum': 50},
+                    'cursor': {'type': 'string', 'minLength': 1},
+                },
                 'required': [],
                 'additionalProperties': False,
             },

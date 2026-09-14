@@ -28,12 +28,15 @@ def read_evidence_history_for_runtime(
         raise TypeError('repository must provide claimant-scoped Evidence history access.')
     if not isinstance(arguments, Mapping):
         raise TypeError('evidence.history arguments must be a mapping.')
-    unknown = set(arguments) - {'limit'}
+    unknown = set(arguments) - {'limit', 'cursor'}
     if unknown:
         raise ValueError(f'evidence.history does not accept: {", ".join(sorted(unknown))}.')
     raw_limit = arguments.get('limit', 25)
     if not isinstance(raw_limit, int) or isinstance(raw_limit, bool) or not 1 <= raw_limit <= 50:
         raise ValueError('evidence.history limit must be an integer between 1 and 50.')
+    raw_cursor = arguments.get('cursor')
+    if raw_cursor is not None and (not isinstance(raw_cursor, str) or not raw_cursor.strip()):
+        raise ValueError('evidence.history cursor must be a non-empty string.')
 
     history = list_evidence_history(
         repository,
@@ -43,16 +46,24 @@ def read_evidence_history_for_runtime(
             auth_source='runtime:claimant_session',
         ),
         limit=raw_limit,
-        cursor=None,
+        cursor=raw_cursor,
     )
+    next_cursor = history.page.next_cursor
+    limitations = [
+        'History is claimant-scoped and does not grant permission to attach or remove Evidence.'
+    ]
+    if next_cursor is not None:
+        limitations.append(
+            'More Evidence history is available; this page cannot support an exhaustive '
+            'not-found conclusion.'
+        )
     return {
         'tool': contract.name,
         'status': 'succeeded',
         'items': [item.model_dump(mode='json') for item in history.items],
         'source_refs': [item.evidence_id for item in history.items],
-        'limitations': [
-            'History is claimant-scoped and does not grant permission to attach or remove Evidence.'
-        ],
+        'page': {'next_cursor': next_cursor},
+        'limitations': limitations,
     }
 
 

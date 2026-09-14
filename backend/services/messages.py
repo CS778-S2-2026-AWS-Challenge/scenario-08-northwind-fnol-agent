@@ -5,6 +5,7 @@ from datetime import datetime
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.agent_action_registry import action_contract
 from backend.domain.branch_registry import (
     BranchRuleEvaluator,
     validate_registered_field_value,
@@ -218,7 +219,7 @@ def _validate_tool_requests(
                     message='The Agent supplied an invalid claim-history result limit.',
                 )
         if tool == 'evidence.history' and operation == 'list':
-            unexpected = set(request) - {'tool', 'operation', 'limit'}
+            unexpected = set(request) - {'tool', 'operation', 'limit', 'cursor'}
             if unexpected:
                 raise ApiError(
                     status_code=503,
@@ -231,6 +232,13 @@ def _validate_tool_requests(
                     status_code=503,
                     code='AGENT_TOOL_NOT_PERMITTED',
                     message='The Agent supplied an invalid Evidence history limit.',
+                )
+            cursor = request.get('cursor')
+            if cursor is not None and (not isinstance(cursor, str) or not cursor.strip()):
+                raise ApiError(
+                    status_code=503,
+                    code='AGENT_TOOL_NOT_PERMITTED',
+                    message='The Agent supplied an invalid Evidence history cursor.',
                 )
         if tool == 'evidence_registry' and request.get('kind') != 'police_report':
             raise ApiError(
@@ -835,20 +843,44 @@ def _validate_evidence_history_action(
 ) -> AgentProposal:
     """Do not turn an unavailable history lookup into an Evidence action."""
 
+    history_results = [
+        result for result in proposal.tool_results if result.get('tool') == 'evidence.history'
+    ]
     if proposal.action_code not in {
         'claim.propose_evidence_reuse',
         'claim.propose_evidence_remove',
     }:
+        latest_history = history_results[-1] if history_results else None
+        page = latest_history.get('page') if isinstance(latest_history, dict) else None
+        if (
+            isinstance(page, dict)
+            and isinstance(page.get('next_cursor'), str)
+            and page['next_cursor']
+        ):
+            return replace(
+                proposal,
+                customer_response=(
+                    f'{proposal.customer_response} I checked one page of your Evidence history; '
+                    'more records are available, so this is not a complete not-found result.'
+                ),
+            )
         return proposal
-    history_results = [
-        result for result in proposal.tool_results if result.get('tool') == 'evidence.history'
-    ]
     if not history_results or history_results[-1].get('status') != 'succeeded':
         raise ApiError(
             status_code=503,
             code='AGENT_TOOL_NOT_PERMITTED',
             message=(
                 'The Agent cannot propose an Evidence action without a successful history lookup.'
+            ),
+            retryable=False,
+        )
+    contract = action_contract(proposal.action_code)
+    if claim.claim_state.workflow_state not in contract.allowed_lifecycle_states:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message=(
+                'The proposed Evidence action is not allowed in the current Claim lifecycle state.'
             ),
             retryable=False,
         )
@@ -903,7 +935,21 @@ def _validate_evidence_history_action(
                 'record because the governed retention and audit operation is not available.'
             ),
         )
-    return proposal
+    return replace(
+        proposal,
+        customer_reason='The selected Evidence is eligible for a reuse proposal only.',
+        customer_response=(
+            f'I found Evidence {proposal.evidence_id} from Claim {proposal.source_claim_id}. '
+            'It has not been attached or copied. Please confirm whether you want Northwind to '
+            'reuse the original Evidence for this Claim.'
+        ),
+        customer_next_step=CustomerNextStep(
+            status='confirm_evidence_reuse',
+            summary='Confirm whether Northwind may reuse the original Evidence for this Claim.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+            required_items=['evidence_reuse_confirmation'],
+        ),
+    )
 
 
 def _apply_question_accounting(
@@ -1142,11 +1188,14 @@ def _execute_evidence_history_search(
     limit = tool.get('limit', 25)
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50:
         return None
+    cursor = tool.get('cursor')
+    if cursor is not None and (not isinstance(cursor, str) or not cursor.strip()):
+        return None
     try:
         result = read_evidence_history_for_runtime(
             repository,
             claim,
-            {'limit': limit},
+            {'limit': limit, **({'cursor': cursor} if cursor is not None else {})},
         )
     except (TypeError, ValueError):
         return None
