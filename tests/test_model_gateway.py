@@ -2393,11 +2393,33 @@ def test_namespaced_model_handoff_on_routine_message_does_not_create_handoff() -
 
     assert response.status_code == 200
     assert repository.list_handoffs(claim_id, 'cus_demo') == []
+    body = response.json()
+    safe_response = (
+        'I have recorded what you shared, but I could not safely apply the proposed next '
+        'step. Your current report remains available.'
+    )
+    assert body['handoff'] is None
+    assert body['agent_message']['content']['text'] == safe_response
     stored_claim = repository.get_claim(claim_id, 'cus_demo')
     assert stored_claim is not None
     assert stored_claim.revision == before_claim.revision + 1
+    assert stored_claim.customer_next_step.status == 'action_not_applied'
+    assert stored_claim.customer_next_step.responsible_party is ResponsibleParty.SYSTEM
     messages = repository.list_messages(claim_id, _session_id, 'cus_demo')
     assert any(message.actor is ActorType.CLAIMANT for message in messages)
+    agent_messages = [message for message in messages if message.actor is ActorType.AGENT]
+    assert len(agent_messages) == 1
+    assert agent_messages[0].content['text'] == safe_response
+    runtime_turn = repository.get_runtime_turn_for_trigger(
+        claim_id,
+        body['claimant_message']['message_id'],
+        'cus_demo',
+    )
+    assert runtime_turn is not None
+    assert runtime_turn.execution_plan.status == 'rejected'
+    assert runtime_turn.result.status == 'blocked'
+    assert runtime_turn.result.customer_response == safe_response
+    assert 'staff member' not in runtime_turn.result.customer_response.casefold()
 
 
 def test_explicit_human_request_uses_runtime_interrupt_before_model_gateway() -> None:

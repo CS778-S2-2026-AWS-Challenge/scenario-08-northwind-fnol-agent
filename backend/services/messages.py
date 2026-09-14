@@ -1591,6 +1591,20 @@ def submit_message(
     effective_customer_reason = proposal.customer_reason
     effective_customer_response = proposal.customer_response
     effective_next_step = _effective_next_step(proposal.customer_next_step, authority.outcome)
+    if (
+        proposal.proposal_source is AgentProposalSource.MODEL_GATEWAY
+        and authority.outcome is not AuthorityOutcome.AUTHORISED
+    ):
+        (
+            effective_customer_reason,
+            effective_customer_response,
+            effective_next_step,
+        ) = _safe_model_customer_content(
+            proposal,
+            authority.outcome,
+            claim.customer_next_step,
+            claim.form,
+        )
     form_changes = _build_form_changes(
         claim.form,
         proposal.form_changes,
