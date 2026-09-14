@@ -322,7 +322,12 @@ class ModelRuntimeProposal(ModelContract):
     persistence, and every side effect.
     """
 
-    action_code: Literal['conversation.answer', 'human.create_handoff']
+    action_code: Literal[
+        'conversation.answer',
+        'human.create_handoff',
+        'claim.propose_evidence_reuse',
+        'claim.propose_evidence_remove',
+    ]
     runtime_action_code: Literal[
         'runtime.continue',
         'runtime.wait_for_user',
@@ -336,6 +341,9 @@ class ModelRuntimeProposal(ModelContract):
     contents_item_changes: list[ModelProposedContentsItem] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
     handoff_priority: str | None = None
+    evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
+    source_claim_id: str | None = Field(default=None, min_length=1, max_length=120)
+    removal_scope: Literal['draft', 'persisted'] | None = None
 
 
 class ModelGatewayErrorCode(str, Enum):

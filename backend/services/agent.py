@@ -202,6 +202,9 @@ class AgentProposal:
     # turns; ``action`` is retained only for persisted compatibility records.
     action_code: str | None = None
     runtime_trace: RuntimeTraceRecord | None = None
+    evidence_id: str | None = None
+    source_claim_id: str | None = None
+    removal_scope: str | None = None
 
 
 def _contains_unnegated_signal(
@@ -1008,6 +1011,15 @@ def validate_proposal(proposal: AgentProposal) -> AgentAuthority:
                 proposed_by='agent',
                 validated_by='deterministic_rule_engine',
                 outcome=AuthorityOutcome.REVIEW_REQUIRED,
+            )
+        if proposal.action_code in {
+            'claim.propose_evidence_reuse',
+            'claim.propose_evidence_remove',
+        }:
+            return AgentAuthority(
+                proposed_by='agent',
+                validated_by='deterministic_rule_engine',
+                outcome=AuthorityOutcome.AUTHORISED,
             )
         if contract.state_effect.value != 'none':
             return AgentAuthority(
