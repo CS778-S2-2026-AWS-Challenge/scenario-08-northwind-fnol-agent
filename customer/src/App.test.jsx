@@ -324,6 +324,10 @@ describe('claimant intake projection', () => {
     await user.type(input, 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
+    expect(api.bootstrapClaim).toHaveBeenCalledWith(expect.objectContaining({
+      incidentType: null,
+      text: 'A pipe burst in the kitchen.',
+    }))
     await waitFor(() => expect(screen.getAllByText('When it happened').length).toBeGreaterThan(0))
     expect(screen.queryByText('Needed later: Affected property')).not.toBeInTheDocument()
     expect(screen.getAllByText('8pm').length).toBeGreaterThan(0)
