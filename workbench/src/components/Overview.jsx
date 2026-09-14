@@ -38,6 +38,8 @@ export default function Overview({ detail, handoffs, collaborationRequests, supp
         </div>
       )}
       <PrimaryAction key={primaryKey || 'no-primary-action'} action={primaryAction} handoff={openHandoff} request={collaborationRequests.find((item) => item.request_id === primaryAction?.target_ref)} onAccept={onAccept} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onSection={onSection} />
+      <RecoverySummary context={detail.work_summary?.incomplete_context} />
+      <IntegrationSummary summary={detail.integration_summary} />
       <SourceSummary summary={detail.source_summary} />
       <MissingInformation items={detail.work_summary?.missing_information || []} />
 
@@ -86,6 +88,83 @@ function WorkSummary({ detail, profile }) {
       <div className="summary-callout"><div><p className="summary-callout__label">Customer-safe next step</p><p>{detail.customer_next_step?.summary || 'No next-step summary is available.'}</p></div>{detail.customer_next_step?.expected_by && <time>{formatDateTime(detail.customer_next_step.expected_by)}</time>}</div>
     </section>
   )
+}
+
+function RecoverySummary({ context }) {
+  if (!context) return null
+  const attempts = context.follow_up_attempts ?? 0
+  return (
+    <section className="detail-section" aria-labelledby="recovery-summary-title">
+      <div className="section-heading">
+        <div><p className="eyebrow">Recovery</p><h2 id="recovery-summary-title">Incomplete Claim recovery</h2></div>
+        <span className="count-badge">{attempts} {attempts === 1 ? 'attempt' : 'attempts'}</span>
+      </div>
+      <p className="section-intro">This checkpoint comes from the authoritative incomplete-Claim projection. Staff should resume from the recorded point instead of repeating completed intake.</p>
+      <div className="summary-grid recovery-summary-grid">
+        <SummaryItem label="Interrupted" value={formatDateTime(context.interrupted_at)} />
+        <SummaryItem label="Last meaningful activity" value={formatDateTime(context.last_meaningful_activity_at)} />
+        <SummaryItem label="Resume point" value={projectedValue(context.resume_point)} />
+        <SummaryStatusItem label="Follow-up status" value={context.follow_up_status} />
+        <SummaryItem label="Follow-up due" value={formatDateTime(context.follow_up_due_at)} />
+        <SummaryItem label="Follow-up attempts" value={String(context.follow_up_attempts ?? 0)} />
+      </div>
+    </section>
+  )
+}
+
+function IntegrationSummary({ summary }) {
+  if (!summary) return null
+  const waiting = summary.waiting_external_services || []
+  return (
+    <section className="detail-section" aria-labelledby="integration-summary-title">
+      <div className="section-heading">
+        <div><p className="eyebrow">Integration</p><h2 id="integration-summary-title">Claim and external progress</h2></div>
+        <span className="count-badge">{waiting.length} waiting</span>
+      </div>
+      <div className="summary-grid">
+        <SummaryStatusItem label="Claim creation" value={summary.claim_creation_status} />
+        <SummaryStatusItem label="Assessor routing" value={summary.assessor_routing_status} />
+      </div>
+      {waiting.length ? (
+        <ul className="missing-list">
+          {waiting.map((item) => (
+            <li key={item.task_id}>
+              <span>
+                <strong>{projectedValue(item.service_identity)}</strong>
+                <small>{projectedValue(item.requested_action)}</small>
+                <ProjectedStatus value={item.status} />
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : <p className="empty-note">No external service is currently projected as waiting.</p>}
+      <p className="record-note"><strong>Projection limit</strong> Claim number and provider timeline are not published by this Workbench summary and are not inferred from lifecycle or queue state.</p>
+    </section>
+  )
+}
+
+function projectedValue(value) {
+  return value ? words(value) : 'Not recorded'
+}
+
+function SummaryStatusItem({ label, value }) {
+  return <div className="summary-item"><span>{label}</span><strong><ProjectedStatus value={value} /></strong></div>
+}
+
+function ProjectedStatus({ value }) {
+  const tone = projectedStatusTone(value)
+  return (
+    <span className={`record-status${tone ? ` record-status--${tone}` : ''}`}>
+      {projectedValue(value)}
+    </span>
+  )
+}
+
+function projectedStatusTone(value) {
+  if (['created', 'assigned', 'accepted', 'resolved', 'not_required'].includes(value)) return 'confirmed'
+  if (['pending', 'queued', 'prepared', 'retryable_failure', 'unknown_outcome'].includes(value)) return 'attention'
+  if (['blocked', 'failed', 'terminal_failure'].includes(value)) return 'missing'
+  return ''
 }
 
 function TerminalSummary({ terminal }) {

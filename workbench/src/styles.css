@@ -210,6 +210,9 @@ p { line-height: 1.55; }
 .summary-item:last-child { border-right: 0; }
 .summary-item span { color: var(--color-text-muted); font-size: var(--workbench-font-meta); }
 .summary-item strong { font-size: var(--workbench-font-control); }
+.recovery-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.recovery-summary-grid .summary-item:nth-child(3) { border-right: 0; }
+.recovery-summary-grid .summary-item:nth-child(-n+3) { border-bottom: var(--border-component); }
 .summary-callout { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 16px; padding: 13px 14px; border-left: 3px solid var(--color-info); background: var(--color-info-soft); }
 .summary-callout p { margin-bottom: 0; }
 .summary-callout__label { color: var(--color-info); font-size: var(--workbench-font-meta); font-weight: var(--font-weight-bold); text-transform: uppercase; }
@@ -482,6 +485,10 @@ p { line-height: 1.55; }
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .summary-item:nth-child(2) { border-right: 0; }
   .summary-item:nth-child(-n+2) { border-bottom: 1px solid var(--color-divider); }
+  .recovery-summary-grid .summary-item:nth-child(3) { border-right: var(--border-component); }
+  .recovery-summary-grid .summary-item:nth-child(4) { border-right: 0; }
+  .recovery-summary-grid .summary-item:nth-child(3),
+  .recovery-summary-grid .summary-item:nth-child(4) { border-bottom: var(--border-component); }
 }
 
 @media (max-width: 800px) {
@@ -522,6 +529,7 @@ p { line-height: 1.55; }
   .summary-grid { grid-template-columns: 1fr; }
   .summary-item { padding-left: 0; border-right: 0; border-bottom: 1px solid var(--color-divider); }
   .summary-item:last-child { border-bottom: 0; }
+  .recovery-summary-grid .summary-item:nth-child(3) { border-right: 0; }
   .summary-callout { align-items: flex-start; flex-direction: column; }
   .fact-list > div, .record-row dl, .external-disclosure dl, .external-authority dl, .action-details dl, .missing-item-details { grid-template-columns: 1fr; gap: var(--space-1); }
   .record-summary-grid, .external-overview { grid-template-columns: 1fr; }
