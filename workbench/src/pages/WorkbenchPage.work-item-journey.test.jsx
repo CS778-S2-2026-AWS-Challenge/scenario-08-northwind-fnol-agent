@@ -5,12 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import WorkbenchPage from './WorkbenchPage.jsx'
 
 const tabs = vi.hoisted(() => ({
-  tabs: [],
-  activeId: null,
-  open: vi.fn(),
-  activate: vi.fn(),
-  close: vi.fn(),
-  update: vi.fn(),
+  tabs: [], activeId: null, open: vi.fn(), activate: vi.fn(), close: vi.fn(), update: vi.fn(),
 }))
 
 vi.mock('../auth/auth-context.js', () => ({
@@ -40,11 +35,7 @@ const metadata = {
 }
 
 function jsonResponse(status, payload) {
-  return {
-    status,
-    ok: status >= 200 && status < 300,
-    json: vi.fn().mockResolvedValue(payload),
-  }
+  return { status, ok: status >= 200 && status < 300, json: vi.fn().mockResolvedValue(payload) }
 }
 
 function updateAction(revision) {
@@ -102,10 +93,7 @@ function updateAction(revision) {
         { path: 'claim_state.coverage', to: 'clear' },
         { path: 'claim_state.workflow_state', to: 'ready_for_next' },
       ],
-      customer_update: {
-        responsible_party: 'claimant',
-        related_refs: ['act_review'],
-      },
+      customer_update: { responsible_party: 'claimant', related_refs: ['act_review'] },
     },
     based_on_revision: revision,
   }
@@ -131,6 +119,7 @@ function workItem(state) {
 function claimProjection(state) {
   const completed = state.phase === 'completed'
   const action = completed ? null : updateAction(state.revision)
+  const workflow = completed ? 'ready_for_next' : 'professional_review'
   return {
     claim_id: 'clm_work_item',
     display_reference: 'NW-WORKITEM',
@@ -138,7 +127,7 @@ function claimProjection(state) {
     claimant: { customer_id: 'cus_work', display_name: 'WorkItem Journey Claimant' },
     incident: { family: 'motor', summary: 'Coverage wording requires staff review.' },
     lifecycle_state: 'staff_support',
-    workflow_state: completed ? 'ready_for_next' : 'professional_review',
+    workflow_state: workflow,
     created_at: '2026-09-14T02:19:00Z',
     updated_at: `2026-09-14T02:2${state.revision}:00Z`,
     active_session_id: null,
@@ -149,7 +138,7 @@ function claimProjection(state) {
       fraud_signal: 'none',
       customer_support: 'none',
       urgency: 'normal',
-      workflow_state: completed ? 'ready_for_next' : 'professional_review',
+      workflow_state: workflow,
       next_action: 'PROCEED',
     },
     ownership: {
@@ -158,11 +147,7 @@ function claimProjection(state) {
       primary_assignee: { staff_id: 'stf_demo', display_name: 'Demo Staff' },
     },
     priority_projection: {
-      level: 'standard',
-      rank: 0,
-      reasons: [],
-      due_at: null,
-      is_overdue: false,
+      level: 'standard', rank: 0, reasons: [], due_at: null, is_overdue: false,
       computed_at: '2026-09-14T02:19:00Z',
     },
     work_summary: {
@@ -180,9 +165,7 @@ function claimProjection(state) {
     },
     allowed_actions: action ? [action] : [],
     integration_summary: {
-      claim_creation_status: null,
-      assessor_routing_status: null,
-      waiting_external_services: [],
+      claim_creation_status: null, assessor_routing_status: null, waiting_external_services: [],
     },
     customer_next_step: {
       status: completed ? 'staff_update' : 'professional_review',
@@ -218,11 +201,7 @@ function queueProjection(state) {
     terminal_disposition: null,
     ownership: detail.ownership,
     priority_projection: detail.priority_projection,
-    work_summary: {
-      ...detail.work_summary,
-      unread_claimant_messages: 0,
-      external_wait_count: 0,
-    },
+    work_summary: { ...detail.work_summary, unread_claimant_messages: 0, external_wait_count: 0 },
     integration_summary: detail.integration_summary,
     tags: [],
     revision: detail.revision,
@@ -243,18 +222,16 @@ function createService() {
     customerUpdateReads: [],
     eventReads: [],
   }
+  const page = (items) => ({ items, page: { next_cursor: null } })
 
   const fetchMock = vi.fn(async (url, options = {}) => {
     const path = String(url)
     const method = options.method || 'GET'
 
-    if (path === '/api/v1/workbench/claims/filter-metadata') {
-      return jsonResponse(200, metadata)
-    }
+    if (path === '/api/v1/workbench/claims/filter-metadata') return jsonResponse(200, metadata)
     if (method === 'GET' && (path === '/api/v1/workbench/claims' || path.startsWith('/api/v1/workbench/claims?'))) {
       return jsonResponse(200, {
-        items: [queueProjection(state)],
-        page: { next_cursor: null },
+        ...page([queueProjection(state)]),
         view_counts: {
           status: 'available',
           items: [{ view: 'all', count: 1 }, { view: 'processing', count: 1 }],
@@ -265,35 +242,27 @@ function createService() {
     if (method === 'GET' && path === '/api/v1/workbench/claims/clm_work_item') {
       return jsonResponse(200, claimProjection(state))
     }
-    if (method === 'GET' && path.startsWith('/api/v1/workbench/claims/clm_work_item/handoffs?')) {
-      return jsonResponse(200, { items: [], page: { next_cursor: null } })
-    }
-    if (method === 'GET' && path.startsWith('/api/v1/workbench/claims/clm_work_item/collaboration-requests?')) {
-      return jsonResponse(200, { items: [], page: { next_cursor: null } })
-    }
+    if (method === 'GET' && (
+      path.startsWith('/api/v1/workbench/claims/clm_work_item/handoffs?')
+      || path.startsWith('/api/v1/workbench/claims/clm_work_item/collaboration-requests?')
+    )) return jsonResponse(200, page([]))
     if (method === 'GET' && path.startsWith('/api/v1/workbench/claims/clm_work_item/work-items?')) {
       state.workItemReads.push({ revision: state.revision, status: state.phase })
-      return jsonResponse(200, { items: [workItem(state)], page: { next_cursor: null } })
+      return jsonResponse(200, page([workItem(state)]))
     }
     if (method === 'GET' && path.startsWith('/api/v1/workbench/claims/clm_work_item/customer-updates?')) {
       state.customerUpdateReads.push({
         revision: state.revision,
         summaries: state.customerUpdates.map((item) => item.summary),
       })
-      return jsonResponse(200, {
-        items: state.customerUpdates.map((item) => ({ ...item })),
-        page: { next_cursor: null },
-      })
+      return jsonResponse(200, page(state.customerUpdates.map((item) => ({ ...item }))))
     }
     if (method === 'GET' && path.startsWith('/api/v1/workbench/claims/clm_work_item/events?')) {
       state.eventReads.push({
         revision: state.revision,
         summaries: state.events.map((item) => item.summary),
       })
-      return jsonResponse(200, {
-        items: state.events.map((item) => ({ ...item })),
-        page: { next_cursor: null },
-      })
+      return jsonResponse(200, page(state.events.map((item) => ({ ...item }))))
     }
     if (method === 'PATCH' && path === '/api/v1/workbench/claims/clm_work_item/staff-actions/act_review') {
       const request = {
@@ -305,10 +274,7 @@ function createService() {
       const expected = state.phase === 'open' ? '2' : '3'
       if (request.revision !== expected) {
         return jsonResponse(409, {
-          error: {
-            code: 'REVISION_CONFLICT',
-            message: 'The Claim changed after this page was loaded.',
-          },
+          error: { code: 'REVISION_CONFLICT', message: 'The Claim changed after this page was loaded.' },
         })
       }
       if (request.payload.status === 'in_progress' && state.phase === 'open') {
@@ -357,10 +323,8 @@ function createService() {
         error: { code: 'INVALID_STATE_TRANSITION', message: 'Invalid WorkItem transition.' },
       })
     }
-
     throw new Error(`Unexpected Workbench request: ${method} ${path}`)
   })
-
   return { fetchMock, state }
 }
 
@@ -421,23 +385,26 @@ describe('WorkbenchPage WorkItem browser/API journey', () => {
       expect(state.mutations).toHaveLength(1)
       expect(state.mutations[0]).toMatchObject({
         revision: '2',
-        payload: {
-          status: 'in_progress',
-          result: null,
-          state_changes: [],
-          customer_update: null,
-        },
+        payload: { status: 'in_progress', result: null, state_changes: [], customer_update: null },
       })
       expect(screen.getByText('Revision 3')).toBeVisible()
       expect(screen.getByText('In Progress')).toBeVisible()
     })
     expect(state.mutations[0].idempotencyKey).toBeTruthy()
-    expect(state.workItemReads.some((read) => read.revision === 3 && read.status === 'in_progress')).toBe(true)
+    expect(state.workItemReads.some((read) => (
+      read.revision === 3 && read.status === 'in_progress'
+    ))).toBe(true)
 
     await user.click(screen.getByText('Coverage Review'))
     await user.selectOptions(screen.getByLabelText('Status'), 'completed')
-    await user.type(screen.getByLabelText('Result summary'), 'The applicable policy wording was reviewed.')
-    await user.type(screen.getByLabelText('Claimant update'), 'The policy review is complete and your report can continue.')
+    await user.type(
+      screen.getByLabelText('Result summary'),
+      'The applicable policy wording was reviewed.',
+    )
+    await user.type(
+      screen.getByLabelText('Claimant update'),
+      'The policy review is complete and your report can continue.',
+    )
     await user.click(screen.getByRole('button', { name: 'Update action' }))
 
     await waitFor(() => {
@@ -468,8 +435,12 @@ describe('WorkbenchPage WorkItem browser/API journey', () => {
     expect(state.mutations[1].idempotencyKey).toBeTruthy()
 
     expect(await screen.findByText('Completed')).toBeVisible()
-    expect(await screen.findByText('The policy review is complete and your report can continue.')).toBeVisible()
-    expect(await screen.findByText('Coverage review completed and the Claim returned to ready for next.')).toBeVisible()
+    expect(await screen.findByText(
+      'The policy review is complete and your report can continue.',
+    )).toBeVisible()
+    expect(await screen.findByText(
+      'Coverage review completed and the Claim returned to ready for next.',
+    )).toBeVisible()
 
     await waitFor(() => {
       expect(state.workItemReads.at(-1)).toEqual({ revision: 4, status: 'completed' })
