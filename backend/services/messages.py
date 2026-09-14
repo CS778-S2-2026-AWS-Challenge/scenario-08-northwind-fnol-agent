@@ -200,20 +200,16 @@ def _validate_tool_requests(
                 code='AGENT_TOOL_NOT_PERMITTED',
                 message='The Agent supplied an invalid policy lookup request.',
             )
-        if (
-            tool == 'claim_history'
-            and operation in {'search_claim_history', 'lookup'}
-            and (
+        if tool == 'claim_history' and operation in {'search_claim_history', 'lookup'}:
+            if (
                 not isinstance(request.get('history_reference'), str)
                 or not str(request['history_reference']).strip()
-            )
-        ):
-            raise ApiError(
-                status_code=503,
-                code='AGENT_TOOL_NOT_PERMITTED',
-                message='The Agent supplied an invalid claim-history lookup request.',
-            )
-        if tool == 'claim_history' and operation in {'search_claim_history', 'lookup'}:
+            ):
+                raise ApiError(
+                    status_code=503,
+                    code='AGENT_TOOL_NOT_PERMITTED',
+                    message='The Agent supplied an invalid claim-history lookup request.',
+                )
             limit = request.get('limit', 10)
             if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50:
                 raise ApiError(
@@ -836,11 +832,14 @@ def _validate_evidence_history_action(
     repository: PersistenceRepository,
     claim: WorkingClaim,
     proposal: AgentProposal,
-) -> None:
+) -> AgentProposal:
     """Do not turn an unavailable history lookup into an Evidence action."""
 
-    if proposal.action_code not in {'evidence.propose_reuse', 'evidence.propose_remove'}:
-        return
+    if proposal.action_code not in {
+        'claim.propose_evidence_reuse',
+        'claim.propose_evidence_remove',
+    }:
+        return proposal
     history_results = [
         result for result in proposal.tool_results if result.get('tool') == 'evidence.history'
     ]
@@ -853,13 +852,29 @@ def _validate_evidence_history_action(
             ),
             retryable=False,
         )
+    history_items = history_results[-1].get('items', [])
+    visible_evidence_ids = (
+        {
+            item.get('evidence_id')
+            for item in history_items
+            if isinstance(item, dict) and isinstance(item.get('evidence_id'), str)
+        }
+        if isinstance(history_items, list)
+        else set()
+    )
+    if proposal.evidence_id not in visible_evidence_ids:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The proposed Evidence item was not present in the authorised history result.',
+            retryable=False,
+        )
     result = validate_evidence_proposal(
         repository,
         claim,
         action_code=proposal.action_code,
         evidence_id=proposal.evidence_id or '',
         source_claim_id=proposal.source_claim_id,
-        confirmation_ref=proposal.confirmation_ref,
         removal_scope=proposal.removal_scope,
     )
     if result.get('status') == 'rejected':
@@ -867,11 +882,28 @@ def _validate_evidence_history_action(
             status_code=422,
             code='VALIDATION_ERROR',
             message=(
-                'The proposed Evidence action did not satisfy its ownership, state, or '
-                'confirmation contract.'
+                'The proposed Evidence action did not satisfy its ownership, state, or input '
+                'contract.'
             ),
             retryable=False,
         )
+    if result.get('status') == 'unavailable':
+        is_draft = result.get('reason') == 'DRAFT_REMOVAL_IS_FRONTEND_OWNED'
+        return replace(
+            proposal,
+            customer_reason=(
+                'Draft Evidence removal is controlled by the current upload composer.'
+                if is_draft
+                else 'Persisted Evidence removal is unavailable under the current retention API.'
+            ),
+            customer_response=(
+                'Select the draft file in the upload composer and remove it before submitting.'
+                if is_draft
+                else 'I can show this Evidence in your history, but I cannot remove the persisted '
+                'record because the governed retention and audit operation is not available.'
+            ),
+        )
+    return proposal
 
 
 def _apply_question_accounting(
@@ -1666,7 +1698,7 @@ def submit_message(
             )
         else:
             proposal = replace(proposal, tool_results=context_tool_results)
-    _validate_evidence_history_action(repository, claim, proposal)
+    proposal = _validate_evidence_history_action(repository, claim, proposal)
     _validate_failed_retrieval_changes(proposal, message_text)
     authority = validate_proposal(proposal)
     runtime_trace = proposal.runtime_trace
@@ -2177,6 +2209,37 @@ def submit_message(
                 output=dict(runtime_trace.tool_output),
                 source_refs=[f'claim:{claim_id}:revision:{expected_revision}'],
                 limitations=[],
+                created_at=timestamp,
+            )
+        )
+    for index, context_result in enumerate(
+        result for result in proposal.tool_results if result.get('tool') == 'evidence.history'
+    ):
+        raw_status = context_result.get('status')
+        status = (
+            raw_status
+            if raw_status in {'succeeded', 'unavailable', 'failed', 'unknown'}
+            else 'failed'
+        )
+        raw_refs = context_result.get('source_refs', [])
+        source_refs = [str(ref) for ref in raw_refs] if isinstance(raw_refs, list) else []
+        raw_limitations = context_result.get('limitations', [])
+        limitations = (
+            [str(item) for item in raw_limitations]
+            if isinstance(raw_limitations, list)
+            else ['The Evidence history result did not contain valid limitations.']
+        )
+        tool_records.append(
+            ToolResultRecord(
+                result_id=new_id('toolres'),
+                turn_id=runtime_turn_id,
+                claim_id=claim_id,
+                tool_call_id=f'context:{claimant_message.message_id}:evidence_history:{index}',
+                tool_name='evidence.history',
+                status=status,
+                output=dict(context_result),
+                source_refs=source_refs,
+                limitations=limitations,
                 created_at=timestamp,
             )
         )

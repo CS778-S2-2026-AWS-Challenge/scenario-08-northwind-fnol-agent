@@ -423,7 +423,13 @@ class GatewayAgent:
             'Runtime contract: first call the read-only claim.read tool with an empty object. '
             'After its result, return JSON with action_code="conversation.answer" for ordinary '
             'intake, or action_code="human.create_handoff" only when the claimant explicitly '
-            'requests human help or a deterministic safety/support rule requires it. '
+            'requests human help or a deterministic safety/support rule requires it. When the '
+            'claimant asks to find, reuse, or remove prior Evidence, use '
+            'action_code="claim.propose_evidence_reuse" or '
+            'action_code="claim.propose_evidence_remove" with the Evidence identifiers. The '
+            'Runtime will load authorised Evidence history and ask you to re-plan before it '
+            'accepts either proposal. A reuse proposal must ask for explicit claimant '
+            'confirmation before any Evidence API attach operation. '
             'runtime_action_code, reason_codes, customer_reason, customer_response, '
             'customer_next_step, and only registered form_changes or contents_item_changes '
             'grounded in the claimant message. Preserve approximate values and reported_text. '
@@ -582,13 +588,25 @@ class GatewayAgent:
                     'runtime.pause_for_review',
                 }:
                     raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+                evidence_action_requested = runtime_proposal.action_code in {
+                    'claim.propose_evidence_reuse',
+                    'claim.propose_evidence_remove',
+                }
+                evidence_history_loaded = any(
+                    item.get('tool') == 'evidence.history' for item in context.tool_results
+                )
+                effective_action_code = (
+                    'conversation.answer'
+                    if evidence_action_requested and not evidence_history_loaded
+                    else runtime_proposal.action_code
+                )
                 result = AgentProposal(
                     action=(
                         AgentAction.HANDOFF
                         if runtime_proposal.action_code == 'human.create_handoff'
                         else AgentAction.UPDATE
                     ),
-                    action_code=runtime_proposal.action_code,
+                    action_code=effective_action_code,
                     reason_codes=runtime_proposal.reason_codes,
                     customer_reason=runtime_proposal.customer_reason,
                     customer_response=runtime_proposal.customer_response,
@@ -638,11 +656,7 @@ class GatewayAgent:
                     proposed_signals=[],
                     required_tools=(
                         [{'tool': 'evidence.history', 'operation': 'list'}]
-                        if runtime_proposal.action_code
-                        in {'evidence.propose_reuse', 'evidence.propose_remove'}
-                        and not any(
-                            item.get('tool') == 'evidence.history' for item in context.tool_results
-                        )
+                        if evidence_action_requested and not evidence_history_loaded
                         else []
                     ),
                     next_action_requirements=[],
@@ -650,7 +664,6 @@ class GatewayAgent:
                     handoff_priority=runtime_proposal.handoff_priority,
                     evidence_id=runtime_proposal.evidence_id,
                     source_claim_id=runtime_proposal.source_claim_id,
-                    confirmation_ref=runtime_proposal.confirmation_ref,
                     removal_scope=runtime_proposal.removal_scope,
                     # Model output is advisory. Deterministic support/safety interrupts are
                     # evaluated before this provider and are the only source of handoff authority.
@@ -672,7 +685,7 @@ class GatewayAgent:
                         tool_arguments=tool_arguments,
                         tool_output=tool_output,
                         tool_result_status='succeeded',
-                        action_code=runtime_proposal.action_code,
+                        action_code=effective_action_code,
                         runtime_action_code=runtime_proposal.runtime_action_code,
                         reason_codes=runtime_proposal.reason_codes,
                         status='succeeded',

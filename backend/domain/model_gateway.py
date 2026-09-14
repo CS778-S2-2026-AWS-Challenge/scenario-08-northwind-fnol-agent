@@ -325,8 +325,8 @@ class ModelRuntimeProposal(ModelContract):
     action_code: Literal[
         'conversation.answer',
         'human.create_handoff',
-        'evidence.propose_reuse',
-        'evidence.propose_remove',
+        'claim.propose_evidence_reuse',
+        'claim.propose_evidence_remove',
     ]
     runtime_action_code: Literal[
         'runtime.continue',
@@ -343,7 +343,6 @@ class ModelRuntimeProposal(ModelContract):
     handoff_priority: str | None = None
     evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
     source_claim_id: str | None = Field(default=None, min_length=1, max_length=120)
-    confirmation_ref: str | None = Field(default=None, min_length=1, max_length=200)
     removal_scope: Literal['draft', 'persisted'] | None = None
 
 

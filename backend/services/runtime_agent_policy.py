@@ -41,7 +41,6 @@ PROPOSAL_TOOL_ACTIONS = {
     'claim_history': 'external.load_requirements',
     'evidence_registry': 'claim.set_evidence_state',
     'professional_review': 'human.request_professional_review',
-    'evidence.history': 'evidence.propose_reuse',
 }
 
 _LEGACY_ACTION_CODES = {
