@@ -9,6 +9,8 @@ const api = vi.hoisted(() => ({
   claims: vi.fn(),
   claim: vi.fn(),
   conversations: vi.fn(),
+  sessionsForTarget: vi.fn(),
+  messages: vi.fn(),
   handoffs: vi.fn(),
   collaborationRequests: vi.fn(),
   acceptHandoff: vi.fn(),
@@ -132,6 +134,12 @@ describe('WorkbenchPage queue routing', () => {
     })
     api.claim.mockResolvedValue(claim)
     api.conversations.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.sessionsForTarget.mockResolvedValue({
+      items: [],
+      resolved_session: null,
+      page: { next_cursor: null },
+    })
+    api.messages.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.handoffs.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.collaborationRequests.mockResolvedValue({ items: [], page: { next_cursor: null } })
   })
@@ -295,6 +303,117 @@ describe('WorkbenchPage queue routing', () => {
       '/workbench/agent/sessions/sas_evidence',
     ))
     expect(screen.getByTestId('staff-agent-state')).toHaveTextContent('Restoring sas_evidence')
+  })
+
+  it('takes over a waiting assistance request with its exact projected target and revision', async () => {
+    const user = userEvent.setup()
+    let accepted = false
+    const acceptAction = {
+      action_code: 'human.accept_handoff',
+      target_type: 'handoff',
+      target_ref: 'hnd_help',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+      confirmation: { message: 'Accepting this Claim makes you responsible for the current handoff.' },
+    }
+    const waitingClaim = {
+      ...claim,
+      claim_id: 'clm_help',
+      revision: 4,
+      display_reference: 'clm_help',
+      incident: { family: 'motor', summary: 'Vehicle was hit while parked.' },
+      lifecycle_state: 'staff_support',
+      ownership: { state: 'unassigned', current_staff_access: 'read_only' },
+      work_summary: {
+        queue_key: 'processing',
+        primary_action_code: 'human.accept_handoff',
+        primary_action_target_ref: 'hnd_help',
+        unread_claimant_messages: 0,
+      },
+      integration_summary: { claim_creation_status: null },
+    }
+    const waitingDetail = {
+      ...waitingClaim,
+      active_session_id: 'ses_help',
+      customer_next_step: { responsible_party: 'claims_professional' },
+      allowed_actions: [acceptAction],
+    }
+    const acceptedDetail = {
+      ...waitingDetail,
+      revision: 5,
+      ownership: {
+        state: 'assigned',
+        current_staff_access: 'primary',
+        primary_assignee: { staff_id: 'stf_demo' },
+      },
+      work_summary: {
+        ...waitingDetail.work_summary,
+        primary_action_code: 'conversation.send_claimant_message',
+        primary_action_target_ref: 'ses_help',
+      },
+      allowed_actions: [],
+    }
+    const waitingHandoff = {
+      handoff_id: 'hnd_help',
+      support_need: 'human_requested',
+      status: 'queued',
+      reason: 'Customer requested staff assistance.',
+      requested_action: 'Help the customer continue.',
+      packet: { incident_summary: 'Parked vehicle damage.' },
+      created_at: '2026-09-14T02:00:00Z',
+    }
+    const acceptedHandoff = {
+      ...waitingHandoff,
+      status: 'accepted',
+      assigned_to: 'stf_demo',
+      accepted_at: '2026-09-14T02:02:00Z',
+    }
+    api.claims.mockImplementation((token, filters = {}) => Promise.resolve({
+      items: filters.view === 'human_requests' && !accepted ? [waitingClaim] : [],
+      page: { next_cursor: null },
+      view_counts: availableCounts,
+    }))
+    api.conversations.mockImplementation(() => Promise.resolve({
+      items: accepted ? [{
+        conversation_id: 'claim:ses_help',
+        kind: 'claim',
+        claim_id: 'clm_help',
+        display_reference: 'clm_help',
+        session_id: 'ses_help',
+        title: 'Claim clm_help',
+        summary: 'Parked vehicle damage.',
+        status: 'active',
+      }] : [],
+      page: { next_cursor: null },
+    }))
+    api.claim.mockImplementation(() => Promise.resolve(accepted ? acceptedDetail : waitingDetail))
+    api.handoffs.mockImplementation(() => Promise.resolve({
+      items: [accepted ? acceptedHandoff : waitingHandoff],
+      page: { next_cursor: null },
+    }))
+    api.acceptHandoff.mockImplementation(() => {
+      accepted = true
+      return Promise.resolve({ revision: 5, handoff: acceptedHandoff })
+    })
+    api.sessionsForTarget.mockResolvedValue({
+      items: [{ session_id: 'ses_help' }],
+      resolved_session: { session_id: 'ses_help' },
+      page: { next_cursor: null },
+    })
+
+    renderPage('/workbench/conversations')
+    await user.click(await screen.findByRole('button', { name: 'Take over' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm take over' }))
+
+    await waitFor(() => expect(api.acceptHandoff).toHaveBeenCalledWith(
+      'staff-token',
+      'clm_help',
+      'hnd_help',
+      4,
+    ))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
+      '/workbench/claims/clm_help/conversation?session=ses_help',
+    ))
   })
 
   it('removes the previous queue rows while a changed filter fails to load', async () => {

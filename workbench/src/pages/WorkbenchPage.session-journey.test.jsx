@@ -61,6 +61,7 @@ function claimDetail(revision, {
       action_code: 'conversation.send_claimant_message',
       target_ref: actionTarget,
       availability: actionAvailability,
+      based_on_revision: revision,
     }] : [],
   }
 }
