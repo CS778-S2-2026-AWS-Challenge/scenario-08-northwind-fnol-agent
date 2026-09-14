@@ -33,7 +33,11 @@ class TurnPlanRecord(ContractModel):
     runtime_directive: Literal[
         'runtime.continue',
         'runtime.wait_for_user',
+        'runtime.wait_for_external',
         'runtime.pause_for_review',
+        'runtime.interrupt_urgent',
+        'runtime.stop_no_claim',
+        'runtime.fail_safe',
     ]
     limitations: list[str] = Field(default_factory=list, max_length=20)
     created_at: datetime

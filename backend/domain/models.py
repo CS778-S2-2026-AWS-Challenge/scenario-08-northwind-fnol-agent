@@ -895,7 +895,7 @@ class ModelDecisionProvenance(ContractModel):
 class RuntimeInvocationTrace(ContractModel):
     """Bounded provider metadata for one staged Runtime invocation."""
 
-    ordinal: int = Field(ge=1, le=2)
+    ordinal: int = Field(ge=1, le=8)
     provider_model: str | None = Field(default=None, max_length=300)
     provider_request_id: str | None = Field(default=None, max_length=500)
     finish_reason: str | None = Field(default=None, max_length=100)
@@ -913,9 +913,9 @@ class RuntimeTraceRecord(ContractModel):
     session_id: str
     model_profile_id: str
     trigger_message_id: str
-    invocations: list[RuntimeInvocationTrace] = Field(min_length=1, max_length=2)
+    invocations: list[RuntimeInvocationTrace] = Field(min_length=1, max_length=8)
     tool_call_id: str
-    tool_name: Literal['claim.read']
+    tool_name: str = Field(pattern=r'^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$')
     tool_arguments: dict[str, Any] = Field(default_factory=dict)
     tool_output: dict[str, Any] = Field(default_factory=dict)
     tool_result_status: Literal['succeeded', 'unavailable', 'failed']

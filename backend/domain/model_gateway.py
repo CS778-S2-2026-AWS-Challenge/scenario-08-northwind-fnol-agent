@@ -322,12 +322,12 @@ class ModelRuntimeProposal(ModelContract):
     persistence, and every side effect.
     """
 
-    action_code: Literal['conversation.answer', 'human.create_handoff']
-    runtime_action_code: Literal[
-        'runtime.continue',
-        'runtime.wait_for_user',
-        'runtime.pause_for_review',
-    ]
+    # The target contract is namespaced.  Keep this a string (rather than a
+    # hand-maintained Literal) so adding a registered action does not require
+    # changing the provider message schema; the validator below still fails
+    # closed for unknown values.
+    action_code: str = Field(pattern=r'^[a-z]+\.[a-z][a-z0-9_]*$')
+    runtime_action_code: str = Field(pattern=r'^runtime\.[a-z][a-z0-9_]*$')
     reason_codes: list[str] = Field(min_length=1)
     customer_reason: str = Field(min_length=1, max_length=1000)
     customer_response: str = Field(min_length=1, max_length=5000)
@@ -336,6 +336,19 @@ class ModelRuntimeProposal(ModelContract):
     contents_item_changes: list[ModelProposedContentsItem] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
     handoff_priority: str | None = None
+
+    @model_validator(mode='after')
+    def validate_registered_actions(self) -> ModelRuntimeProposal:
+        # Import lazily to avoid making the model contract depend on registry
+        # construction during module import.
+        from backend.domain.agent_action_registry import action_contract
+
+        try:
+            action_contract(self.action_code)
+            action_contract(self.runtime_action_code)
+        except ValueError as error:
+            raise ValueError(f'Unregistered Runtime action: {error}') from error
+        return self
 
 
 class ModelGatewayErrorCode(str, Enum):

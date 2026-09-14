@@ -159,6 +159,18 @@ class AgentActionContract(ContractModel):
             and not self.permitted_tools
         ):
             raise ValueError('External-write actions require an allow-listed tool.')
+        # Keep action and tool registries coherent without importing the tool
+        # module during registry construction (which would make import order
+        # part of the contract).
+        from backend.domain.agent_tool_registry import tool_contract
+
+        for tool_name in self.permitted_tools:
+            try:
+                tool_contract(tool_name)
+            except ValueError as error:
+                raise ValueError(
+                    f'Action {self.action_code} references an unknown tool: {tool_name}.'
+                ) from error
         if (
             self.side_effect_class is ActionSideEffectClass.HIGH_IMPACT
             and self.authority_requirement
