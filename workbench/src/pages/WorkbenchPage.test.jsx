@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   claimFilterMetadata: vi.fn(),
   claims: vi.fn(),
   claim: vi.fn(),
+  conversations: vi.fn(),
   handoffs: vi.fn(),
   collaborationRequests: vi.fn(),
   acceptHandoff: vi.fn(),
@@ -42,7 +43,13 @@ vi.mock('../components/ClaimWorkspace.jsx', () => ({
     {detail?.work_summary?.primary_action_code === 'human.accept_handoff' && <button type="button" onClick={() => onAccept({ handoff_id: 'hnd_1' }).catch(() => {})}>Test projected accept</button>}
   </div>,
 }))
-vi.mock('../components/StaffAgent.jsx', () => ({ default: () => null }))
+vi.mock('../components/StaffAgent.jsx', () => ({
+  default: ({ open, requestedSessionId }) => open && (
+    <output data-testid="staff-agent-state">
+      {requestedSessionId ? `Restoring ${requestedSessionId}` : 'New session model'}
+    </output>
+  ),
+}))
 
 const metadata = {
   views: [
@@ -78,6 +85,16 @@ const claim = {
   updated_at: '2026-09-09T12:00:00Z',
 }
 
+const agentConversationSummary = {
+  conversation_id: 'staff_agent:sas_evidence',
+  kind: 'staff_agent',
+  session_id: 'sas_evidence',
+  status: 'active',
+  title: 'Evidence review',
+  summary: 'Police report is still pending.',
+  updated_at: '2026-09-14T02:00:00Z',
+}
+
 const availableCounts = {
   status: 'available',
   items: metadata.views.map((view) => ({ view: view.value, count: 1 })),
@@ -95,6 +112,8 @@ function renderPage(initialEntry) {
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/workbench" element={page} />
+        <Route path="/workbench/conversations" element={page} />
+        <Route path="/workbench/agent/sessions/:agentSessionId" element={page} />
         <Route path="/workbench/claims/:claimId" element={page} />
         <Route path="/workbench/claims/:claimId/:section" element={page} />
       </Routes>
@@ -112,6 +131,7 @@ describe('WorkbenchPage queue routing', () => {
       view_counts: availableCounts,
     })
     api.claim.mockResolvedValue(claim)
+    api.conversations.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.handoffs.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.collaborationRequests.mockResolvedValue({ items: [], page: { next_cursor: null } })
   })
@@ -259,6 +279,22 @@ describe('WorkbenchPage queue routing', () => {
 
     expect(await screen.findByTestId('claim-revision')).toHaveTextContent('Claim revision 1')
     expect(await screen.findByText('Handoff context unavailable')).toBeInTheDocument()
+  })
+
+  it('keeps the existing Staff Agent open and resume route for a history selection', async () => {
+    const user = userEvent.setup()
+    api.conversations.mockResolvedValue({
+      items: [agentConversationSummary],
+      page: { next_cursor: null },
+    })
+    renderPage('/workbench/conversations')
+
+    await user.click(await screen.findByRole('button', { name: /Evidence review/ }))
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
+      '/workbench/agent/sessions/sas_evidence',
+    ))
+    expect(screen.getByTestId('staff-agent-state')).toHaveTextContent('Restoring sas_evidence')
   })
 
   it('removes the previous queue rows while a changed filter fails to load', async () => {
