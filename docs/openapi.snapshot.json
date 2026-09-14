@@ -7647,10 +7647,18 @@
             "title": "Availability",
             "type": "string"
           },
+          "document_input": {
+            "title": "Document Input",
+            "type": "boolean"
+          },
           "id": {
             "minLength": 1,
             "title": "Id",
             "type": "string"
+          },
+          "image_input": {
+            "title": "Image Input",
+            "type": "boolean"
           },
           "label": {
             "minLength": 1,
@@ -7676,7 +7684,9 @@
           "label",
           "protocol",
           "structured_output",
-          "tools"
+          "tools",
+          "image_input",
+          "document_input"
         ],
         "title": "ModelCapability",
         "type": "object"
@@ -10132,9 +10142,17 @@
       "StaffAgentModelCapability": {
         "additionalProperties": false,
         "properties": {
+          "document_input": {
+            "title": "Document Input",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "image_input": {
+            "title": "Image Input",
+            "type": "boolean"
           },
           "label": {
             "title": "Label",
@@ -10158,7 +10176,9 @@
           "label",
           "protocol",
           "structured_output",
-          "tools"
+          "tools",
+          "image_input",
+          "document_input"
         ],
         "title": "StaffAgentModelCapability",
         "type": "object"

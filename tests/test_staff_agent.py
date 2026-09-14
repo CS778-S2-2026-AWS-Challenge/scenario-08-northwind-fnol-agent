@@ -209,6 +209,8 @@ def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
                 'timeout_seconds': 30,
                 'structured_output': True,
                 'tools': False,
+                'image_input': profile_id == 'qwen-local',
+                'document_input': profile_id == 'qwen-local',
             },
             author='test-admin',
             reason='Publish a Staff Agent model catalog.',
@@ -256,6 +258,8 @@ def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
         'qwen-local',
         'nowcoding-gpt56terra',
     ]
+    assert [item['image_input'] for item in body['models']] == [True, False]
+    assert [item['document_input'] for item in body['models']] == [True, False]
 
 
 def test_staff_agent_capabilities_is_empty_for_controlled_runtime() -> None:

@@ -40,6 +40,8 @@ class StaffAgentModelCapability(ContractModel):
     protocol: str
     structured_output: bool
     tools: bool
+    image_input: bool
+    document_input: bool
 
 
 class StaffAgentCapabilitiesResponse(ContractModel):
@@ -114,6 +116,8 @@ def read_capabilities(
             protocol=configuration.protocol,
             structured_output=configuration.structured_output,
             tools=configuration.tools,
+            image_input=configuration.image_input,
+            document_input=configuration.document_input,
         )
         for record in catalog
         if (configuration := ModelRuntimeConfiguration.model_validate(record.values))

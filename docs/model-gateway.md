@@ -255,7 +255,8 @@ The gateway distinguishes:
 - `incomplete_response`;
 - `refused_response`;
 - `malformed_response`;
-- `unsupported_capability`; and
+- `unsupported_capability`;
+- `evidence_unavailable`; and
 - `configuration`.
 
 Only bounded, provider-neutral messages leave the adapter. Timeout, rate-limit, and

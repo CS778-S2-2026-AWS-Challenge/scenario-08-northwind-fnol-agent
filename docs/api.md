@@ -1162,7 +1162,7 @@ Returns the published claimant model catalog without endpoint credentials. The r
 `default_model_profile_id` (selected by the deployment `MODEL_PROFILE_ID` when that profile is
 published and configured, otherwise the first available published profile) and each
 profile's stable ID, provider model label, protocol, structured-output capability, tool-call
-capability, and `availability`. The frontend uses the default when creating a Session, while a
+capability, image-input capability, document-input capability, and `availability`. The frontend uses the default when creating a Session, while a
 message may select another published and available profile in the same conversation.
 
 ### `POST /api/v1/claims`
@@ -2068,7 +2068,9 @@ existing handler runs. The request requires `Idempotency-Key`; Claim-mutating ac
 the current `If-Match` Claim revision.
 
 `GET /api/v1/workbench/agent/capabilities` returns the credential-free published model profile
-catalog for Staff authentication.
+catalog for Staff authentication. Each model declares `structured_output`, `tools`, `image_input`,
+and `document_input` directly from the validated published configuration. These fields do not
+grant permission to access Evidence or execute an action.
 
 ### `GET /api/v1/workbench/claims`
 
