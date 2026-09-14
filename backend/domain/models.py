@@ -1123,6 +1123,15 @@ class ClaimantHandoff(ContractModel):
     created_at: datetime
 
 
+class ClaimantResolvedSupportHandoff(ContractModel):
+    """Claimant-safe evidence that a support handoff was completed."""
+
+    handoff_id: str
+    type: HandoffType
+    resolution_event_id: str
+    resolved_at: datetime
+
+
 class WorkbenchSession(ContractModel):
     """Staff projection of saved resume context without repository ownership fields."""
 
@@ -1711,6 +1720,7 @@ class ClaimantClaim(ContractModel):
     customer_next_step: CustomerNextStep
     incomplete_context: ClaimantIncompleteContext | None = None
     handoff: ClaimantHandoff | None = None
+    resolved_support_handoff: ClaimantResolvedSupportHandoff | None = None
     created_at: datetime
     updated_at: datetime
 

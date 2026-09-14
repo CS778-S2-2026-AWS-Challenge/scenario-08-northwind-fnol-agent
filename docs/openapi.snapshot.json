@@ -2320,6 +2320,16 @@
               }
             ]
           },
+          "resolved_support_handoff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantResolvedSupportHandoff"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -2945,6 +2955,36 @@
           "created_at"
         ],
         "title": "ClaimantMessage",
+        "type": "object"
+      },
+      "ClaimantResolvedSupportHandoff": {
+        "additionalProperties": false,
+        "description": "Claimant-safe evidence that a support handoff was completed.",
+        "properties": {
+          "handoff_id": {
+            "title": "Handoff Id",
+            "type": "string"
+          },
+          "resolution_event_id": {
+            "title": "Resolution Event Id",
+            "type": "string"
+          },
+          "resolved_at": {
+            "format": "date-time",
+            "title": "Resolved At",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/HandoffType"
+          }
+        },
+        "required": [
+          "handoff_id",
+          "type",
+          "resolution_event_id",
+          "resolved_at"
+        ],
+        "title": "ClaimantResolvedSupportHandoff",
         "type": "object"
       },
       "ClaimantSession": {

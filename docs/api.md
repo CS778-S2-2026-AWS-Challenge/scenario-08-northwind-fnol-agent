@@ -1249,10 +1249,21 @@ Response `200`:
   "dynamic_form": null,
   "customer_next_step": {},
   "handoff": null,
+  "resolved_support_handoff": null,
   "created_at": "2026-08-10T03:40:00Z",
   "updated_at": "2026-08-10T03:50:00Z"
 }
 ```
+
+`resolved_support_handoff` is present only on Claim detail, and is otherwise `null`. It is
+derived from the latest claimant-created `human_support` or `urgent_support` HandoffRecord only
+when that record is resolved and has a matching completed `handoff_support` resolution event.
+The projection contains the handoff id, support type, resolution event id, and resolution time.
+Professional review, staff-created or cancelled/rejected work, ordinary staff updates, and
+terminal Claims never produce this field. A newer claimant support request clears the previous
+projection until the newer request is eligible and resolved. This field reports staff assistance
+completion only; it does not mean that the Claim is complete, created externally, covered, or
+otherwise terminal. `customer_next_step` remains the authoritative continuation action.
 
 The claimant-facing `evidence_summary` MUST be calculated only from evidence records visible through the claimant evidence projection. It MUST NOT include counts derived from `internal_only` evidence or any record excluded from `GET /claims/{claim_id}/evidence`. The persisted Working Claim retains the authoritative aggregate over the full persisted evidence set for staff and operational use; persistence adapters MUST preserve that full aggregate. Claimant-safe aggregation is applied only at the claimant projection boundary.
 
