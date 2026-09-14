@@ -470,8 +470,13 @@ Question candidates are calculated by these principles rather than by form order
 
 ### 7. New Canonical Action System
 
-The new system is not a flat enum. It has five namespaces. A TurnPlan may contain multiple
+The new system is not a flat enum. It has six namespaces. A TurnPlan may contain multiple
 conversation moves and multiple command proposals, but only one primary Runtime control directive.
+
+The `evidence` namespace contains claimant-scoped proposals to reuse or remove persisted Evidence.
+The Agent may read the bounded `evidence.history` projection and request explicit confirmation;
+the Evidence API, retention policy, and audit boundary remain responsible for any attachment or
+removal. A history result never exposes storage keys or grants mutation authority.
 
 #### 7.1 Conversation Moves: Communication Only
 

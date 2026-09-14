@@ -63,7 +63,7 @@ class ActionEnvelopeRecord(ContractModel):
     envelope_id: str = Field(min_length=1, max_length=120)
     turn_id: str = Field(min_length=1, max_length=120)
     claim_id: str = Field(min_length=1, max_length=120)
-    namespace: Literal['conversation', 'claim', 'human', 'external', 'runtime']
+    namespace: Literal['conversation', 'claim', 'human', 'evidence', 'external', 'runtime']
     action_code: str = Field(min_length=1, max_length=120)
     target_ref: str = Field(min_length=1, max_length=200)
     expected_revision: int = Field(ge=1)

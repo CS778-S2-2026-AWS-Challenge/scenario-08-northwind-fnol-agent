@@ -202,6 +202,10 @@ class AgentProposal:
     # turns; ``action`` is retained only for persisted compatibility records.
     action_code: str | None = None
     runtime_trace: RuntimeTraceRecord | None = None
+    evidence_id: str | None = None
+    source_claim_id: str | None = None
+    confirmation_ref: str | None = None
+    removal_scope: str | None = None
 
 
 def _contains_unnegated_signal(

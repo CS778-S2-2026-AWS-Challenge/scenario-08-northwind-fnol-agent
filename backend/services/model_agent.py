@@ -69,7 +69,9 @@ from backend.services.runtime_configuration import (
 _PROPOSAL_ADAPTER = TypeAdapter(ModelAgentProposal)
 _RUNTIME_PROPOSAL_ADAPTER = TypeAdapter(ModelRuntimeProposal)
 _SYSTEM_INSTRUCTION = load_motor_claimant_prompt()
-_CONTEXT_TOOL_NAMES = frozenset({'knowledge_search', 'policy_history', 'claim_history'})
+_CONTEXT_TOOL_NAMES = frozenset(
+    {'knowledge_search', 'policy_history', 'claim_history', 'evidence.history'}
+)
 
 _FIELD_DEFINITIONS = build_default_registry().field_by_code
 
@@ -634,10 +636,23 @@ class GatewayAgent:
                     ],
                     state_changes=[],
                     proposed_signals=[],
-                    required_tools=[],
+                    required_tools=(
+                        [{'tool': 'evidence.history', 'operation': 'list'}]
+                        if runtime_proposal.action_code
+                        in {'evidence.propose_reuse', 'evidence.propose_remove'}
+                        and not any(
+                            item.get('tool') == 'evidence.history'
+                            for item in context.tool_results
+                        )
+                        else []
+                    ),
                     next_action_requirements=[],
                     proposal_source=AgentProposalSource.MODEL_GATEWAY,
                     handoff_priority=runtime_proposal.handoff_priority,
+                    evidence_id=runtime_proposal.evidence_id,
+                    source_claim_id=runtime_proposal.source_claim_id,
+                    confirmation_ref=runtime_proposal.confirmation_ref,
+                    removal_scope=runtime_proposal.removal_scope,
                     # Model output is advisory. Deterministic support/safety interrupts are
                     # evaluated before this provider and are the only source of handoff authority.
                     controlled_rule_authorised=False,

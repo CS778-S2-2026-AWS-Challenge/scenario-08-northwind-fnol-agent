@@ -153,12 +153,13 @@ therefore remain outstanding while unrelated Claim creation work continues.
 
 ### Action Registry
 
-The Action Registry defines finite actions across five namespaces:
+The Action Registry defines finite actions across six namespaces:
 
 | Namespace | Meaning |
 | --- | --- |
 | `conversation` | Communication such as answering, explaining, asking, clarifying, or summarising, with no business side effect |
 | `claim` | Revision-checked proposals or changes to facts, evidence, WorkItems, draft progress, and Claim creation |
+| `evidence` | Claimant-scoped proposals to reuse or remove Evidence through the governed Evidence API |
 | `human` | Support handoff, professional review, approval, and staff-decision actions |
 | `external` | Preparation, authority, submission, tracking, verification, reconciliation, and recovery for third-party work |
 | `runtime` | One primary directive controlling whether the turn continues, waits, pauses, interrupts, stops, or fails safely |

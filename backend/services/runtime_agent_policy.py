@@ -41,6 +41,7 @@ PROPOSAL_TOOL_ACTIONS = {
     'claim_history': 'external.load_requirements',
     'evidence_registry': 'claim.set_evidence_state',
     'professional_review': 'human.request_professional_review',
+    'evidence.history': 'evidence.propose_reuse',
 }
 
 _LEGACY_ACTION_CODES = {
@@ -277,7 +278,9 @@ def enforce_agent_proposal(
         for request in proposal.required_tools
         if isinstance((tool_name := request.get('tool')), str)
     }
-    unregistered_tools = requested_tools - set(PROPOSAL_TOOL_ACTIONS)
+    # Read-only target tools (for example ``evidence.history``) are registered
+    # independently from proposal-to-action compatibility tools.
+    unregistered_tools = requested_tools - _registered_tool_names()
     if unregistered_tools or requested_tools - allowed_tools:
         raise ApiError(
             status_code=503,

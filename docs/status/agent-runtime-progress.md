@@ -48,6 +48,7 @@ commit under review.
 | Six behaviour/action brief | implemented | `docs/agent-behaviour-action-brief.md`, issue #597, and action/authority tests | The brief feeds prompts and validation; additional target action handlers still require their own delivery. |
 | Staff session-bound model selection | implemented | `backend/domain/staff_agent.py`, `backend/services/staff_agent.py`, and Staff Agent API tests | Published profile availability and provider connectivity remain deployment concerns. |
 | Staff draft-to-action Runtime evidence | implemented | `StaffAgentExecutionRecord`, atomic Fixture/Mongo writes, staff-scoped readback, and Staff Agent/Mongo tests | Only drafts mapped to an existing registered Workbench handler can execute; unavailable external actions remain non-executable. |
+| Claimant Evidence history Agent boundary | implemented (bounded proposal slice) | `evidence.history`, `evidence.propose_reuse`, `evidence.propose_remove`, `backend/services/agent_tools.py`, and Agent/tool-policy contract tests | History lookup is claimant-scoped and read-only. Reuse/removal remain proposals; persisted attachment/removal handlers are unavailable until the Evidence API publishes governed operations. |
 
 ## Required Evidence Entry
 

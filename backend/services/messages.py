@@ -86,6 +86,10 @@ from backend.services.agent import (
     authorised_state_changes,
     validate_proposal,
 )
+from backend.services.agent_tools import (
+    read_evidence_history_for_runtime,
+    validate_evidence_proposal,
+)
 from backend.services.branching import (
     claimant_dynamic_form_projection,
     latest_applied_branch_evaluation,
@@ -130,6 +134,7 @@ INTERNAL_ONLY_REASON_CODES = frozenset(
 _CONTEXT_TOOL_OPERATIONS = {
     'policy_history': frozenset({'search_policy'}),
     'claim_history': frozenset({'search_claim_history', 'lookup'}),
+    'evidence.history': frozenset({'list'}),
 }
 _ACTION_TOOL_OPERATIONS = {
     'evidence_registry': frozenset({'record_pending_generation'}),
@@ -195,22 +200,41 @@ def _validate_tool_requests(
                 code='AGENT_TOOL_NOT_PERMITTED',
                 message='The Agent supplied an invalid policy lookup request.',
             )
-        if tool == 'claim_history' and operation in {'search_claim_history', 'lookup'}:
-            if (
+        if (
+            tool == 'claim_history'
+            and operation in {'search_claim_history', 'lookup'}
+            and (
                 not isinstance(request.get('history_reference'), str)
                 or not str(request['history_reference']).strip()
-            ):
-                raise ApiError(
-                    status_code=503,
-                    code='AGENT_TOOL_NOT_PERMITTED',
-                    message='The Agent supplied an invalid claim-history lookup request.',
-                )
+            )
+        ):
+            raise ApiError(
+                status_code=503,
+                code='AGENT_TOOL_NOT_PERMITTED',
+                message='The Agent supplied an invalid claim-history lookup request.',
+            )
+        if tool == 'claim_history' and operation in {'search_claim_history', 'lookup'}:
             limit = request.get('limit', 10)
             if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50:
                 raise ApiError(
                     status_code=503,
                     code='AGENT_TOOL_NOT_PERMITTED',
                     message='The Agent supplied an invalid claim-history result limit.',
+                )
+        if tool == 'evidence.history' and operation == 'list':
+            unexpected = set(request) - {'tool', 'operation', 'limit'}
+            if unexpected:
+                raise ApiError(
+                    status_code=503,
+                    code='AGENT_TOOL_NOT_PERMITTED',
+                    message='The Agent supplied an invalid Evidence history request.',
+                )
+            limit = request.get('limit', 25)
+            if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50:
+                raise ApiError(
+                    status_code=503,
+                    code='AGENT_TOOL_NOT_PERMITTED',
+                    message='The Agent supplied an invalid Evidence history limit.',
                 )
         if tool == 'evidence_registry' and request.get('kind') != 'police_report':
             raise ApiError(
@@ -808,6 +832,48 @@ def _validate_failed_retrieval_changes(
         )
 
 
+def _validate_evidence_history_action(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    proposal: AgentProposal,
+) -> None:
+    """Do not turn an unavailable history lookup into an Evidence action."""
+
+    if proposal.action_code not in {'evidence.propose_reuse', 'evidence.propose_remove'}:
+        return
+    history_results = [
+        result for result in proposal.tool_results if result.get('tool') == 'evidence.history'
+    ]
+    if not history_results or history_results[-1].get('status') != 'succeeded':
+        raise ApiError(
+            status_code=503,
+            code='AGENT_TOOL_NOT_PERMITTED',
+            message=(
+                'The Agent cannot propose an Evidence action without a successful history lookup.'
+            ),
+            retryable=False,
+        )
+    result = validate_evidence_proposal(
+        repository,
+        claim,
+        action_code=proposal.action_code,
+        evidence_id=proposal.evidence_id or '',
+        source_claim_id=proposal.source_claim_id,
+        confirmation_ref=proposal.confirmation_ref,
+        removal_scope=proposal.removal_scope,
+    )
+    if result.get('status') == 'rejected':
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message=(
+                'The proposed Evidence action did not satisfy its ownership, state, or '
+                'confirmation contract.'
+            ),
+            retryable=False,
+        )
+
+
 def _apply_question_accounting(
     session: SessionRecord,
     proposal: AgentProposal,
@@ -1024,6 +1090,35 @@ def _execute_claim_history_search(
             'limitations': list(result.limitations),
         },
     )
+
+
+def _execute_evidence_history_search(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    proposal: AgentProposal,
+) -> tuple[None, dict[str, object]] | None:
+    tool = next(
+        (
+            item
+            for item in proposal.required_tools
+            if item.get('tool') == 'evidence.history' and item.get('operation') == 'list'
+        ),
+        None,
+    )
+    if tool is None:
+        return None
+    limit = tool.get('limit', 25)
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50:
+        return None
+    try:
+        result = read_evidence_history_for_runtime(
+            repository,
+            claim,
+            {'limit': limit},
+        )
+    except (TypeError, ValueError):
+        return None
+    return None, result
 
 
 def _professional_review_requested(proposal: AgentProposal) -> bool:
@@ -1504,7 +1599,8 @@ def submit_message(
     }
     if requested_context_tools:
         if any(
-            result.get('tool') in {'knowledge_search', 'policy_history', 'claim_history'}
+            result.get('tool')
+            in {'knowledge_search', 'policy_history', 'claim_history', 'evidence.history'}
             for result in context_tool_results
         ):
             raise ApiError(
@@ -1526,9 +1622,15 @@ def submit_message(
             principal.subject,
             proposal,
         )
+        evidence_history_outcome = _execute_evidence_history_search(
+            repository,
+            claim,
+            proposal,
+        )
         for tool, outcome in (
             ('policy_history', policy_outcome),
             ('claim_history', history_outcome),
+            ('evidence.history', evidence_history_outcome),
         ):
             if tool not in requested_context_tools:
                 continue
@@ -1564,6 +1666,7 @@ def submit_message(
             )
         else:
             proposal = replace(proposal, tool_results=context_tool_results)
+    _validate_evidence_history_action(repository, claim, proposal)
     _validate_failed_retrieval_changes(proposal, message_text)
     authority = validate_proposal(proposal)
     runtime_trace = proposal.runtime_trace
