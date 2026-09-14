@@ -1106,6 +1106,11 @@ class HandoffRecord(ContractModel):
     created_at: datetime
     accepted_at: datetime | None = None
     resolved_at: datetime | None = None
+    # Support handoffs temporarily interrupt the claimant workflow. These values
+    # preserve the authoritative continuation target without creating a second
+    # claim-state record.
+    resume_workflow_state: WorkflowState = WorkflowState.COLLECTING
+    resume_next_action: AgentAction = AgentAction.ASK
 
 
 class ClaimantHandoff(ContractModel):

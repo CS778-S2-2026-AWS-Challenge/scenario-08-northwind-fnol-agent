@@ -344,12 +344,12 @@ def _lifecycle(
         or claim.external_claim is not None
     ):
         return ClaimLifecycleState.CREATED
-    if any(item.type is HandoffType.PROFESSIONAL_REVIEW for item in active_handoffs):
-        return ClaimLifecycleState.PROFESSIONAL_REVIEW
+    if active_handoffs:
+        if any(item.type is HandoffType.PROFESSIONAL_REVIEW for item in active_handoffs):
+            return ClaimLifecycleState.PROFESSIONAL_REVIEW
+        return ClaimLifecycleState.STAFF_SUPPORT
     if claim.claim_state.workflow_state is WorkflowState.PROFESSIONAL_REVIEW:
         return ClaimLifecycleState.PROFESSIONAL_REVIEW
-    if active_handoffs:
-        return ClaimLifecycleState.STAFF_SUPPORT
     if claim.claim_state.workflow_state is WorkflowState.READY_FOR_NEXT:
         return ClaimLifecycleState.READY_TO_CREATE
     if claim.claim_state.workflow_state is WorkflowState.AWAITING_EVIDENCE:

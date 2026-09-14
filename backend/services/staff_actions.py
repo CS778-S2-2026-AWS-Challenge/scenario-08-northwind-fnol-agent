@@ -486,6 +486,13 @@ def resolve_handoff(
     resulting_state = projected.claim_state
     if handoff.type is HandoffType.PROFESSIONAL_REVIEW:
         resulting_state = resulting_state.model_copy(update={'next_action': AgentAction.PROCEED})
+    elif handoff.support_need is not None:
+        resulting_state = resulting_state.model_copy(
+            update={
+                'workflow_state': handoff.resume_workflow_state,
+                'next_action': handoff.resume_next_action,
+            }
+        )
     updated = projected.model_copy(
         update={
             'claim_state': resulting_state,
