@@ -403,8 +403,6 @@ def create_app(
             and assessor_configuration.source is IntegrationSourceValue.FIXTURE
         ) or (
             assessor_configuration is None
-            and resolved_assessor_adapter.integration_source.value
-            == IntegrationSourceValue.FIXTURE.value
             and resolved_settings.data_runtime_profile
             in {DataRuntimeProfile.FIXTURE, DataRuntimeProfile.LOCAL_MVP}
         )
