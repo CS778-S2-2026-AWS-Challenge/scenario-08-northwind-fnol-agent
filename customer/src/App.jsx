@@ -1400,6 +1400,13 @@ function App() {
     setMobileView('chat')
   }
 
+  function openCurrentClaimDocuments() {
+    setWorkspaceView('chat')
+    setDetailsOpen(true)
+    setDetailsTab('documents')
+    setMobileView('details')
+  }
+
   function handleDetailsTabKeyDown(event, currentTab) {
     const tabs = ['summary', 'documents']
     const currentIndex = tabs.indexOf(currentTab)
@@ -1747,7 +1754,7 @@ function App() {
                 aria-label={documentOutstandingCount > 0
                   ? `What to provide, ${documentOutstandingCount} outstanding`
                   : 'What to provide'}
-                onClick={() => setWorkspaceView('files')}
+                onClick={openCurrentClaimDocuments}
               >
                 <span>What to provide</span>
                 {documentOutstandingCount > 0 && (

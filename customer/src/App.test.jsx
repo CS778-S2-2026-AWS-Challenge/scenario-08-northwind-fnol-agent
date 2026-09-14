@@ -333,6 +333,11 @@ describe('claimant intake projection', () => {
     expect(summaryTab).toHaveFocus()
     expect(summaryTab).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('What we have so far')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'What to provide, 1 outstanding' }))
+    expect(documentsTab).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('Repair Quote')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Evidence history' })).not.toBeInTheDocument()
   })
 
   it('aborts an in-flight draft upload when its remove control is used', async () => {

@@ -3,6 +3,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import ClaimDocuments from './ClaimDocuments.jsx'
+import { documentAttentionCount, documentStatus } from '../claimDocumentProjection.js'
 
 const documents = [
   {
@@ -91,4 +92,48 @@ it('shows honest loading, empty, and unavailable states', () => {
 
   rerender(<ClaimDocuments items={[]} loadStatus="error" />)
   expect(screen.getByRole('alert')).toHaveTextContent('Your claim is still saved')
+})
+
+it.each([
+  ['failed processing needed now', { status: 'received', file_status: 'failed', needed_for: ['current_action'] }, 'required'],
+  ['invalid material needed now', { status: 'invalid', file_status: 'ready', needed_for: ['current_action'] }, 'required'],
+  ['retryable supporting material', { status: 'received', file_status: 'failed', needed_for: [] }, 'recommended'],
+  ['usable received material', { status: 'received', file_status: 'ready', needed_for: [] }, 'received'],
+])('maps %s from both authoritative Evidence states', (_label, item, expected) => {
+  expect(documentStatus(item)).toBe(expected)
+})
+
+it('renders failed and invalid material as attention items with replacement uploads', () => {
+  const failed = {
+    evidence_id: 'evd_failed',
+    kind: 'repair_quote',
+    status: 'received',
+    file_status: 'failed',
+    original_filename: 'failed-quote.pdf',
+    needed_for: ['current_action'],
+  }
+  const invalid = {
+    evidence_id: 'evd_invalid',
+    kind: 'proof_of_ownership',
+    status: 'invalid',
+    file_status: 'ready',
+    original_filename: 'invalid-receipt.pdf',
+    needed_for: ['current_action'],
+  }
+
+  render(
+    <ClaimDocuments
+      items={[failed, invalid]}
+      loadStatus="ready"
+      onUpload={vi.fn()}
+      onView={vi.fn()}
+    />,
+  )
+
+  expect(documentAttentionCount([failed, invalid])).toBe(2)
+  expect(screen.getByText('2 items need your attention')).toBeInTheDocument()
+  expect(screen.getAllByText('Required')).toHaveLength(2)
+  expect(screen.getByRole('button', { name: 'Upload failed-quote.pdf' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Upload invalid-receipt.pdf' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /View (failed-quote|invalid-receipt)/ })).not.toBeInTheDocument()
 })

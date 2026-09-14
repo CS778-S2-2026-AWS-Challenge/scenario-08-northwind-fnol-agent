@@ -22,8 +22,11 @@ function neededFor(item, purpose) {
 }
 
 export function documentStatus(item) {
+  if (item.file_status === 'failed' || item.status === 'invalid') {
+    return neededFor(item, 'current_action') ? 'required' : 'recommended'
+  }
   if (['uploading', 'uploaded', 'processing'].includes(item.file_status)) return 'processing'
-  if (item.file_status === 'ready' || item.status === 'received') return 'received'
+  if (item.file_status === 'ready' && item.status === 'received') return 'received'
   if (neededFor(item, 'current_action')) return 'required'
   if (
     neededFor(item, 'later_action')
@@ -37,8 +40,13 @@ export function documentAttentionCount(items) {
 }
 
 export function documentReason(item, status) {
+  if (item.file_status === 'failed') {
+    return 'Northwind could not process this file, so it cannot be used. Upload it again.'
+  }
+  if (item.status === 'invalid') {
+    return 'Northwind cannot use this material because it did not pass validation. Upload a valid replacement.'
+  }
   if (item.claimant_note) return item.claimant_note
-  if (item.file_status === 'failed') return 'This file needs to be uploaded again.'
   if (status === 'required') return 'Needed for the current claim step.'
   if (status === 'recommended') return 'May help Northwind assess this claim.'
   if (status === 'processing') return 'Northwind is checking this file.'
