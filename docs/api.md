@@ -2747,24 +2747,21 @@ Prototype metrics validate observability, not Northwind production performance. 
 
 ## Internal Orchestration and Adapter API
 
-Internal endpoints are service-to-service only. The backend MAY implement an adapter in-process, but it MUST preserve these typed request and response boundaries so fixture repositories can be replaced without changing product clients.
-
 ### External Service Lifecycle Registry
 
 The canonical machine-readable registry is `external-service-lifecycle.v1` in
-`backend/domain/external_service_registry.py`. It defines preparation,
-operation, failure, and result stages for external requests. Existing
-`ExternalTaskRecord` operation statuses are validated against the registry;
-consumers must not introduce another status vocabulary.
+`backend/domain/external_service_registry.py`. Existing `ExternalTaskRecord`
+operation statuses are validated against it; consumers must not define a second
+status vocabulary. The Python backend is the current producer. Browser-facing
+consumers must use a later API projection and must not import Python modules
+directly.
 
-`unknown_outcome` always requires reconciliation before a new side-effecting
-attempt. `accepted` and `assigned` do not mean completed or verified. Result
-receipt, verification, and Claim/Evidence write-back remain separate stages.
-The registry also identifies whether a capability is `configured`, `simulated`,
-`manual`, or `unavailable`, so a manual or simulation-only path cannot be
-represented as live provider success. See
-[`docs/external-service-lifecycle-registry.md`](external-service-lifecycle-registry.md)
-for the registered service access forms.
+`unknown_outcome` requires reconciliation before another side effect. `accepted`
+and `assigned` do not mean completed or verified. Result receipt, verification,
+and Claim/Evidence write-back remain separate stages. Manual and simulation-only
+capabilities cannot be represented as live provider success.
+
+Internal endpoints are service-to-service only. The backend MAY implement an adapter in-process, but it MUST preserve these typed request and response boundaries so fixture repositories can be replaced without changing product clients.
 
 | Method | Path | Purpose |
 |---|---|---|

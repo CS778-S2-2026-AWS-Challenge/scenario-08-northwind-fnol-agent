@@ -28,9 +28,14 @@ registry does not add a second persisted state machine.
 | --- | --- | --- | --- |
 | `vehicle_damage_assessment_routing` | `P3-ASSESSOR` | Controlled assessor simulation | `simulated` |
 | `repairer_information_or_link` | `P3-REPAIRER` | Claimant-provided link or staff-mediated request | `manual` |
-| `police_guidance_or_official_link` | `P3-POLICE` | Official link, phone guidance, or staff-mediated path | `manual` |
+| `police_105_reporting_guidance` | `P3-NZP-REPORT` | Official 105 link or phone guidance | `manual` |
+| `police_traffic_crash_report_guidance` | `P3-NZP-TCR` | Official TCR request guidance or staff-mediated path | `manual` |
 
 The machine-readable definitions include claimant, staff, and Agent meanings,
 terminality, allowed next transitions, recovery, and Claim State effects. Consumer
 surfaces should retrieve these definitions rather than defining local labels or
-transitions.
+transitions. This PR exposes the registry to backend consumers; browser-facing
+consumers must use a later API projection and must not import Python modules
+directly. Manual entries explicitly set `uses_external_task=false` and therefore
+do not create a synthetic task or enter the consent-gated Northwind-send
+lifecycle.

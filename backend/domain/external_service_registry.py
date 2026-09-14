@@ -90,8 +90,17 @@ class ExternalServiceRegistryEntry(ContractModel):
     catalogue_reference: str | None = Field(default=None, min_length=1, max_length=100)
     provenance: ExternalCapabilityProvenance
     access_form: str = Field(min_length=1, max_length=200)
-    supported_statuses: tuple[ExternalLifecycleStatus, ...] = Field(min_length=1)
+    uses_external_task: bool = True
+    supported_statuses: tuple[ExternalLifecycleStatus, ...] = ()
     limitation: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode='after')
+    def validate_task_boundary(self) -> 'ExternalServiceRegistryEntry':
+        if self.uses_external_task and not self.supported_statuses:
+            raise ValueError('An external-task service must declare supported statuses.')
+        if not self.uses_external_task and self.supported_statuses:
+            raise ValueError('A manual path must not declare external-task statuses.')
+        return self
 
 
 def _definition(
@@ -294,15 +303,23 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
         catalogue_reference='P3-REPAIRER',
         provenance=ExternalCapabilityProvenance.MANUAL,
         access_form='claimant-provided link or staff-mediated request',
-        supported_statuses=(ExternalLifecycleStatus.CONSENT_REQUIRED,),
+        uses_external_task=False,
         limitation='Manual path; no synthetic ExternalTask is created for an official link.',
     ),
     ExternalServiceRegistryEntry(
-        service_identity='police_guidance_or_official_link',
-        catalogue_reference='P3-POLICE',
+        service_identity='police_105_reporting_guidance',
+        catalogue_reference='P3-NZP-REPORT',
         provenance=ExternalCapabilityProvenance.MANUAL,
-        access_form='official link, phone guidance, or staff-mediated path',
-        supported_statuses=(ExternalLifecycleStatus.CONSENT_REQUIRED,),
+        access_form='official 105 link or phone guidance',
+        uses_external_task=False,
+        limitation='Manual guidance path; Northwind does not submit or read Police status.',
+    ),
+    ExternalServiceRegistryEntry(
+        service_identity='police_traffic_crash_report_guidance',
+        catalogue_reference='P3-NZP-TCR',
+        provenance=ExternalCapabilityProvenance.MANUAL,
+        access_form='official TCR request guidance or staff-mediated path',
+        uses_external_task=False,
         limitation='Guidance/manual path; Northwind does not claim Police submission.',
     ),
 )

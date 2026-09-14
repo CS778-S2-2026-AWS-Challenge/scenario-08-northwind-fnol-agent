@@ -69,10 +69,11 @@ def test_registered_paths_preserve_manual_and_simulated_boundaries() -> None:
         ExternalCapabilityProvenance.SIMULATED
     )
     assert entries['repairer_information_or_link'].provenance is ExternalCapabilityProvenance.MANUAL
-    assert (
-        entries['police_guidance_or_official_link'].provenance
-        is ExternalCapabilityProvenance.MANUAL
-    )
+    assert entries['repairer_information_or_link'].uses_external_task is False
+    assert entries['police_105_reporting_guidance'].catalogue_reference == 'P3-NZP-REPORT'
+    assert entries['police_105_reporting_guidance'].uses_external_task is False
+    assert entries['police_traffic_crash_report_guidance'].catalogue_reference == 'P3-NZP-TCR'
+    assert entries['police_traffic_crash_report_guidance'].uses_external_task is False
     assert 'Simulation-only' in entries['vehicle_damage_assessment_routing'].limitation
 
 
