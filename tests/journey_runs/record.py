@@ -17,7 +17,7 @@ from typing import Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-RECORD_SCHEMA: Final = 'northwind-journey-run/1'
+RECORD_SCHEMA: Final = 'northwind-journey-run/2'
 
 
 class ResultClass(StrEnum):
@@ -39,12 +39,20 @@ class StepOutcome(StrEnum):
 
 
 class Arrival(StrEnum):
-    """How a pack material actually reached the Claim, if it did."""
+    """How a pack material actually reached the Claim, if it did.
+
+    `no_route`: nothing in the system could deliver it. `not_delivered`: a route exists, but
+    the run did not get the material in, because its step failed or was never reached.
+    """
 
     CLAIMANT_UPLOAD = 'claimant_upload'
     CONSENT_ROUTE = 'consent_route'
     SIMULATED_PROVIDER_RESULT = 'simulated_provider_result'
     NO_ROUTE = 'no_route'
+    NOT_DELIVERED = 'not_delivered'
+
+
+_UNDELIVERED = {Arrival.NO_ROUTE, Arrival.NOT_DELIVERED}
 
 
 class SeamVerdict(StrEnum):
@@ -87,14 +95,31 @@ class RunConfiguration(_Record):
 
 
 class InputMaterial(_Record):
+    """One pack material. `pack_condition` is what the pack declares the material to be;
+    `arrival` and `delivered_at_step` are what the run observed."""
+
     path: str
     material_class: str
-    condition: str
+    pack_condition: str
     provided_by: str
     arrival: Arrival
+    delivered_at_step: str | None = None
     evidence_kind: str | None = None
     evidence_id: str | None = None
     note: str | None = None
+
+    @model_validator(mode='after')
+    def _delivery_names_its_step(self) -> Self:
+        undelivered = self.arrival in _UNDELIVERED
+        if undelivered == (self.delivered_at_step is not None):
+            raise ValueError(
+                f'{self.path}: a {self.arrival} material '
+                + ('cannot name' if undelivered else 'must name')
+                + ' the step that delivered it'
+            )
+        if self.arrival is Arrival.CLAIMANT_UPLOAD and not self.evidence_id:
+            raise ValueError(f'{self.path}: an uploaded material must name its evidence')
+        return self
 
 
 class RunStep(_Record):
@@ -229,8 +254,8 @@ def classify(
       what it must not (or could not see what it must).
     - `blocked`: the system refused a step the journey needs, for a known reason.
     - `unavailable`: a step the journey needs has no implemented capability.
-    - `partial`: every step succeeded, but a pack material had no route in, or claimant
-      and staff disagree (a `contradictory` or `missing` seam check).
+    - `partial`: every step succeeded, but a pack material had no route in or was not
+      delivered, or claimant and staff disagree (a `contradictory` or `missing` seam check).
     - `fixture-only`: everything was exercised and agrees, but on the fixture runtime, a
       simulated provider, or a simulated provider result.
     - `completed`: the same, on a deployed runtime with live providers.
@@ -243,7 +268,7 @@ def classify(
         return ResultClass.BLOCKED
     if StepOutcome.UNAVAILABLE in outcomes:
         return ResultClass.UNAVAILABLE
-    if any(material.arrival is Arrival.NO_ROUTE for material in materials) or any(
+    if any(material.arrival in _UNDELIVERED for material in materials) or any(
         check.verdict in _DISAGREEMENT for check in seam_checks
     ):
         return ResultClass.PARTIAL
@@ -257,7 +282,7 @@ def classify(
 
 
 class JourneyRunRecord(_Record):
-    record_schema: Literal['northwind-journey-run/1'] = RECORD_SCHEMA
+    record_schema: Literal['northwind-journey-run/2'] = RECORD_SCHEMA
     run_id: str
     scenario_id: str
     family: Literal['motor', 'home', 'contents']
@@ -283,6 +308,16 @@ class JourneyRunRecord(_Record):
         for step in referenced:
             if step not in recorded:
                 raise ValueError(f'{step!r} is not a recorded step')
+        succeeded = {step.name for step in self.steps if step.outcome is StepOutcome.SUCCEEDED}
+        for material in self.materials:
+            if (
+                material.delivered_at_step is not None
+                and material.delivered_at_step not in succeeded
+            ):
+                raise ValueError(
+                    f'{material.path}: delivered at {material.delivered_at_step!r}, '
+                    'which is not a step that succeeded'
+                )
         derived = classify(
             steps=self.steps,
             materials=self.materials,

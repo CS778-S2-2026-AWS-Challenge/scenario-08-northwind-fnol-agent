@@ -18,7 +18,7 @@ import subprocess
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 from uuid import uuid4
 
 from fastapi import FastAPI
@@ -67,49 +67,68 @@ TRACE_LIMITATION = (
 )
 FORMS = 'docs/research/sprint4-third-party-integration-forms.md'
 
-# Provisional until an owner freezes the rubric anchors: (path, class, provided by, arrival,
-# upload kind, note). Every material is `received`; the deliberately defective variants
-# (unreadable, conflicting, superseded, not obtainable) belong to failure-path runs.
-MOTOR_COLLISION_PACK: tuple[tuple[str, str, str, Arrival, str | None, str | None], ...] = (
-    (
+
+class PackMaterial(NamedTuple):
+    """A pack entry: how the material is meant to arrive, not whether it did."""
+
+    path: str
+    material_class: str
+    provided_by: str
+    route: Arrival
+    kind: str | None = None
+    media_type: str | None = None
+    note: str | None = None
+
+
+# The step whose success delivers a material on each route; uploads are delivered by their own
+# completion step.
+_DELIVERING_STEP = {
+    Arrival.CONSENT_ROUTE: 'consent to the assessor',
+    Arrival.SIMULATED_PROVIDER_RESULT: 'receive the assessment',
+}
+
+# Provisional until an owner freezes the rubric anchors. Every material is `received`; the
+# deliberately defective variants (unreadable, conflicting, superseded, not obtainable) belong
+# to failure-path runs.
+MOTOR_COLLISION_PACK = (
+    PackMaterial(
         'motor/motor-incident-rear-bumper.jpg',
         'Incident evidence',
         'claimant',
         Arrival.CLAIMANT_UPLOAD,
         'incident_image',
-        None,
+        'image/jpeg',
     ),
-    (
+    PackMaterial(
         'motor/motor-incident-scene-wide.jpg',
         'Incident evidence',
         'claimant',
         Arrival.CLAIMANT_UPLOAD,
         'incident_image',
-        None,
+        'image/jpeg',
     ),
-    (
+    PackMaterial(
         'motor/motor-police-event-report.pdf',
         'Police report',
         'external_party',
         Arrival.CLAIMANT_UPLOAD,
         'police_report',
+        'application/pdf',
         f'Issued by Police and supplied by the claimant (P3-NZP-REPORT, manual, {FORMS}).',
     ),
-    (
+    PackMaterial(
         'motor/motor-consent-record.pdf',
         'Consent record',
         'northwind_staff',
         Arrival.CONSENT_ROUTE,
-        None,
-        'Recorded by Northwind when the claimant consents; the document is not uploaded.',
+        note='Recorded by Northwind when the claimant consents; the document is not uploaded.',
     ),
-    (
+    PackMaterial(
         'motor/motor-assessment-v2.pdf',
         'Assessment report',
         'external_party',
         Arrival.SIMULATED_PROVIDER_RESULT,
-        None,
-        'The fixture assessor returns its own result; these bytes are not transmitted.',
+        note='The fixture assessor returns its own result; these bytes are not transmitted.',
     ),
 )
 
@@ -177,6 +196,9 @@ class _Journey:
         )
         return payload if succeeded else None
 
+    def succeeded(self, name: str) -> bool:
+        return any(s.name == name and s.outcome is StepOutcome.SUCCEEDED for s in self.steps)
+
     def revision(self) -> int:
         return cast(int, self.read(f'/api/v1/claims/{self.claim_id}', 'claimant')['revision'])
 
@@ -200,7 +222,9 @@ def current_head() -> str:
         return 'unknown'
 
 
-def run_motor_collision(*, head: str) -> JourneyRunRecord:
+def run_motor_collision(
+    *, head: str, pack: tuple[PackMaterial, ...] = MOTOR_COLLISION_PACK
+) -> JourneyRunRecord:
     """Run the motor collision journey once, on a fresh fixture runtime."""
 
     settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
@@ -212,7 +236,9 @@ def run_motor_collision(*, head: str) -> JourneyRunRecord:
     )
     with TestClient(app) as client:
         journey = _Journey(client)
-        materials, turns = _drive(journey, json.loads(JOURNEY_PATH.read_text(encoding='utf-8')))
+        journey_input = json.loads(JOURNEY_PATH.read_text(encoding='utf-8'))
+        turns, evidence = _drive(journey, journey_input, pack)
+        materials = _materials(journey, pack, evidence)
         observed = _read_back(journey)
 
     configuration = RunConfiguration(
@@ -265,12 +291,12 @@ def run_motor_collision(*, head: str) -> JourneyRunRecord:
 
 
 def _drive(
-    journey: _Journey, journey_input: dict[str, Any]
-) -> tuple[list[InputMaterial], list[AgentTurn]]:
+    journey: _Journey, journey_input: dict[str, Any], pack: tuple[PackMaterial, ...]
+) -> tuple[list[AgentTurn], dict[str, str]]:
     motor = {'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'}
     created = journey.step('create working claim', 'POST', '/api/v1/claims', 201, 'claimant', motor)
     if created is None:
-        return [], []
+        return [], {}
     journey.claim_id = journey.name(created['claim']['claim_id'], '{id}')
     session = journey.name(created['session']['session_id'], '{session_id}')
     claim = f'/api/v1/claims/{journey.claim_id}'
@@ -284,7 +310,12 @@ def _drive(
         {'client_message_id': 'describe', 'content': text, 'evidence_refs': []},
     )
     turns = [_agent_turn('describe the incident', journey_input['input'], turn)] if turn else []
-    materials = [_deliver(journey, *material) for material in MOTOR_COLLISION_PACK]
+    evidence = {
+        material.path: evidence_id
+        for material in pack
+        if material.route is Arrival.CLAIMANT_UPLOAD
+        and (evidence_id := _upload(journey, material)) is not None
+    }
     confirm = {'field_codes': journey_input['expected_proposed_fields']}
     journey.step(
         'confirm the proposed facts',
@@ -312,7 +343,7 @@ def _drive(
         journey.step(
             'receive the assessment', 'POST', f'{internal}/{task}/result', 201, 'integration'
         )
-    return materials, turns
+    return turns, evidence
 
 
 def _agent_turn(step: str, claimant_input: str, payload: dict[str, Any]) -> AgentTurn:
@@ -330,52 +361,74 @@ def _agent_turn(step: str, claimant_input: str, payload: dict[str, Any]) -> Agen
     )
 
 
-def _deliver(
-    journey: _Journey,
-    path: str,
-    material_class: str,
-    provided_by: str,
-    arrival: Arrival,
-    kind: str | None,
-    note: str | None,
-) -> InputMaterial:
-    evidence_id = None
-    if arrival is Arrival.CLAIMANT_UPLOAD:
-        content = (MATERIAL_ROOT / path).read_bytes()
-        claim = f'/api/v1/claims/{journey.claim_id}'
-        upload = {
-            'kind': kind,
-            'original_filename': Path(path).name,
-            'media_type': 'image/jpeg' if path.endswith('.jpg') else 'application/pdf',
-            'size_bytes': len(content),
-        }
-        intent = journey.step(
-            f'request upload {path}', 'POST', f'{claim}/evidence/uploads', 201, 'claimant', upload
-        )
-        if intent is not None:
-            evidence_id = journey.name(intent['evidence_id'], '{evidence_id}')
-            app = cast(FastAPI, journey.client.app)
-            storage = cast(MockEvidenceStorage, app.state.evidence_storage)
-            storage.put_upload(claim_id=journey.claim_id, evidence_id=evidence_id, content=content)
-            checksum = {'upload_checksum': f'sha256:{sha256(content).hexdigest()}'}
-            journey.step(
-                f'complete upload {path}',
-                'POST',
-                f'{claim}/evidence/{evidence_id}/complete',
-                202,
-                'claimant',
-                checksum,
-            )
-    return InputMaterial(
-        path=path,
-        material_class=material_class,
-        condition='received',
-        provided_by=provided_by,
-        arrival=arrival,
-        evidence_kind=kind,
-        evidence_id=evidence_id,
-        note=note,
+def _upload(journey: _Journey, material: PackMaterial) -> str | None:
+    """Request, put, and complete one claimant upload; return its evidence id if requested."""
+
+    content = (MATERIAL_ROOT / material.path).read_bytes()
+    claim = f'/api/v1/claims/{journey.claim_id}'
+    upload = {
+        'kind': material.kind,
+        'original_filename': Path(material.path).name,
+        'media_type': material.media_type,
+        'size_bytes': len(content),
+    }
+    intent = journey.step(
+        f'request upload {material.path}',
+        'POST',
+        f'{claim}/evidence/uploads',
+        201,
+        'claimant',
+        upload,
     )
+    if intent is None:
+        return None
+    evidence_id = journey.name(intent['evidence_id'], '{evidence_id}')
+    app = cast(FastAPI, journey.client.app)
+    storage = cast(MockEvidenceStorage, app.state.evidence_storage)
+    storage.put_upload(claim_id=journey.claim_id, evidence_id=evidence_id, content=content)
+    journey.step(
+        f'complete upload {material.path}',
+        'POST',
+        f'{claim}/evidence/{evidence_id}/complete',
+        202,
+        'claimant',
+        {'upload_checksum': f'sha256:{sha256(content).hexdigest()}'},
+    )
+    return evidence_id
+
+
+def _materials(
+    journey: _Journey, pack: tuple[PackMaterial, ...], evidence: dict[str, str]
+) -> list[InputMaterial]:
+    """Record each pack material by what the run observed, not by what the pack declares."""
+
+    materials = []
+    for material in pack:
+        step = (
+            f'complete upload {material.path}'
+            if material.route is Arrival.CLAIMANT_UPLOAD
+            else _DELIVERING_STEP.get(material.route)
+        )
+        delivered = step is not None and journey.succeeded(step)
+        if delivered or material.route is Arrival.NO_ROUTE:
+            arrival, note = material.route, material.note
+        else:
+            arrival = Arrival.NOT_DELIVERED
+            note = f'Not delivered: "{step}" did not succeed in this run.'
+        materials.append(
+            InputMaterial(
+                path=material.path,
+                material_class=material.material_class,
+                pack_condition='received',
+                provided_by=material.provided_by,
+                arrival=arrival,
+                delivered_at_step=step if delivered else None,
+                evidence_kind=material.kind,
+                evidence_id=evidence.get(material.path),
+                note=note,
+            )
+        )
+    return materials
 
 
 def _read_back(
@@ -387,9 +440,7 @@ def _read_back(
     step = claimant.get('customer_next_step') or {}
     party = step.get('responsible_party')
     queue = (detail.get('work_summary') or {}).get('queue_key')
-    routed = any(
-        s.name == 'route the assessor' and s.outcome is StepOutcome.SUCCEEDED for s in journey.steps
-    )
+    routed = journey.succeeded('route the assessor')
     checks: list[SeamCheck] = []
     visibility: list[VisibilityCheck] = []
     consents: list[ConsentRecord] = []
@@ -550,9 +601,13 @@ def _reason(
     broken = [check.subject for check in visibility if not check.holds]
     if broken:
         parts.append(f'Visibility does not hold for: {"; ".join(broken)}.')
-    no_route = [material.path for material in materials if material.arrival is Arrival.NO_ROUTE]
-    if no_route:
-        parts.append(f'No route in for {", ".join(no_route)}.')
+    for arrival, label in (
+        (Arrival.NO_ROUTE, 'No route in'),
+        (Arrival.NOT_DELIVERED, 'Not delivered'),
+    ):
+        paths = [material.path for material in materials if material.arrival is arrival]
+        if paths:
+            parts.append(f'{label} for {", ".join(paths)}.')
     reported = [
         f'{c.seam} {c.verdict} ({c.defect_ref})' for c in checks if c.defect_ref is not None
     ]
