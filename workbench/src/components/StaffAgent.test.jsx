@@ -419,9 +419,10 @@ describe('StaffAgent', () => {
     await user.click(await screen.findByRole('button', { name: 'Review action' }))
     await user.click(screen.getByRole('button', { name: 'Confirm and execute' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'The Workbench service could not be reached.',
-    )
+    const unknown = await screen.findByRole('alert')
+    expect(unknown).toHaveTextContent('Execution outcome unknown')
+    expect(unknown).toHaveTextContent('The Workbench service could not be reached.')
+    expect(unknown).toHaveTextContent('Retry this same saved draft')
 
     await user.click(screen.getByRole('button', { name: 'Confirm and execute' }))
 
