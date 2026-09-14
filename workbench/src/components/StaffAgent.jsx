@@ -311,7 +311,7 @@ export default function StaffAgent({
                 <div className="agent-empty">
                   <span className="agent-empty__icon" aria-hidden="true"><Bot size={20} /></span>
                   <p>Ask a general question or explicitly attach up to five Claims.</p>
-                  <small>The Agent can advise and draft, but cannot execute business actions.</small>
+                  <small>The Agent can advise and draft. Registered business actions execute only after explicit staff confirmation.</small>
                 </div>
               )}
               {messages.map((item) => (
