@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, CircleDot, CircleX, UserRoundCheck } from 'lucide-react'
+import { UserRoundCheck } from 'lucide-react'
 import { failureReason, failureReference } from '../failure.js'
 import { formatDateTime, words } from '../format.js'
 import OwnershipActions from './OwnershipActions.jsx'
@@ -153,16 +153,8 @@ function SummaryStatusItem({ label, value }) {
 
 function ProjectedStatus({ value }) {
   const tone = projectedStatusTone(value)
-  const Icon = tone === 'confirmed'
-    ? CircleCheck
-    : tone === 'attention'
-      ? CircleAlert
-      : tone === 'missing'
-        ? CircleX
-        : CircleDot
   return (
-    <span className={`record-status projected-status${tone ? ` record-status--${tone}` : ''}`}>
-      <Icon size={14} aria-hidden="true" />
+    <span className={`record-status${tone ? ` record-status--${tone}` : ''}`}>
       {projectedValue(value)}
     </span>
   )
