@@ -71,6 +71,10 @@ ARRIVED_MATERIAL_STATUSES = frozenset(
     }
 )
 
+_REPLACEABLE_FILE_STATUSES = frozenset(
+    {EvidenceFileStatus.NOT_AVAILABLE, EvidenceFileStatus.FAILED}
+)
+
 
 def _claim_not_found() -> ApiError:
     return ApiError(
@@ -86,6 +90,44 @@ def _evidence_not_found() -> ApiError:
         code='RESOURCE_NOT_FOUND',
         message='The evidence item was not found.',
     )
+
+
+def _existing_upload_requirement(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    principal: Principal,
+    payload: RequestEvidenceUploadRequest,
+) -> EvidenceRecord | None:
+    """Resolve and validate an optional existing Evidence upload target."""
+
+    if payload.evidence_id is None:
+        return None
+    evidence = repository.get_evidence(claim.claim_id, payload.evidence_id, principal.subject)
+    if evidence is None or evidence.source is not EvidenceSource.CLAIMANT:
+        raise _evidence_not_found()
+    if evidence.kind != payload.kind:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The upload kind does not match the existing evidence requirement.',
+            details=[
+                ErrorDetail(
+                    field='kind',
+                    reason='Use the kind recorded on the selected evidence requirement.',
+                )
+            ],
+        )
+    replaceable = evidence.file_status in _REPLACEABLE_FILE_STATUSES or (
+        evidence.status is EvidenceStatus.INVALID
+        and evidence.file_status is EvidenceFileStatus.READY
+    )
+    if not replaceable or evidence.status is EvidenceStatus.SUPERSEDED:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='This evidence item cannot accept a new upload in its current state.',
+        )
+    return evidence
 
 
 def _claimant_evidence(evidence: EvidenceRecord) -> ClaimantEvidence:
@@ -473,7 +515,8 @@ def request_upload(
     if claim is None:
         raise _claim_not_found()
     _validate_revision(claim, expected_revision)
-    evidence_id = new_id('evd')
+    requirement = _existing_upload_requirement(repository, claim, principal, payload)
+    evidence_id = requirement.evidence_id if requirement is not None else new_id('evd')
     try:
         target = storage.create_upload_target(
             claim_id=claim_id,
@@ -507,26 +550,55 @@ def request_upload(
         ) from error
 
     timestamp = now_utc()
-    evidence = EvidenceRecord(
-        evidence_id=evidence_id,
-        claim_id=claim_id,
-        kind=payload.kind,
-        # The upload has been registered and has not finished. That is a fact about
-        # the file, not about the material, so the business condition is that the
-        # claim is still waiting and the file status carries the rest.
-        status=EvidenceStatus.PENDING,
-        file_status=EvidenceFileStatus.AWAITING_UPLOAD,
-        original_filename=payload.original_filename,
-        media_type=payload.media_type,
-        size_bytes=payload.size_bytes,
-        source=EvidenceSource.CLAIMANT,
-        wait_type='claimant',
-        responsible_party='claimant',
-        context_summary='Waiting for the claimant to complete the evidence upload.',
-        provenance={'storage_key': target.storage_key},
-        created_at=timestamp,
-        updated_at=timestamp,
-    )
+    if requirement is None:
+        evidence = EvidenceRecord(
+            evidence_id=evidence_id,
+            claim_id=claim_id,
+            kind=payload.kind,
+            # The upload has been registered and has not finished. That is a fact about
+            # the file, not about the material, so the business condition is that the
+            # claim is still waiting and the file status carries the rest.
+            status=EvidenceStatus.PENDING,
+            file_status=EvidenceFileStatus.AWAITING_UPLOAD,
+            original_filename=payload.original_filename,
+            media_type=payload.media_type,
+            size_bytes=payload.size_bytes,
+            source=EvidenceSource.CLAIMANT,
+            wait_type='claimant',
+            responsible_party='claimant',
+            context_summary='Waiting for the claimant to complete the evidence upload.',
+            provenance={'storage_key': target.storage_key},
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+    else:
+        evidence = requirement.model_copy(
+            update={
+                'status': EvidenceStatus.PENDING,
+                'file_status': EvidenceFileStatus.AWAITING_UPLOAD,
+                'original_filename': payload.original_filename,
+                'media_type': payload.media_type,
+                'size_bytes': payload.size_bytes,
+                'wait_type': EvidenceWaitType.CLAIMANT,
+                'responsible_party': ResponsibleParty.CLAIMANT,
+                'expected_by': None,
+                'expected_timing': None,
+                'context_summary': 'Waiting for the claimant to complete the evidence upload.',
+                'provenance': _with_transition(
+                    {**requirement.provenance, 'storage_key': target.storage_key},
+                    _transition_entry(
+                        field_code=None,
+                        from_state=requirement.file_status.value,
+                        to_state=EvidenceFileStatus.AWAITING_UPLOAD.value,
+                        source=requirement.source.value,
+                        at=timestamp.isoformat(),
+                        actor_type=ActorType.CLAIMANT.value,
+                        actor_id=principal.subject,
+                    ),
+                ),
+                'updated_at': timestamp,
+            }
+        )
     updated_claim = _updated_claim(claim, _records_with(repository, claim, evidence))
     response = EvidenceUploadResponse(
         evidence_id=evidence_id,

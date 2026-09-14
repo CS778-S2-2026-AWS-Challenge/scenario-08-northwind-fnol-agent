@@ -1800,12 +1800,27 @@ Request:
 
 ```json
 {
+  "evidence_id": "evd_01J4Y7V5QJ",
   "kind": "incident_image",
   "original_filename": "rear-damage.jpg",
   "media_type": "image/jpeg",
   "size_bytes": 1842201
 }
 ```
+
+`evidence_id` is optional. When omitted, the request creates a new claimant Evidence record.
+When present, it targets an existing claimant-owned Evidence requirement on the same Claim and
+reuses that identity. `kind` MUST match the existing requirement. The request preserves
+`needed_for`, `related_fields`, `claimant_note`, `created_at`, ownership, and transition
+provenance while updating the file metadata and moving the record to `status=pending` and
+`file_status=awaiting_upload`.
+
+An existing requirement accepts an upload when `file_status` is `not_available` or `failed`.
+Material with `status=invalid` also accepts a replacement when `file_status=ready`. The server
+returns `409 INVALID_STATE_TRANSITION` for active uploads, valid received material, superseded
+material, or any other ineligible lifecycle combination. A target from another Claim or a
+non-claimant Evidence source is not exposed and returns `404 RESOURCE_NOT_FOUND`; a mismatched
+`kind` returns `422 VALIDATION_ERROR`.
 
 Response `201`:
 
@@ -1845,6 +1860,11 @@ capability expires MUST re-sign the same upload intent without creating another 
 record or advancing Claim revision. The adapter MAY use fixture
 storage or the active profile's object storage without changing the client
 contract.
+
+Idempotent replay of an existing-requirement request returns the original `evidence_id`, upload
+intent, and revision while the capability remains valid. A replay after capability expiry re-signs
+the same identity under the existing upload-intent rules. Storage failure before persistence leaves
+the requirement and Claim revision unchanged.
 
 An anonymous browser session may continue its conversation and read its own
 Claim, but it cannot create a durable Evidence record or receive an upload

@@ -1483,6 +1483,7 @@ class RegisterEvidenceRequest(ContractModel):
 
 
 class RequestEvidenceUploadRequest(ContractModel):
+    evidence_id: str | None = Field(default=None, min_length=1, max_length=120)
     kind: str = Field(min_length=1, max_length=100)
     original_filename: str = Field(min_length=1, max_length=255)
     media_type: str = Field(min_length=1, max_length=100)

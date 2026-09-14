@@ -417,6 +417,10 @@ the append-only audit collection through a bounded, filterable projection.
 - Extraction produces source-linked proposals; it does not confirm a claim fact.
 - Evidence lifecycle writes preserve ownership, checksum, provenance, and permitted
   visibility.
+- Uploading a registered requirement, or replacing failed or invalid claimant material, updates
+  the original claimant-owned Evidence record. The mutation preserves `evidence_id`, `created_at`,
+  `needed_for`, `related_fields`, `claimant_note`, ownership, visibility, and transition provenance;
+  it does not create a second record that leaves the requirement outstanding.
 - A `processing` or `failed` file remains pending or attention-required in the
   authoritative Claim aggregation; only a `ready` file can contribute received
   Evidence. Retry reuses the same Evidence identity and revision-checked
