@@ -794,6 +794,8 @@ def _validate_configuration_values(
             and configuration.prompt_version == model_runtime_binding.prompt_version
             and configuration.structured_output is model_runtime_binding.structured_output
             and configuration.tools is model_runtime_binding.tools
+            and configuration.image_input is model_runtime_binding.image_input
+            and configuration.document_input is model_runtime_binding.document_input
         )
         if configuration.evaluation_status != 'configured' or not binding_matches:
             raise _error(

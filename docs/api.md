@@ -434,7 +434,8 @@ combinations return `422 PROVIDER_CONFIGURATION_INVALID`.
 For the `model` domain, `values` is a closed provider-neutral object containing
 `protocol`, `provider`, `model_identifier`, `base_url`, `credential_environment_variable`,
 `profile_id`, `purpose`, `privacy_class`, `prompt_version`, `evaluation_status`,
-`timeout_seconds`, `structured_output`, and `tools`. The credential field contains only an
+`timeout_seconds`, `structured_output`, `tools`, `image_input`, and `document_input`. The
+credential field contains only an
 environment-variable name; the secret itself remains outside the configuration record. Every
 model configuration must declare `impact=high`; an omitted or normal impact returns `422
 PROVIDER_CONFIGURATION_INVALID` and cannot enter the lifecycle. Model validation permits

@@ -113,6 +113,8 @@ class ModelRuntimeConfiguration(BaseModel):
     timeout_seconds: float = Field(gt=0)
     structured_output: bool = False
     tools: bool = False
+    image_input: bool = False
+    document_input: bool = False
 
 
 class ModelRuntimeBinding(BaseModel):
@@ -128,6 +130,8 @@ class ModelRuntimeBinding(BaseModel):
     prompt_version: str = Field(min_length=1, max_length=100)
     structured_output: bool
     tools: bool = False
+    image_input: bool = False
+    document_input: bool = False
 
 
 class ModelCostRate(BaseModel):

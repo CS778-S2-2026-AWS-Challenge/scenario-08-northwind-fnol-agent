@@ -18,6 +18,9 @@ normalise:
 - system, user, assistant, and tool messages;
 - optional JSON-schema structured output;
 - function-tool declarations and calls;
+- text, image Evidence, and PDF Evidence content blocks. Evidence blocks contain only an
+  Evidence ID and media type; an already-authorised resolver supplies bounded bytes to the
+  adapter, so storage keys and object URLs never enter the model contract;
 - assistant text, provider-neutral completion status, raw finish reason, provider model and
   request identity; and
 - input, output, and total token usage when supplied by the endpoint.
@@ -118,6 +121,12 @@ capability requirements against the selected profile. A `degraded` or `unavailab
 closed. This boundary does not discover provider capabilities remotely; a capability declaration
 must still be supported by repeatable adapter tests and the selected endpoint.
 
+Image and document input are separate declared capabilities. A request that requires one of them
+is rejected before transport when the selected profile does not declare support. A configured
+profile must also provide an authorised Evidence resolver for a multimodal request; a missing or
+empty resolution returns `evidence_unavailable` and is never reported as a successful text-only
+fallback.
+
 ## Implemented Adapters
 
 ### OpenAI-Compatible
@@ -149,6 +158,8 @@ model and Runtime authority validation before it can affect Claim State.
 | `MODEL_TIMEOUT_SECONDS` | Positive request timeout; default `30` |
 | `MODEL_SUPPORTS_STRUCTURED_OUTPUT` | Declared endpoint capability required by `GatewayAgent` |
 | `MODEL_SUPPORTS_TOOLS` | Declared endpoint tool-call capability |
+| `MODEL_SUPPORTS_IMAGE_INPUT` | Declared endpoint capability for image Evidence blocks; default `false` |
+| `MODEL_SUPPORTS_DOCUMENT_INPUT` | Declared endpoint capability for PDF Evidence blocks; default `false` |
 
 For an unauthenticated local server, leave `MODEL_API_KEY_ENV` empty. For an
 authenticated endpoint, set it to a separate secret environment variable name, for

@@ -93,6 +93,8 @@ class Settings:
     model_timeout_seconds: float = 30.0
     model_supports_structured_output: bool = True
     model_supports_tools: bool = False
+    model_supports_image_input: bool = False
+    model_supports_document_input: bool = False
     object_storage_adapter: ObjectStorageAdapter = ObjectStorageAdapter.FIXTURE
 
     def __post_init__(self) -> None:
@@ -271,5 +273,7 @@ class Settings:
                 'MODEL_SUPPORTS_STRUCTURED_OUTPUT', True
             ),
             model_supports_tools=_boolean_setting('MODEL_SUPPORTS_TOOLS', False),
+            model_supports_image_input=_boolean_setting('MODEL_SUPPORTS_IMAGE_INPUT', False),
+            model_supports_document_input=_boolean_setting('MODEL_SUPPORTS_DOCUMENT_INPUT', False),
             object_storage_adapter=object_storage_adapter,
         )

@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import re
@@ -10,14 +11,19 @@ import httpx
 from backend.domain.model_gateway import (
     ModelCapabilities,
     ModelCompletionStatus,
+    ModelContentBlock,
+    ModelEvidenceContent,
+    ModelEvidenceContentResolver,
     ModelGateway,
     ModelGatewayError,
     ModelGatewayErrorCode,
+    ModelMessage,
     ModelProfile,
     ModelProfileStatus,
     ModelRequest,
     ModelResponse,
     ModelRole,
+    ModelTextContent,
     ModelToolCall,
     ModelUsage,
 )
@@ -31,6 +37,7 @@ class ModelGatewayConfig:
     timeout_seconds: float
     capabilities: ModelCapabilities
     profile: ModelProfile
+    evidence_resolver: ModelEvidenceContentResolver | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -92,6 +99,43 @@ def _validate_request_profile(config: ModelGatewayConfig, request: ModelRequest)
         raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
     if required.tools and not profile.capabilities.tools:
         raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+    if required.image_input and not profile.capabilities.image_input:
+        raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+    if required.document_input and not profile.capabilities.document_input:
+        raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+
+
+def _content_blocks(message: ModelMessage) -> list[ModelContentBlock]:
+    content_blocks = message.content_blocks
+    if content_blocks:
+        return content_blocks
+    if message.content is None:
+        return []
+    return [ModelTextContent(text=message.content)]
+
+
+def _resolve_evidence(
+    block: ModelEvidenceContent,
+    resolver: ModelEvidenceContentResolver | None,
+) -> bytes:
+    if resolver is None:
+        raise ModelGatewayError(ModelGatewayErrorCode.EVIDENCE_UNAVAILABLE)
+    content = resolver.resolve(block.evidence_id, block.media_type)
+    if content is None:
+        raise ModelGatewayError(ModelGatewayErrorCode.EVIDENCE_UNAVAILABLE)
+    return content
+
+
+def _require_media_capability(
+    block: ModelEvidenceContent,
+    capabilities: ModelCapabilities,
+) -> None:
+    if block.media_type in {'image/jpeg', 'image/png'} and not capabilities.image_input:
+        raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+    if block.media_type == 'application/pdf' and not capabilities.document_input:
+        raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+    if block.media_type not in {'image/jpeg', 'image/png', 'application/pdf'}:
+        raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
 
 
 class OpenAICompatibleModelGateway:
@@ -149,9 +193,36 @@ class OpenAICompatibleModelGateway:
         provider_tool_names = self._provider_tool_names(request)
         messages: list[dict[str, object]] = []
         for message in request.messages:
+            blocks = _content_blocks(message)
+            provider_content: str | None | list[dict[str, object]]
+            if not blocks:
+                provider_content = message.content
+            else:
+                provider_blocks: list[dict[str, object]] = []
+                for block in blocks:
+                    if isinstance(block, ModelTextContent):
+                        provider_blocks.append({'type': 'text', 'text': block.text})
+                    else:
+                        _require_media_capability(block, self.capabilities)
+                        encoded = base64.b64encode(
+                            _resolve_evidence(block, self._config.evidence_resolver)
+                        ).decode('ascii')
+                        data_url = f'data:{block.media_type};base64,{encoded}'
+                        if block.media_type.startswith('image/'):
+                            provider_blocks.append(
+                                {'type': 'image_url', 'image_url': {'url': data_url}}
+                            )
+                        else:
+                            provider_blocks.append(
+                                {
+                                    'type': 'file',
+                                    'file': {'file_data': data_url, 'filename': block.evidence_id},
+                                }
+                            )
+                provider_content = provider_blocks
             item: dict[str, object] = {
                 'role': message.role.value,
-                'content': message.content,
+                'content': provider_content,
             }
             if message.tool_calls:
                 item['tool_calls'] = [
@@ -492,22 +563,42 @@ class BedrockConverseModelGateway:
         if request.tools:
             raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
 
-    @staticmethod
-    def _request_messages(request: ModelRequest) -> tuple[str, list[dict[str, object]]]:
+    def _request_messages(self, request: ModelRequest) -> tuple[str, list[dict[str, object]]]:
         system_parts: list[str] = []
         messages: list[dict[str, object]] = []
         for message in request.messages:
             if message.role is ModelRole.SYSTEM:
+                if message.content_blocks:
+                    raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
                 system_parts.append(message.content or '')
                 continue
             if message.role is ModelRole.TOOL:
                 raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
-            messages.append(
-                {
-                    'role': message.role.value,
-                    'content': [{'text': message.content}],
-                }
-            )
+            content: list[dict[str, object]] = []
+            for block in _content_blocks(message):
+                if isinstance(block, ModelTextContent):
+                    content.append({'text': block.text})
+                    continue
+                _require_media_capability(block, self.capabilities)
+                encoded = base64.b64encode(
+                    _resolve_evidence(block, self._config.evidence_resolver)
+                ).decode('ascii')
+                if block.media_type.startswith('image/'):
+                    image_format = block.media_type.removeprefix('image/')
+                    content.append(
+                        {'image': {'format': image_format, 'source': {'bytes': encoded}}}
+                    )
+                else:
+                    content.append(
+                        {
+                            'document': {
+                                'format': 'pdf',
+                                'name': block.evidence_id,
+                                'source': {'bytes': encoded},
+                            }
+                        }
+                    )
+            messages.append({'role': message.role.value, 'content': content})
         if not messages:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
         return '\n\n'.join(system_parts), messages

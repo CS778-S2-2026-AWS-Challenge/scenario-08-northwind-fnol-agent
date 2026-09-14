@@ -33,6 +33,7 @@ from backend.domain.knowledge import (
 from backend.domain.model_gateway import (
     ModelCapabilities,
     ModelCompletionStatus,
+    ModelEvidenceContent,
     ModelGateway,
     ModelGatewayError,
     ModelGatewayErrorCode,
@@ -42,6 +43,7 @@ from backend.domain.model_gateway import (
     ModelRequest,
     ModelResponse,
     ModelRole,
+    ModelTextContent,
     ModelTool,
     ModelToolCall,
     ModelUsage,
@@ -99,13 +101,21 @@ def gateway_config(
     credential_environment_variable: str | None = None,
     structured_output: bool = True,
     tools: bool = True,
+    image_input: bool = False,
+    document_input: bool = False,
+    evidence_resolver: object | None = None,
     protocol: str = 'openai_compatible',
     purpose: str = 'agent_turn',
     privacy_class: str = 'synthetic_fnol',
     prompt_version: str = 'current',
     evaluation_status: ModelProfileStatus = ModelProfileStatus.CONFIGURED,
 ) -> ModelGatewayConfig:
-    capabilities = ModelCapabilities(structured_output=structured_output, tools=tools)
+    capabilities = ModelCapabilities(
+        structured_output=structured_output,
+        tools=tools,
+        image_input=image_input,
+        document_input=document_input,
+    )
     return ModelGatewayConfig(
         base_url=base_url,
         model=model,
@@ -125,7 +135,187 @@ def gateway_config(
             prompt_version=prompt_version,
             evaluation_status=evaluation_status,
         ),
+        evidence_resolver=evidence_resolver,  # type: ignore[arg-type]
     )
+
+
+class EvidenceResolver:
+    def __init__(self, content: bytes | None = b'synthetic-evidence') -> None:
+        self.content = content
+        self.requests: list[tuple[str, str]] = []
+
+    def resolve(self, evidence_id: str, media_type: str) -> bytes | None:
+        self.requests.append((evidence_id, media_type))
+        return self.content
+
+
+def test_openai_compatible_maps_authorised_evidence_blocks_without_storage_metadata() -> None:
+    resolver = EvidenceResolver(b'png-bytes')
+    observed: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed['payload'] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                'model': 'vision-model',
+                'choices': [
+                    {
+                        'finish_reason': 'stop',
+                        'message': {'role': 'assistant', 'content': 'ok'},
+                    }
+                ],
+            },
+        )
+
+    gateway = OpenAICompatibleModelGateway(
+        gateway_config(
+            image_input=True,
+            evidence_resolver=resolver,
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    response = gateway.complete(
+        ModelRequest(
+            messages=[
+                ModelMessage(
+                    role=ModelRole.USER,
+                    content_blocks=[
+                        ModelTextContent(text='Inspect this.'),
+                        ModelEvidenceContent(evidence_id='evd_authorised', media_type='image/png'),
+                    ],
+                )
+            ],
+            required_capabilities=ModelCapabilities(image_input=True),
+        )
+    )
+
+    payload = cast(dict[str, object], observed['payload'])
+    message = cast(list[dict[str, object]], payload['messages'])[0]
+    content = cast(list[dict[str, object]], message['content'])
+    assert content[0] == {'type': 'text', 'text': 'Inspect this.'}
+    assert content[1]['type'] == 'image_url'
+    assert 'storage_key' not in json.dumps(payload)
+    assert resolver.requests == [('evd_authorised', 'image/png')]
+    assert response.text == 'ok'
+
+
+def test_bedrock_converse_maps_authorised_document_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('TEST_BEDROCK_TOKEN', 'synthetic-token')
+    resolver = EvidenceResolver(b'pdf-bytes')
+    observed: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed['payload'] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                'output': {
+                    'message': {'content': [{'text': 'ok'}]},
+                },
+                'stopReason': 'end_turn',
+            },
+        )
+
+    gateway = BedrockConverseModelGateway(
+        gateway_config(
+            protocol='bedrock_converse',
+            credential_environment_variable='TEST_BEDROCK_TOKEN',
+            document_input=True,
+            evidence_resolver=resolver,
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    response = gateway.complete(
+        ModelRequest(
+            messages=[
+                ModelMessage(
+                    role=ModelRole.USER,
+                    content_blocks=[
+                        ModelEvidenceContent(
+                            evidence_id='evd_document',
+                            media_type='application/pdf',
+                        )
+                    ],
+                )
+            ],
+            required_capabilities=ModelCapabilities(document_input=True),
+        )
+    )
+
+    payload = cast(dict[str, object], observed['payload'])
+    message = cast(list[dict[str, object]], payload['messages'])[0]
+    content = cast(list[dict[str, object]], message['content'])
+    assert content[0]['document'] == {
+        'format': 'pdf',
+        'name': 'evd_document',
+        'source': {'bytes': 'cGRmLWJ5dGVz'},
+    }
+    assert response.text == 'ok'
+    assert resolver.requests == [('evd_document', 'application/pdf')]
+
+
+def test_multimodal_gateway_fails_closed_when_evidence_is_unavailable() -> None:
+    gateway = OpenAICompatibleModelGateway(
+        gateway_config(image_input=True),
+        transport=httpx.MockTransport(lambda _: httpx.Response(500)),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(
+                messages=[
+                    ModelMessage(
+                        role=ModelRole.USER,
+                        content_blocks=[
+                            ModelEvidenceContent(
+                                evidence_id='evd_missing',
+                                media_type='image/jpeg',
+                            )
+                        ],
+                    )
+                ],
+                required_capabilities=ModelCapabilities(image_input=True),
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.EVIDENCE_UNAVAILABLE
+
+
+def test_multimodal_gateway_rejects_unsupported_media_type_before_transport() -> None:
+    transport_called = False
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal transport_called
+        transport_called = True
+        return httpx.Response(500)
+
+    gateway = OpenAICompatibleModelGateway(
+        gateway_config(image_input=True),
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(
+                messages=[
+                    ModelMessage(
+                        role=ModelRole.USER,
+                        content_blocks=[
+                            ModelEvidenceContent(
+                                evidence_id='evd_gif',
+                                media_type='image/gif',
+                            )
+                        ],
+                    )
+                ],
+                required_capabilities=ModelCapabilities(image_input=True),
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
+    assert transport_called is False
 
 
 @pytest.mark.parametrize(
