@@ -1383,8 +1383,11 @@ class FixtureRepository(PersistenceRepository):
         branch_evaluation: BranchEvaluationRecord | None = None,
         runtime_trace: RuntimeTraceRecord | None = None,
         runtime_records: RuntimeTurnRecords | None = None,
+        create_claim: bool = False,
     ) -> None:
-        stored_claim = self._validate_claim_mutation(claim, expected_revision)
+        stored_claim = (
+            None if create_claim else self._validate_claim_mutation(claim, expected_revision)
+        )
         stored_session = self._sessions.get(session.session_id)
         existing_claimant_message = self._messages.get(claimant_message.message_id)
         existing_agent_message = self._messages.get(agent_message.message_id)
@@ -1408,12 +1411,21 @@ class FixtureRepository(PersistenceRepository):
         records_match = (
             child_ownership_matches
             and claimant_message.message_id != agent_message.message_id
-            and stored_claim.customer_id == claim.customer_id
-            and stored_session is not None
-            and stored_session.claim_id == claim.claim_id
-            and stored_session.customer_id == claim.customer_id
-            and stored_session.status is SessionStatus.ACTIVE
-            and stored_claim.active_session_id == session.session_id
+            and (
+                create_claim
+                or (stored_claim is not None and stored_claim.customer_id == claim.customer_id)
+            )
+            and (
+                create_claim
+                or (
+                    stored_session is not None
+                    and stored_session.claim_id == claim.claim_id
+                    and stored_session.customer_id == claim.customer_id
+                    and stored_session.status is SessionStatus.ACTIVE
+                    and stored_claim is not None
+                    and stored_claim.active_session_id == session.session_id
+                )
+            )
             and claim.active_session_id == session.session_id
             and session.status is SessionStatus.ACTIVE
             and claim.customer_id == session.customer_id
@@ -1520,6 +1532,8 @@ class FixtureRepository(PersistenceRepository):
         ):
             raise IdempotencyConflict(idempotency.key)
 
+        if create_claim and claim.claim_id in self._claims:
+            raise IdempotencyConflict(claim.claim_id)
         self._claims[claim.claim_id] = deepcopy(claim)
         self._sessions[session.session_id] = deepcopy(session)
         self._messages[claimant_message.message_id] = deepcopy(claimant_message)

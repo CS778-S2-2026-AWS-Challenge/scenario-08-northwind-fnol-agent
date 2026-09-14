@@ -1319,6 +1319,17 @@ Only one active claimant session per claim is permitted. If an active session al
 
 Returns session status, compact resume summary, unresolved questions, pending items, prior commitments, and current customer next step. It MUST NOT return hidden internal state or the complete conversation by default.
 
+### `POST /api/v1/claims/bootstrap`
+
+The initial claimant turn may be submitted through the bootstrap boundary with one
+`Idempotency-Key`. The server prepares the transient Claim and Session, executes the
+normal Agent turn, and commits Claim, Session, both messages, Agent/Runtime records,
+revision, and the idempotency result in one accepted repository transaction. A replay
+with the same key and request fingerprint returns the original `MessageTurnResponse`;
+the same key with different input returns `409 IDEMPOTENCY_CONFLICT`. A definitive
+failure commits none of these records and does not expose an empty Claim to Workbench.
+The existing later-message endpoint remains unchanged.
+
 ### `POST /api/v1/claims/{claim_id}/sessions/{session_id}/messages`
 
 Stores the claimant message, runs one validated agent turn, persists resulting state, and returns the customer-visible outcome.

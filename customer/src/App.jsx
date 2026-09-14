@@ -3,6 +3,7 @@ import {
   ApiRequestError,
   confirmClaimFields,
   createClaim,
+  bootstrapClaim,
   createExternalClaim,
   grantAssessorConsent,
   getAuthenticatedAccount,
@@ -706,33 +707,35 @@ function App() {
       setPendingMessage({ text })
       let activeClaim = claim
       let activeSessionId = sessionId
+      let turn
       if (!activeClaim) {
-        const created = await createClaim({
+        turn = await bootstrapClaim({
           idempotencyKey: operation.claimKey,
           incidentType: claimType || null,
           modelProfileId: selectedModel,
+          clientMessageId: operation.clientMessageId,
+          text,
         })
-        activeClaim = created.claim
-        activeSessionId = created.session.session_id
-        setClaim(created.claim)
+        activeSessionId = turn.session_id
+        activeClaim = await getClaim(turn.claim_id)
+        setClaim(activeClaim)
         setSessionId(activeSessionId)
-        if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
-        setForm(created.claim.form)
-        setContentsItems(created.claim.contents_items || [])
-        setDynamicForm(created.claim.dynamic_form || null)
-        setNextStep(created.claim.customer_next_step)
+        setForm(activeClaim.form)
+        setContentsItems(activeClaim.contents_items || [])
+        setDynamicForm(activeClaim.dynamic_form || null)
+        setNextStep(activeClaim.customer_next_step)
         messageWasSubmitted = true
+      } else {
+        turn = await submitClaimMessage({
+          claimId: activeClaim.claim_id,
+          sessionId: activeSessionId,
+          revision: activeClaim.revision,
+          text,
+          modelProfileId: selectedModel,
+          idempotencyKey: operation.turnKey,
+          clientMessageId: operation.clientMessageId,
+        })
       }
-
-      const turn = await submitClaimMessage({
-        claimId: activeClaim.claim_id,
-        sessionId: activeSessionId,
-        revision: activeClaim.revision,
-        text,
-        modelProfileId: selectedModel,
-        idempotencyKey: operation.turnKey,
-        clientMessageId: operation.clientMessageId,
-      })
       setMessages((current) => [
         ...current,
         turn.claimant_message,

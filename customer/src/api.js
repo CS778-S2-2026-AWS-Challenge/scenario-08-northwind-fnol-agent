@@ -238,6 +238,19 @@ export function createClaim({ idempotencyKey = requestId('claim'), incidentType 
   })
 }
 
+export function bootstrapClaim({ incidentType = null, modelProfileId = null, clientMessageId, text, idempotencyKey = requestId('bootstrap') } = {}) {
+  return apiRequest('/api/v1/claims/bootstrap', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify({
+      incident_type: incidentType,
+      ...(modelProfileId ? { model_profile_id: modelProfileId } : {}),
+      client_message_id: clientMessageId,
+      content: { type: 'text', text },
+    }),
+  })
+}
+
 export function getRuntimeCapabilities() {
   return apiRequest('/api/v1/claims/capabilities', {
     headers: { 'X-Northwind-Anonymous-Session': anonymousSession },

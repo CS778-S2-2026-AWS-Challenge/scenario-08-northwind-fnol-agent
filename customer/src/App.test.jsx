@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   confirmClaimFields: vi.fn(),
   createExternalClaim: vi.fn(),
   createClaim: vi.fn(),
+  bootstrapClaim: vi.fn(),
   grantAssessorConsent: vi.fn(),
   getAuthenticatedAccount: vi.fn(),
   hasClaimantAccessToken: vi.fn(),
@@ -116,6 +117,17 @@ describe('claimant intake projection', () => {
       claim: initialClaim,
       session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
     })
+    api.bootstrapClaim.mockResolvedValue({
+      claim_id: initialClaim.claim_id,
+      session_id: 'ses_ui_vp',
+      claimant_message: claimantMessage,
+      agent_message: agentMessage,
+      form_changes: [],
+      contents_item_changes: [],
+      dynamic_form: null,
+      claim_revision: 2,
+      decision: { customer_next_step: initialClaim.customer_next_step },
+    })
   })
 
   it('shows the backend default model before creating a session', async () => {
@@ -146,7 +158,7 @@ describe('claimant intake projection', () => {
 
   it('shows one server-confirmed delivery failure with retry guidance', async () => {
     const user = userEvent.setup()
-    api.submitClaimMessage.mockRejectedValue(Object.assign(
+    api.bootstrapClaim.mockRejectedValue(Object.assign(
       new api.ApiRequestError('The model service is temporarily unavailable. The claim is unchanged.'),
       { code: 'DEPENDENCY_UNAVAILABLE', status: 503, retryable: true },
     ))
@@ -156,7 +168,7 @@ describe('claimant intake projection', () => {
     await user.type(input, 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    expect(api.createClaim).toHaveBeenCalledWith(expect.objectContaining({ incidentType: null }))
+    expect(api.bootstrapClaim).toHaveBeenCalledWith(expect.objectContaining({ incidentType: null }))
 
     const failure = await screen.findByText(
       'The model service is temporarily unavailable. The claim is unchanged. Try again in a moment.',
@@ -210,7 +222,7 @@ describe('claimant intake projection', () => {
 
     await user.click(screen.getByRole('button', { name: 'New chat' }))
 
-    expect(api.createClaim).toHaveBeenCalledTimes(2)
+    expect(api.bootstrapClaim).toHaveBeenCalledTimes(2)
     expect(api.startClaimSession).not.toHaveBeenCalled()
     expect(screen.getByText('clm_ui_second')).toBeInTheDocument()
     expect(screen.getByText('Conversation history')).toBeInTheDocument()

@@ -1778,6 +1778,13 @@ class MessageTurnResponse(ContractModel):
     dynamic_form: 'DynamicFormProjection | None' = None
 
 
+class BootstrapClaimRequest(ContractModel):
+    incident_type: str | None = Field(default=None, max_length=100)
+    model_profile_id: str | None = Field(default=None, min_length=1, max_length=100)
+    client_message_id: str = Field(min_length=1, max_length=200)
+    content: TextMessageContent
+
+
 class MessageListResponse(ContractModel):
     items: list[ClaimantMessage]
     page: PageInfo

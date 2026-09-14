@@ -1177,10 +1177,13 @@ def submit_message(
     idempotency_key: str | None,
     if_match: str | None,
     runtime_agent_policy_resolver: RuntimeAgentPolicyResolver | None = None,
+    bootstrap_claim: WorkingClaim | None = None,
+    bootstrap_session: SessionRecord | None = None,
+    bootstrap_route: str | None = None,
 ) -> MessageTurnResponse:
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
-    route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
+    route = bootstrap_route or f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
     existing_idempotency = repository.find_idempotency(principal.subject, route, key)
     if existing_idempotency is not None:
@@ -1200,13 +1203,13 @@ def submit_message(
                 retryable=True,
             )
         claimant_message = repository.get_message(
-            claim_id,
-            session_id,
+            existing_idempotency.claim_id,
+            existing_idempotency.session_id,
             existing_idempotency.message_id,
             principal.subject,
         )
         decision = repository.get_agent_decision(
-            claim_id,
+            existing_idempotency.claim_id,
             existing_idempotency.decision_id,
             principal.subject,
         )
@@ -1217,7 +1220,9 @@ def submit_message(
                 message='The idempotent message turn could not be restored.',
                 retryable=True,
             )
-        return _message_turn_response(repository, principal, claim_id, claimant_message, decision)
+        return _message_turn_response(
+            repository, principal, existing_idempotency.claim_id, claimant_message, decision
+        )
 
     existing_client_message = repository.find_message_by_client_id(
         claim_id,
@@ -1302,8 +1307,8 @@ def submit_message(
             message='The client_message_id has already been used for this claim.',
         )
 
-    claim = repository.get_claim(claim_id, principal.subject)
-    session = repository.get_session(claim_id, session_id, principal.subject)
+    claim = bootstrap_claim or repository.get_claim(claim_id, principal.subject)
+    session = bootstrap_session or repository.get_session(claim_id, session_id, principal.subject)
     if claim is None or session is None:
         raise _session_not_found()
     if session.status.value != 'active':
@@ -2153,6 +2158,7 @@ def submit_message(
             evaluation_record,
             runtime_trace,
             runtime_records,
+            create_claim=bootstrap_claim is not None,
         )
     except RevisionConflict as conflict:
         raise ApiError(

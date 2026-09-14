@@ -1573,6 +1573,51 @@
         "title": "AuthenticatedStaffSession",
         "type": "object"
       },
+      "BootstrapClaimRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "client_message_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Client Message Id",
+            "type": "string"
+          },
+          "content": {
+            "$ref": "#/components/schemas/TextMessageContent"
+          },
+          "incident_type": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Type"
+          },
+          "model_profile_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Profile Id"
+          }
+        },
+        "required": [
+          "client_message_id",
+          "content"
+        ],
+        "title": "BootstrapClaimRequest",
+        "type": "object"
+      },
       "Channel": {
         "enum": [
           "web_agent"
@@ -14824,6 +14869,97 @@
           }
         },
         "summary": "Create Claim",
+        "tags": [
+          "claimant"
+        ]
+      }
+    },
+    "/api/v1/claims/bootstrap": {
+      "post": {
+        "operationId": "bootstrap_claim_api_v1_claims_bootstrap_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Northwind-Anonymous-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Northwind-Anonymous-Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BootstrapClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageTurnResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bootstrap Claim",
         "tags": [
           "claimant"
         ]

@@ -12,15 +12,19 @@ from backend.adapters.claims_service import AssessorServiceAdapter, ClaimsServic
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal, require_claimant
 from backend.core.errors import ApiError
+from backend.domain.ids import new_id
 from backend.domain.models import (
+    BootstrapClaimRequest,
     ClaimantClaim,
     ClaimantExternalServiceResponse,
     ClaimantSession,
     ClaimCreationResponse,
     ClaimListResponse,
+    ClaimState,
     CreateClaimRequest,
     CreateClaimResponse,
     CreateMessageRequest,
+    CustomerNextStep,
     FormConfirmationRequest,
     FormConfirmationResponse,
     FormPatchRequest,
@@ -29,8 +33,11 @@ from backend.domain.models import (
     MessageListResponse,
     MessageTurnResponse,
     PauseSessionResponse,
+    ResponsibleParty,
+    SessionRecord,
     StartSessionRequest,
     WorkflowState,
+    WorkingClaim,
 )
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider
@@ -53,6 +60,7 @@ from backend.services.messages import submit_message
 from backend.services.model_profiles import select_model_profile
 from backend.services.resume import start_session_with_recovery
 from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
+from backend.services.support import now_utc
 
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant'])
 logger = logging.getLogger(__name__)
@@ -117,6 +125,68 @@ def create_claim(
             update={'model_profile_id': select_model_profile(request, None)}
         )
     return start_claim(repository_for(request), principal, payload, idempotency_key)
+
+
+@router.post('/bootstrap', response_model=MessageTurnResponse, status_code=status.HTTP_201_CREATED)
+def bootstrap_claim(
+    request: Request,
+    payload: BootstrapClaimRequest,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+) -> MessageTurnResponse:
+    model_profile_id = payload.model_profile_id
+    if model_profile_id is not None:
+        model_profile_id = select_model_profile(request, model_profile_id)
+    elif request.app.state.settings.agent_runtime_profile.value == 'model_gateway':
+        model_profile_id = select_model_profile(request, None)
+    timestamp = now_utc()
+    claim_id = new_id('clm')
+    session_id = new_id('ses')
+    claim = WorkingClaim(
+        claim_id=claim_id,
+        customer_id=principal.subject,
+        channel='web_agent',
+        locale='en-NZ',
+        incident_type=payload.incident_type,
+        claim_state=ClaimState(),
+        active_session_id=session_id,
+        customer_next_step=CustomerNextStep(
+            status='describe_incident',
+            summary='Tell me what happened in your own words.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+        ),
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    session = SessionRecord(
+        session_id=session_id,
+        claim_id=claim_id,
+        customer_id=principal.subject,
+        model_profile_id=model_profile_id or 'qwen-local',
+        context_revision=claim.revision,
+        started_at=timestamp,
+        last_active_at=timestamp,
+    )
+    message_payload = CreateMessageRequest(
+        client_message_id=payload.client_message_id,
+        content=payload.content,
+        model_profile_id=model_profile_id,
+    )
+    return submit_message(
+        repository_for(request),
+        agent_for(request),
+        policy_history_adapter_for(request),
+        principal,
+        claim_id,
+        session_id,
+        message_payload,
+        idempotency_key,
+        '1',
+        runtime_agent_policy_for(request),
+        bootstrap_claim=claim,
+        bootstrap_session=session,
+        bootstrap_route='/api/v1/claims/bootstrap',
+    )
 
 
 @router.get('', response_model=ClaimListResponse)
