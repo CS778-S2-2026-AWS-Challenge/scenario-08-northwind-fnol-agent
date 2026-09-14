@@ -239,6 +239,7 @@ function App() {
   const evidenceUploadControllers = useRef(new Map())
   const dismissedComposerEvidenceIds = useRef(new Set())
   const detailsTabRefs = useRef({})
+  const conversationPanelRef = useRef(null)
   const confirmedClaimProjections = useRef(new Map())
   const hasStarted = claim !== null
   const savedReports = claimHistory === null
@@ -288,6 +289,10 @@ function App() {
   // setPage is a stable local navigation helper; keep this guard tied to auth state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account, page])
+
+  useEffect(() => {
+    if (conversationPanelRef.current) conversationPanelRef.current.scrollTop = 0
+  }, [workspaceView])
 
   function routeForPage(nextPage) {
     if (nextPage === 'login') return '/auth/login'
@@ -1786,7 +1791,7 @@ function App() {
               </button>
             </div>
           </aside>
-          <section className={`conversation-panel mobile-view-${mobileView} ${workspaceView !== 'chat' ? 'is-utility' : ''}`} aria-labelledby="conversation-title">
+          <section ref={conversationPanelRef} className={`conversation-panel mobile-view-${mobileView} ${workspaceView !== 'chat' ? 'is-utility' : ''}`} aria-labelledby="conversation-title">
             <div
               className={`workspace-utility-page ${['history', 'claim-features', 'claim-evidence', 'files'].includes(workspaceView) ? 'is-claim-record-page' : ''}`}
               hidden={workspaceView === 'chat'}

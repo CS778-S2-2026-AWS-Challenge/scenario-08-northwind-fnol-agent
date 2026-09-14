@@ -337,7 +337,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 .intake-profile-copy small { display: block; margin-top: 2px; color: var(--color-text-muted); font-size: var(--font-size-caption); overflow: hidden; text-overflow: ellipsis; }
 
 .conversation-panel { min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; padding: var(--space-6) clamp(var(--space-4), 4vw, var(--space-10)); }
-.conversation-panel.is-utility { justify-content: flex-start; }
+.conversation-panel.is-utility { justify-content: flex-start; overflow-y: auto; }
 .conversation-panel.is-utility > :not(.workspace-utility-page) { display: none; }
 .workspace-utility-page { max-width: 70ch; padding-top: var(--space-6); }
 .workspace-utility-page.is-claim-record-page { padding-top: var(--space-2); }
