@@ -231,10 +231,10 @@ function claimProjection(state) {
       waiting_external_services: [],
     },
     customer_next_step: {
-      status: resolved ? 'ready_to_create' : 'human_support_in_progress',
-      responsible_party: resolved ? 'northwind' : 'claims_professional',
+      status: resolved ? 'staff_update' : 'human_support_in_progress',
+      responsible_party: 'claims_professional',
       summary: resolved
-        ? 'Your report is ready for claim creation.'
+        ? state.customerUpdates.at(-1).summary
         : 'A claims professional is helping with this Claim.',
       can_resume: true,
       required_items: [],
