@@ -131,6 +131,7 @@ superseded when the implementation state changes.
 - [Third-party Stakeholder and Service Research](research/third-party-stakeholder-service-research.md)
 - [Third-party Stakeholder and Service Independent Challenge Review](research/third-party-stakeholder-service-independent-challenge-review.md)
 - [Unified Third-party Service Catalogue and Implementation Brief](research/third-party-stakeholder-unified-service-catalogue-and-implementation-brief.md)
+- [Sprint 4 Third-party Integration Forms](research/sprint4-third-party-integration-forms.md) — implementation-facing selection of motor, home, and contents third-party access forms, authority boundaries, collision journey, and #777 handoff requirements.
 - [Third-party Service Claimant Consent Copy Draft](research/third-party-service-claimant-consent-copy-draft.md)
 - [Insurance Industry Interview and User Observation](research/insurance-industry-interview-and-user-observation.md)
 - [Participant Information and Consent](research/participant-information-and-consent.md)
