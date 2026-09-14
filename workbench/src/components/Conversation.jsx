@@ -33,7 +33,7 @@ export default function Conversation({
     displayedSessionId
       && displayedSessionId !== detail.active_session_id,
   )
-  const handoff = latestCustomerAssistance(handoffs)
+  const handoff = isCurrentSession ? latestCustomerAssistance(handoffs) : null
   const assistanceState = assistanceDisplayState(detail, handoff)
   const sendAction = currentProjectedAction(detail, 'conversation.send_claimant_message', displayedSessionId)
   const acceptAction = currentProjectedAction(detail, 'human.accept_handoff', handoff?.handoff_id)

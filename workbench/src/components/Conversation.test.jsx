@@ -252,19 +252,37 @@ describe('Conversation', () => {
     })
   })
 
-  it('keeps a displayed historical session read only', () => {
+  it.each([
+    {
+      handoff: assistanceHandoff('queued'),
+      actionCode: 'human.accept_handoff',
+      actionLabel: 'Take over conversation',
+      statusLabel: 'Waiting request',
+    },
+    {
+      handoff: assistanceHandoff('accepted'),
+      actionCode: 'human.resolve_handoff',
+      actionLabel: 'Complete assistance',
+      statusLabel: 'Assigned to me',
+    },
+  ])('keeps a displayed historical session read only when the current handoff is $handoff.status', ({ handoff, actionCode, actionLabel, statusLabel }) => {
     const onSend = vi.fn()
     renderConversation({
       detail: {
         ...detail,
         active_session_id: 'ses_active',
-        allowed_actions: [{
-          action_code: 'conversation.send_claimant_message',
-          target_ref: 'ses_active',
-          based_on_revision: 1,
-          availability: 'available',
-        }],
+        allowed_actions: [
+          {
+            action_code: 'conversation.send_claimant_message',
+            target_ref: 'ses_active',
+            based_on_revision: 1,
+            availability: 'available',
+          },
+          action(actionCode, 'hnd_1', { based_on_revision: 1 }),
+        ],
       },
+      handoffs: [handoff],
+      profile: { staff_id: 'stf_demo', display_name: 'Demo Staff' },
       resource: {
         items: [{
           message_id: 'msg_old',
@@ -276,12 +294,17 @@ describe('Conversation', () => {
       },
       draft: 'A staff reply',
       onDraft: vi.fn(),
+      onAccept: vi.fn(),
+      onResolve: vi.fn(),
       onSend,
     }, '/workbench/claims/clm_1/conversation?session=ses_old')
 
     expect(screen.getByLabelText('Reply to claimant')).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
     expect(screen.getByText(/saved session is read-only/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: actionLabel })).not.toBeInTheDocument()
+    expect(screen.queryByText(statusLabel)).not.toBeInTheDocument()
+    expect(screen.queryByText('Staff assistance requested')).not.toBeInTheDocument()
     expect(onSend).not.toHaveBeenCalled()
   })
 
