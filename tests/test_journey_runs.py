@@ -7,38 +7,60 @@ from typing import Any
 
 import pytest
 from journey_runs.record import (
+    AgentTurn,
     Arrival,
     InputMaterial,
     JourneyRunRecord,
     ResultClass,
     RunConfiguration,
-    RunStep,
     SeamCheck,
     SeamVerdict,
+    VisibilityCheck,
 )
 from pydantic import ValidationError
 
+_NOW = datetime(2026, 9, 15, tzinfo=UTC)
+
+
+def _configuration(runtime: str, provider_mode: str) -> RunConfiguration:
+    return RunConfiguration.model_validate(
+        {
+            'head': 'abc',
+            'started_at': _NOW,
+            'finished_at': _NOW,
+            'runtime': runtime,
+            'provider_mode': provider_mode,
+            'agent_runtime_profile': 'controlled',
+            'model_profile_id': 'model',
+            'evidence_level': runtime,
+        }
+    )
+
+
+def _step(http_status: int | None, outcome: str, name: str = 'step') -> dict[str, Any]:
+    return {
+        'name': name,
+        'actor': 'claimant',
+        'route': 'POST /x',
+        'expected_status': 201,
+        'http_status': http_status,
+        'outcome': outcome,
+    }
+
 
 def _record(**changes: Any) -> dict[str, Any]:
-    now = datetime(2026, 9, 15, tzinfo=UTC)
     base: dict[str, Any] = {
         'run_id': 'run-1',
         'scenario_id': 'motor-collision-assessor',
         'family': 'motor',
         'pack_id': 'pack',
         'rubric_refs': [],
-        'configuration': RunConfiguration(
-            head='abc',
-            started_at=now,
-            finished_at=now,
-            runtime='deployed',
-            provider_mode='live',
-            agent_runtime_profile='controlled',
-            model_profile_id='model',
-            evidence_level='deployed',
-        ),
+        'configuration': _configuration('deployed', 'live'),
         'materials': [],
-        'steps': [RunStep(name='step', route='POST /x', http_status=201, outcome='succeeded')],
+        'steps': [_step(201, 'succeeded')],
+        'agent_turns': [],
+        'consents': [],
+        'visibility_checks': [],
         'seam_checks': [],
         'final_state': {
             'claim_id': 'clm_1',
@@ -49,6 +71,9 @@ def _record(**changes: Any) -> dict[str, Any]:
             'queue_key': None,
             'customer_next_step': None,
             'next_step_responsible_party': None,
+            'session_id': None,
+            'session_status': None,
+            'active_session_id': None,
             'evidence_ids': [],
             'external_task_statuses': [],
             'handoff_status': None,
@@ -60,17 +85,7 @@ def _record(**changes: Any) -> dict[str, Any]:
     return base | changes
 
 
-_FIXTURE = RunConfiguration(
-    head='abc',
-    started_at=datetime(2026, 9, 15, tzinfo=UTC),
-    finished_at=datetime(2026, 9, 15, tzinfo=UTC),
-    runtime='fixture',
-    provider_mode='simulated',
-    agent_runtime_profile='controlled',
-    model_profile_id='model',
-    evidence_level='fixture',
-)
-_BLOCKED = [RunStep(name='step', route='POST /x', http_status=409, outcome='blocked')]
+_FIXTURE = _configuration('fixture', 'simulated')
 _NO_ROUTE = [
     InputMaterial(
         path='police.pdf',
@@ -90,6 +105,11 @@ _DISAGREEING = [
         defect_ref='#792 F2',
     )
 ]
+_LEAK = [
+    VisibilityCheck(
+        audience='claimant', subject='internal note', expected_visible=False, observed_visible=True
+    )
+]
 
 
 @pytest.mark.parametrize(
@@ -99,7 +119,8 @@ _DISAGREEING = [
         ({'configuration': _FIXTURE}, ResultClass.FIXTURE_ONLY),
         ({'materials': _NO_ROUTE}, ResultClass.PARTIAL),
         ({'seam_checks': _DISAGREEING, 'configuration': _FIXTURE}, ResultClass.PARTIAL),
-        ({'steps': _BLOCKED, 'seam_checks': _DISAGREEING}, ResultClass.BLOCKED),
+        ({'steps': [_step(409, 'blocked')], 'seam_checks': _DISAGREEING}, ResultClass.BLOCKED),
+        ({'visibility_checks': _LEAK}, ResultClass.FAILED),
     ],
 )
 def test_a_record_cannot_claim_more_than_its_evidence(
@@ -112,6 +133,18 @@ def test_a_record_cannot_claim_more_than_its_evidence(
                 JourneyRunRecord.model_validate(_record(**changes, result_class=overstated))
 
 
+@pytest.mark.parametrize(
+    ('http_status', 'claimed'),
+    [(500, 'succeeded'), (409, 'succeeded'), (None, 'succeeded'), (201, 'failed')],
+)
+def test_a_step_outcome_must_follow_its_status(http_status: int | None, claimed: str) -> None:
+    # A deployed, live run whose only step errored cannot be recorded as completed.
+    with pytest.raises(ValidationError, match='contradicts HTTP'):
+        JourneyRunRecord.model_validate(
+            _record(steps=[_step(http_status, claimed)], result_class='completed')
+        )
+
+
 def test_a_disagreement_must_name_its_defect() -> None:
     with pytest.raises(ValidationError, match='must name a defect reference'):
         SeamCheck(
@@ -121,3 +154,20 @@ def test_a_disagreement_must_name_its_defect() -> None:
             staff='claims_professional',
             verdict=SeamVerdict.CONTRADICTORY,
         )
+
+
+def test_an_unobserved_agent_trace_must_say_why() -> None:
+    turn = {
+        'step': 'step',
+        'claimant_input': 'Another car hit mine.',
+        'agent_reply': 'Please check the facts.',
+        'proposed_action': 'CONFIRM',
+        'reason_codes': ['MATERIAL_FACTS_PROPOSED'],
+        'next_step': 'confirmation_required',
+    }
+    with pytest.raises(ValidationError, match='need a trace_limitation'):
+        AgentTurn.model_validate(turn)
+    limited = {**turn, 'trace_limitation': 'Not exposed by the claimant route.'}
+    assert JourneyRunRecord.model_validate(_record(agent_turns=[limited]))
+    with pytest.raises(ValidationError, match='is not a recorded step'):
+        JourneyRunRecord.model_validate(_record(agent_turns=[{**limited, 'step': 'other'}]))
