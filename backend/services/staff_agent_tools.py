@@ -129,6 +129,23 @@ class StaffToolDispatcher:
         purpose: str,
     ) -> StaffToolResult:
         now = datetime.now(UTC)
+        if self._principal.actor_type != 'staff' or 'workbench:read' not in self._principal.scopes:
+            return StaffToolResult(
+                tool_name=(
+                    tool_name
+                    if tool_name.startswith('staff.') and tool_name.count('.') == 2
+                    else 'staff.runtime.unknown'
+                ),
+                registry_version='v1.0',
+                call_id=call_id,
+                correlation_id=correlation_id,
+                status=StaffToolResultStatus.DENIED,
+                query_scope='none',
+                effective_filters={},
+                limitations=['The authenticated identity is not authorised for Staff Agent reads.'],
+                failure_code='ACCESS_DENIED',
+                created_at=now,
+            )
         contract = STAFF_TOOL_REGISTRY.get(tool_name)
         if contract is None:
             return StaffToolResult(
@@ -147,15 +164,6 @@ class StaffToolDispatcher:
                 failure_code='UNKNOWN_TOOL',
                 created_at=now,
             )
-        if self._principal.actor_type != 'staff':
-            return self._failure(
-                tool_name,
-                call_id,
-                correlation_id,
-                StaffToolResultStatus.DENIED,
-                'ACCESS_DENIED',
-                'The authenticated actor is not authorised to use Staff Agent tools.',
-            )
         if not contract.required_scopes.issubset(self._principal.scopes):
             return self._failure(
                 tool_name,
@@ -164,6 +172,15 @@ class StaffToolDispatcher:
                 StaffToolResultStatus.DENIED,
                 'ACCESS_DENIED',
                 'The authenticated staff identity lacks the required read scope.',
+            )
+        if not self._principal.roles.intersection(contract.allowed_staff_roles):
+            return self._failure(
+                tool_name,
+                call_id,
+                correlation_id,
+                StaffToolResultStatus.DENIED,
+                'ACCESS_DENIED',
+                'The authenticated staff identity lacks an allowed role for this tool.',
             )
         if registry_version != contract.registry_version:
             return self._failure(
@@ -286,8 +303,10 @@ class StaffToolDispatcher:
         self, raw: BaseModel
     ) -> tuple[list[dict[str, Any]], list[str], list[str], list[str]]:
         payload = cast(StaffClaimSearchInput, raw)
+        filters = payload.model_dump(mode='json', exclude_none=True, exclude={'limit'})
+        candidates = self._repository.search_claims_internal(filters, payload.limit)
         matches: list[dict[str, Any]] = []
-        for claim in self._repository.list_claims_internal():
+        for claim in candidates:
             projection = self._claim(claim.claim_id)
             external_reference = (
                 claim.external_claim.claim_number if claim.external_claim is not None else None

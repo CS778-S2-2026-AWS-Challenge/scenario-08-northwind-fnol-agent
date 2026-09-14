@@ -851,6 +851,47 @@ class FixtureRepository(PersistenceRepository):
             reverse=True,
         )
 
+    def search_claims_internal(
+        self, filters: dict[str, object], limit: int
+    ) -> list[WorkingClaim]:
+        """Apply registered Claim filters before returning a bounded candidate set."""
+        matches: list[WorkingClaim] = []
+        for claim in sorted(self._claims.values(), key=lambda item: item.updated_at, reverse=True):
+            if filters.get('claim_reference') and filters['claim_reference'] not in {
+                claim.claim_id,
+                claim.external_claim.claim_number if claim.external_claim else None,
+            }:
+                continue
+            if filters.get('customer_reference') and (
+                filters['customer_reference'] != claim.customer_id
+            ):
+                continue
+            if filters.get('external_reference') and (
+                claim.external_claim is None
+                or filters['external_reference'] != claim.external_claim.claim_number
+            ):
+                continue
+            if filters.get('created_date') and (
+                claim.created_at.date().isoformat() != filters['created_date']
+            ):
+                continue
+            if filters.get('incident_date'):
+                incident = claim.form.get('incident.occurred_at')
+                if incident is None or str(incident.value)[:10] != filters['incident_date']:
+                    continue
+            if filters.get('product_family') and (
+                (
+                    claim.form.get('claim.product_family')
+                    and claim.form['claim.product_family'].value
+                )
+                or claim.incident_type
+            ) != filters['product_family']:
+                continue
+            matches.append(deepcopy(claim))
+            if len(matches) >= limit:
+                break
+        return matches
+
     def save_message(self, message: MessageRecord, customer_id: str) -> None:
         if (
             self.get_claim(message.claim_id, customer_id) is None

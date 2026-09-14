@@ -22,6 +22,7 @@ class Principal:
     auth_source: str = 'internal:unverified'
     synthetic: bool = False
     expires_at: datetime | None = None
+    roles: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +47,7 @@ def _synthetic_profiles(settings: Settings) -> tuple[_SyntheticProfile, ...]:
                 scopes=CLAIMANT_SCOPES,
                 auth_source='developer:synthetic_claimant',
                 synthetic=True,
+                roles=frozenset({'claims_professional'}),
             ),
         ),
         _SyntheticProfile(
@@ -147,6 +149,9 @@ def _resolve_principal(
             sha256(token.encode()).hexdigest()
         )
         if staff_session is not None:
+            staff_account = request.app.state.staff_identity_repository.get_account(
+                staff_session.staff_id
+            )
             principal = Principal(
                 subject=staff_session.staff_id,
                 actor_type='staff',
@@ -158,6 +163,7 @@ def _resolve_principal(
                 ),
                 synthetic=settings.identity_mode is IdentityMode.DEVELOPER,
                 expires_at=staff_session.expires_at,
+                roles=frozenset(staff_account.roles if staff_account is not None else ()),
             )
 
     if settings.identity_mode is IdentityMode.DEVELOPER:

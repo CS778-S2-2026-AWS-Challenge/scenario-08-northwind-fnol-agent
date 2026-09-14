@@ -8,11 +8,12 @@ records their release and disclosure boundary for maintainers and consumers.
 
 `StaffToolDispatcher` receives a server-verified `Principal`, a registered tool name and version,
 the registered business purpose, a typed argument object, a call ID, and a correlation ID. It
-validates staff identity and the required `workbench:read` scope before resource existence, rejects
-version or purpose drift, rejects extra or malformed fields, rejects duplicate call IDs within one
-dispatcher, and invokes only an explicitly bound handler. Registry metadata also records the
-allowed staff role and the server-resolved customer and tenant boundaries; role resolution remains
-at the authenticated Runtime boundary because `Principal` currently carries actor type and scopes.
+validates staff identity, the required `workbench:read` scope, and the server-resolved staff role
+before resource or tool existence, rejects version or purpose drift, rejects extra or malformed
+fields, rejects duplicate call IDs within one dispatcher, and invokes only an explicitly bound
+handler. Registry metadata also records the allowed staff role and the server-resolved customer
+and tenant boundaries; roles are loaded from the authenticated staff account and carried in the
+verified `Principal`, never accepted from tool arguments.
 
 The dispatcher returns `StaffToolResult`. Each result records the registry version, status, bounded
 output, source references, returned record IDs, effective filters, query scope, limitations,
@@ -29,7 +30,7 @@ The active registry is version `v1.0`. The following table describes its handler
 
 | Tool | Bounded input | Result projection | Release state |
 | --- | --- | --- | --- |
-| `staff.claim.search` | One or more registered Claim, customer, date, family, lifecycle, queue, assignee, or external-reference filters; maximum 25. | Candidate identity, matching fields, effective time, lifecycle, and revision. | Read-only Runtime executable. |
+| `staff.claim.search` | One or more registered Claim, customer, date, family, lifecycle, queue, assignee, or external-reference filters; maximum 25. | Candidate identity, matching fields, effective time, lifecycle, and revision. | Read-only Runtime executable; repository applies the bounded candidate query before projection. |
 | `staff.claim.read` | One `claim_id`. | Current staff-safe Claim summary, ownership, work, integration, next step, and revision. | Read-only Runtime executable. |
 | `staff.session.search` | One `claim_id` plus optional session, date, status, actor, or bounded message-text filter; maximum 25. | Claim-linked session identities and metadata. | Read-only Runtime executable. |
 | `staff.session.read` | One `claim_id` and `session_id`; maximum 50 messages. | Session metadata and bounded Claim conversation messages. | Read-only Runtime executable. |

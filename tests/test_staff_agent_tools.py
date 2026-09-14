@@ -120,6 +120,7 @@ def _dispatcher() -> StaffToolDispatcher:
             scopes=frozenset({'workbench:read'}),
             auth_source='test:verified',
             synthetic=True,
+            roles=frozenset({'claims_professional'}),
         ),
     )
 
@@ -270,6 +271,23 @@ def test_dispatch_rejects_unknown_malformed_duplicate_and_non_staff_calls() -> N
     assert purpose_denied.failure_code == 'PURPOSE_DENIED'
 
 
+def test_dispatch_rejects_staff_without_an_allowed_registry_role() -> None:
+    dispatcher = StaffToolDispatcher(
+        _repository(),
+        Principal(
+            subject='stf_restricted',
+            actor_type='staff',
+            scopes=frozenset({'workbench:read'}),
+            roles=frozenset({'claims_observer'}),
+            auth_source='test:verified',
+        ),
+    )
+    result = _execute(dispatcher, 'staff.claim.read', {'claim_id': 'clm_staff_tool'}, 1)
+
+    assert result.status == 'denied'
+    assert result.failure_code == 'ACCESS_DENIED'
+
+
 def test_cross_claim_identifiers_and_empty_collections_do_not_widen_scope() -> None:
     dispatcher = _dispatcher()
     wrong_session = _execute(
@@ -349,6 +367,7 @@ def test_knowledge_tool_preserves_governed_citation_identity() -> None:
             subject='stf_tool_reader',
             actor_type='staff',
             scopes=frozenset({'workbench:read'}),
+            roles=frozenset({'claims_professional'}),
         ),
         knowledge_retriever=_KnowledgeRetriever(),
     )
