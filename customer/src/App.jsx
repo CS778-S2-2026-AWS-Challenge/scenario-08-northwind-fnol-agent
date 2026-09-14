@@ -33,7 +33,7 @@ import {
 import './App.css'
 import './styles/frontend-refactor.css'
 import MessageComposer from './components/MessageComposer.jsx'
-import ExternalServiceAction from './components/ExternalServiceAction.jsx'
+import ExternalServiceAction, { ExternalServiceOverview } from './components/ExternalServiceAction.jsx'
 
 const FIELD_LABELS = {
   'incident.description': 'What happened',
@@ -1440,6 +1440,7 @@ function App() {
               <button type="button" onClick={startNewChat} disabled={isBusy}>New chat</button>
               <button type="button" onClick={() => setWorkspaceView('privacy')}>Privacy policy</button>
               <button type="button" onClick={() => setWorkspaceView('history')}>Claim history</button>
+              <button type="button" onClick={() => setWorkspaceView('external-services')}>External services</button>
               <button type="button" onClick={() => setWorkspaceView('files')}>Uploaded files</button>
             </div>
             <div className="intake-history-label">Conversation history</div>
@@ -1479,8 +1480,8 @@ function App() {
           <section className={`conversation-panel mobile-view-${mobileView} ${workspaceView !== 'chat' ? 'is-utility' : ''}`} aria-labelledby="conversation-title">
             <div className="workspace-utility-page" hidden={workspaceView === 'chat'}>
               <button className="back-link" type="button" onClick={() => { setWorkspaceView('chat'); setPage('home') }}>← Back to conversation</button>
-              <h1>{workspaceView === 'privacy' ? 'Privacy policy' : workspaceView === 'history' ? 'Claim history' : workspaceView === 'account' ? 'Your account' : 'Uploaded files'}</h1>
-              <p>{workspaceView === 'privacy' ? 'We only use the information needed to handle your claim and show you what has been recorded.' : workspaceView === 'history' ? 'Your claim conversations will appear here as they are saved.' : workspaceView === 'account' ? 'Manage your profile and communication preferences.' : 'Files you share for this claim appear here with their upload and processing status.'}</p>
+              <h1>{workspaceView === 'privacy' ? 'Privacy policy' : workspaceView === 'history' ? 'Claim history' : workspaceView === 'external-services' ? 'External services' : workspaceView === 'account' ? 'Your account' : 'Uploaded files'}</h1>
+              <p>{workspaceView === 'privacy' ? 'We only use the information needed to handle your claim and show you what has been recorded.' : workspaceView === 'history' ? 'Your claim conversations will appear here as they are saved.' : workspaceView === 'external-services' ? 'See the external service currently recorded for this claim, including what may be shared and what happens next.' : workspaceView === 'account' ? 'Manage your profile and communication preferences.' : 'Files you share for this claim appear here with their upload and processing status.'}</p>
               {workspaceView === 'account' && account && (
                 <div className="workspace-account-content">
                   <form className="login-form" onSubmit={saveProfile}>
@@ -1500,6 +1501,11 @@ function App() {
                   <button className="secondary-button" type="button" onClick={signOut} disabled={authStatus !== 'idle'}>Log out</button>
                   {authError && <p className="backend-status is-error" role="alert">{authError}</p>}
                 </div>
+              )}
+              {workspaceView === 'external-services' && (
+                claim.external_service_action
+                  ? <ExternalServiceOverview action={claim.external_service_action} />
+                  : <p className="empty-details">No external service is currently recorded for this claim.</p>
               )}
               {workspaceView === 'files' && (
                 evidenceItems.length > 0 ? (
