@@ -466,7 +466,7 @@ function AgentDraft({ draft, sourceMessage, onExecute }) {
       {executionError && (
         <div className="agent-draft__execution agent-draft__execution--error" role="alert">
           <AlertCircle size={16} aria-hidden="true" />
-          <span><strong>Action not executed</strong><small>{executionError}</small></span>
+          <span><strong>{executionError.title}</strong><small>{executionError.message}</small></span>
         </div>
       )}
       {executable && <small>The saved registered payload is executed unchanged. To change the business action, ask Staff Agent to prepare a new draft.</small>}
@@ -521,12 +521,52 @@ function draftExecutionPresentation(execution) {
 
 function draftExecutionError(error) {
   const reference = error?.requestId ? ` Reference: ${error.requestId}` : ''
-  if (error?.code === 'REVISION_CONFLICT') return `The Claim changed before execution. Reload the latest Claim and review the draft again.${reference}`
-  if (error?.code === 'ACCESS_DENIED') return `This staff identity is not authorised to execute the proposed action.${reference}`
-  if (error?.code === 'IDEMPOTENCY_CONFLICT') return `This draft no longer matches the original execution identity and was not run again.${reference}`
-  if (error?.code === 'DEPENDENCY_UNAVAILABLE' || error?.code === 'DEPENDENCY_FAILED') return `A required service is unavailable, so the action was not reported as completed.${reference}`
-  if (error?.code === 'CONFIRMATION_REQUIRED') return `The backend did not receive valid explicit confirmation, so nothing was executed.${reference}`
-  return `${error?.message || 'The registered action could not be executed.'}${reference}`
+  if (
+    error?.code === 'NETWORK_ERROR'
+    || error?.code === 'DRAFT_EXECUTION_UNKNOWN'
+    || error?.status === 0
+    || (error?.status >= 500
+      && !['DEPENDENCY_UNAVAILABLE', 'DEPENDENCY_FAILED'].includes(error?.code))
+  ) {
+    return {
+      title: 'Execution outcome unknown',
+      message: `${error?.message || 'The Workbench could not confirm the execution result.'} Retry this same saved draft to reconcile the authoritative result before preparing another action.${reference}`,
+    }
+  }
+  if (error?.code === 'REVISION_CONFLICT') {
+    return {
+      title: 'Action not executed',
+      message: `The Claim changed before execution. Reload the latest Claim and review the draft again.${reference}`,
+    }
+  }
+  if (error?.code === 'ACCESS_DENIED') {
+    return {
+      title: 'Action not executed',
+      message: `This staff identity is not authorised to execute the proposed action.${reference}`,
+    }
+  }
+  if (error?.code === 'IDEMPOTENCY_CONFLICT') {
+    return {
+      title: 'Action not executed',
+      message: `This draft no longer matches the original execution identity and was not run again.${reference}`,
+    }
+  }
+  if (error?.code === 'DEPENDENCY_UNAVAILABLE' || error?.code === 'DEPENDENCY_FAILED') {
+    return {
+      title: 'Action not executed',
+      message: `A required service is unavailable, so the action was not reported as completed.${reference}`,
+    }
+  }
+  if (error?.code === 'CONFIRMATION_REQUIRED') {
+    return {
+      title: 'Action not executed',
+      message: `The backend did not receive valid explicit confirmation, so nothing was executed.${reference}`,
+    }
+  }
+  return {
+    title: 'Action not executed',
+    message: `${error?.message || 'The registered action could not be executed.'}${reference}`,
+  }
 }
 
 function scopeLabel(selectedClaimIds, claims) {
