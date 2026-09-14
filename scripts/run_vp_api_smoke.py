@@ -458,6 +458,22 @@ def run(base_url: str, compose_directory: Path, *, restart: bool) -> dict[str, A
                 {200},
                 'handoff recovery after restart',
             )
+            recovered_updates = _json(
+                client.get(
+                    f'/api/v1/workbench/claims/{claim_id}/customer-updates',
+                    headers=staff_after_auth,
+                ),
+                {200},
+                'customer update recovery after restart',
+            )
+            recovered_work_items = _json(
+                client.get(
+                    f'/api/v1/workbench/claims/{claim_id}/work-items',
+                    headers=staff_after_auth,
+                ),
+                {200},
+                'staff action recovery after restart',
+            )
             recovered_external = _json(
                 client.get(
                     f'/api/v1/workbench/claims/{claim_id}/external-requests',
@@ -474,6 +490,32 @@ def run(base_url: str, compose_directory: Path, *, restart: bool) -> dict[str, A
                 raise RuntimeError('restart recovery produced duplicate or missing messages.')
             if len(recovered_handoffs['items']) != 1:
                 raise RuntimeError('restart recovery produced duplicate or missing handoffs.')
+            recovered_handoff = recovered_handoffs['items'][0]
+            if (
+                recovered_handoff['handoff_id'] != handoff_id
+                or recovered_handoff['status'] != 'resolved'
+                or not recovered_handoff.get('resolved_at')
+            ):
+                raise RuntimeError('restart recovery did not preserve the resolved handoff.')
+            if len(recovered_updates['items']) != 1:
+                raise RuntimeError(
+                    'restart recovery produced duplicate or missing customer updates.'
+                )
+            recovered_update = recovered_updates['items'][0]
+            expected_update = resolved.get('customer_update')
+            if (
+                not isinstance(expected_update, dict)
+                or recovered_update['summary'] != expected_update['summary']
+                or recovered_update['related_refs'] != expected_update['related_refs']
+            ):
+                raise RuntimeError('restart recovery lost or changed the customer update.')
+            expected_action = resolved.get('staff_action')
+            if (
+                not isinstance(expected_action, dict)
+                or len(recovered_work_items['items']) != 1
+                or recovered_work_items['items'][0]['action_id'] != expected_action['action_id']
+            ):
+                raise RuntimeError('restart recovery lost or duplicated the resolution action.')
             if len(recovered_external['items']) != 1:
                 raise RuntimeError(
                     'restart recovery produced duplicate or missing external requests.'
@@ -491,6 +533,8 @@ def run(base_url: str, compose_directory: Path, *, restart: bool) -> dict[str, A
                 or not isinstance(external_action.get('routing'), dict)
             ):
                 raise RuntimeError('claimant projection lost the assigned assessor state.')
+            if recovered_claim['customer_next_step']['summary'] != expected_update['summary']:
+                raise RuntimeError('claimant projection lost the resolution next step.')
             claimant_messages = _json(
                 client.get(
                     f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
