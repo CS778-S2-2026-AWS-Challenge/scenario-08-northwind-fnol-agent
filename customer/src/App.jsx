@@ -140,7 +140,7 @@ function assistancePresentation({ handoff, nextStep, requesting, reviewingReply,
   return null
 }
 
-function buildConversationTimeline(messages, handoff, completedAssistance) {
+function buildConversationTimeline(messages, handoff, completedAssistanceClaimId) {
   const timeline = messages.map((message) => ({
     key: message.message_id,
     kind: 'message',
@@ -183,11 +183,11 @@ function buildConversationTimeline(messages, handoff, completedAssistance) {
   }
 
   if (
-    completedAssistance
+    completedAssistanceClaimId
     && !hasRecordedEvent('staff assistance completed')
   ) {
     timeline.push({
-      key: `assistance-completed-${completedAssistance.handoffId}`,
+      key: `assistance-completed-${completedAssistanceClaimId}`,
       kind: 'system-event',
       text: 'Staff assistance completed',
     })
@@ -287,7 +287,6 @@ function App() {
   const [editValue, setEditValue] = useState('')
   const [handoff, setHandoff] = useState(null)
   const [assistanceReplyReview, setAssistanceReplyReview] = useState(null)
-  const [completedAssistance, setCompletedAssistance] = useState(null)
   const [claimHistory, setClaimHistory] = useState(null)
   const [claimHistoryError, setClaimHistoryError] = useState('')
   const [selectedHistoryClaimId, setSelectedHistoryClaimId] = useState(() => {
@@ -320,7 +319,6 @@ function App() {
   const pendingSupportRequest = useRef(null)
   const pendingClaimCreation = useRef(null)
   const pendingExternalService = useRef(null)
-  const lastActiveAssistance = useRef(null)
   const latestRevision = useRef(0)
   const latestRevisionClaimId = useRef(null)
   const latestEvidenceRevision = useRef(0)
@@ -491,14 +489,17 @@ function App() {
     && assistanceReplyReview.claimId === claim?.claim_id
     && assistanceReplyReview.handoffId === handoff?.handoff_id,
   )
+  const completedAssistanceClaimId = !handoff && nextStep?.status === 'staff_update'
+    ? claim?.claim_id
+    : null
   const assistanceState = useMemo(() => assistancePresentation({
     handoff,
     nextStep,
     requesting: status === 'requesting-support',
     reviewingReply: reviewingAssistanceReply,
-    completed: completedAssistance?.claimId === claim?.claim_id,
+    completed: completedAssistanceClaimId === claim?.claim_id,
   }), [
-    completedAssistance?.claimId,
+    completedAssistanceClaimId,
     claim?.claim_id,
     handoff,
     nextStep,
@@ -506,30 +507,9 @@ function App() {
     status,
   ])
   const conversationTimeline = useMemo(
-    () => buildConversationTimeline(messages, handoff, completedAssistance),
-    [completedAssistance, handoff, messages],
+    () => buildConversationTimeline(messages, handoff, completedAssistanceClaimId),
+    [completedAssistanceClaimId, handoff, messages],
   )
-
-  useEffect(() => {
-    if (handoff?.support_need) {
-      lastActiveAssistance.current = {
-        claimId: claim?.claim_id,
-        handoffId: handoff.handoff_id,
-      }
-      setCompletedAssistance(null)
-      return
-    }
-    const previous = lastActiveAssistance.current
-    if (previous?.claimId === claim?.claim_id && nextStep?.status === 'staff_update') {
-      setCompletedAssistance(previous)
-      lastActiveAssistance.current = null
-      return
-    }
-    if (previous && previous.claimId !== claim?.claim_id) {
-      lastActiveAssistance.current = null
-      setCompletedAssistance(null)
-    }
-  }, [claim?.claim_id, handoff, nextStep?.status])
 
   useEffect(() => {
     setAssistanceReplyReview((current) => {
@@ -1216,7 +1196,6 @@ function App() {
     if (!claim || isBusy || handoff) return
     setError('')
     setAssistanceReplyReview(null)
-    setCompletedAssistance(null)
     setStatus('requesting-support')
     try {
       if (!pendingSupportRequest.current) {

@@ -353,6 +353,49 @@ describe('claimant intake projection', () => {
     expect(screen.queryByText('Claim created')).not.toBeInTheDocument()
   })
 
+  it('restores completed staff assistance from a fresh post-resolution Claim projection', async () => {
+    const user = userEvent.setup()
+    const resolvedClaim = {
+      ...initialClaim,
+      revision: 7,
+      handoff: null,
+      customer_next_step: {
+        status: 'staff_update',
+        summary: 'Your report is ready to continue online.',
+        responsible_party: 'claimant',
+      },
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({
+      items: [{ ...resolvedClaim, can_resume: true }],
+      page: { next_cursor: null },
+    })
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_ui_vp',
+      model_profile_id: 'qwen-local',
+      resume: {
+        customer_next_step: resolvedClaim.customer_next_step,
+        summary: 'A pipe burst in the kitchen.',
+        pending_items: [],
+        prior_commitments: [],
+      },
+    })
+    api.getClaim.mockResolvedValue(resolvedClaim)
+    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Resume claim' }))
+
+    expect(await screen.findByRole('heading', { name: 'Staff assistance completed' })).toBeVisible()
+    expect(screen.getByText('You can continue your claim below.')).toBeVisible()
+    expect(screen.getAllByText('Staff assistance completed')).toHaveLength(2)
+    expect(screen.queryByText('Claim created')).not.toBeInTheDocument()
+  })
+
   it('opens a new claim conversation without clearing the previous claim', async () => {
     const user = userEvent.setup()
     api.hasClaimantAccessToken.mockReturnValue(true)
