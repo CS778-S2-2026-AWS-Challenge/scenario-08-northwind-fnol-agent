@@ -179,10 +179,10 @@ function claimProjection(state) {
     },
     incident: {
       family: state.family,
-      summary: 'Minor collision requiring staff assistance.',
+      summary: 'Incident requiring staff assistance.',
     },
-    lifecycle_state: resolved ? 'ready_to_create' : 'staff_support',
-    workflow_state: 'ready_for_next',
+    lifecycle_state: 'professional_review',
+    workflow_state: 'professional_review',
     created_at: '2026-09-14T00:00:00Z',
     updated_at: `2026-09-14T00:0${state.revision}:00Z`,
     active_session_id: 'ses_journey',
@@ -193,8 +193,8 @@ function claimProjection(state) {
       fraud_signal: 'none',
       customer_support: 'human_requested',
       urgency: 'normal',
-      workflow_state: 'ready_for_next',
-      next_action: 'PROCEED',
+      workflow_state: 'professional_review',
+      next_action: 'handoff',
     },
     ownership: accepted
       ? {
@@ -390,7 +390,14 @@ function createHandoffJourneyService(family) {
 
     if (method === 'GET' && path === '/api/v1/workbench/claims/clm_handoff_journey') {
       const detail = claimProjection(state)
-      state.claimReads.push({ revision: detail.revision, phase: state.phase })
+      state.claimReads.push({
+        revision: detail.revision,
+        phase: state.phase,
+        family: detail.incident.family,
+        lifecycle_state: detail.lifecycle_state,
+        workflow_state: detail.workflow_state,
+        next_action: detail.claim_state.next_action,
+      })
       return jsonResponse(200, detail)
     }
 
@@ -601,7 +608,7 @@ function createHandoffJourneyService(family) {
         event_id: 'evt_resolved',
         event_type: 'handoff.resolved',
         actor_id: 'stf_demo',
-        summary: 'Staff handoff resolved and Claim returned to the authoritative workflow.',
+        summary: 'Staff handoff resolved while Claim continuation remains blocked on the backend workflow projection.',
         source_refs: ['hnd_journey', 'upd_resolved'],
         created_at: '2026-09-14T00:04:00Z',
         resulting_revision: 4,
@@ -662,7 +669,7 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
   })
 
   it.each(['motor', 'home', 'contents'])(
-    'opens, accepts, communicates, and resolves the %s support handoff',
+    'opens, accepts, communicates, and resolves the %s support handoff with blocked continuation',
     async (family) => {
     const { fetchMock, state } = createHandoffJourneyService(family)
     vi.stubGlobal('fetch', fetchMock)
@@ -723,7 +730,7 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
     )
     await user.type(
       screen.getByLabelText('Claimant update'),
-      'Your staff handoff is resolved and your claim can continue.',
+      'Your staff handoff is resolved. A claims professional will review the next step.',
     )
     await user.click(screen.getByRole('button', { name: 'Resolve handoff' }))
 
@@ -742,7 +749,7 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
           customer_update: {
             responsible_party: 'claims_professional',
             related_refs: ['hnd_journey'],
-            summary: 'Your staff handoff is resolved and your claim can continue.',
+            summary: 'Your staff handoff is resolved. A claims professional will review the next step.',
           },
         },
       })
@@ -751,10 +758,10 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
     expect(state.resolveRequests[0].idempotencyKey).toBeTruthy()
 
     expect(await screen.findByText(
-      'Your staff handoff is resolved and your claim can continue.',
+      'Your staff handoff is resolved. A claims professional will review the next step.',
     )).toBeVisible()
     expect(await screen.findByText(
-      'Staff handoff resolved and Claim returned to the authoritative workflow.',
+      'Staff handoff resolved while Claim continuation remains blocked on the backend workflow projection.',
     )).toBeVisible()
 
     await waitFor(() => {
@@ -764,15 +771,23 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
       })
       expect(state.queueReads.at(-1)).toMatchObject({
         revision: 4,
-        workflow_state: 'ready_for_next',
+        workflow_state: 'professional_review',
         phase: 'resolved',
       })
       expect(state.customerUpdateReads.at(-1).summaries).toContain(
-        'Your staff handoff is resolved and your claim can continue.',
+        'Your staff handoff is resolved. A claims professional will review the next step.',
       )
       expect(state.eventReads.at(-1).summaries).toContain(
-        'Staff handoff resolved and Claim returned to the authoritative workflow.',
+        'Staff handoff resolved while Claim continuation remains blocked on the backend workflow projection.',
       )
+      expect(state.claimReads.at(-1)).toMatchObject({
+        revision: 4,
+        phase: 'resolved',
+        family,
+        lifecycle_state: 'professional_review',
+        workflow_state: 'professional_review',
+        next_action: 'handoff',
+      })
     })
   },
   )
