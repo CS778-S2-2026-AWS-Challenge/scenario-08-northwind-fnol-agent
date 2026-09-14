@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import MessageComposer from './MessageComposer.jsx'
@@ -25,6 +25,29 @@ function ComposerHarness({ onRemoved = vi.fn(), initialStatus = 'uploading' }) {
         onRemoved(attachment)
         setAttachments((current) => current.filter((item) => item.id !== attachment.id))
       }}
+    />
+  )
+}
+
+function ControlHarness() {
+  const [draft, setDraft] = useState('')
+  const [claimType, setClaimType] = useState('')
+  const [selectedModel, setSelectedModel] = useState('qwen-local')
+
+  return (
+    <MessageComposer
+      draft={draft}
+      setDraft={setDraft}
+      onSubmit={(event) => event.preventDefault()}
+      inputLabel="Claim message"
+      busy={false}
+      buttonLabel="Send"
+      variant="workspace"
+      claimType={claimType}
+      setClaimType={setClaimType}
+      models={[{ id: 'qwen-local', label: 'Qwen Local', availability: 'available' }]}
+      selectedModel={selectedModel}
+      setSelectedModel={setSelectedModel}
     />
   )
 }
@@ -65,4 +88,37 @@ it('does not present a local remove action for server-persisted Evidence', () =>
   expect(screen.getByText('kitchen-damage.jpg')).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Remove kitchen-damage.jpg' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Select kitchen-damage.jpg' })).not.toBeInTheDocument()
+})
+
+it('keeps the claimant selectors keyboard operable with clear control sizing hooks', async () => {
+  const user = userEvent.setup()
+  render(<ControlHarness />)
+
+  const claimType = screen.getByRole('button', { name: 'Claim type (optional)' })
+  expect(claimType).toHaveTextContent('Let Agent identify')
+
+  claimType.focus()
+  await user.keyboard('{ArrowDown}')
+  const automaticOption = screen.getByRole('option', { name: 'Let Agent identify' })
+  await waitFor(() => expect(automaticOption).toHaveFocus())
+  await user.keyboard('{ArrowDown}')
+  await user.keyboard('{Enter}')
+
+  expect(claimType).toHaveTextContent('Motor')
+  expect(claimType).toHaveFocus()
+  expect(screen.queryByRole('listbox', { name: 'Claim type (optional)' })).not.toBeInTheDocument()
+
+  expect(screen.getByRole('button', { name: 'Model' })).toHaveTextContent('Qwen Local')
+})
+
+it('uses recognizable icons and accessible names for attachment and voice controls', () => {
+  render(<ControlHarness />)
+
+  const attach = screen.getByRole('button', { name: 'Attach a file' })
+  const voice = screen.getByRole('button', { name: 'Use voice input' })
+
+  expect(attach.querySelector('.tool-icon')).toBeInTheDocument()
+  expect(voice.querySelector('.tool-icon')).toBeInTheDocument()
+  expect(attach).toHaveAttribute('title', 'Attach a file')
+  expect(voice).toHaveAttribute('title', 'Use voice input')
 })
