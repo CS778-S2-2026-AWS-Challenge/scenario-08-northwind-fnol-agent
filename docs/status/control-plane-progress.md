@@ -13,7 +13,7 @@ in `docs/api.md`.
   approval for high-impact publication, publication, withdrawal, supersession,
   rollback, idempotency, and configuration audit events.
 - Model configurations use `configuration_key=profile_id` and can publish one catalog
-  containing `qwen-local` as primary plus `nowcoding-gpt54mini` as a selectable claimant
+  containing `qwen-local` as primary plus `nowcoding-gpt56terra` as a selectable claimant
   profile. Publication validation requires structured output and tool calling to be declared;
   credentials remain secret references and are never returned to claimant capabilities.
 - Release Sets and Runtime Snapshots for one complete published configuration

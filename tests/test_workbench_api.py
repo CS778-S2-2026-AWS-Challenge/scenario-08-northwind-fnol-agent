@@ -1656,7 +1656,7 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
         item for item in queue_response.json()['items'] if item['claim_id'] == claim_id
     )
     assert queue_item['work_summary']['queue_key'] == 'completed'
-    assert queue_item['ownership']['primary_assignee']['staff_id'] == 'stf_demo'
+    assert queue_item['ownership']['primary_assignee'] is None
 
 
 def test_handoff_acceptance_is_atomic_revision_safe_and_idempotent(

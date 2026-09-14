@@ -363,6 +363,10 @@ def create_message(
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> MessageTurnResponse:
+    if payload.model_profile_id is not None:
+        payload = payload.model_copy(
+            update={'model_profile_id': select_model_profile(request, payload.model_profile_id)}
+        )
     return submit_message(
         repository_for(request),
         agent_for(request),

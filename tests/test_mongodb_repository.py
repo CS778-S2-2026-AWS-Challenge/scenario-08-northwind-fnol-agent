@@ -29,6 +29,7 @@ from backend.domain.models import (
     AgentAction,
     AgentAuthority,
     AgentDecisionRecord,
+    AgentProposalSource,
     AssessorLocation,
     AssessorRoutingFailureCode,
     AssessorRoutingOperation,
@@ -66,6 +67,20 @@ from backend.domain.retrieval import (
     RetrievalSource,
     ReviewSignalRecord,
 )
+from backend.domain.runtime import (
+    AgentProposalRecord,
+    ExecutionPlanRecord,
+    RuntimeTurnRecords,
+    TurnPlanRecord,
+    TurnResultRecord,
+)
+from backend.domain.staff_agent import (
+    StaffAgentDraft,
+    StaffAgentDraftKind,
+    StaffAgentMessage,
+    StaffAgentMessageRole,
+    StaffAgentSession,
+)
 from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.mongodb import (
     MongoDBConfigurationError,
@@ -79,6 +94,9 @@ from backend.repositories.protocols import (
     IdempotencyRecord,
     PersistenceRepository,
     RevisionConflict,
+    StaffAgentDraftSource,
+    staff_agent_execution_for,
+    with_staff_agent_source,
 )
 from backend.services.external_service_entry import resolve_external_service_entry
 from backend.services.integrations import (
@@ -136,6 +154,84 @@ def _message(claim: WorkingClaim, session: SessionRecord) -> MessageRecord:
         content={'type': 'text', 'text': 'A synthetic incident.'},
         created_at=claim.created_at,
     )
+
+
+def _staff_agent_execution_graph(
+    claim: WorkingClaim,
+) -> tuple[
+    StaffAgentSession,
+    StaffAgentMessage,
+    StaffAgentMessage,
+    StaffActionRecord,
+    IdempotencyRecord,
+]:
+    staff_session = StaffAgentSession(
+        session_id='sas_mongo_001',
+        staff_id='staff-001',
+        title='Claim review',
+        created_at=claim.created_at,
+        updated_at=claim.updated_at,
+    )
+    staff_message = StaffAgentMessage(
+        message_id='sam_mongo_staff_001',
+        session_id=staff_session.session_id,
+        staff_id=staff_session.staff_id,
+        role=StaffAgentMessageRole.STAFF,
+        content='Prepare a review action.',
+        claim_ids=[claim.claim_id],
+        client_message_id='client-staff-mongo-001',
+        created_at=claim.created_at,
+    )
+    assistant_message = StaffAgentMessage(
+        message_id='sam_mongo_assistant_001',
+        session_id=staff_session.session_id,
+        staff_id=staff_session.staff_id,
+        role=StaffAgentMessageRole.ASSISTANT,
+        content='The review action is ready for confirmation.',
+        claim_ids=[claim.claim_id],
+        drafts=[
+            StaffAgentDraft(
+                draft_id='sdr_mongo_001',
+                kind=StaffAgentDraftKind.INTERNAL_NOTE,
+                title='Review Claim',
+                content='Review the collected Claim information.',
+                claim_id=claim.claim_id,
+                action_code='work_item.create',
+                target_ref=claim.claim_id,
+            )
+        ],
+        in_reply_to=staff_message.message_id,
+        created_at=claim.created_at,
+    )
+    action = StaffActionRecord(
+        action_id='act_mongo_agent_001',
+        claim_id=claim.claim_id,
+        action_type='review_claim',
+        status=StaffActionStatus.OPEN,
+        assigned_to=staff_session.staff_id,
+        requested_outcome='Review the collected Claim information.',
+        created_at=claim.created_at,
+    )
+    source = StaffAgentDraftSource(
+        session_id=staff_session.session_id,
+        message_id=assistant_message.message_id,
+        draft_id='sdr_mongo_001',
+    )
+    idempotency = with_staff_agent_source(
+        IdempotencyRecord(
+            actor_id=staff_session.staff_id,
+            route='/staff-actions',
+            key='staff-agent-execution-key',
+            request_fingerprint='staff-agent-execution-fingerprint',
+            claim_id=claim.claim_id,
+            session_id=claim.active_session_id or '',
+            action_code='work_item.create',
+            target_ref=claim.claim_id,
+            response_payload={'action_id': action.action_id, 'status': 'open'},
+        ),
+        source,
+    )
+    return staff_session, staff_message, assistant_message, action, idempotency
 
 
 def _decision(
@@ -1545,6 +1641,134 @@ def test_staff_mutation_persists_audited_record_with_claim_revision(
     assert repository.list_staff_actions(claim.claim_id) == [action]
 
 
+def test_staff_agent_execution_persists_with_owned_assistant_draft(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim()
+    repository.create_claim(claim, _session(claim))
+    staff_session, staff_message, assistant_message, action, idempotency = (
+        _staff_agent_execution_graph(claim)
+    )
+    repository.save_staff_agent_session(staff_session)
+    repository.save_staff_agent_turn(staff_session, staff_message, assistant_message)
+    updated_claim = claim.model_copy(update={'revision': 2})
+    source = StaffAgentDraftSource(
+        session_id=staff_session.session_id,
+        message_id=assistant_message.message_id,
+        draft_id=assistant_message.drafts[0].draft_id or '',
+    )
+    execution = staff_agent_execution_for(updated_claim, 1, idempotency, source)
+    assert execution is not None
+
+    repository.save_staff_mutation(
+        updated_claim,
+        1,
+        idempotency,
+        staff_action=action,
+        staff_agent_execution=execution,
+    )
+
+    assert repository.get_staff_agent_execution(execution.execution_id, staff_session.staff_id) == (
+        execution
+    )
+    assert repository.get_staff_agent_execution(execution.execution_id, 'staff-other') is None
+
+
+def test_staff_agent_execution_rejects_missing_source_message_without_writes(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim()
+    repository.create_claim(claim, _session(claim))
+    staff_session, _staff_message, assistant_message, action, idempotency = (
+        _staff_agent_execution_graph(claim)
+    )
+    repository.save_staff_agent_session(staff_session)
+    updated_claim = claim.model_copy(update={'revision': 2})
+    source = StaffAgentDraftSource(
+        session_id=staff_session.session_id,
+        message_id=assistant_message.message_id,
+        draft_id=assistant_message.drafts[0].draft_id or '',
+    )
+    execution = staff_agent_execution_for(updated_claim, 1, idempotency, source)
+    assert execution is not None
+
+    with pytest.raises(KeyError, match=claim.claim_id):
+        repository.save_staff_mutation(
+            updated_claim,
+            1,
+            idempotency,
+            staff_action=action,
+            staff_agent_execution=execution,
+        )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+    assert repository.get_staff_action(claim.claim_id, action.action_id) is None
+    assert (
+        repository.get_staff_agent_execution(execution.execution_id, staff_session.staff_id) is None
+    )
+
+
+def test_staff_agent_execution_identity_cannot_execute_same_draft_twice(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim()
+    repository.create_claim(claim, _session(claim))
+    staff_session, staff_message, assistant_message, action, idempotency = (
+        _staff_agent_execution_graph(claim)
+    )
+    repository.save_staff_agent_session(staff_session)
+    repository.save_staff_agent_turn(staff_session, staff_message, assistant_message)
+    source = StaffAgentDraftSource(
+        session_id=staff_session.session_id,
+        message_id=assistant_message.message_id,
+        draft_id=assistant_message.drafts[0].draft_id or '',
+    )
+    first_claim = claim.model_copy(update={'revision': 2})
+    first_execution = staff_agent_execution_for(first_claim, 1, idempotency, source)
+    assert first_execution is not None
+    repository.save_staff_mutation(
+        first_claim,
+        1,
+        idempotency,
+        staff_action=action,
+        staff_agent_execution=first_execution,
+    )
+
+    second_action = action.model_copy(update={'action_id': 'act_mongo_agent_002'})
+    second_idempotency = with_staff_agent_source(
+        IdempotencyRecord(
+            actor_id=staff_session.staff_id,
+            route='/staff-actions',
+            key='staff-agent-execution-second-key',
+            request_fingerprint='staff-agent-execution-second-fingerprint',
+            claim_id=claim.claim_id,
+            session_id=claim.active_session_id or '',
+            action_code='work_item.create',
+            target_ref=claim.claim_id,
+            response_payload={'action_id': second_action.action_id, 'status': 'open'},
+        ),
+        source,
+    )
+    second_claim = claim.model_copy(update={'revision': 3})
+    second_execution = staff_agent_execution_for(second_claim, 2, second_idempotency, source)
+    assert second_execution is not None
+
+    with pytest.raises(IdempotencyConflict, match=first_execution.execution_id):
+        repository.save_staff_mutation(
+            second_claim,
+            2,
+            second_idempotency,
+            staff_action=second_action,
+            staff_agent_execution=second_execution,
+        )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == first_claim
+    assert repository.get_staff_action(claim.claim_id, second_action.action_id) is None
+    assert repository.get_staff_agent_execution(
+        first_execution.execution_id, staff_session.staff_id
+    ) == (first_execution)
+
+
 def test_mongodb_staff_mutation_linearizes_against_presence_revision(
     repository: MongoDBRepository,
     monkeypatch: pytest.MonkeyPatch,
@@ -1947,6 +2171,108 @@ def test_agent_turn_persists_linked_records_as_one_mutation(
         repository.get_agent_decision(claim.claim_id, decision.decision_id, claim.customer_id)
         == decision
     )
+
+
+def test_agent_turn_reads_back_target_runtime_records_by_turn_scope(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    updated_claim = claim.model_copy(update={'revision': 2})
+    updated_session = session.model_copy(update={'context_revision': 2})
+    claimant_message = _message(claim, session).model_copy(
+        update={'message_id': 'msg_mongo_target_claimant', 'client_message_id': 'target-runtime'}
+    )
+    agent_message = claimant_message.model_copy(
+        update={
+            'message_id': 'msg_mongo_target_agent',
+            'client_message_id': None,
+            'actor': ActorType.AGENT,
+            'content': {'type': 'text', 'text': 'I recorded the report.'},
+            'in_reply_to': claimant_message.message_id,
+        }
+    )
+    decision = _decision(updated_claim, updated_session, claimant_message)
+    timestamp = claim.created_at
+    turn_id = 'turn_mongo_target'
+    runtime_records = RuntimeTurnRecords(
+        turn_plan=TurnPlanRecord(
+            turn_id=turn_id,
+            claim_id=claim.claim_id,
+            session_id=session.session_id,
+            trigger_message_id=claimant_message.message_id,
+            model_profile_id='qwen-local',
+            runtime_directive='runtime.continue',
+            created_at=timestamp,
+        ),
+        proposal=AgentProposalRecord(
+            proposal_id='proposal_mongo_target',
+            turn_id=turn_id,
+            claim_id=claim.claim_id,
+            session_id=session.session_id,
+            action_code='conversation.answer',
+            runtime_directive='runtime.continue',
+            reason_codes=['CLAIM_CONTEXT_READ'],
+            customer_reason='The report was recorded.',
+            customer_response='I recorded the report.',
+            customer_next_step=claim.customer_next_step,
+            proposal_source=AgentProposalSource.MODEL_GATEWAY,
+            model_profile_id='qwen-local',
+            created_at=timestamp,
+        ),
+        execution_plan=ExecutionPlanRecord(
+            execution_plan_id='execution_mongo_target',
+            turn_id=turn_id,
+            claim_id=claim.claim_id,
+            expected_revision=claim.revision,
+            status='executed',
+            created_at=timestamp,
+            finished_at=timestamp,
+        ),
+        result=TurnResultRecord(
+            result_id='result_mongo_target',
+            turn_id=turn_id,
+            claim_id=claim.claim_id,
+            session_id=session.session_id,
+            trigger_message_id=claimant_message.message_id,
+            agent_message_id=agent_message.message_id,
+            execution_plan_id='execution_mongo_target',
+            status='succeeded',
+            resulting_claim_revision=updated_claim.revision,
+            customer_response='I recorded the report.',
+            created_at=timestamp,
+        ),
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/agent-runtime-turn',
+        key='target-runtime-key',
+        request_fingerprint='target-runtime-fingerprint',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        message_id=claimant_message.message_id,
+        agent_message_id=agent_message.message_id,
+        decision_id=decision.decision_id,
+    )
+
+    repository.save_agent_turn(
+        updated_claim,
+        claim.revision,
+        updated_session,
+        claimant_message,
+        agent_message,
+        decision,
+        idempotency,
+        runtime_records=runtime_records,
+    )
+
+    restored = repository.get_runtime_turn_for_trigger(
+        claim.claim_id,
+        claimant_message.message_id,
+        claim.customer_id,
+    )
+    assert restored == runtime_records
 
 
 def test_runtime_turn_persists_trace_without_claim_revision_change(

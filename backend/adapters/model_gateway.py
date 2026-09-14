@@ -146,6 +146,7 @@ class OpenAICompatibleModelGateway:
             raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
 
     def _request_payload(self, request: ModelRequest) -> dict[str, object]:
+        provider_tool_names = self._provider_tool_names(request)
         messages: list[dict[str, object]] = []
         for message in request.messages:
             item: dict[str, object] = {
@@ -158,7 +159,9 @@ class OpenAICompatibleModelGateway:
                         'id': tool.call_id,
                         'type': 'function',
                         'function': {
-                            'name': tool.name,
+                            'name': provider_tool_names.get(
+                                tool.name, self._provider_tool_name(tool.name)
+                            ),
                             'arguments': json.dumps(
                                 tool.arguments,
                                 separators=(',', ':'),
@@ -170,7 +173,9 @@ class OpenAICompatibleModelGateway:
             if message.tool_call_id is not None:
                 item['tool_call_id'] = message.tool_call_id
             if message.name is not None:
-                item['name'] = message.name
+                item['name'] = provider_tool_names.get(
+                    message.name, self._provider_tool_name(message.name)
+                )
             messages.append(item)
         payload: dict[str, object] = {
             'model': self._config.model,
@@ -190,14 +195,38 @@ class OpenAICompatibleModelGateway:
                 {
                     'type': 'function',
                     'function': {
-                        'name': tool.name,
+                        'name': provider_tool_names[tool.name],
                         'description': tool.description,
                         'parameters': tool.input_schema,
                     },
                 }
                 for tool in request.tools
             ]
+        if request.required_tool_name is not None:
+            if request.required_tool_name not in {tool.name for tool in request.tools}:
+                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+            payload['tool_choice'] = {
+                'type': 'function',
+                'function': {'name': provider_tool_names[request.required_tool_name]},
+            }
+            payload['parallel_tool_calls'] = False
         return payload
+
+    @staticmethod
+    def _provider_tool_name(name: str) -> str:
+        return name.replace('.', '_')
+
+    @classmethod
+    def _provider_tool_names(cls, request: ModelRequest) -> dict[str, str]:
+        domain_names = {tool.name for tool in request.tools} | {
+            call.name for message in request.messages for call in message.tool_calls
+        }
+        if request.required_tool_name is not None:
+            domain_names.add(request.required_tool_name)
+        provider_names = {name: cls._provider_tool_name(name) for name in domain_names}
+        if len(set(provider_names.values())) != len(provider_names):
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        return provider_names
 
     @classmethod
     def _strict_response_schema(cls, value: object) -> object:
@@ -306,8 +335,13 @@ class OpenAICompatibleModelGateway:
                 raise TypeError
             structured_output = parsed_content
 
+        provider_to_domain = {
+            OpenAICompatibleModelGateway._provider_tool_name(tool.name): tool.name
+            for tool in request.tools
+        }
         tool_calls = OpenAICompatibleModelGateway._normalise_tool_calls(
-            message.get('tool_calls', [])
+            message.get('tool_calls', []),
+            provider_to_domain,
         )
         usage = OpenAICompatibleModelGateway._normalise_usage(payload.get('usage'))
         model = payload.get('model')
@@ -342,7 +376,10 @@ class OpenAICompatibleModelGateway:
         return ModelCompletionStatus.UNKNOWN
 
     @staticmethod
-    def _normalise_tool_calls(value: object) -> list[ModelToolCall]:
+    def _normalise_tool_calls(
+        value: object,
+        provider_to_domain: dict[str, str] | None = None,
+    ) -> list[ModelToolCall]:
         if not isinstance(value, list):
             raise TypeError
         normalised: list[ModelToolCall] = []
@@ -356,7 +393,7 @@ class OpenAICompatibleModelGateway:
             normalised.append(
                 ModelToolCall(
                     call_id=item['id'],
-                    name=function['name'],
+                    name=(provider_to_domain or {}).get(function['name'], function['name']),
                     arguments=arguments,
                 )
             )

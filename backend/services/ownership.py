@@ -24,6 +24,10 @@ from backend.repositories.protocols import (
     IdempotencyRecord,
     PersistenceRepository,
     RevisionConflict,
+    StaffAgentDraftSource,
+    idempotency_source_matches,
+    staff_agent_execution_for,
+    with_staff_agent_source,
 )
 from backend.services.support import (
     now_utc,
@@ -75,11 +79,12 @@ def _retry(
     route: str,
     key: str,
     fingerprint: str,
+    source: StaffAgentDraftSource | None = None,
 ) -> CollaborationMutationResponse | None:
     record = repository.find_idempotency(principal.subject, route, key)
     if record is None:
         return None
-    if record.request_fingerprint != fingerprint:
+    if record.request_fingerprint != fingerprint or not idempotency_source_matches(record, source):
         raise _error(
             409, 'IDEMPOTENCY_CONFLICT', 'The idempotency key was reused with different data.'
         )
@@ -95,17 +100,22 @@ def _save(
     idempotency: IdempotencyRecord,
     request: ClaimCollaborationRequest,
     *,
+    source: StaffAgentDraftSource | None = None,
     coworkers: list[ClaimCoworkerRecord] | None = None,
     handoff: HandoffRecord | None = None,
 ) -> None:
     try:
+        linked_idempotency = with_staff_agent_source(idempotency, source)
         repository.save_ownership_mutation(
             claim,
             expected,
-            idempotency,
+            linked_idempotency,
             request,
             coworkers=coworkers,
             handoff=handoff,
+            staff_agent_execution=staff_agent_execution_for(
+                claim, expected, linked_idempotency, source
+            ),
         )
     except RevisionConflict as conflict:
         raise _error(
@@ -180,11 +190,12 @@ def create_cowork_request(
     payload: CreateCoworkRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    source: StaffAgentDraftSource | None = None,
 ) -> CollaborationMutationResponse:
     key = require_idempotency_key(idempotency_key)
     route = f'/api/v1/workbench/claims/{claim_id}/cowork-requests'
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
-    replay = _retry(repository, principal, route, key, fingerprint)
+    replay = _retry(repository, principal, route, key, fingerprint, source)
     if replay is not None:
         return replay
     claim = _claim(repository, principal, claim_id)
@@ -251,6 +262,7 @@ def create_cowork_request(
         expected,
         _idempotency(principal, route, key, fingerprint, claim, response, projected_action),
         request,
+        source=source,
     )
     return response
 
@@ -262,11 +274,12 @@ def create_transfer_request(
     payload: CreateTransferRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    source: StaffAgentDraftSource | None = None,
 ) -> CollaborationMutationResponse:
     key = require_idempotency_key(idempotency_key)
     route = f'/api/v1/workbench/claims/{claim_id}/transfer-requests'
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
-    replay = _retry(repository, principal, route, key, fingerprint)
+    replay = _retry(repository, principal, route, key, fingerprint, source)
     if replay is not None:
         return replay
     claim = _claim(repository, principal, claim_id)
@@ -314,6 +327,7 @@ def create_transfer_request(
         expected,
         _idempotency(principal, route, key, fingerprint, claim, response, projected_action),
         request,
+        source=source,
     )
     return response
 
@@ -326,11 +340,12 @@ def decide_collaboration_request(
     payload: DecideCollaborationRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    source: StaffAgentDraftSource | None = None,
 ) -> CollaborationMutationResponse:
     key = require_idempotency_key(idempotency_key)
     route = f'/api/v1/workbench/claims/{claim_id}/collaboration-requests/{request_id}'
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
-    replay = _retry(repository, principal, route, key, fingerprint)
+    replay = _retry(repository, principal, route, key, fingerprint, source)
     if replay is not None:
         return replay
     claim = _claim(repository, principal, claim_id)
@@ -425,6 +440,7 @@ def decide_collaboration_request(
         if request.kind is CollaborationRequestKind.TRANSFER
         and payload.decision is CollaborationRequestStatus.ACCEPTED
         else None,
+        source=source,
     )
     return response
 
@@ -436,11 +452,12 @@ def requeue_claim(
     payload: RequeueClaimRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    source: StaffAgentDraftSource | None = None,
 ) -> CollaborationMutationResponse:
     key = require_idempotency_key(idempotency_key)
     route = f'/api/v1/workbench/claims/{claim_id}/requeue'
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
-    replay = _retry(repository, principal, route, key, fingerprint)
+    replay = _retry(repository, principal, route, key, fingerprint, source)
     if replay is not None:
         return replay
     claim = _claim(repository, principal, claim_id)
@@ -511,5 +528,6 @@ def requeue_claim(
         request,
         coworkers=coworkers,
         handoff=handoff,
+        source=source,
     )
     return response

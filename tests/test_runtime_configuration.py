@@ -63,6 +63,55 @@ def _resolver(
     )
 
 
+def test_runtime_snapshot_selects_each_keyed_model_profile() -> None:
+    configurations = ConfigurationRepository()
+    releases = ReleaseSetRepository()
+    records: dict[str, ConfigurationRecord] = {}
+    for profile_id in ('qwen-local', 'nowcoding-gpt56terra'):
+        record = ConfigurationRecord(
+            configuration_id=f'cfg_{profile_id}',
+            domain='model',
+            configuration_key=profile_id,
+            revision=1,
+            state=ConfigurationState.PUBLISHED,
+            impact=ConfigurationImpact.HIGH,
+            values={'profile_id': profile_id},
+            author='test-admin',
+            reason='Publish a selectable model profile.',
+            updated_at=now_utc(),
+        )
+        configurations.create(record)
+        records[profile_id] = record
+    releases.create(
+        ReleaseSetRecord(
+            release_set_id='rel_model_catalog',
+            environment='test',
+            runtime_profile='fixture',
+            revision=1,
+            state=ReleaseSetState.PUBLISHED,
+            configuration_refs={
+                f'model:{profile_id}': ConfigurationReference(
+                    configuration_id=record.configuration_id,
+                    revision=record.revision,
+                )
+                for profile_id, record in records.items()
+            },
+            author='test-admin',
+            reason='Activate both model profiles.',
+            effective_time=now_utc(),
+            updated_at=now_utc(),
+        )
+    )
+
+    snapshot = _resolver(configurations, releases).snapshot()
+
+    default_model = snapshot.model()
+    assert default_model is not None
+    assert default_model.values['profile_id'] == 'qwen-local'
+    assert snapshot.model('qwen-local') == records['qwen-local']
+    assert snapshot.model('nowcoding-gpt56terra') == records['nowcoding-gpt56terra']
+
+
 def _knowledge(
     knowledge_id: str,
     version: str,

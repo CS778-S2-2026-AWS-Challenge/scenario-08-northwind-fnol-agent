@@ -635,6 +635,8 @@ def test_repository_history_reconciles_branch_corrections_for_both_profiles(
     ('message', 'support_need', 'reason'),
     [
         ('I need to speak to a person.', 'human_requested', 'explicit_human_request'),
+        ('I want to speak to a staff member.', 'human_requested', 'explicit_human_request'),
+        ('I need a claims professional.', 'human_requested', 'explicit_human_request'),
         ('I need an interpreter to continue.', 'accessibility_required', 'accessibility_need'),
         ('I am overwhelmed and cannot cope.', 'distress', 'distress'),
     ],
@@ -668,6 +670,7 @@ def test_claimant_support_message_enters_deterministic_branch_boundary(
     'message',
     [
         'I do not need to speak to a person.',
+        'I do not need to speak to a staff member.',
         'Another person saw the collision.',
         'I am not distressed and can continue.',
     ],

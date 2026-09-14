@@ -154,9 +154,25 @@ def _claimant_form(
     repository: PersistenceRepository,
     claim: WorkingClaim,
 ) -> dict[str, StructuredFormField]:
-    """Keep field provenance but never expose internal retrieval identifiers to a claimant."""
+    """Return only facts that have actually been recorded in the conversation.
 
-    return project_claimant_form_fields(repository, claim, claim.form)
+    The branch registry describes possible fields, not customer-visible Claim
+    facts.  Empty or missing registry entries must stay out of the claimant
+    panel; the next question belongs in the Agent response and progress
+    projection, not in a list of ``Needed now`` placeholders.
+    """
+
+    projected = project_claimant_form_fields(repository, claim, claim.form)
+
+    def has_recorded_value(field: StructuredFormField) -> bool:
+        value = field.value
+        if value is not None and value != '' and value != [] and value != {}:
+            return True
+        return any(assertion.reported_text for assertion in field.assertions)
+
+    return {
+        field_code: field for field_code, field in projected.items() if has_recorded_value(field)
+    }
 
 
 def _claimant_contents_items(

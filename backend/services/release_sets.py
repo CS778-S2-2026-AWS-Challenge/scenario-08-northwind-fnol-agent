@@ -262,15 +262,25 @@ def snapshot(
     if release is None:
         raise _error(404, 'ACTIVE_RELEASE_SET_NOT_FOUND', 'No published release set is available.')
     resolved: dict[str, object] = {}
-    for domain, reference in release.configuration_refs.items():
+    for slot, reference in release.configuration_refs.items():
         configuration = configurations.get(reference.configuration_id, reference.revision)
-        if configuration is None or configuration.state is not ConfigurationState.PUBLISHED:
+        expected_domain = 'model' if slot.startswith('model:') else slot
+        expected_profile = slot.partition(':')[2] if slot.startswith('model:') else None
+        if (
+            configuration is None
+            or configuration.domain != expected_domain
+            or configuration.state is not ConfigurationState.PUBLISHED
+            or (
+                expected_profile is not None
+                and configuration.values.get('profile_id') != expected_profile
+            )
+        ):
             raise _error(
                 409,
                 'RELEASE_SET_CONFIGURATION_UNAVAILABLE',
                 'A published release references a configuration that is no longer available.',
             )
-        resolved[domain] = configuration
+        resolved[slot] = configuration
     resolved_knowledge: dict[str, KnowledgeSourceRecord] = {}
     _assert_knowledge_references_published(knowledge, release.knowledge_refs)
     for product, knowledge_reference in release.knowledge_refs.items():
@@ -306,11 +316,22 @@ def _assert_references_exist(
     configurations: ConfigurationRepository,
     references: Mapping[str, ConfigurationReference],
 ) -> None:
-    for domain, reference in references.items():
+    for slot, reference in references.items():
         configuration = configurations.get(reference.configuration_id, reference.revision)
-        if configuration is None or configuration.domain != domain:
+        expected_domain = 'model' if slot.startswith('model:') else slot
+        expected_profile = slot.partition(':')[2] if slot.startswith('model:') else None
+        if (
+            configuration is None
+            or configuration.domain != expected_domain
+            or (
+                expected_profile is not None
+                and configuration.values.get('profile_id') != expected_profile
+            )
+        ):
             raise _error(
-                422, 'RELEASE_SET_CONFIGURATION_NOT_FOUND', f'No configuration exists for {domain}.'
+                422,
+                'RELEASE_SET_CONFIGURATION_NOT_FOUND',
+                f'No configuration exists for {slot}.',
             )
 
 
@@ -319,11 +340,11 @@ def _assert_references_published(
     references: Mapping[str, ConfigurationReference],
 ) -> None:
     _assert_references_exist(configurations, references)
-    for domain, reference in references.items():
+    for slot, reference in references.items():
         configuration = configurations.get(reference.configuration_id, reference.revision)
         if configuration is None or configuration.state is not ConfigurationState.PUBLISHED:
             raise _error(
-                422, 'RELEASE_SET_CONFIGURATION_NOT_PUBLISHED', f'{domain} is not published.'
+                422, 'RELEASE_SET_CONFIGURATION_NOT_PUBLISHED', f'{slot} is not published.'
             )
 
 

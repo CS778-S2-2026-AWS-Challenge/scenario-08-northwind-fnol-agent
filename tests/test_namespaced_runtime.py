@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -9,6 +10,7 @@ from backend.adapters.model_gateway import ModelGatewayRegistry
 from backend.app import create_app
 from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
 from backend.core.errors import ApiError
+from backend.domain.agent_action_registry import registered_actions
 from backend.domain.agent_tool_registry import tool_contract
 from backend.domain.configuration import (
     ConfigurationImpact,
@@ -22,14 +24,18 @@ from backend.domain.model_gateway import (
     ModelResponse,
     ModelToolCall,
 )
+from backend.domain.release import ConfigurationReference, ReleaseSetRecord, ReleaseSetState
+from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID, load_motor_claimant_prompt
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.release_set import ReleaseSetRepository
 from backend.services.model_profiles import (
     _settings_configuration,
     model_catalog,
     model_configuration,
     select_model_profile,
 )
+from backend.services.runtime_agent_policy import registered_agent_tool_names
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationSnapshot,
@@ -84,7 +90,160 @@ class SequenceToolGateway:
         return self.responses.pop(0)
 
 
-def test_namespaced_runtime_persists_tool_loop_without_legacy_decision_or_revision() -> None:
+class RepeatableToolGateway:
+    """Provider-neutral gateway used to prove per-turn model selection."""
+
+    def __init__(self) -> None:
+        self.requests: list[ModelRequest] = []
+        self.turn_number = 0
+
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return ModelCapabilities(structured_output=True, tools=True)
+
+    def complete(self, request: ModelRequest) -> ModelResponse:
+        self.requests.append(request)
+        if request.required_tool_name:
+            return ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id=f'call-read-{len(self.requests)}',
+                        name='claim.read',
+                        arguments={},
+                    )
+                ],
+                provider_model=request.model_profile_id,
+                provider_request_id=f'request-{len(self.requests)}',
+            )
+        self.turn_number += 1
+        return ModelResponse(
+            completion_status=ModelCompletionStatus.COMPLETE,
+            structured_output={
+                'action_code': 'conversation.answer',
+                'runtime_action_code': 'runtime.continue',
+                'reason_codes': ['CLAIM_CONTEXT_READ'],
+                'customer_reason': 'The current report was reviewed.',
+                'customer_response': f'Turn {self.turn_number} reviewed.',
+                'customer_next_step': {
+                    'status': 'continue_current_report',
+                    'summary': 'Continue the report when ready.',
+                    'responsible_party': 'claimant',
+                    'required_items': [],
+                },
+                'form_changes': [],
+                'contents_item_changes': [],
+                'source_refs': [],
+                'handoff_priority': None,
+            },
+            provider_model=request.model_profile_id,
+            provider_request_id=f'request-{len(self.requests)}',
+        )
+
+
+def published_model_catalog(
+    settings: Settings,
+) -> tuple[ConfigurationRepository, ReleaseSetRepository]:
+    configurations = ConfigurationRepository()
+    releases = ReleaseSetRepository()
+    common = {
+        'protocol': 'openai_compatible',
+        'purpose': 'agent_turn',
+        'privacy_class': 'synthetic_fnol',
+        'prompt_version': MOTOR_CLAIMANT_PROMPT_ID,
+        'evaluation_status': 'configured',
+        'timeout_seconds': 30.0,
+        'structured_output': True,
+        'tools': True,
+    }
+    records: dict[str, ConfigurationRecord] = {}
+    for profile_id, model_identifier, base_url in (
+        ('qwen-local', 'qwen3.8-27b', 'http://100.71.25.5:8080/v1'),
+        ('nowcoding-gpt56terra', 'gpt-5.6-terra', 'https://nowcoding.ai/v1'),
+    ):
+        record = ConfigurationRecord(
+            configuration_id=f'cfg_{profile_id}',
+            domain='model',
+            configuration_key=profile_id,
+            revision=1,
+            state=ConfigurationState.PUBLISHED,
+            impact=ConfigurationImpact.HIGH,
+            values={
+                **common,
+                'provider': 'qwen-local' if profile_id == 'qwen-local' else 'nowcoding',
+                'model_identifier': model_identifier,
+                'base_url': base_url,
+                'profile_id': profile_id,
+                'credential_environment_variable': (
+                    None if profile_id == 'qwen-local' else 'NORTHWIND_MODEL_API_KEY'
+                ),
+            },
+            author='test',
+            reason='Published test profile.',
+            updated_at=datetime.now(UTC),
+        )
+        configurations.create(record)
+        records[f'model:{profile_id}'] = record
+    agent_values = {
+        'agent_instruction': {
+            'prompt_version': MOTOR_CLAIMANT_PROMPT_ID,
+            'purpose': 'claimant_agent',
+            'system_prompt': load_motor_claimant_prompt(),
+        },
+        'agent_tool_policy': {
+            'policy_version': 'test-policy-v1',
+            'allowed_action_codes': list(registered_actions()),
+            'allowed_tool_names': list(registered_agent_tool_names()),
+        },
+        'agent_rule': {
+            'rules_version': 'test-rules-v1',
+            'disabled_rule_ids': [],
+            'observation_rule_ids': [],
+        },
+        'feature': {
+            'feature_version': 'test-features-v1',
+            'model_assisted_turns': True,
+            'knowledge_retrieval': True,
+        },
+    }
+    for domain, values in agent_values.items():
+        record = ConfigurationRecord(
+            configuration_id=f'cfg_{domain}',
+            domain=domain,
+            revision=1,
+            state=ConfigurationState.PUBLISHED,
+            impact=ConfigurationImpact.HIGH,
+            values=values,
+            author='test',
+            reason='Publish the complete test Agent policy.',
+            updated_at=datetime.now(UTC),
+        )
+        configurations.create(record)
+        records[domain] = record
+    releases.create(
+        ReleaseSetRecord(
+            release_set_id='rel_model_catalog',
+            environment=settings.environment,
+            runtime_profile=settings.data_runtime_profile.value,
+            revision=1,
+            state=ReleaseSetState.PUBLISHED,
+            configuration_refs={
+                slot: ConfigurationReference(
+                    configuration_id=record.configuration_id,
+                    revision=record.revision,
+                )
+                for slot, record in records.items()
+            },
+            author='test',
+            reason='Publish both selectable model profiles with one complete Agent policy.',
+            effective_time=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+    )
+    return configurations, releases
+
+
+def test_namespaced_runtime_applies_claim_mutation_and_persists_runtime_records() -> None:
     gateway = SequenceToolGateway()
     registry = ModelGatewayRegistry()
     registry.register('openai_compatible', lambda _config: gateway)
@@ -137,16 +296,16 @@ def test_namespaced_runtime_persists_tool_loop_without_legacy_decision_or_revisi
         )
         assert response.status_code == 200, response.text
         body = response.json()
-        assert body['claim_revision'] == 1
-        assert body['decision'] is None
+        assert body['claim_revision'] == 2
+        assert body['decision'] is not None
         assert body['agent_message']['content']['text'] == (
             'I have read the current claim context.'
         )
 
         stored_claim = repository.get_claim(claim_id, 'cus_demo')
         assert stored_claim is not None
-        assert stored_claim.revision == 1
-        assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
+        assert stored_claim.revision == 2
+        assert len(repository.list_agent_decisions(claim_id, 'cus_demo')) == 1
         trace = repository.find_runtime_trace_for_trigger(
             claim_id,
             body['claimant_message']['message_id'],
@@ -156,10 +315,23 @@ def test_namespaced_runtime_persists_tool_loop_without_legacy_decision_or_revisi
         assert trace.tool_name == 'claim.read'
         assert trace.action_code == 'conversation.answer'
         assert trace.runtime_action_code == 'runtime.continue'
+        runtime_turn = repository.get_runtime_turn_for_trigger(
+            claim_id,
+            body['claimant_message']['message_id'],
+            'cus_demo',
+        )
+        assert runtime_turn is not None
+        assert runtime_turn.execution_plan.status == 'executed'
+        assert runtime_turn.result.resulting_claim_revision == 2
+        assert runtime_turn.tool_results[0].output['claim_id'] == claim_id
+        assert runtime_turn.tool_results[0].output['workflow_state'] == 'collecting'
+        assert runtime_turn.tool_results[0].output['form'] == {}
 
         assert len(gateway.requests) == 2
+
         first = gateway.requests[0]
         assert [tool.name for tool in first.tools] == ['claim.read']
+        assert first.required_tool_name == 'claim.read'
         assert first.response_schema is None
         second = gateway.requests[1]
         assert second.response_schema is not None
@@ -185,8 +357,82 @@ def test_namespaced_runtime_persists_tool_loop_without_legacy_decision_or_revisi
         assert len(gateway.requests) == 2
 
 
+def test_model_profile_can_change_between_turns_without_new_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('NORTHWIND_MODEL_API_KEY', 'test-gpt-key')
+    gateway = RepeatableToolGateway()
+    registry = ModelGatewayRegistry()
+    registry.register('openai_compatible', lambda _config: gateway)
+    settings = Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_protocol_adapter='openai_compatible',
+        model_profile_id='qwen-local',
+        model_base_url='http://model.example.test/v1',
+        model_identifier='qwen3.8-27b',
+        model_supports_tools=True,
+    )
+    configurations, releases = published_model_catalog(settings)
+
+    with TestClient(
+        create_app(
+            settings,
+            repository=FixtureRepository(),
+            configuration_repository=configurations,
+            release_set_repository=releases,
+            model_gateway_registry=registry,
+        )
+    ) as client:
+        headers = {'Authorization': 'Bearer synthetic-claimant'}
+        created = client.post(
+            '/api/v1/claims',
+            headers={**headers, 'Idempotency-Key': 'switch-claim'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'model_profile_id': 'qwen-local'},
+        )
+        assert created.status_code == 201, created.text
+        claim_id = created.json()['claim']['claim_id']
+        session_id = created.json()['session']['session_id']
+
+        for index, profile_id in enumerate(('qwen-local', 'nowcoding-gpt56terra'), start=1):
+            response = client.post(
+                f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+                headers={
+                    **headers,
+                    'Idempotency-Key': f'switch-message-{index}',
+                    'If-Match': str(index),
+                },
+                json={
+                    'client_message_id': f'switch-client-{index}',
+                    'model_profile_id': profile_id,
+                    'content': {'type': 'text', 'text': f'Please review turn {index}.'},
+                },
+            )
+            assert response.status_code == 200, response.text
+
+        stored_claim = client.get(f'/api/v1/claims/{claim_id}', headers=headers)
+        assert stored_claim.status_code == 200
+        assert stored_claim.json()['revision'] == 3
+        session = client.get(f'/api/v1/claims/{claim_id}/sessions/{session_id}', headers=headers)
+        assert session.status_code == 200
+        assert session.json()['model_profile_id'] == 'nowcoding-gpt56terra'
+        assert [request.model_profile_id for request in gateway.requests] == [
+            'qwen-local',
+            'qwen-local',
+            'nowcoding-gpt56terra',
+            'nowcoding-gpt56terra',
+        ]
+        second_turn_content = gateway.requests[2].messages[1].content
+        assert second_turn_content is not None
+        second_turn_context = json.loads(second_turn_content)
+        history = second_turn_context['conversation_history']
+        assert len(history) == 2
+        history_actors = {json.loads(item['content'])['actor'] for item in history}
+        assert history_actors == {'claimant', 'agent'}
+
+
 def test_session_model_catalog_exposes_qwen_default_and_gpt_selection() -> None:
-    configurations = ConfigurationRepository()
     settings = Settings(
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
@@ -197,55 +443,20 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection() -> None:
         model_identifier='qwen3.8-27b',
         model_supports_tools=True,
     )
-    common = {
-        'protocol': 'openai_compatible',
-        'purpose': 'agent_turn',
-        'privacy_class': 'synthetic_fnol',
-        'prompt_version': settings.model_prompt_version,
-        'evaluation_status': 'configured',
-        'timeout_seconds': 30.0,
-        'structured_output': True,
-        'tools': True,
-    }
-    for profile_id, model_identifier, base_url in (
-        ('qwen-local', 'qwen3.8-27b', 'http://100.71.25.5:8080/v1'),
-        ('nowcoding-gpt54mini', 'gpt-5.4-mini', 'https://nowcoding.ai/v1'),
-    ):
-        configurations.create(
-            ConfigurationRecord(
-                configuration_id=f'cfg_{profile_id}',
-                domain='model',
-                configuration_key=profile_id,
-                revision=1,
-                state=ConfigurationState.PUBLISHED,
-                impact=ConfigurationImpact.HIGH,
-                values={
-                    **common,
-                    'provider': 'qwen-local' if profile_id == 'qwen-local' else 'nowcoding',
-                    'model_identifier': model_identifier,
-                    'base_url': base_url,
-                    'profile_id': profile_id,
-                    'credential_environment_variable': (
-                        None if profile_id == 'qwen-local' else 'NORTHWIND_MODEL_API_KEY'
-                    ),
-                },
-                author='test',
-                reason='Published test profile.',
-                updated_at=datetime.now(UTC),
-            )
-        )
+    configurations, releases = published_model_catalog(settings)
     registry = ModelGatewayRegistry()
     registry.register('openai_compatible', lambda _config: SequenceToolGateway())
     app = create_app(
         settings,
         repository=FixtureRepository(),
         configuration_repository=configurations,
+        release_set_repository=releases,
         model_gateway_registry=registry,
     )
     request = SimpleNamespace(app=app)
-    selected = model_configuration(request, 'nowcoding-gpt54mini')
+    selected = model_configuration(request, 'nowcoding-gpt56terra')
     assert selected is not None
-    assert selected.model_identifier == 'gpt-5.4-mini'
+    assert selected.model_identifier == 'gpt-5.6-terra'
     assert model_configuration(request, 'missing-profile') is None
     with TestClient(app) as client:
         headers = {'Authorization': 'Bearer synthetic-claimant'}
@@ -255,7 +466,7 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection() -> None:
         assert body['default_model_profile_id'] == 'qwen-local'
         assert [item['id'] for item in body['models']] == [
             'qwen-local',
-            'nowcoding-gpt54mini',
+            'nowcoding-gpt56terra',
         ]
         created = client.post(
             '/api/v1/claims',
@@ -264,11 +475,11 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection() -> None:
                 'channel': 'web_agent',
                 'locale': 'en-NZ',
                 'incident_type': 'motor',
-                'model_profile_id': 'nowcoding-gpt54mini',
+                'model_profile_id': 'nowcoding-gpt56terra',
             },
         )
         assert created.status_code == 201
-        assert created.json()['session']['model_profile_id'] == 'nowcoding-gpt54mini'
+        assert created.json()['session']['model_profile_id'] == 'nowcoding-gpt56terra'
 
         unknown = client.post(
             '/api/v1/claims',
@@ -281,6 +492,26 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection() -> None:
         )
         assert unknown.status_code == 422
         assert unknown.json()['error']['code'] == 'MODEL_PROFILE_UNAVAILABLE'
+
+    gpt_default_app = create_app(
+        replace(settings, model_profile_id='nowcoding-gpt56terra'),
+        repository=FixtureRepository(),
+        configuration_repository=configurations,
+        release_set_repository=releases,
+        model_gateway_registry=registry,
+    )
+    with TestClient(gpt_default_app) as client:
+        capabilities = client.get(
+            '/api/v1/claims/capabilities',
+            headers={'Authorization': 'Bearer synthetic-claimant'},
+        )
+
+    assert capabilities.status_code == 200
+    assert capabilities.json()['default_model_profile_id'] == 'nowcoding-gpt56terra'
+    assert [item['id'] for item in capabilities.json()['models']] == [
+        'nowcoding-gpt56terra',
+        'qwen-local',
+    ]
 
 
 def test_model_catalog_filters_unpublished_and_invalid_profiles_before_bootstrap() -> None:

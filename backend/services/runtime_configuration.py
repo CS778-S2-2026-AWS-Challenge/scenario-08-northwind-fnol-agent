@@ -152,21 +152,27 @@ class RuntimeConfigurationResolver:
             )
 
         resolved: dict[str, ConfigurationRecord] = {}
-        for domain, reference in release.configuration_refs.items():
+        for slot, reference in release.configuration_refs.items():
             configuration = self._configuration_repository.get(
                 reference.configuration_id,
                 reference.revision,
             )
+            expected_domain = 'model' if slot.startswith('model:') else slot
+            expected_profile = slot.partition(':')[2] if slot.startswith('model:') else None
             if (
                 configuration is None
-                or configuration.domain != domain
+                or configuration.domain != expected_domain
                 or configuration.state is not ConfigurationState.PUBLISHED
+                or (
+                    expected_profile is not None
+                    and configuration.values.get('profile_id') != expected_profile
+                )
             ):
                 raise RuntimeConfigurationResolutionError(
                     f'Release set {release.release_set_id!r} references an unavailable '
-                    f'published configuration for {domain!r}.'
+                    f'published configuration for {slot!r}.'
                 )
-            resolved[domain] = configuration
+            resolved[slot] = configuration
         resolved_knowledge: dict[str, KnowledgeSourceRecord] = {}
         for product, knowledge_reference in release.knowledge_refs.items():
             if self._knowledge_repository is None:

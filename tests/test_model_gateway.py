@@ -16,7 +16,7 @@ from backend.adapters.model_gateway import (
 )
 from backend.app import create_app
 from backend.core.auth import Principal
-from backend.core.config import AgentRuntimeProfile, Settings
+from backend.core.config import AgentRuntimeProfile, DataRuntimeProfile, IdentityMode, Settings
 from backend.core.model_gateway import ConfigurationBackedModelGateway
 from backend.domain.branch_registry import BranchRuleEvaluator
 from backend.domain.configuration import (
@@ -64,6 +64,7 @@ from backend.domain.models import (
     NeededFor,
     ResponsibleParty,
     StructuredFormField,
+    SupportNeed,
     WorkingClaim,
 )
 from backend.prompts import (
@@ -624,7 +625,10 @@ def test_bedrock_converse_rejects_malformed_provider_payloads(
 
 
 def test_openai_compatible_gateway_normalises_tool_calls() -> None:
-    def handler(_request: httpx.Request) -> httpx.Response:
+    observed: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed['payload'] = json.loads(request.content)
         return httpx.Response(
             200,
             json={
@@ -665,11 +669,36 @@ def test_openai_compatible_gateway_normalises_tool_calls() -> None:
                     },
                 )
             ],
+            required_tool_name='find_policy',
         )
     )
 
+    payload = cast(dict[str, object], observed['payload'])
+    assert payload['tool_choice'] == {
+        'type': 'function',
+        'function': {'name': 'find_policy'},
+    }
+    assert payload['parallel_tool_calls'] is False
     assert response.tool_calls[0].name == 'find_policy'
     assert response.tool_calls[0].arguments == {'policy_id': 'pol-1'}
+
+
+def test_openai_compatible_rejects_required_tool_outside_request_manifest() -> None:
+    gateway = OpenAICompatibleModelGateway(
+        gateway_config(),
+        transport=httpx.MockTransport(lambda _: httpx.Response(500)),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(
+                messages=[ModelMessage(role=ModelRole.USER, content='Read the claim.')],
+                tools=[ModelTool(name='claim.read', description='Read.', input_schema={})],
+                required_tool_name='policy.read',
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
 
 
 @pytest.mark.parametrize(
@@ -1016,6 +1045,57 @@ def _runtime_model_output() -> dict[str, object]:
     }
 
 
+def test_gateway_runtime_handoff_proposal_remains_advisory() -> None:
+    gateway = RuntimeSequenceGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='handoff-read',
+                        name='claim.read',
+                        arguments={},
+                    )
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output={
+                    'action_code': 'human.create_handoff',
+                    'runtime_action_code': 'runtime.pause_for_review',
+                    'reason_codes': ['HUMAN_SUPPORT_REQUESTED'],
+                    'customer_reason': 'The claimant asked for human support.',
+                    'customer_response': 'I will connect you with a claims professional.',
+                    'customer_next_step': {
+                        'status': 'human_support_requested',
+                        'summary': 'A claims professional will continue with you.',
+                        'responsible_party': 'claims_professional',
+                        'required_items': [],
+                    },
+                    'form_changes': [],
+                    'contents_item_changes': [],
+                    'source_refs': [],
+                    'handoff_priority': 'standard',
+                },
+            ),
+        ]
+    )
+    proposal = GatewayAgent(gateway).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim(),
+            session_id='ses-runtime-handoff',
+            trigger_message_id='msg-runtime-handoff',
+            message_text='Please connect me with a person.',
+            evidence_refs=[],
+        )
+    )
+
+    assert proposal.action is AgentAction.HANDOFF
+    assert proposal.action_code == 'human.create_handoff'
+    assert proposal.controlled_rule_authorised is False
+    assert validate_proposal(proposal).outcome is AuthorityOutcome.BLOCKED
+
+
 class FailingGateway:
     def __init__(self, code: ModelGatewayErrorCode, *, retryable: bool = False) -> None:
         self.code = code
@@ -1033,6 +1113,8 @@ class FailingGateway:
 
 def model_gateway_settings(protocol: str) -> Settings:
     return Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
         model_protocol_adapter=protocol,
         model_base_url='https://model.example.test/v1',
@@ -1284,6 +1366,7 @@ def submit_model_message(
     *,
     protocol: str,
     message_text: str = 'A synthetic rear-end incident.',
+    tools: bool = False,
 ) -> tuple[httpx.Response, FixtureRepository, WorkingClaim, str, str]:
     registry = ModelGatewayRegistry()
     registry.register(protocol, lambda _config: gateway)
@@ -1291,7 +1374,7 @@ def submit_model_message(
     headers = {'Authorization': 'Bearer synthetic-claimant'}
     with TestClient(
         create_app(
-            model_gateway_settings(protocol),
+            replace(model_gateway_settings(protocol), model_supports_tools=tools),
             repository=repository,
             model_gateway_registry=registry,
         ),
@@ -1634,6 +1717,8 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
         'knowledge_limitations',
         'tool_results',
         'provenance_messages',
+        'conversation_history',
+        'field_value_contracts',
     }
     assert model_context['branch'] is None
     assert model_context['evidence_reference_count'] == 1
@@ -2181,23 +2266,22 @@ def test_deterministic_interrupts_precede_model_gateway(
         gateway = StaticGateway(ModelResponse(structured_output=None))
     protocol = f'interrupt_{failure_kind}_{expected_action.lower()}'
 
-    response, repository, before_claim, claim_id, session_id = submit_model_message(
+    response, repository, before_claim, claim_id, _session_id = submit_model_message(
         gateway,
         protocol=protocol,
         message_text=message_text,
     )
 
-    expected_status = 503 if failure_kind == 'timeout' else 502
-    assert response.status_code == expected_status
-    assert_model_message_failure_is_atomic(
-        repository,
-        before_claim,
-        claim_id,
-        session_id,
-        protocol,
-    )
-    assert repository.list_handoffs(claim_id, 'cus_demo') == []
-    assert gateway.call_count == 1
+    assert response.status_code == 200
+    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert stored_claim is not None
+    assert stored_claim.revision == before_claim.revision + 1
+    handoffs = repository.list_handoffs(claim_id, 'cus_demo')
+    assert len(handoffs) == 1
+    assert handoffs[0].type.value == expected_type
+    assert handoffs[0].trigger.value == expected_trigger
+    assert handoffs[0].reason_codes == [expected_reason]
+    assert gateway.call_count == 0
 
 
 @pytest.mark.parametrize(
@@ -2262,6 +2346,100 @@ def test_model_proposed_handoffs_remain_advisory(action: str, reason_code: str) 
     assert candidate.proposal_source is AgentProposalSource.MODEL_GATEWAY
     assert authority.outcome is AuthorityOutcome.REVIEW_REQUIRED
     assert authorised_state_changes(candidate, authority) == []
+
+
+def test_namespaced_model_handoff_on_routine_message_does_not_create_handoff() -> None:
+    gateway = RuntimeSequenceGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='routine-read',
+                        name='claim.read',
+                        arguments={},
+                    )
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output={
+                    'action_code': 'human.create_handoff',
+                    'runtime_action_code': 'runtime.pause_for_review',
+                    'reason_codes': ['HUMAN_SUPPORT_REQUESTED'],
+                    'customer_reason': 'Human support was requested.',
+                    'customer_response': 'A staff member will review this report.',
+                    'customer_next_step': {
+                        'status': 'human_support_requested',
+                        'summary': 'A staff member will review this report.',
+                        'responsible_party': 'claims_professional',
+                        'required_items': [],
+                    },
+                    'form_changes': [],
+                    'contents_item_changes': [],
+                    'source_refs': [],
+                    'handoff_priority': 'standard',
+                },
+            ),
+        ]
+    )
+
+    response, repository, before_claim, claim_id, _session_id = submit_model_message(
+        gateway,
+        protocol='runtime_forged_handoff',
+        message_text='A routine update with no request for support.',
+        tools=True,
+    )
+
+    assert response.status_code == 200
+    assert repository.list_handoffs(claim_id, 'cus_demo') == []
+    body = response.json()
+    safe_response = (
+        'I have recorded what you shared, but I could not safely apply the proposed next '
+        'step. Your current report remains available.'
+    )
+    assert body['handoff'] is None
+    assert body['agent_message']['content']['text'] == safe_response
+    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert stored_claim is not None
+    assert stored_claim.revision == before_claim.revision + 1
+    assert stored_claim.customer_next_step.status == 'action_not_applied'
+    assert stored_claim.customer_next_step.responsible_party is ResponsibleParty.SYSTEM
+    messages = repository.list_messages(claim_id, _session_id, 'cus_demo')
+    assert any(message.actor is ActorType.CLAIMANT for message in messages)
+    agent_messages = [message for message in messages if message.actor is ActorType.AGENT]
+    assert len(agent_messages) == 1
+    assert agent_messages[0].content['text'] == safe_response
+    runtime_turn = repository.get_runtime_turn_for_trigger(
+        claim_id,
+        body['claimant_message']['message_id'],
+        'cus_demo',
+    )
+    assert runtime_turn is not None
+    assert runtime_turn.execution_plan.status == 'rejected'
+    assert runtime_turn.result.status == 'blocked'
+    assert runtime_turn.result.customer_response == safe_response
+    assert 'staff member' not in runtime_turn.result.customer_response.casefold()
+
+
+def test_explicit_human_request_uses_runtime_interrupt_before_model_gateway() -> None:
+    gateway = RuntimeSequenceGateway([])
+
+    response, repository, before_claim, claim_id, _session_id = submit_model_message(
+        gateway,
+        protocol='runtime_explicit_handoff',
+        message_text='I want to speak to a staff member now.',
+        tools=True,
+    )
+
+    assert response.status_code == 200
+    assert gateway.requests == []
+    handoffs = repository.list_handoffs(claim_id, 'cus_demo')
+    assert len(handoffs) == 1
+    assert handoffs[0].support_need is SupportNeed.HUMAN_REQUESTED
+    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert stored_claim is not None
+    assert stored_claim.revision == before_claim.revision + 1
 
 
 def test_legacy_model_motor_journey_is_rejected_before_side_effects() -> None:
@@ -2684,6 +2862,75 @@ def test_snapshot_gateway_rejects_missing_model_configuration() -> None:
     assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
 
 
+def test_explicit_unpublished_profile_fails_closed_instead_of_falling_back() -> None:
+    settings = Settings(
+        environment='test',
+        data_runtime_profile=DataRuntimeProfile.FIXTURE,
+        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_protocol_adapter='openai_compatible',
+        model_profile_id='qwen-local',
+        model_provider='qwen-local',
+        model_identifier='qwen3.8-27b',
+        model_base_url='http://qwen.example.test/v1',
+    )
+    repository = ConfigurationRepository()
+    repository.create(
+        ConfigurationRecord(
+            configuration_id='cfg_qwen_active',
+            configuration_key='qwen-local',
+            revision=1,
+            state=ConfigurationState.PUBLISHED,
+            impact=ConfigurationImpact.HIGH,
+            domain='model',
+            values={
+                'protocol': 'openai_compatible',
+                'provider': 'qwen-local',
+                'model_identifier': 'qwen3.8-27b',
+                'base_url': 'http://qwen.example.test/v1',
+                'credential_environment_variable': None,
+                'profile_id': 'qwen-local',
+                'purpose': 'agent_turn',
+                'privacy_class': 'synthetic_fnol',
+                'prompt_version': settings.model_prompt_version,
+                'evaluation_status': 'configured',
+                'timeout_seconds': 30,
+                'structured_output': True,
+                'tools': True,
+            },
+            author='test',
+            reason='Published Qwen profile must not capture an explicit GPT turn.',
+            updated_at=now_utc(),
+        )
+    )
+    constructed: list[ModelGatewayConfig] = []
+    registry = ModelGatewayRegistry()
+
+    def build_recording_gateway(config: ModelGatewayConfig) -> ModelGateway:
+        constructed.append(config)
+        return StaticGateway(
+            ModelResponse(text='ok', completion_status=ModelCompletionStatus.COMPLETE)
+        )
+
+    registry.register('openai_compatible', build_recording_gateway)
+    gateway = ConfigurationBackedModelGateway(
+        settings,
+        repository,
+        registry,
+        runtime_configuration_resolver=RuntimeConfigurationResolver(
+            repository,
+            ReleaseSetRepository(),
+            environment='test',
+            runtime_profile='fixture',
+        ),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(ModelRequest(model_profile_id='nowcoding-gpt54mini', messages=[]))
+
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
+    assert constructed == []
+
+
 def test_gateway_agent_requires_structured_output_at_composition() -> None:
     registry = ModelGatewayRegistry()
     registry.register(
@@ -2980,12 +3227,12 @@ def test_gateway_agent_preserves_claimant_support_and_marks_inference() -> None:
                     },
                     {
                         'field_code': 'property.affected_areas',
-                        'value': ['kitchen', 'roof'],
+                        'value': 'kitchen and roof',
                         'reported_text': 'the kitchen and roof',
                     },
                     {
                         'field_code': 'incident.injury_or_danger',
-                        'value': False,
+                        'value': 'false',
                         'reported_text': 'nobody was injured',
                     },
                     {
@@ -3019,7 +3266,20 @@ def test_gateway_agent_preserves_claimant_support_and_marks_inference() -> None:
     assert sources['incident.description'] is FormSource.CLAIMANT
     assert sources['claim.product_family'] is FormSource.CLAIMANT
     assert sources['property.affected_areas'] is FormSource.CLAIMANT
+    assert next(
+        change.value
+        for change in proposal.form_changes
+        if change.field_code == 'property.affected_areas'
+    ) == ['kitchen', 'roof']
     assert sources['incident.injury_or_danger'] is FormSource.CLAIMANT
+    assert (
+        next(
+            change.value
+            for change in proposal.form_changes
+            if change.field_code == 'incident.injury_or_danger'
+        )
+        is False
+    )
     assert sources['parties.other_parties'] is FormSource.CLAIMANT
     assert sources['incident.occurred_at'] is FormSource.INFERENCE
 

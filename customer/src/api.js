@@ -370,6 +370,7 @@ export function submitClaimMessage({
   sessionId,
   revision,
   text,
+  modelProfileId = null,
   idempotencyKey = requestId('turn'),
   clientMessageId = requestId('message'),
 }) {
@@ -383,6 +384,7 @@ export function submitClaimMessage({
       client_message_id: clientMessageId,
       content: { type: 'text', text },
       evidence_refs: [],
+      ...(modelProfileId ? { model_profile_id: modelProfileId } : {}),
     }),
   })
 }

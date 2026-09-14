@@ -15,9 +15,6 @@ from backend.services.runtime_configuration import (
     RuntimeConfigurationResolver,
 )
 
-DEFAULT_MODEL_PROFILE_ID = 'qwen-local'
-GPT_MODEL_PROFILE_ID = 'nowcoding-gpt54mini'
-
 
 def _settings_configuration(settings: Settings) -> ConfigurationRecord | None:
     if not settings.model_base_url or not settings.model_identifier:
@@ -60,10 +57,16 @@ def _parse(records: Iterable[ConfigurationRecord]) -> list[ConfigurationRecord]:
         except ValueError:
             continue
         parsed.append(record)
+    return sorted(parsed, key=lambda item: str(item.values.get('profile_id', '')))
+
+
+def _default_first(
+    records: list[ConfigurationRecord], default_profile_id: str
+) -> list[ConfigurationRecord]:
     return sorted(
-        parsed,
+        records,
         key=lambda item: (
-            item.values.get('profile_id') != DEFAULT_MODEL_PROFILE_ID,
+            item.values.get('profile_id') != default_profile_id,
             str(item.values.get('profile_id', '')),
         ),
     )
@@ -86,23 +89,53 @@ def model_catalog(request: object) -> list[ConfigurationRecord]:
             retryable=False,
         ) from error
     if snapshot.release_set_id is not None:
-        return _parse(snapshot.configurations.values())
-    records = _parse(app.state.configuration_repository.list_configurations('model'))
-    return records or ([bootstrap] if (bootstrap := _settings_configuration(settings)) else [])
+        records = _parse(snapshot.configurations.values())
+    else:
+        records = [
+            record
+            for record in _parse(app.state.configuration_repository.list_configurations('model'))
+            if record.values.get('profile_id') == settings.model_profile_id
+        ]
+        if not records and (bootstrap := _settings_configuration(settings)):
+            records = [bootstrap]
+    return _default_first(records, settings.model_profile_id)
+
+
+def default_model_profile_id(
+    request: object,
+    records: list[ConfigurationRecord] | None = None,
+) -> str | None:
+    """Return the deployment-selected default, or the first available profile."""
+    app = request.app  # type: ignore[attr-defined]
+    settings: Settings = app.state.settings
+    catalog = records if records is not None else model_catalog(request)
+    available = [
+        str(record.values['profile_id'])
+        for record in catalog
+        if record.values.get('profile_id')
+        and record.values.get('evaluation_status') == 'configured'
+    ]
+    if settings.model_profile_id in available:
+        return settings.model_profile_id
+    return available[0] if available else None
 
 
 def select_model_profile(request: object, requested: str | None) -> str:
     """Validate Session model selection against the current published catalog."""
     app = request.app  # type: ignore[attr-defined]
     settings: Settings = app.state.settings
-    selected = requested or DEFAULT_MODEL_PROFILE_ID
+    selected = requested or settings.model_profile_id
     if settings.agent_runtime_profile is not AgentRuntimeProfile.MODEL_GATEWAY:
         return selected
+    catalog = model_catalog(request)
     available = {
         str(record.values.get('profile_id'))
-        for record in model_catalog(request)
+        for record in catalog
         if record.values.get('profile_id')
+        and record.values.get('evaluation_status') == 'configured'
     }
+    if requested is None:
+        selected = default_model_profile_id(request, catalog) or selected
     if selected not in available:
         raise ApiError(
             status_code=422,

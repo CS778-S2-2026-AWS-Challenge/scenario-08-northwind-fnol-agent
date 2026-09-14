@@ -91,4 +91,11 @@
   --density-workbench-list-max-height: 70vh;
   --measure-reading: 75ch;
   --viewport-min-width: 320px;
+  --size-control-touch: 44px;
+  --size-header-compact: 52px;
+  --size-select-menu-min: 248px;
+  --size-select-menu-max: 320px;
+  --size-model-trigger-max: 200px;
+  --layer-popover: 20;
+  --size-popover-viewport-max: 80vw;
 }

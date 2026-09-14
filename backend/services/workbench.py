@@ -105,6 +105,8 @@ from backend.domain.workbench import (
     WorkbenchResponsibility,
     WorkbenchRetrievalsResponse,
     WorkbenchRiskSignal,
+    WorkbenchRuntimeWorkItem,
+    WorkbenchRuntimeWorkItemsResponse,
     WorkbenchSectionSummaries,
     WorkbenchSectionSummary,
     WorkbenchSessionsResponse,
@@ -132,6 +134,7 @@ from backend.domain.workbench_action_registry import (
 )
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.incomplete_claims import find_incomplete_recovery
+from backend.services.runtime_work_items import current_runtime_work_items
 from backend.services.support import decode_cursor, encode_cursor, now_utc
 from backend.services.tag_projection import project_staff_tags
 
@@ -2139,6 +2142,35 @@ def list_workbench_work_items(
     _authorised_claim(repository, principal, claim_id)
     items = repository.list_staff_actions(claim_id)
     items.sort(key=lambda item: (item.created_at, item.action_id))
+    return _page(items, limit, cursor)
+
+
+def list_workbench_runtime_work_items(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    limit: int,
+    cursor: str | None,
+) -> WorkbenchRuntimeWorkItemsResponse:
+    """Project claimant Runtime WorkItems after server-side reconciliation."""
+
+    claim = _authorised_claim(repository, principal, claim_id)
+    items = [
+        WorkbenchRuntimeWorkItem(
+            work_item_id=item.work_item_id,
+            subject_ref=item.subject_ref,
+            type=item.kind,
+            status=item.status,
+            owner_role=WorkbenchResponsibility(item.owner),
+            blocked_action=item.blocks_action,
+            source_refs=list(item.source_refs),
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+            completed_at=item.completed_at,
+        )
+        for item in current_runtime_work_items(repository, claim)
+    ]
+    items.sort(key=lambda item: (item.updated_at, item.work_item_id))
     return _page(items, limit, cursor)
 
 
