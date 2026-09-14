@@ -11,7 +11,8 @@ RUN python -m pip install --no-cache-dir -r backend/requirements.txt
 COPY backend backend
 COPY config config
 
-RUN addgroup --system northwind && adduser --system --ingroup northwind northwind
+RUN addgroup --system northwind && adduser --system --ingroup northwind northwind \
+    && install -d -o northwind -g northwind /var/lib/northwind
 USER northwind
 
 EXPOSE 8000

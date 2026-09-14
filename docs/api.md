@@ -1527,6 +1527,15 @@ The `standard_motor_intake` fixture route leaves a newly created Working Claim u
 online staff member takes ownership only through the explicit, authorised handoff-acceptance
 action. This preserves the same ownership contract for fixture and normal identity modes without
 pretending that the prototype has an approved workforce-allocation policy.
+The `standard_motor_intake` route leaves the created Working Claim unassigned. An authenticated
+claims professional must accept the Claim through the Workbench ownership boundary before taking
+staff-only actions. Claim creation does not invent a fixture staff identity or bypass the existing
+assignment contract.
+
+Claim creation records its completed external-claim disposition. If the claimant later opens a
+Staff Assistance handoff, that active handoff takes precedence in the Workbench projection until
+it is resolved: the queue is `processing` and the registered accept, claimant-message, and resolve
+actions remain available. A created Claim with no active handoff remains in the completed queue.
 
 Creates an external claim through the configured provider-neutral claims adapter. The endpoint
 accepts no provider payload. It derives the confirmed form, evidence references, pending evidence,

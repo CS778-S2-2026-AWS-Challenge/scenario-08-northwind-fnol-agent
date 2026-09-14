@@ -314,4 +314,20 @@ def test_backend_image_has_one_environment_selected_entrypoint() -> None:
     assert 'FROM python:3.12-slim' in dockerfile
     assert 'ARG DATA_RUNTIME_PROFILE' not in dockerfile
     assert 'USER northwind' in dockerfile
+    assert 'install -d -o northwind -g northwind /var/lib/northwind' in dockerfile
     assert 'backend.main:app' in dockerfile
+
+
+def test_vp_compose_profile_bootstraps_knowledge_and_mounts_durable_backend_state() -> None:
+    compose = (ROOT / 'docker-compose.yml').read_text(encoding='utf-8')
+
+    assert 'knowledge-init:' in compose
+    assert 'scripts/upload_knowledge_sources.py' in compose
+    assert 'config/knowledge-ingestion-requests/*.json' in compose
+    assert 'NORTHWIND_IDENTITY_MODE: normal' in compose
+    assert 'NORTHWIND_IDENTITY_DB_PATH: /var/lib/northwind/claimant-identity.sqlite3' in compose
+    assert 'NORTHWIND_STAFF_IDENTITY_DB_PATH: /var/lib/northwind/staff-identity.sqlite3' in compose
+    assert 'NORTHWIND_CONTROL_PLANE_DB_PATH: /var/lib/northwind/control-plane.sqlite3' in compose
+    assert 'northwind-backend-state:/var/lib/northwind' in compose
+    assert 'NORTHWIND_OBJECT_STORAGE_ENDPOINT: http://minio:9000' in compose
+    assert 'NORTHWIND_OBJECT_STORAGE_PRESIGN_ENDPOINT:' in compose

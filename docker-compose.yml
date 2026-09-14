@@ -57,6 +57,83 @@ services:
       NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY: ${NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY:-minioadmin}
     restart: "no"
 
+  knowledge-init:
+    profiles: ["vp"]
+    build: .
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      NORTHWIND_OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID: ${NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID:-minioadmin}
+      NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY: ${NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY:-minioadmin}
+      NORTHWIND_OBJECT_STORAGE_REGION: ${NORTHWIND_OBJECT_STORAGE_REGION:-us-east-1}
+      NORTHWIND_KNOWLEDGE_BUCKET: northwind-knowledge
+    volumes:
+      - ./scripts:/app/scripts:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        python scripts/upload_knowledge_sources.py config/knowledge-source-corpus &&
+        for request in config/knowledge-ingestion-requests/*.json;
+        do python scripts/ingest_knowledge_source.py "$${request}" || exit 1; done
+    restart: "no"
+
+  backend:
+    profiles: ["vp"]
+    build: .
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      knowledge-init:
+        condition: service_completed_successfully
+    environment:
+      NORTHWIND_ENVIRONMENT: development
+      NORTHWIND_IDENTITY_MODE: normal
+      NORTHWIND_IDENTITY_DB_PATH: /var/lib/northwind/claimant-identity.sqlite3
+      NORTHWIND_STAFF_IDENTITY_DB_PATH: /var/lib/northwind/staff-identity.sqlite3
+      NORTHWIND_CONTROL_PLANE_DB_PATH: /var/lib/northwind/control-plane.sqlite3
+      NORTHWIND_STAFF_BOOTSTRAP_EMAIL: ${NORTHWIND_STAFF_BOOTSTRAP_EMAIL:-}
+      NORTHWIND_STAFF_BOOTSTRAP_PASSWORD: ${NORTHWIND_STAFF_BOOTSTRAP_PASSWORD:-}
+      NORTHWIND_STAFF_BOOTSTRAP_DISPLAY_NAME: ${NORTHWIND_STAFF_BOOTSTRAP_DISPLAY_NAME:-Northwind Claims Professional}
+      DATA_RUNTIME_PROFILE: local_mvp
+      NORTHWIND_MONGODB_URI: mongodb://mongodb:27017/?directConnection=true&replicaSet=rs0
+      NORTHWIND_MONGODB_DATABASE: northwind_fnol
+      NORTHWIND_MONGODB_COLLECTION: northwind_records
+      NORTHWIND_MONGODB_SERVER_SELECTION_TIMEOUT_MS: 5000
+      NORTHWIND_OBJECT_STORAGE_ADAPTER: s3_compatible
+      NORTHWIND_OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      NORTHWIND_OBJECT_STORAGE_PRESIGN_ENDPOINT: ${NORTHWIND_OBJECT_STORAGE_PRESIGN_ENDPOINT:-}
+      NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID: ${NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID:-minioadmin}
+      NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY: ${NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY:-minioadmin}
+      NORTHWIND_OBJECT_STORAGE_BUCKET: northwind-evidence
+      NORTHWIND_KNOWLEDGE_BUCKET: northwind-knowledge
+      NORTHWIND_OBJECT_STORAGE_REGION: ${NORTHWIND_OBJECT_STORAGE_REGION:-us-east-1}
+      NORTHWIND_OBJECT_STORAGE_PRESIGN_EXPIRY_SECONDS: 900
+      NORTHWIND_CORS_ALLOW_ORIGINS: ${NORTHWIND_CORS_ALLOW_ORIGINS:-*}
+      NORTHWIND_CORS_ALLOW_CREDENTIALS: "false"
+      AGENT_RUNTIME_PROFILE: ${AGENT_RUNTIME_PROFILE:-controlled}
+      MODEL_PROTOCOL_ADAPTER: ${MODEL_PROTOCOL_ADAPTER:-openai_compatible}
+      MODEL_PROFILE_ID: ${MODEL_PROFILE_ID:-default}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-unconfigured}
+      MODEL_PURPOSE: agent_turn
+      MODEL_PRIVACY_CLASS: synthetic_fnol
+      MODEL_PROMPT_VERSION: ${MODEL_PROMPT_VERSION:-northwind-fnol-claimant-v5}
+      MODEL_EVALUATION_STATUS: ${MODEL_EVALUATION_STATUS:-configured}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-}
+      MODEL_IDENTIFIER: ${MODEL_IDENTIFIER:-}
+      MODEL_API_KEY_ENV: NORTHWIND_MODEL_API_KEY
+      NORTHWIND_MODEL_API_KEY: ${NORTHWIND_MODEL_API_KEY:-}
+      MODEL_TIMEOUT_SECONDS: ${MODEL_TIMEOUT_SECONDS:-30}
+      MODEL_SUPPORTS_STRUCTURED_OUTPUT: "true"
+      MODEL_SUPPORTS_TOOLS: "false"
+    ports:
+      - "8000:8000"
+    volumes:
+      - northwind-backend-state:/var/lib/northwind
+    restart: unless-stopped
+
 volumes:
+  northwind-backend-state:
   northwind-minio-data:
   northwind-mongodb-data:

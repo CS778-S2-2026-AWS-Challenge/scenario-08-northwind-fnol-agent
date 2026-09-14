@@ -116,6 +116,18 @@ and atomic timeout, malformed, incomplete, and unauthorised-output failures. Thi
 transport is repeatable contract evidence, not a live-provider claim; a live run additionally
 requires an approved endpoint and secret supplied through the documented model environment.
 
+For a single-host Validation Prototype handoff, set the browser-reachable object-storage origin,
+staff bootstrap credentials, and optional model configuration through the process environment,
+then start the explicit Compose profile:
+
+```powershell
+docker compose --profile vp up -d --build
+```
+
+This profile uses normal claimant and staff authentication, durable MongoDB, MinIO, and SQLite
+volumes, and an idempotent governed-knowledge bootstrap. It still labels policy/history and the
+controlled assessor honestly as synthetic; it is not an AWS or production deployment claim.
+
 To check changed backend lines locally after a coverage run, use:
 
 ```powershell

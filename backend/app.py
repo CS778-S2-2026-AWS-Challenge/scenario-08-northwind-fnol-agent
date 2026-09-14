@@ -403,7 +403,8 @@ def create_app(
             and assessor_configuration.source is IntegrationSourceValue.FIXTURE
         ) or (
             assessor_configuration is None
-            and resolved_settings.data_runtime_profile is DataRuntimeProfile.FIXTURE
+            and resolved_settings.data_runtime_profile
+            in {DataRuntimeProfile.FIXTURE, DataRuntimeProfile.LOCAL_MVP}
         )
         assessor_status = (
             RuntimeCapabilityStatus.USING_FIXTURE

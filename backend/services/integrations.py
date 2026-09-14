@@ -1505,6 +1505,19 @@ def create_external_claim(
         outcome = adapter.create_claim(payload, fingerprint)
     except AdapterIdempotencyConflict as conflict:
         raise _idempotency_error() from conflict
+    if outcome.result.source is not adapter.integration_source:
+        raise ApiError(
+            status_code=502,
+            code='DEPENDENCY_FAILED',
+            message='The claims service returned a result with an invalid source.',
+            details=[
+                ErrorDetail(
+                    field='source',
+                    reason='The result source must match the installed claims adapter.',
+                )
+            ],
+            retryable=False,
+        )
 
     timestamp = now_utc()
     created = outcome.result.creation_status is ClaimCreationStatus.CREATED

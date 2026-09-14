@@ -22,6 +22,8 @@ from backend.domain.models import (
     AgentAuthority,
     AgentDecisionRecord,
     AuthorityOutcome,
+    ClaimCreationStatus,
+    ClaimTerminalDisposition,
     ContentsItem,
     ContentsLossType,
     ContentsOwnership,
@@ -33,6 +35,7 @@ from backend.domain.models import (
     EvidenceRelationState,
     EvidenceSource,
     EvidenceStatus,
+    ExternalClaimResult,
     ExternalServiceConsent,
     ExternalServiceConsentStatus,
     FormStatus,
@@ -42,6 +45,8 @@ from backend.domain.models import (
     MessageVisibility,
     ResponsibleParty,
     StructuredFormField,
+    TerminalDispositionReasonCode,
+    TerminalDispositionValue,
     WorkflowState,
 )
 from backend.domain.retrieval import RetrievalSource
@@ -1656,6 +1661,7 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
         item for item in queue_response.json()['items'] if item['claim_id'] == claim_id
     )
     assert queue_item['work_summary']['queue_key'] == 'completed'
+    assert queue_item['ownership']['state'] == 'unassigned'
     assert queue_item['ownership']['primary_assignee'] is None
 
 
@@ -1707,6 +1713,48 @@ def test_handoff_acceptance_is_atomic_revision_safe_and_idempotent(
     assert stale.status_code == 409
     assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
     assert stale.json()['error']['current_revision'] == claim.revision
+
+
+def test_created_claim_with_active_staff_handoff_remains_actionable(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, handoff_id, revision = _request_staff_support(client, auth_headers, repository)
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    created = claim.model_copy(
+        update={
+            'terminal_disposition': ClaimTerminalDisposition(
+                value=TerminalDispositionValue.COMPLETED,
+                reason_code=TerminalDispositionReasonCode.CLAIM_CREATED,
+                source_refs=['dec_created', 'ext_created'],
+                recorded_by=ActorReference(actor_type=ActorType.SYSTEM, actor_id='test'),
+                recorded_at=claim.updated_at,
+                recorded_revision=claim.revision + 1,
+            ),
+            'external_claim': ExternalClaimResult(
+                external_claim_id='ext_created',
+                claim_number='NWF-2026-CREATED',
+                creation_status=ClaimCreationStatus.CREATED,
+                route='standard_motor_intake',
+                next_step='Claims intake review',
+                source=IntegrationSource.FIXTURE,
+                created_at=claim.updated_at,
+            ),
+            'revision': claim.revision + 1,
+        }
+    )
+    repository.save_claim(created, expected_revision=claim.revision)
+    detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers)
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body['work_summary']['queue_key'] == 'processing'
+    assert any(
+        action['action_code'] == 'human.accept_handoff' and action['target_ref'] == handoff_id
+        for action in body['allowed_actions']
+    )
 
 
 def test_claim_conversations_list_only_sessions_held_by_current_staff(
