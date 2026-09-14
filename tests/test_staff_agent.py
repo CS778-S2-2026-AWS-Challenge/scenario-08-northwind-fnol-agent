@@ -142,7 +142,7 @@ def _create_session(client: TestClient, model_profile_id: str | None = None) -> 
     return str(response.json()['session_id'])
 
 
-def test_staff_agent_session_persists_selected_model_profile() -> None:
+def test_staff_agent_reuses_empty_session_until_first_turn_is_persisted() -> None:
     repository = FixtureRepository()
     provider = RecordingStaffAgent()
     with _client(repository, provider) as client:
@@ -154,9 +154,17 @@ def test_staff_agent_session_persists_selected_model_profile() -> None:
         assert response.status_code == 201
         session_id = response.json()['session_id']
         assert response.json()['model_profile_id'] == 'nowcoding-gpt56terra'
+        repeated = client.post(
+            '/api/v1/workbench/agent/sessions',
+            headers=STAFF_HEADERS,
+            json={'title': 'GPT review', 'model_profile_id': 'nowcoding-gpt56terra'},
+        )
+        assert repeated.status_code == 201
+        assert repeated.json()['session_id'] == session_id
+        assert len(repository.list_staff_agent_sessions('stf_demo')) == 1
+
         listed = client.get('/api/v1/workbench/agent/sessions', headers=STAFF_HEADERS)
-        assert listed.status_code == 200
-        assert listed.json()['items'][0]['model_profile_id'] == 'nowcoding-gpt56terra'
+        assert listed.json()['items'] == []
 
         message = client.post(
             f'/api/v1/workbench/agent/sessions/{session_id}/messages',
@@ -167,8 +175,11 @@ def test_staff_agent_session_persists_selected_model_profile() -> None:
                 'claim_ids': [],
             },
         )
+        listed = client.get('/api/v1/workbench/agent/sessions', headers=STAFF_HEADERS)
 
     assert message.status_code == 201
+    assert listed.status_code == 200
+    assert listed.json()['items'][0]['model_profile_id'] == 'nowcoding-gpt56terra'
     assert provider.contexts[0].model_profile_id == 'nowcoding-gpt56terra'
     assert message.json()['session']['model_profile_id'] == 'nowcoding-gpt56terra'
 
@@ -401,6 +412,9 @@ def test_staff_agent_persists_explicit_multi_claim_scope_and_lists_conversation(
         first_claim = _create_claim(client, 'staff-agent-first')
         second_claim = _create_claim(client, 'staff-agent-second')
         session_id = _create_session(client)
+        empty_conversations = client.get('/api/v1/workbench/conversations', headers=STAFF_HEADERS)
+
+        assert all(item['kind'] != 'staff_agent' for item in empty_conversations.json()['items'])
 
         response = client.post(
             f'/api/v1/workbench/agent/sessions/{session_id}/messages',
@@ -674,9 +688,16 @@ def test_staff_agent_fails_closed_when_no_model_profile_is_configured() -> None:
                 'claim_ids': [],
             },
         )
+        listed = client.get('/api/v1/workbench/agent/sessions', headers=STAFF_HEADERS)
+        conversations = client.get('/api/v1/workbench/conversations', headers=STAFF_HEADERS)
+        retried_session = _create_session(client)
 
     assert response.status_code == 503
     assert response.json()['error']['code'] == 'DEPENDENCY_UNAVAILABLE'
+    assert listed.json()['items'] == []
+    assert all(item['kind'] != 'staff_agent' for item in conversations.json()['items'])
+    assert retried_session == session_id
+    assert len(repository.list_staff_agent_sessions('stf_demo')) == 1
 
 
 def test_staff_agent_rejects_informational_draft_without_mutating_claim() -> None:

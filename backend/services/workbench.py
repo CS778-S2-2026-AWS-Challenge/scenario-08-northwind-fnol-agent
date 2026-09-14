@@ -2010,6 +2010,8 @@ def list_workbench_conversations(
             )
     for agent_session in repository.list_staff_agent_sessions(principal.subject):
         messages = repository.list_staff_agent_messages(agent_session.session_id, principal.subject)
+        if not messages:
+            continue
         messages.sort(
             key=lambda item: (
                 item.created_at,
@@ -2017,7 +2019,6 @@ def list_workbench_conversations(
                 item.message_id,
             )
         )
-        summary = messages[-1].content if messages else None
         items.append(
             WorkbenchConversationSummary(
                 conversation_id=f'staff_agent:{agent_session.session_id}',
@@ -2025,7 +2026,7 @@ def list_workbench_conversations(
                 session_id=agent_session.session_id,
                 status='active',
                 title=agent_session.title,
-                summary=summary,
+                summary=messages[-1].content,
                 updated_at=agent_session.updated_at,
             )
         )

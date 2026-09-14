@@ -251,6 +251,21 @@ def create_staff_agent_session(
         if model_profile_selector is not None
         else (payload.model_profile_id or 'qwen-local')
     )
+    existing_sessions = repository.list_staff_agent_sessions(principal.subject)
+    existing_sessions.sort(key=lambda item: (item.updated_at, item.session_id), reverse=True)
+    reusable_session = None
+    for session in existing_sessions:
+        if session.title != payload.title:
+            continue
+        if session.model_profile_id != selected_profile:
+            continue
+        if repository.list_staff_agent_messages(session.session_id, principal.subject):
+            continue
+        reusable_session = session
+        break
+    if reusable_session is not None:
+        return reusable_session
+
     session = StaffAgentSession(
         session_id=new_id('sas'),
         staff_id=principal.subject,
@@ -267,7 +282,11 @@ def list_staff_agent_sessions(
     repository: PersistenceRepository, principal: Principal
 ) -> StaffAgentSessionsResponse:
     _require_staff(principal)
-    sessions = repository.list_staff_agent_sessions(principal.subject)
+    sessions = [
+        session
+        for session in repository.list_staff_agent_sessions(principal.subject)
+        if repository.list_staff_agent_messages(session.session_id, principal.subject)
+    ]
     sessions.sort(key=lambda item: (item.updated_at, item.session_id), reverse=True)
     return StaffAgentSessionsResponse(items=sessions)
 

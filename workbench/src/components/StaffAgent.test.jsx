@@ -128,9 +128,8 @@ describe('StaffAgent', () => {
     expect(await screen.findByText('The police report is still pending.')).toBeInTheDocument()
   })
 
-  it('labels the model for new sessions and applies it only after the explicit New action', async () => {
+  it('does not persist New until the first non-empty message and then uses the selected model', async () => {
     const user = userEvent.setup()
-    let resolveCreateSession
     vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({
       items: [{ session_id: 'sas_1', title: 'Evidence review', model_profile_id: 'staff-secondary' }],
     })
@@ -142,10 +141,41 @@ describe('StaffAgent', () => {
       default_model_profile_id: 'qwen-local',
     })
     vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
-    vi.spyOn(workbenchApi, 'staffAgentMessages').mockResolvedValue({ items: [] })
-    vi.spyOn(workbenchApi, 'createStaffAgentSession').mockImplementation(() => new Promise((resolve) => {
-      resolveCreateSession = resolve
-    }))
+    vi.spyOn(workbenchApi, 'staffAgentMessages').mockResolvedValue({
+      items: [{
+        message_id: 'sam_existing',
+        role: 'assistant',
+        content: 'Review the existing evidence.',
+        claim_ids: [],
+        drafts: [],
+        source_refs: [],
+      }],
+    })
+    vi.spyOn(workbenchApi, 'createStaffAgentSession').mockResolvedValue({
+      session_id: 'sas_new',
+      title: 'New Staff Agent session',
+      model_profile_id: 'staff-secondary',
+      created_at: '2026-09-14T00:10:00Z',
+    })
+    vi.spyOn(workbenchApi, 'sendStaffAgentMessage').mockResolvedValue({
+      session: { session_id: 'sas_new', title: 'Question about evidence' },
+      staff_message: {
+        message_id: 'sam_staff',
+        role: 'staff',
+        content: 'What should I review next?',
+        claim_ids: [],
+        drafts: [],
+        source_refs: [],
+      },
+      assistant_message: {
+        message_id: 'sam_agent',
+        role: 'assistant',
+        content: 'Review the repair estimate next.',
+        claim_ids: [],
+        drafts: [],
+        source_refs: [],
+      },
+    })
 
     render(<StatefulAgentHarness />)
     await screen.findByRole('option', { name: 'Staff secondary' })
@@ -161,25 +191,61 @@ describe('StaffAgent', () => {
     const newSessionButton = screen.getByRole('button', { name: 'Start a new Staff Agent session' })
     await user.click(newSessionButton)
 
-    expect(newSessionButton).toBeDisabled()
-    expect(newSessionButton).toHaveTextContent('Starting...')
-    resolveCreateSession({
-      session_id: 'sas_new',
-      title: 'New Staff Agent session',
-      model_profile_id: 'staff-secondary',
-      created_at: '2026-09-14T00:10:00Z',
-    })
+    expect(workbenchApi.createStaffAgentSession).not.toHaveBeenCalled()
+    expect(sessionSelect).toHaveValue('')
+    expect(screen.getByRole('option', { name: 'New conversation (not saved)' })).toBeInTheDocument()
+    expect(screen.getByText('New conversation ready')).toBeInTheDocument()
+    expect(screen.getByText('This conversation will be saved when you send the first message.')).toBeInTheDocument()
+    const composer = screen.getByLabelText('Message Staff Agent')
+    expect(composer).toHaveFocus()
+    expect(screen.getByRole('button', { name: 'Send to Staff Agent' })).toBeDisabled()
+
+    await user.type(composer, '   ')
+    expect(screen.getByRole('button', { name: 'Send to Staff Agent' })).toBeDisabled()
+    expect(workbenchApi.createStaffAgentSession).not.toHaveBeenCalled()
+
+    await user.clear(composer)
+    await user.type(composer, 'What should I review next?')
+    await user.click(screen.getByRole('button', { name: 'Send to Staff Agent' }))
 
     await waitFor(() => expect(workbenchApi.createStaffAgentSession).toHaveBeenCalledWith(
       'staff-token',
       'New Staff Agent session',
       'staff-secondary',
     ))
-    expect(workbenchApi.staffAgentMessages).toHaveBeenCalledWith('staff-token', 'sas_new')
-    expect(await screen.findByText('New session ready')).toBeInTheDocument()
-    expect(screen.getByText('Ask a general question or attach Claim context to begin.')).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: /^Created .*2026/ })).toBeInTheDocument()
-    expect(screen.getByLabelText('Message Staff Agent')).toHaveFocus()
+    expect(workbenchApi.sendStaffAgentMessage).toHaveBeenCalledWith(
+      'staff-token',
+      'sas_new',
+      'What should I review next?',
+      [],
+    )
+    expect(await screen.findByText('Review the repair estimate next.')).toBeInTheDocument()
+  })
+
+  it('reuses the current empty session when New is clicked', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({
+      items: [{ session_id: 'sas_empty', title: 'New Staff Agent session', model_profile_id: 'qwen-local' }],
+    })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({
+      models: [{ id: 'qwen-local', label: 'qwen3.8-27b' }],
+      default_model_profile_id: 'qwen-local',
+    })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    vi.spyOn(workbenchApi, 'staffAgentMessages').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'createStaffAgentSession')
+
+    renderAgent()
+    await waitFor(() => expect(workbenchApi.staffAgentMessages).toHaveBeenCalledWith('staff-token', 'sas_empty'))
+    const sessionSelect = screen.getByLabelText('Session')
+    expect(sessionSelect).toHaveValue('sas_empty')
+
+    await user.click(screen.getByRole('button', { name: 'Start a new Staff Agent session' }))
+
+    expect(sessionSelect).toHaveValue('sas_empty')
+    expect(screen.getByText('This conversation is already empty. Start typing to continue.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send to Staff Agent' })).toBeDisabled()
+    expect(workbenchApi.createStaffAgentSession).not.toHaveBeenCalled()
   })
 
   it('preserves the draft and identifies a model service failure accurately', async () => {
