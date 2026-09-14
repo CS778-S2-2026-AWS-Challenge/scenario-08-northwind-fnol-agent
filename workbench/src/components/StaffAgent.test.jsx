@@ -339,7 +339,19 @@ describe('StaffAgent', () => {
     vi.spyOn(workbenchApi, 'executeStaffAgentDraft').mockResolvedValue({
       claim_id: 'clm_1',
       action_code: 'work_item.update',
-      runtime_execution: { resulting_revision: 10 },
+      outcome: 'executed',
+      result: {
+        action: { action_id: 'wki_1', status: 'in_progress' },
+        revision: 10,
+      },
+      runtime_execution: {
+        outcome: 'executed',
+        resulting_revision: 10,
+        result: {
+          action: { action_id: 'wki_1', status: 'in_progress' },
+          revision: 10,
+        },
+      },
     })
 
     renderAgent()
@@ -365,8 +377,74 @@ describe('StaffAgent', () => {
       draft.payload,
     )
     const result = await screen.findByRole('status')
-    expect(result).toHaveTextContent('Executed by Workbench')
-    expect(result).toHaveTextContent('Claim revision 10')
+    expect(result).toHaveTextContent('Workbench outcome: Executed')
+    expect(result).toHaveTextContent('Work item status: In Progress')
+    expect(result).toHaveTextContent('Work item: wki_1')
+    expect(result).toHaveTextContent('Claim revision: 10')
+  })
+
+
+
+  it('re-reads the Claim on an ambiguous retry while preserving the saved draft operation boundary', async () => {
+    const user = userEvent.setup()
+    const draft = executableDraft()
+    mockDraftConversation(draft)
+    vi.spyOn(workbenchApi, 'claim')
+      .mockResolvedValueOnce({ ...claim, revision: 9 })
+      .mockResolvedValueOnce({ ...claim, revision: 10 })
+    const executeDraft = vi.spyOn(workbenchApi, 'executeStaffAgentDraft')
+      .mockRejectedValueOnce(new ApiError(
+        'The Workbench service could not be reached.',
+        { code: 'NETWORK_ERROR', retryable: true },
+      ))
+      .mockResolvedValueOnce({
+        claim_id: 'clm_1',
+        action_code: 'work_item.update',
+        outcome: 'executed',
+        result: {
+          action: { action_id: 'wki_1', status: 'in_progress' },
+          revision: 10,
+        },
+        runtime_execution: {
+          outcome: 'executed',
+          resulting_revision: 10,
+          result: {
+            action: { action_id: 'wki_1', status: 'in_progress' },
+            revision: 10,
+          },
+        },
+      })
+
+    renderAgent()
+    await user.click(await screen.findByRole('button', { name: 'Review action' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm and execute' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The Workbench service could not be reached.',
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Confirm and execute' }))
+
+    await waitFor(() => expect(workbenchApi.claim).toHaveBeenCalledTimes(2))
+    expect(executeDraft).toHaveBeenNthCalledWith(
+      1,
+      'staff-token',
+      'sas_1',
+      'sam_action',
+      'sad_1',
+      9,
+      draft.payload,
+    )
+    expect(executeDraft).toHaveBeenNthCalledWith(
+      2,
+      'staff-token',
+      'sas_1',
+      'sam_action',
+      'sad_1',
+      10,
+      draft.payload,
+    )
+    expect(await screen.findByRole('status')).toHaveTextContent('Workbench outcome: Executed')
   })
 
   it.each([
@@ -402,7 +480,19 @@ describe('StaffAgent', () => {
     vi.spyOn(workbenchApi, 'executeStaffAgentDraft').mockResolvedValue({
       claim_id: 'clm_1',
       action_code: 'work_item.update',
-      runtime_execution: { resulting_revision: 10 },
+      outcome: 'executed',
+      result: {
+        action: { action_id: 'wki_1', status: 'in_progress' },
+        revision: 10,
+      },
+      runtime_execution: {
+        outcome: 'executed',
+        resulting_revision: 10,
+        result: {
+          action: { action_id: 'wki_1', status: 'in_progress' },
+          revision: 10,
+        },
+      },
     })
     const refreshError = Object.assign(
       new Error('Action executed, but refresh failed for Claim queue, open Claim. Refresh before taking another action.'),
@@ -415,7 +505,7 @@ describe('StaffAgent', () => {
     await user.click(await screen.findByRole('button', { name: 'Review action' }))
     await user.click(screen.getByRole('button', { name: 'Confirm and execute' }))
 
-    expect(await screen.findByText('Executed by Workbench')).toBeInTheDocument()
+    expect(await screen.findByText('Workbench outcome: Executed')).toBeInTheDocument()
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Action executed; refresh required')
     expect(alert).toHaveTextContent('Claim queue, open Claim')
