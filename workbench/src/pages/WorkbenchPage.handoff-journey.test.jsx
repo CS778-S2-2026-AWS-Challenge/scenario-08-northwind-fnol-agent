@@ -178,7 +178,7 @@ function claimProjection(state) {
       display_name: 'Journey Claimant',
     },
     incident: {
-      family: 'motor',
+      family: state.family,
       summary: 'Minor collision requiring staff assistance.',
     },
     lifecycle_state: resolved ? 'ready_to_create' : 'staff_support',
@@ -338,8 +338,9 @@ function claimantMessage() {
   }
 }
 
-function createHandoffJourneyService() {
+function createHandoffJourneyService(family) {
   const state = {
+    family,
     revision: 1,
     phase: 'queued',
     messages: [claimantMessage()],
@@ -660,8 +661,10 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
     vi.restoreAllMocks()
   })
 
-  it('opens, accepts, communicates, resolves, and re-reads the authoritative staff journey', async () => {
-    const { fetchMock, state } = createHandoffJourneyService()
+  it.each(['motor', 'home', 'contents'])(
+    'opens, accepts, communicates, and resolves the %s support handoff',
+    async (family) => {
+    const { fetchMock, state } = createHandoffJourneyService(family)
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
     renderJourney()
@@ -771,5 +774,6 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
         'Staff handoff resolved and Claim returned to the authoritative workflow.',
       )
     })
-  })
+  },
+  )
 })
