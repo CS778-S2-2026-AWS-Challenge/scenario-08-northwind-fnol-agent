@@ -789,7 +789,14 @@ export default function WorkbenchPage() {
           </div>
         )}
         {isConversations ? (
-          <ConversationsPage conversations={conversations} loading={conversationsLoading} error={conversationsError} onRetry={loadConversations} onOpenConversation={openConversation} />
+          <ConversationsPage
+            conversations={conversations}
+            loading={conversationsLoading}
+            error={conversationsError}
+            onRetry={loadConversations}
+            onOpenConversation={openConversation}
+            selectedStaffAgentSessionId={agentSessionId}
+          />
         ) : (
           <div className={`workbench-layout${queueVisible ? '' : ' queue-hidden'}`}>
             {queueVisible && (filterMetadata

@@ -2010,9 +2010,16 @@ exposed through claimant routes. `GET /api/v1/workbench/conversations` includes 
 `POST /api/v1/workbench/agent/sessions` accepts an optional `title` and published
 `model_profile_id`, and creates a `sas_` session. The selected profile is persisted on that
 session; omitting it selects the published default. A message cannot override the session's
-profile.
-`GET /api/v1/workbench/agent/sessions` lists only sessions owned by the authenticated staff
-member. `GET /api/v1/workbench/agent/sessions/{session_id}/messages` returns that session's
+profile. If the same staff member already has a zero-message session with the same title and
+selected model profile, creation reuses the most recently updated matching session instead of
+persisting another empty session.
+
+Zero-message sessions are treated as not-yet-started drafts and are omitted from both
+`GET /api/v1/workbench/agent/sessions` and `GET /api/v1/workbench/conversations`. A session enters
+history after its first staff/assistant message pair is persisted successfully. Direct message
+access by an owned `session_id` remains available so a failed first turn can be retried without
+creating another session. Session lists otherwise contain only sessions owned by the authenticated
+staff member. `GET /api/v1/workbench/agent/sessions/{session_id}/messages` returns that session's
 ordered `staff` and `assistant` messages; another staff identity receives `404` rather than an
 ownership disclosure.
 

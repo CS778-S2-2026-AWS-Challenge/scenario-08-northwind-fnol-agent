@@ -35,7 +35,6 @@ export default function StaffAgent({
   const [scopeOpen, setScopeOpen] = useState(false)
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
-  const [creatingSession, setCreatingSession] = useState(false)
   const [sending, setSending] = useState(false)
   const [sessionNotice, setSessionNotice] = useState('')
   const [error, setError] = useState(null)
@@ -104,42 +103,45 @@ export default function StaffAgent({
     return () => window.clearTimeout(task)
   }, [open, loadAgent, requestedSessionId])
 
-  async function createSession() {
-    setCreatingSession(true)
+  function beginNewSession() {
     setSessionNotice('')
     setError(null)
-    let sessionCreated = false
-    try {
-      const session = await workbenchApi.createStaffAgentSession(token, NEW_SESSION_TITLE, newSessionModel)
-      sessionCreated = true
-      setSessions((current) => [session, ...current.filter((item) => item.session_id !== session.session_id)])
-      await selectSession(session.session_id)
-      setSessionNotice(message.trim() ? 'Your draft is still here and ready to send.' : 'Ask a general question or attach Claim context to begin.')
+
+    if (activeSessionId && !messages.length) {
+      setSessionNotice('This conversation is already empty. Start typing to continue.')
       messageRef.current?.focus()
-      onConversationChanged()
-    } catch (nextError) {
-      setError(agentError(nextError, sessionCreated ? 'load' : 'create'))
-    } finally {
-      setCreatingSession(false)
+      return
     }
+
+    activeSessionIdRef.current = null
+    setActiveSessionId(null)
+    setMessages([])
+    setSelectedClaimIds([])
+    setSessionNotice(message.trim()
+      ? 'Your draft is still here. This conversation will be saved when you send it.'
+      : 'This conversation will be saved when you send the first message.')
+    messageRef.current?.focus()
   }
 
   async function submit(event) {
     event.preventDefault()
     const content = message.trim()
-    if (!content || loading || creatingSession || sending) return
+    if (!content || loading || sending) return
     setSending(true)
     setSessionNotice('')
     setError(null)
+    let operation = 'send'
     try {
       let sessionId = activeSessionId
       if (!sessionId) {
+        operation = 'create'
         const session = await workbenchApi.createStaffAgentSession(token, NEW_SESSION_TITLE, newSessionModel)
         setSessions((current) => [session, ...current])
         sessionId = session.session_id
         activeSessionIdRef.current = sessionId
         setActiveSessionId(sessionId)
         onSessionChangeRef.current(sessionId)
+        operation = 'send'
       }
       const response = await workbenchApi.sendStaffAgentMessage(
         token,
@@ -159,7 +161,7 @@ export default function StaffAgent({
       ])
       onConversationChanged()
     } catch (nextError) {
-      setError(agentError(nextError, 'send', { hasAlternativeModel: models.length > 1 }))
+      setError(agentError(nextError, operation, { hasAlternativeModel: models.length > 1 }))
     } finally {
       setSending(false)
     }
@@ -221,21 +223,21 @@ export default function StaffAgent({
             <div className="agent-session-bar">
               <label>
                 <span>Session</span>
-                <select value={activeSessionId || ''} onChange={(event) => selectSession(event.target.value)} disabled={loading || creatingSession || sending || !sessions.length}>
-                  {!sessions.length && <option value="">No saved session</option>}
+                <select value={activeSessionId || ''} onChange={(event) => selectSession(event.target.value)} disabled={loading || sending || !sessions.length}>
+                  {!activeSessionId && <option value="">New conversation (not saved)</option>}
                   {sessions.map((session) => <option value={session.session_id} key={session.session_id}>{sessionLabel(session)}</option>)}
                 </select>
               </label>
               <label>
                 <span>New session model</span>
-                <select value={newSessionModel} onChange={(event) => setNewSessionModel(event.target.value)} disabled={loading || creatingSession || sending || !models.length}>
+                <select value={newSessionModel} onChange={(event) => setNewSessionModel(event.target.value)} disabled={loading || sending || !models.length}>
                   {!models.length && <option value="">No published model</option>}
                   {models.map((model) => <option value={model.id} key={model.id}>{model.label}</option>)}
                 </select>
               </label>
-              <button className="agent-session-bar__new" type="button" onClick={createSession} disabled={loading || creatingSession || sending} aria-busy={creatingSession} aria-label="Start a new Staff Agent session">
+              <button className="agent-session-bar__new" type="button" onClick={beginNewSession} disabled={loading || sending} aria-label="Start a new Staff Agent session">
                 <MessageSquarePlus size={16} />
-                <span>{creatingSession ? 'Starting...' : 'New'}</span>
+                <span>New</span>
               </button>
             </div>
 
@@ -293,7 +295,7 @@ export default function StaffAgent({
             {sessionNotice && (
               <div className="agent-notice" role="status">
                 <CheckCircle2 size={16} aria-hidden="true" />
-                <span><strong>New session ready</strong><small>{sessionNotice}</small></span>
+                <span><strong>New conversation ready</strong><small>{sessionNotice}</small></span>
               </div>
             )}
             {error && (
@@ -310,7 +312,7 @@ export default function StaffAgent({
             <form className="agent-composer" onSubmit={submit}>
               <label className="sr-only" htmlFor="staff-agent-message">Message Staff Agent</label>
               <textarea id="staff-agent-message" ref={messageRef} rows="2" value={message} onChange={(event) => { setMessage(event.target.value); setSessionNotice('') }} placeholder="Ask about selected Claims or policy" />
-              <button className="agent-composer__send" type="submit" disabled={!message.trim() || loading || creatingSession || sending} aria-busy={sending} aria-label="Send to Staff Agent">
+              <button className="agent-composer__send" type="submit" disabled={!message.trim() || loading || sending} aria-busy={sending} aria-label="Send to Staff Agent">
                 <Send size={15} />
                 <span>{sending ? 'Sending...' : 'Send'}</span>
               </button>
@@ -390,7 +392,7 @@ function agentError(error, operation, { hasAlternativeModel = false } = {}) {
   if (operation === 'create') {
     return {
       title: 'New session was not created',
-      message: `${error?.message || 'The Staff Agent session request failed.'} Choose a published model and try New again.`,
+      message: `${error?.message || 'The Staff Agent session request failed.'} Choose a published model and try sending again.`,
       requestId,
     }
   }
