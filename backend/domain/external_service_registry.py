@@ -517,23 +517,24 @@ def build_lifecycle_projection(
     *,
     service_identity: str,
     operation_status: ExternalLifecycleStatus | str,
-    provenance: ExternalCapabilityProvenance,
-    access_form: str,
-    limitation: str,
-    catalogue_reference: str | None = None,
     result_status: ExternalLifecycleStatus | str | None = None,
 ) -> ExternalServiceLifecycleProjection:
-    """Build one canonical projection without exposing raw task/provider data."""
+    """Build one projection from the registered service and canonical status."""
 
+    entry = service_registry_entry(service_identity)
     operation = lifecycle_definition(operation_status)
+    if not entry.uses_external_task or operation.status not in entry.supported_statuses:
+        raise InvalidExternalLifecycleTransition(
+            f'{operation.status.value} is not supported by {service_identity}.'
+        )
     metadata = projection_metadata(operation.status)
     result = ExternalLifecycleStatus(result_status) if result_status is not None else None
     return ExternalServiceLifecycleProjection(
         service_identity=service_identity,
-        catalogue_reference=catalogue_reference,
-        provenance=provenance,
-        access_form=access_form,
-        limitation=limitation,
+        catalogue_reference=entry.catalogue_reference,
+        provenance=entry.provenance,
+        access_form=entry.access_form,
+        limitation=entry.limitation,
         operation_status=operation.status,
         result_status=result,
         claimant_meaning=operation.claimant_meaning,

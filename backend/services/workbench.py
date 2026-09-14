@@ -14,13 +14,12 @@ from backend.domain.external_service_registry import (
     service_registry_entry,
 )
 from backend.domain.external_services import (
+    ExternalRequestProvenance,
     ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
     ExternalTaskResult,
     ExternalTaskResultVerification,
-    catalogue_reference,
-    request_provenance,
 )
 from backend.domain.models import (
     AgentAction,
@@ -2207,26 +2206,22 @@ def _external_lifecycle(
 ) -> WorkbenchExternalLifecycle:
     status = task.status
     projection = projection_metadata(status.value)
-    try:
-        registry_entry = service_registry_entry(task.service_identity)
-        canonical_projection = build_lifecycle_projection(
-            service_identity=task.service_identity,
-            catalogue_reference=registry_entry.catalogue_reference,
-            provenance=(
-                ExternalCapabilityProvenance.SIMULATED
-                if task.integration_source.value == 'fixture'
-                else ExternalCapabilityProvenance.CONFIGURED
-            ),
-            access_form=registry_entry.access_form,
-            limitation=registry_entry.limitation,
-            operation_status=status.value,
-            result_status=None,
+    registry_entry = service_registry_entry(task.service_identity)
+    canonical_projection = build_lifecycle_projection(
+        service_identity=task.service_identity,
+        operation_status=status.value,
+    )
+    expected_source = (
+        'fixture'
+        if registry_entry.provenance is ExternalCapabilityProvenance.SIMULATED
+        else 'configured_service'
+    )
+    if task.integration_source.value != expected_source:
+        raise ValueError(
+            f'{task.service_identity} has registry provenance {registry_entry.provenance.value} '
+            f'but task source is {task.integration_source.value}.'
         )
-        projection = projection_metadata(canonical_projection.operation_status.value)
-    except (KeyError, ValueError):
-        # Older task records may name a service not yet present in this registry;
-        # preserve their bounded projection until that service is registered.
-        pass
+    projection = projection_metadata(canonical_projection.operation_status.value)
     label = projection.label
     owner = WorkbenchResponsibility(projection.pending_owner)
     next_action = projection.next_action
@@ -2275,17 +2270,11 @@ def _external_lifecycle(
             detail = 'The returned result needs professional review before it can be used.'
             next_action = 'Review the result, evidence, and checked Claim revision.'
             attention = True
-    fixture = task.integration_source.value == 'fixture'
-    limitation = (
-        'Synthetic fixture record; no production provider completion is verified.'
-        if fixture
-        else None
-    )
     return WorkbenchExternalLifecycle(
         stakeholder='external_party',
         service=task.service_identity,
-        catalogue_reference=catalogue_reference(task),
-        provenance=request_provenance(task),
+        catalogue_reference=canonical_projection.catalogue_reference,
+        provenance=ExternalRequestProvenance(canonical_projection.provenance.value),
         request_type=task.requested_action,
         authority_state='recorded' if request is not None else 'not_recorded',
         consent_state=(
@@ -2316,7 +2305,7 @@ def _external_lifecycle(
             )
             for item in result_evidence
         ],
-        limitation=limitation,
+        limitation=canonical_projection.limitation,
         next_action=next_action,
         needs_attention=attention,
     )

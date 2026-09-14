@@ -114,10 +114,6 @@ def test_projection_metadata_is_complete_for_persisted_statuses() -> None:
 def test_lifecycle_projection_carries_registry_and_role_safe_contract() -> None:
     projection = build_lifecycle_projection(
         service_identity='vehicle_damage_assessment_routing',
-        catalogue_reference='P3-ASSESSOR',
-        provenance=ExternalCapabilityProvenance.SIMULATED,
-        access_form='controlled assessor simulation',
-        limitation='Simulation-only.',
         operation_status=ExternalLifecycleStatus.ACCEPTED,
         result_status=ExternalLifecycleStatus.RESULT_RECEIVED,
     )
@@ -126,3 +122,13 @@ def test_lifecycle_projection_carries_registry_and_role_safe_contract() -> None:
     assert projection.result_status is ExternalLifecycleStatus.RESULT_RECEIVED
     assert projection.required_preconditions
     assert projection.allowed_next
+
+
+def test_lifecycle_projection_rejects_unknown_or_unsupported_service_state() -> None:
+    with pytest.raises(KeyError, match='No canonical external-service entry'):
+        build_lifecycle_projection(service_identity='fake', operation_status='accepted')
+    with pytest.raises(InvalidExternalLifecycleTransition, match='not supported'):
+        build_lifecycle_projection(
+            service_identity='repairer_information_or_link',
+            operation_status=ExternalLifecycleStatus.PREPARED,
+        )
