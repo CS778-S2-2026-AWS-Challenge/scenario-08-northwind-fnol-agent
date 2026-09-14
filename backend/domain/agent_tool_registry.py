@@ -35,7 +35,7 @@ AGENT_TOOL_REGISTRY = MappingProxyType(
         'evidence.history': AgentToolContract(
             name='evidence.history',
             description=(
-                'Read the authenticated claimant\'s bounded Evidence history across Claims.'
+                "Read the authenticated claimant's bounded Evidence history across Claims."
             ),
             purpose='claimant_evidence_reuse_and_removal',
             input_schema={

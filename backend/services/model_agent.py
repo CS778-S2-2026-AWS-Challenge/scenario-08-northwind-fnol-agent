@@ -641,8 +641,7 @@ class GatewayAgent:
                         if runtime_proposal.action_code
                         in {'evidence.propose_reuse', 'evidence.propose_remove'}
                         and not any(
-                            item.get('tool') == 'evidence.history'
-                            for item in context.tool_results
+                            item.get('tool') == 'evidence.history' for item in context.tool_results
                         )
                         else []
                     ),
