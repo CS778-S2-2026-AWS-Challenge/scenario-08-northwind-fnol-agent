@@ -227,7 +227,7 @@ export default function StaffAgent({
                 </select>
               </label>
               <label>
-                <span>Model</span>
+                <span>New session model</span>
                 <select value={newSessionModel} onChange={(event) => setNewSessionModel(event.target.value)} disabled={loading || creatingSession || sending || !models.length}>
                   {!models.length && <option value="">No published model</option>}
                   {models.map((model) => <option value={model.id} key={model.id}>{model.label}</option>)}

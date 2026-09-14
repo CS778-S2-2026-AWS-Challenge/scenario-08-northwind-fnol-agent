@@ -128,11 +128,11 @@ describe('StaffAgent', () => {
     expect(await screen.findByText('The police report is still pending.')).toBeInTheDocument()
   })
 
-  it('uses the selected model when the explicit New session action is used', async () => {
+  it('labels the model for new sessions and applies it only after the explicit New action', async () => {
     const user = userEvent.setup()
     let resolveCreateSession
     vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({
-      items: [{ session_id: 'sas_1', title: 'Evidence review', model_profile_id: 'qwen-local' }],
+      items: [{ session_id: 'sas_1', title: 'Evidence review', model_profile_id: 'staff-secondary' }],
     })
     vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({
       models: [
@@ -149,7 +149,15 @@ describe('StaffAgent', () => {
 
     render(<StatefulAgentHarness />)
     await screen.findByRole('option', { name: 'Staff secondary' })
-    await user.selectOptions(screen.getByLabelText('Model'), 'staff-secondary')
+    const sessionSelect = screen.getByLabelText('Session')
+    const newSessionModelSelect = screen.getByLabelText('New session model')
+    expect(sessionSelect).toHaveValue('sas_1')
+    expect(newSessionModelSelect).toHaveValue('qwen-local')
+
+    await user.selectOptions(newSessionModelSelect, 'staff-secondary')
+
+    expect(sessionSelect).toHaveValue('sas_1')
+    expect(workbenchApi.createStaffAgentSession).not.toHaveBeenCalled()
     const newSessionButton = screen.getByRole('button', { name: 'Start a new Staff Agent session' })
     await user.click(newSessionButton)
 
