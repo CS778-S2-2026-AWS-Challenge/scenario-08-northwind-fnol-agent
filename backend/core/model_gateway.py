@@ -332,6 +332,8 @@ class ConfigurationBackedModelGateway:
         return ModelCapabilities(
             structured_output=configuration.structured_output,
             tools=configuration.tools,
+            image_input=configuration.image_input,
+            document_input=configuration.document_input,
         )
 
     def complete(self, request: ModelRequest) -> ModelResponse:

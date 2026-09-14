@@ -120,7 +120,10 @@ def _resolve_evidence(
 ) -> bytes:
     if resolver is None:
         raise ModelGatewayError(ModelGatewayErrorCode.EVIDENCE_UNAVAILABLE)
-    content = resolver.resolve(block.evidence_id, block.media_type)
+    try:
+        content = resolver.resolve(block.evidence_id, block.media_type)
+    except (TypeError, ValueError, KeyError):
+        raise ModelGatewayError(ModelGatewayErrorCode.EVIDENCE_UNAVAILABLE) from None
     if content is None:
         raise ModelGatewayError(ModelGatewayErrorCode.EVIDENCE_UNAVAILABLE)
     return content
@@ -193,7 +196,9 @@ class OpenAICompatibleModelGateway:
         provider_tool_names = self._provider_tool_names(request)
         messages: list[dict[str, object]] = []
         for message in request.messages:
-            blocks = _content_blocks(message)
+            # Preserve the legacy OpenAI-compatible string payload unless the
+            # caller explicitly supplied multimodal content blocks.
+            blocks = message.content_blocks
             provider_content: str | None | list[dict[str, object]]
             if not blocks:
                 provider_content = message.content

@@ -200,6 +200,26 @@ def test_openai_compatible_maps_authorised_evidence_blocks_without_storage_metad
     assert response.text == 'ok'
 
 
+def test_openai_compatible_preserves_legacy_text_wire_shape() -> None:
+    observed: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed['payload'] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={'choices': [{'finish_reason': 'stop', 'message': {'content': 'ok'}}]},
+        )
+
+    gateway = OpenAICompatibleModelGateway(gateway_config(), transport=httpx.MockTransport(handler))
+    gateway.complete(
+        ModelRequest(messages=[ModelMessage(role=ModelRole.USER, content='Return plain text.')])
+    )
+
+    payload = cast(dict[str, object], observed['payload'])
+    message = cast(list[dict[str, object]], payload['messages'])[0]
+    assert message['content'] == 'Return plain text.'
+
+
 def test_bedrock_converse_maps_authorised_document_block(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -274,6 +294,34 @@ def test_multimodal_gateway_fails_closed_when_evidence_is_unavailable() -> None:
                                 evidence_id='evd_missing',
                                 media_type='image/jpeg',
                             )
+                        ],
+                    )
+                ],
+                required_capabilities=ModelCapabilities(image_input=True),
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.EVIDENCE_UNAVAILABLE
+
+
+def test_multimodal_gateway_normalises_resolver_type_errors() -> None:
+    class BrokenResolver:
+        def resolve(self, _evidence_id: str, _media_type: str) -> bytes:
+            raise TypeError('resolver contract broken')
+
+    gateway = OpenAICompatibleModelGateway(
+        gateway_config(image_input=True, evidence_resolver=BrokenResolver()),
+        transport=httpx.MockTransport(lambda _: httpx.Response(500)),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(
+                messages=[
+                    ModelMessage(
+                        role=ModelRole.USER,
+                        content_blocks=[
+                            ModelEvidenceContent(evidence_id='evd_broken', media_type='image/jpeg')
                         ],
                     )
                 ],
@@ -2990,6 +3038,62 @@ def test_published_model_cannot_override_runtime_authority(
     assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
     assert provider_constructions == []
     assert environment_reads == []
+
+
+def test_published_model_capabilities_project_image_and_document_support() -> None:
+    settings = Settings(
+        environment='test',
+        data_runtime_profile=DataRuntimeProfile.FIXTURE,
+        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_protocol_adapter='openai_compatible',
+        model_profile_id='vision-profile',
+        model_provider='synthetic-provider',
+        model_identifier='vision-model',
+        model_base_url='https://model.example.test/v1',
+        model_supports_image_input=True,
+        model_supports_document_input=True,
+    )
+    repository = ConfigurationRepository()
+    repository.create(
+        ConfigurationRecord(
+            configuration_id='cfg_vision',
+            configuration_key='vision-profile',
+            revision=1,
+            state=ConfigurationState.PUBLISHED,
+            impact=ConfigurationImpact.HIGH,
+            domain='model',
+            values={
+                'protocol': 'openai_compatible',
+                'provider': 'synthetic-provider',
+                'model_identifier': 'vision-model',
+                'base_url': 'https://model.example.test/v1',
+                'credential_environment_variable': None,
+                'profile_id': 'vision-profile',
+                'purpose': 'agent_turn',
+                'privacy_class': 'synthetic_fnol',
+                'prompt_version': settings.model_prompt_version,
+                'evaluation_status': 'configured',
+                'timeout_seconds': 30,
+                'structured_output': True,
+                'tools': True,
+                'image_input': True,
+                'document_input': True,
+            },
+            secret_references={},
+            author='test',
+            reason='Publish multimodal test profile.',
+            effective_time=now_utc(),
+            updated_at=now_utc(),
+        )
+    )
+
+    gateway = ConfigurationBackedModelGateway(settings, repository, ModelGatewayRegistry())
+    assert gateway.capabilities == ModelCapabilities(
+        structured_output=True,
+        tools=True,
+        image_input=True,
+        document_input=True,
+    )
 
 
 def test_current_prompt_has_a_new_identifier_and_bounded_rag_instructions() -> None:
