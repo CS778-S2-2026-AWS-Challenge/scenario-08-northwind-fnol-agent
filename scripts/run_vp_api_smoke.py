@@ -75,11 +75,11 @@ def _wait_ready(client: httpx.Client) -> dict[str, Any]:
 
 
 def run(base_url: str, compose_directory: Path, *, restart: bool) -> dict[str, Any]:
-    staff_email = os.environ.get('NORTHWIND_VP_STAFF_EMAIL', '').strip()
-    staff_password = os.environ.get('NORTHWIND_VP_STAFF_PASSWORD', '')
+    staff_email = os.environ.get('NORTHWIND_STAFF_BOOTSTRAP_EMAIL', '').strip()
+    staff_password = os.environ.get('NORTHWIND_STAFF_BOOTSTRAP_PASSWORD', '')
     if not staff_email or not staff_password:
         raise RuntimeError(
-            'Set NORTHWIND_VP_STAFF_EMAIL and NORTHWIND_VP_STAFF_PASSWORD '
+            'Set NORTHWIND_STAFF_BOOTSTRAP_EMAIL and NORTHWIND_STAFF_BOOTSTRAP_PASSWORD '
             'for the deployed staff account.'
         )
 
@@ -468,6 +468,8 @@ def run(base_url: str, compose_directory: Path, *, restart: bool) -> dict[str, A
             )
             if recovered_claim['claim_id'] != claim_id or recovered_detail['claim_id'] != claim_id:
                 raise RuntimeError('restarted services returned a different Claim.')
+            if int(recovered_claim['revision']) != int(resolved['revision']):
+                raise RuntimeError('restart recovery returned a stale Claim revision.')
             if len(recovered_messages['items']) != 3:
                 raise RuntimeError('restart recovery produced duplicate or missing messages.')
             if len(recovered_handoffs['items']) != 1:
@@ -476,6 +478,35 @@ def run(base_url: str, compose_directory: Path, *, restart: bool) -> dict[str, A
                 raise RuntimeError(
                     'restart recovery produced duplicate or missing external requests.'
                 )
+            external_item = recovered_external['items'][0]
+            if external_item['task']['claim_id'] != claim_id:
+                raise RuntimeError('recovered external request is linked to a different Claim.')
+            if external_item['task']['provider_reference'] is None:
+                raise RuntimeError('recovered assessor request lost its provider reference.')
+            external_action = recovered_claim['external_service_action']
+            if (
+                not isinstance(external_action, dict)
+                or external_action.get('status') != 'assigned'
+                or external_action.get('consent_status') != 'granted'
+                or not isinstance(external_action.get('routing'), dict)
+            ):
+                raise RuntimeError('claimant projection lost the assigned assessor state.')
+            claimant_messages = _json(
+                client.get(
+                    f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+                    headers=claimant_after_auth,
+                ),
+                {200},
+                'claimant-visible message recovery after restart',
+            )
+            if len(claimant_messages['items']) != 3:
+                raise RuntimeError('claimant projection has duplicate or missing messages.')
+            if not any(
+                item.get('actor') == 'staff'
+                and 'accepted your request' in item.get('content', {}).get('text', '')
+                for item in claimant_messages['items']
+            ):
+                raise RuntimeError('claimant projection is missing the staff update.')
             return {
                 'status': 'PASS',
                 'run_id': run_id,
