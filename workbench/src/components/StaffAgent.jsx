@@ -188,7 +188,15 @@ export default function StaffAgent({
       draft.payload || {},
     )
 
-    await onBusinessActionExecuted?.(response)
+    try {
+      await onBusinessActionExecuted?.(response)
+    } catch (refreshError) {
+      setError({
+        title: 'Action executed; refresh required',
+        message: 'The registered action succeeded, but the latest Workbench projection could not be loaded automatically. Refresh the Claim before taking another action.',
+        requestId: refreshError?.requestId || null,
+      })
+    }
     return response
   }
 
