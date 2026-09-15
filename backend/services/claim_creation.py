@@ -117,6 +117,12 @@ def create_claim_from_confirmed_report(
                 external_claim=claim.external_claim,
                 external_service_action=claimant_assessor_action(repository, claim),
                 customer_next_step=claim.customer_next_step,
+                primary_action=project_claimant_primary_action(
+                    claim_id=claim_id,
+                    claim_revision=claim.revision,
+                    next_step=claim.customer_next_step,
+                    external_service_action=claimant_assessor_action(repository, claim),
+                ),
             )
             repository.save_idempotency(
                 IdempotencyRecord(
