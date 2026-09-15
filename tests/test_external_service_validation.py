@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -773,6 +774,69 @@ def _failed_attempt(
     return client, claim_id
 
 
+class CountingReconciliationAdapter(MockAssessorServiceAdapter):
+    """Count routing and status checks across one unresolved operation."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            failure_sequence=(
+                ScriptedAssessorFailure(
+                    code=AssessorFixtureFailure.TIMEOUT,
+                    delivery=ExternalTaskDelivery.SUBMITTED,
+                    delivery_evidence=('fixture send acknowledged; no routing answer returned'),
+                ),
+            )
+        )
+        self.routing_calls = 0
+        self.reconciliation_calls = 0
+
+    def route_assessor(
+        self,
+        command: RouteAssessorRequest,
+        request_fingerprint: str,
+    ) -> AssessorRoutingOutcome:
+        self.routing_calls += 1
+        return super().route_assessor(command, request_fingerprint)
+
+    def reconcile_assessor(
+        self,
+        command: AssessorReconciliationRequest,
+        request_fingerprint: str,
+    ) -> AssessorRoutingOutcome | None:
+        self.reconciliation_calls += 1
+        return super().reconcile_assessor(command, request_fingerprint)
+
+
+class InconclusiveReconciliationAdapter(CountingReconciliationAdapter):
+    """Keep the existing external operation unresolved after a status check."""
+
+    def reconcile_assessor(
+        self,
+        command: AssessorReconciliationRequest,
+        request_fingerprint: str,
+    ) -> AssessorRoutingOutcome | None:
+        del command, request_fingerprint
+        self.reconciliation_calls += 1
+        return None
+
+
+def _unknown_attempt(
+    repository: FixtureRepository,
+    adapter: CountingReconciliationAdapter,
+    *,
+    key: str,
+) -> tuple[TestClient, str]:
+    client = TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    )
+    client.__enter__()
+    claim_id, revision = _create_assessor_ready_claim(client, key=key)
+    consent_revision = _grant_consent(client, claim_id, revision, key=key)
+    failed = _attempt(client, claim_id, consent_revision, key=key)
+    assert failed.status_code == 409
+    return client, claim_id
+
+
 def test_a_terminal_failure_stops_telling_the_claimant_to_send_the_request() -> None:
     """The two halves of one claimant response must not contradict each other.
 
@@ -866,6 +930,405 @@ def test_a_terminal_failure_becomes_the_staff_blocker_without_a_second_gap() -> 
     assert summary['primary_blocker'] == gap['label']
 
 
+def test_created_terminal_failure_is_discoverable_and_reviewable_by_staff(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    repository = FixtureRepository()
+    client, claim_id = _failed_attempt(
+        repository,
+        AssessorFixtureFailure.MALFORMED,
+        key='terminal-staff-attention',
+    )
+    with client:
+        detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
+        task = repository.list_external_tasks_internal(claim_id)[0]
+        action = next(
+            item
+            for item in detail['allowed_actions']
+            if item['action_code'] == 'external.accept_review'
+        )
+        assert detail['terminal_disposition']['value'] == 'completed'
+        assert detail['work_summary']['queue_key'] == 'processing'
+        assert detail['work_summary']['primary_action_code'] == 'external.accept_review'
+        assert action['target_type'] == 'external_task'
+        assert action['target_ref'] == task.task_id
+        assert action['based_on_revision'] == detail['revision']
+
+        processing = client.get(
+            '/api/v1/workbench/claims?view=processing', headers=STAFF_AUTH
+        ).json()
+        created = client.get(
+            '/api/v1/workbench/claims?view=created_routed', headers=STAFF_AUTH
+        ).json()
+        assert claim_id in {item['claim_id'] for item in processing['items']}
+        assert claim_id in {item['claim_id'] for item in created['items']}
+
+        presence = client.patch(
+            '/api/v1/workbench/staff/presence',
+            headers=STAFF_AUTH,
+            json={'online': True, 'available': True, 'lease_seconds': 30},
+        )
+        assert presence.status_code == 200
+        accept_headers = {
+            **STAFF_AUTH,
+            'Idempotency-Key': 'terminal-staff-accept',
+            'If-Match': str(detail['revision']),
+        }
+        with caplog.at_level(logging.INFO, logger='backend.api.workbench'):
+            accepted = client.post(
+                f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task.task_id}/accept-review',
+                headers=accept_headers,
+                json={},
+            )
+        replay = client.post(
+            f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task.task_id}/accept-review',
+            headers=accept_headers,
+            json={},
+        )
+        changed_retry = client.post(
+            f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task.task_id}/accept-review',
+            headers=accept_headers,
+            json={'assignee_id': 'stf_someone_else'},
+        )
+        assert accepted.status_code == 201, accepted.text
+        assert replay.status_code == 201
+        assert replay.json() == accepted.json()
+        assert changed_retry.status_code == 409
+        assert changed_retry.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+        assert accepted.json()['action']['action_type'] == 'external_failure_review'
+        assert accepted.json()['action']['source_refs'] == [task.task_id]
+        completed_log = next(
+            record for record in caplog.records if record.msg == 'external_review.accept.completed'
+        )
+        structured_log = cast(Any, completed_log)
+        assert structured_log.request_id
+        assert structured_log.claim_id == claim_id
+        assert structured_log.external_task_id == task.task_id
+        assert structured_log.action_code == 'external.accept_review'
+        assert structured_log.staff_action_id == accepted.json()['action']['action_id']
+
+        reviewing = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
+        work_action = next(
+            item
+            for item in reviewing['allowed_actions']
+            if item['action_code'] == 'work_item.update'
+        )
+        defaults = work_action['payload_defaults']
+        completion = client.patch(
+            f'/api/v1/workbench/claims/{claim_id}/staff-actions/'
+            f'{accepted.json()["action"]["action_id"]}',
+            headers={
+                **STAFF_AUTH,
+                'Idempotency-Key': 'terminal-staff-complete',
+                'If-Match': str(reviewing['revision']),
+            },
+            json={
+                'status': 'completed',
+                'result': {
+                    **defaults['result'],
+                    'summary': 'The terminal assessor failure was reviewed.',
+                },
+                'state_changes': defaults['state_changes'],
+                'customer_update': defaults['customer_update'],
+            },
+        )
+        assert completion.status_code == 200, completion.text
+        completed = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
+        external = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/external-requests',
+            headers=STAFF_AUTH,
+        ).json()['items'][0]['lifecycle']
+        assert completed['work_summary']['queue_key'] == 'completed'
+        assert completed['work_summary']['primary_action_code'] is None
+        assert completed['terminal_disposition']['value'] == 'completed'
+        assert repository.list_external_tasks_internal(claim_id)[0] == task
+        assert external['status_label'] == 'Staff review recorded'
+        assert external['needs_attention'] is False
+        assert external['result_verification_state'] is None
+
+
+def test_competing_external_review_acceptance_cannot_overwrite_the_winner() -> None:
+    repository = FixtureRepository()
+    client, claim_id = _failed_attempt(
+        repository,
+        AssessorFixtureFailure.MALFORMED,
+        key='terminal-staff-race',
+    )
+    with client:
+        detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
+        task = repository.list_external_tasks_internal(claim_id)[0]
+        first_presence = client.patch(
+            '/api/v1/workbench/staff/presence',
+            headers=STAFF_AUTH,
+            json={'online': True, 'available': True, 'lease_seconds': 30},
+        )
+        assert first_presence.status_code == 200
+
+        identity_repository = cast(Any, client.app).state.staff_identity_repository
+        second_account = identity_repository.provision_account(
+            'staff.two@example.invalid',
+            'northwind-demo-staff-two',
+            'Second Claims Professional',
+            ('claims_professional',),
+        )
+        second_login = client.post(
+            '/api/v1/staff/auth/sessions',
+            json={
+                'email': 'staff.two@example.invalid',
+                'password': 'northwind-demo-staff-two',
+            },
+        )
+        assert second_login.status_code == 201
+        second_auth = {'Authorization': f'Bearer {second_login.json()["access_token"]}'}
+
+        route = f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task.task_id}/accept-review'
+        first = client.post(
+            route,
+            headers={
+                **STAFF_AUTH,
+                'Idempotency-Key': 'terminal-staff-race-first',
+                'If-Match': str(detail['revision']),
+            },
+            json={},
+        )
+        second = client.post(
+            route,
+            headers={
+                **second_auth,
+                'Idempotency-Key': 'terminal-staff-race-second',
+                'If-Match': str(detail['revision']),
+            },
+            json={},
+        )
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 409
+    assert second.json()['error']['code'] == 'REVISION_CONFLICT'
+    stored_claim = repository.get_claim_internal(claim_id)
+    assert stored_claim is not None
+    assert stored_claim.assignee_id == 'stf_demo'
+    actions = repository.list_staff_actions(claim_id)
+    assert len(actions) == 1
+    assert actions[0].action_id == first.json()['action']['action_id']
+    assert actions[0].source_refs == [task.task_id]
+    assert (
+        repository.find_idempotency(
+            second_account.staff_id,
+            route,
+            'terminal-staff-race-second',
+        )
+        is None
+    )
+
+
+def test_created_unknown_outcome_projects_only_reconciliation_as_primary_action() -> None:
+    repository = FixtureRepository()
+    client, claim_id = _failed_attempt(
+        repository,
+        AssessorFixtureFailure.TIMEOUT,
+        key='unknown-staff-attention',
+        delivery_evidence='fixture send acknowledged; no routing answer returned',
+    )
+    with client:
+        detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
+
+    task = repository.list_external_tasks_internal(claim_id)[0]
+    assert detail['work_summary']['queue_key'] == 'processing'
+    assert detail['work_summary']['primary_action_code'] == 'external.reconcile_response'
+    action = next(
+        item
+        for item in detail['allowed_actions']
+        if item['action_code'] == 'external.reconcile_response'
+    )
+    assert action['target_ref'] == task.task_id
+    assert action['source_refs'] == [task.task_id]
+
+
+def test_staff_reconciliation_settles_the_existing_operation_atomically(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    repository = FixtureRepository()
+    adapter = CountingReconciliationAdapter()
+    client, claim_id = _unknown_attempt(repository, adapter, key='staff-reconcile')
+    with client:
+        detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
+        task = repository.list_external_tasks_internal(claim_id)[0]
+        requests_before = repository.list_external_task_requests_internal(claim_id)
+        presence = client.patch(
+            '/api/v1/workbench/staff/presence',
+            headers=STAFF_AUTH,
+            json={'online': True, 'available': True, 'lease_seconds': 30},
+        )
+        assert presence.status_code == 200
+        headers = {
+            **STAFF_AUTH,
+            'Idempotency-Key': 'staff-reconcile-action',
+            'If-Match': str(detail['revision']),
+        }
+        with caplog.at_level(logging.INFO, logger='backend.api.workbench'):
+            settled = client.post(
+                f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task.task_id}/reconcile',
+                headers=headers,
+            )
+        replay = client.post(
+            f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task.task_id}/reconcile',
+            headers=headers,
+        )
+        after = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
+
+    assert settled.status_code == 200, settled.text
+    assert replay.status_code == 200
+    assert replay.json() == settled.json()
+    assert settled.json()['task_id'] == task.task_id
+    assert settled.json()['staff_action']['action_type'] == 'external_reconciliation'
+    assert settled.json()['staff_action']['status'] == 'completed'
+    completed_log = next(
+        record for record in caplog.records if record.msg == 'external_response.reconcile.completed'
+    )
+    structured_log = cast(Any, completed_log)
+    assert structured_log.request_id
+    assert structured_log.claim_id == claim_id
+    assert structured_log.external_task_id == task.task_id
+    assert structured_log.action_code == 'external.reconcile_response'
+    assert structured_log.staff_action_id == settled.json()['staff_action']['action_id']
+    assert structured_log.routing_status == settled.json()['routing']['routing_status']
+    assert adapter.routing_calls == 1
+    assert adapter.reconciliation_calls == 1
+    assert len(repository.list_external_tasks_internal(claim_id)) == 1
+    assert len(repository.list_external_task_requests_internal(claim_id)) == 1
+    assert (
+        repository.list_external_task_requests_internal(claim_id)[0].request_id
+        == requests_before[0].request_id
+    )
+    stored_claim = repository.get_claim_internal(claim_id)
+    assert stored_claim is not None
+    assert stored_claim.assignee_id == 'stf_demo'
+    assert stored_claim.assessor_routing is not None
+    assert repository.list_external_tasks_internal(claim_id)[0].status.value == 'accepted'
+    actions = repository.list_staff_actions(claim_id)
+    assert len(actions) == 1
+    assert actions[0].action_id == settled.json()['staff_action']['action_id']
+    assert after['work_summary']['queue_key'] == 'waiting_third_party'
+    assert all(
+        item['action_code'] != 'external.reconcile_response' for item in after['allowed_actions']
+    )
+
+
+def test_staff_reconciliation_requires_presence_and_current_revision() -> None:
+    repository = FixtureRepository()
+    adapter = CountingReconciliationAdapter()
+    client, claim_id = _unknown_attempt(repository, adapter, key='staff-reconcile-guards')
+    with client:
+        detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
+        task = repository.list_external_tasks_internal(claim_id)[0]
+        route = f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task.task_id}/reconcile'
+        client.patch(
+            '/api/v1/workbench/staff/presence',
+            headers=STAFF_AUTH,
+            json={'online': False, 'available': False, 'lease_seconds': 30},
+        )
+        unavailable = client.post(
+            route,
+            headers={
+                **STAFF_AUTH,
+                'Idempotency-Key': 'staff-reconcile-unavailable',
+                'If-Match': str(detail['revision']),
+            },
+        )
+        client.patch(
+            '/api/v1/workbench/staff/presence',
+            headers=STAFF_AUTH,
+            json={'online': True, 'available': True, 'lease_seconds': 30},
+        )
+        stale = client.post(
+            route,
+            headers={
+                **STAFF_AUTH,
+                'Idempotency-Key': 'staff-reconcile-stale',
+                'If-Match': str(detail['revision'] - 1),
+            },
+        )
+
+    assert unavailable.status_code == 409
+    assert unavailable.json()['error']['code'] == 'STAFF_NOT_AVAILABLE'
+    assert stale.status_code == 409
+    assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert adapter.reconciliation_calls == 0
+    assert repository.list_staff_actions(claim_id) == []
+
+
+def test_inconclusive_staff_reconciliation_preserves_unknown_state() -> None:
+    repository = FixtureRepository()
+    adapter = InconclusiveReconciliationAdapter()
+    client, claim_id = _unknown_attempt(repository, adapter, key='staff-reconcile-unknown')
+    with client:
+        detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
+        task = repository.list_external_tasks_internal(claim_id)[0]
+        before = repository.get_claim_internal(claim_id)
+        client.patch(
+            '/api/v1/workbench/staff/presence',
+            headers=STAFF_AUTH,
+            json={'online': True, 'available': True, 'lease_seconds': 30},
+        )
+        response = client.post(
+            f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task.task_id}/reconcile',
+            headers={
+                **STAFF_AUTH,
+                'Idempotency-Key': 'staff-reconcile-inconclusive',
+                'If-Match': str(detail['revision']),
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    assert adapter.routing_calls == 1
+    assert adapter.reconciliation_calls == 1
+    assert repository.get_claim_internal(claim_id) == before
+    assert repository.list_external_tasks_internal(claim_id)[0].status.value == 'unknown_outcome'
+    assert repository.list_staff_actions(claim_id) == []
+
+
+def test_staff_reconciliation_checks_authority_and_exact_claim_task_pair() -> None:
+    repository = FixtureRepository()
+    adapter = CountingReconciliationAdapter()
+    client, first_claim_id = _unknown_attempt(repository, adapter, key='staff-reconcile-scope')
+    with client:
+        first_task = repository.list_external_tasks_internal(first_claim_id)[0]
+        second_claim_id, _ = _create_assessor_ready_claim(
+            client,
+            key='staff-reconcile-other-claim',
+        )
+        second_detail = client.get(
+            f'/api/v1/workbench/claims/{second_claim_id}',
+            headers=STAFF_AUTH,
+        ).json()
+        unauthenticated = client.post(
+            '/api/v1/workbench/claims/not-a-claim/external-tasks/not-a-task/reconcile',
+            headers={'Idempotency-Key': 'staff-reconcile-no-auth', 'If-Match': '1'},
+        )
+        client.patch(
+            '/api/v1/workbench/staff/presence',
+            headers=STAFF_AUTH,
+            json={'online': True, 'available': True, 'lease_seconds': 30},
+        )
+        cross_claim = client.post(
+            f'/api/v1/workbench/claims/{second_claim_id}/external-tasks/'
+            f'{first_task.task_id}/reconcile',
+            headers={
+                **STAFF_AUTH,
+                'Idempotency-Key': 'staff-reconcile-cross-claim',
+                'If-Match': str(second_detail['revision']),
+            },
+        )
+
+    assert unauthenticated.status_code == 401
+    assert cross_claim.status_code == 403
+    assert cross_claim.json()['error']['code'] == 'ACCESS_DENIED'
+    assert adapter.reconciliation_calls == 0
+    assert repository.list_staff_actions(first_claim_id) == []
+    assert repository.list_staff_actions(second_claim_id) == []
+
+
 def test_a_retryable_failure_stays_a_follow_up_owned_by_the_external_party() -> None:
     """Only the terminal case is reclassified."""
 
@@ -923,9 +1386,11 @@ def test_a_claim_whose_result_arrived_is_no_longer_waiting_on_the_assessor() -> 
     assert received.status_code == 201, received.text
     # Before the answer arrives the claim is genuinely waiting.
     assert before['external_wait_count'] == 1
+    assert before['queue_key'] == 'waiting_third_party'
     assert after['external_wait_count'] == 0
     assert lifecycle['result_verification_state'] == 'review_required'
     assert lifecycle['pending_owner'] == 'claims_professional'
+    assert after['queue_key'] == 'processing'
 
 
 def _receive_assessment(
@@ -946,6 +1411,87 @@ def _receive_assessment(
             'If-Match': str(claim.revision),
         },
     )
+
+
+def test_returned_result_review_completion_preserves_external_provenance() -> None:
+    repository = FixtureRepository()
+    adapter = MockAssessorServiceAdapter()
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key='result-staff-review')
+        consent_revision = _grant_consent(client, claim_id, revision, key='result-staff-review')
+        assert (
+            _attempt(client, claim_id, consent_revision, key='result-staff-review').status_code
+            == 201
+        )
+        assert (
+            _receive_assessment(client, repository, claim_id, key='result-staff-review').status_code
+            == 201
+        )
+        task = repository.list_external_tasks_internal(claim_id)[0]
+        result_before = repository.list_external_task_results_internal(claim_id)[0]
+        detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
+        projected = next(
+            item
+            for item in detail['allowed_actions']
+            if item['action_code'] == 'external.accept_review'
+        )
+        assert projected['source_refs'] == [task.task_id, result_before.result_id]
+        client.patch(
+            '/api/v1/workbench/staff/presence',
+            headers=STAFF_AUTH,
+            json={'online': True, 'available': True, 'lease_seconds': 30},
+        )
+        accepted = client.post(
+            f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task.task_id}/accept-review',
+            headers={
+                **STAFF_AUTH,
+                'Idempotency-Key': 'result-staff-review-accept',
+                'If-Match': str(detail['revision']),
+            },
+            json={},
+        )
+        assert accepted.status_code == 201, accepted.text
+        assert accepted.json()['action']['action_type'] == 'external_result_review'
+        reviewing = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
+        work_action = next(
+            item
+            for item in reviewing['allowed_actions']
+            if item['action_code'] == 'work_item.update'
+        )
+        defaults = work_action['payload_defaults']
+        completed = client.patch(
+            f'/api/v1/workbench/claims/{claim_id}/staff-actions/'
+            f'{accepted.json()["action"]["action_id"]}',
+            headers={
+                **STAFF_AUTH,
+                'Idempotency-Key': 'result-staff-review-complete',
+                'If-Match': str(reviewing['revision']),
+            },
+            json={
+                'status': 'completed',
+                'result': {
+                    **defaults['result'],
+                    'summary': 'The returned assessor material was reviewed.',
+                },
+                'state_changes': defaults['state_changes'],
+                'customer_update': defaults['customer_update'],
+            },
+        )
+        final_detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
+        lifecycle = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/external-requests',
+            headers=STAFF_AUTH,
+        ).json()['items'][0]['lifecycle']
+
+    assert completed.status_code == 200, completed.text
+    assert repository.list_external_task_results_internal(claim_id)[0] == result_before
+    assert result_before.verification.value == 'review_required'
+    assert final_detail['terminal_disposition']['value'] == 'completed'
+    assert final_detail['work_summary']['queue_key'] == 'completed'
+    assert lifecycle['needs_attention'] is False
+    assert lifecycle['result_verification_state'] == 'review_required'
 
 
 def test_the_claimant_learns_that_the_assessment_came_back() -> None:

@@ -5955,6 +5955,39 @@
         "title": "ExternalTaskOperationStatus",
         "type": "string"
       },
+      "ExternalTaskReconciliationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "routing": {
+            "$ref": "#/components/schemas/AssessorRoutingResult"
+          },
+          "staff_action": {
+            "$ref": "#/components/schemas/StaffActionRecord"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_id",
+          "task_id",
+          "revision",
+          "routing",
+          "staff_action"
+        ],
+        "title": "ExternalTaskReconciliationResponse",
+        "type": "object"
+      },
       "ExternalTaskRecord": {
         "additionalProperties": false,
         "description": "One third-party task, recorded separately from Claim State.\n\nThe record carries its own claim association, source class, status, and\ntimestamps so a task can be interpreted without reading Claim State, and so\na fixture result can never be read as a configured-service result.\n\nDelivery defaults to `NOT_SUBMITTED` and may only be raised to `SUBMITTED`\nby naming the evidence that the request reached the provider. No adapter in\nthis repository records that evidence yet, so the default preserves the\ndocumented assessor behaviour, and a caller cannot escalate a timeout to an\nunknown outcome on an assumption. `docs/claim-creation-boundary.md` requires\ntrustworthy delivery evidence before a timeout is classified as submitted.",
@@ -19501,6 +19534,216 @@
           }
         },
         "summary": "Read Workbench External Requests",
+        "tags": [
+          "workbench"
+        ]
+      }
+    },
+    "/api/v1/workbench/claims/{claim_id}/external-tasks/{task_id}/accept-review": {
+      "post": {
+        "description": "Accept one server-projected external-task review for the current staff member.\n\nArgs:\n    claim_id: Claim that owns the external task.\n    task_id: Exact external task projected by the Workbench action registry.\n    payload: Requested self-assignment; another staff identity is forbidden.\n    request: Authenticated request carrying repository and correlation context.\n    principal: Authenticated staff principal supplied by FastAPI.\n    idempotency_key: Required replay identity for this mutation.\n    if_match: Required current Claim revision.\n\nReturns:\n    The created or replayed task-linked StaffAction and resulting Claim revision.\n\nRaises:\n    ApiError: Authentication, authority, revision, ownership, presence, task state, or\n        idempotency validation fails.",
+        "operationId": "accept_external_task_review_api_v1_workbench_claims__claim_id__external_tasks__task_id__accept_review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptHandoffRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffActionMutationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Accept External Task Review",
+        "tags": [
+          "workbench"
+        ]
+      }
+    },
+    "/api/v1/workbench/claims/{claim_id}/external-tasks/{task_id}/reconcile": {
+      "post": {
+        "description": "Reconcile one unknown assessor operation through its persisted identity.\n\nArgs:\n    claim_id: Claim that owns the unresolved external task.\n    task_id: Exact external task projected by the Workbench action registry.\n    request: Authenticated request carrying Runtime and correlation context.\n    principal: Authenticated staff principal supplied by FastAPI.\n    idempotency_key: Required replay identity for this mutation.\n    if_match: Required current Claim revision.\n\nReturns:\n    The persisted reconciliation result and its completed StaffAction.\n\nRaises:\n    ApiError: Authentication, authority, revision, ownership, presence, adapter,\n        lifecycle, or idempotency validation fails.",
+        "operationId": "reconcile_external_task_response_api_v1_workbench_claims__claim_id__external_tasks__task_id__reconcile_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalTaskReconciliationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reconcile External Task Response",
         "tags": [
           "workbench"
         ]
