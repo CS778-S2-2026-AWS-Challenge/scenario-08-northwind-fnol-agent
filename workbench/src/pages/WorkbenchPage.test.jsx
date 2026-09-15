@@ -714,6 +714,155 @@ describe('WorkbenchPage queue routing', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/tsk_assessor_1.*may have completed.*outcome is not confirmed/i)
   })
 
+  it('keeps the recovery guard when an authoritative retry is superseded', async () => {
+    const user = userEvent.setup()
+    const externalAction = {
+      action_code: 'external.accept_review',
+      target_type: 'external_task',
+      target_ref: 'tsk_assessor_superseded',
+      label: 'Accept external-service review',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+      inputs: [],
+    }
+    const actionable = {
+      ...claim,
+      revision: 4,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: externalAction.action_code,
+        primary_action_target_ref: externalAction.target_ref,
+      },
+      allowed_actions: [externalAction],
+    }
+    const latest = {
+      ...actionable,
+      revision: 5,
+      allowed_actions: [{ ...externalAction, based_on_revision: 5 }],
+    }
+
+    let resolveRecoveryClaim
+    let resolveRecoveryExternal
+    const delayedRecoveryClaim = new Promise((resolve) => { resolveRecoveryClaim = resolve })
+    const delayedRecoveryExternal = new Promise((resolve) => { resolveRecoveryExternal = resolve })
+
+    api.claim
+      .mockResolvedValueOnce(actionable)
+      .mockRejectedValueOnce(Object.assign(
+        new Error('Claim readback is unavailable.'),
+        { status: 503, code: 'DEPENDENCY_UNAVAILABLE' },
+      ))
+      .mockReturnValueOnce(delayedRecoveryClaim)
+      .mockResolvedValueOnce(latest)
+      .mockResolvedValueOnce(latest)
+    api.externalRequests
+      .mockResolvedValueOnce({ items: [], page: { next_cursor: null }, status: 'available' })
+      .mockReturnValueOnce(delayedRecoveryExternal)
+      .mockResolvedValueOnce({ items: [], page: { next_cursor: null }, status: 'available' })
+    api.acceptExternalTaskReview.mockResolvedValue({ revision: 5 })
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+    await expect(externalActionTracker.lastPromise).rejects.toThrow(/authoritative readback did not complete/i)
+
+    const warning = await screen.findByRole('alert')
+    expect(warning).toHaveTextContent('tsk_assessor_superseded')
+    expect(screen.queryByRole('button', { name: 'Test projected external action' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Retry external readback' }))
+    expect(screen.getByRole('button', { name: 'Retry external readback' })).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'Test claim refresh' }))
+    await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 5'))
+
+    await act(async () => {
+      resolveRecoveryClaim(latest)
+      resolveRecoveryExternal({ items: [], page: { next_cursor: null }, status: 'available' })
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('tsk_assessor_superseded'))
+    expect(screen.queryByRole('button', { name: 'Test projected external action' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Retry external readback' }))
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+  })
+
+  it('preserves independent unconfirmed external-action guards across Claim tabs', async () => {
+    const user = userEvent.setup()
+    const actionA = {
+      action_code: 'external.accept_review',
+      target_type: 'external_task',
+      target_ref: 'tsk_claim_a',
+      label: 'Accept external-service review A',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+      inputs: [],
+    }
+    const actionB = {
+      ...actionA,
+      target_ref: 'tsk_claim_b',
+      label: 'Accept external-service review B',
+      based_on_revision: 6,
+    }
+    const claimA = {
+      ...claim,
+      claim_id: 'clm_route_1',
+      revision: 4,
+      display_reference: 'NW-A',
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: actionA.action_code,
+        primary_action_target_ref: actionA.target_ref,
+      },
+      allowed_actions: [actionA],
+    }
+    const claimB = {
+      ...claim,
+      claim_id: 'clm_route_2',
+      revision: 6,
+      display_reference: 'NW-B',
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: actionB.action_code,
+        primary_action_target_ref: actionB.target_ref,
+      },
+      allowed_actions: [actionB],
+    }
+    const calls = { clm_route_1: 0, clm_route_2: 0 }
+    api.claim.mockImplementation((token, id) => {
+      calls[id] += 1
+      if (calls[id] === 2) {
+        return Promise.reject(Object.assign(
+          new Error(`Claim ${id} readback is unavailable.`),
+          { status: 503, code: 'DEPENDENCY_UNAVAILABLE' },
+        ))
+      }
+      return Promise.resolve(id === 'clm_route_1' ? claimA : claimB)
+    })
+    api.acceptExternalTaskReview.mockResolvedValue({})
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('tsk_claim_a'))
+
+    await user.click(screen.getByRole('button', { name: 'Navigate Claim B' }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/workbench/claims/clm_route_2'))
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('tsk_claim_b'))
+
+    await user.click(screen.getByRole('button', { name: 'Navigate Claim A' }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/workbench/claims/clm_route_1'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('tsk_claim_a')
+    expect(screen.getByRole('alert')).not.toHaveTextContent('tsk_claim_b')
+    expect(screen.queryByRole('button', { name: 'Test projected external action' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Navigate Claim B' }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/workbench/claims/clm_route_2'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('tsk_claim_b')
+    expect(screen.queryByRole('button', { name: 'Test projected external action' })).not.toBeInTheDocument()
+  })
+
   it('reads back external-service state after a stale external action conflict', async () => {
     const user = userEvent.setup()
     const externalAction = {
