@@ -1364,6 +1364,13 @@ the claimant message, Agent decision, or idempotency result. A schema-valid part
 discarded unless the adapter normalises the provider termination state as complete. Provider
 response bodies, credentials, prompts, and internal model context are never returned.
 
+If the claim-scoped external-service records cannot be read or cannot be represented by the
+canonical lifecycle registry, the endpoint returns `503 EXTERNAL_LIFECYCLE_CONTEXT_UNAVAILABLE`
+before model execution or Claim mutation. `retryable` is `true` only for a temporary persistence
+read failure. Cross-Claim records, contradictory capability provenance, invalid task/result
+relationships, unsupported registry mappings, invalid result-verification combinations, and
+context overflow return the same bounded code with `retryable: false`.
+
 Response `200`:
 
 ```json
@@ -2410,11 +2417,23 @@ them. `live_attempted` is currently unreachable: the only implemented service id
 controlled fixture, and clients MUST NOT read `simulated` as evidence of a provider relationship.
 
 The lifecycle's overall `verification_state`, `pending_owner`, `status_label`, `status_detail`, and
-`next_action` remain the backend-owned operational projection. An `unknown_outcome` remains awaiting
-reconciliation even when a late result record exists; the Workbench does not infer completion from
-that result. The Workbench renders those fields and MUST NOT reconstruct lifecycle status or next
-steps from raw task status strings. Raw task/request objects remain available for identity, timing,
-failure, and source traceability.
+`next_action` are one backend-owned effective projection. A received or checked result replaces
+acknowledgement-only guidance with the applicable verification or authorised-decision step. An
+`unknown_outcome` remains awaiting reconciliation even when a late result record exists; the result
+coordinate remains visible, but the Workbench does not infer completion or bypass reconciliation.
+The Workbench renders these fields and MUST NOT reconstruct lifecycle status or next steps from raw
+task status strings. Raw task/request objects remain available for identity, timing, failure, and
+source traceability.
+
+For `vehicle_damage_assessment_routing`, an accepted external task is projected as `queued` or
+`assigned` only when the authoritative `WorkingClaim.assessor_routing` status carries the same
+assessor or queue reference as the task's `provider_reference`. A missing or non-matching routing
+record leaves the lifecycle at `accepted`; it is not evidence of later progress.
+
+If a registered capability's provenance contradicts the persisted request provenance, the endpoint
+returns `200` with `status: unavailable`, an empty `items` list, and a bounded `limitation`. This
+keeps a corrupt or stale integration record visible as an unavailable resource boundary without
+claiming provider activity or converting the whole page into an internal server error.
 
 Access to policy excerpts, history evidence, fraud-review signals, and staff notes MAY be further restricted by role.
 
@@ -2746,6 +2765,38 @@ Response groups aggregate metrics only:
 Prototype metrics validate observability, not Northwind production performance. Small groups MUST not expose identifiable claim or staff behaviour.
 
 ## Internal Orchestration and Adapter API
+
+### External Service Lifecycle Registry
+
+The canonical machine-readable registry is `external-service-lifecycle.v1` in
+`backend/domain/external_service_registry.py`. Existing `ExternalTaskRecord`
+operation statuses are validated against it; consumers must not define a second
+status vocabulary. The Python backend is the current producer. Browser-facing
+consumers must use a later API projection and must not import Python modules
+directly.
+
+`unknown_outcome` requires reconciliation before another side effect. `accepted`
+and `assigned` do not mean completed or verified. Result receipt, verification,
+and Claim/Evidence write-back remain separate stages. Manual and simulation-only
+capabilities cannot be represented as live provider success.
+
+The canonical projection exposes operation status, result lifecycle status, and
+result verification outcome as separate typed values. A received result is
+`unverified`; a verified result is `consistent`, `inconsistent`, or
+`review_required`. The task/result projection does not claim `written_back`
+without a separate authorised Claim/Evidence write-back record. Registry entries
+also distinguish transient statuses such as `submitting` from task statuses that
+can be persisted and projected. Definitions publish current-state invariants
+separately from transition preconditions; notably, `operation_id` and
+`dispatch_reserved_at` arise only when a prepared request reserves submission.
+
+The claimant Model Gateway receives the registry-derived effective meaning,
+responsibility, next action, attention requirement, and status detail. It does not
+reconstruct those values from raw status strings. For the assessor capability, Runtime
+also reads `WorkingClaim.assessor_routing`; `queued` or `assigned` replaces `accepted`
+only when its assessor or queue reference matches the external task's provider
+reference. TurnPlan evidence stores the resulting canonical operation coordinate,
+while the task and routing records remain authoritative.
 
 Internal endpoints are service-to-service only. The backend MAY implement an adapter in-process, but it MUST preserve these typed request and response boundaries so fixture repositories can be replaced without changing product clients.
 
@@ -3445,6 +3496,7 @@ All errors use one envelope:
 | `UPLOAD_TOO_LARGE` | `413` | File exceeds configured size |
 | `RATE_LIMITED` | `429` | Caller exceeded a limit |
 | `DEPENDENCY_UNAVAILABLE` | `503` | Required service is unavailable |
+| `EXTERNAL_LIFECYCLE_CONTEXT_UNAVAILABLE` | `503` | Claim-scoped external-service records are unavailable or cannot be represented safely for the Agent Runtime |
 | `PROJECTION_UNAVAILABLE` | `503` | Authoritative Claim facts conflict or cannot be placed in a published Workbench projection |
 | `DEPENDENCY_FAILED` | `502` | Required service returned an invalid or failed result |
 | `INTERNAL_ERROR` | `500` | Unexpected server failure |
