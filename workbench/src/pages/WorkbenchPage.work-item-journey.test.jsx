@@ -27,7 +27,7 @@ function jsonResponse(status, payload) {
 }
 function updateAction(revision) {
   return {
-    registry_version: '2026-09-11.1',
+    registry_version: '2026-09-15.1',
     action_code: 'work_item.update',
     target_type: 'work_item',
     target_ref: 'act_review',
