@@ -186,6 +186,48 @@ def test_successful_retry_clears_failure_state_from_task_and_workbench(
     assert staff_task['failure_code'] is None
 
 
+@pytest.mark.parametrize(
+    ('routing_status', 'expected_label'),
+    [
+        (AssessorRoutingStatus.QUEUED, 'Awaiting service assignment'),
+        (AssessorRoutingStatus.ASSIGNED, 'Assessor assigned'),
+    ],
+)
+def test_workbench_projects_real_assessor_routing_progress(
+    routing_status: AssessorRoutingStatus,
+    expected_label: str,
+) -> None:
+    repository = FixtureRepository()
+    adapter = MockAssessorServiceAdapter(routing_status=routing_status)
+    key = f'workbench-routing-{routing_status.value}'
+
+    with TestClient(
+        create_app(
+            DEVELOPER_SETTINGS,
+            repository=repository,
+            assessor_service_adapter=adapter,
+        )
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        routed = _route(client, claim_id, key=f'{key}-route', revision=consent_revision)
+        workbench = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/external-requests',
+            headers=STAFF_AUTH,
+        )
+
+    assert routed.status_code == 201, routed.text
+    assert workbench.status_code == 200, workbench.text
+    lifecycle = workbench.json()['items'][0]['lifecycle']
+    assert lifecycle['status_label'] == expected_label
+    assert lifecycle['verification_state'] == 'pending_verification'
+    assert lifecycle['pending_owner'] == 'external_party'
+    assert lifecycle['provider_reference'] in {
+        routed.json()['action']['routing']['assessor_reference'],
+        routed.json()['action']['routing']['queue_reference'],
+    }
+
+
 UNRESOLVED_MESSAGE = 'may already have reached the assessor'
 SENT_THEN_LOST = ScriptedAssessorFailure(
     code=AssessorFixtureFailure.TIMEOUT,
