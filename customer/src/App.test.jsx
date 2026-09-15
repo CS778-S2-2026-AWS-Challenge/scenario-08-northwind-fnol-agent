@@ -260,7 +260,7 @@ describe('claimant intake projection', () => {
       { code: 'DEPENDENCY_UNAVAILABLE', status: 503, retryable: true },
     ))
 
-    render(<App />)
+    const { container } = render(<App />)
     const input = screen.getByPlaceholderText('Tell us what happened…')
     await user.type(input, 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
@@ -271,8 +271,54 @@ describe('claimant intake projection', () => {
       'The model service is temporarily unavailable. The claim is unchanged. Try again in a moment.',
     )
     expect(failure).toBeInTheDocument()
+    expect(screen.getByText('Not sent')).toBeInTheDocument()
+    expect(container.querySelector('.workspace-composer [role="alert"]')).toHaveTextContent(
+      'The model service is temporarily unavailable. The claim is unchanged. Try again in a moment.',
+    )
     expect(screen.queryByText('We could not confirm delivery. Please try again.')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Retry message' })).toBeInTheDocument()
+  })
+
+  it('shows third-party support in a dismissible dialog with a compact reopen control', async () => {
+    const user = userEvent.setup()
+    api.createClaim.mockResolvedValue({
+      claim: {
+        ...initialClaim,
+        external_capabilities: [
+          {
+            service_identity: 'vehicle-assessment',
+            service_name: 'Vehicle damage assessment',
+            purpose: 'Assess visible vehicle damage.',
+            result_semantics: 'An assessment supports review; it does not approve repairs.',
+            official_phone: '0800 555 010',
+          },
+          {
+            service_identity: 'vehicle-recovery',
+            service_name: 'Vehicle recovery',
+            purpose: 'Arrange recovery when a vehicle cannot be driven safely.',
+            result_semantics: 'Availability depends on location and provider confirmation.',
+          },
+        ],
+      },
+      session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
+    })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    const { container } = render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'My car was damaged.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Third-party services' })
+    expect(dialog).toBeVisible()
+    expect(container.querySelector('.message-list .service-capability-list')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Close third-party services' }))
+    expect(screen.queryByRole('dialog', { name: 'Third-party services' })).not.toBeInTheDocument()
+
+    const trigger = screen.getByRole('button', { name: /Third-party support/ })
+    await waitFor(() => expect(trigger).toHaveFocus())
+    await user.click(trigger)
+    expect(await screen.findByRole('dialog', { name: 'Third-party services' })).toBeVisible()
   })
 
   it('returns to Claim history without dropping the active conversation', async () => {

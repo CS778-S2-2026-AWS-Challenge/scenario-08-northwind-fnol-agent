@@ -363,6 +363,7 @@ function App() {
   const [evidencePollingKey, setEvidencePollingKey] = useState(0)
   const [resumeContext, setResumeContext] = useState(null)
   const [expandedConversationPanels, setExpandedConversationPanels] = useState({})
+  const [externalCapabilitiesOpen, setExternalCapabilitiesOpen] = useState(false)
   const [externalServiceInteraction, setExternalServiceInteraction] = useState({
     claimId: null,
     consentChecked: false,
@@ -386,6 +387,11 @@ function App() {
   const detailsTabRefs = useRef({})
   const conversationPanelRef = useRef(null)
   const messageListRef = useRef(null)
+  const externalCapabilitiesDialogRef = useRef(null)
+  const externalCapabilitiesHeadingRef = useRef(null)
+  const externalCapabilitiesTriggerRef = useRef(null)
+  const presentedCapabilityCatalogues = useRef(new Set())
+  const restoreCapabilityTriggerFocus = useRef(false)
   const followLatestMessages = useRef(true)
   const forceLatestMessages = useRef(false)
   const confirmedClaimProjections = useRef(new Map())
@@ -595,6 +601,39 @@ function App() {
     [claim, nextStep],
   )
   const conversationActionKind = conversationAction?.kind || null
+  const externalCapabilityKey = claim?.external_capabilities?.length > 0
+    ? `${claim.claim_id}:${claim.external_capabilities
+        .map((capability) => `${capability.service_identity}:${capability.registry_version || ''}`)
+        .join('|')}`
+    : null
+
+  useEffect(() => {
+    if (!externalCapabilityKey || !isWorkspaceActive) return
+    if (presentedCapabilityCatalogues.current.has(externalCapabilityKey)) return
+    presentedCapabilityCatalogues.current.add(externalCapabilityKey)
+    setExternalCapabilitiesOpen(true)
+  }, [externalCapabilityKey, isWorkspaceActive])
+
+  useEffect(() => {
+    const dialog = externalCapabilitiesDialogRef.current
+    if (!dialog) return
+    if (externalCapabilitiesOpen) {
+      if (!dialog.open) {
+        if (typeof dialog.showModal === 'function') dialog.showModal()
+        else dialog.setAttribute('open', '')
+      }
+      globalThis.requestAnimationFrame(() => externalCapabilitiesHeadingRef.current?.focus())
+      return
+    }
+    if (dialog.open) {
+      if (typeof dialog.close === 'function') dialog.close()
+      else dialog.removeAttribute('open')
+    }
+    if (restoreCapabilityTriggerFocus.current) {
+      restoreCapabilityTriggerFocus.current = false
+      globalThis.requestAnimationFrame(() => externalCapabilitiesTriggerRef.current?.focus())
+    }
+  }, [externalCapabilitiesOpen])
 
   useEffect(() => {
     followLatestMessages.current = true
@@ -1793,6 +1832,11 @@ function App() {
     )
   }
 
+  function closeExternalCapabilities() {
+    restoreCapabilityTriggerFocus.current = true
+    setExternalCapabilitiesOpen(false)
+  }
+
   function toggleConversationPanel(panel) {
     if (!claim?.claim_id) return
     const panelKey = `${claim.claim_id}:${panel}`
@@ -2455,7 +2499,7 @@ function App() {
                 <article className="message message-claimant is-failed" role="alert">
                   <p className="message-author">{failedMessage.sender}</p>
                   <p>{failedMessage.text}</p>
-                  <p className="message-state">{failedMessage.message}</p>
+                  <p className="message-state">Not sent</p>
                 </article>
               )}
               {isUrgentSupport && handoff && ['queued', 'accepted'].includes(handoff.status) && (
@@ -2519,7 +2563,27 @@ function App() {
             </div>
 
             {claim.external_capabilities?.length > 0 && (
-              <ExternalCapabilityCatalogue capabilities={claim.external_capabilities} />
+              <>
+                <button
+                  ref={externalCapabilitiesTriggerRef}
+                  className="external-capabilities-trigger"
+                  type="button"
+                  aria-haspopup="dialog"
+                  onClick={() => setExternalCapabilitiesOpen(true)}
+                >
+                  <span>
+                    <strong>Third-party support</strong>
+                    <small>{claim.external_capabilities.length} services available</small>
+                  </span>
+                  <span aria-hidden="true">View</span>
+                </button>
+                <ExternalCapabilityCatalogue
+                  capabilities={claim.external_capabilities}
+                  dialogRef={externalCapabilitiesDialogRef}
+                  headingRef={externalCapabilitiesHeadingRef}
+                  onClose={closeExternalCapabilities}
+                />
+              </>
             )}
 
             <MessageComposer
@@ -2543,7 +2607,7 @@ function App() {
                   : assistanceState?.key === 'response_needed'
                     ? 'Send reply'
                     : 'Send'}
-              error={error}
+              error={failedMessage?.message || error}
               variant="workspace"
               claimType={claimType}
               setClaimType={setClaimType}
@@ -2726,11 +2790,26 @@ function App() {
   )
 }
 
-function ExternalCapabilityCatalogue({ capabilities }) {
+function ExternalCapabilityCatalogue({ capabilities, dialogRef, headingRef, onClose }) {
   return (
-    <section className="external-service" aria-labelledby="external-capabilities-title">
-      <p className="transfer-label">Available support</p>
-      <h2 id="external-capabilities-title">Third-party services</h2>
+    <dialog
+      ref={dialogRef}
+      className="external-capabilities-dialog"
+      aria-labelledby="external-capabilities-title"
+      onCancel={(event) => {
+        event.preventDefault()
+        onClose()
+      }}
+    >
+      <div className="external-capabilities-dialog-heading">
+        <div>
+          <p className="transfer-label">Available support</p>
+          <h2 id="external-capabilities-title" ref={headingRef} tabIndex="-1">Third-party services</h2>
+        </div>
+        <button className="external-capabilities-close" type="button" aria-label="Close third-party services" onClick={onClose}>
+          <span aria-hidden="true">×</span>
+        </button>
+      </div>
       <div className="service-capability-list">
         {capabilities.map((capability) => (
           <article className="service-capability" key={capability.service_identity}>
@@ -2744,7 +2823,7 @@ function ExternalCapabilityCatalogue({ capabilities }) {
           </article>
         ))}
       </div>
-    </section>
+    </dialog>
   )
 }
 export default App
