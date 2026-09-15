@@ -170,33 +170,37 @@ the append-only audit collection through a bounded, filterable projection.
 26. List external tasks for one authorised Claim in stable `(created_at, task_id)` order and map
     each task to its single request and single-origin evidence links without exposing another
     Claim.
-27. Append an immutable branch evaluation for a Claim revision and list evaluations in creation
+27. Read active Evidence reuse links by target Claim and Evidence identity, and list all links for
+    one claimant without crossing customer scope.
+28. Atomically apply one claimant Evidence reuse or removal with the target Claim revision,
+    idempotency record, Branch Evaluation, and append-only audit event.
+29. Append an immutable branch evaluation for a Claim revision and list evaluations in creation
     order without allowing an evaluation to overwrite Claim State.
-28. Resolve an unexpired and unrevoked staff session from the independent staff identity store
+30. Resolve an unexpired and unrevoked staff session from the independent staff identity store
     without accepting claimant credentials or browser-supplied roles.
-29. Create, list, and resume Staff Agent sessions by authenticated `staff_id` without exposing
+31. Create, list, and resume Staff Agent sessions by authenticated `staff_id` without exposing
     another staff member's sessions.
-30. Append one Staff Agent question and answer atomically, resolve retries by
+32. Append one Staff Agent question and answer atomically, resolve retries by
     `(staff_id, session_id, client_message_id)`, and preserve the explicit zero-to-five Claim scope
     used for that turn. Persist stable draft identities and route an explicitly confirmed draft
     through the existing revision-checked Workbench action handler; do not grant the model direct
     mutation authority.
-31. Create a unique Customer or Staff account through its identity repository without exposing the
+33. Create a unique Customer or Staff account through its identity repository without exposing the
     password hash or allowing an administration retry to create a duplicate account.
-32. Conditionally update approved Customer or Staff account fields by account revision; a stale
+34. Conditionally update approved Customer or Staff account fields by account revision; a stale
     write returns the current revision without changing the record.
-33. List identity sessions for exactly one Customer or Staff account in stable newest-first order
+35. List identity sessions for exactly one Customer or Staff account in stable newest-first order
     without returning bearer values or token hashes.
-34. Resolve and revoke one active identity session by opaque `ias_` ID and expected revision; a
+36. Resolve and revoke one active identity session by opaque `ias_` ID and expected revision; a
     session under another account is not exposed and a retry cannot reactivate it.
-35. Receive one accepted assessor task's returned report through the installed adapter, store its
+37. Receive one accepted assessor task's returned report through the installed adapter, store its
     bytes under the task-linked Evidence identity, recover an interrupted unchanged retry, and
     verify the immutable result against the current Claim revision without promoting Claim facts.
-36. List authorised Claims by the server-projected completed, abandoned, or closed disposition
+38. List authorised Claims by the server-projected completed, abandoned, or closed disposition
     without scanning action history or inferring terminal state from a missing Session.
-37. Resolve and atomically reopen one eligible abandoned/closed Claim by staff actor, exact action,
+39. Resolve and atomically reopen one eligible abandoned/closed Claim by staff actor, exact action,
     target, expected revision, and idempotency key while preserving the active-session pointer.
-38. Search Sessions within one authorised Claim by registered Session and message filters while
+40. Search Sessions within one authorised Claim by registered Session and message filters while
     examining at most 100 Sessions and 200 messages per Session, stopping once the requested result
     limit is satisfied, and returning unavailable when the examined-set bound cannot prove a
     complete result (`SEARCH_SCOPE_EXCEEDED`). Read at most the requested newest 50 messages for
@@ -465,6 +469,21 @@ the append-only audit collection through a bounded, filterable projection.
   authoritative Claim aggregation; only a `ready` file can contribute received
   Evidence. Retry reuses the same Evidence identity and revision-checked
   mutation rather than creating a duplicate record.
+- Account history actions preserve the original Evidence identity. Reuse stores an
+  `EvidenceClaimLink` containing source Claim, target Claim, customer, lifecycle,
+  and timestamps; it never duplicates the object or its metadata as a new source
+  record. The target Claim projection includes only active links and recomputes
+  its evidence summary from the linked source records.
+- Removing source Evidence marks its claimant-history state removed while keeping
+  the immutable record, material history, provenance, and audit trail. Removing a
+  reused item writes a detached link and leaves the source Claim unchanged. Both
+  operations advance only the target Claim revision and are persisted atomically
+  with idempotency, Branch Evaluation, and audit data.
+- Evidence action writes require the authenticated claimant to own both Claims and
+  the source Evidence. The compare-and-set revision check occurs in the same
+  transaction as the relation or history-state change; retries with the same key
+  replay the stored typed result, while a different request under that key is a
+  conflict.
 - Pending, invalid, unofficial, and not-yet-generated evidence remain distinct states.
   `EvidenceStatus` carries the business condition of the material and
   `EvidenceFileStatus` the upload and processing lifecycle alone, so the two

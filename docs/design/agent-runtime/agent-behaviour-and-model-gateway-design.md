@@ -519,7 +519,9 @@ confirmation reference before invoking a provider-neutral backend port. It check
 workflow state and Claim revision before a first execution, and it looks up an existing result by
 the same idempotency key before treating a stale revision as a conflict. The backend remains
 authoritative for retention, consent and permission policy, audit persistence, Evidence linkage,
-and whether removal means detach, unavailable, or physical deletion.
+and whether removal means detach, claimant-history removal with retention, or physical deletion.
+The current Evidence API implements the first two: reuse creates an auditable link to the existing
+Evidence object, while source removal hides it from claimant history without deleting the object.
 
 The backend port returns `succeeded`, `rejected`, `unavailable`, `failed`, or `unknown`. Runtime
 reports success only when the result identifies the same action and Evidence, includes an

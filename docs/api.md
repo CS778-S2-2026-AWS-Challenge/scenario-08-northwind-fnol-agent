@@ -1820,8 +1820,38 @@ or unrestricted provenance. Registration-only Evidence with no uploaded file
 is not included.
 
 `can_reuse` is true only for a claimant-owned file in a reusable processing
-state. `can_remove` remains false until a governed remove operation is
-available; clients must not delete an object-storage key directly.
+state. `can_remove` is true only for a ready claimant-owned item that is not
+invalid, expired, superseded, or otherwise retention-blocked. Active links to
+other Claims are returned as `linked_claim_ids`.
+
+### `POST /api/v1/claims/{claim_id}/evidence/{evidence_id}/reuse`
+
+Attaches an eligible Evidence object from another Claim owned by the same
+claimant. This creates an auditable relation to the existing `evidence_id`; it
+does not copy file bytes or expose a storage key. The request requires the
+source Claim, Runtime proposal reference, claimant confirmation reference,
+`Idempotency-Key`, and `If-Match` for the target Claim revision.
+
+The response is a typed action result with `status`, `reason_code`, the target
+revision when applied, and `state_change_refs`. `succeeded` is returned only
+after the relation, Claim evidence projection, Branch Evaluation, idempotency
+record, and audit event are persisted together. Processing, failed, invalid,
+expired, superseded, cross-customer, already-linked, or stale items are
+rejected without changing Claim State.
+
+### `POST /api/v1/claims/{claim_id}/evidence/{evidence_id}/remove`
+
+Removes an Evidence item through the governed claimant API. When the source
+Claim is the target, removal hides the item from claimant history while
+retaining the immutable Evidence object and audit/provenance record. When the
+item is reused from another Claim, removal detaches only the target relation;
+the source Evidence remains available from its original Claim. Physical object
+deletion is not performed by the browser or Agent.
+
+The request and response use the same confirmation, idempotency, revision, and
+typed-outcome rules as `reuse`. A rejected or ambiguous result does not claim
+that the item was removed; the client must refresh the authoritative history
+and reconcile an unknown outcome with the same idempotency key.
 
 ### `POST /api/v1/claims/{claim_id}/evidence`
 

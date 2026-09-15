@@ -150,6 +150,196 @@ def test_claimant_can_read_evidence_history_across_owned_claims(
     assert second_page.json()['items'][0]['source_claim_id'] == second_id
 
 
+def _make_ready_evidence(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    claim_id: str,
+    case: str,
+    revision: int = 1,
+) -> tuple[str, int]:
+    evidence_id = upload_evidence(client, auth_headers, claim_id, case, revision)
+    complete_upload(client, auth_headers, claim_id, evidence_id, case, revision + 1)
+    processed = client.post(
+        f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing',
+        headers=integration_headers(f'{case}-processing', revision + 2),
+        json={
+            'facts': [
+                {
+                    'field_code': 'incident.description',
+                    'value': 'Ready Evidence for governed account-history actions.',
+                    'confidence': 0.9,
+                }
+            ]
+        },
+    )
+    assert processed.status_code == 200
+    return evidence_id, revision + 3
+
+
+def test_claimant_can_reuse_then_detach_existing_evidence_without_copying_it(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    source = create_claim(client, auth_headers, 'reuse-source-claim')
+    target = create_claim(client, auth_headers, 'reuse-target-claim')
+    source_id = str(cast(dict[str, object], source['claim'])['claim_id'])
+    target_id = str(cast(dict[str, object], target['claim'])['claim_id'])
+    evidence_id, source_revision = _make_ready_evidence(
+        client, auth_headers, source_id, 'reuse-source-evidence'
+    )
+
+    reuse = client.post(
+        f'/api/v1/claims/{target_id}/evidence/{evidence_id}/reuse',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'reuse-evidence-action',
+            'If-Match': '1',
+        },
+        json={
+            'source_claim_id': source_id,
+            'proposal_ref': 'proposal-reuse-1',
+            'confirmation_ref': 'confirmation-reuse-1',
+        },
+    )
+    target_evidence = client.get(f'/api/v1/claims/{target_id}/evidence', headers=auth_headers)
+    history = client.get('/api/v1/evidence', headers=auth_headers)
+
+    assert source_revision == 4
+    assert reuse.status_code == 200
+    assert reuse.json()['status'] == 'succeeded'
+    assert reuse.json()['revision'] == 2
+    assert [item['evidence_id'] for item in target_evidence.json()['items']] == [evidence_id]
+    assert target_evidence.json()['items'][0]['source_claim_id'] == source_id
+    history_item = next(
+        item for item in history.json()['items'] if item['evidence_id'] == evidence_id
+    )
+    assert history_item['linked_claim_ids'] == [target_id]
+    assert repository.get_evidence_claim_link(target_id, evidence_id, 'cus_demo') is not None
+    assert repository.get_evidence(source_id, evidence_id, 'cus_demo') is not None
+
+    detach = client.post(
+        f'/api/v1/claims/{target_id}/evidence/{evidence_id}/remove',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'detach-evidence-action',
+            'If-Match': '2',
+        },
+        json={
+            'source_claim_id': source_id,
+            'proposal_ref': 'proposal-remove-1',
+            'confirmation_ref': 'confirmation-remove-1',
+        },
+    )
+    target_after = client.get(f'/api/v1/claims/{target_id}/evidence', headers=auth_headers)
+    history_after = client.get('/api/v1/evidence', headers=auth_headers)
+
+    assert detach.status_code == 200
+    assert detach.json()['reason_code'] == 'EVIDENCE_DETACHED'
+    assert target_after.json()['items'] == []
+    history_item = next(
+        item for item in history_after.json()['items'] if item['evidence_id'] == evidence_id
+    )
+    assert history_item['linked_claim_ids'] == []
+    link = repository.get_evidence_claim_link(target_id, evidence_id, 'cus_demo')
+    assert link is not None
+    assert link.state.value == 'detached'
+
+
+def test_removing_source_evidence_marks_history_removed_and_replays_idempotently(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    created = create_claim(client, auth_headers, 'remove-source-claim')
+    claim_id = str(cast(dict[str, object], created['claim'])['claim_id'])
+    evidence_id, revision = _make_ready_evidence(
+        client, auth_headers, claim_id, 'remove-source-evidence'
+    )
+    payload = {
+        'source_claim_id': claim_id,
+        'proposal_ref': 'proposal-remove-source',
+        'confirmation_ref': 'confirmation-remove-source',
+    }
+    headers = {
+        **auth_headers,
+        'Idempotency-Key': 'remove-source-action',
+        'If-Match': str(revision),
+    }
+
+    removed = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/remove',
+        headers=headers,
+        json=payload,
+    )
+    replay = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/remove',
+        headers=headers,
+        json=payload,
+    )
+    history = client.get('/api/v1/evidence', headers=auth_headers)
+
+    assert removed.status_code == 200
+    assert removed.json()['reason_code'] == 'EVIDENCE_HISTORY_REMOVED_CONTENT_RETAINED'
+    assert replay.json() == removed.json()
+    assert evidence_id not in {item['evidence_id'] for item in history.json()['items']}
+
+
+@pytest.mark.parametrize(
+    ('file_status', 'status', 'reason'),
+    [
+        ('processing', 'received', 'EVIDENCE_PROCESSING'),
+        ('failed', 'received', 'EVIDENCE_NOT_REMOVABLE'),
+        ('ready', 'invalid', 'EVIDENCE_RETENTION_BLOCKED'),
+    ],
+)
+def test_evidence_action_rejects_ineligible_source_without_changing_claim(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    file_status: str,
+    status: str,
+    reason: str,
+) -> None:
+    created = create_claim(client, auth_headers, f'action-rejected-{file_status}-{status}')
+    claim_id = str(cast(dict[str, object], created['claim'])['claim_id'])
+    evidence_id = upload_evidence(client, auth_headers, claim_id, f'action-{file_status}', 1)
+    complete_upload(client, auth_headers, claim_id, evidence_id, f'action-{file_status}', 2)
+    evidence = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    assert evidence is not None
+    repository.save_evidence(
+        evidence.model_copy(
+            update={
+                'file_status': EvidenceFileStatus(file_status),
+                'status': EvidenceStatus(status),
+            }
+        ),
+        'cus_demo',
+    )
+    before = repository.get_claim(claim_id, 'cus_demo')
+    assert before is not None
+
+    response = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/remove',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': f'rejected-{file_status}-{status}',
+            'If-Match': '3',
+        },
+        json={
+            'source_claim_id': claim_id,
+            'proposal_ref': 'proposal-rejected',
+            'confirmation_ref': 'confirmation-rejected',
+        },
+    )
+    after = repository.get_claim(claim_id, 'cus_demo')
+
+    assert response.status_code == 200
+    assert response.json()['status'] == 'rejected'
+    assert response.json()['reason_code'] == reason
+    assert after is not None
+    assert after.revision == before.revision
+
+
 def _seed_history_evidence(
     repository: FixtureRepository,
     *,
