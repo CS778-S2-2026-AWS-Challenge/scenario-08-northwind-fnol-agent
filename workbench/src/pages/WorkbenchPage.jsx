@@ -45,6 +45,7 @@ export default function WorkbenchPage() {
   const conversationsRequestId = useRef(0)
   const [detail, setDetail] = useState(null)
   const detailRef = useRef(null)
+  const rootRestoreAttemptedRef = useRef(false)
   const currentClaimIdRef = useRef(claimId)
   currentClaimIdRef.current = claimId
   const detailRequestId = useRef(0)
@@ -128,8 +129,17 @@ export default function WorkbenchPage() {
     return response
   }, [openTab])
 
-  const loadClaims = useCallback(async ({ cursor = null, append = false } = {}) => {
-    if (!filterMetadata || !viewAvailable) return
+  const loadClaims = useCallback(async ({
+    cursor = null,
+    append = false,
+    propagateError = false,
+  } = {}) => {
+    if (!filterMetadata || !viewAvailable) {
+      if (propagateError) {
+        throw new Error('The Claim queue projection is unavailable and could not be refreshed.')
+      }
+      return
+    }
     const requestId = ++queueRequestId.current
     const snapshotKey = queueFilterKey(queueFilters)
     const sameSnapshot = queueSnapshotKeyRef.current === snapshotKey
@@ -165,17 +175,21 @@ export default function WorkbenchPage() {
           setQueueNotice('The saved queue page was invalid or stale, so current work was reloaded from the start.')
           return
         } catch (recoveryError) {
-          if (requestId === queueRequestId.current) setQueueError(recoveryError)
+          if (requestId === queueRequestId.current) {
+            setQueueError(recoveryError)
+            if (propagateError) throw recoveryError
+          }
           return
         }
       }
       setQueueError(error)
+      if (propagateError) throw error
     } finally {
       if (requestId === queueRequestId.current) setQueueLoading(false)
     }
   }, [filterMetadata, queueFilters, token, viewAvailable])
 
-  const loadDetail = useCallback(async (id) => {
+  const loadDetail = useCallback(async (id, { propagateError = false } = {}) => {
     const requestId = ++detailRequestId.current
     if (!id) {
       detailRef.current = null
@@ -227,6 +241,7 @@ export default function WorkbenchPage() {
         setDetailStale(true)
       }
       setDetailError(error)
+      if (propagateError) throw error
     } finally {
       if (requestId === detailRequestId.current) setDetailLoading(false)
     }
@@ -394,7 +409,7 @@ export default function WorkbenchPage() {
     token,
   ])
 
-  const loadConversations = useCallback(async () => {
+  const loadConversations = useCallback(async ({ propagateError = false } = {}) => {
     const requestId = ++conversationsRequestId.current
     setConversationsLoading(true)
     setConversationsError(null)
@@ -456,6 +471,17 @@ export default function WorkbenchPage() {
     }
     setConversationsLoading(false)
     setAssistanceRequestsLoading(false)
+    if (propagateError) {
+      const contextError = contextEntries
+        .flatMap(([, context]) => [context.detailError, context.handoffError])
+        .find(Boolean)
+      const refreshError = conversationResult.status === 'rejected'
+        ? conversationResult.reason
+        : assistanceResult.status === 'rejected'
+          ? assistanceResult.reason
+          : contextError
+      if (refreshError) throw refreshError
+    }
   }, [token])
 
   useEffect(() => {
@@ -484,6 +510,44 @@ export default function WorkbenchPage() {
       setSearchParams(normalized, { replace: true })
     }
   }, [filterMetadata, searchParams, setSearchParams])
+  useEffect(() => {
+    if (
+      rootRestoreAttemptedRef.current
+      || location.pathname !== '/workbench'
+      || !filterMetadata
+    ) return
+
+    rootRestoreAttemptedRef.current = true
+    if (!viewAvailable) return
+
+    const activeTab = tabs.tabs.find((tab) => tab.claimId === tabs.activeId)
+    if (!activeTab) return
+
+    const section = CLAIM_SECTIONS.has(activeTab.section)
+      ? activeTab.section
+      : 'summary'
+    const suffix = section === 'summary' ? '' : `/${section}`
+    const sessionId = section === 'conversation'
+      ? activeTab.sessionId || null
+      : null
+
+    navigate(
+      queueRoute(
+        `/workbench/claims/${activeTab.claimId}${suffix}`,
+        queueFilters,
+        sessionId,
+      ),
+      { replace: true },
+    )
+  }, [
+    filterMetadata,
+    location.pathname,
+    navigate,
+    queueFilters,
+    tabs.activeId,
+    tabs.tabs,
+    viewAvailable,
+  ])
   useEffect(() => {
     loadClaims()
   }, [loadClaims])
@@ -926,6 +990,39 @@ export default function WorkbenchPage() {
         onSessionChange={(sessionId) => setAgentSessionId(sessionId)}
         onConversationChanged={() => {
           if (isConversations) loadConversations()
+        }}
+        onBusinessActionExecuted={async (execution) => {
+          const refreshes = [
+            ['Claim queue', loadClaims({ propagateError: true })],
+          ]
+          if (claimId && execution.claim_id === claimId) {
+            refreshes.push([
+              'open Claim',
+              loadDetail(claimId, { propagateError: true }),
+            ])
+          }
+          if (isConversations) {
+            refreshes.push([
+              'conversations',
+              loadConversations({ propagateError: true }),
+            ])
+          }
+
+          const results = await Promise.allSettled(
+            refreshes.map(([, refresh]) => refresh),
+          )
+          const failures = results.flatMap((result, index) => (
+            result.status === 'rejected'
+              ? [{ label: refreshes[index][0], error: result.reason }]
+              : []
+          ))
+          if (failures.length) {
+            const refreshError = new Error(
+              `Action executed, but refresh failed for ${failures.map(({ label }) => label).join(', ')}. Refresh before taking another action.`,
+            )
+            refreshError.requestId = failures.find(({ error }) => error?.requestId)?.error?.requestId || null
+            throw refreshError
+          }
         }}
       />
     </div>

@@ -916,6 +916,12 @@ record disagrees with.
 `references` does not appear in the claimant projection. A claimant is told a check is in
 progress; which side is doubted, and why, is staff-only.
 
+Staff handoff projections also retain the authoritative `resume_workflow_state` and
+`resume_next_action` captured when support was requested. These continuation fields are
+optional for legacy handoff records; when absent, resolving the handoff preserves the
+current Claim state rather than inventing a continuation target. These fields are
+staff-facing only and are not included in the claimant handoff projection.
+
 Extracted facts use the structured form envelope with `source` set to `image` or `document`. They remain `proposed` until claimant confirmation or an authorised staff decision.
 
 ### Current Compatibility Agent Decision
@@ -1249,10 +1255,24 @@ Response `200`:
   "dynamic_form": null,
   "customer_next_step": {},
   "handoff": null,
+  "resolved_support_handoff": null,
   "created_at": "2026-08-10T03:40:00Z",
   "updated_at": "2026-08-10T03:50:00Z"
 }
 ```
+
+`resolved_support_handoff` is present only on Claim detail, and is otherwise `null`. It is
+claimant-safe completion evidence containing exactly `handoff_id`, `type`, `status`,
+`completed_at`, and `customer_update`. The `customer_update` is the claimant-safe update written
+when the handoff is resolved; staff result summaries and internal action identifiers are never
+projected. The object is derived from the latest claimant-created `human_support` or
+`urgent_support` HandoffRecord only when that record is resolved and has a matching completed
+`handoff_support` resolution event.
+Professional review, staff-created or cancelled/rejected work, ordinary staff updates, and
+terminal Claims never produce this field. A newer claimant support request clears the previous
+projection until the newer request is eligible and resolved. This field reports staff assistance
+completion only; it does not mean that the Claim is complete, created externally, covered, or
+otherwise terminal. `customer_next_step` remains the authoritative continuation action.
 
 The claimant-facing `evidence_summary` MUST be calculated only from evidence records visible through the claimant evidence projection. It MUST NOT include counts derived from `internal_only` evidence or any record excluded from `GET /claims/{claim_id}/evidence`. The persisted Working Claim retains the authoritative aggregate over the full persisted evidence set for staff and operational use; persistence adapters MUST preserve that full aggregate. Claimant-safe aggregation is applied only at the claimant projection boundary.
 
@@ -1332,9 +1352,9 @@ Request:
   "model_profile_id": "qwen-local",
   "content": {
     "type": "text",
-    "text": "I was rear-ended while stopped at traffic lights. Nobody is injured."
+    "text": "I was rear-ended while stopped at traffic lights. Please review the photo."
   },
-  "evidence_refs": []
+  "evidence_refs": ["evd_01J4Y7V5QJ"]
 }
 ```
 
@@ -1343,6 +1363,17 @@ optional `model_profile_id` selects any currently published claimant profile for
 does not create a new Claim or clear the conversation. The selected profile is persisted in the
 Session as the latest default and in the Runtime provenance for the exact turn. Empty text
 without evidence is rejected.
+
+`evidence_refs` is also the explicit per-message disclosure boundary for model input. Before a
+model call, each ID must resolve to claimant-visible Evidence on the authenticated claimant's
+current Claim, use a supported image/PDF media type, and be in an uploaded, processing, or ready
+file state. Duplicate, unknown, cross-Claim, staff/external internal-only, incomplete, invalid,
+expired, superseded, missing, or unavailable references are rejected before the Agent runs. The
+Runtime passes a turn-scoped resolver rather than an object URL or storage key, and the resolver
+repeats the visibility, record, and immutable-object checks whenever an adapter reads bytes. A
+structured form fact or contents item attributed to an attachment must name that exact Evidence
+ID. It is persisted with `image` or `document` provenance and remains `proposed` for claimant
+confirmation.
 
 On the target namespaced Runtime path the model must first call `claim.read`. The Runtime executes
 the read against the authenticated Claim, sends the assistant tool call and result back to the
@@ -1363,6 +1394,13 @@ Both outcomes use provider-neutral messages, preserve the current Claim revision
 the claimant message, Agent decision, or idempotency result. A schema-valid partial result is still
 discarded unless the adapter normalises the provider termination state as complete. Provider
 response bodies, credentials, prompts, and internal model context are never returned.
+
+If the claim-scoped external-service records cannot be read or cannot be represented by the
+canonical lifecycle registry, the endpoint returns `503 EXTERNAL_LIFECYCLE_CONTEXT_UNAVAILABLE`
+before model execution or Claim mutation. `retryable` is `true` only for a temporary persistence
+read failure. Cross-Claim records, contradictory capability provenance, invalid task/result
+relationships, unsupported registry mappings, invalid result-verification combinations, and
+context overflow return the same bounded code with `retryable: false`.
 
 Response `200`:
 
@@ -2410,11 +2448,23 @@ them. `live_attempted` is currently unreachable: the only implemented service id
 controlled fixture, and clients MUST NOT read `simulated` as evidence of a provider relationship.
 
 The lifecycle's overall `verification_state`, `pending_owner`, `status_label`, `status_detail`, and
-`next_action` remain the backend-owned operational projection. An `unknown_outcome` remains awaiting
-reconciliation even when a late result record exists; the Workbench does not infer completion from
-that result. The Workbench renders those fields and MUST NOT reconstruct lifecycle status or next
-steps from raw task status strings. Raw task/request objects remain available for identity, timing,
-failure, and source traceability.
+`next_action` are one backend-owned effective projection. A received or checked result replaces
+acknowledgement-only guidance with the applicable verification or authorised-decision step. An
+`unknown_outcome` remains awaiting reconciliation even when a late result record exists; the result
+coordinate remains visible, but the Workbench does not infer completion or bypass reconciliation.
+The Workbench renders these fields and MUST NOT reconstruct lifecycle status or next steps from raw
+task status strings. Raw task/request objects remain available for identity, timing, failure, and
+source traceability.
+
+For `vehicle_damage_assessment_routing`, an accepted external task is projected as `queued` or
+`assigned` only when the authoritative `WorkingClaim.assessor_routing` status carries the same
+assessor or queue reference as the task's `provider_reference`. A missing or non-matching routing
+record leaves the lifecycle at `accepted`; it is not evidence of later progress.
+
+If a registered capability's provenance contradicts the persisted request provenance, the endpoint
+returns `200` with `status: unavailable`, an empty `items` list, and a bounded `limitation`. This
+keeps a corrupt or stale integration record visible as an unavailable resource boundary without
+claiming provider activity or converting the whole page into an internal server error.
 
 Access to policy excerpts, history evidence, fraud-review signals, and staff notes MAY be further restricted by role.
 
@@ -2746,6 +2796,38 @@ Response groups aggregate metrics only:
 Prototype metrics validate observability, not Northwind production performance. Small groups MUST not expose identifiable claim or staff behaviour.
 
 ## Internal Orchestration and Adapter API
+
+### External Service Lifecycle Registry
+
+The canonical machine-readable registry is `external-service-lifecycle.v1` in
+`backend/domain/external_service_registry.py`. Existing `ExternalTaskRecord`
+operation statuses are validated against it; consumers must not define a second
+status vocabulary. The Python backend is the current producer. Browser-facing
+consumers must use a later API projection and must not import Python modules
+directly.
+
+`unknown_outcome` requires reconciliation before another side effect. `accepted`
+and `assigned` do not mean completed or verified. Result receipt, verification,
+and Claim/Evidence write-back remain separate stages. Manual and simulation-only
+capabilities cannot be represented as live provider success.
+
+The canonical projection exposes operation status, result lifecycle status, and
+result verification outcome as separate typed values. A received result is
+`unverified`; a verified result is `consistent`, `inconsistent`, or
+`review_required`. The task/result projection does not claim `written_back`
+without a separate authorised Claim/Evidence write-back record. Registry entries
+also distinguish transient statuses such as `submitting` from task statuses that
+can be persisted and projected. Definitions publish current-state invariants
+separately from transition preconditions; notably, `operation_id` and
+`dispatch_reserved_at` arise only when a prepared request reserves submission.
+
+The claimant Model Gateway receives the registry-derived effective meaning,
+responsibility, next action, attention requirement, and status detail. It does not
+reconstruct those values from raw status strings. For the assessor capability, Runtime
+also reads `WorkingClaim.assessor_routing`; `queued` or `assigned` replaces `accepted`
+only when its assessor or queue reference matches the external task's provider
+reference. TurnPlan evidence stores the resulting canonical operation coordinate,
+while the task and routing records remain authoritative.
 
 Internal endpoints are service-to-service only. The backend MAY implement an adapter in-process, but it MUST preserve these typed request and response boundaries so fixture repositories can be replaced without changing product clients.
 
@@ -3445,6 +3527,7 @@ All errors use one envelope:
 | `UPLOAD_TOO_LARGE` | `413` | File exceeds configured size |
 | `RATE_LIMITED` | `429` | Caller exceeded a limit |
 | `DEPENDENCY_UNAVAILABLE` | `503` | Required service is unavailable |
+| `EXTERNAL_LIFECYCLE_CONTEXT_UNAVAILABLE` | `503` | Claim-scoped external-service records are unavailable or cannot be represented safely for the Agent Runtime |
 | `PROJECTION_UNAVAILABLE` | `503` | Authoritative Claim facts conflict or cannot be placed in a published Workbench projection |
 | `DEPENDENCY_FAILED` | `502` | Required service returned an invalid or failed result |
 | `INTERNAL_ERROR` | `500` | Unexpected server failure |

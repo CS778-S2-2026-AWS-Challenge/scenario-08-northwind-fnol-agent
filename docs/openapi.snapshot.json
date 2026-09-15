@@ -2320,6 +2320,16 @@
               }
             ]
           },
+          "resolved_support_handoff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantResolvedSupportHandoff"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -2945,6 +2955,48 @@
           "created_at"
         ],
         "title": "ClaimantMessage",
+        "type": "object"
+      },
+      "ClaimantResolvedSupportHandoff": {
+        "additionalProperties": false,
+        "description": "Claimant-safe evidence that a support handoff was completed.",
+        "properties": {
+          "completed_at": {
+            "format": "date-time",
+            "title": "Completed At",
+            "type": "string"
+          },
+          "customer_update": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Update"
+          },
+          "handoff_id": {
+            "title": "Handoff Id",
+            "type": "string"
+          },
+          "status": {
+            "const": "resolved",
+            "default": "resolved",
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/HandoffType"
+          }
+        },
+        "required": [
+          "handoff_id",
+          "type",
+          "completed_at"
+        ],
+        "title": "ClaimantResolvedSupportHandoff",
         "type": "object"
       },
       "ClaimantSession": {
@@ -12511,6 +12563,26 @@
               }
             ],
             "title": "Resolved At"
+          },
+          "resume_next_action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentAction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resume_workflow_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowState"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source_message_id": {
             "anyOf": [

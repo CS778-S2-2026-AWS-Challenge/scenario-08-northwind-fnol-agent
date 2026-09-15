@@ -99,7 +99,7 @@ function messageReadCount(state, sessionId) {
 async function expectLedgerMessageAfterRead(state, sessionId, readsBefore, text) {
   await waitFor(() => {
     expect(messageReadCount(state, sessionId)).toBeGreaterThan(readsBefore)
-    const ledger = document.querySelector('.message-ledger')
+    const ledger = document.querySelector('.message-list')
     expect(ledger).toBeInTheDocument()
     const matchingArticles = [...ledger.querySelectorAll('.message')].filter(
       (article) => article.textContent?.includes(text),
@@ -283,13 +283,13 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     renderJourney('ses_25')
 
     expect(await screen.findByText('Historical claimant message')).toBeVisible()
-    const reply = screen.getByLabelText('Reply to claimant')
+    const reply = screen.getByLabelText('Message to claimant')
     const sendButton = screen.getByRole('button', { name: 'Send message' })
 
     expect(reply).toBeDisabled()
     expect(reply).toHaveValue('Must stay local')
     expect(sendButton).toBeDisabled()
-    expect(screen.getByText(/saved session is read-only/i)).toBeVisible()
+    expect(screen.getByText('Read-only conversation')).toBeVisible()
 
     await userEvent.setup().click(sendButton)
     expect(state.postRequests).toHaveLength(0)
@@ -328,7 +328,7 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     await user.click(sendButton)
 
     expect(await screen.findByRole('alert')).toHaveTextContent('could not be reached')
-    expect(screen.getByLabelText('Reply to claimant')).toHaveValue('Journey staff reply')
+    expect(screen.getByLabelText('Message to claimant')).toHaveValue('Journey staff reply')
     expect(state.messagesBySession.ses_26).toHaveLength(1)
     expect(state.postRequests).toHaveLength(1)
     const readsBeforeRetry = messageReadCount(state, 'ses_26')
@@ -419,7 +419,7 @@ describe('WorkbenchPage staff session browser/API journey', () => {
       'latest server projection at revision 8 is now shown',
     )
 
-    expect(screen.getByLabelText('Reply to claimant')).toHaveValue(
+    expect(screen.getByLabelText('Message to claimant')).toHaveValue(
       'Journey staff reply',
     )
     expect(service.state.postRequests).toHaveLength(1)
@@ -428,8 +428,8 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     expect(service.state.messagesBySession.ses_27).toHaveLength(0)
 
     await waitFor(() => {
-      expect(screen.getByText(/saved session is read-only/i)).toBeVisible()
-      expect(screen.getByLabelText('Reply to claimant')).toBeDisabled()
+      expect(screen.getByText('Read-only conversation')).toBeVisible()
+      expect(screen.getByLabelText('Message to claimant')).toBeDisabled()
       expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
     })
 
@@ -455,7 +455,7 @@ describe('WorkbenchPage staff session browser/API journey', () => {
 
     const revalidatedButton = await screen.findByRole('button', { name: 'Send message' })
     await waitFor(() => expect(revalidatedButton).toBeEnabled())
-    expect(screen.getByLabelText('Reply to claimant')).toHaveValue('Journey staff reply')
+    expect(screen.getByLabelText('Message to claimant')).toHaveValue('Journey staff reply')
     expect(service.state.postRequests).toHaveLength(1)
     const readsBeforeRevalidatedSend = messageReadCount(service.state, 'ses_27')
 

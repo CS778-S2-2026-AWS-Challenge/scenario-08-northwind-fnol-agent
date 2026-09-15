@@ -1,18 +1,28 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
+from typing import cast
 from uuid import uuid4
 
+import mongomock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Response
 
+from backend.adapters.evidence_storage import MockEvidenceStorage
 from backend.adapters.policy_history import MockPolicyHistoryAdapter, ProviderLookupEnvelope
+from backend.app import create_app
+from backend.core.config import IdentityMode, Settings
 from backend.domain.models import (
     AgentAction,
     ClaimCreationStatus,
     ContentsLossType,
     ContentsOwnership,
     CustomerNextStep,
+    EvidenceFileStatus,
+    EvidenceRecord,
+    EvidenceSource,
+    EvidenceStatus,
     ExternalClaimResult,
     FormSource,
     FormStatus,
@@ -29,7 +39,9 @@ from backend.domain.models import (
 )
 from backend.domain.retrieval import ClaimHistoryRetrievalRecord, ClaimHistorySearchRequest
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.mongodb import MongoDBRepository
 from backend.services.agent import AgentProposal, AgentTurnContext
+from backend.services.messages import _TurnEvidenceResolver
 
 
 class HighImpactAgent:
@@ -78,6 +90,76 @@ class OtherPartyAgent:
             proposed_signals=[],
             required_tools=[],
             next_action_requirements=[],
+        )
+
+
+class CapturingEvidenceAgent:
+    def __init__(self) -> None:
+        self.context: AgentTurnContext | None = None
+
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        self.context = context
+        evidence_id = context.evidence[0].evidence_id if context.evidence else None
+        return AgentProposal(
+            action=AgentAction.UPDATE,
+            reason_codes=['ATTACHED_EVIDENCE_REVIEWED'],
+            customer_reason='The attached Evidence was made available to this turn.',
+            customer_response='I have reviewed the attachment for this report.',
+            customer_next_step=context.claim.customer_next_step,
+            form_changes=(
+                [
+                    ProposedFormChange(
+                        field_code='incident.description',
+                        value='Visible rear bumper damage.',
+                        source=FormSource.IMAGE,
+                        status=FormStatus.PROPOSED,
+                        source_evidence_id=evidence_id,
+                    )
+                ]
+                if evidence_id is not None
+                else []
+            ),
+            state_changes=[],
+            proposed_signals=[],
+            required_tools=[],
+            next_action_requirements=[],
+        )
+
+
+class ContentsEvidenceAgent:
+    def __init__(self) -> None:
+        self.context: AgentTurnContext | None = None
+
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        self.context = context
+        evidence_id = context.evidence[-1].evidence_id
+        return AgentProposal(
+            action=AgentAction.CONFIRM,
+            reason_codes=['CONTENTS_ITEM_REVIEW_REQUIRED'],
+            customer_reason='The attached Evidence supports a proposed contents item.',
+            customer_response='Please confirm the item extracted from the attachment.',
+            customer_next_step=CustomerNextStep(
+                status='confirmation_required',
+                summary='Check the contents item.',
+                responsible_party=ResponsibleParty.CLAIMANT,
+                required_items=['contents.items'],
+            ),
+            form_changes=[],
+            contents_item_changes=[
+                ProposedContentsItem(
+                    description='Laptop computer',
+                    category='electronics',
+                    quantity=1,
+                    loss_type=ContentsLossType.DAMAGED,
+                    ownership=ContentsOwnership.OWNED,
+                    confidence=0.88,
+                    source_evidence_id=evidence_id,
+                )
+            ],
+            state_changes=[],
+            proposed_signals=[],
+            required_tools=[],
+            next_action_requirements=['contents.items'],
         )
 
 
@@ -285,6 +367,7 @@ def submit_message(
     key: str = 'message-1',
     client_message_id: str = 'client-message-1',
     text: str = 'A synthetic rear-end incident. Nobody was injured.',
+    evidence_refs: list[str] | None = None,
 ) -> Response:
     return client.post(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
@@ -296,9 +379,269 @@ def submit_message(
         json={
             'client_message_id': client_message_id,
             'content': {'type': 'text', 'text': text},
-            'evidence_refs': [],
+            'evidence_refs': evidence_refs or [],
         },
     )
+
+
+def test_message_turn_scopes_uploaded_evidence_to_the_current_claim(
+    app: FastAPI,
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    agent = CapturingEvidenceAgent()
+    app.state.agent_turn_provider = agent
+    first = create_claim(client, auth_headers, key='multimodal-first')
+    first_body = first.json()
+    claim_id = first_body['claim']['claim_id']
+    session_id = first_body['session']['session_id']
+    content = b'authorised-image'
+    upload = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/uploads',
+        headers={**auth_headers, 'Idempotency-Key': 'multimodal-upload', 'If-Match': '1'},
+        json={
+            'kind': 'incident_image',
+            'original_filename': 'damage.png',
+            'media_type': 'image/png',
+            'size_bytes': len(content),
+        },
+    )
+    assert upload.status_code == 201, upload.text
+    evidence_id = upload.json()['evidence_id']
+    storage = cast(MockEvidenceStorage, app.state.evidence_storage)
+    storage.put_upload(claim_id=claim_id, evidence_id=evidence_id, content=content)
+    completed = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'multimodal-complete',
+            'If-Match': '2',
+        },
+        json={'upload_checksum': f'sha256:{sha256(content).hexdigest()}'},
+    )
+    assert completed.status_code == 202, completed.text
+
+    turn = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=3,
+        key='multimodal-turn',
+        client_message_id='multimodal-message',
+        text='Please review this damage photo.',
+        evidence_refs=[evidence_id],
+    )
+
+    assert turn.status_code == 200, turn.text
+    assert agent.context is not None
+    assert [(item.evidence_id, item.media_type) for item in agent.context.evidence] == [
+        (evidence_id, 'image/png')
+    ]
+    assert agent.context.evidence_resolver is not None
+    assert agent.context.evidence_resolver.resolve(evidence_id, 'image/png') == content
+    assert agent.context.evidence_resolver.resolve(evidence_id, 'application/pdf') is None
+    assert agent.context.evidence_resolver.resolve('evd_not_selected', 'image/png') is None
+    persisted_change = turn.json()['form_changes'][0]['field']
+    assert persisted_change['source'] == 'image'
+    assert persisted_change['status'] == 'proposed'
+    assert persisted_change['source_refs'] == [evidence_id]
+
+    second = create_claim(client, auth_headers, key='multimodal-second').json()
+    denied = submit_message(
+        client,
+        auth_headers,
+        second['claim']['claim_id'],
+        second['session']['session_id'],
+        key='multimodal-cross-claim',
+        client_message_id='multimodal-cross-claim-message',
+        evidence_refs=[evidence_id],
+    )
+    assert denied.status_code == 422
+    assert denied.json()['error']['code'] == 'VALIDATION_ERROR'
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'mongodb'])
+@pytest.mark.parametrize('source', [EvidenceSource.STAFF, EvidenceSource.EXTERNAL_SYSTEM])
+def test_message_turn_rejects_internal_evidence_before_agent_invocation(
+    repository_kind: str,
+    source: EvidenceSource,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = (
+        FixtureRepository()
+        if repository_kind == 'fixture'
+        else MongoDBRepository(mongomock.MongoClient(), f'multimodal_{source.value}')
+    )
+    if isinstance(repository, MongoDBRepository):
+        monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
+    agent = CapturingEvidenceAgent()
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        repository,
+        agent,
+    )
+    with TestClient(app) as test_client:
+        auth_headers = {'Authorization': 'Bearer synthetic-claimant'}
+        created = create_claim(test_client, auth_headers, key=f'internal-{repository_kind}')
+        body = created.json()
+        claim_id = body['claim']['claim_id']
+        timestamp = datetime.now(UTC)
+        evidence_id = f'evd_{repository_kind}_{source.value}'
+        repository.save_evidence(
+            EvidenceRecord(
+                evidence_id=evidence_id,
+                claim_id=claim_id,
+                kind='incident_image',
+                status=EvidenceStatus.RECEIVED,
+                file_status=EvidenceFileStatus.READY,
+                source=source,
+                media_type='image/png',
+                size_bytes=18,
+                provenance={'storage_key': f'{claim_id}/{evidence_id}'},
+                created_at=timestamp,
+                updated_at=timestamp,
+            ),
+            'cus_demo',
+        )
+
+        denied = submit_message(
+            test_client,
+            auth_headers,
+            claim_id,
+            body['session']['session_id'],
+            key=f'internal-{repository_kind}-{source.value}',
+            client_message_id=f'internal-{repository_kind}-{source.value}',
+            evidence_refs=[evidence_id],
+        )
+
+    assert denied.status_code == 422
+    assert denied.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert agent.context is None
+
+
+def test_turn_evidence_resolver_rechecks_claimant_visibility(
+    app: FastAPI,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='resolver-visibility').json()
+    claim = repository.get_claim_internal(created['claim']['claim_id'])
+    assert claim is not None
+    timestamp = datetime.now(UTC)
+    evidence_id = 'evd_reclassified_internal'
+    repository.save_evidence(
+        EvidenceRecord(
+            evidence_id=evidence_id,
+            claim_id=claim.claim_id,
+            kind='incident_image',
+            status=EvidenceStatus.RECEIVED,
+            file_status=EvidenceFileStatus.READY,
+            source=EvidenceSource.STAFF,
+            media_type='image/png',
+            size_bytes=18,
+            provenance={'storage_key': f'{claim.claim_id}/{evidence_id}'},
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+        claim.customer_id,
+    )
+    resolver = _TurnEvidenceResolver(
+        repository=repository,
+        storage=MockEvidenceStorage(),
+        claim_id=claim.claim_id,
+        customer_id=claim.customer_id,
+        allowed_media_types={evidence_id: 'image/png'},
+    )
+
+    assert resolver.resolve(evidence_id, 'image/png') is None
+
+
+@pytest.mark.parametrize(
+    ('target_media_type', 'target_filename', 'expected_source'),
+    [
+        ('image/png', 'damaged-laptop.png', FormSource.IMAGE),
+        ('application/pdf', 'contents-list.pdf', FormSource.DOCUMENT),
+    ],
+)
+def test_message_turn_persists_contents_attachment_provenance(
+    app: FastAPI,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    target_media_type: str,
+    target_filename: str,
+    expected_source: FormSource,
+    repository: FixtureRepository,
+) -> None:
+    agent = ContentsEvidenceAgent()
+    app.state.agent_turn_provider = agent
+    created = create_claim(client, auth_headers, key='contents-evidence', incident_type='contents')
+    body = created.json()
+    claim_id = body['claim']['claim_id']
+    revision = 1
+    uploaded_ids: list[str] = []
+    attachments = [
+        ('image/png', 'context.png', b'context-image'),
+        (target_media_type, target_filename, b'authoritative-target'),
+    ]
+    for index, (media_type, filename, content) in enumerate(attachments):
+        upload = client.post(
+            f'/api/v1/claims/{claim_id}/evidence/uploads',
+            headers={
+                **auth_headers,
+                'Idempotency-Key': f'contents-upload-{index}',
+                'If-Match': str(revision),
+            },
+            json={
+                'kind': 'incident_image' if media_type.startswith('image/') else 'other_document',
+                'original_filename': filename,
+                'media_type': media_type,
+                'size_bytes': len(content),
+            },
+        )
+        assert upload.status_code == 201, upload.text
+        evidence_id = upload.json()['evidence_id']
+        revision = upload.json()['revision']
+        cast(MockEvidenceStorage, app.state.evidence_storage).put_upload(
+            claim_id=claim_id,
+            evidence_id=evidence_id,
+            content=content,
+        )
+        completed = client.post(
+            f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
+            headers={
+                **auth_headers,
+                'Idempotency-Key': f'contents-complete-{index}',
+                'If-Match': str(revision),
+            },
+            json={'upload_checksum': f'sha256:{sha256(content).hexdigest()}'},
+        )
+        assert completed.status_code == 202, completed.text
+        revision = completed.json()['revision']
+        uploaded_ids.append(evidence_id)
+
+    turn = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        body['session']['session_id'],
+        revision=revision,
+        key=f'contents-turn-{expected_source.value}',
+        client_message_id=f'contents-message-{expected_source.value}',
+        text='My laptop was damaged. Please review the attached records.',
+        evidence_refs=uploaded_ids,
+    )
+
+    assert turn.status_code == 200, turn.text
+    item = turn.json()['contents_item_changes'][0]
+    assert item['source'] == expected_source.value
+    assert item['status'] == 'proposed'
+    assert item['source_refs'] == [uploaded_ids[-1]]
+    stored_claim = repository.get_claim_internal(claim_id)
+    assert stored_claim is not None
+    stored = stored_claim.contents_items[0]
+    assert stored.assertions[-1].source_refs == [uploaded_ids[-1]]
 
 
 def test_create_claim_returns_claim_and_first_session(
