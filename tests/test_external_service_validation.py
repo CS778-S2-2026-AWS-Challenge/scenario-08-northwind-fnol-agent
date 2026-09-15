@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -929,7 +930,9 @@ def test_a_terminal_failure_becomes_the_staff_blocker_without_a_second_gap() -> 
     assert summary['primary_blocker'] == gap['label']
 
 
-def test_created_terminal_failure_is_discoverable_and_reviewable_by_staff() -> None:
+def test_created_terminal_failure_is_discoverable_and_reviewable_by_staff(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     repository = FixtureRepository()
     client, claim_id = _failed_attempt(
         repository,
@@ -971,11 +974,12 @@ def test_created_terminal_failure_is_discoverable_and_reviewable_by_staff() -> N
             'Idempotency-Key': 'terminal-staff-accept',
             'If-Match': str(detail['revision']),
         }
-        accepted = client.post(
-            f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task.task_id}/accept-review',
-            headers=accept_headers,
-            json={},
-        )
+        with caplog.at_level(logging.INFO, logger='backend.api.workbench'):
+            accepted = client.post(
+                f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task.task_id}/accept-review',
+                headers=accept_headers,
+                json={},
+            )
         replay = client.post(
             f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task.task_id}/accept-review',
             headers=accept_headers,
@@ -993,6 +997,15 @@ def test_created_terminal_failure_is_discoverable_and_reviewable_by_staff() -> N
         assert changed_retry.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
         assert accepted.json()['action']['action_type'] == 'external_failure_review'
         assert accepted.json()['action']['source_refs'] == [task.task_id]
+        completed_log = next(
+            record for record in caplog.records if record.msg == 'external_review.accept.completed'
+        )
+        structured_log = cast(Any, completed_log)
+        assert structured_log.request_id
+        assert structured_log.claim_id == claim_id
+        assert structured_log.external_task_id == task.task_id
+        assert structured_log.action_code == 'external.accept_review'
+        assert structured_log.staff_action_id == accepted.json()['action']['action_id']
 
         reviewing = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
         work_action = next(
@@ -1034,6 +1047,80 @@ def test_created_terminal_failure_is_discoverable_and_reviewable_by_staff() -> N
         assert external['result_verification_state'] is None
 
 
+def test_competing_external_review_acceptance_cannot_overwrite_the_winner() -> None:
+    repository = FixtureRepository()
+    client, claim_id = _failed_attempt(
+        repository,
+        AssessorFixtureFailure.MALFORMED,
+        key='terminal-staff-race',
+    )
+    with client:
+        detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
+        task = repository.list_external_tasks_internal(claim_id)[0]
+        first_presence = client.patch(
+            '/api/v1/workbench/staff/presence',
+            headers=STAFF_AUTH,
+            json={'online': True, 'available': True, 'lease_seconds': 30},
+        )
+        assert first_presence.status_code == 200
+
+        identity_repository = cast(Any, client.app).state.staff_identity_repository
+        second_account = identity_repository.provision_account(
+            'staff.two@example.invalid',
+            'northwind-demo-staff-two',
+            'Second Claims Professional',
+            ('claims_professional',),
+        )
+        second_login = client.post(
+            '/api/v1/staff/auth/sessions',
+            json={
+                'email': 'staff.two@example.invalid',
+                'password': 'northwind-demo-staff-two',
+            },
+        )
+        assert second_login.status_code == 201
+        second_auth = {'Authorization': f'Bearer {second_login.json()["access_token"]}'}
+
+        route = f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task.task_id}/accept-review'
+        first = client.post(
+            route,
+            headers={
+                **STAFF_AUTH,
+                'Idempotency-Key': 'terminal-staff-race-first',
+                'If-Match': str(detail['revision']),
+            },
+            json={},
+        )
+        second = client.post(
+            route,
+            headers={
+                **second_auth,
+                'Idempotency-Key': 'terminal-staff-race-second',
+                'If-Match': str(detail['revision']),
+            },
+            json={},
+        )
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 409
+    assert second.json()['error']['code'] == 'REVISION_CONFLICT'
+    stored_claim = repository.get_claim_internal(claim_id)
+    assert stored_claim is not None
+    assert stored_claim.assignee_id == 'stf_demo'
+    actions = repository.list_staff_actions(claim_id)
+    assert len(actions) == 1
+    assert actions[0].action_id == first.json()['action']['action_id']
+    assert actions[0].source_refs == [task.task_id]
+    assert (
+        repository.find_idempotency(
+            second_account.staff_id,
+            route,
+            'terminal-staff-race-second',
+        )
+        is None
+    )
+
+
 def test_created_unknown_outcome_projects_only_reconciliation_as_primary_action() -> None:
     repository = FixtureRepository()
     client, claim_id = _failed_attempt(
@@ -1057,7 +1144,9 @@ def test_created_unknown_outcome_projects_only_reconciliation_as_primary_action(
     assert action['source_refs'] == [task.task_id]
 
 
-def test_staff_reconciliation_settles_the_existing_operation_atomically() -> None:
+def test_staff_reconciliation_settles_the_existing_operation_atomically(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     repository = FixtureRepository()
     adapter = CountingReconciliationAdapter()
     client, claim_id = _unknown_attempt(repository, adapter, key='staff-reconcile')
@@ -1076,10 +1165,11 @@ def test_staff_reconciliation_settles_the_existing_operation_atomically() -> Non
             'Idempotency-Key': 'staff-reconcile-action',
             'If-Match': str(detail['revision']),
         }
-        settled = client.post(
-            f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task.task_id}/reconcile',
-            headers=headers,
-        )
+        with caplog.at_level(logging.INFO, logger='backend.api.workbench'):
+            settled = client.post(
+                f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task.task_id}/reconcile',
+                headers=headers,
+            )
         replay = client.post(
             f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task.task_id}/reconcile',
             headers=headers,
@@ -1092,6 +1182,16 @@ def test_staff_reconciliation_settles_the_existing_operation_atomically() -> Non
     assert settled.json()['task_id'] == task.task_id
     assert settled.json()['staff_action']['action_type'] == 'external_reconciliation'
     assert settled.json()['staff_action']['status'] == 'completed'
+    completed_log = next(
+        record for record in caplog.records if record.msg == 'external_response.reconcile.completed'
+    )
+    structured_log = cast(Any, completed_log)
+    assert structured_log.request_id
+    assert structured_log.claim_id == claim_id
+    assert structured_log.external_task_id == task.task_id
+    assert structured_log.action_code == 'external.reconcile_response'
+    assert structured_log.staff_action_id == settled.json()['staff_action']['action_id']
+    assert structured_log.routing_status == settled.json()['routing']['routing_status']
     assert adapter.routing_calls == 1
     assert adapter.reconciliation_calls == 1
     assert len(repository.list_external_tasks_internal(claim_id)) == 1

@@ -593,6 +593,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
             expected_revision: Claim revision that must still be current.
             task: Existing external task advanced to accepted.
             operation: Existing assessor operation advanced to accepted.
+            request: Existing request whose dispatch is confirmed by reconciliation.
             evidence: Pending material now owed by the accepted task.
             link: Immutable task-to-evidence relationship for that material.
             branch_evaluation: Applied branch projection for the new Claim revision.

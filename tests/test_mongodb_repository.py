@@ -1867,6 +1867,92 @@ def test_mongodb_staff_mutation_linearizes_against_presence_revision(
     )
 
 
+def test_mongodb_external_review_stale_competitor_cannot_overwrite_owner(
+    repository: MongoDBRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = _claim().model_copy(update={'assignee_id': None})
+    repository.create_claim(claim, _session(claim))
+    now = datetime.now(UTC)
+    for staff_id in ('staff-external-first', 'staff-external-second'):
+        repository.save_staff_presence(
+            StaffPresenceRecord(
+                staff_id=staff_id,
+                online=True,
+                available=True,
+                last_seen_at=now,
+                expires_at=now.replace(microsecond=0).replace(year=now.year + 1),
+                updated_at=now,
+            )
+        )
+    monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
+    task_id = 'extask_mongo_staff_review'
+    route = f'/api/v1/workbench/claims/{claim.claim_id}/external-tasks/{task_id}/accept-review'
+
+    first_action = StaffActionRecord(
+        action_id='act_mongo_external_first',
+        claim_id=claim.claim_id,
+        action_type='external_failure_review',
+        status=StaffActionStatus.IN_PROGRESS,
+        assigned_to='staff-external-first',
+        requested_outcome='Review the terminal assessor failure.',
+        source_refs=[task_id],
+        created_at=claim.created_at,
+    )
+    first_idempotency = IdempotencyRecord(
+        actor_id='staff-external-first',
+        route=route,
+        key='mongo-external-first',
+        request_fingerprint='mongo-external-first-fingerprint',
+        claim_id=claim.claim_id,
+        session_id=claim.active_session_id or '',
+        action_code='external.accept_review',
+        target_ref=task_id,
+    )
+    won_claim = claim.model_copy(update={'assignee_id': 'staff-external-first', 'revision': 2})
+    repository.save_staff_mutation(
+        won_claim,
+        1,
+        first_idempotency,
+        staff_action=first_action,
+        required_staff_id='staff-external-first',
+        required_staff_revision=1,
+    )
+
+    second_action = first_action.model_copy(
+        update={
+            'action_id': 'act_mongo_external_second',
+            'assigned_to': 'staff-external-second',
+        }
+    )
+    second_idempotency = IdempotencyRecord(
+        actor_id='staff-external-second',
+        route=route,
+        key='mongo-external-second',
+        request_fingerprint='mongo-external-second-fingerprint',
+        claim_id=claim.claim_id,
+        session_id=claim.active_session_id or '',
+        action_code='external.accept_review',
+        target_ref=task_id,
+    )
+    losing_claim = claim.model_copy(update={'assignee_id': 'staff-external-second', 'revision': 2})
+    with pytest.raises(RevisionConflict):
+        repository.save_staff_mutation(
+            losing_claim,
+            1,
+            second_idempotency,
+            staff_action=second_action,
+            required_staff_id='staff-external-second',
+            required_staff_revision=1,
+        )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == won_claim
+    assert repository.list_staff_actions(claim.claim_id) == [first_action]
+    assert (
+        repository.find_idempotency('staff-external-second', route, 'mongo-external-second') is None
+    )
+
+
 def test_mongodb_staff_acceptance_races_real_presence_transition() -> None:
     """Exercise the acceptance guard through a real MongoDB transaction.
 

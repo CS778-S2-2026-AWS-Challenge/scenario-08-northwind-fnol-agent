@@ -313,7 +313,24 @@ def accept_external_review(
     idempotency_key: str | None,
     if_match: str | None,
 ) -> StaffActionMutationResponse:
-    """Assign one exact external-service review without changing its source records."""
+    """Assign one exact external-service review without changing its source records.
+
+    Args:
+        repository: Authoritative Claim, external-task, staff-action, and replay storage.
+        principal: Authenticated staff member accepting the projected work.
+        claim_id: Claim that owns the external task.
+        task_id: Exact external task projected as requiring staff review.
+        payload: Self-assignment request constrained by the projected action.
+        idempotency_key: Required actor-and-route replay identity.
+        if_match: Required current Claim revision.
+
+    Returns:
+        The created or replayed task-linked StaffAction and resulting Claim revision.
+
+    Raises:
+        ApiError: Authority, task state, ownership, presence, revision, or idempotency
+            validation fails.
+    """
 
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
@@ -423,7 +440,24 @@ def reconcile_external_response(
     idempotency_key: str | None,
     if_match: str | None,
 ) -> ExternalTaskReconciliationResponse:
-    """Reconcile one exact unknown external task through the staff authority boundary."""
+    """Reconcile one exact unknown external task through the staff authority boundary.
+
+    Args:
+        repository: Authoritative Claim, external-operation, staff-action, and replay storage.
+        adapter: Configured provider-neutral assessor status-check boundary.
+        principal: Authenticated staff member performing the projected reconciliation.
+        claim_id: Claim that owns the unknown external operation.
+        task_id: Exact external task projected as requiring reconciliation.
+        idempotency_key: Required actor-and-route replay identity.
+        if_match: Required current Claim revision.
+
+    Returns:
+        The atomically persisted routing outcome and completed reconciliation StaffAction.
+
+    Raises:
+        ApiError: Authority, ownership, presence, revision, adapter, lifecycle, persistence,
+            or idempotency validation fails.
+    """
 
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)

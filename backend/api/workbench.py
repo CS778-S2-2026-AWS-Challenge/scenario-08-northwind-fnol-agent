@@ -1,4 +1,5 @@
 import base64
+import logging
 import re
 from datetime import datetime
 from typing import cast
@@ -94,6 +95,7 @@ from backend.services.workbench import (
 
 router = APIRouter(prefix='/api/v1/workbench/claims', tags=['workbench'])
 conversation_router = APIRouter(prefix='/api/v1/workbench/conversations', tags=['workbench'])
+logger = logging.getLogger(__name__)
 
 
 @router.post('/{claim_id}/messages', response_model=StaffMessageResponse)
@@ -115,6 +117,17 @@ def repository_for(request: Request) -> PersistenceRepository:
 
 
 def assessor_adapter_for(request: Request) -> AssessorServiceAdapter:
+    """Resolve the assessor adapter allowed by the active Runtime profile.
+
+    Args:
+        request: Authenticated staff request whose application owns Runtime dependencies.
+
+    Returns:
+        The configured provider-neutral assessor adapter.
+
+    Raises:
+        ApiError: The active Runtime profile does not permit assessor service calls.
+    """
     policy = cast(RuntimeIntegrationPolicy, request.app.state.runtime_integration_policy)
     policy.require('assessor_service')
     return cast(AssessorServiceAdapter, request.app.state.assessor_service_adapter)
@@ -504,7 +517,35 @@ def accept_external_task_review(
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> StaffActionMutationResponse:
-    return accept_external_review(
+    """Accept one server-projected external-task review for the current staff member.
+
+    Args:
+        claim_id: Claim that owns the external task.
+        task_id: Exact external task projected by the Workbench action registry.
+        payload: Requested self-assignment; another staff identity is forbidden.
+        request: Authenticated request carrying repository and correlation context.
+        principal: Authenticated staff principal supplied by FastAPI.
+        idempotency_key: Required replay identity for this mutation.
+        if_match: Required current Claim revision.
+
+    Returns:
+        The created or replayed task-linked StaffAction and resulting Claim revision.
+
+    Raises:
+        ApiError: Authentication, authority, revision, ownership, presence, task state, or
+            idempotency validation fails.
+    """
+    request_id = str(getattr(request.state, 'request_id', 'unavailable'))
+    logger.info(
+        'external_review.accept.requested',
+        extra={
+            'request_id': request_id,
+            'claim_id': claim_id,
+            'external_task_id': task_id,
+            'action_code': 'external.accept_review',
+        },
+    )
+    result = accept_external_review(
         repository_for(request),
         principal,
         claim_id,
@@ -513,6 +554,19 @@ def accept_external_task_review(
         idempotency_key,
         if_match,
     )
+    logger.info(
+        'external_review.accept.completed',
+        extra={
+            'request_id': request_id,
+            'claim_id': claim_id,
+            'external_task_id': task_id,
+            'action_code': 'external.accept_review',
+            'staff_action_id': result.action.action_id,
+            'staff_action_type': result.action.action_type,
+            'claim_revision': result.revision,
+        },
+    )
+    return result
 
 
 @router.post(
@@ -527,7 +581,34 @@ def reconcile_external_task_response(
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> ExternalTaskReconciliationResponse:
-    return reconcile_external_response(
+    """Reconcile one unknown assessor operation through its persisted identity.
+
+    Args:
+        claim_id: Claim that owns the unresolved external task.
+        task_id: Exact external task projected by the Workbench action registry.
+        request: Authenticated request carrying Runtime and correlation context.
+        principal: Authenticated staff principal supplied by FastAPI.
+        idempotency_key: Required replay identity for this mutation.
+        if_match: Required current Claim revision.
+
+    Returns:
+        The persisted reconciliation result and its completed StaffAction.
+
+    Raises:
+        ApiError: Authentication, authority, revision, ownership, presence, adapter,
+            lifecycle, or idempotency validation fails.
+    """
+    request_id = str(getattr(request.state, 'request_id', 'unavailable'))
+    logger.info(
+        'external_response.reconcile.requested',
+        extra={
+            'request_id': request_id,
+            'claim_id': claim_id,
+            'external_task_id': task_id,
+            'action_code': 'external.reconcile_response',
+        },
+    )
+    result = reconcile_external_response(
         repository_for(request),
         assessor_adapter_for(request),
         principal,
@@ -536,6 +617,19 @@ def reconcile_external_task_response(
         idempotency_key,
         if_match,
     )
+    logger.info(
+        'external_response.reconcile.completed',
+        extra={
+            'request_id': request_id,
+            'claim_id': claim_id,
+            'external_task_id': task_id,
+            'action_code': 'external.reconcile_response',
+            'staff_action_id': result.staff_action.action_id,
+            'routing_status': result.routing.routing_status.value,
+            'claim_revision': result.revision,
+        },
+    )
+    return result
 
 
 @router.patch('/{claim_id}/staff-actions/{action_id}', response_model=StaffActionMutationResponse)
