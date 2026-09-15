@@ -6,11 +6,14 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.core.auth import Principal
 from backend.core.config import AgentRuntimeProfile
 from backend.core.errors import ApiError
 from backend.domain.models import ActorType
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.protocols import IdempotencyRecord
 from backend.services.agent import AgentProposal, AgentTurnContext, ControlledAgent
+from backend.services.messages import _restore_idempotent_message_turn
 
 
 def test_initial_bootstrap_persists_claim_and_turn_once(
@@ -186,3 +189,54 @@ def test_initial_bootstrap_resolves_explicit_and_gateway_default_profiles(
     )
     assert defaulted.status_code == 201, defaulted.text
     assert selected == ['qwen-local', 'qwen-local', None, 'qwen-local']
+
+
+def test_idempotent_message_replay_uses_stored_response_payload(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    response = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'payload-replay-operation'},
+        json={
+            'initial_message': {
+                'client_message_id': 'payload-replay-message',
+                'content': {'type': 'text', 'text': 'A parked car was damaged.'},
+            }
+        },
+    )
+    assert response.status_code == 201, response.text
+    record = repository.find_idempotency('cus_demo', '/api/v1/claims', 'payload-replay-operation')
+    assert record is not None
+    turn_payload = {
+        key: value for key, value in response.json().items() if key not in {'claim', 'session'}
+    }
+    restored = _restore_idempotent_message_turn(
+        repository,
+        Principal(subject='cus_demo', actor_type='claimant'),
+        replace(record, response_payload=turn_payload),
+    )
+    assert restored.claim_id == response.json()['claim_id']
+
+
+def test_idempotent_message_replay_fails_closed_when_linked_records_are_missing(
+    repository: FixtureRepository,
+) -> None:
+    record = IdempotencyRecord(
+        actor_id='cus_demo',
+        route='/api/v1/claims/clm_missing/sessions/ses_missing/messages',
+        key='missing-linked-records',
+        request_fingerprint='fingerprint',
+        claim_id='clm_missing',
+        session_id='ses_missing',
+        message_id='msg_missing',
+        decision_id='dec_missing',
+    )
+    with pytest.raises(ApiError) as error:
+        _restore_idempotent_message_turn(
+            repository,
+            Principal(subject='cus_demo', actor_type='claimant'),
+            record,
+        )
+    assert error.value.status_code == 500
