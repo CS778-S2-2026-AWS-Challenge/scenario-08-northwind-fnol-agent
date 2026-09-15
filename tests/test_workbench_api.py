@@ -1684,6 +1684,8 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
     assert detail['revision'] == final_claim.revision
     assert detail['claim_state']['workflow_state'] == 'created'
     assert detail['integration_summary']['claim_creation_status'] == 'created'
+    assert detail['integration_summary']['claim_number'] == creation['claim_number']
+    assert detail['integration_summary']['expected_by'] == creation['expected_by']
     assert detail['integration_summary']['assessor_routing_status'] == 'assigned'
     assert detail['customer_next_step']['status'] == 'assessor_assigned'
     assert detail['customer_next_step']['expected_by'] == routing['expected_by']
@@ -1704,6 +1706,26 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
     assert queue_item['work_summary']['queue_key'] == 'completed'
     assert queue_item['ownership']['state'] == 'unassigned'
     assert queue_item['ownership']['primary_assignee'] is None
+
+
+def test_workbench_detail_keeps_claim_creation_identity_null_without_external_claim(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, _ = _create_claim_with_context(client, auth_headers, repository)
+
+    response = client.get(
+        f'/api/v1/workbench/claims/{claim_id}',
+        headers=staff_auth_headers,
+    )
+
+    assert response.status_code == 200
+    integration = response.json()['integration_summary']
+    assert integration['claim_creation_status'] is None
+    assert integration['claim_number'] is None
+    assert integration['expected_by'] is None
 
 
 def test_handoff_acceptance_is_atomic_revision_safe_and_idempotent(

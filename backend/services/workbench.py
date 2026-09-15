@@ -958,6 +958,8 @@ def _integration_summary(
         claim_creation_status=(
             claim.external_claim.creation_status.value if claim.external_claim else None
         ),
+        claim_number=(claim.external_claim.claim_number if claim.external_claim else None),
+        expected_by=(claim.external_claim.expected_by if claim.external_claim else None),
         assessor_routing_status=(
             claim.assessor_routing.routing_status.value if claim.assessor_routing else None
         ),

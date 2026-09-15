@@ -355,6 +355,8 @@ class WorkbenchWaitingExternalService(ContractModel):
 
 class WorkbenchIntegrationSummary(ContractModel):
     claim_creation_status: str | None = None
+    claim_number: str | None = None
+    expected_by: datetime | None = None
     assessor_routing_status: str | None = None
     waiting_external_services: list[WorkbenchWaitingExternalService] = Field(default_factory=list)
 
