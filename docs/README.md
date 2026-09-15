@@ -82,6 +82,7 @@ them:
 - [Self-hosted Runner Deployment](../deploy/self-hosted-runner.md)
 - [Staff Tag Registry](staff-tag-registry.md)
 - [Third-party Service Consent and Shared-data Contract](third-party-service-consent-and-shared-data-contract.md)
+- [External Service Lifecycle Registry](external-service-lifecycle-registry.md)
 - [Repository layout, start commands, and verification](../README.md#repository-layout)
 
 Task-specific implementation and decision records belong in the relevant Issue, Discussion, or
