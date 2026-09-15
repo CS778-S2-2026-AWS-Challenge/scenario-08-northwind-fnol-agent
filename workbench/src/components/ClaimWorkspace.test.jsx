@@ -255,11 +255,12 @@ describe('ClaimWorkspace navigation', () => {
         allowed_actions: [],
       }}
       resources={{ handoffs: { items: [] }, externalRequests: { status: 'unavailable', items: [], error: new Error('Refresh failed.') } }}
-      externalActionNotice={{
+      externalActionNotices={[{
         claimId: 'clm_1',
         taskId: 'tsk_assessor_1',
+        recovering: false,
         message: 'The action for external task tsk_assessor_1 may have completed. Its outcome is not confirmed. Do not submit it again until Claim and External Services state has been refreshed.',
-      }}
+      }]}
       onRetryExternalActionContext={onRetryExternalActionContext}
     />)
 
@@ -270,7 +271,7 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.queryByRole('heading', { name: 'Reconcile external outcome' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Refresh Claim and External Services' }))
-    expect(onRetryExternalActionContext).toHaveBeenCalledOnce()
+    expect(onRetryExternalActionContext).toHaveBeenCalledWith('tsk_assessor_1')
   })
 
   it('does not present a blocked or inexact backend pair as the staff next action', () => {
