@@ -18,6 +18,7 @@ from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
+from backend.domain.evidence import assert_material_history_is_append_only
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
@@ -1542,6 +1543,13 @@ class MongoDBRepository:
     def save_evidence(self, evidence: EvidenceRecord, customer_id: str) -> None:
         if not self._claim_owned(evidence.claim_id, customer_id):
             raise KeyError(evidence.claim_id)
+        current = self._get(
+            'evidence', evidence.evidence_id, EvidenceRecord, customer_id=customer_id
+        )
+        try:
+            assert_material_history_is_append_only(current, evidence)
+        except ValueError as conflict:
+            raise IdempotencyConflict(evidence.evidence_id) from conflict
         self._put(
             'evidence',
             evidence.evidence_id,
@@ -3166,7 +3174,7 @@ class MongoDBRepository:
             )
             existing = self._collection.find_one(
                 {'_id': document['_id'], 'record_type': kind},
-                projection={'claim_id': 1, 'customer_id': 1},
+                projection=None if kind == 'evidence' else {'claim_id': 1, 'customer_id': 1},
                 session=mongo_session,
             )
             if existing is not None and (
@@ -3175,6 +3183,18 @@ class MongoDBRepository:
                 or kind in IMMUTABLE_CHILD_RECORD_KINDS
             ):
                 raise IdempotencyConflict(identifier)
+            if kind == 'evidence':
+                if not isinstance(record, EvidenceRecord):
+                    raise KeyError(claim.claim_id)
+                current_evidence = (
+                    self._model_from_document(existing, EvidenceRecord)
+                    if existing is not None
+                    else None
+                )
+                try:
+                    assert_material_history_is_append_only(current_evidence, record)
+                except ValueError as conflict:
+                    raise IdempotencyConflict(identifier) from conflict
             self._reject_client_message_conflict(document, session=mongo_session)
         result = self._replace_claim_revision(claim, expected_revision, mongo_session=mongo_session)
         if result == 0:

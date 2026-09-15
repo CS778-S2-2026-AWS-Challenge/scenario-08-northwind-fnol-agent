@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from backend.adapters.evidence_storage import (
     EvidenceStorage,
     EvidenceStorageUnavailable,
@@ -24,6 +26,7 @@ from backend.domain.models import (
     EvidenceFactDecisionResponse,
     EvidenceFileStatus,
     EvidenceListResponse,
+    EvidenceMaterialVersion,
     EvidenceMutationResponse,
     EvidenceProcessingResponse,
     EvidenceRecord,
@@ -74,6 +77,64 @@ ARRIVED_MATERIAL_STATUSES = frozenset(
 _REPLACEABLE_FILE_STATUSES = frozenset(
     {EvidenceFileStatus.NOT_AVAILABLE, EvidenceFileStatus.FAILED}
 )
+
+
+def _material_source_ref(evidence_id: str, version: int) -> str:
+    return f'evidence:{evidence_id}:material:{version}'
+
+
+def _has_material_generation(evidence: EvidenceRecord) -> bool:
+    return bool(
+        evidence.original_filename
+        or evidence.media_type
+        or evidence.size_bytes is not None
+        or evidence.references
+        or evidence.provenance
+        or evidence.file_status in {EvidenceFileStatus.FAILED, EvidenceFileStatus.READY}
+    )
+
+
+def _material_proposed_fields(
+    claim: WorkingClaim,
+    evidence: EvidenceRecord,
+) -> dict[str, StructuredFormField]:
+    generation_refs = {
+        evidence.evidence_id,
+        _material_source_ref(evidence.evidence_id, evidence.material_version),
+    }
+    return {
+        code: field
+        for code, field in claim.form.items()
+        if field.status is FormStatus.PROPOSED
+        and field.source in {FormSource.IMAGE, FormSource.DOCUMENT}
+        and bool(field.source_refs)
+        and set(field.source_refs) <= generation_refs
+    }
+
+
+def _archive_material_generation(
+    evidence: EvidenceRecord,
+    proposed_fields: dict[str, StructuredFormField],
+    archived_at: datetime,
+) -> EvidenceMaterialVersion:
+    return EvidenceMaterialVersion(
+        version=evidence.material_version,
+        status=evidence.status,
+        file_status=evidence.file_status,
+        original_filename=evidence.original_filename,
+        media_type=evidence.media_type,
+        size_bytes=evidence.size_bytes,
+        references=evidence.references,
+        provenance=evidence.provenance,
+        proposed_fields=proposed_fields,
+        wait_type=evidence.wait_type,
+        responsible_party=evidence.responsible_party,
+        expected_by=evidence.expected_by,
+        expected_timing=evidence.expected_timing,
+        context_summary=evidence.context_summary,
+        archived_at=archived_at,
+        reason='claimant_replacement',
+    )
 
 
 def _claim_not_found() -> ApiError:
@@ -550,6 +611,7 @@ def request_upload(
         ) from error
 
     timestamp = now_utc()
+    claim_for_update = claim
     if requirement is None:
         evidence = EvidenceRecord(
             evidence_id=evidence_id,
@@ -572,6 +634,25 @@ def request_upload(
             updated_at=timestamp,
         )
     else:
+        replacing_material = _has_material_generation(requirement)
+        proposed_fields = (
+            _material_proposed_fields(claim, requirement) if replacing_material else {}
+        )
+        material_version = requirement.material_version + (1 if replacing_material else 0)
+        material_history = list(requirement.material_history)
+        if replacing_material:
+            material_history.append(
+                _archive_material_generation(requirement, proposed_fields, timestamp)
+            )
+            claim_for_update = claim.model_copy(
+                update={
+                    'form': {
+                        code: field
+                        for code, field in claim.form.items()
+                        if code not in proposed_fields
+                    }
+                }
+            )
         evidence = requirement.model_copy(
             update={
                 'status': EvidenceStatus.PENDING,
@@ -579,13 +660,16 @@ def request_upload(
                 'original_filename': payload.original_filename,
                 'media_type': payload.media_type,
                 'size_bytes': payload.size_bytes,
+                'references': [],
+                'material_version': material_version,
+                'material_history': material_history,
                 'wait_type': EvidenceWaitType.CLAIMANT,
                 'responsible_party': ResponsibleParty.CLAIMANT,
                 'expected_by': None,
                 'expected_timing': None,
                 'context_summary': 'Waiting for the claimant to complete the evidence upload.',
                 'provenance': _with_transition(
-                    {**requirement.provenance, 'storage_key': target.storage_key},
+                    {'storage_key': target.storage_key},
                     _transition_entry(
                         field_code=None,
                         from_state=requirement.file_status.value,
@@ -599,7 +683,10 @@ def request_upload(
                 'updated_at': timestamp,
             }
         )
-    updated_claim = _updated_claim(claim, _records_with(repository, claim, evidence))
+    updated_claim = _updated_claim(
+        claim_for_update,
+        _records_with(repository, claim_for_update, evidence),
+    )
     response = EvidenceUploadResponse(
         evidence_id=evidence_id,
         revision=updated_claim.revision,
@@ -969,7 +1056,10 @@ def complete_evidence_processing(
         fact.field_code: StructuredFormField(
             value=fact.value,
             source=form_source,
-            source_refs=[evidence_id],
+            source_refs=[
+                evidence_id,
+                _material_source_ref(evidence_id, evidence.material_version),
+            ],
             status=FormStatus.PROPOSED,
             needed_for=NeededFor.CURRENT_ACTION,
             confidence=fact.confidence,
@@ -1098,6 +1188,8 @@ def decide_evidence_facts(
         if field_code not in claim.form
         or claim.form[field_code].status is not FormStatus.PROPOSED
         or evidence_id not in claim.form[field_code].source_refs
+        or _material_source_ref(evidence_id, evidence.material_version)
+        not in claim.form[field_code].source_refs
         or claim.form[field_code].source not in {FormSource.IMAGE, FormSource.DOCUMENT}
     ]
     if duplicate_codes or unavailable_codes:

@@ -4989,6 +4989,151 @@
         "title": "EvidenceListResponse",
         "type": "object"
       },
+      "EvidenceMaterialVersion": {
+        "additionalProperties": false,
+        "description": "Immutable snapshot of one replaced material generation.",
+        "properties": {
+          "archived_at": {
+            "format": "date-time",
+            "title": "Archived At",
+            "type": "string"
+          },
+          "context_summary": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Summary"
+          },
+          "expected_by": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected By"
+          },
+          "expected_timing": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Timing"
+          },
+          "file_status": {
+            "$ref": "#/components/schemas/EvidenceFileStatus"
+          },
+          "media_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Type"
+          },
+          "original_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Filename"
+          },
+          "proposed_fields": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/StructuredFormField-Output"
+            },
+            "title": "Proposed Fields",
+            "type": "object"
+          },
+          "provenance": {
+            "title": "Provenance",
+            "type": "object"
+          },
+          "reason": {
+            "const": "claimant_replacement",
+            "title": "Reason",
+            "type": "string"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceReference"
+            },
+            "maxItems": 50,
+            "title": "References",
+            "type": "array"
+          },
+          "responsible_party": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponsibleParty"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "status": {
+            "$ref": "#/components/schemas/EvidenceStatus"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "wait_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceWaitType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "version",
+          "status",
+          "file_status",
+          "archived_at",
+          "reason"
+        ],
+        "title": "EvidenceMaterialVersion",
+        "type": "object"
+      },
       "EvidenceMutationResponse": {
         "additionalProperties": false,
         "properties": {
@@ -5112,6 +5257,19 @@
           "kind": {
             "title": "Kind",
             "type": "string"
+          },
+          "material_history": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceMaterialVersion"
+            },
+            "title": "Material History",
+            "type": "array"
+          },
+          "material_version": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Material Version",
+            "type": "integer"
           },
           "media_type": {
             "anyOf": [

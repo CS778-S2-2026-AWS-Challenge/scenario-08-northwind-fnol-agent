@@ -10,8 +10,12 @@ from backend.adapters.evidence_storage import EvidenceStorageUnavailable, MockEv
 from backend.domain.models import (
     EvidenceFileStatus,
     EvidenceRecord,
+    EvidenceReference,
+    EvidenceRelation,
+    EvidenceRelationState,
     EvidenceSource,
     EvidenceStatus,
+    FormStatus,
 )
 from backend.repositories.fixture import FixtureRepository
 
@@ -177,6 +181,200 @@ def test_upload_replaces_failed_or_invalid_material_on_the_same_identity(
     assert replaced.needed_for == evidence.needed_for
     assert replaced.claimant_note == evidence.claimant_note
     assert replaced.created_at == evidence.created_at
+    assert replaced.material_version == 2
+    assert len(replaced.material_history) == 1
+    assert replaced.material_history[0].provenance == evidence.provenance
+    assert replaced.provenance['storage_key'] != evidence.provenance.get('storage_key')
+
+
+def test_replacement_archives_old_material_and_allows_corrected_fact(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id = _create_claim(client, auth_headers, 'replace-material-generation')
+    requested = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/uploads',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'old-material-upload',
+            'If-Match': '1',
+        },
+        json={
+            'kind': 'repair_quote',
+            'original_filename': 'old-quote.pdf',
+            'media_type': 'application/pdf',
+            'size_bytes': 8,
+        },
+    )
+    assert requested.status_code == 201
+    evidence_id = str(requested.json()['evidence_id'])
+    storage = cast(MockEvidenceStorage, cast(FastAPI, client.app).state.evidence_storage)
+    old_content = b'old-data'
+    storage.put_upload(claim_id=claim_id, evidence_id=evidence_id, content=old_content)
+    completed = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'old-material-complete',
+            'If-Match': '2',
+        },
+        json={'upload_checksum': f'sha256:{sha256(old_content).hexdigest()}'},
+    )
+    assert completed.status_code == 202
+    processed = client.post(
+        f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing',
+        headers={
+            'Authorization': 'Bearer synthetic-integration',
+            'Idempotency-Key': 'old-material-processing',
+            'If-Match': '3',
+        },
+        json={
+            'facts': [
+                {
+                    'field_code': 'incident.description',
+                    'value': 'Incorrect extracted description.',
+                    'confidence': 0.4,
+                }
+            ]
+        },
+    )
+    assert processed.status_code == 200
+
+    claim_with_proposals = repository.get_claim(claim_id, 'cus_demo')
+    assert claim_with_proposals is not None
+    extracted = claim_with_proposals.form['incident.description']
+    repository.save_claim(
+        claim_with_proposals.model_copy(
+            update={
+                'revision': 5,
+                'form': {
+                    **claim_with_proposals.form,
+                    'incident.location': extracted.model_copy(
+                        update={'value': 'Wellington', 'status': FormStatus.CONFIRMED}
+                    ),
+                    'incident.cause': extracted.model_copy(
+                        update={
+                            'value': 'Impact while parked.',
+                            'source_refs': [
+                                evidence_id,
+                                f'evidence:{evidence_id}:material:1',
+                                'evidence:evd_other:material:1',
+                            ],
+                        }
+                    ),
+                },
+            }
+        ),
+        expected_revision=4,
+    )
+
+    timestamp = datetime.now(UTC)
+    old_material = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    assert old_material is not None
+    old_checksum = old_material.provenance['upload_checksum']
+    old_reference = EvidenceReference(
+        relation=EvidenceRelation.CONFLICTS_WITH,
+        evidence_id='evd_conflicting_quote',
+        state=EvidenceRelationState.RESOLVED,
+        reason='The original quote was found to contain the wrong vehicle details.',
+        raised_at=timestamp,
+        resolved_at=timestamp,
+    )
+    invalid_material = old_material.model_copy(
+        update={
+            'status': EvidenceStatus.INVALID,
+            'references': [old_reference],
+            'provenance': {
+                **old_material.provenance,
+                'validation_state': 'invalid',
+            },
+            'updated_at': timestamp,
+        }
+    )
+    repository.save_evidence(invalid_material, 'cus_demo')
+
+    replacement = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/uploads',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'corrected-material-upload',
+            'If-Match': '5',
+        },
+        json=_upload_payload(evidence_id),
+    )
+    assert replacement.status_code == 201
+    archived = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    claim_after_replacement = repository.get_claim(claim_id, 'cus_demo')
+    assert archived is not None
+    assert claim_after_replacement is not None
+    assert archived.material_version == 2
+    assert len(archived.material_history) == 1
+    prior = archived.material_history[0]
+    assert prior.version == 1
+    assert prior.status is EvidenceStatus.INVALID
+    assert prior.file_status is EvidenceFileStatus.READY
+    assert prior.references == [old_reference]
+    assert prior.provenance['upload_checksum'] == old_checksum
+    assert prior.provenance['processing_state'] == 'completed'
+    assert prior.provenance['extraction_state'] == 'proposed'
+    assert prior.provenance['fact_decisions'] == {'incident.description': 'proposed'}
+    assert prior.proposed_fields['incident.description'].value == (
+        'Incorrect extracted description.'
+    )
+    assert 'incident.location' not in prior.proposed_fields
+    assert 'incident.cause' not in prior.proposed_fields
+    assert archived.references == []
+    assert 'upload_checksum' not in archived.provenance
+    assert 'processing_state' not in archived.provenance
+    assert 'extraction_state' not in archived.provenance
+    assert 'fact_decisions' not in archived.provenance
+    assert 'incident.description' not in claim_after_replacement.form
+    assert claim_after_replacement.form['incident.location'].status is FormStatus.CONFIRMED
+    assert claim_after_replacement.form['incident.cause'].source_refs[-1] == (
+        'evidence:evd_other:material:1'
+    )
+
+    corrected_content = b'new-data'
+    storage.put_upload(claim_id=claim_id, evidence_id=evidence_id, content=corrected_content)
+    corrected_complete = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'corrected-material-complete',
+            'If-Match': '6',
+        },
+        json={'upload_checksum': f'sha256:{sha256(corrected_content).hexdigest()}'},
+    )
+    assert corrected_complete.status_code == 202
+    corrected_processing = client.post(
+        f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing',
+        headers={
+            'Authorization': 'Bearer synthetic-integration',
+            'Idempotency-Key': 'corrected-material-processing',
+            'If-Match': '7',
+        },
+        json={
+            'facts': [
+                {
+                    'field_code': 'incident.description',
+                    'value': 'Corrected extracted description.',
+                    'confidence': 0.95,
+                }
+            ]
+        },
+    )
+    assert corrected_processing.status_code == 200
+    corrected = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    assert corrected is not None
+    proposal = corrected_processing.json()['proposed_fields']['incident.description']
+    assert proposal['value'] == 'Corrected extracted description.'
+    assert proposal['source_refs'] == [
+        evidence_id,
+        f'evidence:{evidence_id}:material:2',
+    ]
+    assert corrected.provenance['upload_checksum'] != old_checksum
+    assert corrected.material_history == archived.material_history
 
 
 def test_existing_requirement_upload_rejects_wrong_claim_kind_and_active_state(

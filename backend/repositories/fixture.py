@@ -5,6 +5,7 @@ from threading import RLock
 from typing import Any
 
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
+from backend.domain.evidence import assert_material_history_is_append_only
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
@@ -1687,6 +1688,12 @@ class FixtureRepository(PersistenceRepository):
     def save_evidence(self, evidence: EvidenceRecord, customer_id: str) -> None:
         if self.get_claim(evidence.claim_id, customer_id) is None:
             raise KeyError(evidence.claim_id)
+        try:
+            assert_material_history_is_append_only(
+                self._evidence.get(evidence.evidence_id), evidence
+            )
+        except ValueError as conflict:
+            raise IdempotencyConflict(evidence.evidence_id) from conflict
         self._evidence[evidence.evidence_id] = deepcopy(evidence)
 
     def get_evidence(
@@ -1745,6 +1752,10 @@ class FixtureRepository(PersistenceRepository):
             or idempotency.session_id != (claim.active_session_id or '')
         ):
             raise KeyError(claim.claim_id)
+        try:
+            assert_material_history_is_append_only(existing_evidence, evidence)
+        except ValueError as conflict:
+            raise IdempotencyConflict(evidence.evidence_id) from conflict
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
         existing_idempotency = self._idempotency.get(lookup)
         if (
