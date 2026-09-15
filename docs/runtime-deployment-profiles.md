@@ -34,6 +34,13 @@ uses normal identity mode, mounts the three SQLite identity and Control Plane re
 before starting the Backend. It remains a controlled Validation Prototype, not an AWS or production
 profile.
 
+The Backend contains the versioned initial Agent Runtime Release. When the selected Control Plane
+scope has no Release Set history, application composition installs the complete Agent policy and
+the `qwen-local` plus `nowcoding-gpt55` model configurations as one active published Release Set.
+This is backend initialization, not a deployment-script repair step. Once any Release Set history
+exists, that history is authoritative and startup never republishes or restores a model that an
+operator removed.
+
 Before starting this profile, inject `NORTHWIND_OBJECT_STORAGE_PRESIGN_ENDPOINT` as the public
 HTTP(S) origin through which claimant browsers reach MinIO. Inject the staff bootstrap email and
 password and, when `AGENT_RUNTIME_PROFILE=model_gateway`, the model endpoint, identifier, and
