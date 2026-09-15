@@ -853,6 +853,10 @@ def build_lifecycle_projection(
         raise InvalidExternalLifecycleTransition(
             'A verification outcome requires a result lifecycle status.'
         )
+    if result is not None and verification is None:
+        raise InvalidExternalLifecycleTransition(
+            'A result lifecycle status requires a verification outcome.'
+        )
     if result is ExternalLifecycleStatus.RESULT_RECEIVED and verification is not (
         ExternalTaskResultVerification.UNVERIFIED
     ):
@@ -866,9 +870,10 @@ def build_lifecycle_projection(
             'result_verified requires a checked verification outcome.'
         )
     result_definition = lifecycle_definition(result) if result is not None else None
-    result_metadata = (
-        _RESULT_PROJECTION_METADATA.get((result, verification)) if result is not None else None
-    )
+    result_metadata = None
+    if result is not None:
+        assert verification is not None
+        result_metadata = _RESULT_PROJECTION_METADATA.get((result, verification))
     if result is not None and result_metadata is None:
         raise InvalidExternalLifecycleTransition(
             f'{result.value} has no projection for verification {verification}.'

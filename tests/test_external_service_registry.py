@@ -321,6 +321,15 @@ def test_projection_rejects_verification_without_result_stage() -> None:
         )
 
 
+def test_projection_rejects_result_stage_without_verification() -> None:
+    with pytest.raises(InvalidExternalLifecycleTransition, match='requires a verification'):
+        build_lifecycle_projection(
+            service_identity=ASSESSOR_SERVICE_IDENTITY,
+            operation_status=ExternalLifecycleStatus.ACCEPTED,
+            result_status=ExternalLifecycleStatus.RESULT_RECEIVED,
+        )
+
+
 def test_prepared_state_does_not_claim_reserved_operation_identity() -> None:
     prepared = lifecycle_definition(ExternalLifecycleStatus.PREPARED)
 
