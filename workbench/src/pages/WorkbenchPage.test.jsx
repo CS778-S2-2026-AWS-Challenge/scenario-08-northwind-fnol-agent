@@ -49,10 +49,11 @@ vi.mock('../hooks/usePersistentTabs.js', () => ({ usePersistentTabs: () => tabs 
 vi.mock('../components/NavigationRail.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimTabs.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimWorkspace.jsx', () => ({
-  default: ({ detail, resources, onAccept, onReopen, onExternalTaskAction }) => <div>
+  default: ({ detail, resources, externalActionNotice, onAccept, onReopen, onExternalTaskAction, onRetryExternalActionContext }) => <div>
     {detail && <output data-testid="claim-revision">Claim revision {detail.revision}</output>}
     {resources.handoffs?.error && <p>Handoff context unavailable</p>}
     {resources.externalRequests?.error && <p>External context unavailable</p>}
+    {externalActionNotice && <div role="alert"><p>{externalActionNotice.message}</p><p>{externalActionNotice.taskId}</p><button type="button" onClick={onRetryExternalActionContext}>Retry external readback</button></div>}
     {detail?.work_summary?.primary_action_code === 'claim.reopen' && <button type="button" onClick={() => onReopen(detail.allowed_actions[0], { reason: 'New material received.' }, 'reopen-route-key').catch(() => {})}>Test projected reopen</button>}
     {detail?.work_summary?.primary_action_code === 'human.accept_handoff' && <button type="button" onClick={() => onAccept({ handoff_id: 'hnd_1' }).catch(() => {})}>Test projected accept</button>}
     {detail?.work_summary?.primary_action_code?.startsWith('external.') && <button type="button" onClick={() => {
@@ -640,6 +641,7 @@ describe('WorkbenchPage queue routing', () => {
     expect(api.acceptExternalTaskReview).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(api.externalRequests).toHaveBeenCalledWith('staff-token', 'clm_route_1'))
     expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 4')
+    expect(await screen.findByRole('alert')).toHaveTextContent(/tsk_assessor_1.*may have completed.*outcome is not confirmed/i)
   })
 
   it('keeps a successful external mutation unsettled when External Services readback fails', async () => {
@@ -690,6 +692,7 @@ describe('WorkbenchPage queue routing', () => {
     expect(api.acceptExternalTaskReview).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 5'))
     await waitFor(() => expect(screen.getByText('External context unavailable')).toBeInTheDocument())
+    expect(await screen.findByRole('alert')).toHaveTextContent(/tsk_assessor_1.*may have completed.*outcome is not confirmed/i)
   })
 
   it('reads back external-service state after a stale external action conflict', async () => {
