@@ -2053,7 +2053,7 @@ def test_non_complete_provider_results_are_bounded_and_atomic_at_message_api(
         inner_gateway: ModelGateway = OpenAICompatibleModelGateway(
             gateway_config(
                 tools=False,
-                prompt_version='northwind-fnol-claimant-v5',
+                prompt_version='northwind-fnol-claimant-v6',
             ),
             transport=transport,
         )
@@ -2077,7 +2077,7 @@ def test_non_complete_provider_results_are_bounded_and_atomic_at_message_api(
             gateway_config(
                 credential_environment_variable='TEST_BEDROCK_COMPLETION_TOKEN',
                 tools=False,
-                prompt_version='northwind-fnol-claimant-v5',
+                prompt_version='northwind-fnol-claimant-v6',
             ),
             transport=transport,
         )
@@ -2368,7 +2368,7 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
     assert proposal.model_provenance is not None
     assert proposal.model_provenance.provider_model == 'provider-model-private'
     assert proposal.model_provenance.provider_request_id == 'provider-request-private'
-    assert proposal.model_provenance.prompt_id == 'northwind-fnol-claimant-v5'
+    assert proposal.model_provenance.prompt_id == 'northwind-fnol-claimant-v6'
     assert proposal.form_changes[0].source is FormSource.INFERENCE
     assert proposal.form_changes[0].status is FormStatus.PROPOSED
     authority = validate_proposal(proposal)
@@ -3614,14 +3614,16 @@ def test_configuration_backed_gateway_injects_only_the_call_resolver() -> None:
     assert constructed[0].evidence_resolver is resolver
 
 
-def test_current_prompt_has_a_new_identifier_and_bounded_rag_instructions() -> None:
+def test_current_prompt_declares_the_namespaced_runtime_contract() -> None:
     prompt = load_motor_claimant_prompt()
 
-    assert MOTOR_CLAIMANT_PROMPT_ID == 'northwind-fnol-claimant-v5'
-    assert 'Prompt ID: `northwind-fnol-claimant-v5`' in prompt
-    assert 'current-action requirements' in prompt
-    assert 'one normalized' in prompt
-    assert 'cannot become a positive fact or a readiness signal' in prompt
+    assert MOTOR_CLAIMANT_PROMPT_ID == 'northwind-fnol-claimant-v6'
+    assert 'Prompt ID: `northwind-fnol-claimant-v6`' in prompt
+    assert '`action_code` and `runtime_action_code`' in prompt
+    assert '`conversation.answer` with `runtime.wait_for_user`' in prompt
+    assert '`human.create_handoff` with `runtime.pause_for_review`' in prompt
+    assert '`runtime.confirm_claimant_facts` is not a registered' in prompt
+    assert 'Never return the deprecated `action`' in prompt
 
 
 def test_prompt_identifier_mismatch_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:

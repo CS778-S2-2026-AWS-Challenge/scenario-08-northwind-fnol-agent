@@ -742,9 +742,13 @@ components use the existing independent approval record and publication guard; n
 write production Claim State.
 
 Model records use `domain=model` and `configuration_key=profile_id`, so one published Release
-Set can bind both `qwen-local` and `nowcoding-gpt56terra` without overwriting either profile.
+Set can bind both `qwen-local` and `nowcoding-gpt55` without overwriting either profile.
 Claimant profiles must declare `structured_output=true` and `tools=true`; a Session stores the
 selected profile ID and Runtime resolves that exact key for every turn.
+The deployment binding manifest is not persisted catalogue state. It contains only non-secret
+connection metadata and credential environment-variable names used to reject unapproved model
+configurations before publication. The active Release Set remains the authority for which matched
+profiles are selectable.
 
 An `AgentDecisionRecord` may retain a `runtime_configuration` provenance projection for the exact
 turn. It contains the Release Set ID, environment, runtime profile, each selected configuration ID
