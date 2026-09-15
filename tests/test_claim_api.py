@@ -892,22 +892,27 @@ def test_default_home_journey_creates_without_an_unapproved_external_service(
 
 
 @pytest.mark.parametrize(
-    ('answer', 'expected'),
+    ('case_id', 'answer', 'expected'),
     [
-        ('There is no ongoing risk.', 'none'),
-        ('The leak is still active.', 'active_leak'),
+        ('none', 'There is no ongoing risk.', 'none'),
+        ('active-leak', 'The leak is still active.', 'active_leak'),
+        ('mixed-fire', 'There is no leak now, but the fire is still burning.', 'fire'),
+        ('negated-leak', 'The leak is not active anymore.', None),
+        ('negated-collapse', 'The ceiling is not collapsing.', None),
+        ('negated-exposure', 'Nothing is exposed.', None),
     ],
 )
 def test_controlled_home_ongoing_risk_answer_uses_registered_enum(
     client: TestClient,
     auth_headers: dict[str, str],
+    case_id: str,
     answer: str,
-    expected: str,
+    expected: str | None,
 ) -> None:
     created = create_claim(
         client,
         auth_headers,
-        key=f'home-risk-{expected}',
+        key=f'home-risk-{case_id}',
         incident_type='home',
     ).json()
     claim_id = created['claim']['claim_id']
@@ -945,8 +950,8 @@ def test_controlled_home_ongoing_risk_answer_uses_registered_enum(
         claim_id,
         session_id,
         revision=prepared.json()['revision'],
-        key=f'home-risk-message-{expected}',
-        client_message_id=f'home-risk-message-{expected}',
+        key=f'home-risk-message-{case_id}',
+        client_message_id=f'home-risk-message-{case_id}',
         text=answer,
     )
 
@@ -954,7 +959,7 @@ def test_controlled_home_ongoing_risk_answer_uses_registered_enum(
     changes = {
         item['field_code']: item['field']['value'] for item in response.json()['form_changes']
     }
-    assert changes['property.ongoing_risk'] == expected
+    assert changes.get('property.ongoing_risk') == expected
 
 
 def test_default_contents_journey_preserves_the_report_without_inventing_a_provider(

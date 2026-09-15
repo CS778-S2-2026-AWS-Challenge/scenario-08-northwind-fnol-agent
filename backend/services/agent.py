@@ -120,6 +120,77 @@ DANGER_NEGATION_PATTERNS = (
         re.IGNORECASE,
     ),
 )
+HOME_RISK_NONE_PATTERNS = (
+    re.compile(r'^(?:no|none|nope)[.!]?$', re.IGNORECASE),
+    re.compile(
+        r'\b(?:there\s+(?:is|are)\s+|we\s+have\s+|i\s+have\s+)?'
+        r'no\s+(?:(?:ongoing|current|immediate)\s+)?(?:risk|danger)s?\b',
+        re.IGNORECASE,
+    ),
+    re.compile(r'\bno\s+longer\s+(?:any\s+)?(?:risk|danger)s?\b', re.IGNORECASE),
+)
+HOME_ACTIVE_LEAK_PATTERNS = (
+    re.compile(
+        r'\b(?:active|ongoing)\b[^.!?]{0,30}\b(?:leak|flood|water)\b',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r'\b(?:leak|flood|water)\b[^.!?]{0,30}'
+        r'\b(?:active|ongoing|still\s+(?:leaking|running)|continuing)\b',
+        re.IGNORECASE,
+    ),
+)
+HOME_ACTIVE_LEAK_NEGATION_PATTERNS = (
+    re.compile(r'\b(?:no|without\s+an?)\s+(?:active\s+)?(?:leak|flood)\b', re.IGNORECASE),
+    re.compile(
+        r'\b(?:leak|flood|water)\b[^.!?]{0,30}\b(?:is\s+)?'
+        r'(?:not|no\s+longer)\s+(?:active|ongoing|leaking|running)\b'
+        r'(?:\s+anymore)?',
+        re.IGNORECASE,
+    ),
+)
+HOME_FIRE_PATTERNS = (
+    re.compile(
+        r'\b(?:active|ongoing)\b[^.!?]{0,30}\bfire\b',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r'\bfire\b[^.!?]{0,30}'
+        r'\b(?:active|ongoing|burning|still\s+burning|spreading|continuing)\b',
+        re.IGNORECASE,
+    ),
+)
+HOME_FIRE_NEGATION_PATTERNS = (
+    re.compile(r'\bno\s+(?:active\s+|ongoing\s+)?fire\b', re.IGNORECASE),
+    re.compile(
+        r'\bfire\b[^.!?]{0,30}\b(?:is\s+)?(?:not|no\s+longer)\s+'
+        r'(?:active|burning|spreading|continuing)\b',
+        re.IGNORECASE,
+    ),
+    re.compile(r'\bfire\b[^.!?]{0,20}\b(?:is\s+)?(?:out|extinguished)\b', re.IGNORECASE),
+)
+HOME_COLLAPSE_PATTERNS = (re.compile(r'\b(?:collapse|collapsing)\b', re.IGNORECASE),)
+HOME_COLLAPSE_NEGATION_PATTERNS = (
+    re.compile(r'\b(?:no|without\s+(?:a|any))\s+(?:risk\s+of\s+)?collapse\b', re.IGNORECASE),
+    re.compile(
+        r'\b[^.!?]{0,30}\b(?:is|are)\s+(?:not|no\s+longer)\s+collapsing\b',
+        re.IGNORECASE,
+    ),
+)
+HOME_EXPOSURE_PATTERNS = (re.compile(r'\b(?:exposure|exposed)\b', re.IGNORECASE),)
+HOME_EXPOSURE_NEGATION_PATTERNS = (
+    re.compile(r'\b(?:no|without\s+(?:an?|any))\s+exposure\b', re.IGNORECASE),
+    re.compile(
+        r'\b(?:nothing|no\s+part|the\s+property)\b[^.!?]{0,30}'
+        r'\b(?:is|was)?\s*(?:not\s+)?exposed\b',
+        re.IGNORECASE,
+    ),
+    re.compile(r'\b(?:is|are|was|were)\s+not\s+exposed\b', re.IGNORECASE),
+)
+HOME_OTHER_RISK_PATTERNS = (
+    re.compile(r'\b(?:active|ongoing)\b[^.!?]{0,30}\b(?:risk|danger)\b', re.IGNORECASE),
+)
+HOME_OTHER_RISK_NEGATION_PATTERNS = HOME_RISK_NONE_PATTERNS
 PENDING_POLICE_REPORT_PATTERNS = (
     re.compile(
         r'\bpolice\b[^.!?]{0,100}\b(?:report|reference)\b[^.!?]{0,100}'
@@ -436,24 +507,18 @@ def _controlled_requirement_value(field_code: str, message_text: str) -> Any | N
             return True
         return None
     if field_code == 'property.ongoing_risk':
-        if re.fullmatch(r'(?:no|none|nope)[.!]?', lowered) or re.search(
-            r'\b(?:no|none|not|no longer)\b.*\b(?:risk|leak|fire|danger)\b', lowered
-        ):
+        if any(pattern.search(text) for pattern in HOME_RISK_NONE_PATTERNS):
             return 'none'
-        if re.search(
-            r'\b(?:active|ongoing)\b.*\b(?:leak|flood|water)\b'
-            r'|\b(?:leak|flood|water)\b.*\b(?:active|ongoing|still)\b',
-            lowered,
-        ):
-            return 'active_leak'
-        if re.search(r'\b(?:active|ongoing)\b.*\bfire\b|\bfire\b.*\b(?:active|ongoing)\b', lowered):
-            return 'fire'
-        if re.search(r'\b(?:collapse|collapsing)\b', lowered):
-            return 'collapse'
-        if re.search(r'\b(?:exposure|exposed)\b', lowered):
-            return 'exposure'
-        if re.search(r'\b(?:active|ongoing)\b.*\b(?:risk|danger)\b', lowered):
-            return 'other'
+        risk_patterns = (
+            ('active_leak', HOME_ACTIVE_LEAK_PATTERNS, HOME_ACTIVE_LEAK_NEGATION_PATTERNS),
+            ('fire', HOME_FIRE_PATTERNS, HOME_FIRE_NEGATION_PATTERNS),
+            ('collapse', HOME_COLLAPSE_PATTERNS, HOME_COLLAPSE_NEGATION_PATTERNS),
+            ('exposure', HOME_EXPOSURE_PATTERNS, HOME_EXPOSURE_NEGATION_PATTERNS),
+            ('other', HOME_OTHER_RISK_PATTERNS, HOME_OTHER_RISK_NEGATION_PATTERNS),
+        )
+        for value, signal_patterns, negation_patterns in risk_patterns:
+            if _contains_unnegated_signal(text, signal_patterns, negation_patterns):
+                return value
         return None
     if field_code == 'property.habitable':
         if re.search(r'\b(?:uninhabitable|unsafe to live|cannot live|can\'t live)\b', lowered):
