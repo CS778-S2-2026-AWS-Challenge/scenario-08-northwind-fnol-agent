@@ -27,6 +27,7 @@ from backend.domain.models import (
     EvidenceFileStatus,
     EvidenceRecord,
     EvidenceStatus,
+    ExternalCapabilityProjection,
     MessageRecord,
     PageInfo,
     StaffActionRecord,
@@ -506,6 +507,7 @@ class WorkbenchClaimDetail(WorkbenchClaimListItem):
     allowed_actions: list[WorkbenchAllowedAction] = Field(default_factory=list)
     section_summaries: WorkbenchSectionSummaries
     customer_next_step: CustomerNextStep
+    external_capabilities: list[ExternalCapabilityProjection] = Field(default_factory=list)
 
 
 class WorkbenchFieldItem(ContractModel):

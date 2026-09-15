@@ -11,6 +11,7 @@ This note defines the bounded backend execution hand-off introduced for Sprint 3
 - `execute_claim_context_command` re-resolves the authoritative Claim immediately before execution and rejects a command whose workflow state or expected revision is stale.
 - Execution uses an explicit action-to-handler binding. When a command exposes registered tools, the bound internal tool must be present in its registry-derived `permitted_tools`. A registered tool-free command binds `None` and may execute only while its `permitted_tools` remains empty. Mismatched or unsupported bindings are rejected before execution.
 - Action-specific handlers continue to own their existing compare-and-set/idempotency transaction boundaries. The execution gate does not duplicate Claim, handoff, evidence, staff, or external-service persistence logic.
+- Confirmed Evidence reuse/removal consumes this command contract through `execute_confirmed_evidence_action`. That specialised Runtime gate verifies the exact proposal and claimant confirmation, resolves claimant-owned source Evidence, checks first-attempt lifecycle and revision state, and preserves typed unavailable or unknown outcomes. Its backend port owns persisted linkage, retention, audit, and idempotency replay; Runtime never accesses an object-storage key.
 - After a handler reports success, the execution gate re-reads authoritative Claim State and verifies that the reported revision was actually persisted. A Claim mutation or handoff must advance the Claim revision; a non-mutating Claim proposal must not advance it unexpectedly.
 - Conversation-only, runtime-control, and external-service actions do not become Claim Context commands through this boundary. Their owners retain their existing runtime or adapter execution paths.
 
@@ -20,7 +21,18 @@ The internal `ClaimContextExecutionResult` is deliberately smaller than the targ
 
 The execution gate rejects stale workflow state, stale revision, unsupported actions, tool allow-list mismatches, missing Claim scope, repository conflicts, and invalid handler outcomes without presenting them as completed work. Expected dependency or service failures become bounded `failed` results rather than provider-specific exceptions. Unexpected programming errors are not swallowed by this boundary.
 
-This issue does **not** introduce the coordinated target `ExecutionPlan` / `TurnResult` persistence or public transport migration. It also does not publish a new API route or compose every namespaced action into one runtime entry point. Day 4 integration work may consume this internal boundary while the existing action-specific services remain authoritative for concrete writes.
+The live claimant composition now supplies production bindings for
+`claim.apply_fact_patch`, `claim.register_evidence`, `claim.prepare_creation`, `claim.create`,
+and `human.create_handoff`. The message boundary dispatches its one material mutation through the
+binding before committing the existing atomic Agent turn. The formal-creation boundary dispatches
+`claim.create` before the existing claims adapter is invoked. Both handlers retain their existing
+transactions; the dispatcher validates and selects them but does not persist a second Claim.
+
+Conversation-only and runtime-control actions remain part of the Runtime turn rather than Claim
+Context commands. External participant actions remain unavailable until their owning service
+handlers are composed. `ClaimantRuntimeActionDispatcher.binding_table()` is the machine-readable
+deployment evidence: registry entries absent from that table are not executable merely because a
+contract or test exists.
 
 ## Day 4 API, persistence, and audit mapping
 

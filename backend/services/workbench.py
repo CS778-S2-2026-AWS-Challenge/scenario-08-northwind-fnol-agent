@@ -13,6 +13,7 @@ from backend.domain.external_service_registry import (
     InvalidExternalLifecycleTransition,
     assert_projection_provenance,
     build_lifecycle_projection,
+    capability_catalogue,
     projection_metadata,
 )
 from backend.domain.external_services import (
@@ -852,11 +853,15 @@ def _queue_key(
     lifecycle: ClaimLifecycleState,
     missing_information: Sequence[WorkbenchMissingInformation],
     active_handoffs: Sequence[HandoffRecord],
+    has_external_staff_attention: bool = False,
+    has_external_provider_wait: bool = False,
 ) -> WorkbenchQueueKey:
     # Claim creation remains terminal for the external-claim contract, but a later
     # claimant-requested handoff is active staff work and must remain actionable.
-    if active_handoffs:
+    if active_handoffs or has_external_staff_attention:
         return WorkbenchQueueKey.PROCESSING
+    if has_external_provider_wait:
+        return WorkbenchQueueKey.WAITING_THIRD_PARTY
     terminal = claim.terminal_disposition
     if terminal is not None:
         created_external_claim = (
@@ -915,6 +920,45 @@ def _external_tasks(
         return repository.list_external_tasks_internal(claim_id), None
     except RuntimeError:
         return [], 'External-service records are temporarily unavailable.'
+
+
+def _external_staff_attention(
+    external_tasks: Sequence[ExternalTaskRecord],
+    results: Sequence[ExternalTaskResult],
+    staff_actions: Sequence[StaffActionRecord],
+) -> list[tuple[ExternalTaskRecord, ExternalTaskResult | None, str, StaffActionRecord | None]]:
+    """Return exact external records that still require a staff-owned next step."""
+
+    results_by_task = {item.task_id: item for item in results}
+    attention: list[
+        tuple[ExternalTaskRecord, ExternalTaskResult | None, str, StaffActionRecord | None]
+    ] = []
+    for task in external_tasks:
+        result = results_by_task.get(task.task_id)
+        if task.status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
+            attention.append((task, result, 'reconcile', None))
+            continue
+        action_type = None
+        if task.status is ExternalTaskOperationStatus.TERMINAL_FAILURE:
+            action_type = 'external_failure_review'
+        elif result is not None and result.verification in {
+            ExternalTaskResultVerification.UNVERIFIED,
+            ExternalTaskResultVerification.INCONSISTENT,
+            ExternalTaskResultVerification.REVIEW_REQUIRED,
+        }:
+            action_type = 'external_result_review'
+        if action_type is None:
+            continue
+        matching_actions = [
+            item
+            for item in staff_actions
+            if item.action_type == action_type and task.task_id in item.source_refs
+        ]
+        latest_action = matching_actions[-1] if matching_actions else None
+        if latest_action is not None and latest_action.status is StaffActionStatus.COMPLETED:
+            continue
+        attention.append((task, result, action_type, latest_action))
+    return attention
 
 
 def _integration_summary(
@@ -1037,10 +1081,16 @@ def _allowed_actions(
     risk_signals: Sequence[WorkbenchRiskSignal],
     collaboration_requests: Sequence[ClaimCollaborationRequest],
     external_tasks: Sequence[ExternalTaskRecord],
+    external_results: Sequence[ExternalTaskResult],
     principal: Principal,
 ) -> list[WorkbenchAllowedAction]:
+    external_attention = _external_staff_attention(
+        external_tasks,
+        external_results,
+        staff_actions,
+    )
     terminal = claim.terminal_disposition
-    if terminal is not None and not active_handoffs:
+    if terminal is not None and not active_handoffs and not external_attention:
         if terminal.value is TerminalDispositionValue.COMPLETED:
             return []
         blocker = None
@@ -1069,6 +1119,50 @@ def _allowed_actions(
             )
         ]
     actions: list[WorkbenchAllowedAction] = []
+    for task, result, attention_type, review_action in external_attention:
+        other_owner = (
+            ownership.primary_assignee is not None
+            and ownership.primary_assignee.staff_id != principal.subject
+        )
+        source_refs = [task.task_id]
+        if result is not None:
+            source_refs.append(result.result_id)
+        if attention_type == 'reconcile':
+            actions.append(
+                _registered_action(
+                    'external.reconcile_response',
+                    task.task_id,
+                    claim.revision,
+                    availability=(
+                        ActionAvailability.BLOCKED
+                        if other_owner
+                        else ActionAvailability.CONFIRMATION_REQUIRED
+                    ),
+                    blocked_reason=(
+                        'This Claim is assigned to another staff member.' if other_owner else None
+                    ),
+                    source_refs=source_refs,
+                    result_state='pending_confirmation',
+                )
+            )
+        elif review_action is None:
+            actions.append(
+                _registered_action(
+                    'external.accept_review',
+                    task.task_id,
+                    claim.revision,
+                    availability=(
+                        ActionAvailability.BLOCKED
+                        if other_owner
+                        else ActionAvailability.CONFIRMATION_REQUIRED
+                    ),
+                    blocked_reason=(
+                        'This Claim is assigned to another staff member.' if other_owner else None
+                    ),
+                    source_refs=source_refs,
+                    result_state='pending_confirmation',
+                )
+            )
     if active_handoffs:
         handoff = active_handoffs[-1]
         if handoff.status is HandoffStatus.QUEUED:
@@ -1501,6 +1595,15 @@ def _primary_action(
         for signal in risk_signals
         if signal.status in {SignalReviewStatus.OPEN, SignalReviewStatus.UNDER_REVIEW}
     )
+    preferred.extend(
+        (action.action_code, action.target_ref)
+        for action in allowed_actions
+        if action.action_code
+        in {
+            'external.reconcile_response',
+            'external.accept_review',
+        }
+    )
     if current_work is not None:
         preferred.append(('work_item.update', current_work.work_item_id))
     preferred.append(('ownership.request_cowork', None))
@@ -1668,6 +1771,7 @@ def _build_projection(
         projected_risk_signals,
         collaboration_requests,
         external_tasks,
+        external_results,
         principal,
     )
     primary_action = _primary_action(
@@ -1680,7 +1784,18 @@ def _build_projection(
     lifecycle = _lifecycle(claim, active_handoffs, pending_evidence)
     incomplete_context = _incomplete_context(repository, claim, sessions)
     work_summary = WorkbenchWorkSummary(
-        queue_key=_queue_key(claim, lifecycle, missing, active_handoffs),
+        queue_key=_queue_key(
+            claim,
+            lifecycle,
+            missing,
+            active_handoffs,
+            bool(_external_staff_attention(external_tasks, external_results, actions)),
+            any(
+                task.status is ExternalTaskOperationStatus.ACCEPTED
+                and all(result.task_id != task.task_id for result in external_results)
+                for task in external_tasks
+            ),
+        ),
         current_work_item=current_work,
         primary_action_code=primary_action.action_code if primary_action else None,
         primary_action_target_ref=primary_action.target_ref if primary_action else None,
@@ -1798,6 +1913,7 @@ def _build_projection(
             ),
         ),
         customer_next_step=claim.customer_next_step,
+        external_capabilities=list(capability_catalogue(claim.incident_type)),
     )
 
 
@@ -2219,6 +2335,7 @@ def _external_lifecycle(
     result: ExternalTaskResult | None = None,
     result_evidence: Sequence[EvidenceRecord] = (),
     assessor_routing: AssessorRoutingResult | None = None,
+    completed_review: StaffActionRecord | None = None,
 ) -> WorkbenchExternalLifecycle:
     status = task.status
     projection = projection_metadata(status.value)
@@ -2319,6 +2436,15 @@ def _external_lifecycle(
                 detail = 'The returned result needs professional review before it can be used.'
                 next_action = 'Review the result, evidence, and checked Claim revision.'
                 attention = True
+    if completed_review is not None:
+        label = 'Staff review recorded'
+        detail = (
+            'Northwind completed the task-linked review. The source external-service state '
+            'remains unchanged.'
+        )
+        owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
+        next_action = 'No further staff review is required for this external-service record.'
+        attention = False
     return WorkbenchExternalLifecycle(
         stakeholder='external_party',
         service=task.service_identity,
@@ -2377,6 +2503,7 @@ def list_workbench_external_requests(
         requests = repository.list_external_task_requests_internal(claim_id)
         results = repository.list_external_task_results_internal(claim_id)
         evidence = repository.list_evidence(claim_id, claim.customer_id)
+        staff_actions = repository.list_staff_actions(claim_id)
     except RuntimeError:
         return WorkbenchResourcePage(
             items=[],
@@ -2387,6 +2514,14 @@ def list_workbench_external_requests(
     by_task = {item.task_id: item for item in requests}
     results_by_task = {item.task_id: item for item in results}
     evidence_by_id = {item.evidence_id: item for item in evidence}
+    completed_reviews_by_task = {
+        source_ref: action
+        for action in staff_actions
+        if action.status is StaffActionStatus.COMPLETED
+        and action.action_type in {'external_failure_review', 'external_result_review'}
+        for source_ref in action.source_refs
+        if source_ref in {task.task_id for task in tasks}
+    }
     items = []
     try:
         for task in tasks:
@@ -2408,6 +2543,7 @@ def list_workbench_external_requests(
                         if result is not None
                         else [],
                         claim.assessor_routing,
+                        completed_reviews_by_task.get(task.task_id),
                     ),
                 )
             )

@@ -47,6 +47,7 @@ from backend.domain.external_services import (
     external_task_for_evidence,
     verify_external_task_result,
 )
+from backend.domain.ids import new_id
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -74,6 +75,9 @@ from backend.domain.models import (
     IntegrationSource,
     ResponsibleParty,
     RouteAssessorRequest,
+    StaffActionRecord,
+    StaffActionResult,
+    StaffActionStatus,
     TerminalDispositionReasonCode,
     TerminalDispositionValue,
     WorkflowState,
@@ -82,6 +86,7 @@ from backend.domain.models import (
 from backend.domain.retrieval import RetrievalSource
 from backend.repositories.protocols import (
     IdempotencyConflict,
+    IdempotencyRecord,
     PersistenceRepository,
     RevisionConflict,
 )
@@ -1111,6 +1116,12 @@ def reconcile_assessor_routing(
     task_id: str,
     idempotency_key: str,
     expected_revision: int,
+    *,
+    staff_actor_id: str | None = None,
+    staff_route: str | None = None,
+    staff_request_fingerprint: str | None = None,
+    staff_action_registry_version: str | None = None,
+    required_staff_revision: int | None = None,
 ) -> tuple[AssessorRoutingResult, bool]:
     """Settle one persisted unknown assessor request from a provider status check.
 
@@ -1135,6 +1146,16 @@ def reconcile_assessor_routing(
     """
 
     require_idempotency_key(idempotency_key)
+    staff_values = (
+        staff_actor_id,
+        staff_route,
+        staff_request_fingerprint,
+        staff_action_registry_version,
+    )
+    if any(value is not None for value in staff_values) and not all(
+        value is not None for value in staff_values
+    ):
+        raise ValueError('Staff reconciliation metadata must be supplied as one contract.')
     claim = repository.get_claim_internal(claim_id)
     if claim is None:
         raise _claim_not_found()
@@ -1368,6 +1389,10 @@ def reconcile_assessor_routing(
         fingerprint=operation.request_fingerprint,
         result=result,
     )
+    if staff_actor_id is not None:
+        if claim.assignee_id not in {None, staff_actor_id}:
+            raise _authorisation_error('The Claim is assigned to another staff member.')
+        updated_claim = updated_claim.model_copy(update={'assignee_id': staff_actor_id})
     awaited, link = _awaited_material_records(task=accepted_task, claim=updated_claim)
     # An interrupted dispatch never recorded its send. The status check has just
     # established that the provider did receive it, so the record says so now rather
@@ -1383,6 +1408,52 @@ def reconcile_assessor_routing(
         repository=repository,
         recomputation_reason='integration_result_changed',
     )
+    staff_action = None
+    staff_idempotency = None
+    if staff_actor_id is not None:
+        assert staff_route is not None
+        assert staff_request_fingerprint is not None
+        assert staff_action_registry_version is not None
+        timestamp = now_utc()
+        staff_action = StaffActionRecord(
+            action_id=new_id('act'),
+            claim_id=claim_id,
+            action_type='external_reconciliation',
+            status=StaffActionStatus.COMPLETED,
+            assigned_to=staff_actor_id,
+            requested_outcome=(
+                'Reconcile the existing external operation before any further request.'
+            ),
+            source_refs=[task.task_id, operation.operation_id, provider_reference],
+            result=StaffActionResult(
+                outcome='external_reconciliation_completed',
+                summary='The existing assessor operation was reconciled to an accepted state.',
+                reason_codes=['EXTERNAL_OUTCOME_RECONCILED'],
+                source_refs=[task.task_id, operation.operation_id, provider_reference],
+            ),
+            completed_by=staff_actor_id,
+            created_at=timestamp,
+            completed_at=timestamp,
+        )
+        response_payload = {
+            'claim_id': claim_id,
+            'task_id': task.task_id,
+            'revision': updated_claim.revision,
+            'routing': result.model_dump(mode='json'),
+            'staff_action': staff_action.model_dump(mode='json'),
+        }
+        staff_idempotency = IdempotencyRecord(
+            actor_id=staff_actor_id,
+            route=staff_route,
+            key=idempotency_key,
+            request_fingerprint=staff_request_fingerprint,
+            claim_id=claim_id,
+            session_id=claim.active_session_id or '',
+            action_registry_version=staff_action_registry_version,
+            action_code='external.reconcile_response',
+            target_ref=task.task_id,
+            response_payload=response_payload,
+        )
     try:
         repository.save_assessor_reconciliation(
             updated_claim,
@@ -1394,6 +1465,10 @@ def reconcile_assessor_routing(
             link,
             branch_evaluation,
             claim.customer_id,
+            staff_action=staff_action,
+            idempotency=staff_idempotency,
+            required_staff_id=staff_actor_id,
+            required_staff_revision=required_staff_revision,
         )
     except RevisionConflict as conflict:
         raise ApiError(

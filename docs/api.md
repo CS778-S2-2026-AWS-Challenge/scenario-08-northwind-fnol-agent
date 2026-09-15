@@ -1154,6 +1154,7 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `POST` | `/claims/{claim_id}/creation` | Create an external claim after deterministic validation |
 | `POST` | `/claims/{claim_id}/assessor-routing/consent` | Record bounded claimant permission for the contextual assessor action |
 | `POST` | `/claims/{claim_id}/assessor-routing` | Send the authorised assessor request and return its claimant-safe state |
+| `GET` | `/claims/{claim_id}/external-capabilities` | Read the server-owned third-party capability catalogue for the Claim product family |
 | `GET` | `/claims/{claim_id}/evidence` | List claimant-visible evidence state |
 | `POST` | `/claims/{claim_id}/evidence` | Register expected, missing, or pending evidence |
 | `POST` | `/claims/{claim_id}/evidence/uploads` | Request an evidence upload target |
@@ -1254,6 +1255,7 @@ Response `200`:
   },
   "external_claim": null,
   "external_service_action": null,
+  "external_capabilities": [],
   "dynamic_form": null,
   "customer_next_step": {},
   "handoff": null,
@@ -1291,6 +1293,15 @@ service and provider labels, purpose, claimant-safe summary of the minimum data 
 consent state, progress/result state, and the provider-neutral routing result when accepted. It
 never exposes the raw consent record, authorisation decision, internal signals, or complete claim
 context.
+
+`external_capabilities` is the claimant-safe catalogue derived from the canonical
+`external-service-lifecycle.v1` registry. Rows are filtered by the Claim product family and
+contain the service identity, purpose, access form, required and disclosure fields, provider label,
+official URL or phone when published, result semantics, and limitation. Internal provenance and
+operation evidence are not included. A row with `uses_external_task: false` is an official manual
+link or phone path and does not create an ExternalTask; a task-capable row still requires the
+existing consent, authority, idempotency, delivery, reconciliation, and result-verification
+contracts before any side effect.
 
 `dynamic_form` is the claimant-safe Dynamic Form projection applicable to the returned Claim
 snapshot. It is built from the newest applied branch evaluation valid at or before the current
@@ -1549,9 +1560,16 @@ Request:
 All fields must exist and be confirmable. Response `200` returns the new claim revision, confirmed fields, any new decision, and the current customer next step.
 
 When all controlled intake fields are confirmed, `customer_next_step.status` becomes
-`ready_to_create`. Confirmation does not itself invoke an external claims service.
+`ready_to_create` and `workflow_state` becomes `ready_for_next`. A later material edit that makes
+the registered requirements incomplete returns the workflow to `collecting`. Confirmation does
+not itself invoke an external claims service.
 
 ### `POST /api/v1/claims/{claim_id}/creation`
+
+This endpoint is the live handler for the registered `claim.create` action. It accepts only a
+`ready_for_next` Claim and dispatches a typed, revision-checked, idempotent command through the
+configured `claims_service.create_claim` binding before using the existing provider-neutral
+adapter. The model cannot call or authorise this endpoint by emitting an action name.
 
 The claimant client MAY offer a guided Motor presentation over the same resources used by the
 conversational intake. The guided presentation creates the Working Claim before its first page is
@@ -1820,8 +1838,42 @@ or unrestricted provenance. Registration-only Evidence with no uploaded file
 is not included.
 
 `can_reuse` is true only for a claimant-owned file in a reusable processing
-state. `can_remove` remains false until a governed remove operation is
-available; clients must not delete an object-storage key directly.
+state. `can_remove` is true only for a ready claimant-owned item that is not
+invalid, expired, superseded, or otherwise retention-blocked. Active links to
+other Claims are returned as `linked_claim_ids`.
+
+### `POST /api/v1/claims/{claim_id}/evidence/{evidence_id}/reuse`
+
+Attaches an eligible Evidence object from another Claim owned by the same
+claimant. This creates an auditable relation to the existing `evidence_id`; it
+does not copy file bytes or expose a storage key. The request requires the
+source Claim, Runtime proposal reference, claimant confirmation reference,
+`Idempotency-Key`, and `If-Match` for the target Claim revision. `proposal_ref` must identify a
+persisted Runtime proposal for this Claim, active session, Evidence, source Claim, action, and
+revision. `confirmation_ref` must identify a later claimant-visible `MessageRecord` in that same
+session containing the claimant's explicit confirmation. References supplied only in the request
+body are not authorization evidence and are rejected before any mutation.
+
+The response is a typed action result with `status`, `reason_code`, the target
+revision when applied, and `state_change_refs`. `succeeded` is returned only
+after the relation, Claim evidence projection, Branch Evaluation, idempotency
+record, and audit event are persisted together. Processing, failed, invalid,
+expired, superseded, cross-customer, already-linked, or stale items are
+rejected without changing Claim State.
+
+### `POST /api/v1/claims/{claim_id}/evidence/{evidence_id}/remove`
+
+Removes an Evidence item through the governed claimant API. When the source
+Claim is the target, removal hides the item from claimant history while
+retaining the immutable Evidence object and audit/provenance record. When the
+item is reused from another Claim, removal detaches only the target relation;
+the source Evidence remains available from its original Claim. Physical object
+deletion is not performed by the browser or Agent.
+
+The request and response use the same persisted proposal/confirmation, idempotency, revision, and
+typed-outcome rules as `reuse`. A rejected or ambiguous result does not claim
+that the item was removed; the client must refresh the authoritative history
+and reconcile an unknown outcome with the same idempotency key.
 
 ### `POST /api/v1/claims/{claim_id}/evidence`
 
@@ -2072,6 +2124,8 @@ Returns staff and system updates visible to the claimant. Each update includes `
 | `POST` | `/workbench/claims/{claim_id}/requeue` | Release primary ownership when the projected action is executable |
 | `POST` | `/workbench/claims/{claim_id}/staff-actions` | Create a staff action |
 | `PATCH` | `/workbench/claims/{claim_id}/staff-actions/{action_id}` | Progress or complete a staff action |
+| `POST` | `/workbench/claims/{claim_id}/external-tasks/{task_id}/accept-review` | Accept a projected external-result or terminal-failure review |
+| `POST` | `/workbench/claims/{claim_id}/external-tasks/{task_id}/reconcile` | Reconcile one projected unknown external outcome without resubmitting it |
 | `POST` | `/workbench/claims/{claim_id}/signals/{signal_id}/decisions` | Decide an internal signal |
 | `POST` | `/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept` | Accept a handoff |
 | `POST` | `/workbench/claims/{claim_id}/messages` | Send a persisted claimant-visible staff message |
@@ -2219,19 +2273,25 @@ integration status; tags; and creation and update times. It is a projection of s
 not a separately editable board record.
 
 `work_summary.queue_key` is exactly one of seven lifecycle-placement views for every listable
-Claim. The server applies terminal precedence before active placement:
+Claim. The server applies actionable staff work and an accepted provider wait before terminal
+placement:
 
 | Queue | Authoritative mapping |
 |---|---|
-| `completed` | `terminal_disposition.value=completed` |
+| `completed` | `terminal_disposition.value=completed` with no active handoff, unresolved staff-owned external attention, or accepted external task awaiting its result |
 | `abandoned` | `terminal_disposition.value=abandoned` |
 | `closed` | `terminal_disposition.value=closed` |
 | `processing` | Non-terminal `draft_active`, `staff_support`, `professional_review`, `ready_to_create`, or `creating` lifecycle |
 | `waiting_user` | `waiting_customer` without claimant material required for the current action |
 | `waiting_material` | `waiting_customer` with claimant Evidence missing information that is `required_now` |
-| `waiting_third_party` | `waiting_external`; this takes precedence over other waiting reasons |
+| `waiting_third_party` | `waiting_external`, or an accepted created-Claim external task whose provider result has not arrived; this takes precedence over terminal placement and other waiting reasons |
 
-Active handoffs and professional review therefore remain in `processing`. Operational views are
+Active handoffs, professional review, and unresolved staff-owned external-service attention
+therefore remain in `processing`, including when Claim creation has already recorded a `completed`
+terminal disposition. Completing the applicable external review or reconciling the unknown
+operation removes that temporary active placement without changing the terminal disposition. A
+reconciled accepted request then remains in `waiting_third_party` until its result arrives.
+Operational views are
 independent, overlapping projections: the same Claim may appear in `processing` and, for example,
 `human_requests` or `professional_review`; a completed Claim may also match `created_routed`.
 `all` is the union of the four active queues and excludes all three terminal queues.
@@ -2444,6 +2504,26 @@ non-blocked `allowed_actions` entry. Clients display a Staff next action only wh
 exactly resolve to a non-blocked entry; they do not fall back to another action or infer one from
 tags, queues, text, role, ownership, or field counts. `customer_next_step` remains a separate
 claimant-safe projection.
+
+For one `terminal_failure` or returned result whose verification is `unverified`, `inconsistent`,
+or `review_required`, the server projects `external.accept_review` against the exact `task_id`.
+The dedicated accept-review mutation requires authenticated, claimable staff, the projected Claim
+revision, and an idempotency key. It assigns an unowned Claim to that staff member and creates a
+task-linked `external_failure_review` or `external_result_review` WorkItem. It does not change the
+external task, provider result, Claim terminal disposition, or claimant next step. The ordinary
+`work_item.update` contract completes the accepted review. After completion, the external-request
+projection reports that the task-linked staff review is recorded and clears `needs_attention`;
+the raw task and result-verification fields remain unchanged for provenance.
+
+For `unknown_outcome`, the server instead projects `external.reconcile_response` against the exact
+`task_id`. Its dedicated mutation requires the same staff authority and calls the configured
+assessor status-check adapter with the existing task, request, and operation identity. It never
+submits a second provider request. A confirmed result atomically assigns an unowned Claim, advances
+the existing task and operation to `accepted`, records the routing result and awaited Evidence,
+completes a task-linked `external_reconciliation` StaffAction, stores the actor-scoped idempotency
+response, and advances the Claim revision. An inconclusive check remains `unknown_outcome` and
+writes none of that bundle. Stale revision, unavailable staff, another owner, missing exact action,
+or changed idempotency input returns a structured conflict before settlement.
 
 ### `POST /api/v1/workbench/claims/{claim_id}/reopen`
 

@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 const api = vi.hoisted(() => ({
+  applyEvidenceHistoryAction: vi.fn(),
   getClaimEvidence: vi.fn(),
   listEvidenceHistory: vi.fn(),
 }))
@@ -24,6 +25,7 @@ const historyItem = {
   provenance_summary: ['claimant_upload'],
   can_reuse: true,
   can_remove: false,
+  linked_claim_ids: [],
   created_at: '2026-09-12T01:00:00Z',
   updated_at: '2026-09-12T01:01:00Z',
 }
@@ -127,5 +129,53 @@ describe('claimant Evidence history', () => {
     expect(api.listEvidenceHistory).not.toHaveBeenCalled()
     expect(screen.queryByText('Reuse')).not.toBeInTheDocument()
     expect(screen.queryByText('Removal')).not.toBeInTheDocument()
+  })
+
+  it('reuses an eligible historical item, refreshes the list, and announces the result', async () => {
+    const user = userEvent.setup()
+    api.listEvidenceHistory
+      .mockResolvedValueOnce({ items: [historyItem], page: { next_cursor: null } })
+      .mockResolvedValueOnce({ items: [{ ...historyItem, linked_claim_ids: ['clm_current'] }], page: { next_cursor: null } })
+    api.applyEvidenceHistoryAction.mockResolvedValue({ status: 'succeeded' })
+
+    render(<EvidenceHistory currentClaimId="clm_current" currentClaimRevision={4} />)
+    await screen.findByText('rear-damage.jpg')
+    await user.click(screen.getByRole('button', { name: 'Reuse for this Claim' }))
+
+    expect(api.applyEvidenceHistoryAction).toHaveBeenCalledWith(expect.objectContaining({
+      claimId: 'clm_current',
+      evidenceId: 'evd_history_1',
+      action: 'reuse',
+      sourceClaimId: 'clm_previous',
+      revision: 4,
+    }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('now attached to this Claim')
+    expect(api.listEvidenceHistory).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('button', { name: 'Remove from this Claim' })).toBeInTheDocument()
+  })
+
+  it('announces a server-denied removal and keeps the refreshed history visible', async () => {
+    const user = userEvent.setup()
+    const removable = {
+      ...historyItem,
+      can_reuse: false,
+      can_remove: true,
+      source_claim_id: 'clm_current',
+    }
+    api.listEvidenceHistory
+      .mockResolvedValueOnce({ items: [removable], page: { next_cursor: null } })
+      .mockResolvedValueOnce({ items: [removable], page: { next_cursor: null } })
+    api.applyEvidenceHistoryAction.mockRejectedValue(Object.assign(new Error('Retention prevents removal.'), {
+      status: 409,
+      code: 'EVIDENCE_RETENTION_BLOCKED',
+    }))
+
+    render(<EvidenceHistory currentClaimId="clm_current" currentClaimRevision={4} />)
+    await screen.findByText('rear-damage.jpg')
+    await user.click(screen.getByRole('button', { name: 'Remove from history' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Retention prevents removal')
+    expect(screen.getByText('rear-damage.jpg')).toBeInTheDocument()
+    expect(api.applyEvidenceHistoryAction).toHaveBeenCalledWith(expect.objectContaining({ action: 'remove' }))
   })
 })

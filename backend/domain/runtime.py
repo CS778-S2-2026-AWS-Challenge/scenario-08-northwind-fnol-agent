@@ -73,6 +73,9 @@ class AgentProposalRecord(ContractModel):
     customer_reason: str = Field(min_length=1, max_length=1000)
     customer_response: str = Field(min_length=1, max_length=5000)
     customer_next_step: CustomerNextStep
+    evidence_id: str | None = Field(default=None, max_length=120)
+    source_claim_id: str | None = Field(default=None, max_length=120)
+    removal_scope: str | None = Field(default=None, max_length=120)
     form_changes: list[ProposedFormChange] = Field(default_factory=list, max_length=100)
     contents_item_changes: list[ProposedContentsItem] = Field(default_factory=list, max_length=100)
     source_refs: list[str] = Field(default_factory=list, max_length=100)

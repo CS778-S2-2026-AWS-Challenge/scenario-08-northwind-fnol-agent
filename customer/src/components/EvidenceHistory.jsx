@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { getClaimEvidence, listEvidenceHistory } from '../api.js'
+import { applyEvidenceHistoryAction, getClaimEvidence, listEvidenceHistory } from '../api.js'
 import { formatDateTime, formatIdentifierLabel } from '../formatters.js'
 
 const FILE_STATUS_LABELS = {
@@ -40,7 +40,7 @@ async function requestEvidenceHistory({ claimId, cursor, signal }) {
   }
 }
 
-function EvidenceHistoryItem({ accountScoped, item, currentClaimId }) {
+function EvidenceHistoryItem({ accountScoped, item, currentClaimId, actionsEnabled, onAction, actionState }) {
   const statusLabel = FILE_STATUS_LABELS[item.file_status] || item.file_status || item.status
   const metadata = [item.media_type, formatFileSize(item.size_bytes)].filter(Boolean)
   const provenanceLabel = item.provenance_summary
@@ -90,21 +90,101 @@ function EvidenceHistoryItem({ accountScoped, item, currentClaimId }) {
           </>
         )}
       </dl>
+      {accountScoped && actionsEnabled && currentClaimId && item.source_claim_id !== currentClaimId && (
+        <div className="evidence-history-actions">
+          {item.can_reuse && (
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => onAction(item, 'reuse')}
+              disabled={actionState?.pending}
+            >
+              {actionState?.pending && actionState.action === 'reuse' ? 'Reusing…' : 'Reuse for this Claim'}
+            </button>
+          )}
+          {item.linked_claim_ids?.includes(currentClaimId) && (
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => onAction(item, 'remove')}
+              disabled={actionState?.pending}
+            >
+              {actionState?.pending && actionState.action === 'remove' ? 'Removing…' : 'Remove from this Claim'}
+            </button>
+          )}
+        </div>
+      )}
+      {accountScoped && actionsEnabled && currentClaimId && item.source_claim_id === currentClaimId && item.can_remove && (
+        <div className="evidence-history-actions">
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => onAction(item, 'remove')}
+            disabled={actionState?.pending}
+          >
+            {actionState?.pending ? 'Removing…' : 'Remove from history'}
+          </button>
+        </div>
+      )}
+      {actionState?.message && (
+        <p className="evidence-history-action-message" role="alert">{actionState.message}</p>
+      )}
     </li>
   )
 }
 
-export default function EvidenceHistory({ claimId = null, currentClaimId = null }) {
+export default function EvidenceHistory({ claimId = null, currentClaimId = null, currentClaimRevision = null }) {
   const [items, setItems] = useState([])
   const [nextCursor, setNextCursor] = useState(null)
   const [viewState, setViewState] = useState('loading')
   const [message, setMessage] = useState('')
   const controllerRef = useRef(null)
   const itemsRef = useRef([])
+  const [actionStates, setActionStates] = useState({})
 
   function replaceItems(nextItems) {
     itemsRef.current = nextItems
     setItems(nextItems)
+  }
+
+  async function runAction(item, action) {
+    if (!currentClaimId || currentClaimRevision == null) return
+    setActionStates((current) => ({
+      ...current,
+      [item.evidence_id]: { action, pending: true, message: '' },
+    }))
+    try {
+      await applyEvidenceHistoryAction({
+        claimId: currentClaimId,
+        evidenceId: item.evidence_id,
+        action,
+        sourceClaimId: item.source_claim_id,
+        revision: currentClaimRevision,
+        proposalRef: `claimant-history:${item.evidence_id}`,
+        confirmationRef: `claimant-confirmation:${item.evidence_id}:${action}`,
+      })
+      await load()
+      setActionStates((current) => ({
+        ...current,
+        [item.evidence_id]: {
+          action,
+          pending: false,
+          message: action === 'reuse'
+            ? 'The Evidence is now attached to this Claim.'
+            : 'The Evidence action was completed and the history was refreshed.',
+        },
+      }))
+    } catch (error) {
+      await load()
+      setActionStates((current) => ({
+        ...current,
+        [item.evidence_id]: {
+          action,
+          pending: false,
+          message: `${error?.message || 'The Evidence action could not be completed.'} The latest history is shown below.`,
+        },
+      }))
+    }
   }
 
   async function load({ cursor = null, append = false } = {}) {
@@ -212,6 +292,9 @@ export default function EvidenceHistory({ claimId = null, currentClaimId = null 
             key={item.evidence_id}
             item={item}
             currentClaimId={currentClaimId}
+            actionsEnabled={currentClaimRevision != null}
+            onAction={runAction}
+            actionState={actionStates[item.evidence_id]}
           />
         ))}
       </ul>

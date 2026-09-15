@@ -363,6 +363,7 @@ function App() {
   const [evidencePollingKey, setEvidencePollingKey] = useState(0)
   const [resumeContext, setResumeContext] = useState(null)
   const [expandedConversationPanels, setExpandedConversationPanels] = useState({})
+  const [externalCapabilitiesOpen, setExternalCapabilitiesOpen] = useState(false)
   const [externalServiceInteraction, setExternalServiceInteraction] = useState({
     claimId: null,
     consentChecked: false,
@@ -386,6 +387,11 @@ function App() {
   const detailsTabRefs = useRef({})
   const conversationPanelRef = useRef(null)
   const messageListRef = useRef(null)
+  const externalCapabilitiesDialogRef = useRef(null)
+  const externalCapabilitiesHeadingRef = useRef(null)
+  const externalCapabilitiesTriggerRef = useRef(null)
+  const presentedCapabilityCatalogues = useRef(new Set())
+  const restoreCapabilityTriggerFocus = useRef(false)
   const followLatestMessages = useRef(true)
   const forceLatestMessages = useRef(false)
   const confirmedClaimProjections = useRef(new Map())
@@ -595,6 +601,39 @@ function App() {
     [claim, nextStep],
   )
   const conversationActionKind = conversationAction?.kind || null
+  const externalCapabilityKey = claim?.external_capabilities?.length > 0
+    ? `${claim.claim_id}:${claim.external_capabilities
+        .map((capability) => `${capability.service_identity}:${capability.registry_version || ''}`)
+        .join('|')}`
+    : null
+
+  useEffect(() => {
+    if (!externalCapabilityKey || !isWorkspaceActive) return
+    if (presentedCapabilityCatalogues.current.has(externalCapabilityKey)) return
+    presentedCapabilityCatalogues.current.add(externalCapabilityKey)
+    setExternalCapabilitiesOpen(true)
+  }, [externalCapabilityKey, isWorkspaceActive])
+
+  useEffect(() => {
+    const dialog = externalCapabilitiesDialogRef.current
+    if (!dialog) return
+    if (externalCapabilitiesOpen) {
+      if (!dialog.open) {
+        if (typeof dialog.showModal === 'function') dialog.showModal()
+        else dialog.setAttribute('open', '')
+      }
+      globalThis.requestAnimationFrame(() => externalCapabilitiesHeadingRef.current?.focus())
+      return
+    }
+    if (dialog.open) {
+      if (typeof dialog.close === 'function') dialog.close()
+      else dialog.removeAttribute('open')
+    }
+    if (restoreCapabilityTriggerFocus.current) {
+      restoreCapabilityTriggerFocus.current = false
+      globalThis.requestAnimationFrame(() => externalCapabilitiesTriggerRef.current?.focus())
+    }
+  }, [externalCapabilitiesOpen])
 
   useEffect(() => {
     followLatestMessages.current = true
@@ -1588,17 +1627,6 @@ function App() {
         }
       }
       setAccount(await getAuthenticatedAccount())
-      if (!claim) {
-        const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null, modelProfileId: selectedModel })
-        rememberClaimInHistory(created.claim)
-        setClaim(created.claim)
-        setSessionId(created.session.session_id)
-        if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
-        setForm(created.claim.form)
-        setContentsItems(created.claim.contents_items || [])
-        setDynamicForm(created.claim.dynamic_form || null)
-        setNextStep(created.claim.customer_next_step)
-      }
       setWorkspaceActive(true)
       setWorkspaceView('chat'); setPage('home'); setAuthStatus('idle')
     } catch (requestError) {
@@ -1638,17 +1666,6 @@ function App() {
         }
       }
       setAccount(await getAuthenticatedAccount())
-      if (!claim) {
-        const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null, modelProfileId: selectedModel })
-        rememberClaimInHistory(created.claim)
-        setClaim(created.claim)
-        setSessionId(created.session.session_id)
-        if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
-        setForm(created.claim.form)
-        setContentsItems(created.claim.contents_items || [])
-        setDynamicForm(created.claim.dynamic_form || null)
-        setNextStep(created.claim.customer_next_step)
-      }
       setWorkspaceActive(true)
       setWorkspaceView('chat'); setPage('home'); setAuthStatus('idle')
     } catch (requestError) {
@@ -1813,6 +1830,11 @@ function App() {
     followLatestMessages.current = (
       messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight <= 1
     )
+  }
+
+  function closeExternalCapabilities() {
+    restoreCapabilityTriggerFocus.current = true
+    setExternalCapabilitiesOpen(false)
   }
 
   function toggleConversationPanel(panel) {
@@ -2353,7 +2375,10 @@ function App() {
               )}
               {workspaceView === 'files' && (
                 account ? (
-                  <EvidenceHistory currentClaimId={claim.claim_id} />
+                  <EvidenceHistory
+                    currentClaimId={claim.claim_id}
+                    currentClaimRevision={claim.revision}
+                  />
                 ) : (
                   <div className="evidence-history-state">
                     <h2>Sign in to view your evidence history</h2>
@@ -2465,7 +2490,7 @@ function App() {
                 <article className="message message-claimant is-failed" role="alert">
                   <p className="message-author">{failedMessage.sender}</p>
                   <p>{failedMessage.text}</p>
-                  <p className="message-state">{failedMessage.message}</p>
+                  <p className="message-state">Not sent</p>
                 </article>
               )}
               {isUrgentSupport && handoff && ['queued', 'accepted'].includes(handoff.status) && (
@@ -2528,6 +2553,30 @@ function App() {
               )}
             </div>
 
+            {claim.external_capabilities?.length > 0 && (
+              <>
+                <button
+                  ref={externalCapabilitiesTriggerRef}
+                  className="external-capabilities-trigger"
+                  type="button"
+                  aria-haspopup="dialog"
+                  onClick={() => setExternalCapabilitiesOpen(true)}
+                >
+                  <span>
+                    <strong>Third-party support</strong>
+                    <small>{claim.external_capabilities.length} services available</small>
+                  </span>
+                  <span aria-hidden="true">View</span>
+                </button>
+                <ExternalCapabilityCatalogue
+                  capabilities={claim.external_capabilities}
+                  dialogRef={externalCapabilitiesDialogRef}
+                  headingRef={externalCapabilitiesHeadingRef}
+                  onClose={closeExternalCapabilities}
+                />
+              </>
+            )}
+
             <MessageComposer
               draft={draft}
               setDraft={setDraft}
@@ -2549,7 +2598,7 @@ function App() {
                   : assistanceState?.key === 'response_needed'
                     ? 'Send reply'
                     : 'Send'}
-              error={error}
+              error={failedMessage?.message || error}
               variant="workspace"
               claimType={claimType}
               setClaimType={setClaimType}
@@ -2729,6 +2778,43 @@ function App() {
         </main>
       )}
     </div>
+  )
+}
+
+function ExternalCapabilityCatalogue({ capabilities, dialogRef, headingRef, onClose }) {
+  return (
+    <dialog
+      ref={dialogRef}
+      className="external-capabilities-dialog"
+      aria-labelledby="external-capabilities-title"
+      onCancel={(event) => {
+        event.preventDefault()
+        onClose()
+      }}
+    >
+      <div className="external-capabilities-dialog-heading">
+        <div>
+          <p className="transfer-label">Available support</p>
+          <h2 id="external-capabilities-title" ref={headingRef} tabIndex="-1">Third-party services</h2>
+        </div>
+        <button className="external-capabilities-close" type="button" aria-label="Close third-party services" onClick={onClose}>
+          <span aria-hidden="true">×</span>
+        </button>
+      </div>
+      <div className="service-capability-list">
+        {capabilities.map((capability) => (
+          <article className="service-capability" key={capability.service_identity}>
+            <h3>{capability.service_name}</h3>
+            <p>{capability.purpose}</p>
+            <p className="service-limitation">{capability.result_semantics}</p>
+            <div className="service-capability-actions">
+              {capability.official_url && <a href={capability.official_url} target="_blank" rel="noreferrer">Official information</a>}
+              {capability.official_phone && <a href={`tel:${capability.official_phone}`}>Call {capability.official_phone}</a>}
+            </div>
+          </article>
+        ))}
+      </div>
+    </dialog>
   )
 }
 export default App

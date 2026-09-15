@@ -1013,7 +1013,14 @@ def validate_proposal(proposal: AgentProposal) -> AgentAuthority:
                 validated_by='deterministic_rule_engine',
                 outcome=AuthorityOutcome.BLOCKED,
             )
-        if proposal.action_code == 'conversation.answer' and contract.state_effect.value == 'none':
+        if (
+            proposal.action_code
+            in {
+                'conversation.answer',
+                'claim.prepare_creation',
+            }
+            and contract.authority_requirement.value == 'runtime_validation'
+        ):
             return AgentAuthority(
                 proposed_by='agent',
                 validated_by='deterministic_rule_engine',
