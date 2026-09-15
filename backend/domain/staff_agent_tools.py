@@ -7,20 +7,38 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from backend.domain.knowledge import KnowledgeCitation
 from backend.domain.models import (
     ContractModel,
+    CustomerNextStep,
+    CustomerUpdateRecord,
     EvidenceFileStatus,
     EvidenceRecord,
+    EvidenceReference,
+    EvidenceSource,
     EvidenceStatus,
     HandoffRecord,
     HandoffStatus,
     HandoffType,
     NeededFor,
     ResponsibleParty,
+    SessionRecord,
+    StaffActionRecord,
+    WorkbenchHandoff,
     WorkflowState,
     WorkingClaim,
 )
-from backend.domain.workbench import ClaimLifecycleState, WorkbenchQueueKey
+from backend.domain.retrieval import RetrievalRecord
+from backend.domain.workbench import (
+    ClaimLifecycleState,
+    WorkbenchIncidentSummary,
+    WorkbenchIntegrationSummary,
+    WorkbenchOwnershipProjection,
+    WorkbenchQueueKey,
+    WorkbenchRuntimeWorkItem,
+    WorkbenchSignalDetail,
+    WorkbenchWorkSummary,
+)
 
 
 class StaffClaimSearchCandidate(ContractModel):
@@ -30,6 +48,21 @@ class StaffClaimSearchCandidate(ContractModel):
     lifecycle_state: ClaimLifecycleState
     assignee_id: str | None = None
     queue: WorkbenchQueueKey
+
+
+class StaffClaimSearchProjection(ContractModel):
+    """Persisted, indexable fields used by the Staff Claim search boundary."""
+
+    claim_id: str
+    customer_reference: str
+    external_reference: str | None = None
+    created_date: date
+    incident_date: date | None = None
+    product_family: Literal['motor', 'home', 'contents'] | None = None
+    lifecycle_state: ClaimLifecycleState
+    assignee_id: str | None = None
+    queue: WorkbenchQueueKey
+    updated_at: datetime
 
 
 def _pending_evidence(records: Sequence[EvidenceRecord]) -> list[EvidenceRecord]:
@@ -125,6 +158,42 @@ def build_staff_claim_search_candidate(
         lifecycle_state=lifecycle,
         assignee_id=assignee_id,
         queue=queue,
+    )
+
+
+def build_staff_claim_search_projection(
+    candidate: StaffClaimSearchCandidate,
+) -> StaffClaimSearchProjection:
+    """Convert one authoritative candidate into the persisted search projection."""
+
+    claim = candidate.claim
+    incident = claim.form.get('incident.occurred_at')
+    incident_date: date | None = None
+    if incident is not None and incident.value is not None:
+        try:
+            incident_date = date.fromisoformat(str(incident.value)[:10])
+        except ValueError:
+            incident_date = None
+    family_field = claim.form.get('claim.product_family')
+    raw_family = (
+        str(family_field.value)
+        if family_field is not None and family_field.value is not None
+        else claim.incident_type
+    )
+    product_family = raw_family if raw_family in {'motor', 'home', 'contents'} else None
+    return StaffClaimSearchProjection(
+        claim_id=claim.claim_id,
+        customer_reference=claim.customer_id,
+        external_reference=(
+            claim.external_claim.claim_number if claim.external_claim is not None else None
+        ),
+        created_date=claim.created_at.date(),
+        incident_date=incident_date,
+        product_family=product_family,
+        lifecycle_state=candidate.lifecycle_state,
+        assignee_id=candidate.assignee_id,
+        queue=candidate.queue,
+        updated_at=claim.updated_at,
     )
 
 
@@ -284,6 +353,146 @@ class StaffExternalTaskStatusInput(ContractModel):
     task_id: str | None = Field(default=None, min_length=1, max_length=120)
 
 
+class StaffClaimSearchItem(ContractModel):
+    claim_id: str
+    display_reference: str
+    matched_fields: list[str]
+    incident_date: str | None = None
+    product_family: str | None = None
+    lifecycle_state: ClaimLifecycleState
+    revision: int = Field(ge=1)
+    created_at: datetime
+    updated_at: datetime
+
+
+class StaffClaimReadItem(ContractModel):
+    claim_id: str
+    display_reference: str
+    revision: int = Field(ge=1)
+    incident: WorkbenchIncidentSummary
+    lifecycle_state: ClaimLifecycleState
+    workflow_state: WorkflowState
+    ownership: WorkbenchOwnershipProjection
+    work_summary: WorkbenchWorkSummary
+    integration_summary: WorkbenchIntegrationSummary
+    customer_next_step: CustomerNextStep
+    created_at: datetime
+    updated_at: datetime
+
+
+class StaffSessionSearchItem(ContractModel):
+    session_id: str
+    claim_id: str
+    status: str
+    summary: str | None = None
+    message_count: int = Field(ge=0)
+    started_at: datetime
+    last_active_at: datetime
+
+
+class StaffSessionMessageItem(ContractModel):
+    message_id: str
+    actor: str
+    visibility: str
+    content: dict[str, Any]
+    evidence_refs: list[str]
+    created_at: datetime
+
+
+class StaffSessionReadItem(ContractModel):
+    session: SessionRecord
+    messages: list[StaffSessionMessageItem]
+
+
+class StaffEvidenceItem(ContractModel):
+    evidence_id: str
+    claim_id: str
+    kind: str
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    original_filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    source: EvidenceSource
+    references: list[EvidenceReference]
+    related_fields: list[str]
+    needed_for: list[NeededFor]
+    wait_type: str | None = None
+    responsible_party: ResponsibleParty | None = None
+    context_summary: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class StaffEmptyOutput(ContractModel):
+    pass
+
+
+class StaffClaimSearchOutput(ContractModel):
+    items: list[StaffClaimSearchItem] = Field(max_length=25)
+
+
+class StaffClaimReadOutput(ContractModel):
+    items: list[StaffClaimReadItem] = Field(max_length=1)
+
+
+class StaffSessionSearchOutput(ContractModel):
+    items: list[StaffSessionSearchItem] = Field(max_length=25)
+
+
+class StaffSessionReadOutput(ContractModel):
+    items: list[StaffSessionReadItem] = Field(max_length=1)
+
+
+class StaffEvidenceOutput(ContractModel):
+    items: list[StaffEvidenceItem] = Field(max_length=50)
+
+
+class StaffKnowledgeOutput(ContractModel):
+    items: list[KnowledgeCitation] = Field(max_length=10)
+
+
+class StaffPolicyHistoryOutput(ContractModel):
+    items: list[RetrievalRecord] = Field(max_length=25)
+
+
+class StaffHandoffOutput(ContractModel):
+    items: list[WorkbenchHandoff] = Field(max_length=50)
+
+
+class StaffReviewSignalOutput(ContractModel):
+    items: list[WorkbenchSignalDetail] = Field(max_length=50)
+
+
+class StaffWorkItemOutput(ContractModel):
+    items: list[StaffActionRecord | WorkbenchRuntimeWorkItem] = Field(max_length=50)
+
+
+class StaffExternalTaskOutput(ContractModel):
+    items: list[dict[Literal['task_id'], str]] = Field(default_factory=list, max_length=0)
+
+
+class StaffCustomerUpdateOutput(ContractModel):
+    items: list[CustomerUpdateRecord] = Field(max_length=50)
+
+
+StaffToolOutput = (
+    StaffEmptyOutput
+    | StaffClaimSearchOutput
+    | StaffClaimReadOutput
+    | StaffSessionSearchOutput
+    | StaffSessionReadOutput
+    | StaffEvidenceOutput
+    | StaffKnowledgeOutput
+    | StaffPolicyHistoryOutput
+    | StaffHandoffOutput
+    | StaffReviewSignalOutput
+    | StaffWorkItemOutput
+    | StaffExternalTaskOutput
+    | StaffCustomerUpdateOutput
+)
+
+
 class StaffToolResult(ContractModel):
     """Bounded observation returned to Runtime; never a Claim mutation."""
 
@@ -292,7 +501,7 @@ class StaffToolResult(ContractModel):
     call_id: str = Field(min_length=1, max_length=120)
     correlation_id: str = Field(min_length=1, max_length=120)
     status: StaffToolResultStatus
-    output: dict[str, Any] = Field(default_factory=dict)
+    output: StaffToolOutput = Field(default_factory=StaffEmptyOutput)
     source_refs: list[str] = Field(default_factory=list, max_length=100)
     record_ids: list[str] = Field(default_factory=list, max_length=100)
     query_scope: str = Field(min_length=1, max_length=200)
@@ -322,11 +531,30 @@ STAFF_TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
 }
 
 
+STAFF_TOOL_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
+    'staff.claim.search': StaffClaimSearchOutput,
+    'staff.claim.read': StaffClaimReadOutput,
+    'staff.session.search': StaffSessionSearchOutput,
+    'staff.session.read': StaffSessionReadOutput,
+    'staff.evidence.list': StaffEvidenceOutput,
+    'staff.evidence.read': StaffEvidenceOutput,
+    'staff.knowledge.search': StaffKnowledgeOutput,
+    'staff.policy.history': StaffPolicyHistoryOutput,
+    'staff.handoff.read': StaffHandoffOutput,
+    'staff.review_signal.read': StaffReviewSignalOutput,
+    'staff.work_item.list': StaffWorkItemOutput,
+    'staff.external_task.status': StaffExternalTaskOutput,
+    'staff.customer_update.read': StaffCustomerUpdateOutput,
+}
+
+
 __all__ = [
     'STAFF_TOOL_INPUT_MODELS',
+    'STAFF_TOOL_OUTPUT_MODELS',
     'StaffClaimCollectionInput',
     'StaffClaimReadInput',
     'StaffClaimSearchInput',
+    'StaffClaimSearchProjection',
     'StaffCustomerUpdateReadInput',
     'StaffEvidenceListInput',
     'StaffEvidenceReadInput',
@@ -337,6 +565,7 @@ __all__ = [
     'StaffReviewSignalReadInput',
     'StaffSessionReadInput',
     'StaffSessionSearchInput',
+    'StaffToolOutput',
     'StaffToolResult',
     'StaffToolResultStatus',
     'StaffWorkItemListInput',

@@ -15,10 +15,12 @@ handler. Registry metadata also records the allowed staff role and the server-re
 and tenant boundaries; roles are loaded from the authenticated staff account and carried in the
 verified `Principal`, never accepted from tool arguments.
 
-The dispatcher returns `StaffToolResult`. Each result records the registry version, status, bounded
-output, source references, returned record IDs, effective filters, query scope, limitations,
-failure code, retry guidance, disclosure flag, and server timestamp. A result is an observation. It
-does not mutate Claim State or grant authority for an action.
+The dispatcher returns `StaffToolResult`. Each registry entry publishes its own closed output
+schema, and the dispatcher validates the selected handler result against that schema before any
+data is released. Undeclared output fields fail closed with `INVALID_TOOL_OUTPUT`. Each result also
+records the registry version, status, source references, returned record IDs, effective filters,
+query scope, limitations, failure code, retry guidance, disclosure flag, and server timestamp. A
+result is an observation. It does not mutate Claim State or grant authority for an action.
 
 Runtime owns staged model continuation and durable turn-trace assembly. The dispatcher does not
 call the model, prepare prompts, execute side effects, or represent an unavailable dependency as a
@@ -69,8 +71,8 @@ Consumers use these status values without parsing limitation text:
 | `unknown` | The backend cannot determine an outcome; consumers must not claim success. |
 
 `UNKNOWN_TOOL`, `REGISTRY_VERSION_MISMATCH`, `PURPOSE_DENIED`, `INVALID_TOOL_ARGUMENTS`,
-`DUPLICATE_CALL_ID`, `ACCESS_DENIED`, `RESOURCE_NOT_FOUND`, and `SOURCE_UNAVAILABLE` are the initial
-stable failure codes produced by the dispatch boundary.
+`INVALID_TOOL_OUTPUT`, `DUPLICATE_CALL_ID`, `ACCESS_DENIED`, `RESOURCE_NOT_FOUND`, and
+`SOURCE_UNAVAILABLE` are the initial stable failure codes produced by the dispatch boundary.
 
 ## Preserve implementation limits
 

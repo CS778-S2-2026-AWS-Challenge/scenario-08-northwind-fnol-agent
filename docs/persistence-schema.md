@@ -369,11 +369,16 @@ the append-only audit collection through a bounded, filterable projection.
 - A successful execution response is built from repository readback of the persisted execution
   record. Claimant routes never expose Staff Agent execution evidence or its internal source links.
 - The Staff Claim search boundary derives lifecycle, active queue, and effective assignee from the
-  Working Claim plus its current Evidence and handoff records. Fixture and MongoDB repositories
-  apply those derived filters together with the registered identity, date, family, and external
-  reference filters before the caller's result limit. The boundary returns a lightweight search
-  candidate only; it does not enumerate or construct full Workbench Claim projections in the
-  dispatcher.
+  Working Claim plus its current Evidence and handoff records. The MongoDB adapter stores that
+  derived state in an adapter-owned `staff_search` projection on the Claim document. It contains
+  only `claim_id`, customer/external references, created/incident dates, product family, lifecycle,
+  effective assignee, queue, and `updated_at`; it is not part of `WorkingClaim` or any API response.
+  Claim, Evidence, and handoff writes refresh the projection in the same transaction or write
+  boundary, and repository initialisation backfills pre-contract Claim documents before serving
+  searches. MongoDB indexes every registered derived search field and applies all filters plus a
+  database-side limit without per-Claim Evidence or handoff reads. Fixture and MongoDB behavior
+  remains equivalent. The dispatcher receives only the bounded lightweight candidates and never
+  enumerates or constructs full Workbench Claim projections.
 
 ## Claim Lifecycle, Follow-up, and Retention Invariants
 

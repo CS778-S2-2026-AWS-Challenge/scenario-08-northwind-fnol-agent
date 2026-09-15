@@ -17,6 +17,7 @@ from backend.domain.knowledge import KnowledgeRetriever, KnowledgeSearchRequest
 from backend.domain.retrieval import RetrievalKind
 from backend.domain.staff_agent_tools import (
     STAFF_TOOL_INPUT_MODELS,
+    STAFF_TOOL_OUTPUT_MODELS,
     StaffClaimCollectionInput,
     StaffClaimReadInput,
     StaffClaimSearchInput,
@@ -252,6 +253,19 @@ class StaffToolDispatcher:
                 retryable=True,
                 effective_filters=payload.model_dump(mode='json', exclude_none=True),
             )
+        output_model = STAFF_TOOL_OUTPUT_MODELS[tool_name]
+        try:
+            output = output_model.model_validate({'items': items})
+        except ValidationError:
+            return self._failure(
+                tool_name,
+                call_id,
+                correlation_id,
+                StaffToolResultStatus.FAILED,
+                'INVALID_TOOL_OUTPUT',
+                'The handler output does not match the registered disclosure schema.',
+                effective_filters=payload.model_dump(mode='json', exclude_none=True),
+            )
         status = StaffToolResultStatus.SUCCEEDED if items else StaffToolResultStatus.NO_RESULT
         return StaffToolResult(
             tool_name=tool_name,
@@ -259,7 +273,7 @@ class StaffToolDispatcher:
             call_id=call_id,
             correlation_id=correlation_id,
             status=status,
-            output={'items': items},
+            output=output,
             source_refs=source_refs,
             record_ids=record_ids,
             query_scope=contract.claim_scope,

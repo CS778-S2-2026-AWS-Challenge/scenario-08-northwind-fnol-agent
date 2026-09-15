@@ -7,6 +7,7 @@ from backend.domain.agent_tool_registry import (
     StaffToolResultStatus,
     staff_tool_contract,
 )
+from backend.domain.staff_agent_tools import STAFF_TOOL_OUTPUT_MODELS
 
 
 def test_staff_registry_contains_the_published_read_surface() -> None:
@@ -47,6 +48,18 @@ def test_staff_registry_contains_the_published_read_surface() -> None:
     assert STAFF_TOOL_REGISTRY['staff.evidence.list'].max_results == 50
     assert STAFF_TOOL_REGISTRY['staff.knowledge.search'].max_results == 10
     assert STAFF_TOOL_REGISTRY['staff.claim.read'].max_results == 1
+
+
+def test_staff_registry_publishes_each_tools_closed_output_schema() -> None:
+    for name, contract in STAFF_TOOL_REGISTRY.items():
+        output_model = STAFF_TOOL_OUTPUT_MODELS[name]
+        assert contract.output_schema == output_model.model_json_schema()
+        assert contract.output_schema['additionalProperties'] is False
+
+    assert (
+        STAFF_TOOL_REGISTRY['staff.claim.search'].output_schema
+        != STAFF_TOOL_REGISTRY['staff.claim.read'].output_schema
+    )
 
 
 def test_staff_registry_rejects_database_like_search_fields() -> None:

@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.domain import staff_agent_tools as staff_tool_models
 
 STAFF_TOOL_INPUT_MODELS = staff_tool_models.STAFF_TOOL_INPUT_MODELS
+STAFF_TOOL_OUTPUT_MODELS = staff_tool_models.STAFF_TOOL_OUTPUT_MODELS
 StaffToolResult = staff_tool_models.StaffToolResult
 StaffToolResultStatus = staff_tool_models.StaffToolResultStatus
 
@@ -80,7 +81,7 @@ def _staff_tool(
         max_results=max_results,
         follow_up_tools=follow_up_tools,
         release_status=release_status,
-        output_schema=StaffToolResult.model_json_schema(),
+        output_schema=STAFF_TOOL_OUTPUT_MODELS[name].model_json_schema(),
     )
 
 

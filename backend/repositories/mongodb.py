@@ -79,8 +79,9 @@ from backend.domain.staff_agent import (
 )
 from backend.domain.staff_agent_tools import (
     StaffClaimSearchCandidate,
+    StaffClaimSearchProjection,
     build_staff_claim_search_candidate,
-    staff_claim_search_matches,
+    build_staff_claim_search_projection,
 )
 from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.protocols import (
@@ -284,6 +285,21 @@ class MongoDBRepository:
             name='external_task_result_task_unique',
             partialFilterExpression={'record_type': 'external_task_result'},
         )
+        for search_field in (
+            'external_reference',
+            'created_date',
+            'incident_date',
+            'product_family',
+            'lifecycle_state',
+            'assignee_id',
+            'queue',
+        ):
+            self._collection.create_index(
+                [('record_type', 1), (f'staff_search.{search_field}', 1), ('updated_at', -1)],
+                name=f'staff_claim_search_{search_field}',
+                partialFilterExpression={'record_type': 'claim'},
+            )
+        self._backfill_staff_search_projections()
 
     def connection_status(self) -> str:
         try:
@@ -299,6 +315,91 @@ class MongoDBRepository:
     def _record_id(kind: str, identifier: str) -> str:
         return f'{kind}:{identifier}'
 
+    def _staff_search_projection(
+        self,
+        claim: WorkingClaim,
+        *,
+        session: Any = None,
+    ) -> StaffClaimSearchProjection:
+        evidence = [
+            record
+            for record in (
+                self._model_from_document(document, EvidenceRecord)
+                for document in self._collection.find(
+                    {
+                        'record_type': 'evidence',
+                        'claim_id': claim.claim_id,
+                        'customer_id': claim.customer_id,
+                    },
+                    session=session,
+                )
+            )
+            if record is not None
+        ]
+        handoffs = [
+            record
+            for record in (
+                self._model_from_document(document, HandoffRecord)
+                for document in self._collection.find(
+                    {
+                        'record_type': 'handoff',
+                        'claim_id': claim.claim_id,
+                        'customer_id': claim.customer_id,
+                    },
+                    session=session,
+                )
+            )
+            if record is not None
+        ]
+        return build_staff_claim_search_projection(
+            build_staff_claim_search_candidate(claim, evidence, handoffs)
+        )
+
+    def _refresh_staff_search_projection(
+        self,
+        claim_id: str,
+        customer_id: str,
+        *,
+        session: Any = None,
+    ) -> None:
+        document = self._collection.find_one(
+            {
+                '_id': self._record_id('claim', claim_id),
+                'record_type': 'claim',
+                'customer_id': customer_id,
+            },
+            session=session,
+        )
+        claim = self._model_from_document(document, WorkingClaim)
+        if claim is None:
+            raise KeyError(claim_id)
+        projection = self._staff_search_projection(claim, session=session)
+        result = self._collection.update_one(
+            {
+                '_id': self._record_id('claim', claim_id),
+                'record_type': 'claim',
+                'customer_id': customer_id,
+                'revision': claim.revision,
+            },
+            {'$set': {'staff_search': projection.model_dump(mode='json')}},
+            session=session,
+        )
+        if result.matched_count != 1:
+            raise RevisionConflict(claim.revision)
+
+    def _backfill_staff_search_projections(self) -> None:
+        """Populate the adapter-owned projection for pre-contract Claim documents."""
+
+        documents = self._collection.find(
+            {'record_type': 'claim', 'staff_search': {'$exists': False}},
+            projection={'claim_id': 1, 'customer_id': 1},
+        )
+        for document in documents:
+            claim_id = document.get('claim_id')
+            customer_id = document.get('customer_id')
+            if isinstance(claim_id, str) and isinstance(customer_id, str):
+                self._refresh_staff_search_projection(claim_id, customer_id)
+
     def _put(
         self,
         kind: str,
@@ -310,6 +411,12 @@ class MongoDBRepository:
         session: Any = None,
     ) -> None:
         document = model.model_dump(mode='json')
+        if kind == 'claim':
+            if not isinstance(model, WorkingClaim):
+                raise TypeError('Claim records require WorkingClaim.')
+            document['staff_search'] = self._staff_search_projection(
+                model, session=session
+            ).model_dump(mode='json')
         document.update(
             {
                 '_id': self._record_id(kind, identifier),
@@ -344,6 +451,14 @@ class MongoDBRepository:
         except DuplicateKeyError as error:
             conflict_key = document.get('client_message_id') or identifier
             raise IdempotencyConflict(str(conflict_key)) from error
+        if kind in {'evidence', 'handoff'}:
+            if claim_id is None or customer_id is None:
+                raise KeyError(identifier)
+            self._refresh_staff_search_projection(
+                claim_id,
+                customer_id,
+                session=session,
+            )
 
     def _reject_client_message_conflict(
         self,
@@ -754,34 +869,40 @@ class MongoDBRepository:
         if claim_reference:
             query['$or'] = [
                 {'claim_id': claim_reference},
-                {'external_claim.claim_number': claim_reference},
+                {'staff_search.external_reference': claim_reference},
             ]
         if filters.get('customer_reference'):
             query['customer_id'] = filters['customer_reference']
         if filters.get('external_reference'):
-            query['external_claim.claim_number'] = filters['external_reference']
+            query['staff_search.external_reference'] = filters['external_reference']
         if filters.get('created_date'):
-            created = str(filters['created_date'])
-            query['created_at'] = {
-                '$gte': f'{created}T00:00:00',
-                '$lt': f'{created}T23:59:59.999999',
-            }
-        cursor = self._collection.find(query).sort([('updated_at', -1), ('_id', -1)])
+            query['staff_search.created_date'] = str(filters['created_date'])
+        for search_field in (
+            'incident_date',
+            'product_family',
+            'lifecycle_state',
+            'assignee_id',
+            'queue',
+        ):
+            value = filters.get(search_field)
+            if value:
+                query[f'staff_search.{search_field}'] = str(value)
+        cursor = self._collection.find(query).sort([('updated_at', -1), ('_id', -1)]).limit(limit)
         records: list[StaffClaimSearchCandidate] = []
         for document in cursor:
             claim = self._model_from_document(document, WorkingClaim)
-            if claim is None:
+            projection_payload = document.get('staff_search')
+            if claim is None or not isinstance(projection_payload, dict):
                 continue
-            candidate = build_staff_claim_search_candidate(
-                claim,
-                self.list_evidence(claim.claim_id, claim.customer_id),
-                self.list_handoffs(claim.claim_id, claim.customer_id),
+            projection = StaffClaimSearchProjection.model_validate(projection_payload)
+            records.append(
+                StaffClaimSearchCandidate(
+                    claim=claim,
+                    lifecycle_state=projection.lifecycle_state,
+                    assignee_id=projection.assignee_id,
+                    queue=projection.queue,
+                )
             )
-            if not staff_claim_search_matches(candidate, filters):
-                continue
-            records.append(candidate)
-            if len(records) >= limit:
-                break
         return records
 
     def promote_claim_owner(
@@ -800,7 +921,12 @@ class MongoDBRepository:
         )
         self._collection.update_one(
             {'_id': self._record_id('claim', claim_id), 'record_type': 'claim'},
-            {'$set': {'customer_id': customer_id}},
+            {
+                '$set': {
+                    'customer_id': customer_id,
+                    'staff_search.customer_reference': customer_id,
+                }
+            },
         )
         return self.get_claim(claim_id, customer_id)
 
@@ -833,6 +959,7 @@ class MongoDBRepository:
             },
             {
                 **claim.model_dump(mode='json'),
+                'staff_search': self._staff_search_projection(claim).model_dump(mode='json'),
                 '_id': self._record_id('claim', claim.claim_id),
                 'record_type': 'claim',
                 'customer_id': claim.customer_id,
@@ -3282,6 +3409,9 @@ class MongoDBRepository:
             },
             {
                 **claim.model_dump(mode='json'),
+                'staff_search': self._staff_search_projection(
+                    claim, session=mongo_session
+                ).model_dump(mode='json'),
                 '_id': self._record_id('claim', claim.claim_id),
                 'record_type': 'claim',
                 'customer_id': claim.customer_id,

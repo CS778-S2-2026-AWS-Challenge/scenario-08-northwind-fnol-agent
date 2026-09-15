@@ -19,10 +19,18 @@ from backend.domain.models import (
     EvidenceRecord,
     EvidenceSource,
     EvidenceStatus,
+    HandoffPacket,
+    HandoffPriority,
+    HandoffRecord,
+    HandoffStatus,
+    HandoffTrigger,
+    HandoffType,
     MessageRecord,
     MessageVisibility,
+    NeededFor,
     ResponsibleParty,
     SessionRecord,
+    SupportNeed,
     WorkflowState,
     WorkingClaim,
 )
@@ -376,11 +384,11 @@ def test_cross_claim_identifiers_and_empty_collections_do_not_widen_scope() -> N
     )
 
     assert wrong_session.status == 'no_result'
-    assert wrong_session.output == {}
+    assert wrong_session.output.model_dump(mode='json') == {}
     assert wrong_evidence.status == 'no_result'
-    assert wrong_evidence.output == {}
+    assert wrong_evidence.output.model_dump(mode='json') == {}
     assert no_policy.status == 'no_result'
-    assert no_policy.output == {'items': []}
+    assert no_policy.output.model_dump(mode='json') == {'items': []}
     assert no_policy.effective_filters == {'claim_id': 'clm_staff_tool', 'limit': 10}
 
 
@@ -456,7 +464,7 @@ def test_knowledge_tool_preserves_governed_citation_identity() -> None:
     assert result.status == 'succeeded'
     assert result.record_ids == ['chunk_collision']
     assert result.source_refs == ['knowledge:doc_motor_wording:chunk_collision:1.0']
-    assert result.output['items'][0]['checksum'] == 'sha256:synthetic'
+    assert result.output.model_dump(mode='json')['items'][0]['checksum'] == 'sha256:synthetic'
 
 
 @pytest.mark.parametrize('repository_kind', ['fixture', 'mongodb'])
@@ -494,7 +502,7 @@ def test_claim_search_applies_derived_filters_before_limit(
 
     assert result.status == 'succeeded'
     assert result.record_ids == ['clm_older_match']
-    assert result.output['items'][0]['matched_fields'] == [matched_field]
+    assert result.output.model_dump(mode='json')['items'][0]['matched_fields'] == [matched_field]
 
 
 def test_claim_search_does_not_build_workbench_projections(
@@ -519,6 +527,202 @@ def test_claim_search_does_not_build_workbench_projections(
 
     assert result.status == 'succeeded'
     assert result.record_ids == ['clm_older_match']
+
+
+def test_mongodb_claim_search_uses_indexed_projection_and_database_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'bounded_staff_search')
+
+    def without_transaction(operation: Callable[[Any], Any]) -> Any:
+        return operation(None)
+
+    monkeypatch.setattr(repository, '_atomic', without_transaction)
+    _seed_bounded_search(repository)
+    original_find = repository._collection.find
+    observed: dict[str, Any] = {'child_reads': 0, 'limit': None, 'query': None}
+
+    class _TrackedCursor:
+        def __init__(self, cursor: Any) -> None:
+            self._cursor = cursor
+
+        def sort(self, *args: Any, **kwargs: Any) -> '_TrackedCursor':
+            self._cursor = self._cursor.sort(*args, **kwargs)
+            return self
+
+        def limit(self, value: int) -> '_TrackedCursor':
+            observed['limit'] = value
+            self._cursor = self._cursor.limit(value)
+            return self
+
+        def __iter__(self) -> Any:
+            return iter(self._cursor)
+
+    def tracked_find(*args: Any, **kwargs: Any) -> Any:
+        query = args[0] if args else kwargs.get('filter', {})
+        if query.get('record_type') in {'evidence', 'handoff'}:
+            observed['child_reads'] = int(observed['child_reads']) + 1
+        cursor = original_find(*args, **kwargs)
+        if query.get('record_type') == 'claim':
+            observed['query'] = query
+            return _TrackedCursor(cursor)
+        return cursor
+
+    monkeypatch.setattr(repository._collection, 'find', tracked_find)
+
+    matches = repository.search_claims_internal({'queue': 'waiting_user'}, 1)
+
+    assert [item.claim.claim_id for item in matches] == ['clm_older_match']
+    assert observed == {
+        'child_reads': 0,
+        'limit': 1,
+        'query': {'record_type': 'claim', 'staff_search.queue': 'waiting_user'},
+    }
+
+
+def test_mongodb_repository_backfills_legacy_staff_search_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'legacy_staff_search')
+
+    def without_transaction(operation: Callable[[Any], Any]) -> Any:
+        return operation(None)
+
+    monkeypatch.setattr(repository, '_atomic', without_transaction)
+    _seed_bounded_search(repository)
+    repository._collection.update_many(
+        {'record_type': 'claim'},
+        {'$unset': {'staff_search': ''}},
+    )
+
+    repository._backfill_staff_search_projections()
+    matches = repository.search_claims_internal({'queue': 'waiting_user'}, 1)
+
+    assert [item.claim.claim_id for item in matches] == ['clm_older_match']
+    assert (
+        repository._collection.count_documents(
+            {'record_type': 'claim', 'staff_search': {'$exists': True}}
+        )
+        == 2
+    )
+
+
+def test_mongodb_child_writes_refresh_staff_search_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'child_staff_search')
+
+    def without_transaction(operation: Callable[[Any], Any]) -> Any:
+        return operation(None)
+
+    monkeypatch.setattr(repository, '_atomic', without_transaction)
+    _seed_bounded_search(repository)
+    claim_id = 'clm_older_match'
+    customer_id = 'cus_older_match'
+    timestamp = datetime(2026, 9, 14, 4, 0, tzinfo=UTC)
+    repository.save_evidence(
+        EvidenceRecord(
+            evidence_id='evd_waiting_material',
+            claim_id=claim_id,
+            kind='incident_photo',
+            status=EvidenceStatus.PENDING,
+            file_status=EvidenceFileStatus.AWAITING_UPLOAD,
+            source=EvidenceSource.CLAIMANT,
+            needed_for=[NeededFor.CURRENT_ACTION],
+            responsible_party=ResponsibleParty.CLAIMANT,
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+        customer_id,
+    )
+
+    waiting = repository.search_claims_internal({'queue': 'waiting_material'}, 1)
+    assert [item.claim.claim_id for item in waiting] == [claim_id]
+
+    repository.save_handoff(
+        HandoffRecord(
+            handoff_id='hnd_staff_search',
+            claim_id=claim_id,
+            type=HandoffType.HUMAN_SUPPORT,
+            status=HandoffStatus.REQUESTED,
+            priority=HandoffPriority.STANDARD,
+            queue='human_support',
+            support_need=SupportNeed.HUMAN_REQUESTED,
+            trigger=HandoffTrigger.CLAIMANT_SUPPORT_REQUEST,
+            reason_codes=['HUMAN_SUPPORT_REQUESTED'],
+            reason='The claimant requested staff support.',
+            requested_action='Continue the report with staff support.',
+            applied_rule='human_support_request',
+            packet=HandoffPacket(
+                form_revision=1,
+                promised_next_step='Northwind staff will continue the report.',
+            ),
+            created_at=timestamp,
+        ),
+        customer_id,
+    )
+
+    supported = repository.search_claims_internal(
+        {'lifecycle_state': 'staff_support', 'assignee_id': 'stf_match'}, 1
+    )
+    assert [item.claim.claim_id for item in supported] == [claim_id]
+
+
+def test_dispatch_rejects_handler_fields_outside_registered_output_schema() -> None:
+    dispatcher = _dispatcher()
+
+    def leaking_handler(
+        _payload: object,
+    ) -> tuple[list[dict[str, Any]], list[str], list[str], list[str]]:
+        return (
+            [
+                {
+                    'claim_id': 'clm_staff_tool',
+                    'display_reference': 'clm_staff_tool',
+                    'revision': 1,
+                    'incident': {'family': None, 'summary': 'Claim details'},
+                    'lifecycle_state': 'draft_active',
+                    'workflow_state': 'collecting',
+                    'ownership': {
+                        'state': 'unassigned',
+                        'coworkers': [],
+                        'coworker_count': 0,
+                        'current_staff_access': 'read_only',
+                        'pending_cowork_requests': 0,
+                        'pending_transfer_requests': 0,
+                    },
+                    'work_summary': {
+                        'queue_key': 'processing',
+                        'missing_information': [],
+                        'risk_signals': [],
+                    },
+                    'integration_summary': {'waiting_external_services': []},
+                    'customer_next_step': {
+                        'status': 'describe_incident',
+                        'summary': 'Describe the incident.',
+                        'responsible_party': 'claimant',
+                    },
+                    'created_at': '2026-09-14T02:30:00Z',
+                    'updated_at': '2026-09-14T02:30:00Z',
+                    'storage_key': 'must-fail-closed',
+                }
+            ],
+            [],
+            [],
+            [],
+        )
+
+    dispatcher._handlers['staff.claim.read'] = leaking_handler
+    result = _execute(
+        dispatcher,
+        'staff.claim.read',
+        {'claim_id': 'clm_staff_tool'},
+        1,
+    )
+
+    assert result.status == 'failed'
+    assert result.failure_code == 'INVALID_TOOL_OUTPUT'
+    assert result.output.model_dump(mode='json') == {}
 
 
 def test_synthetic_credentials_enforce_staff_tool_role_boundary() -> None:
