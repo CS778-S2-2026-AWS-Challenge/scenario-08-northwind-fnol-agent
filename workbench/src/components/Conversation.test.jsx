@@ -5,7 +5,35 @@ import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../api.js'
 import Conversation from './Conversation.jsx'
 
-const detail = { active_session_id: 'ses_1', allowed_actions: [] }
+const detail = { active_session_id: 'ses_1', revision: 1, allowed_actions: [] }
+
+function assistanceHandoff(status, overrides = {}) {
+  return {
+    handoff_id: 'hnd_1',
+    support_need: 'human_requested',
+    status,
+    reason: 'Customer requested staff assistance.',
+    requested_action: 'Help the customer continue their report.',
+    created_at: '2026-09-14T10:01:00Z',
+    assigned_to: status === 'queued' ? null : 'stf_demo',
+    accepted_at: status === 'queued' ? null : '2026-09-14T10:03:00Z',
+    resolved_at: status === 'resolved' ? '2026-09-14T10:07:00Z' : null,
+    ...overrides,
+  }
+}
+
+function action(actionCode, targetRef, overrides = {}) {
+  return {
+    action_code: actionCode,
+    target_ref: targetRef,
+    availability: 'confirmation_required',
+    based_on_revision: 2,
+    confirmation: { message: 'Confirm this action.' },
+    inputs: [],
+    payload_defaults: {},
+    ...overrides,
+  }
+}
 
 function renderConversation(props, route = '/workbench/claims/clm_1/conversation?session=ses_1') {
   return render(
@@ -16,6 +44,144 @@ function renderConversation(props, route = '/workbench/claims/clm_1/conversation
 }
 
 describe('Conversation', () => {
+  it('keeps review read-only until take-over and renders the shared actor history with request event', async () => {
+    const user = userEvent.setup()
+    const onAccept = vi.fn().mockResolvedValue(undefined)
+    const handoff = assistanceHandoff('queued')
+    renderConversation({
+      detail: {
+        ...detail,
+        revision: 2,
+        work_summary: { unread_claimant_messages: 0 },
+        allowed_actions: [action('human.accept_handoff', 'hnd_1')],
+      },
+      handoffs: [handoff],
+      profile: { staff_id: 'stf_demo', display_name: 'Demo Staff' },
+      resource: {
+        resolved_session_id: 'ses_1',
+        items: [
+          { message_id: 'msg_customer', session_id: 'ses_1', actor: 'claimant', content: { type: 'text', text: 'I need help.' }, created_at: '2026-09-14T10:00:00Z' },
+          { message_id: 'msg_agent', session_id: 'ses_1', actor: 'agent', content: { type: 'text', text: 'I have sent your request.' }, created_at: '2026-09-14T10:02:00Z' },
+          { message_id: 'msg_staff', session_id: 'ses_1', actor: 'staff', content: { type: 'text', text: 'I can review this.' }, created_at: '2026-09-14T10:04:00Z' },
+          { message_id: 'msg_system', session_id: 'ses_1', actor: 'system', content: { type: 'text', text: 'Conversation updated.' }, created_at: '2026-09-14T10:05:00Z' },
+        ],
+      },
+      draft: '',
+      onDraft: vi.fn(),
+      onAccept,
+      onResolve: vi.fn(),
+      onSend: vi.fn(),
+    })
+
+    expect(screen.getByText('Waiting request')).toBeVisible()
+    expect(screen.getByText('Staff assistance requested')).toBeVisible()
+    expect(screen.getByText('Customer')).toBeVisible()
+    expect(screen.getByText('AI Agent')).toBeVisible()
+    expect(screen.getByText('Northwind staff')).toBeVisible()
+    expect(screen.getByText('System')).toBeVisible()
+    expect(screen.getByLabelText('Message to claimant')).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'Take over conversation' }))
+    expect(onAccept).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Confirm take over' }))
+    expect(onAccept).toHaveBeenCalledWith(handoff)
+  })
+
+  it('shows the current assignee, joined event, reply controls, and assistance-only completion action', () => {
+    const handoff = assistanceHandoff('accepted')
+    renderConversation({
+      detail: {
+        ...detail,
+        revision: 2,
+        work_summary: { unread_claimant_messages: 0 },
+        customer_next_step: { responsible_party: 'claims_professional' },
+        allowed_actions: [
+          action('conversation.send_claimant_message', 'ses_1'),
+          action('human.resolve_handoff', 'hnd_1', {
+            inputs: [
+              { field_code: 'result.summary', label: 'Internal result summary', control: 'textarea', required: true },
+              { field_code: 'customer_update.summary', label: 'Claimant update', control: 'textarea', required: true },
+            ],
+            payload_defaults: {
+              result: { outcome: 'support_completed', reason_codes: ['SUPPORT_NEED_MET'], source_refs: ['hnd_1'] },
+              state_changes: [],
+              customer_update: { responsible_party: 'claims_professional', related_refs: ['hnd_1'] },
+            },
+          }),
+        ],
+      },
+      handoffs: [handoff],
+      profile: { staff_id: 'stf_demo', display_name: 'Demo Staff' },
+      resource: { items: [], resolved_session_id: 'ses_1' },
+      draft: '',
+      onDraft: vi.fn(),
+      onAccept: vi.fn(),
+      onResolve: vi.fn(),
+      onSend: vi.fn(),
+    })
+
+    expect(screen.getByText('Assigned to me')).toBeVisible()
+    expect(screen.getByText('Demo Staff joined the conversation')).toBeVisible()
+    expect(screen.getByText('Assigned staff: Demo Staff · Claims professional')).toBeVisible()
+    expect(screen.getByLabelText('Message to claimant')).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Complete assistance' })).toBeEnabled()
+    expect(screen.queryByText('Claim completed')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    {
+      name: 'customer reply',
+      handoff: assistanceHandoff('in_progress'),
+      workSummary: { unread_claimant_messages: 1 },
+      nextStep: { responsible_party: 'claims_professional' },
+      label: 'Action needed',
+      title: 'Customer replied',
+      placeholder: 'Reply to customer...',
+    },
+    {
+      name: 'waiting customer',
+      handoff: assistanceHandoff('in_progress'),
+      workSummary: { unread_claimant_messages: 0 },
+      nextStep: { responsible_party: 'claimant' },
+      label: 'Waiting for customer',
+      title: 'Waiting for customer',
+      placeholder: 'Waiting for the customer — send an update if needed',
+    },
+    {
+      name: 'completed assistance',
+      handoff: assistanceHandoff('resolved'),
+      workSummary: { unread_claimant_messages: 0 },
+      nextStep: { responsible_party: 'claims_professional' },
+      label: 'Completed',
+      title: 'Staff assistance completed',
+      placeholder: 'Staff assistance is complete',
+    },
+  ])('renders the $name composer and assistance state from server projections', ({ handoff, workSummary, nextStep, label, title, placeholder }) => {
+    renderConversation({
+      detail: {
+        ...detail,
+        revision: 2,
+        work_summary: workSummary,
+        customer_next_step: nextStep,
+        allowed_actions: handoff.status === 'resolved'
+          ? []
+          : [action('conversation.send_claimant_message', 'ses_1')],
+      },
+      handoffs: [handoff],
+      profile: { staff_id: 'stf_demo', display_name: 'Demo Staff' },
+      resource: { items: [], resolved_session_id: 'ses_1' },
+      draft: '',
+      onDraft: vi.fn(),
+      onAccept: vi.fn(),
+      onResolve: vi.fn(),
+      onSend: vi.fn(),
+    })
+
+    expect(screen.getAllByText(label).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(title).length).toBeGreaterThan(0)
+    expect(screen.getByLabelText('Message to claimant')).toHaveAttribute('placeholder', placeholder)
+  })
+
   it('shows the exact blocked claimant-message reason without a usable form', () => {
     renderConversation({
       detail: {
@@ -23,6 +189,7 @@ describe('Conversation', () => {
         allowed_actions: [{
           action_code: 'conversation.send_claimant_message',
           target_ref: 'ses_1',
+          based_on_revision: 1,
           label: 'Reply to claimant',
           availability: 'blocked',
           blocked_reason: 'Accept the handoff before replying.',
@@ -47,6 +214,7 @@ describe('Conversation', () => {
         allowed_actions: [{
           action_code: 'conversation.send_claimant_message',
           target_ref: 'ses_other',
+          based_on_revision: 1,
           availability: 'available',
         }],
       },
@@ -106,6 +274,7 @@ describe('Conversation', () => {
         allowed_actions: [{
           action_code: 'conversation.send_claimant_message',
           target_ref: 'ses_1',
+          based_on_revision: 1,
           availability: 'available',
         }],
       },
@@ -130,18 +299,37 @@ describe('Conversation', () => {
     })
   })
 
-  it('keeps a displayed historical session read only', () => {
+  it.each([
+    {
+      handoff: assistanceHandoff('queued'),
+      actionCode: 'human.accept_handoff',
+      actionLabel: 'Take over conversation',
+      statusLabel: 'Waiting request',
+    },
+    {
+      handoff: assistanceHandoff('accepted'),
+      actionCode: 'human.resolve_handoff',
+      actionLabel: 'Complete assistance',
+      statusLabel: 'Assigned to me',
+    },
+  ])('keeps a displayed historical session read only when the current handoff is $handoff.status', ({ handoff, actionCode, actionLabel, statusLabel }) => {
     const onSend = vi.fn()
     renderConversation({
       detail: {
         ...detail,
         active_session_id: 'ses_active',
-        allowed_actions: [{
-          action_code: 'conversation.send_claimant_message',
-          target_ref: 'ses_active',
-          availability: 'available',
-        }],
+        allowed_actions: [
+          {
+            action_code: 'conversation.send_claimant_message',
+            target_ref: 'ses_active',
+            based_on_revision: 1,
+            availability: 'available',
+          },
+          action(actionCode, 'hnd_1', { based_on_revision: 1 }),
+        ],
       },
+      handoffs: [handoff],
+      profile: { staff_id: 'stf_demo', display_name: 'Demo Staff' },
       resource: {
         items: [{
           message_id: 'msg_old',
@@ -153,11 +341,16 @@ describe('Conversation', () => {
       },
       draft: 'A staff reply',
       onDraft: vi.fn(),
+      onAccept: vi.fn(),
+      onResolve: vi.fn(),
       onSend,
     }, '/workbench/claims/clm_1/conversation?session=ses_old')
 
     expect(screen.getByLabelText('Message to claimant')).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: actionLabel })).not.toBeInTheDocument()
+    expect(screen.queryByText(statusLabel)).not.toBeInTheDocument()
+    expect(screen.queryByText('Staff assistance requested')).not.toBeInTheDocument()
     expect(screen.getByText('Read-only conversation')).toBeInTheDocument()
     expect(screen.getByText('Open the active claimant conversation to send a message.')).toBeInTheDocument()
     expect(onSend).not.toHaveBeenCalled()
@@ -179,6 +372,7 @@ describe('Conversation', () => {
         allowed_actions: [{
           action_code: 'conversation.send_claimant_message',
           target_ref: 'ses_1',
+          based_on_revision: 1,
           availability: 'available',
         }],
       },
@@ -211,6 +405,7 @@ describe('Conversation', () => {
         allowed_actions: [{
           action_code: 'conversation.send_claimant_message',
           target_ref: 'ses_1',
+          based_on_revision: 1,
           availability: 'available',
         }],
       },
@@ -237,6 +432,7 @@ describe('Conversation', () => {
         allowed_actions: [{
           action_code: 'conversation.send_claimant_message',
           target_ref: 'ses_active',
+          based_on_revision: 1,
           availability: 'available',
         }],
       },

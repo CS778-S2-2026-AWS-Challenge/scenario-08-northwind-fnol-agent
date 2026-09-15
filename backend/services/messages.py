@@ -1,7 +1,8 @@
 import re
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 
+from backend.adapters.evidence_storage import EvidenceStorage, EvidenceStorageError
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
@@ -81,6 +82,7 @@ from backend.repositories.protocols import (
     RevisionConflict,
 )
 from backend.services.agent import (
+    AgentEvidenceReference,
     AgentProposal,
     AgentTurnContext,
     AgentTurnProvider,
@@ -100,6 +102,7 @@ from backend.services.branching import (
     latest_applied_branch_evaluation,
 )
 from backend.services.claimant_form_projection import project_claimant_form_fields
+from backend.services.evidence_visibility import default_evidence_visibility
 from backend.services.fact_resolution import (
     provenance_messages_for_fields,
     resolve_contents_item_change,
@@ -145,6 +148,59 @@ _ACTION_TOOL_OPERATIONS = {
     'evidence_registry': frozenset({'record_pending_generation'}),
     'professional_review': frozenset({'create_policy_review'}),
 }
+
+_MODEL_EVIDENCE_FILE_STATES = frozenset(
+    {
+        EvidenceFileStatus.UPLOADED,
+        EvidenceFileStatus.PROCESSING,
+        EvidenceFileStatus.READY,
+    }
+)
+_MODEL_EVIDENCE_MEDIA_TYPES = frozenset({'image/jpeg', 'image/png', 'application/pdf'})
+
+
+@dataclass(frozen=True, slots=True)
+class _TurnEvidenceResolver:
+    repository: PersistenceRepository
+    storage: EvidenceStorage
+    claim_id: str
+    customer_id: str
+    allowed_media_types: dict[str, str]
+
+    def resolve(self, evidence_id: str, media_type: str) -> bytes | None:
+        if self.allowed_media_types.get(evidence_id) != media_type:
+            return None
+        evidence = self.repository.get_evidence(
+            self.claim_id,
+            evidence_id,
+            self.customer_id,
+        )
+        if (
+            evidence is None
+            or evidence.file_status not in _MODEL_EVIDENCE_FILE_STATES
+            or evidence.media_type != media_type
+            or default_evidence_visibility(evidence.source) is MessageVisibility.INTERNAL_ONLY
+            or evidence.status
+            in {
+                EvidenceStatus.INVALID,
+                EvidenceStatus.EXPIRED,
+                EvidenceStatus.SUPERSEDED,
+                EvidenceStatus.UNAVAILABLE,
+                EvidenceStatus.MISSING,
+            }
+        ):
+            return None
+        storage_key = evidence.provenance.get('storage_key')
+        if not isinstance(storage_key, str) or not storage_key:
+            return None
+        try:
+            return self.storage.read_upload(
+                claim_id=self.claim_id,
+                evidence_id=evidence_id,
+                storage_key=storage_key,
+            )
+        except EvidenceStorageError:
+            return None
 
 
 def _validate_tool_requests(
@@ -573,6 +629,7 @@ def _build_form_changes(
     proposal_source: AgentProposalSource,
     branch_evaluation: BranchEvaluationResult | None = None,
     grounding_source_refs: set[str] | None = None,
+    evidence_media_types: dict[str, str] | None = None,
 ) -> dict[str, StructuredFormField]:
     form_changes: dict[str, StructuredFormField] = {}
     normalised_proposals = list(proposals)
@@ -602,6 +659,27 @@ def _build_form_changes(
                 status_code=500,
                 code='INTERNAL_ERROR',
                 message='The Agent proposed an unregistered field.',
+            )
+        if proposal.source_evidence_id is not None:
+            media_type = (evidence_media_types or {}).get(proposal.source_evidence_id)
+            expected_source = (
+                FormSource.IMAGE
+                if media_type is not None and media_type.startswith('image/')
+                else FormSource.DOCUMENT
+                if media_type == 'application/pdf'
+                else None
+            )
+            if expected_source is None or proposal.source is not expected_source:
+                raise ApiError(
+                    status_code=500,
+                    code='INTERNAL_ERROR',
+                    message='The Agent proposed an invalid Evidence source.',
+                )
+        elif proposal.source in {FormSource.IMAGE, FormSource.DOCUMENT}:
+            raise ApiError(
+                status_code=500,
+                code='INTERNAL_ERROR',
+                message='The Agent proposed Evidence-derived data without a source.',
             )
         try:
             validate_registered_field_value(
@@ -652,7 +730,7 @@ def _build_form_changes(
             field_code=proposal.field_code,
             existing=existing_field,
             proposal=proposal,
-            source_ref=claimant_message.message_id,
+            source_ref=proposal.source_evidence_id or claimant_message.message_id,
             message_text=str(claimant_message.content.get('text', '')) or None,
             timestamp=timestamp,
             accepted_status=accepted_status,
@@ -692,6 +770,7 @@ def _build_contents_item_changes(
     timestamp: datetime,
     authority_outcome: AuthorityOutcome,
     branch_evaluation: BranchEvaluationResult,
+    evidence_media_types: dict[str, str] | None = None,
 ) -> list[ContentsItem]:
     if not proposal.contents_item_changes or authority_outcome is not AuthorityOutcome.AUTHORISED:
         return []
@@ -710,6 +789,22 @@ def _build_contents_item_changes(
     }
     changes: list[ContentsItem] = []
     for item in proposal.contents_item_changes:
+        evidence_source: FormSource | None = None
+        if item.source_evidence_id is not None:
+            media_type = (evidence_media_types or {}).get(item.source_evidence_id)
+            evidence_source = (
+                FormSource.IMAGE
+                if media_type is not None and media_type.startswith('image/')
+                else FormSource.DOCUMENT
+                if media_type == 'application/pdf'
+                else None
+            )
+            if evidence_source is None:
+                raise ApiError(
+                    status_code=500,
+                    code='INTERNAL_ERROR',
+                    message='The Agent proposed an invalid contents Evidence source.',
+                )
         existing = existing_by_id.get(item.item_id or '')
         if item.item_id is not None and existing is None:
             raise ApiError(
@@ -728,8 +823,12 @@ def _build_contents_item_changes(
             existing=existing,
             proposal=item,
             item_id=existing.item_id if existing is not None else new_id('itm'),
-            source_ref=claimant_message.message_id,
-            message_text=str(claimant_message.content.get('text', '')) or None,
+            source_ref=item.source_evidence_id or claimant_message.message_id,
+            message_text=(
+                None
+                if item.source_evidence_id is not None
+                else str(claimant_message.content.get('text', '')) or None
+            ),
             timestamp=timestamp,
             accepted_status=FormStatus.PROPOSED,
             updated_by=ActorReference(
@@ -737,7 +836,11 @@ def _build_contents_item_changes(
                 actor_id=proposal.proposal_source.value,
             ),
         )
-        if not claimant_supplied:
+        if evidence_source is not None:
+            contents_item = contents_item.model_copy(
+                update={'source': evidence_source, 'status': FormStatus.PROPOSED}
+            )
+        elif not claimant_supplied:
             contents_item = contents_item.model_copy(update={'source': FormSource.INFERENCE})
         changes.append(contents_item)
     return changes
@@ -1347,6 +1450,7 @@ def submit_message(
     idempotency_key: str | None,
     if_match: str | None,
     runtime_agent_policy_resolver: RuntimeAgentPolicyResolver | None = None,
+    evidence_storage: EvidenceStorage | None = None,
 ) -> MessageTurnResponse:
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
@@ -1567,21 +1671,69 @@ def submit_message(
             retryable=True,
             current_revision=claim.revision,
         )
-    missing_evidence_refs = [
-        evidence_id
-        for evidence_id in payload.evidence_refs
-        if repository.get_evidence(claim_id, evidence_id, principal.subject) is None
-    ]
-    if missing_evidence_refs:
+    selected_evidence: list[EvidenceRecord] = []
+    invalid_evidence_refs: list[ErrorDetail] = []
+    seen_evidence_refs: set[str] = set()
+    for evidence_id in payload.evidence_refs:
+        if evidence_id in seen_evidence_refs:
+            invalid_evidence_refs.append(
+                ErrorDetail(field='evidence_refs', reason=f'Duplicate evidence: {evidence_id}.')
+            )
+            continue
+        seen_evidence_refs.add(evidence_id)
+        evidence = repository.get_evidence(claim_id, evidence_id, principal.subject)
+        if evidence is None:
+            invalid_evidence_refs.append(
+                ErrorDetail(field='evidence_refs', reason=f'Unknown evidence: {evidence_id}.')
+            )
+            continue
+        if (
+            evidence.file_status not in _MODEL_EVIDENCE_FILE_STATES
+            or evidence.media_type not in _MODEL_EVIDENCE_MEDIA_TYPES
+            or default_evidence_visibility(evidence.source) is MessageVisibility.INTERNAL_ONLY
+            or evidence.status
+            in {
+                EvidenceStatus.INVALID,
+                EvidenceStatus.EXPIRED,
+                EvidenceStatus.SUPERSEDED,
+                EvidenceStatus.UNAVAILABLE,
+                EvidenceStatus.MISSING,
+            }
+        ):
+            invalid_evidence_refs.append(
+                ErrorDetail(
+                    field='evidence_refs',
+                    reason=f'Evidence is not available for model processing: {evidence_id}.',
+                )
+            )
+            continue
+        selected_evidence.append(evidence)
+    if invalid_evidence_refs:
         raise ApiError(
             status_code=422,
             code='VALIDATION_ERROR',
             message='One or more evidence references are invalid.',
-            details=[
-                ErrorDetail(field='evidence_refs', reason=f'Unknown evidence: {evidence_id}.')
-                for evidence_id in missing_evidence_refs
-            ],
+            details=invalid_evidence_refs,
         )
+
+    turn_evidence = tuple(
+        AgentEvidenceReference(
+            evidence_id=evidence.evidence_id,
+            media_type=evidence.media_type or '',
+        )
+        for evidence in selected_evidence
+    )
+    evidence_resolver = (
+        _TurnEvidenceResolver(
+            repository=repository,
+            storage=evidence_storage,
+            claim_id=claim_id,
+            customer_id=principal.subject,
+            allowed_media_types={item.evidence_id: item.media_type for item in turn_evidence},
+        )
+        if turn_evidence and evidence_storage is not None
+        else None
+    )
 
     timestamp = now_utc()
     claimant_message = MessageRecord(
@@ -1653,6 +1805,8 @@ def submit_message(
         trigger_message_id=claimant_message.message_id,
         message_text=payload.content.text if payload.content is not None else None,
         evidence_refs=payload.evidence_refs,
+        evidence=turn_evidence,
+        evidence_resolver=evidence_resolver,
         professional_review_required=any(
             signal.code == 'POLICY_RETRIEVAL_UNCERTAINTY' for signal in persisted_review_signals
         ),
@@ -1806,6 +1960,7 @@ def submit_message(
         proposal.proposal_source,
         branch_evaluation,
         _grounding_source_refs(proposal.tool_results),
+        {item.evidence_id: item.media_type for item in turn_evidence},
     )
     contents_item_changes = _build_contents_item_changes(
         claim,
@@ -1814,6 +1969,7 @@ def submit_message(
         timestamp,
         authority.outcome,
         branch_evaluation,
+        {item.evidence_id: item.media_type for item in turn_evidence},
     )
     conflicting_fields = [
         field_code

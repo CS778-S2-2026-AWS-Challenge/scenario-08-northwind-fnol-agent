@@ -10,6 +10,7 @@ from backend.domain.models import (
     Channel,
     CustomerNextStep,
     EvidenceFileStatus,
+    EvidenceMaterialVersion,
     EvidenceRecord,
     EvidenceSource,
     EvidenceStatus,
@@ -256,6 +257,57 @@ def test_fixture_repository_supports_customer_message_and_evidence_access_patter
         repository.save_message(message, 'other_customer')
     with pytest.raises(KeyError):
         repository.save_evidence(evidence, 'other_customer')
+
+
+def test_fixture_repository_rejects_material_history_rewrite_or_removal() -> None:
+    repository = FixtureRepository()
+    claim, session = make_claim()
+    repository.create_claim(claim, session)
+    evidence = EvidenceRecord(
+        evidence_id='evd_fixture_history',
+        claim_id=claim.claim_id,
+        kind='incident_image',
+        status=EvidenceStatus.INVALID,
+        file_status=EvidenceFileStatus.READY,
+        source=EvidenceSource.CLAIMANT,
+        provenance={'upload_checksum': 'sha256:old'},
+        created_at=claim.created_at,
+        updated_at=claim.updated_at,
+    )
+    repository.save_evidence(evidence, claim.customer_id)
+    archived = EvidenceMaterialVersion(
+        version=1,
+        status=evidence.status,
+        file_status=evidence.file_status,
+        provenance=evidence.provenance,
+        archived_at=claim.updated_at,
+        reason='claimant_replacement',
+    )
+    current = evidence.model_copy(
+        update={
+            'status': EvidenceStatus.PENDING,
+            'file_status': EvidenceFileStatus.AWAITING_UPLOAD,
+            'material_version': 2,
+            'material_history': [archived],
+        }
+    )
+    repository.save_evidence(current, claim.customer_id)
+
+    rewritten = current.model_copy(
+        update={
+            'material_history': [
+                archived.model_copy(update={'provenance': {'upload_checksum': 'sha256:new'}})
+            ]
+        }
+    )
+    shortened = current.model_copy(update={'material_history': []})
+    with pytest.raises(IdempotencyConflict):
+        repository.save_evidence(rewritten, claim.customer_id)
+    with pytest.raises(IdempotencyConflict):
+        repository.save_evidence(shortened, claim.customer_id)
+    assert (
+        repository.get_evidence(claim.claim_id, evidence.evidence_id, claim.customer_id) == current
+    )
 
 
 def test_fixture_repository_persists_agent_turn_as_one_consistent_unit() -> None:

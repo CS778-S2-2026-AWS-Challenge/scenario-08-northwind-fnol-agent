@@ -428,6 +428,24 @@ the append-only audit collection through a bounded, filterable projection.
 - Extraction produces source-linked proposals; it does not confirm a claim fact.
 - Evidence lifecycle writes preserve ownership, checksum, provenance, and permitted
   visibility.
+- Uploading a registered requirement, or replacing failed or invalid claimant material, updates
+  the original claimant-owned Evidence record. The mutation preserves `evidence_id`, `created_at`,
+  `needed_for`, `related_fields`, `claimant_note`, ownership, and visibility; it does not create a
+  second record that leaves the requirement outstanding.
+- `material_version` identifies the current file generation beneath that stable requirement. A
+  replacement advances it by exactly one and appends the prior generation to typed
+  `material_history`, including its condition, file state and metadata, references, complete
+  provenance, processing and extraction decisions, and any proposed Claim fields sourced only by
+  that generation. Fixture and MongoDB persistence reject a shortened or rewritten history.
+- A replacement starts the new generation without the prior file's references, checksum,
+  processing state, extraction state, fact decisions, or lifecycle transition history.
+  Requirement-origin provenance such as `reported_in_message_id` and `captured_at` remains on the
+  current stable requirement. A current Claim field is withdrawn only when it is still `proposed`,
+  has an image or document source, and all of its source references identify the replaced
+  generation. Confirmed, disputed, and multi-source fields remain current.
+- An extracted field names both the stable `evidence_id` and
+  `evidence:{evidence_id}:material:{material_version}`. Fact decisions require the current
+  generation reference so an older material cannot be mistaken for the replacement.
 - A `processing` or `failed` file remains pending or attention-required in the
   authoritative Claim aggregation; only a `ready` file can contribute received
   Evidence. Retry reuses the same Evidence identity and revision-checked
@@ -464,6 +482,11 @@ Evidence record or protected object.
   profile, executable prompt identifier, provider-reported model identifier, and provider request
   identifier when supplied.
   These provider references are internal-only and never enter claimant projections.
+- A successful multimodal Runtime trace may retain the exact selected Evidence ID, media type,
+  and `submitted` outcome. It never retains raw bytes, object URLs, storage keys, or provider
+  payloads. Any proposed form field or contents item derived from that attachment retains the
+  Evidence ID as its source reference and remains unconfirmed until the ordinary fact-confirmation
+  path accepts it.
 - Model-authored customer prose and model-proposed internal signals are not persistence
   authority. Claimant-visible response fields are server-rendered after deterministic
   validation, and any non-empty model signal proposal rejects the complete turn before write.

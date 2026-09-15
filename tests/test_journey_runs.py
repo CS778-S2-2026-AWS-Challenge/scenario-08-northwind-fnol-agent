@@ -6,6 +6,14 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from journey_runs.household import (
+    CONTENTS,
+    HOME,
+    KNOWN_STOPS,
+    HouseholdRun,
+    HouseholdScenario,
+    run_household,
+)
 from journey_runs.motor_collision import MOTOR_COLLISION_PACK, run_motor_collision
 from journey_runs.record import (
     AgentTurn,
@@ -21,6 +29,8 @@ from journey_runs.record import (
     VisibilityCheck,
 )
 from pydantic import ValidationError
+
+from backend.services import agent
 
 _NOW = datetime(2026, 9, 15, tzinfo=UTC)
 
@@ -39,6 +49,64 @@ def test_the_motor_collision_journey_reaches_its_end_and_reports_every_disagreem
     # The fixture runtime can never produce a completed run.
     assert record.result_class is not ResultClass.COMPLETED
     assert JourneyRunRecord.model_validate_json(record.model_dump_json()) == record
+
+
+@pytest.mark.parametrize('scenario', [HOME, CONTENTS], ids=['home', 'contents'])
+def test_a_household_journey_stops_only_where_the_stop_is_reported_or_documented(
+    scenario: HouseholdScenario,
+) -> None:
+    _assert_household_run(run_household(scenario, head='test'), scenario)
+
+
+def test_a_household_journey_that_reaches_creation_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Stand in for the #848 fix: the controlled parser proposes the registry enum, not a boolean.
+    parse = agent._controlled_requirement_value
+
+    def registry_value(field_code: str, message_text: str) -> Any:
+        value = parse(field_code, message_text)
+        if field_code == 'property.ongoing_risk' and isinstance(value, bool):
+            return 'active_leak' if value else 'none'
+        return value
+
+    monkeypatch.setattr(agent, '_controlled_requirement_value', registry_value)
+
+    run = run_household(HOME, head='test')
+    record = run.record
+
+    _assert_household_run(run, HOME)
+    assert run.stopped_at is None
+    assert (record.steps[-1].name, record.steps[-1].http_status) == ('create the claim', 201)
+    assert record.final_state.claim_number is not None
+    assert record.unavailable_capabilities == []
+    # Reaching creation is not completion: the consent record still has no route in, and a
+    # fixture run is at most fixture-only.
+    assert record.result_class is ResultClass.PARTIAL
+    assert [m.path for m in record.materials if m.arrival is Arrival.NO_ROUTE] == [
+        'home/home-consent-record.pdf'
+    ]
+
+
+def _assert_household_run(run: HouseholdRun, scenario: HouseholdScenario) -> None:
+    record = run.record
+    assert JourneyRunRecord.model_validate_json(record.model_dump_json()) == record
+    assert all(check.holds for check in record.visibility_checks)
+    assert [check.seam for check in record.seam_checks if check.defect_ref == 'untracked'] == []
+    # The fixture runtime can never produce a completed run, whether or not it reaches creation.
+    assert record.result_class is not ResultClass.COMPLETED
+    if run.stopped_at is None:
+        assert record.steps[-1].name == 'create the claim'
+        assert record.steps[-1].outcome is StepOutcome.SUCCEEDED
+    elif run.stopped_at in scenario.unavailable:
+        assert record.result_class is ResultClass.UNAVAILABLE
+        assert [capability.capability for capability in record.unavailable_capabilities] == [
+            scenario.unavailable[run.stopped_at]
+        ]
+    else:
+        # A stall nobody has reported must fail here, so it reaches its owner.
+        assert run.stopped_at in KNOWN_STOPS
+        assert record.result_class in {ResultClass.FAILED, ResultClass.BLOCKED}
 
 
 def test_a_run_that_stops_early_records_no_later_material_as_delivered() -> None:

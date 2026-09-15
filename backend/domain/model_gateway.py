@@ -248,6 +248,7 @@ class ModelTurnContext(ModelContract):
     claim: ModelClaimContext
     message_text: str | None = None
     evidence_reference_count: int = Field(ge=0)
+    attached_evidence: list[ModelAttachedEvidenceContext] = Field(default_factory=list)
     professional_review_required: bool = False
     provenance_messages: list[ModelProvenanceMessage] = Field(default_factory=list)
     conversation_history: list[ModelProvenanceMessage] = Field(default_factory=list)
@@ -280,6 +281,11 @@ class ModelProvenanceMessage(ModelContract):
     content: str
 
 
+class ModelAttachedEvidenceContext(ModelContract):
+    evidence_id: str = Field(min_length=1, max_length=100)
+    media_type: str = Field(min_length=1, max_length=100)
+
+
 class ModelProposedFormChange(ModelContract):
     field_code: str = Field(min_length=1, max_length=100)
     value: Any
@@ -288,6 +294,7 @@ class ModelProposedFormChange(ModelContract):
     precision: FactPrecision = FactPrecision.EXACT
     relation: AssertionRelation | None = None
     reported_text: str | None = Field(default=None, max_length=5000)
+    source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ModelProposedContentsItem(ModelContract):
@@ -301,6 +308,7 @@ class ModelProposedContentsItem(ModelContract):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     relation: AssertionRelation | None = None
     reported_text: str | None = Field(default=None, max_length=5000)
+    source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ModelAgentProposal(ModelContract):
@@ -326,17 +334,12 @@ class ModelRuntimeProposal(ModelContract):
     persistence, and every side effect.
     """
 
-    action_code: Literal[
-        'conversation.answer',
-        'human.create_handoff',
-        'claim.propose_evidence_reuse',
-        'claim.propose_evidence_remove',
-    ]
-    runtime_action_code: Literal[
-        'runtime.continue',
-        'runtime.wait_for_user',
-        'runtime.pause_for_review',
-    ]
+    # The target contract is namespaced.  Keep this a string (rather than a
+    # hand-maintained Literal) so adding a registered action does not require
+    # changing the provider message schema; the validator below still fails
+    # closed for unknown values.
+    action_code: str = Field(pattern=r'^[a-z]+\.[a-z][a-z0-9_]*$')
+    runtime_action_code: str = Field(pattern=r'^runtime\.[a-z][a-z0-9_]*$')
     reason_codes: list[str] = Field(min_length=1)
     customer_reason: str = Field(min_length=1, max_length=1000)
     customer_response: str = Field(min_length=1, max_length=5000)
@@ -348,6 +351,41 @@ class ModelRuntimeProposal(ModelContract):
     evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
     source_claim_id: str | None = Field(default=None, min_length=1, max_length=120)
     removal_scope: Literal['draft', 'persisted'] | None = None
+
+    @model_validator(mode='after')
+    def validate_registered_actions(self) -> ModelRuntimeProposal:
+        # Import lazily to avoid making the model contract depend on registry
+        # construction during module import.
+        from backend.domain.agent_action_registry import action_contract
+
+        try:
+            action_contract(self.action_code)
+            runtime_contract = action_contract(self.runtime_action_code)
+        except ValueError as error:
+            raise ValueError(f'Unregistered Runtime action: {error}') from error
+        # Protected interrupts are emitted only by deterministic published
+        # rules.  A model proposal has no rule-evaluation authority, so it must
+        # never be able to pair an ordinary conversation move with one.
+        if runtime_contract.authority_requirement.value == 'published_rule':
+            raise ValueError(
+                'A model proposal cannot select a published-rule-only runtime directive.'
+            )
+        allowed_directives = {
+            'conversation.answer': {'runtime.continue', 'runtime.wait_for_user'},
+            'conversation.explain': {'runtime.continue', 'runtime.wait_for_user'},
+            'conversation.summarise': {'runtime.continue', 'runtime.wait_for_user'},
+            'human.create_handoff': {
+                'runtime.pause_for_review',
+            },
+            'claim.prepare_creation': {'runtime.continue', 'runtime.wait_for_external'},
+            'claim.create': {'runtime.continue', 'runtime.wait_for_external'},
+        }
+        permitted = allowed_directives.get(self.action_code)
+        if permitted is not None and self.runtime_action_code not in permitted:
+            raise ValueError(
+                f'Runtime directive {self.runtime_action_code} is not valid for {self.action_code}.'
+            )
+        return self
 
 
 class ModelGatewayErrorCode(str, Enum):

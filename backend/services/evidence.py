@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from backend.adapters.evidence_storage import (
     EvidenceStorage,
     EvidenceStorageUnavailable,
@@ -24,6 +26,7 @@ from backend.domain.models import (
     EvidenceFactDecisionResponse,
     EvidenceFileStatus,
     EvidenceListResponse,
+    EvidenceMaterialVersion,
     EvidenceMutationResponse,
     EvidenceProcessingResponse,
     EvidenceRecord,
@@ -71,6 +74,75 @@ ARRIVED_MATERIAL_STATUSES = frozenset(
     }
 )
 
+_REPLACEABLE_FILE_STATUSES = frozenset(
+    {EvidenceFileStatus.NOT_AVAILABLE, EvidenceFileStatus.FAILED}
+)
+
+_REQUIREMENT_PROVENANCE_KEYS = frozenset({'captured_at', 'reported_in_message_id'})
+
+
+def _material_source_ref(evidence_id: str, version: int) -> str:
+    return f'evidence:{evidence_id}:material:{version}'
+
+
+def _has_material_generation(evidence: EvidenceRecord) -> bool:
+    """Distinguish an actual file generation from requirement-level metadata."""
+
+    return evidence.file_status in {EvidenceFileStatus.FAILED, EvidenceFileStatus.READY}
+
+
+def _requirement_provenance(evidence: EvidenceRecord) -> dict[str, object]:
+    """Retain the stable requirement source without carrying old material state."""
+
+    return {
+        key: value
+        for key, value in evidence.provenance.items()
+        if key in _REQUIREMENT_PROVENANCE_KEYS
+    }
+
+
+def _material_proposed_fields(
+    claim: WorkingClaim,
+    evidence: EvidenceRecord,
+) -> dict[str, StructuredFormField]:
+    generation_refs = {
+        evidence.evidence_id,
+        _material_source_ref(evidence.evidence_id, evidence.material_version),
+    }
+    return {
+        code: field
+        for code, field in claim.form.items()
+        if field.status is FormStatus.PROPOSED
+        and field.source in {FormSource.IMAGE, FormSource.DOCUMENT}
+        and bool(field.source_refs)
+        and set(field.source_refs) <= generation_refs
+    }
+
+
+def _archive_material_generation(
+    evidence: EvidenceRecord,
+    proposed_fields: dict[str, StructuredFormField],
+    archived_at: datetime,
+) -> EvidenceMaterialVersion:
+    return EvidenceMaterialVersion(
+        version=evidence.material_version,
+        status=evidence.status,
+        file_status=evidence.file_status,
+        original_filename=evidence.original_filename,
+        media_type=evidence.media_type,
+        size_bytes=evidence.size_bytes,
+        references=evidence.references,
+        provenance=evidence.provenance,
+        proposed_fields=proposed_fields,
+        wait_type=evidence.wait_type,
+        responsible_party=evidence.responsible_party,
+        expected_by=evidence.expected_by,
+        expected_timing=evidence.expected_timing,
+        context_summary=evidence.context_summary,
+        archived_at=archived_at,
+        reason='claimant_replacement',
+    )
+
 
 def _claim_not_found() -> ApiError:
     return ApiError(
@@ -86,6 +158,44 @@ def _evidence_not_found() -> ApiError:
         code='RESOURCE_NOT_FOUND',
         message='The evidence item was not found.',
     )
+
+
+def _existing_upload_requirement(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    principal: Principal,
+    payload: RequestEvidenceUploadRequest,
+) -> EvidenceRecord | None:
+    """Resolve and validate an optional existing Evidence upload target."""
+
+    if payload.evidence_id is None:
+        return None
+    evidence = repository.get_evidence(claim.claim_id, payload.evidence_id, principal.subject)
+    if evidence is None or evidence.source is not EvidenceSource.CLAIMANT:
+        raise _evidence_not_found()
+    if evidence.kind != payload.kind:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The upload kind does not match the existing evidence requirement.',
+            details=[
+                ErrorDetail(
+                    field='kind',
+                    reason='Use the kind recorded on the selected evidence requirement.',
+                )
+            ],
+        )
+    replaceable = evidence.file_status in _REPLACEABLE_FILE_STATUSES or (
+        evidence.status is EvidenceStatus.INVALID
+        and evidence.file_status is EvidenceFileStatus.READY
+    )
+    if not replaceable or evidence.status is EvidenceStatus.SUPERSEDED:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='This evidence item cannot accept a new upload in its current state.',
+        )
+    return evidence
 
 
 def _claimant_evidence(evidence: EvidenceRecord) -> ClaimantEvidence:
@@ -473,7 +583,8 @@ def request_upload(
     if claim is None:
         raise _claim_not_found()
     _validate_revision(claim, expected_revision)
-    evidence_id = new_id('evd')
+    requirement = _existing_upload_requirement(repository, claim, principal, payload)
+    evidence_id = requirement.evidence_id if requirement is not None else new_id('evd')
     try:
         target = storage.create_upload_target(
             claim_id=claim_id,
@@ -507,27 +618,88 @@ def request_upload(
         ) from error
 
     timestamp = now_utc()
-    evidence = EvidenceRecord(
-        evidence_id=evidence_id,
-        claim_id=claim_id,
-        kind=payload.kind,
-        # The upload has been registered and has not finished. That is a fact about
-        # the file, not about the material, so the business condition is that the
-        # claim is still waiting and the file status carries the rest.
-        status=EvidenceStatus.PENDING,
-        file_status=EvidenceFileStatus.AWAITING_UPLOAD,
-        original_filename=payload.original_filename,
-        media_type=payload.media_type,
-        size_bytes=payload.size_bytes,
-        source=EvidenceSource.CLAIMANT,
-        wait_type='claimant',
-        responsible_party='claimant',
-        context_summary='Waiting for the claimant to complete the evidence upload.',
-        provenance={'storage_key': target.storage_key},
-        created_at=timestamp,
-        updated_at=timestamp,
+    claim_for_update = claim
+    if requirement is None:
+        evidence = EvidenceRecord(
+            evidence_id=evidence_id,
+            claim_id=claim_id,
+            kind=payload.kind,
+            # The upload has been registered and has not finished. That is a fact about
+            # the file, not about the material, so the business condition is that the
+            # claim is still waiting and the file status carries the rest.
+            status=EvidenceStatus.PENDING,
+            file_status=EvidenceFileStatus.AWAITING_UPLOAD,
+            original_filename=payload.original_filename,
+            media_type=payload.media_type,
+            size_bytes=payload.size_bytes,
+            source=EvidenceSource.CLAIMANT,
+            wait_type='claimant',
+            responsible_party='claimant',
+            context_summary='Waiting for the claimant to complete the evidence upload.',
+            provenance={'storage_key': target.storage_key},
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+    else:
+        replacing_material = _has_material_generation(requirement)
+        proposed_fields = (
+            _material_proposed_fields(claim, requirement) if replacing_material else {}
+        )
+        material_version = requirement.material_version + (1 if replacing_material else 0)
+        material_history = list(requirement.material_history)
+        if replacing_material:
+            material_history.append(
+                _archive_material_generation(requirement, proposed_fields, timestamp)
+            )
+            claim_for_update = claim.model_copy(
+                update={
+                    'form': {
+                        code: field
+                        for code, field in claim.form.items()
+                        if code not in proposed_fields
+                    }
+                }
+            )
+        current_provenance = (
+            _requirement_provenance(requirement)
+            if replacing_material
+            else dict(requirement.provenance)
+        )
+        current_provenance['storage_key'] = target.storage_key
+        evidence = requirement.model_copy(
+            update={
+                'status': EvidenceStatus.PENDING,
+                'file_status': EvidenceFileStatus.AWAITING_UPLOAD,
+                'original_filename': payload.original_filename,
+                'media_type': payload.media_type,
+                'size_bytes': payload.size_bytes,
+                'references': [],
+                'material_version': material_version,
+                'material_history': material_history,
+                'wait_type': EvidenceWaitType.CLAIMANT,
+                'responsible_party': ResponsibleParty.CLAIMANT,
+                'expected_by': None,
+                'expected_timing': None,
+                'context_summary': 'Waiting for the claimant to complete the evidence upload.',
+                'provenance': _with_transition(
+                    current_provenance,
+                    _transition_entry(
+                        field_code=None,
+                        from_state=requirement.file_status.value,
+                        to_state=EvidenceFileStatus.AWAITING_UPLOAD.value,
+                        source=requirement.source.value,
+                        at=timestamp.isoformat(),
+                        actor_type=ActorType.CLAIMANT.value,
+                        actor_id=principal.subject,
+                    ),
+                ),
+                'updated_at': timestamp,
+            }
+        )
+    updated_claim = _updated_claim(
+        claim_for_update,
+        _records_with(repository, claim_for_update, evidence),
     )
-    updated_claim = _updated_claim(claim, _records_with(repository, claim, evidence))
     response = EvidenceUploadResponse(
         evidence_id=evidence_id,
         revision=updated_claim.revision,
@@ -897,7 +1069,10 @@ def complete_evidence_processing(
         fact.field_code: StructuredFormField(
             value=fact.value,
             source=form_source,
-            source_refs=[evidence_id],
+            source_refs=[
+                evidence_id,
+                _material_source_ref(evidence_id, evidence.material_version),
+            ],
             status=FormStatus.PROPOSED,
             needed_for=NeededFor.CURRENT_ACTION,
             confidence=fact.confidence,
@@ -1026,6 +1201,8 @@ def decide_evidence_facts(
         if field_code not in claim.form
         or claim.form[field_code].status is not FormStatus.PROPOSED
         or evidence_id not in claim.form[field_code].source_refs
+        or _material_source_ref(evidence_id, evidence.material_version)
+        not in claim.form[field_code].source_refs
         or claim.form[field_code].source not in {FormSource.IMAGE, FormSource.DOCUMENT}
     ]
     if duplicate_codes or unavailable_codes:

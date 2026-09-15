@@ -9,6 +9,7 @@ from backend.domain.model_gateway import (
     CLAIMANT_AGENT_PRIVACY_CLASS,
     CLAIMANT_AGENT_PURPOSE,
     ModelCapabilities,
+    ModelEvidenceContentResolver,
     ModelGateway,
     ModelGatewayError,
     ModelGatewayErrorCode,
@@ -29,6 +30,7 @@ from backend.services.runtime_configuration import (
 
 def _model_gateway_config_from_runtime(
     configuration: ModelRuntimeConfiguration,
+    evidence_resolver: ModelEvidenceContentResolver | None = None,
 ) -> ModelGatewayConfig:
     capabilities = ModelCapabilities(
         structured_output=configuration.structured_output,
@@ -56,6 +58,7 @@ def _model_gateway_config_from_runtime(
         timeout_seconds=configuration.timeout_seconds,
         capabilities=capabilities,
         profile=profile,
+        evidence_resolver=evidence_resolver,
     )
 
 
@@ -81,6 +84,7 @@ def _runtime_configuration_matches_settings(
 def build_model_gateway(
     settings: Settings,
     registry: ModelGatewayRegistry | None = None,
+    evidence_resolver: ModelEvidenceContentResolver | None = None,
 ) -> ModelGateway:
     resolved_registry = registry or default_model_gateway_registry()
     capabilities = ModelCapabilities(
@@ -111,6 +115,7 @@ def build_model_gateway(
             timeout_seconds=settings.model_timeout_seconds,
             capabilities=capabilities,
             profile=profile,
+            evidence_resolver=evidence_resolver,
         ),
     )
 
@@ -124,6 +129,7 @@ def build_scoped_model_gateway(
     profile_suffix: str,
     registry: ModelGatewayRegistry | None = None,
     runtime_configuration: ModelRuntimeConfiguration | None = None,
+    evidence_resolver: ModelEvidenceContentResolver | None = None,
 ) -> ModelGateway:
     """Build an explicit purpose profile over the configured provider connection.
 
@@ -220,6 +226,7 @@ def build_scoped_model_gateway(
             timeout_seconds=profile.timeout_seconds,
             capabilities=capabilities,
             profile=profile,
+            evidence_resolver=evidence_resolver,
         ),
     )
 
@@ -337,6 +344,23 @@ class ConfigurationBackedModelGateway:
         )
 
     def complete(self, request: ModelRequest) -> ModelResponse:
+        return self._complete(request, evidence_resolver=None)
+
+    def complete_with_evidence(
+        self,
+        request: ModelRequest,
+        evidence_resolver: ModelEvidenceContentResolver,
+    ) -> ModelResponse:
+        """Complete one request with a resolver scoped to its authorised Evidence."""
+
+        return self._complete(request, evidence_resolver=evidence_resolver)
+
+    def _complete(
+        self,
+        request: ModelRequest,
+        *,
+        evidence_resolver: ModelEvidenceContentResolver | None,
+    ) -> ModelResponse:
         configuration, authoritative = self._active_model_configuration(request.model_profile_id)
         if configuration is None:
             if (
@@ -344,7 +368,11 @@ class ConfigurationBackedModelGateway:
                 and request.model_profile_id != self._settings.model_profile_id
             ):
                 raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
-            gateway = build_model_gateway(self._settings, self._registry)
+            gateway = build_model_gateway(
+                self._settings,
+                self._registry,
+                evidence_resolver=evidence_resolver,
+            )
         else:
             if not authoritative and not _runtime_configuration_matches_settings(
                 configuration, self._settings
@@ -353,7 +381,7 @@ class ConfigurationBackedModelGateway:
             registry = self._registry or default_model_gateway_registry()
             gateway = registry.create(
                 configuration.protocol,
-                _model_gateway_config_from_runtime(configuration),
+                _model_gateway_config_from_runtime(configuration, evidence_resolver),
             )
         return gateway.complete(request)
 
@@ -361,6 +389,29 @@ class ConfigurationBackedModelGateway:
         self,
         request: ModelRequest,
         snapshot: RuntimeConfigurationSnapshot,
+    ) -> ModelResponse:
+        return self._complete_for_snapshot(request, snapshot, evidence_resolver=None)
+
+    def complete_for_snapshot_with_evidence(
+        self,
+        request: ModelRequest,
+        snapshot: RuntimeConfigurationSnapshot,
+        evidence_resolver: ModelEvidenceContentResolver,
+    ) -> ModelResponse:
+        """Use one Release Set snapshot and one turn-scoped Evidence resolver."""
+
+        return self._complete_for_snapshot(
+            request,
+            snapshot,
+            evidence_resolver=evidence_resolver,
+        )
+
+    def _complete_for_snapshot(
+        self,
+        request: ModelRequest,
+        snapshot: RuntimeConfigurationSnapshot,
+        *,
+        evidence_resolver: ModelEvidenceContentResolver | None,
     ) -> ModelResponse:
         """Complete a request with the model selected by the turn's existing snapshot.
 
@@ -376,7 +427,7 @@ class ConfigurationBackedModelGateway:
         """
 
         if snapshot.release_set_id is None:
-            return self.complete(request)
+            return self._complete(request, evidence_resolver=evidence_resolver)
         try:
             record = snapshot.model(request.model_profile_id)
             if record is None:
@@ -389,6 +440,6 @@ class ConfigurationBackedModelGateway:
         registry = self._registry or default_model_gateway_registry()
         gateway = registry.create(
             configuration.protocol,
-            _model_gateway_config_from_runtime(configuration),
+            _model_gateway_config_from_runtime(configuration, evidence_resolver),
         )
         return gateway.complete(request)
