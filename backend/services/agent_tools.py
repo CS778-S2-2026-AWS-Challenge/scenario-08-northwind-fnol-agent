@@ -16,6 +16,7 @@ def dispatch_external_service_tool(
     *,
     tool_name: str,
     service_identity: str,
+    product_family: str,
     arguments: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Execute one registered external-service tool through Runtime policy code."""
@@ -24,7 +25,12 @@ def dispatch_external_service_tool(
     if not tool_name.startswith('external_service.'):
         raise ValueError('Only external_service tools may use this dispatcher.')
     operation = tool_name.removeprefix('external_service.')
-    result = dispatcher.execute(service_identity, operation, arguments or {})
+    result = dispatcher.execute(
+        service_identity,
+        operation,
+        arguments or {},
+        product_family=product_family,
+    )
     return {
         'tool': contract.name,
         'status': result.status,
