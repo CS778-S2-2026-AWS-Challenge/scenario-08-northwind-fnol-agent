@@ -1044,19 +1044,43 @@ def _validate_evidence_history_action(
                 'record because the governed retention and audit operation is not available.'
             ),
         )
+    is_removal = proposal.action_code == 'claim.propose_evidence_remove'
     return replace(
         proposal,
-        customer_reason='The selected Evidence is eligible for a reuse proposal only.',
+        source_claim_id=(
+            str(result['source_claim_id'])
+            if isinstance(result.get('source_claim_id'), str)
+            else proposal.source_claim_id
+        ),
+        customer_reason=(
+            'The selected Evidence is eligible for a governed removal proposal.'
+            if is_removal
+            else 'The selected Evidence is eligible for a reuse proposal.'
+        ),
         customer_response=(
-            f'I found Evidence {proposal.evidence_id} from Claim {proposal.source_claim_id}. '
-            'It has not been attached or copied. Please confirm whether you want Northwind to '
-            'reuse the original Evidence for this Claim.'
+            (
+                f'I found Evidence {proposal.evidence_id} from Claim {proposal.source_claim_id}. '
+                'No change has been made. Please confirm whether you want Northwind to remove '
+                'it from your Evidence history.'
+            )
+            if is_removal
+            else (
+                f'I found Evidence {proposal.evidence_id} from Claim {proposal.source_claim_id}. '
+                'It has not been attached or copied. Please confirm whether you want Northwind '
+                'to reuse the original Evidence for this Claim.'
+            )
         ),
         customer_next_step=CustomerNextStep(
-            status='confirm_evidence_reuse',
-            summary='Confirm whether Northwind may reuse the original Evidence for this Claim.',
+            status='confirm_evidence_remove' if is_removal else 'confirm_evidence_reuse',
+            summary=(
+                'Confirm whether Northwind may remove the Evidence from your history.'
+                if is_removal
+                else 'Confirm whether Northwind may reuse the original Evidence for this Claim.'
+            ),
             responsible_party=ResponsibleParty.CLAIMANT,
-            required_items=['evidence_reuse_confirmation'],
+            required_items=[
+                'evidence_remove_confirmation' if is_removal else 'evidence_reuse_confirmation'
+            ],
         ),
     )
 
@@ -2507,6 +2531,9 @@ def submit_message(
         customer_reason=effective_customer_reason,
         customer_response=effective_customer_response,
         customer_next_step=effective_next_step,
+        evidence_id=proposal.evidence_id,
+        source_claim_id=proposal.source_claim_id,
+        removal_scope=proposal.removal_scope,
         form_changes=list(proposal.form_changes),
         contents_item_changes=list(proposal.contents_item_changes),
         source_refs=sorted(_tool_source_refs(proposal.tool_results)),

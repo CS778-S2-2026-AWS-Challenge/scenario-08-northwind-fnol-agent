@@ -2075,7 +2075,10 @@ function App() {
               )}
               {workspaceView === 'files' && (
                 account ? (
-                  <EvidenceHistory currentClaimId={claim.claim_id} />
+                  <EvidenceHistory
+                    currentClaimId={claim.claim_id}
+                    currentClaimRevision={claim.revision}
+                  />
                 ) : (
                   <div className="evidence-history-state">
                     <h2>Sign in to view your evidence history</h2>

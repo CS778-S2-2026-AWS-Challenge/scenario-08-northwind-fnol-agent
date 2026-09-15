@@ -196,6 +196,16 @@ class EvidenceSource(str, Enum):
     EXTERNAL_SYSTEM = 'external_system'
 
 
+class EvidenceHistoryState(str, Enum):
+    AVAILABLE = 'available'
+    REMOVED = 'removed'
+
+
+class EvidenceClaimLinkState(str, Enum):
+    ACTIVE = 'active'
+    DETACHED = 'detached'
+
+
 class FormSource(str, Enum):
     CLAIMANT = 'claimant'
     IMAGE = 'image'
@@ -1100,6 +1110,8 @@ class EvidenceRecord(ContractModel):
     media_type: str | None = None
     size_bytes: int | None = Field(default=None, ge=0)
     source: EvidenceSource
+    claimant_history_state: EvidenceHistoryState = EvidenceHistoryState.AVAILABLE
+    claimant_history_removed_at: datetime | None = None
     references: list[EvidenceReference] = Field(default_factory=list, max_length=50)
     material_version: int = Field(default=1, ge=1)
     material_history: list[EvidenceMaterialVersion] = Field(default_factory=list)
@@ -1117,6 +1129,10 @@ class EvidenceRecord(ContractModel):
 
     @model_validator(mode='after')
     def validate_material_history(self) -> 'EvidenceRecord':
+        if (self.claimant_history_state is EvidenceHistoryState.REMOVED) != (
+            self.claimant_history_removed_at is not None
+        ):
+            raise ValueError('Removed claimant Evidence history must record when it was removed.')
         versions = [item.version for item in self.material_history]
         if versions != list(range(1, self.material_version)):
             raise ValueError(
@@ -1126,6 +1142,32 @@ class EvidenceRecord(ContractModel):
             raise ValueError(
                 'Evidence material history cannot be archived after the record update.'
             )
+        return self
+
+
+class EvidenceClaimLink(ContractModel):
+    """Auditable attachment of one existing Evidence object to another Claim."""
+
+    link_id: str
+    evidence_id: str
+    source_claim_id: str
+    target_claim_id: str
+    customer_id: str
+    state: EvidenceClaimLinkState
+    created_at: datetime
+    updated_at: datetime
+    detached_at: datetime | None = None
+
+    @model_validator(mode='after')
+    def validate_link_state(self) -> 'EvidenceClaimLink':
+        if self.source_claim_id == self.target_claim_id:
+            raise ValueError('An Evidence reuse link must connect two different Claims.')
+        if (self.state is EvidenceClaimLinkState.DETACHED) != (self.detached_at is not None):
+            raise ValueError('A detached Evidence link must record when it was detached.')
+        if self.updated_at < self.created_at:
+            raise ValueError('An Evidence link cannot be updated before it was created.')
+        if self.detached_at is not None and self.detached_at != self.updated_at:
+            raise ValueError('An Evidence link detachment must be its latest update.')
         return self
 
 
@@ -1569,6 +1611,7 @@ class ClaimantEvidence(ContractModel):
 
     evidence_id: str
     claim_id: str
+    source_claim_id: str | None = None
     kind: str
     status: EvidenceStatus
     file_status: EvidenceFileStatus
@@ -1579,6 +1622,8 @@ class ClaimantEvidence(ContractModel):
     related_fields: list[str] = Field(default_factory=list)
     needed_for: list[str] = Field(default_factory=list)
     claimant_note: str | None = None
+    reused: bool = False
+    can_remove: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -1679,6 +1724,7 @@ class ClaimantEvidenceHistoryItem(ContractModel):
     provenance_summary: list[str] = Field(default_factory=list, max_length=20)
     can_reuse: bool = False
     can_remove: bool = False
+    linked_claim_ids: list[str] = Field(default_factory=list, max_length=100)
     created_at: datetime
     updated_at: datetime
 
@@ -1688,6 +1734,25 @@ class ClaimantEvidenceHistoryResponse(ContractModel):
 
     items: list[ClaimantEvidenceHistoryItem]
     page: PageInfo
+
+
+class EvidenceActionRequestPayload(ContractModel):
+    source_claim_id: str = Field(min_length=1, max_length=120)
+    proposal_ref: str = Field(min_length=1, max_length=200)
+    confirmation_ref: str = Field(min_length=1, max_length=200)
+
+
+class ClaimantEvidenceActionResponse(ContractModel):
+    action: Literal['reuse', 'remove']
+    status: Literal['succeeded', 'rejected', 'unavailable', 'failed', 'unknown']
+    reason_code: str = Field(min_length=1, max_length=100)
+    evidence_id: str
+    source_claim_id: str
+    target_claim_id: str
+    revision: int | None = Field(default=None, ge=1)
+    state_change_refs: list[str] = Field(default_factory=list, max_length=20)
+    retryable: bool = False
+    message: str
 
 
 class EvidenceMutationResponse(ContractModel):

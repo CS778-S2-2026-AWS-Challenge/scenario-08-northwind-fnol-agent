@@ -2498,6 +2498,11 @@
         "additionalProperties": false,
         "description": "Claimant-safe evidence projection with storage and extraction details removed.",
         "properties": {
+          "can_remove": {
+            "default": false,
+            "title": "Can Remove",
+            "type": "boolean"
+          },
           "claim_id": {
             "title": "Claim Id",
             "type": "string"
@@ -2565,6 +2570,11 @@
             "title": "Related Fields",
             "type": "array"
           },
+          "reused": {
+            "default": false,
+            "title": "Reused",
+            "type": "boolean"
+          },
           "size_bytes": {
             "anyOf": [
               {
@@ -2578,6 +2588,17 @@
           },
           "source": {
             "$ref": "#/components/schemas/EvidenceSource"
+          },
+          "source_claim_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Claim Id"
           },
           "status": {
             "$ref": "#/components/schemas/EvidenceStatus"
@@ -2599,6 +2620,88 @@
           "updated_at"
         ],
         "title": "ClaimantEvidence",
+        "type": "object"
+      },
+      "ClaimantEvidenceActionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "reuse",
+              "remove"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "evidence_id": {
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "reason_code": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "retryable": {
+            "default": false,
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "source_claim_id": {
+            "title": "Source Claim Id",
+            "type": "string"
+          },
+          "state_change_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "State Change Refs",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "succeeded",
+              "rejected",
+              "unavailable",
+              "failed",
+              "unknown"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target_claim_id": {
+            "title": "Target Claim Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "status",
+          "reason_code",
+          "evidence_id",
+          "source_claim_id",
+          "target_claim_id",
+          "message"
+        ],
+        "title": "ClaimantEvidenceActionResponse",
         "type": "object"
       },
       "ClaimantEvidenceHistoryItem": {
@@ -2630,6 +2733,14 @@
           "kind": {
             "title": "Kind",
             "type": "string"
+          },
+          "linked_claim_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Linked Claim Ids",
+            "type": "array"
           },
           "media_type": {
             "anyOf": [
@@ -4954,6 +5065,36 @@
         "title": "EvaluationState",
         "type": "string"
       },
+      "EvidenceActionRequestPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation_ref": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Confirmation Ref",
+            "type": "string"
+          },
+          "proposal_ref": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Proposal Ref",
+            "type": "string"
+          },
+          "source_claim_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Source Claim Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_claim_id",
+          "proposal_ref",
+          "confirmation_ref"
+        ],
+        "title": "EvidenceActionRequestPayload",
+        "type": "object"
+      },
       "EvidenceCompleteResponse": {
         "additionalProperties": false,
         "properties": {
@@ -5089,6 +5230,14 @@
           "failed"
         ],
         "title": "EvidenceFileStatus",
+        "type": "string"
+      },
+      "EvidenceHistoryState": {
+        "enum": [
+          "available",
+          "removed"
+        ],
+        "title": "EvidenceHistoryState",
         "type": "string"
       },
       "EvidenceListResponse": {
@@ -5327,6 +5476,22 @@
           "claim_id": {
             "title": "Claim Id",
             "type": "string"
+          },
+          "claimant_history_removed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimant History Removed At"
+          },
+          "claimant_history_state": {
+            "$ref": "#/components/schemas/EvidenceHistoryState",
+            "default": "available"
           },
           "claimant_note": {
             "anyOf": [
@@ -16675,6 +16840,256 @@
           }
         },
         "summary": "Decide Extracted Facts",
+        "tags": [
+          "claimant-evidence"
+        ]
+      }
+    },
+    "/api/v1/claims/{claim_id}/evidence/{evidence_id}/remove": {
+      "post": {
+        "operationId": "remove_historical_evidence_api_v1_claims__claim_id__evidence__evidence_id__remove_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "evidence_id",
+            "required": true,
+            "schema": {
+              "title": "Evidence Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Northwind-Anonymous-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Northwind-Anonymous-Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceActionRequestPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimantEvidenceActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Historical Evidence",
+        "tags": [
+          "claimant-evidence"
+        ]
+      }
+    },
+    "/api/v1/claims/{claim_id}/evidence/{evidence_id}/reuse": {
+      "post": {
+        "operationId": "reuse_historical_evidence_api_v1_claims__claim_id__evidence__evidence_id__reuse_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "evidence_id",
+            "required": true,
+            "schema": {
+              "title": "Evidence Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Northwind-Anonymous-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Northwind-Anonymous-Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceActionRequestPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimantEvidenceActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reuse Historical Evidence",
         "tags": [
           "claimant-evidence"
         ]
