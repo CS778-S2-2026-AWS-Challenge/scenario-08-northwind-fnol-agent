@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import ExternalServiceAction, { ExternalServiceOverview } from './ExternalServiceAction'
@@ -19,8 +21,10 @@ const BASE_ACTION = {
   can_request: false,
 }
 
-function renderAction(action, props = {}) {
-  return render(
+function ActionHarness({ action, initialExpanded = false, ...props }) {
+  const [expanded, setExpanded] = useState(initialExpanded)
+
+  return (
     <ExternalServiceAction
       action={{ ...BASE_ACTION, ...action }}
       consentChecked={props.consentChecked ?? false}
@@ -28,7 +32,15 @@ function renderAction(action, props = {}) {
       onRequest={props.onRequest ?? vi.fn()}
       status={props.status ?? 'idle'}
       error={props.error ?? null}
-    />,
+      expanded={expanded}
+      onToggle={() => setExpanded((current) => !current)}
+    />
+  )
+}
+
+function renderAction(action, props = {}) {
+  return render(
+    <ActionHarness action={action} {...props} />,
   )
 }
 
@@ -39,9 +51,9 @@ describe('controlled assessor claimant states', () => {
       consent_status: 'not_recorded',
       can_request: true,
     }
-    const { rerender } = renderAction(action)
+    const { rerender } = renderAction(action, { initialExpanded: true })
 
-    expect(screen.getByText('What will be shared')).toBeInTheDocument()
+    expect(screen.getByText('What Northwind may share')).toBeInTheDocument()
     expect(screen.getByText('Your confirmed incident region')).toBeInTheDocument()
     expect(screen.getByRole('checkbox')).not.toBeChecked()
     expect(
@@ -49,13 +61,14 @@ describe('controlled assessor claimant states', () => {
     ).toBeDisabled()
 
     rerender(
-      <ExternalServiceAction
-        action={{ ...BASE_ACTION, ...action }}
+      <ActionHarness
+        action={action}
         consentChecked
         setConsentChecked={vi.fn()}
         onRequest={vi.fn()}
         status="idle"
         error={null}
+        initialExpanded
       />,
     )
 
@@ -88,19 +101,22 @@ describe('controlled assessor claimant states', () => {
       'A controlled assessor is assigned. The assessment is still in progress.',
     ],
   ])('does not present %s progress as completed service', (status, heading, nextStep) => {
-    renderAction({
-      status,
-      routing: {
-        next_step: nextStep,
-        queue_reference: 'queue-42',
-        assessor_reference: status === 'assigned' ? 'assessor-7' : null,
-        expected_by: '2026-09-16T01:30:00Z',
-        limitations: ['Controlled simulation only; no production provider is connected.'],
+    renderAction(
+      {
+        status,
+        routing: {
+          next_step: nextStep,
+          queue_reference: 'queue-42',
+          assessor_reference: status === 'assigned' ? 'assessor-7' : null,
+          expected_by: '2026-09-16T01:30:00Z',
+          limitations: ['Controlled simulation only; no production provider is connected.'],
+        },
       },
-    })
+      { initialExpanded: true },
+    )
 
     expect(screen.getByText(heading)).toBeInTheDocument()
-    expect(screen.getByText(nextStep)).toBeInTheDocument()
+    expect(screen.getAllByText(nextStep)).toHaveLength(2)
     expect(
       screen.getAllByText(/Controlled simulation only; no production provider is connected/i),
     ).toHaveLength(2)
@@ -109,16 +125,21 @@ describe('controlled assessor claimant states', () => {
   })
 
   it('keeps terminal failure with Northwind and exposes no claimant retry control', () => {
-    renderAction({
-      status: 'terminal_failure',
-      failure_code: 'access_denied',
-      can_request: false,
-    })
+    renderAction(
+      {
+        status: 'terminal_failure',
+        failure_code: 'access_denied',
+        can_request: false,
+      },
+      { initialExpanded: true },
+    )
 
     expect(screen.getByText('Assessment request not sent')).toBeInTheDocument()
-    expect(screen.getByText(/Northwind must review the request before trying again/i)).toBeInTheDocument()
+    expect(
+      screen.getAllByText(/Northwind must review the request before trying again/i),
+    ).toHaveLength(2)
     expect(screen.getByText(/Northwind needs to review this before another request/i)).toBeInTheDocument()
-    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /retry assessment request/i })).not.toBeInTheDocument()
   })
 
   it('shows the persistent claimant-safe assessor status without inventing provider completion', () => {
@@ -155,19 +176,26 @@ describe('controlled assessor claimant states', () => {
 })
 
 describe('an assessment request whose outcome is not confirmed', () => {
-  it('says the request may already have arrived and not to resend it', () => {
+  it('summarises the outcome inline and discloses its details on request', async () => {
+    const user = userEvent.setup()
     renderAction({ status: 'awaiting_reconciliation', failure_code: 'timeout' })
 
-    expect(screen.getByText('Assessment request outcome not confirmed')).toBeInTheDocument()
-    expect(
-      screen.getByText(/may already have reached the assessor/i),
-    ).toHaveTextContent(/please do not resend it/i)
+    const trigger = screen.getByRole('button', { name: /request a vehicle damage assessment/i })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(trigger).toHaveTextContent(/may already have reached the assessor/i)
+    expect(trigger).toHaveTextContent(/please do not resend it/i)
+    expect(screen.getByText('Assessment request outcome not confirmed')).not.toBeVisible()
+
+    await user.click(trigger)
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('Assessment request outcome not confirmed')).toBeVisible()
   })
 
   it('offers no retry control, so the claimant cannot send a second request', () => {
     renderAction({ status: 'awaiting_reconciliation', failure_code: 'timeout' })
 
-    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /retry assessment request/i })).not.toBeInTheDocument()
   })
 
   it('does not present it as a failure the claimant may retry', () => {
@@ -179,13 +207,28 @@ describe('an assessment request whose outcome is not confirmed', () => {
     expect(screen.queryByText(/Assessment request not sent/i)).not.toBeInTheDocument()
   })
 
-  it('still offers the retry control for a failure that never reached the assessor', () => {
+  it('still offers the retry control for a failure that never reached the assessor', async () => {
+    const user = userEvent.setup()
     renderAction({ status: 'retryable_failure', failure_code: 'timeout', can_request: true })
 
+    const trigger = screen.getByRole('button', { name: /request a vehicle damage assessment/i })
+    await user.click(trigger)
+
     expect(screen.getByRole('button', { name: /retry assessment request/i })).toBeInTheDocument()
-    expect(screen.getByText(/can safely retry the same request/i)).toBeInTheDocument()
+    expect(trigger).toHaveTextContent(/can safely retry the same request/i)
     expect(
       screen.queryByText('Assessment request outcome not confirmed'),
     ).not.toBeInTheDocument()
+  })
+
+  it('weakens a completed action while keeping the result available', () => {
+    const { container } = renderAction({
+      status: 'queued',
+      routing: { next_step: 'Wait for the assessor to contact you.' },
+    })
+
+    expect(container.querySelector('.conversation-action-card')).toHaveClass('is-completed')
+    expect(screen.getByRole('button', { name: /vehicle damage assessment/i }))
+      .toHaveTextContent('✓ Request queued · View')
   })
 })

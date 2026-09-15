@@ -1,3 +1,5 @@
+import { ConversationActionCard } from './ConversationContext.jsx'
+
 // Claimant wording approved by the AT-10 controlled assessor scenario, one entry per
 // provider-neutral failure code. The claim itself is unchanged by a failure, so this is
 // what the claimant sees when they return to a claim whose last attempt did not succeed.
@@ -131,6 +133,8 @@ export default function ExternalServiceAction({
   onRequest,
   status,
   error,
+  expanded = false,
+  onToggle,
 }) {
   const isRecordingConsent = status === 'granting-service-consent'
   const isRequesting = status === 'requesting-assessor'
@@ -142,18 +146,32 @@ export default function ExternalServiceAction({
   const retryableFailure = action.status === 'retryable_failure'
   const awaitingReconciliation = action.status === 'awaiting_reconciliation'
   const recordedFailure = !error && (retryableFailure || action.status === 'terminal_failure')
+  const state = claimantStatusCopy(action)
+  const cardStatus = isRecordingConsent
+    ? 'Recording permission…'
+    : isRequesting
+      ? 'Sending request…'
+      : succeeded
+        ? `✓ ${state.label} · View`
+        : state.label
 
   return (
-    <section className="external-service" aria-labelledby="external-service-title">
-      <p className="transfer-label">Optional next step</p>
-      <h2 id="external-service-title">Request a vehicle damage assessment</h2>
-      <p>{action.purpose}</p>
+    <ConversationActionCard
+      icon="↗"
+      title={succeeded ? 'Vehicle damage assessment' : 'Request a vehicle damage assessment'}
+      description={error?.message || state.detail}
+      status={cardStatus}
+      completed={succeeded}
+      expanded={expanded}
+      onClick={onToggle}
+    >
+      <p className="conversation-action-purpose">{action.purpose}</p>
       <dl className="service-details">
         <div><dt>Service</dt><dd>{action.service_name}</dd></div>
         <div><dt>Provider</dt><dd>{action.provider}</dd></div>
       </dl>
-      <details className="service-disclosure">
-        <summary>What will be shared</summary>
+      <div className="service-sharing-details">
+        <h3>What Northwind may share</h3>
         <ul className="shared-data-list">
           {action.shared_data_summary.map((item) => <li key={item}>{item}</li>)}
         </ul>
@@ -162,7 +180,7 @@ export default function ExternalServiceAction({
             {limitations.map((limitation) => <p key={limitation}>{limitation}</p>)}
           </div>
         )}
-      </details>
+      </div>
       {needsConsent && (
         <label className="service-consent">
           <input type="checkbox" checked={consentChecked} onChange={(event) => setConsentChecked(event.target.checked)} disabled={isBusy} />
@@ -206,6 +224,6 @@ export default function ExternalServiceAction({
           {isRecordingConsent ? 'Recording permission...' : isRequesting ? 'Sending request...' : (error?.retryable || retryableFailure) ? 'Retry assessment request' : needsConsent ? 'Agree and request assessor' : 'Request assessor'}
         </button>
       )}
-    </section>
+    </ConversationActionCard>
   )
 }
