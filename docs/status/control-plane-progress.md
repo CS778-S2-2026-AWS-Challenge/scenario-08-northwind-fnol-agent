@@ -1,6 +1,6 @@
 # Control Plane implementation status
 
-Updated: 2026-09-09
+Updated: 2026-09-15
 
 This status record reports what is currently backed by the repository and what
 still requires implementation. It is evidence, not a replacement for the
@@ -13,9 +13,10 @@ in `docs/api.md`.
   approval for high-impact publication, publication, withdrawal, supersession,
   rollback, idempotency, and configuration audit events.
 - Model configurations use `configuration_key=profile_id` and can publish one catalog
-  containing `qwen-local` as primary plus `nowcoding-gpt56terra` as a selectable claimant
-  profile. Publication validation requires structured output and tool calling to be declared;
-  credentials remain secret references and are never returned to claimant capabilities.
+  containing `qwen-local` as primary plus `nowcoding-gpt55` as a selectable claimant
+  profile. Publication validation matches every field against one exact deployment-owned binding;
+  the binding list itself does not publish a model. Credentials remain outside both the binding
+  manifest and Control Plane records; only an environment-variable name is stored.
 - Release Sets and Runtime Snapshots for one complete published configuration
   boundary per environment and runtime profile.
 - Customer and staff account creation, revision-checked updates, safe session listing, and active-

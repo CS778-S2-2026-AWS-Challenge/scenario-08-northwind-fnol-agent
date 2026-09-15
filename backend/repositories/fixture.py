@@ -13,6 +13,7 @@ from backend.domain.external_services import (
     ExternalTaskResult,
     ExternalTaskResultVerification,
     assert_disclosure_within_consent,
+    assert_external_task_registry_compatible,
     assert_request_matches_task,
     assert_result_advance_is_permitted,
     assert_result_evidence_is_linked,
@@ -30,6 +31,7 @@ from backend.domain.models import (
     ClaimCollaborationRequest,
     ClaimCoworkerRecord,
     CustomerUpdateRecord,
+    EvidenceClaimLink,
     EvidenceRecord,
     FollowUpRecord,
     FollowUpStatus,
@@ -54,12 +56,22 @@ from backend.domain.staff_agent import (
     StaffAgentMessage,
     StaffAgentSession,
 )
+from backend.domain.staff_agent_tools import (
+    STAFF_SESSION_MAX_EXAMINED,
+    STAFF_SESSION_MESSAGE_MAX_EXAMINED,
+    StaffClaimSearchCandidate,
+    StaffSessionSearchCandidate,
+    build_staff_claim_search_candidate,
+    staff_claim_search_matches,
+    staff_session_search_matches,
+)
 from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.protocols import (
     DemoSeedConflict,
     IdempotencyConflict,
     IdempotencyRecord,
     PersistenceRepository,
+    RepositorySearchLimitExceeded,
     RevisionConflict,
     ValidationSeedGraph,
     validate_staff_agent_execution,
@@ -77,6 +89,8 @@ class FixtureRepository(PersistenceRepository):
         self._claims: dict[str, WorkingClaim] = {}
         self._audit_events: dict[str, AuditEventEnvelope] = {}
         self._sessions: dict[str, SessionRecord] = {}
+        self._session_ids_by_claim: dict[tuple[str, str], list[str]] = {}
+        self._message_ids_by_session: dict[str, list[str]] = {}
         self._follow_ups: dict[str, FollowUpRecord] = {}
         self._messages: dict[str, MessageRecord] = {}
         self._runtime_traces: dict[str, RuntimeTraceRecord] = {}
@@ -88,6 +102,7 @@ class FixtureRepository(PersistenceRepository):
         self._branch_evaluations: dict[str, BranchEvaluationRecord] = {}
         self._assessor_routing_operations: dict[str, AssessorRoutingOperation] = {}
         self._evidence: dict[str, EvidenceRecord] = {}
+        self._evidence_claim_links: dict[tuple[str, str], EvidenceClaimLink] = {}
         self._external_tasks: dict[str, ExternalTaskRecord] = {}
         self._external_task_requests: dict[str, ExternalTaskRequest] = {}
         self._external_task_evidence_links: dict[tuple[str, str], ExternalTaskEvidenceLink] = {}
@@ -135,6 +150,7 @@ class FixtureRepository(PersistenceRepository):
             'branch_evaluations': len(self._branch_evaluations),
             'assessor_routing_operations': len(self._assessor_routing_operations),
             'evidence': len(self._evidence),
+            'evidence_claim_links': len(self._evidence_claim_links),
             'external_tasks': len(self._external_tasks),
             'external_task_requests': len(self._external_task_requests),
             'external_task_evidence_links': len(self._external_task_evidence_links),
@@ -153,6 +169,8 @@ class FixtureRepository(PersistenceRepository):
         self._claims.clear()
         self._audit_events.clear()
         self._sessions.clear()
+        self._session_ids_by_claim.clear()
+        self._message_ids_by_session.clear()
         self._follow_ups.clear()
         self._messages.clear()
         self._runtime_traces.clear()
@@ -163,6 +181,7 @@ class FixtureRepository(PersistenceRepository):
         self._branch_evaluations.clear()
         self._assessor_routing_operations.clear()
         self._evidence.clear()
+        self._evidence_claim_links.clear()
         self._external_tasks.clear()
         self._external_task_requests.clear()
         self._external_task_evidence_links.clear()
@@ -311,7 +330,37 @@ class FixtureRepository(PersistenceRepository):
 
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
         self._claims[claim.claim_id] = deepcopy(claim)
+        self._store_session(session)
+
+    def _store_message(self, message: MessageRecord) -> None:
+        """Store a message and maintain the bounded-search child index."""
+
+        self._messages[message.message_id] = deepcopy(message)
+        message_ids = self._message_ids_by_session.setdefault(message.session_id, [])
+        if message.message_id not in message_ids:
+            message_ids.append(message.message_id)
+        message_ids.sort(
+            key=lambda message_id: (
+                self._messages[message_id].created_at,
+                message_id,
+            )
+        )
+
+    def _store_session(self, session: SessionRecord) -> None:
         self._sessions[session.session_id] = deepcopy(session)
+        self._message_ids_by_session.setdefault(session.session_id, [])
+        session_ids = self._session_ids_by_claim.setdefault(
+            (session.claim_id, session.customer_id), []
+        )
+        if session.session_id not in session_ids:
+            session_ids.append(session.session_id)
+        session_ids.sort(
+            key=lambda session_id: (
+                self._sessions[session_id].started_at,
+                session_id,
+            ),
+            reverse=True,
+        )
 
     def seed_validation_graph(self, graph: ValidationSeedGraph) -> IdempotencyRecord | None:
         """Serialize validation seeds so a same-key race cannot create two graphs."""
@@ -561,7 +610,7 @@ class FixtureRepository(PersistenceRepository):
         claim = self._claims.get(session.claim_id)
         if claim is None or claim.customer_id != session.customer_id:
             raise KeyError(session.claim_id)
-        self._sessions[session.session_id] = deepcopy(session)
+        self._store_session(session)
 
     def get_follow_up(
         self,
@@ -670,7 +719,7 @@ class FixtureRepository(PersistenceRepository):
             prepared_idempotency = deepcopy(idempotency)
 
             self._claims[claim.claim_id] = prepared_claim
-            self._sessions[session.session_id] = prepared_session
+            self._store_session(prepared_session)
             self._follow_ups[follow_up.follow_up_id] = prepared_follow_up
             self._idempotency[lookup] = prepared_idempotency
 
@@ -776,10 +825,8 @@ class FixtureRepository(PersistenceRepository):
 
             self._claims[claim.claim_id] = deepcopy(claim)
             if replaced_active_session is not None:
-                self._sessions[replaced_active_session.session_id] = deepcopy(
-                    replaced_active_session
-                )
-            self._sessions[session.session_id] = deepcopy(session)
+                self._store_session(replaced_active_session)
+            self._store_session(session)
             if resolved_follow_up is not None:
                 self._follow_ups[resolved_follow_up.follow_up_id] = deepcopy(resolved_follow_up)
             if branch_evaluation is not None:
@@ -852,6 +899,74 @@ class FixtureRepository(PersistenceRepository):
             reverse=True,
         )
 
+    def search_claims_internal(
+        self, filters: dict[str, object], limit: int
+    ) -> list[StaffClaimSearchCandidate]:
+        """Apply registered Claim filters before returning a bounded candidate set."""
+        matches: list[StaffClaimSearchCandidate] = []
+        for claim in sorted(self._claims.values(), key=lambda item: item.updated_at, reverse=True):
+            candidate = build_staff_claim_search_candidate(
+                claim,
+                [item for item in self._evidence.values() if item.claim_id == claim.claim_id],
+                [item for item in self._handoffs.values() if item.claim_id == claim.claim_id],
+            )
+            if not staff_claim_search_matches(candidate, filters):
+                continue
+            matches.append(candidate.model_copy(deep=True))
+            if len(matches) >= limit:
+                break
+        return matches
+
+    def search_sessions_internal(
+        self,
+        claim_id: str,
+        customer_id: str,
+        filters: dict[str, object],
+        limit: int,
+    ) -> list[StaffSessionSearchCandidate]:
+        """Search only a bounded Claim-scoped Session and message set."""
+
+        if self.get_claim(claim_id, customer_id) is None:
+            return []
+        session_ids = self._session_ids_by_claim.get((claim_id, customer_id), [])
+        matches: list[StaffSessionSearchCandidate] = []
+        for examined, session_id in enumerate(
+            session_ids[: STAFF_SESSION_MAX_EXAMINED + 1], start=1
+        ):
+            if examined > STAFF_SESSION_MAX_EXAMINED:
+                raise RepositorySearchLimitExceeded(
+                    'The Session search exceeded its maximum examined set; narrow the filters.'
+                )
+            session = self._sessions[session_id]
+            session_filter = filters.get('session_id')
+            if session_filter and session.session_id != session_filter:
+                continue
+            if (
+                filters.get('started_date')
+                and str(filters['started_date']) != session.started_at.date().isoformat()
+            ):
+                continue
+            if filters.get('status') and str(filters['status']) != session.status.value:
+                continue
+            message_ids = self._message_ids_by_session.get(session.session_id, [])
+            if len(message_ids) > STAFF_SESSION_MESSAGE_MAX_EXAMINED:
+                raise RepositorySearchLimitExceeded(
+                    'The Session message search exceeded its maximum examined set; '
+                    'narrow the filters.'
+                )
+            messages = [self._messages[message_id] for message_id in message_ids]
+            if not staff_session_search_matches(session, messages, filters):
+                continue
+            matches.append(
+                StaffSessionSearchCandidate(
+                    session=deepcopy(session),
+                    message_count=len(messages),
+                )
+            )
+            if len(matches) >= limit:
+                break
+        return matches
+
     def save_message(self, message: MessageRecord, customer_id: str) -> None:
         if (
             self.get_claim(message.claim_id, customer_id) is None
@@ -863,7 +978,7 @@ class FixtureRepository(PersistenceRepository):
             is None
         ):
             raise KeyError(message.claim_id)
-        self._messages[message.message_id] = deepcopy(message)
+        self._store_message(message)
 
     def save_staff_agent_session(self, session: StaffAgentSession) -> None:
         existing = self._staff_agent_sessions.get(session.session_id)
@@ -1004,8 +1119,8 @@ class FixtureRepository(PersistenceRepository):
         if existing is not None and existing.request_fingerprint != idempotency.request_fingerprint:
             raise IdempotencyConflict(idempotency.key)
         self._claims[claim.claim_id] = deepcopy(claim)
-        self._sessions[session.session_id] = deepcopy(session)
-        self._messages[message.message_id] = deepcopy(message)
+        self._store_session(session)
+        self._store_message(message)
         self._idempotency[lookup] = deepcopy(idempotency)
 
     def get_message(
@@ -1049,6 +1164,18 @@ class FixtureRepository(PersistenceRepository):
             if message.claim_id == claim_id and message.session_id == session_id
         ]
         return sorted(messages, key=lambda message: (message.created_at, message.message_id))
+
+    def list_recent_messages(
+        self,
+        claim_id: str,
+        session_id: str,
+        customer_id: str,
+        limit: int,
+    ) -> list[MessageRecord]:
+        if self.get_session(claim_id, session_id, customer_id) is None:
+            return []
+        message_ids = self._message_ids_by_session.get(session_id, [])[-limit:]
+        return [deepcopy(self._messages[message_id]) for message_id in message_ids]
 
     def save_agent_decision(self, decision: AgentDecisionRecord, customer_id: str) -> None:
         if (
@@ -1181,6 +1308,11 @@ class FixtureRepository(PersistenceRepository):
         link: ExternalTaskEvidenceLink,
         branch_evaluation: BranchEvaluationRecord,
         customer_id: str,
+        *,
+        staff_action: StaffActionRecord | None = None,
+        idempotency: IdempotencyRecord | None = None,
+        required_staff_id: str | None = None,
+        required_staff_revision: int | None = None,
     ) -> None:
         """Atomically settle one unknown assessor operation in fixture storage.
 
@@ -1194,6 +1326,10 @@ class FixtureRepository(PersistenceRepository):
             link: Immutable relationship between the task and material.
             branch_evaluation: Applied branch projection for the new Claim revision.
             customer_id: Customer who owns every record.
+            staff_action: Optional completed reconciliation action persisted atomically.
+            idempotency: Optional staff mutation replay record persisted atomically.
+            required_staff_id: Staff identity that must remain claimable through the write.
+            required_staff_revision: Exact presence revision guarded by the write.
 
         Returns:
             None.
@@ -1206,6 +1342,34 @@ class FixtureRepository(PersistenceRepository):
 
         with self._claim_mutation_lock:
             current_claim = self._validate_claim_mutation(claim, expected_revision)
+            if (staff_action is None) is not (idempotency is None):
+                raise KeyError(claim.claim_id)
+            presence = None
+            if staff_action is not None and idempotency is not None:
+                presence = self._staff_presence.get(required_staff_id or '')
+                if (
+                    required_staff_id is None
+                    or presence is None
+                    or not presence.is_claimable(datetime.now(UTC))
+                    or (
+                        required_staff_revision is not None
+                        and presence.revision != required_staff_revision
+                    )
+                    or claim.assignee_id != required_staff_id
+                    or staff_action.claim_id != claim.claim_id
+                    or staff_action.assigned_to != required_staff_id
+                    or staff_action.completed_by != required_staff_id
+                    or staff_action.status is not StaffActionStatus.COMPLETED
+                    or task.task_id not in staff_action.source_refs
+                    or idempotency.actor_id != required_staff_id
+                    or idempotency.claim_id != claim.claim_id
+                    or idempotency.action_code != 'external.reconcile_response'
+                    or idempotency.target_ref != task.task_id
+                ):
+                    raise KeyError(claim.claim_id)
+                lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+                if lookup in self._idempotency or staff_action.action_id in self._staff_actions:
+                    raise IdempotencyConflict(idempotency.key)
             current_task = self._external_tasks.get(task.task_id)
             current_operation = self._assessor_routing_operations.get(operation.operation_id)
             if (
@@ -1269,6 +1433,15 @@ class FixtureRepository(PersistenceRepository):
             self._evidence[evidence.evidence_id] = deepcopy(evidence)
             self._external_task_evidence_links[(link.claim_id, link.evidence_id)] = deepcopy(link)
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
+            if staff_action is not None and idempotency is not None and presence is not None:
+                self._staff_actions[staff_action.action_id] = deepcopy(staff_action)
+                self._idempotency[(idempotency.actor_id, idempotency.route, idempotency.key)] = (
+                    deepcopy(idempotency)
+                )
+                if required_staff_revision is not None:
+                    self._staff_presence[required_staff_id or ''] = deepcopy(
+                        presence.model_copy(update={'revision': presence.revision + 1})
+                    )
 
     def save_assessor_routing_preparation(
         self,
@@ -1522,9 +1695,9 @@ class FixtureRepository(PersistenceRepository):
             raise IdempotencyConflict(idempotency.key)
 
         self._claims[claim.claim_id] = deepcopy(claim)
-        self._sessions[session.session_id] = deepcopy(session)
-        self._messages[claimant_message.message_id] = deepcopy(claimant_message)
-        self._messages[agent_message.message_id] = deepcopy(agent_message)
+        self._store_session(session)
+        self._store_message(claimant_message)
+        self._store_message(agent_message)
         self._decisions[decision.decision_id] = deepcopy(decision)
         if handoff is not None:
             self._handoffs[handoff.handoff_id] = deepcopy(handoff)
@@ -1618,9 +1791,9 @@ class FixtureRepository(PersistenceRepository):
             and existing_idempotency.request_fingerprint != idempotency.request_fingerprint
         ):
             raise IdempotencyConflict(idempotency.key)
-        self._sessions[session.session_id] = deepcopy(session)
-        self._messages[claimant_message.message_id] = deepcopy(claimant_message)
-        self._messages[agent_message.message_id] = deepcopy(agent_message)
+        self._store_session(session)
+        self._store_message(claimant_message)
+        self._store_message(agent_message)
         self._runtime_traces[runtime_trace.trace_id] = deepcopy(runtime_trace)
         self._idempotency[lookup] = deepcopy(idempotency)
 
@@ -1733,6 +1906,81 @@ class FixtureRepository(PersistenceRepository):
             key=lambda evidence: (evidence.created_at, evidence.evidence_id),
         )
 
+    def get_evidence_claim_link(
+        self, target_claim_id: str, evidence_id: str, customer_id: str
+    ) -> EvidenceClaimLink | None:
+        if self.get_claim(target_claim_id, customer_id) is None:
+            return None
+        link = self._evidence_claim_links.get((target_claim_id, evidence_id))
+        return deepcopy(link) if link is not None and link.customer_id == customer_id else None
+
+    def list_evidence_claim_links(
+        self, customer_id: str, target_claim_id: str | None = None
+    ) -> list[EvidenceClaimLink]:
+        return sorted(
+            (
+                deepcopy(link)
+                for link in self._evidence_claim_links.values()
+                if link.customer_id == customer_id
+                and (target_claim_id is None or link.target_claim_id == target_claim_id)
+            ),
+            key=lambda link: (link.created_at, link.link_id),
+        )
+
+    def save_evidence_action_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        evidence: EvidenceRecord | None,
+        link: EvidenceClaimLink | None,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+        branch_evaluation: BranchEvaluationRecord,
+    ) -> None:
+        with self._claim_mutation_lock:
+            self._validate_claim_mutation(claim, expected_revision)
+            self._validate_branch_evaluation(claim, branch_evaluation)
+            prepared = self._prepare_audit_events(claim, (audit_event,))
+            if (
+                idempotency.actor_id != claim.customer_id
+                or idempotency.claim_id != claim.claim_id
+                or idempotency.session_id != (claim.active_session_id or '')
+            ):
+                raise KeyError(claim.claim_id)
+            if evidence is not None:
+                source_claim = self._claims.get(evidence.claim_id)
+                if source_claim is None or source_claim.customer_id != claim.customer_id:
+                    raise KeyError(evidence.evidence_id)
+            if link is not None and (
+                link.target_claim_id != claim.claim_id or link.customer_id != claim.customer_id
+            ):
+                raise KeyError(link.link_id)
+            if link is not None:
+                source_evidence = self._evidence.get(link.evidence_id)
+                source_claim = self._claims.get(link.source_claim_id)
+                if (
+                    source_evidence is None
+                    or source_evidence.claim_id != link.source_claim_id
+                    or source_claim is None
+                    or source_claim.customer_id != claim.customer_id
+                ):
+                    raise KeyError(link.evidence_id)
+            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            existing = self._idempotency.get(lookup)
+            if existing is not None:
+                raise IdempotencyConflict(idempotency.key)
+            self._claims[claim.claim_id] = deepcopy(claim)
+            if evidence is not None:
+                self._evidence[evidence.evidence_id] = deepcopy(evidence)
+            if link is not None:
+                self._evidence_claim_links[(link.target_claim_id, link.evidence_id)] = deepcopy(
+                    link
+                )
+            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
+            self._idempotency[lookup] = idempotency
+            for event in prepared:
+                self._audit_events[event.event_id] = deepcopy(event)
+
     def save_evidence_mutation(
         self,
         claim: WorkingClaim,
@@ -1789,6 +2037,8 @@ class FixtureRepository(PersistenceRepository):
         existing = self._external_tasks.get(task.task_id)
         if existing is not None and existing.claim_id != task.claim_id:
             raise IdempotencyConflict(task.task_id)
+        if existing == task:
+            return
         immutable_identity = (
             'claim_id',
             'service_identity',
@@ -1802,6 +2052,7 @@ class FixtureRepository(PersistenceRepository):
             )
             if changed_identity or task.updated_at <= existing.updated_at:
                 raise IdempotencyConflict(task.task_id)
+        assert_external_task_registry_compatible(task)
         self._external_tasks[task.task_id] = deepcopy(task)
 
     def reserve_external_dispatch(
@@ -2436,7 +2687,7 @@ class FixtureRepository(PersistenceRepository):
         if handoff is not None:
             self._handoffs[handoff.handoff_id] = deepcopy(handoff)
         if message is not None:
-            self._messages[message.message_id] = deepcopy(message)
+            self._store_message(message)
         if staff_agent_execution is not None:
             self._staff_agent_executions[staff_agent_execution.execution_id] = deepcopy(
                 staff_agent_execution

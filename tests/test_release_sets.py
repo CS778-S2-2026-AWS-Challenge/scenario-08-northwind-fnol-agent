@@ -163,7 +163,7 @@ def test_release_set_accepts_keyed_model_profiles_and_rejects_profile_mismatch()
         )
 
     qwen = model_record('qwen-local')
-    gpt = model_record('nowcoding-gpt56terra')
+    gpt = model_record('nowcoding-gpt55')
     configurations.create(qwen)
     configurations.create(gpt)
     refs = {
@@ -171,7 +171,7 @@ def test_release_set_accepts_keyed_model_profiles_and_rejects_profile_mismatch()
             configuration_id=qwen.configuration_id,
             revision=qwen.revision,
         ),
-        'model:nowcoding-gpt56terra': ConfigurationReference(
+        'model:nowcoding-gpt55': ConfigurationReference(
             configuration_id=gpt.configuration_id,
             revision=gpt.revision,
         ),
@@ -200,7 +200,7 @@ def test_release_set_accepts_keyed_model_profiles_and_rejects_profile_mismatch()
                 environment='test',
                 runtime_profile='fixture',
                 configuration_refs={
-                    'model:nowcoding-gpt56terra': ConfigurationReference(
+                    'model:nowcoding-gpt55': ConfigurationReference(
                         configuration_id=qwen.configuration_id,
                         revision=qwen.revision,
                     )

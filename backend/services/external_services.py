@@ -13,6 +13,10 @@ from backend.domain.audit import (
     AuditSubjectType,
     AuditVisibility,
 )
+from backend.domain.external_service_registry import (
+    ExternalLifecycleStatus,
+    build_lifecycle_projection,
+)
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
     ASSESSOR_REQUESTED_ACTION,
@@ -235,8 +239,36 @@ def claimant_assessor_action(
     else:
         status = ClaimantExternalServiceStatus.CONSENT_REQUIRED
 
+    lifecycle_status = {
+        ClaimantExternalServiceStatus.CONSENT_REQUIRED: ExternalLifecycleStatus.CONSENT_REQUIRED,
+        ClaimantExternalServiceStatus.READY_TO_REQUEST: ExternalLifecycleStatus.AUTHORISED,
+        ClaimantExternalServiceStatus.ASSIGNED: ExternalLifecycleStatus.ASSIGNED,
+        ClaimantExternalServiceStatus.QUEUED: ExternalLifecycleStatus.QUEUED,
+        ClaimantExternalServiceStatus.RETRYABLE_FAILURE: (
+            ExternalLifecycleStatus.RETRYABLE_FAILURE
+        ),
+        ClaimantExternalServiceStatus.TERMINAL_FAILURE: ExternalLifecycleStatus.TERMINAL_FAILURE,
+        ClaimantExternalServiceStatus.AWAITING_RECONCILIATION: (
+            ExternalLifecycleStatus.UNKNOWN_OUTCOME
+        ),
+    }[status]
+    canonical_projection = build_lifecycle_projection(
+        service_identity=ASSESSOR_SERVICE_IDENTITY,
+        operation_status=lifecycle_status,
+    )
+
     return ClaimantExternalServiceAction(
         service_identity=ASSESSOR_SERVICE_IDENTITY,
+        registry_version=canonical_projection.registry_version,
+        lifecycle_status=canonical_projection.operation_status.value,
+        catalogue_reference=canonical_projection.catalogue_reference,
+        capability_provenance=canonical_projection.provenance.value,
+        access_form=canonical_projection.access_form,
+        status_label=canonical_projection.status_label,
+        status_detail=canonical_projection.status_detail,
+        pending_owner=canonical_projection.pending_owner,
+        next_action=canonical_projection.next_action,
+        limitation=canonical_projection.limitation,
         service_name=_ACTION_SERVICE_NAME,
         provider=_ACTION_PROVIDER,
         purpose=_ACTION_PURPOSE,

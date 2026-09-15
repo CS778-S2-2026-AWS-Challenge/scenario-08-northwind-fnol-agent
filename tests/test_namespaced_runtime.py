@@ -69,11 +69,18 @@ class SequenceToolGateway:
                     'customer_reason': 'The current claim context was read.',
                     'customer_response': 'I have read the current claim context.',
                     'customer_next_step': {
-                        'status': 'continue_current_report',
-                        'summary': 'Continue the report when ready.',
+                        'status': 'confirmation_required',
+                        'summary': 'Review the incident description.',
                         'responsible_party': 'claimant',
-                        'required_items': [],
+                        'required_items': ['incident.description'],
                     },
+                    'form_changes': [
+                        {
+                            'field_code': 'incident.description',
+                            'value': 'Please read the current report.',
+                            'reported_text': 'Please read the current report.',
+                        }
+                    ],
                     'source_refs': [],
                 },
                 provider_model='qwen3.8-27b',
@@ -159,7 +166,7 @@ def published_model_catalog(
     records: dict[str, ConfigurationRecord] = {}
     for profile_id, model_identifier, base_url in (
         ('qwen-local', 'qwen3.8-27b', 'http://100.71.25.5:8080/v1'),
-        ('nowcoding-gpt56terra', 'gpt-5.6-terra', 'https://nowcoding.ai/v1'),
+        ('nowcoding-gpt55', 'gpt-5.5', 'https://nowcoding.ai/v1'),
     ):
         record = ConfigurationRecord(
             configuration_id=f'cfg_{profile_id}',
@@ -298,13 +305,16 @@ def test_namespaced_runtime_applies_claim_mutation_and_persists_runtime_records(
         body = response.json()
         assert body['claim_revision'] == 2
         assert body['decision'] is not None
-        assert body['agent_message']['content']['text'] == (
+        assert body['agent_message']['content']['text'].startswith(
             'I have read the current claim context.'
         )
 
         stored_claim = repository.get_claim(claim_id, 'cus_demo')
         assert stored_claim is not None
         assert stored_claim.revision == 2
+        assert stored_claim.form['incident.description'].value == (
+            'Please read the current report.'
+        )
         assert len(repository.list_agent_decisions(claim_id, 'cus_demo')) == 1
         trace = repository.find_runtime_trace_for_trigger(
             claim_id,
@@ -322,10 +332,23 @@ def test_namespaced_runtime_applies_claim_mutation_and_persists_runtime_records(
         )
         assert runtime_turn is not None
         assert runtime_turn.execution_plan.status == 'executed'
+        assert [item.action_code for item in runtime_turn.action_envelopes] == [
+            'conversation.answer',
+            'claim.apply_fact_patch',
+        ]
+        assert all(item.status == 'executed' for item in runtime_turn.action_envelopes)
         assert runtime_turn.result.resulting_claim_revision == 2
         assert runtime_turn.tool_results[0].output['claim_id'] == claim_id
         assert runtime_turn.tool_results[0].output['workflow_state'] == 'collecting'
         assert runtime_turn.tool_results[0].output['form'] == {}
+        idempotency = repository.find_idempotency(
+            'cus_demo',
+            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+            'runtime-message',
+        )
+        assert idempotency is not None
+        assert idempotency.action_code == 'claim.apply_fact_patch'
+        assert idempotency.target_ref == claim_id
 
         assert len(gateway.requests) == 2
 
@@ -395,7 +418,7 @@ def test_model_profile_can_change_between_turns_without_new_claim(
         claim_id = created.json()['claim']['claim_id']
         session_id = created.json()['session']['session_id']
 
-        for index, profile_id in enumerate(('qwen-local', 'nowcoding-gpt56terra'), start=1):
+        for index, profile_id in enumerate(('qwen-local', 'nowcoding-gpt55'), start=1):
             response = client.post(
                 f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
                 headers={
@@ -416,12 +439,12 @@ def test_model_profile_can_change_between_turns_without_new_claim(
         assert stored_claim.json()['revision'] == 3
         session = client.get(f'/api/v1/claims/{claim_id}/sessions/{session_id}', headers=headers)
         assert session.status_code == 200
-        assert session.json()['model_profile_id'] == 'nowcoding-gpt56terra'
+        assert session.json()['model_profile_id'] == 'nowcoding-gpt55'
         assert [request.model_profile_id for request in gateway.requests] == [
             'qwen-local',
             'qwen-local',
-            'nowcoding-gpt56terra',
-            'nowcoding-gpt56terra',
+            'nowcoding-gpt55',
+            'nowcoding-gpt55',
         ]
         second_turn_content = gateway.requests[2].messages[1].content
         assert second_turn_content is not None
@@ -454,9 +477,9 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection() -> None:
         model_gateway_registry=registry,
     )
     request = SimpleNamespace(app=app)
-    selected = model_configuration(request, 'nowcoding-gpt56terra')
+    selected = model_configuration(request, 'nowcoding-gpt55')
     assert selected is not None
-    assert selected.model_identifier == 'gpt-5.6-terra'
+    assert selected.model_identifier == 'gpt-5.5'
     assert model_configuration(request, 'missing-profile') is None
     with TestClient(app) as client:
         headers = {'Authorization': 'Bearer synthetic-claimant'}
@@ -466,7 +489,7 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection() -> None:
         assert body['default_model_profile_id'] == 'qwen-local'
         assert [item['id'] for item in body['models']] == [
             'qwen-local',
-            'nowcoding-gpt56terra',
+            'nowcoding-gpt55',
         ]
         created = client.post(
             '/api/v1/claims',
@@ -475,11 +498,11 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection() -> None:
                 'channel': 'web_agent',
                 'locale': 'en-NZ',
                 'incident_type': 'motor',
-                'model_profile_id': 'nowcoding-gpt56terra',
+                'model_profile_id': 'nowcoding-gpt55',
             },
         )
         assert created.status_code == 201
-        assert created.json()['session']['model_profile_id'] == 'nowcoding-gpt56terra'
+        assert created.json()['session']['model_profile_id'] == 'nowcoding-gpt55'
 
         unknown = client.post(
             '/api/v1/claims',
@@ -494,7 +517,7 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection() -> None:
         assert unknown.json()['error']['code'] == 'MODEL_PROFILE_UNAVAILABLE'
 
     gpt_default_app = create_app(
-        replace(settings, model_profile_id='nowcoding-gpt56terra'),
+        replace(settings, model_profile_id='nowcoding-gpt55'),
         repository=FixtureRepository(),
         configuration_repository=configurations,
         release_set_repository=releases,
@@ -507,9 +530,9 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection() -> None:
         )
 
     assert capabilities.status_code == 200
-    assert capabilities.json()['default_model_profile_id'] == 'nowcoding-gpt56terra'
+    assert capabilities.json()['default_model_profile_id'] == 'nowcoding-gpt55'
     assert [item['id'] for item in capabilities.json()['models']] == [
-        'nowcoding-gpt56terra',
+        'nowcoding-gpt55',
         'qwen-local',
     ]
 

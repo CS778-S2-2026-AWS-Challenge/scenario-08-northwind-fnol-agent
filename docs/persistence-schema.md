@@ -170,32 +170,41 @@ the append-only audit collection through a bounded, filterable projection.
 26. List external tasks for one authorised Claim in stable `(created_at, task_id)` order and map
     each task to its single request and single-origin evidence links without exposing another
     Claim.
-27. Append an immutable branch evaluation for a Claim revision and list evaluations in creation
+27. Read active Evidence reuse links by target Claim and Evidence identity, and list all links for
+    one claimant without crossing customer scope.
+28. Atomically apply one claimant Evidence reuse or removal with the target Claim revision,
+    idempotency record, Branch Evaluation, and append-only audit event.
+29. Append an immutable branch evaluation for a Claim revision and list evaluations in creation
     order without allowing an evaluation to overwrite Claim State.
-28. Resolve an unexpired and unrevoked staff session from the independent staff identity store
+30. Resolve an unexpired and unrevoked staff session from the independent staff identity store
     without accepting claimant credentials or browser-supplied roles.
-29. Create, list, and resume Staff Agent sessions by authenticated `staff_id` without exposing
+31. Create, list, and resume Staff Agent sessions by authenticated `staff_id` without exposing
     another staff member's sessions.
-30. Append one Staff Agent question and answer atomically, resolve retries by
+32. Append one Staff Agent question and answer atomically, resolve retries by
     `(staff_id, session_id, client_message_id)`, and preserve the explicit zero-to-five Claim scope
     used for that turn. Persist stable draft identities and route an explicitly confirmed draft
     through the existing revision-checked Workbench action handler; do not grant the model direct
     mutation authority.
-31. Create a unique Customer or Staff account through its identity repository without exposing the
+33. Create a unique Customer or Staff account through its identity repository without exposing the
     password hash or allowing an administration retry to create a duplicate account.
-32. Conditionally update approved Customer or Staff account fields by account revision; a stale
+34. Conditionally update approved Customer or Staff account fields by account revision; a stale
     write returns the current revision without changing the record.
-33. List identity sessions for exactly one Customer or Staff account in stable newest-first order
+35. List identity sessions for exactly one Customer or Staff account in stable newest-first order
     without returning bearer values or token hashes.
-34. Resolve and revoke one active identity session by opaque `ias_` ID and expected revision; a
+36. Resolve and revoke one active identity session by opaque `ias_` ID and expected revision; a
     session under another account is not exposed and a retry cannot reactivate it.
-35. Receive one accepted assessor task's returned report through the installed adapter, store its
+37. Receive one accepted assessor task's returned report through the installed adapter, store its
     bytes under the task-linked Evidence identity, recover an interrupted unchanged retry, and
     verify the immutable result against the current Claim revision without promoting Claim facts.
-36. List authorised Claims by the server-projected completed, abandoned, or closed disposition
+38. List authorised Claims by the server-projected completed, abandoned, or closed disposition
     without scanning action history or inferring terminal state from a missing Session.
-37. Resolve and atomically reopen one eligible abandoned/closed Claim by staff actor, exact action,
+39. Resolve and atomically reopen one eligible abandoned/closed Claim by staff actor, exact action,
     target, expected revision, and idempotency key while preserving the active-session pointer.
+40. Search Sessions within one authorised Claim by registered Session and message filters while
+    examining at most 100 Sessions and 200 messages per Session, stopping once the requested result
+    limit is satisfied, and returning unavailable when the examined-set bound cannot prove a
+    complete result (`SEARCH_SCOPE_EXCEEDED`). Read at most the requested newest 50 messages for
+    one explicit Session.
 
 ## Development/Test Identity Invariants
 
@@ -368,6 +377,27 @@ the append-only audit collection through a bounded, filterable projection.
   message, a cross-session reference, or a changed draft contract rejects the complete mutation.
 - A successful execution response is built from repository readback of the persisted execution
   record. Claimant routes never expose Staff Agent execution evidence or its internal source links.
+- The Staff Claim search boundary derives lifecycle, active queue, and effective assignee from the
+  Working Claim plus its current Evidence and handoff records. The MongoDB adapter stores that
+  derived state in an adapter-owned `staff_search` projection on the Claim document. It contains
+  only `claim_id`, customer/external references, created/incident dates, product family, lifecycle,
+  effective assignee, queue, and `updated_at`; it is not part of `WorkingClaim` or any API response.
+  Claim, Evidence, and handoff writes refresh the projection in the same transaction or write
+  boundary, and repository initialisation backfills pre-contract Claim documents before serving
+  searches. MongoDB indexes every registered derived search field and applies all filters plus a
+  database-side limit without per-Claim Evidence or handoff reads. Fixture and MongoDB behavior
+  remains equivalent. The dispatcher receives only the bounded lightweight candidates and never
+  enumerates or constructs full Workbench Claim projections.
+- Staff Session search is Claim/customer scoped before any Session or Message read. Repository
+  adapters apply exact Session ID, start date, and status predicates at their indexed Session
+  boundary, evaluate actor and closed typed text only within a maximum of 100 candidate Sessions
+  and 200 messages per Session, and stop as soon as the requested result limit is satisfied. Exceeding
+  either examined-set limit fails closed as unavailable with `SEARCH_SCOPE_EXCEEDED`; it cannot be
+  reported as no result.
+  Session read queries only the requested newest message window. Its Staff Agent projection
+  contains allow-listed Session identity/status/timestamps and closed `{type: text, text: ...}`
+  content; customer identity, model/session internals, and undeclared nested Message fields remain
+  persistence-only.
 
 ## Claim Lifecycle, Follow-up, and Retention Invariants
 
@@ -439,6 +469,27 @@ the append-only audit collection through a bounded, filterable projection.
   authoritative Claim aggregation; only a `ready` file can contribute received
   Evidence. Retry reuses the same Evidence identity and revision-checked
   mutation rather than creating a duplicate record.
+- Account history actions preserve the original Evidence identity. Reuse stores an
+  `EvidenceClaimLink` containing source Claim, target Claim, customer, lifecycle,
+  and timestamps; it never duplicates the object or its metadata as a new source
+  record. The target Claim projection includes only active links and recomputes
+  its evidence summary from the linked source records.
+- Removing source Evidence marks its claimant-history state removed while keeping
+  the immutable record, material history, provenance, and audit trail. Removing a
+  reused item writes a detached link and leaves the source Claim unchanged. Both
+  operations advance only the target Claim revision and are persisted atomically
+  with idempotency, Branch Evaluation, and audit data.
+ - Evidence action writes require the authenticated claimant to own both Claims and
+   the source Evidence. The compare-and-set revision check occurs in the same
+   transaction as the relation or history-state change; retries with the same key
+   replay the stored typed result, while a different request under that key is a
+   conflict.
+ - Evidence action authorization is grounded in immutable Runtime records: the persisted
+   `AgentProposalRecord` stores the target Evidence and source Claim for the exact action, and
+   the claimant confirmation is a later claimant-visible `MessageRecord` in the same active
+   session. Public Evidence mutations reject references that exist only in the request body;
+   fabricated or cross-session references fail before the Claim, link, history, audit, or
+   idempotency mutation begins.
 - Pending, invalid, unofficial, and not-yet-generated evidence remain distinct states.
   `EvidenceStatus` carries the business condition of the material and
   `EvidenceFileStatus` the upload and processing lifecycle alone, so the two
@@ -579,6 +630,11 @@ Evidence record or protected object.
   writes none of those records. An unchanged replay reads the settled records and does not repeat
   the status check. `unknown_outcome` cannot become `retryable_failure`; a confirmed non-submission
   requires a separate durable reconciliation record before it can permit another attempt.
+- When an authenticated Workbench staff mutation performs that reconciliation, the same Fixture
+  lock or MongoDB transaction also checks the staff presence revision, assigns an unowned Claim to
+  that staff member, stores one completed task-linked `external_reconciliation` StaffAction, and
+  stores the exact action-code/target idempotency response. Failure of any presence, ownership,
+  revision, identity, lifecycle, or idempotency guard writes none of the settlement bundle.
 - One prepared `erq_` request carries a dispatch reservation. Runtime must hold it before any
   provider call, and the reservation is taken by an atomic compare-and-set on the stored request
   rather than by a check made before the write, so exactly one of two concurrent callers may
@@ -598,7 +654,12 @@ Evidence record or protected object.
 - An external task uses an opaque `tsk_` identifier and remains separate from Claim State. Its
   integration source, status, and timestamps are stored with the claim association. A
   task keeps its original claim, service, action, source class, and creation time across status
-  updates, and a changed state must advance `updated_at` so a stale concurrent write fails. A
+  updates, and a changed state must advance `updated_at` so a stale concurrent write fails. Before
+  Fixture or MongoDB accepts a new or changed task, its service identity must exist in the
+  canonical External Service Lifecycle Registry, permit `ExternalTask` persistence, allow the
+  persisted status, and agree with the request provenance derived from integration source and
+  delivery. Historical unknown records remain readable as legacy/unavailable projections, but
+  cannot be created or advanced through the repository write contract. A
   task-to-evidence link is accepted only when the named Evidence record exists under the same
   claim and customer. It is immutable for `(claim_id, evidence_id)` and cannot name a task on
   another claim; repeated material cannot acquire a second external origin.
@@ -711,9 +772,13 @@ components use the existing independent approval record and publication guard; n
 write production Claim State.
 
 Model records use `domain=model` and `configuration_key=profile_id`, so one published Release
-Set can bind both `qwen-local` and `nowcoding-gpt56terra` without overwriting either profile.
+Set can bind both `qwen-local` and `nowcoding-gpt55` without overwriting either profile.
 Claimant profiles must declare `structured_output=true` and `tools=true`; a Session stores the
 selected profile ID and Runtime resolves that exact key for every turn.
+The deployment binding manifest is not persisted catalogue state. It contains only non-secret
+connection metadata and credential environment-variable names used to reject unapproved model
+configurations before publication. The active Release Set remains the authority for which matched
+profiles are selectable.
 
 An `AgentDecisionRecord` may retain a `runtime_configuration` provenance projection for the exact
 turn. It contains the Release Set ID, environment, runtime profile, each selected configuration ID

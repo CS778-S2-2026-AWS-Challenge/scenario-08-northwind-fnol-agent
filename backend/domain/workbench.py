@@ -6,6 +6,10 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import Field
 
+from backend.domain.external_service_registry import (
+    ExternalCapabilityProvenance,
+    ExternalLifecycleStatus,
+)
 from backend.domain.external_services import (
     ExternalRequestProvenance,
     ExternalTaskRecord,
@@ -23,6 +27,7 @@ from backend.domain.models import (
     EvidenceFileStatus,
     EvidenceRecord,
     EvidenceStatus,
+    ExternalCapabilityProjection,
     MessageRecord,
     PageInfo,
     StaffActionRecord,
@@ -502,6 +507,7 @@ class WorkbenchClaimDetail(WorkbenchClaimListItem):
     allowed_actions: list[WorkbenchAllowedAction] = Field(default_factory=list)
     section_summaries: WorkbenchSectionSummaries
     customer_next_step: CustomerNextStep
+    external_capabilities: list[ExternalCapabilityProjection] = Field(default_factory=list)
 
 
 class WorkbenchFieldItem(ContractModel):
@@ -525,7 +531,11 @@ class WorkbenchExternalResultEvidence(ContractModel):
 class WorkbenchExternalLifecycle(ContractModel):
     stakeholder: str
     service: str
+    registry_version: str | None = Field(default=None, min_length=1, max_length=100)
+    lifecycle_status: ExternalLifecycleStatus | None = None
     catalogue_reference: str | None = None
+    capability_provenance: ExternalCapabilityProvenance
+    access_form: str | None = Field(default=None, min_length=1, max_length=200)
     provenance: ExternalRequestProvenance
     request_type: str
     authority_state: str

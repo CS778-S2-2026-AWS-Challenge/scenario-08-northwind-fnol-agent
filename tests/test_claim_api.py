@@ -40,6 +40,7 @@ from backend.domain.models import (
 from backend.domain.retrieval import ClaimHistoryRetrievalRecord, ClaimHistorySearchRequest
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
+from backend.repositories.protocols import IdempotencyConflict, RevisionConflict
 from backend.services.agent import AgentProposal, AgentTurnContext
 from backend.services.messages import _TurnEvidenceResolver
 
@@ -332,6 +333,22 @@ class QuestionAndFactAgent:
         )
 
 
+class ConversationOnlyAgent:
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        return AgentProposal(
+            action=AgentAction.UPDATE,
+            reason_codes=['CONVERSATION_ACKNOWLEDGED'],
+            customer_reason='No Claim Context mutation was requested.',
+            customer_response='I have acknowledged the update.',
+            customer_next_step=context.claim.customer_next_step,
+            form_changes=[],
+            state_changes=[],
+            proposed_signals=[],
+            required_tools=[],
+            next_action_requirements=[],
+        )
+
+
 class SpyPolicyHistoryAdapter(MockPolicyHistoryAdapter):
     def __init__(self) -> None:
         super().__init__()
@@ -382,6 +399,45 @@ def submit_message(
             'evidence_refs': evidence_refs or [],
         },
     )
+
+
+@pytest.mark.parametrize(
+    ('failure', 'expected_code'),
+    [
+        (RevisionConflict(current_revision=9), 'REVISION_CONFLICT'),
+        (IdempotencyConflict('duplicate-turn'), 'IDEMPOTENCY_CONFLICT'),
+    ],
+)
+def test_conversation_only_turn_maps_atomic_repository_conflicts(
+    app: FastAPI,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+    expected_code: str,
+) -> None:
+    app.state.agent_turn_provider = ConversationOnlyAgent()
+    created = create_claim(client, auth_headers, key=f'conversation-{expected_code}').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+
+    def reject_turn(*_args: object, **_kwargs: object) -> None:
+        raise failure
+
+    monkeypatch.setattr(repository, 'save_agent_turn', reject_turn)
+    response = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        key=f'conversation-turn-{expected_code}',
+        text='Thanks, there is nothing else to add.',
+    )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == expected_code
+    assert repository.list_messages(claim_id, session_id, 'cus_demo') == []
 
 
 def test_message_turn_scopes_uploaded_evidence_to_the_current_claim(

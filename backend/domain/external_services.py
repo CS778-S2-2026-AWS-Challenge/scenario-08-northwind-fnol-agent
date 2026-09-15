@@ -9,6 +9,9 @@ from backend.domain.external_service_registry import (
     ExternalTaskResultVerification as _ExternalTaskResultVerification,
 )
 from backend.domain.external_service_registry import (
+    assert_external_task_registry_compatible as assert_registry_compatible,
+)
+from backend.domain.external_service_registry import (
     assert_operation_status_registered,
     assert_persisted_operation_transition,
 )
@@ -335,6 +338,16 @@ class ExternalTaskRecord(ContractModel):
                 f'not {self.status.value}.'
             )
         return self
+
+
+def assert_external_task_registry_compatible(task: ExternalTaskRecord) -> None:
+    """Validate a task write without preventing historical records from being read."""
+
+    assert_registry_compatible(
+        service_identity=task.service_identity,
+        operation_status=task.status.value,
+        request_provenance=request_provenance(task).value,
+    )
 
 
 class ExternalTaskEvidenceLink(ContractModel):

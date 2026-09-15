@@ -16,6 +16,7 @@ from backend.domain.models import (
     ClaimCollaborationRequest,
     ClaimCoworkerRecord,
     CustomerUpdateRecord,
+    EvidenceClaimLink,
     EvidenceRecord,
     FollowUpRecord,
     HandoffRecord,
@@ -34,6 +35,10 @@ from backend.domain.staff_agent import (
     StaffAgentMessage,
     StaffAgentMessageRole,
     StaffAgentSession,
+)
+from backend.domain.staff_agent_tools import (
+    StaffClaimSearchCandidate,
+    StaffSessionSearchCandidate,
 )
 from backend.domain.staff_identity import StaffPresenceRecord
 
@@ -54,6 +59,12 @@ class IdempotencyConflict(RepositoryConflict):
 
 class DemoSeedConflict(RepositoryConflict):
     """The controlled validation seed cannot run against a populated queue."""
+
+    pass
+
+
+class RepositorySearchLimitExceeded(RuntimeError):
+    """A bounded repository search cannot prove a complete result."""
 
     pass
 
@@ -273,6 +284,12 @@ class ClaimRepository(Protocol):
         """Return claims for an authorised staff projection."""
         raise NotImplementedError
 
+    def search_claims_internal(
+        self, filters: dict[str, object], limit: int
+    ) -> list[StaffClaimSearchCandidate]:
+        """Return only bounded Claim candidates matching registered staff filters."""
+        raise NotImplementedError
+
     def promote_claim_owner(
         self,
         claim_id: str,
@@ -358,6 +375,16 @@ class ClaimRepository(Protocol):
         claim_id: str,
         customer_id: str,
     ) -> list[SessionRecord]:
+        raise NotImplementedError
+
+    def search_sessions_internal(
+        self,
+        claim_id: str,
+        customer_id: str,
+        filters: dict[str, object],
+        limit: int,
+    ) -> list[StaffSessionSearchCandidate]:
+        """Return bounded Session candidates after applying registered filters."""
         raise NotImplementedError
 
     def find_idempotency(
@@ -538,6 +565,16 @@ class PersistenceRepository(ClaimRepository, Protocol):
     ) -> list[MessageRecord]:
         raise NotImplementedError
 
+    def list_recent_messages(
+        self,
+        claim_id: str,
+        session_id: str,
+        customer_id: str,
+        limit: int,
+    ) -> list[MessageRecord]:
+        """Return at most the newest requested messages in stable ascending order."""
+        raise NotImplementedError
+
     def save_agent_decision(self, decision: AgentDecisionRecord, customer_id: str) -> None:
         raise NotImplementedError
 
@@ -580,6 +617,11 @@ class PersistenceRepository(ClaimRepository, Protocol):
         link: ExternalTaskEvidenceLink,
         branch_evaluation: BranchEvaluationRecord,
         customer_id: str,
+        *,
+        staff_action: StaffActionRecord | None = None,
+        idempotency: IdempotencyRecord | None = None,
+        required_staff_id: str | None = None,
+        required_staff_revision: int | None = None,
     ) -> None:
         """Atomically settle one unknown assessor request as accepted.
 
@@ -588,10 +630,15 @@ class PersistenceRepository(ClaimRepository, Protocol):
             expected_revision: Claim revision that must still be current.
             task: Existing external task advanced to accepted.
             operation: Existing assessor operation advanced to accepted.
+            request: Existing request whose dispatch is confirmed by reconciliation.
             evidence: Pending material now owed by the accepted task.
             link: Immutable task-to-evidence relationship for that material.
             branch_evaluation: Applied branch projection for the new Claim revision.
             customer_id: Customer who owns every persisted record.
+            staff_action: Optional completed Workbench action recorded with the settlement.
+            idempotency: Optional staff mutation replay record.
+            required_staff_id: Staff presence identity that must remain claimable.
+            required_staff_revision: Presence revision required by the staff mutation.
 
         Returns:
             None.
@@ -742,6 +789,29 @@ class PersistenceRepository(ClaimRepository, Protocol):
 
     def list_evidence_for_customer(self, customer_id: str) -> list[EvidenceRecord]:
         """Return Evidence owned by a customer across all of their Claims."""
+        raise NotImplementedError
+
+    def get_evidence_claim_link(
+        self, target_claim_id: str, evidence_id: str, customer_id: str
+    ) -> EvidenceClaimLink | None:
+        raise NotImplementedError
+
+    def list_evidence_claim_links(
+        self, customer_id: str, target_claim_id: str | None = None
+    ) -> list[EvidenceClaimLink]:
+        raise NotImplementedError
+
+    def save_evidence_action_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        evidence: EvidenceRecord | None,
+        link: EvidenceClaimLink | None,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+        branch_evaluation: BranchEvaluationRecord,
+    ) -> None:
+        """Atomically persist one governed reuse or removal result."""
         raise NotImplementedError
 
     def save_evidence_mutation(

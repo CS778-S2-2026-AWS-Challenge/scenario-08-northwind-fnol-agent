@@ -2262,6 +2262,13 @@
           "evidence_summary": {
             "$ref": "#/components/schemas/EvidenceSummary"
           },
+          "external_capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalCapabilityProjection"
+            },
+            "title": "External Capabilities",
+            "type": "array"
+          },
           "external_claim": {
             "anyOf": [
               {
@@ -2491,6 +2498,11 @@
         "additionalProperties": false,
         "description": "Claimant-safe evidence projection with storage and extraction details removed.",
         "properties": {
+          "can_remove": {
+            "default": false,
+            "title": "Can Remove",
+            "type": "boolean"
+          },
           "claim_id": {
             "title": "Claim Id",
             "type": "string"
@@ -2558,6 +2570,11 @@
             "title": "Related Fields",
             "type": "array"
           },
+          "reused": {
+            "default": false,
+            "title": "Reused",
+            "type": "boolean"
+          },
           "size_bytes": {
             "anyOf": [
               {
@@ -2571,6 +2588,17 @@
           },
           "source": {
             "$ref": "#/components/schemas/EvidenceSource"
+          },
+          "source_claim_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Claim Id"
           },
           "status": {
             "$ref": "#/components/schemas/EvidenceStatus"
@@ -2592,6 +2620,88 @@
           "updated_at"
         ],
         "title": "ClaimantEvidence",
+        "type": "object"
+      },
+      "ClaimantEvidenceActionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "reuse",
+              "remove"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "evidence_id": {
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "reason_code": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "retryable": {
+            "default": false,
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "source_claim_id": {
+            "title": "Source Claim Id",
+            "type": "string"
+          },
+          "state_change_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "State Change Refs",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "succeeded",
+              "rejected",
+              "unavailable",
+              "failed",
+              "unknown"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target_claim_id": {
+            "title": "Target Claim Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "status",
+          "reason_code",
+          "evidence_id",
+          "source_claim_id",
+          "target_claim_id",
+          "message"
+        ],
+        "title": "ClaimantEvidenceActionResponse",
         "type": "object"
       },
       "ClaimantEvidenceHistoryItem": {
@@ -2623,6 +2733,14 @@
           "kind": {
             "title": "Kind",
             "type": "string"
+          },
+          "linked_claim_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Linked Claim Ids",
+            "type": "array"
           },
           "media_type": {
             "anyOf": [
@@ -2719,9 +2837,32 @@
       "ClaimantExternalServiceAction": {
         "additionalProperties": false,
         "properties": {
+          "access_form": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Access Form",
+            "type": "string"
+          },
           "can_request": {
             "title": "Can Request",
             "type": "boolean"
+          },
+          "capability_provenance": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Capability Provenance",
+            "type": "string"
+          },
+          "catalogue_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalogue Reference"
           },
           "consent_status": {
             "anyOf": [
@@ -2743,12 +2884,43 @@
               }
             ]
           },
+          "lifecycle_status": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Lifecycle Status",
+            "type": "string"
+          },
+          "limitation": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Limitation",
+            "type": "string"
+          },
+          "next_action": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Next Action",
+            "type": "string"
+          },
+          "pending_owner": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Pending Owner",
+            "type": "string"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
           },
           "purpose": {
             "title": "Purpose",
+            "type": "string"
+          },
+          "registry_version": {
+            "default": "external-service-lifecycle.v1",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Registry Version",
             "type": "string"
           },
           "routing": {
@@ -2778,10 +2950,30 @@
           },
           "status": {
             "$ref": "#/components/schemas/ClaimantExternalServiceStatus"
+          },
+          "status_detail": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Status Detail",
+            "type": "string"
+          },
+          "status_label": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Status Label",
+            "type": "string"
           }
         },
         "required": [
           "service_identity",
+          "lifecycle_status",
+          "capability_provenance",
+          "access_form",
+          "status_label",
+          "status_detail",
+          "pending_owner",
+          "next_action",
+          "limitation",
           "service_name",
           "provider",
           "purpose",
@@ -4873,6 +5065,36 @@
         "title": "EvaluationState",
         "type": "string"
       },
+      "EvidenceActionRequestPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation_ref": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Confirmation Ref",
+            "type": "string"
+          },
+          "proposal_ref": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Proposal Ref",
+            "type": "string"
+          },
+          "source_claim_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Source Claim Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_claim_id",
+          "proposal_ref",
+          "confirmation_ref"
+        ],
+        "title": "EvidenceActionRequestPayload",
+        "type": "object"
+      },
       "EvidenceCompleteResponse": {
         "additionalProperties": false,
         "properties": {
@@ -5008,6 +5230,14 @@
           "failed"
         ],
         "title": "EvidenceFileStatus",
+        "type": "string"
+      },
+      "EvidenceHistoryState": {
+        "enum": [
+          "available",
+          "removed"
+        ],
+        "title": "EvidenceHistoryState",
         "type": "string"
       },
       "EvidenceListResponse": {
@@ -5246,6 +5476,22 @@
           "claim_id": {
             "title": "Claim Id",
             "type": "string"
+          },
+          "claimant_history_removed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimant History Removed At"
+          },
+          "claimant_history_state": {
+            "$ref": "#/components/schemas/EvidenceHistoryState",
+            "default": "available"
           },
           "claimant_note": {
             "anyOf": [
@@ -5633,6 +5879,135 @@
         "title": "ExecuteStaffAgentDraftRequest",
         "type": "object"
       },
+      "ExternalCapabilityProjection": {
+        "additionalProperties": false,
+        "description": "Server-owned third-party capability row shared by claimant and staff.",
+        "properties": {
+          "access_form": {
+            "title": "Access Form",
+            "type": "string"
+          },
+          "adapter_kind": {
+            "title": "Adapter Kind",
+            "type": "string"
+          },
+          "catalogue_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalogue Reference"
+          },
+          "disclosure_fields": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Disclosure Fields",
+            "type": "array"
+          },
+          "limitation": {
+            "title": "Limitation",
+            "type": "string"
+          },
+          "official_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official Phone"
+          },
+          "official_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official Url"
+          },
+          "product_families": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Product Families",
+            "type": "array"
+          },
+          "provider_name": {
+            "title": "Provider Name",
+            "type": "string"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          },
+          "registry_version": {
+            "default": "external-service-lifecycle.v1",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Registry Version",
+            "type": "string"
+          },
+          "required_fields": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Fields",
+            "type": "array"
+          },
+          "result_semantics": {
+            "title": "Result Semantics",
+            "type": "string"
+          },
+          "service_identity": {
+            "title": "Service Identity",
+            "type": "string"
+          },
+          "service_name": {
+            "title": "Service Name",
+            "type": "string"
+          },
+          "uses_external_task": {
+            "title": "Uses External Task",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "service_identity",
+          "service_name",
+          "provider_name",
+          "product_families",
+          "purpose",
+          "access_form",
+          "adapter_kind",
+          "uses_external_task",
+          "result_semantics",
+          "limitation"
+        ],
+        "title": "ExternalCapabilityProjection",
+        "type": "object"
+      },
+      "ExternalCapabilityProvenance": {
+        "enum": [
+          "configured",
+          "simulated",
+          "manual",
+          "unavailable"
+        ],
+        "title": "ExternalCapabilityProvenance",
+        "type": "string"
+      },
       "ExternalClaimResult": {
         "additionalProperties": false,
         "properties": {
@@ -5699,6 +6074,26 @@
         ],
         "title": "ExternalClaimResult",
         "type": "object"
+      },
+      "ExternalLifecycleStatus": {
+        "description": "Canonical status IDs, including operation and result stages.",
+        "enum": [
+          "consent_required",
+          "authorised",
+          "prepared",
+          "submitting",
+          "accepted",
+          "queued",
+          "assigned",
+          "retryable_failure",
+          "terminal_failure",
+          "unknown_outcome",
+          "result_received",
+          "result_verified",
+          "written_back"
+        ],
+        "title": "ExternalLifecycleStatus",
+        "type": "string"
       },
       "ExternalRequestProvenance": {
         "description": "What a request actually reached, as distinct from what was configured.\n\nThe three classes are **derived** from `IntegrationSource` and the delivery the task\nalready records, not stored as a fourth thing that could disagree with them:\n\n- `simulated` \u2014 a fixture source. No production provider is involved, whatever the\n  request looks like.\n- `configured` \u2014 a configured service that has not been sent. Configuration is not\n  contact, and a demonstration that reads it as contact would claim a provider\n  relationship nobody has.\n- `live_attempted` \u2014 a configured service whose request was submitted with delivery\n  evidence. It says an attempt reached a provider; it says nothing about the result,\n  which is `ExternalTaskResultVerification`'s question.\n\nDeriving rather than storing matters here. `docs/third-party-service-consent-and-\nshared-data-contract.md` records the only implemented service identity as a\ncontrolled fixture and `P3-ASSESSOR` as simulation-only, so `live_attempted` is\ncurrently unreachable. Stored as an enum member on a persisted record it would be a\nvalue nothing can produce and a projection could still assert; derived, it simply\nnever occurs until a configured service actually sends something.",
@@ -5840,6 +6235,39 @@
         ],
         "title": "ExternalTaskOperationStatus",
         "type": "string"
+      },
+      "ExternalTaskReconciliationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "routing": {
+            "$ref": "#/components/schemas/AssessorRoutingResult"
+          },
+          "staff_action": {
+            "$ref": "#/components/schemas/StaffActionRecord"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_id",
+          "task_id",
+          "revision",
+          "routing",
+          "staff_action"
+        ],
+        "title": "ExternalTaskReconciliationResponse",
+        "type": "object"
       },
       "ExternalTaskRecord": {
         "additionalProperties": false,
@@ -11887,6 +12315,13 @@
             "title": "Display Reference",
             "type": "string"
           },
+          "external_capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalCapabilityProjection"
+            },
+            "title": "External Capabilities",
+            "type": "array"
+          },
           "incident": {
             "$ref": "#/components/schemas/WorkbenchIncidentSummary"
           },
@@ -12422,9 +12857,25 @@
       "WorkbenchExternalLifecycle": {
         "additionalProperties": false,
         "properties": {
+          "access_form": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Form"
+          },
           "authority_state": {
             "title": "Authority State",
             "type": "string"
+          },
+          "capability_provenance": {
+            "$ref": "#/components/schemas/ExternalCapabilityProvenance"
           },
           "catalogue_reference": {
             "anyOf": [
@@ -12444,6 +12895,16 @@
           "delivery_state": {
             "title": "Delivery State",
             "type": "string"
+          },
+          "lifecycle_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalLifecycleStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "limitation": {
             "anyOf": [
@@ -12481,6 +12942,19 @@
               }
             ],
             "title": "Provider Reference"
+          },
+          "registry_version": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registry Version"
           },
           "request_type": {
             "title": "Request Type",
@@ -12591,6 +13065,7 @@
         "required": [
           "stakeholder",
           "service",
+          "capability_provenance",
           "provenance",
           "request_type",
           "authority_state",
@@ -16370,6 +16845,335 @@
         ]
       }
     },
+    "/api/v1/claims/{claim_id}/evidence/{evidence_id}/remove": {
+      "post": {
+        "operationId": "remove_historical_evidence_api_v1_claims__claim_id__evidence__evidence_id__remove_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "evidence_id",
+            "required": true,
+            "schema": {
+              "title": "Evidence Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Northwind-Anonymous-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Northwind-Anonymous-Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceActionRequestPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimantEvidenceActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Historical Evidence",
+        "tags": [
+          "claimant-evidence"
+        ]
+      }
+    },
+    "/api/v1/claims/{claim_id}/evidence/{evidence_id}/reuse": {
+      "post": {
+        "operationId": "reuse_historical_evidence_api_v1_claims__claim_id__evidence__evidence_id__reuse_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "evidence_id",
+            "required": true,
+            "schema": {
+              "title": "Evidence Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Northwind-Anonymous-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Northwind-Anonymous-Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceActionRequestPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimantEvidenceActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reuse Historical Evidence",
+        "tags": [
+          "claimant-evidence"
+        ]
+      }
+    },
+    "/api/v1/claims/{claim_id}/external-capabilities": {
+      "get": {
+        "description": "Return the claimant-safe capability catalogue for one authorised Claim.",
+        "operationId": "read_external_capabilities_api_v1_claims__claim_id__external_capabilities_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Northwind-Anonymous-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Northwind-Anonymous-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ExternalCapabilityProjection"
+                  },
+                  "title": "Response Read External Capabilities Api V1 Claims  Claim Id  External Capabilities Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read External Capabilities",
+        "tags": [
+          "claimant"
+        ]
+      }
+    },
     "/api/v1/claims/{claim_id}/form": {
       "patch": {
         "operationId": "patch_form_api_v1_claims__claim_id__form_patch",
@@ -19203,6 +20007,216 @@
           }
         },
         "summary": "Read Workbench External Requests",
+        "tags": [
+          "workbench"
+        ]
+      }
+    },
+    "/api/v1/workbench/claims/{claim_id}/external-tasks/{task_id}/accept-review": {
+      "post": {
+        "description": "Accept one server-projected external-task review for the current staff member.\n\nArgs:\n    claim_id: Claim that owns the external task.\n    task_id: Exact external task projected by the Workbench action registry.\n    payload: Requested self-assignment; another staff identity is forbidden.\n    request: Authenticated request carrying repository and correlation context.\n    principal: Authenticated staff principal supplied by FastAPI.\n    idempotency_key: Required replay identity for this mutation.\n    if_match: Required current Claim revision.\n\nReturns:\n    The created or replayed task-linked StaffAction and resulting Claim revision.\n\nRaises:\n    ApiError: Authentication, authority, revision, ownership, presence, task state, or\n        idempotency validation fails.",
+        "operationId": "accept_external_task_review_api_v1_workbench_claims__claim_id__external_tasks__task_id__accept_review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptHandoffRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffActionMutationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Accept External Task Review",
+        "tags": [
+          "workbench"
+        ]
+      }
+    },
+    "/api/v1/workbench/claims/{claim_id}/external-tasks/{task_id}/reconcile": {
+      "post": {
+        "description": "Reconcile one unknown assessor operation through its persisted identity.\n\nArgs:\n    claim_id: Claim that owns the unresolved external task.\n    task_id: Exact external task projected by the Workbench action registry.\n    request: Authenticated request carrying Runtime and correlation context.\n    principal: Authenticated staff principal supplied by FastAPI.\n    idempotency_key: Required replay identity for this mutation.\n    if_match: Required current Claim revision.\n\nReturns:\n    The persisted reconciliation result and its completed StaffAction.\n\nRaises:\n    ApiError: Authentication, authority, revision, ownership, presence, adapter,\n        lifecycle, or idempotency validation fails.",
+        "operationId": "reconcile_external_task_response_api_v1_workbench_claims__claim_id__external_tasks__task_id__reconcile_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalTaskReconciliationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reconcile External Task Response",
         "tags": [
           "workbench"
         ]
