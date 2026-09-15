@@ -1332,9 +1332,9 @@ Request:
   "model_profile_id": "qwen-local",
   "content": {
     "type": "text",
-    "text": "I was rear-ended while stopped at traffic lights. Nobody is injured."
+    "text": "I was rear-ended while stopped at traffic lights. Please review the photo."
   },
-  "evidence_refs": []
+  "evidence_refs": ["evd_01J4Y7V5QJ"]
 }
 ```
 
@@ -1343,6 +1343,16 @@ optional `model_profile_id` selects any currently published claimant profile for
 does not create a new Claim or clear the conversation. The selected profile is persisted in the
 Session as the latest default and in the Runtime provenance for the exact turn. Empty text
 without evidence is rejected.
+
+`evidence_refs` is also the explicit per-message disclosure boundary for model input. Before a
+model call, each ID must resolve to the authenticated claimant's current Claim, use a supported
+image/PDF media type, and be in an uploaded, processing, or ready file state. Duplicate, unknown,
+cross-Claim, incomplete, invalid, expired, superseded, missing, or unavailable references are
+rejected before the Agent runs. The Runtime passes a turn-scoped resolver rather than an object
+URL or storage key, and the resolver repeats the record and immutable-object checks whenever an
+adapter reads bytes. A structured fact attributed to an attachment must name that exact Evidence
+ID. It is persisted with `image` or `document` provenance and remains `proposed` for claimant
+confirmation.
 
 On the target namespaced Runtime path the model must first call `claim.read`. The Runtime executes
 the read against the authenticated Claim, sends the assistant tool call and result back to the

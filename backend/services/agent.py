@@ -34,6 +34,7 @@ from backend.domain.support_intent import (
 )
 
 if TYPE_CHECKING:
+    from backend.domain.model_gateway import ModelEvidenceContentResolver
     from backend.services.runtime_agent_policy import RuntimeAgentPolicySnapshot
     from backend.services.runtime_configuration import RuntimeConfigurationSnapshot
 
@@ -161,12 +162,22 @@ OCCURRED_AT_PATTERN = re.compile(
 
 
 @dataclass(frozen=True, slots=True)
+class AgentEvidenceReference:
+    """One authorised Evidence object available only to the current Agent turn."""
+
+    evidence_id: str
+    media_type: str
+
+
+@dataclass(frozen=True, slots=True)
 class AgentTurnContext:
     claim: WorkingClaim
     session_id: str
     trigger_message_id: str
     message_text: str | None
     evidence_refs: list[str]
+    evidence: tuple[AgentEvidenceReference, ...] = ()
+    evidence_resolver: ModelEvidenceContentResolver | None = None
     model_profile_id: str = 'qwen-local'
     professional_review_required: bool = False
     branch_evaluation: BranchEvaluationResult | None = None
