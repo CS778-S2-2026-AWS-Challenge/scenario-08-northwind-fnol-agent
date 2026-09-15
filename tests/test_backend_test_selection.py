@@ -1,4 +1,12 @@
+import subprocess
+import sys
+from unittest.mock import patch
+
+import pytest
+
+from scripts import select_backend_tests as selector
 from scripts.select_backend_tests import (
+    changed_paths,
     changed_python_files,
     needs_audit_contract_check,
     needs_openapi_check,
@@ -42,7 +50,7 @@ def test_unmapped_backend_change_never_returns_an_empty_selection() -> None:
     assert selection.tests == ('tests',)
 
 
-def test_main_branch_forces_the_complete_suite() -> None:
+def test_explicit_flag_forces_the_complete_suite() -> None:
     selection = select_tests(['docs/README.md'], full=True)
 
     assert selection.mode == 'full'
@@ -105,9 +113,9 @@ def test_ci_selector_change_runs_the_complete_suite() -> None:
 
 
 def test_static_checks_use_only_changed_python_files_for_scoped_prs() -> None:
-    assert changed_python_files(['backend/api/claims.py', 'docs/README.md']) == (
-        'backend/api/claims.py',
-    )
+    assert changed_python_files(
+        ['backend/api/claims.py', 'backend/removed.py', 'docs/README.md']
+    ) == ('backend/api/claims.py',)
 
 
 def test_contract_checks_follow_their_own_impact() -> None:
@@ -116,3 +124,102 @@ def test_contract_checks_follow_their_own_impact() -> None:
     assert not needs_openapi_check(['backend/services/claims.py'])
     assert needs_audit_contract_check(['backend/domain/audit.py'])
     assert not needs_audit_contract_check(['backend/services/claims.py'])
+
+
+def test_main_change_detection_uses_first_parent_and_includes_deletions() -> None:
+    completed = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout='customer/src/App.jsx\nbackend/removed.py\n'
+    )
+    with patch('scripts.select_backend_tests.subprocess.run', return_value=completed) as run:
+        paths = changed_paths(main_branch=True)
+
+    assert paths == ('customer/src/App.jsx', 'backend/removed.py')
+    run.assert_called_once_with(
+        ['git', 'diff', '--name-only', '--diff-filter=ACMRD', 'HEAD^1..HEAD'],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_pull_request_change_detection_uses_merge_base() -> None:
+    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout='backend/api/claims.py\n')
+    with patch('scripts.select_backend_tests.subprocess.run', return_value=completed) as run:
+        paths = changed_paths()
+
+    assert paths == ('backend/api/claims.py',)
+    run.assert_called_once_with(
+        ['git', 'diff', '--name-only', '--diff-filter=ACMRD', 'origin/main...HEAD'],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_main_frontend_change_uses_impact_selection(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def frontend_main_paths(*, main_branch: bool) -> tuple[str, ...]:
+        assert main_branch
+        return ('customer/src/App.jsx',)
+
+    monkeypatch.setattr(selector, 'running_on_main', lambda: True)
+    monkeypatch.setattr(selector, 'changed_paths', frontend_main_paths)
+    monkeypatch.setattr(sys, 'argv', ['select_backend_tests.py', '--mode'])
+
+    assert selector.main() == 0
+    assert capsys.readouterr().out.strip() == 'skip'
+
+
+@pytest.mark.parametrize('flag', ['--needs-openapi', '--needs-audit-contract'])
+def test_main_frontend_change_skips_backend_contract_checks(
+    flag: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def frontend_main_paths(*, main_branch: bool) -> tuple[str, ...]:
+        assert main_branch
+        return ('customer/src/App.jsx',)
+
+    monkeypatch.setattr(selector, 'running_on_main', lambda: True)
+    monkeypatch.setattr(selector, 'changed_paths', frontend_main_paths)
+    monkeypatch.setattr(sys, 'argv', ['select_backend_tests.py', flag])
+
+    assert selector.main() == 0
+    assert capsys.readouterr().out.strip() == 'false'
+
+
+def test_workbench_domain_change_selects_workbench_consumers() -> None:
+    selection = select_tests(['backend/domain/workbench.py', 'backend/services/workbench.py'])
+
+    assert selection.mode == 'scoped'
+    assert 'tests/test_workbench_api.py' in selection.tests
+    assert 'tests/test_workbench_action_registry.py' in selection.tests
+
+
+def test_agent_gateway_change_selects_agent_consumers() -> None:
+    selection = select_tests(
+        [
+            'backend/domain/model_gateway.py',
+            'backend/services/agent.py',
+            'backend/services/messages.py',
+        ]
+    )
+
+    assert selection.mode == 'scoped'
+    assert 'tests/test_model_gateway.py' in selection.tests
+    assert 'tests/test_staff_agent.py' in selection.tests
+
+
+def test_unknown_backend_module_still_runs_the_complete_suite() -> None:
+    selection = select_tests(['backend/services/new_unmapped_service.py'])
+
+    assert selection.mode == 'full'
+    assert selection.tests == ('tests',)
+
+
+def test_backend_file_rules_do_not_match_longer_similar_names() -> None:
+    selection = select_tests(['backend/services/agent.py.backup'])
+
+    assert selection.mode == 'full'
+    assert selection.tests == ('tests',)
