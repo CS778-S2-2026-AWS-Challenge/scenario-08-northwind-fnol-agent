@@ -512,17 +512,17 @@ def test_non_typed_backend_result_fails_closed(replay: bool) -> None:
 
 
 @pytest.mark.parametrize(
-    'result_update',
+    'invalid_field',
     [
-        {'action_code': 'claim.other_action'},
-        {'reason_code': ' '},
-        {'resulting_revision': None},
-        {'resulting_revision': 1},
-        {'state_change_refs': ()},
+        'action_code',
+        'reason_code',
+        'missing_revision',
+        'older_revision',
+        'state_change_refs',
     ],
 )
 def test_invalid_backend_success_metadata_fails_closed(
-    result_update: dict[str, object],
+    invalid_field: str,
 ) -> None:
     request = EvidenceActionRequest(
         action_code='claim.reuse_evidence',
@@ -546,7 +546,16 @@ def test_invalid_backend_success_metadata_fails_closed(
         resulting_revision=2,
         state_change_refs=('evidence-link:link-1',),
     )
-    result = replace(result, **result_update)
+    if invalid_field == 'action_code':
+        result = replace(result, action_code='claim.other_action')
+    elif invalid_field == 'reason_code':
+        result = replace(result, reason_code=' ')
+    elif invalid_field == 'missing_revision':
+        result = replace(result, resulting_revision=None)
+    elif invalid_field == 'older_revision':
+        result = replace(result, resulting_revision=1)
+    else:
+        result = replace(result, state_change_refs=())
 
     checked = execute_confirmed_evidence_action(
         _repository(),
