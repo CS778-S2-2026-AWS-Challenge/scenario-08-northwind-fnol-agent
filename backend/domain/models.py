@@ -1133,8 +1133,6 @@ class ClaimantResolvedSupportHandoff(ContractModel):
     status: Literal['resolved'] = 'resolved'
     completed_at: datetime
     customer_update: str | None = None
-    resolution_event_id: str
-    resolved_at: datetime
 
 
 class WorkbenchSession(ContractModel):

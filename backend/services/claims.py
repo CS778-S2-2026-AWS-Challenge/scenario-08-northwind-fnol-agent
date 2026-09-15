@@ -284,17 +284,21 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
                 None,
             )
             if latest_support.resolved_at is not None and resolution_event is not None:
+                customer_update = next(
+                    (
+                        update
+                        for update in reversed(repository.list_customer_updates(claim.claim_id))
+                        if latest_support.handoff_id in update.related_refs
+                    ),
+                    None,
+                )
                 resolved_support_handoff = ClaimantResolvedSupportHandoff(
                     handoff_id=latest_support.handoff_id,
                     type=latest_support.type,
                     completed_at=resolution_event.completed_at,
-                    customer_update=(
-                        resolution_event.result.summary
-                        if resolution_event.result is not None
-                        else None
-                    ),
-                    resolution_event_id=resolution_event.action_id,
-                    resolved_at=latest_support.resolved_at,
+                    customer_update=customer_update.summary
+                    if customer_update is not None
+                    else None,
                 )
     return ClaimantClaim(
         claim_id=claim.claim_id,

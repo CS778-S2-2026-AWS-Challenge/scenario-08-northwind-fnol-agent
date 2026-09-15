@@ -150,7 +150,13 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
                 'reason_codes': ['SUPPORT_NEED_MET'],
                 'source_refs': in_progress.packet.source_refs,
             },
-            'state_changes': [],
+            'state_changes': [
+                {
+                    'path': 'claim_state.workflow_state',
+                    'to': in_progress.resume_workflow_state.value,
+                },
+                {'path': 'claim_state.next_action', 'to': in_progress.resume_next_action.value},
+            ],
             'customer_update': {
                 'summary': 'A staff member completed the support step and your claim can continue.',
                 'responsible_party': 'claims_professional',
@@ -158,7 +164,7 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
             },
         },
     )
-    assert resolved.status_code == 200
+    assert resolved.status_code == 200, resolved.text
     body = resolved.json()
     assert body['revision'] == 5
     assert body['handoff']['status'] == 'resolved'
@@ -175,6 +181,8 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
     assert stored_handoff.status is HandoffStatus.RESOLVED
     assert stored_handoff.assigned_to == 'stf_demo'
     assert stored_handoff.resolved_at is not None
+    assert stored_claim.claim_state.workflow_state.value == 'collecting'
+    assert stored_claim.claim_state.next_action.value == 'ASK'
 
 
 def test_handoff_mutations_require_the_exact_current_projected_action(
@@ -244,7 +252,16 @@ def test_handoff_mutations_require_the_exact_current_projected_action(
                 'reason_codes': ['SUPPORT_NEED_MET'],
                 'source_refs': accepted_handoff.packet.source_refs,
             },
-            'state_changes': [],
+            'state_changes': [
+                {
+                    'path': 'claim_state.workflow_state',
+                    'to': accepted_handoff.resume_workflow_state.value,
+                },
+                {
+                    'path': 'claim_state.next_action',
+                    'to': accepted_handoff.resume_next_action.value,
+                },
+            ],
             'customer_update': {
                 'summary': 'This update must not be persisted.',
                 'responsible_party': 'claims_professional',
@@ -720,7 +737,16 @@ def test_guard_rejects_invalid_payload_and_terminal_rewrite(
                 'reason_codes': ['SUPPORT_NEED_MET'],
                 'source_refs': accepted_handoff.packet.source_refs,
             },
-            'state_changes': [],
+            'state_changes': [
+                {
+                    'path': 'claim_state.workflow_state',
+                    'to': accepted_handoff.resume_workflow_state.value,
+                },
+                {
+                    'path': 'claim_state.next_action',
+                    'to': accepted_handoff.resume_next_action.value,
+                },
+            ],
             'customer_update': {
                 'summary': 'The support step is complete.',
                 'responsible_party': 'claims_professional',

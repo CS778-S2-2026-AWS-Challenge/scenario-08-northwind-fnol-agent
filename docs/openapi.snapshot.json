@@ -2981,15 +2981,6 @@
             "title": "Handoff Id",
             "type": "string"
           },
-          "resolution_event_id": {
-            "title": "Resolution Event Id",
-            "type": "string"
-          },
-          "resolved_at": {
-            "format": "date-time",
-            "title": "Resolved At",
-            "type": "string"
-          },
           "status": {
             "const": "resolved",
             "default": "resolved",
@@ -3003,9 +2994,7 @@
         "required": [
           "handoff_id",
           "type",
-          "completed_at",
-          "resolution_event_id",
-          "resolved_at"
+          "completed_at"
         ],
         "title": "ClaimantResolvedSupportHandoff",
         "type": "object"

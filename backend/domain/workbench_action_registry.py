@@ -4,11 +4,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from backend.domain.models import (
-    AgentAction,
     HandoffRecord,
     HandoffType,
     StaffActionRecord,
-    WorkflowState,
 )
 from backend.domain.workbench import (
     ConfirmationLevel,
@@ -445,14 +443,7 @@ def handoff_resolution_defaults(handoff: HandoffRecord) -> dict[str, object]:
     """
     professional_review = handoff.type is HandoffType.PROFESSIONAL_REVIEW
     support_state_changes = []
-    if (
-        handoff.resume_workflow_state is not None
-        and handoff.resume_next_action is not None
-        and (
-            handoff.resume_workflow_state is not WorkflowState.COLLECTING
-            or handoff.resume_next_action is not AgentAction.ASK
-        )
-    ):
+    if handoff.resume_workflow_state is not None and handoff.resume_next_action is not None:
         support_state_changes = [
             {
                 'path': 'claim_state.workflow_state',
