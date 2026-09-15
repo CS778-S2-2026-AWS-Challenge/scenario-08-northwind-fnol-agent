@@ -926,7 +926,7 @@ class RuntimeTraceRecord(ContractModel):
     evidence: list[RuntimeEvidenceTrace] = Field(default_factory=list, max_length=20)
     invocations: list[RuntimeInvocationTrace] = Field(min_length=1, max_length=2)
     tool_call_id: str
-    tool_name: Literal['claim.read']
+    tool_name: str = Field(pattern=r'^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$')
     tool_arguments: dict[str, Any] = Field(default_factory=dict)
     tool_output: dict[str, Any] = Field(default_factory=dict)
     tool_result_status: Literal['succeeded', 'unavailable', 'failed']

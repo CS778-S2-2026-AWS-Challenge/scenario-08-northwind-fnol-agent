@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from pydantic import TypeAdapter, ValidationError
 
+from backend.domain.agent_action_registry import action_contract
 from backend.domain.agent_tool_registry import tool_contract
 from backend.domain.branch_registry import build_default_registry
 from backend.domain.ids import new_id
@@ -673,12 +674,14 @@ class GatewayAgent:
                     )
                 except ValidationError:
                     raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
-                if runtime_proposal.runtime_action_code not in {
-                    'runtime.continue',
-                    'runtime.wait_for_user',
-                    'runtime.pause_for_review',
-                }:
-                    raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+                # ModelRuntimeProposal validates registry membership.  Keep the
+                # explicit lookup here as a second boundary so a malformed or
+                # stale provider response can never introduce a private action.
+                try:
+                    action_contract(runtime_proposal.action_code)
+                    action_contract(runtime_proposal.runtime_action_code)
+                except ValueError:
+                    raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY) from None
                 evidence_action_requested = runtime_proposal.action_code in {
                     'claim.propose_evidence_reuse',
                     'claim.propose_evidence_remove',

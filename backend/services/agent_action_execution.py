@@ -6,7 +6,12 @@ from enum import Enum
 
 from backend.core.errors import ApiError
 from backend.domain.agent_action_commands import ClaimContextCommand
-from backend.domain.agent_action_registry import ActionStateEffect
+from backend.domain.agent_action_registry import (
+    AGENT_ACTION_REGISTRY,
+    ActionStateEffect,
+    action_contract,
+)
+from backend.domain.agent_tool_registry import tool_contract
 from backend.repositories.protocols import ClaimRepository, IdempotencyConflict, RevisionConflict
 
 
@@ -16,6 +21,91 @@ class ClaimContextExecutionStatus(str, Enum):
     APPLIED = 'applied'
     REJECTED = 'rejected'
     FAILED = 'failed'
+
+
+class ActionBindingStatus(str, Enum):
+    """Evidence status for a registered action in the application composition root."""
+
+    RUNTIME_EXECUTABLE = 'runtime-executable'
+    TEST_ONLY = 'test-only'
+    STANDALONE_API = 'standalone-api'
+    UNAVAILABLE = 'unavailable'
+
+
+@dataclass(frozen=True, slots=True)
+class ActionBindingDescriptor:
+    """Machine-readable binding evidence for one namespaced action."""
+
+    action_code: str
+    status: ActionBindingStatus
+    handler_name: str | None
+    tool_name: str | None
+    reason: str
+
+
+def action_binding_table(
+    handlers: Mapping[str, 'ClaimContextHandlerBinding'] | None = None,
+    *,
+    test_only_actions: set[str] | frozenset[str] = frozenset(),
+    standalone_api_actions: set[str] | frozenset[str] = frozenset(),
+) -> tuple[ActionBindingDescriptor, ...]:
+    """Describe every registered action without implying unsupported execution.
+
+    The table is intentionally derived from the immutable registry.  The
+    composition root supplies only real handlers; all other actions remain
+    explicitly unavailable (or are labelled as test-only/standalone API when
+    the deployment says so).  This makes registry membership and production
+    executability separately auditable.
+    """
+
+    supplied = handlers or {}
+    unknown = sorted(set(supplied) - set(AGENT_ACTION_REGISTRY))
+    if unknown:
+        raise ValueError(f'Unknown action bindings: {", ".join(unknown)}.')
+    overlap = set(test_only_actions) & set(standalone_api_actions)
+    if overlap:
+        raise ValueError(
+            f'An action cannot be both test-only and standalone API: {", ".join(sorted(overlap))}.'
+        )
+    unknown_labels = (set(test_only_actions) | set(standalone_api_actions)) - set(
+        AGENT_ACTION_REGISTRY
+    )
+    if unknown_labels:
+        raise ValueError(f'Unknown action status labels: {", ".join(sorted(unknown_labels))}.')
+
+    rows: list[ActionBindingDescriptor] = []
+    for action_code in sorted(AGENT_ACTION_REGISTRY):
+        contract = action_contract(action_code)
+        binding = supplied.get(action_code)
+        if binding is not None:
+            if not isinstance(binding, ClaimContextHandlerBinding):
+                raise TypeError('handler bindings must be ClaimContextHandlerBinding values.')
+            if binding.tool_name is not None:
+                tool_contract(binding.tool_name)
+            status = ActionBindingStatus.RUNTIME_EXECUTABLE
+            handler_name = getattr(binding.handler, '__qualname__', None) or getattr(
+                binding.handler, '__name__', type(binding.handler).__name__
+            )
+            reason = 'A composition-root handler is bound and validated at execution time.'
+        elif action_code in test_only_actions:
+            status, handler_name = ActionBindingStatus.TEST_ONLY, None
+            reason = 'Covered by tests only; no production Runtime handler is bound.'
+        elif action_code in standalone_api_actions:
+            status, handler_name = ActionBindingStatus.STANDALONE_API, None
+            reason = 'Reachable through a standalone service/API boundary only.'
+        else:
+            status, handler_name = ActionBindingStatus.UNAVAILABLE, None
+            reason = 'No production Runtime handler is currently bound.'
+        rows.append(
+            ActionBindingDescriptor(
+                action_code=contract.action_code,
+                status=status,
+                handler_name=handler_name,
+                tool_name=binding.tool_name if binding is not None else None,
+                reason=reason,
+            )
+        )
+    return tuple(rows)
 
 
 @dataclass(frozen=True, slots=True)
