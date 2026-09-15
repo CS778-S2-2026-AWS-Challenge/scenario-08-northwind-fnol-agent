@@ -2262,6 +2262,13 @@
           "evidence_summary": {
             "$ref": "#/components/schemas/EvidenceSummary"
           },
+          "external_capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalCapabilityProjection"
+            },
+            "title": "External Capabilities",
+            "type": "array"
+          },
           "external_claim": {
             "anyOf": [
               {
@@ -2799,6 +2806,7 @@
             "type": "string"
           },
           "registry_version": {
+            "default": "external-service-lifecycle.v1",
             "maxLength": 100,
             "minLength": 1,
             "title": "Registry Version",
@@ -2847,7 +2855,6 @@
         },
         "required": [
           "service_identity",
-          "registry_version",
           "lifecycle_status",
           "capability_provenance",
           "access_form",
@@ -5705,6 +5712,125 @@
           }
         },
         "title": "ExecuteStaffAgentDraftRequest",
+        "type": "object"
+      },
+      "ExternalCapabilityProjection": {
+        "additionalProperties": false,
+        "description": "Server-owned third-party capability row shared by claimant and staff.",
+        "properties": {
+          "access_form": {
+            "title": "Access Form",
+            "type": "string"
+          },
+          "adapter_kind": {
+            "title": "Adapter Kind",
+            "type": "string"
+          },
+          "catalogue_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalogue Reference"
+          },
+          "disclosure_fields": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Disclosure Fields",
+            "type": "array"
+          },
+          "limitation": {
+            "title": "Limitation",
+            "type": "string"
+          },
+          "official_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official Phone"
+          },
+          "official_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official Url"
+          },
+          "product_families": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Product Families",
+            "type": "array"
+          },
+          "provider_name": {
+            "title": "Provider Name",
+            "type": "string"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          },
+          "registry_version": {
+            "default": "external-service-lifecycle.v1",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Registry Version",
+            "type": "string"
+          },
+          "required_fields": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Fields",
+            "type": "array"
+          },
+          "result_semantics": {
+            "title": "Result Semantics",
+            "type": "string"
+          },
+          "service_identity": {
+            "title": "Service Identity",
+            "type": "string"
+          },
+          "service_name": {
+            "title": "Service Name",
+            "type": "string"
+          },
+          "uses_external_task": {
+            "title": "Uses External Task",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "service_identity",
+          "service_name",
+          "provider_name",
+          "product_families",
+          "purpose",
+          "access_form",
+          "adapter_kind",
+          "uses_external_task",
+          "result_semantics",
+          "limitation"
+        ],
+        "title": "ExternalCapabilityProjection",
         "type": "object"
       },
       "ExternalCapabilityProvenance": {
@@ -12024,6 +12150,13 @@
             "title": "Display Reference",
             "type": "string"
           },
+          "external_capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalCapabilityProjection"
+            },
+            "title": "External Capabilities",
+            "type": "array"
+          },
           "incident": {
             "$ref": "#/components/schemas/WorkbenchIncidentSummary"
           },
@@ -16544,6 +16677,85 @@
         "summary": "Decide Extracted Facts",
         "tags": [
           "claimant-evidence"
+        ]
+      }
+    },
+    "/api/v1/claims/{claim_id}/external-capabilities": {
+      "get": {
+        "description": "Return the claimant-safe capability catalogue for one authorised Claim.",
+        "operationId": "read_external_capabilities_api_v1_claims__claim_id__external_capabilities_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Northwind-Anonymous-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Northwind-Anonymous-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ExternalCapabilityProjection"
+                  },
+                  "title": "Response Read External Capabilities Api V1 Claims  Claim Id  External Capabilities Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read External Capabilities",
+        "tags": [
+          "claimant"
         ]
       }
     },

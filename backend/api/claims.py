@@ -13,6 +13,7 @@ from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal, require_claimant
 from backend.core.errors import ApiError
+from backend.domain.external_service_registry import capability_catalogue
 from backend.domain.models import (
     ClaimantClaim,
     ClaimantExternalServiceResponse,
@@ -22,6 +23,7 @@ from backend.domain.models import (
     CreateClaimRequest,
     CreateClaimResponse,
     CreateMessageRequest,
+    ExternalCapabilityProjection,
     FormConfirmationRequest,
     FormConfirmationResponse,
     FormPatchRequest,
@@ -158,6 +160,18 @@ def read_claim(
     principal: Principal = Depends(require_claimant),
 ) -> ClaimantClaim:
     return get_claim(repository_for(request), principal, claim_id)
+
+
+@router.get('/{claim_id}/external-capabilities', response_model=list[ExternalCapabilityProjection])
+def read_external_capabilities(
+    claim_id: str,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+) -> list[ExternalCapabilityProjection]:
+    """Return the claimant-safe capability catalogue for one authorised Claim."""
+
+    claim = get_claim(repository_for(request), principal, claim_id)
+    return list(capability_catalogue(claim.incident_type))
 
 
 @router.post('/{claim_id}/promote', response_model=ClaimantClaim)
