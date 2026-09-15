@@ -84,14 +84,9 @@ def _material_source_ref(evidence_id: str, version: int) -> str:
 
 
 def _has_material_generation(evidence: EvidenceRecord) -> bool:
-    return bool(
-        evidence.original_filename
-        or evidence.media_type
-        or evidence.size_bytes is not None
-        or evidence.references
-        or evidence.provenance
-        or evidence.file_status in {EvidenceFileStatus.FAILED, EvidenceFileStatus.READY}
-    )
+    """Distinguish an actual file generation from requirement-level metadata."""
+
+    return evidence.file_status in {EvidenceFileStatus.FAILED, EvidenceFileStatus.READY}
 
 
 def _material_proposed_fields(
@@ -653,6 +648,8 @@ def request_upload(
                     }
                 }
             )
+        current_provenance = {} if replacing_material else dict(requirement.provenance)
+        current_provenance['storage_key'] = target.storage_key
         evidence = requirement.model_copy(
             update={
                 'status': EvidenceStatus.PENDING,
@@ -669,7 +666,7 @@ def request_upload(
                 'expected_timing': None,
                 'context_summary': 'Waiting for the claimant to complete the evidence upload.',
                 'provenance': _with_transition(
-                    {'storage_key': target.storage_key},
+                    current_provenance,
                     _transition_entry(
                         field_code=None,
                         from_state=requirement.file_status.value,

@@ -126,6 +126,68 @@ def test_upload_targets_existing_requirement_and_preserves_metadata(
     assert stored.provenance['transition_history'][-1]['to'] == 'processing'
 
 
+def test_first_upload_preserves_message_created_requirement_provenance(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'message-requirement-claim'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+    assert created.status_code == 201
+    claim_id = str(created.json()['claim']['claim_id'])
+    session_id = str(created.json()['session']['session_id'])
+    turn = client.post(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'message-requirement-turn',
+            'If-Match': '1',
+        },
+        json={
+            'client_message_id': 'message-requirement-turn',
+            'content': {
+                'type': 'text',
+                'text': 'The police report has not been issued and will be available later.',
+            },
+            'evidence_refs': [],
+        },
+    )
+    assert turn.status_code == 200, turn.text
+    requirements = repository.list_evidence(claim_id, 'cus_demo')
+    assert len(requirements) == 1
+    requirement = requirements[0]
+    assert requirement.file_status is EvidenceFileStatus.NOT_AVAILABLE
+    source_message_id = requirement.provenance['reported_in_message_id']
+
+    requested = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/uploads',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'message-requirement-upload',
+            'If-Match': str(turn.json()['claim_revision']),
+        },
+        json={
+            'evidence_id': requirement.evidence_id,
+            'kind': requirement.kind,
+            'original_filename': 'police-report.pdf',
+            'media_type': 'application/pdf',
+            'size_bytes': 8,
+        },
+    )
+
+    assert requested.status_code == 201, requested.text
+    awaiting = repository.get_evidence(claim_id, requirement.evidence_id, 'cus_demo')
+    assert awaiting is not None
+    assert awaiting.material_version == 1
+    assert awaiting.material_history == []
+    assert awaiting.provenance['reported_in_message_id'] == source_message_id
+    assert awaiting.provenance['storage_key']
+    assert awaiting.provenance['transition_history'][-1]['to'] == 'awaiting_upload'
+
+
 @pytest.mark.parametrize(
     ('status', 'file_status'),
     [
