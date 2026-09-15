@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
+from backend.domain.external_service_registry import InvalidExternalLifecycleTransition
 from backend.domain.external_services import (
     ExternalTaskDelivery,
     ExternalTaskEvidenceLink,
@@ -115,6 +116,26 @@ def _repositories() -> Iterator[PersistenceRepository]:
     mongo = MongoDBRepository(mongomock.MongoClient(), 'external_task_contract')
     mongo._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
     yield mongo
+
+
+@pytest.mark.parametrize('repository', _repositories())
+def test_external_task_writes_reject_registry_incompatible_capabilities(
+    repository: PersistenceRepository,
+) -> None:
+    claim = _claim(claim_id='clm_registry_guard')
+    repository.create_claim(claim, _session(claim))
+    valid = _task(claim, 1)
+    invalid_tasks = (
+        valid.model_copy(update={'service_identity': 'unregistered-provider'}),
+        valid.model_copy(update={'service_identity': 'repairer_information_or_link'}),
+        valid.model_copy(update={'integration_source': IntegrationSource.CONFIGURED_SERVICE}),
+    )
+
+    for task in invalid_tasks:
+        with pytest.raises(InvalidExternalLifecycleTransition):
+            repository.save_external_task(task, claim.customer_id)
+
+    assert repository.list_external_tasks_internal(claim.claim_id) == []
 
 
 @pytest.mark.parametrize('repository', _repositories())

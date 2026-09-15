@@ -9,9 +9,11 @@ from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from backend.adapters.claims_service import AssessorServiceAdapter, ClaimsServiceAdapter
+from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal, require_claimant
 from backend.core.errors import ApiError
+from backend.domain.external_service_registry import capability_catalogue
 from backend.domain.models import (
     ClaimantClaim,
     ClaimantExternalServiceResponse,
@@ -21,6 +23,7 @@ from backend.domain.models import (
     CreateClaimRequest,
     CreateClaimResponse,
     CreateMessageRequest,
+    ExternalCapabilityProjection,
     FormConfirmationRequest,
     FormConfirmationResponse,
     FormPatchRequest,
@@ -34,6 +37,7 @@ from backend.domain.models import (
 )
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider
+from backend.services.agent_action_execution import ClaimantRuntimeActionDispatcher
 from backend.services.claim_creation import create_claim_from_confirmed_report
 from backend.services.claimant_events import claimant_change_after, claimant_event_revision
 from backend.services.claims import (
@@ -85,6 +89,13 @@ def runtime_agent_policy_for(request: Request) -> RuntimeAgentPolicyResolver:
     return cast(RuntimeAgentPolicyResolver, request.app.state.runtime_agent_policy_resolver)
 
 
+def action_dispatcher_for(request: Request) -> ClaimantRuntimeActionDispatcher:
+    return cast(
+        ClaimantRuntimeActionDispatcher,
+        request.app.state.claimant_runtime_action_dispatcher,
+    )
+
+
 def claims_adapter_for(request: Request) -> ClaimsServiceAdapter:
     return cast(ClaimsServiceAdapter, request.app.state.claims_service_adapter)
 
@@ -99,6 +110,10 @@ def _assessor_entry_for(request: Request) -> ExternalServiceEntryDecision:
 
 def policy_history_adapter_for(request: Request) -> PolicyHistoryAdapter:
     return cast(PolicyHistoryAdapter, request.app.state.policy_history_adapter)
+
+
+def evidence_storage_for(request: Request) -> EvidenceStorage:
+    return cast(EvidenceStorage, request.app.state.evidence_storage)
 
 
 @router.post('', response_model=CreateClaimResponse, status_code=status.HTTP_201_CREATED)
@@ -147,6 +162,18 @@ def read_claim(
     return get_claim(repository_for(request), principal, claim_id)
 
 
+@router.get('/{claim_id}/external-capabilities', response_model=list[ExternalCapabilityProjection])
+def read_external_capabilities(
+    claim_id: str,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+) -> list[ExternalCapabilityProjection]:
+    """Return the claimant-safe capability catalogue for one authorised Claim."""
+
+    claim = get_claim(repository_for(request), principal, claim_id)
+    return list(capability_catalogue(claim.incident_type))
+
+
 @router.post('/{claim_id}/promote', response_model=ClaimantClaim)
 def promote_claim(
     claim_id: str,
@@ -180,6 +207,7 @@ def create_external_claim(
     return create_claim_from_confirmed_report(
         repository_for(request),
         claims_adapter_for(request),
+        action_dispatcher_for(request),
         principal,
         claim_id,
         idempotency_key,
@@ -368,16 +396,18 @@ def create_message(
             update={'model_profile_id': select_model_profile(request, payload.model_profile_id)}
         )
     return submit_message(
-        repository_for(request),
-        agent_for(request),
-        policy_history_adapter_for(request),
-        principal,
-        claim_id,
-        session_id,
-        payload,
-        idempotency_key,
-        if_match,
-        runtime_agent_policy_for(request),
+        repository=repository_for(request),
+        agent=agent_for(request),
+        policy_history_adapter=policy_history_adapter_for(request),
+        principal=principal,
+        claim_id=claim_id,
+        session_id=session_id,
+        payload=payload,
+        idempotency_key=idempotency_key,
+        if_match=if_match,
+        runtime_agent_policy_resolver=runtime_agent_policy_for(request),
+        action_dispatcher=action_dispatcher_for(request),
+        evidence_storage=evidence_storage_for(request),
     )
 
 

@@ -174,19 +174,19 @@ export default function MessageComposer({
   setSelectedModel,
   attachments = [],
   onFileSelected,
+  onRemoveAttachment,
 }) {
   const isWorkspace = variant === 'workspace'
   const fileInput = useRef(null)
   const textareaRef = useRef(null)
   const [voiceStatus, setVoiceStatus] = useState('')
+  const [selectedAttachmentId, setSelectedAttachmentId] = useState(null)
 
   useEffect(() => {
     const textarea = textareaRef.current
     if (!textarea) return
     textarea.style.height = 'auto'
-    const minHeight = 52
-    const maxHeight = 220
-    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight)}px`
+    textarea.style.height = `${textarea.scrollHeight}px`
   }, [draft, attachments.length])
 
   function startVoiceInput() {
@@ -207,6 +207,19 @@ export default function MessageComposer({
     recognition.onerror = () => setVoiceStatus('Voice input could not be started.')
     recognition.onend = () => setVoiceStatus('')
     recognition.start()
+  }
+
+  function removeAttachment(attachment) {
+    if (!onRemoveAttachment) return
+    onRemoveAttachment(attachment)
+    setSelectedAttachmentId(null)
+    textareaRef.current?.focus()
+  }
+
+  function handleAttachmentKeyDown(event, attachment) {
+    if (event.key !== 'Backspace') return
+    event.preventDefault()
+    removeAttachment(attachment)
   }
 
   const modelDisplayName = (model) => model?.label || model?.id
@@ -239,18 +252,58 @@ export default function MessageComposer({
     <form className={`composer ${isWorkspace ? 'workspace-composer' : ''}`} onSubmit={onSubmit}>
       <label className="sr-only" htmlFor={isWorkspace ? 'workspace-incident-input' : 'incident-input'}>{inputLabel}</label>
       <div className={isWorkspace ? 'composer-input-surface' : undefined}>
-        {isWorkspace && attachments.length > 0 && (
+        {attachments.length > 0 && (
           <div className="composer-attachments" aria-label="Attached files">
-            {attachments.map((attachment) => (
-              <div className={`composer-file composer-file-${attachment.status || 'uploaded'}`} key={attachment.id || attachment.name}>
-                <span className="composer-file-icon" aria-hidden="true">↗</span>
-                <span className="composer-file-copy">
-                  <strong>{attachment.name}</strong>
-                  <small>{attachment.statusLabel || attachment.status || 'Uploaded'}</small>
-                </span>
+            {attachments.map((attachment) => {
+              const attachmentId = attachment.id || attachment.name
+              const canRemoveFromDraft = Boolean(onRemoveAttachment) && (
+                attachment.status === 'staged'
+                || attachment.status === 'uploading'
+                || (attachment.status === 'failed' && !attachment.evidenceId)
+              )
+              const content = (
+                <>
+                  <span className="composer-file-icon" aria-hidden="true">↗</span>
+                  <span className="composer-file-copy">
+                    <strong>{attachment.name}</strong>
+                    <small>{attachment.statusLabel || attachment.status || 'Uploaded'}</small>
+                  </span>
+                </>
+              )
+              return (
+                <div
+                  className={`composer-file composer-file-${attachment.status || 'uploaded'} ${selectedAttachmentId === attachmentId ? 'is-selected' : ''}`}
+                  key={attachmentId}
+                >
+                  {canRemoveFromDraft ? (
+                    <button
+                      type="button"
+                      className="composer-file-select"
+                      aria-label={`Select ${attachment.name}`}
+                      aria-pressed={selectedAttachmentId === attachmentId}
+                      onClick={() => setSelectedAttachmentId(attachmentId)}
+                      onFocus={() => setSelectedAttachmentId(attachmentId)}
+                      onKeyDown={(event) => handleAttachmentKeyDown(event, attachment)}
+                    >
+                      {content}
+                    </button>
+                  ) : (
+                    <div className="composer-file-static">{content}</div>
+                  )}
                 {attachment.retry && <button type="button" className="text-button" onClick={attachment.retry}>{attachment.retryLabel || 'Retry'}</button>}
-              </div>
-            ))}
+                {canRemoveFromDraft && (
+                  <button
+                    type="button"
+                    className="composer-file-remove"
+                    aria-label={`Remove ${attachment.name}`}
+                    onClick={() => removeAttachment(attachment)}
+                  >
+                    <span aria-hidden="true">×</span>
+                  </button>
+                )}
+                </div>
+              )
+            })}
           </div>
         )}
         <textarea
@@ -276,8 +329,29 @@ export default function MessageComposer({
               event.target.value = ''
             }}
           />
-          <button className="tool-btn tool-attach" type="button" aria-label="Attach a file" onClick={() => fileInput.current?.click()}><span aria-hidden="true">+</span></button>
-          <button className="tool-btn tool-voice" type="button" aria-label="Voice input" onClick={startVoiceInput}>Voice</button>
+          <button
+            className="tool-btn tool-attach"
+            type="button"
+            aria-label="Attach a file"
+            title="Attach a file"
+            onClick={() => fileInput.current?.click()}
+          >
+            <svg className="tool-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+          <button
+            className="tool-btn tool-voice"
+            type="button"
+            aria-label="Use voice input"
+            title="Use voice input"
+            onClick={startVoiceInput}
+          >
+            <svg className="tool-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="9" y="3" width="6" height="11" rx="3" />
+              <path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" />
+            </svg>
+          </button>
           {(isWorkspace || showClaimTypeControl) && setClaimType && (
             <OptionMenu
               value={claimType}

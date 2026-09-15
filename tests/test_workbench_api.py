@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.domain.external_services import (
+    ASSESSOR_SERVICE_IDENTITY,
     ExternalTaskDelivery,
     ExternalTaskEvidenceLink,
     ExternalTaskFailureCode,
@@ -22,6 +23,8 @@ from backend.domain.models import (
     AgentAuthority,
     AgentDecisionRecord,
     AuthorityOutcome,
+    ClaimCreationStatus,
+    ClaimTerminalDisposition,
     ContentsItem,
     ContentsLossType,
     ContentsOwnership,
@@ -33,6 +36,7 @@ from backend.domain.models import (
     EvidenceRelationState,
     EvidenceSource,
     EvidenceStatus,
+    ExternalClaimResult,
     ExternalServiceConsent,
     ExternalServiceConsentStatus,
     FormStatus,
@@ -42,6 +46,8 @@ from backend.domain.models import (
     MessageVisibility,
     ResponsibleParty,
     StructuredFormField,
+    TerminalDispositionReasonCode,
+    TerminalDispositionValue,
     WorkflowState,
 )
 from backend.domain.retrieval import RetrievalSource
@@ -486,7 +492,7 @@ def test_staff_detail_preserves_unknown_external_outcome_as_an_uncertain_gap(
     task = ExternalTaskRecord(
         task_id='tsk_unknown',
         claim_id=claim_id,
-        service_identity='damage_assessment',
+        service_identity=ASSESSOR_SERVICE_IDENTITY,
         requested_action='request_assessment',
         integration_source=IntegrationSource.FIXTURE,
         status=ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
@@ -618,6 +624,10 @@ def test_external_lifecycle_projection_covers_each_delivery_outcome(
     assert projection.needs_attention is attention
     assert projection.authority_state == 'not_recorded'
     assert projection.consent_state == 'not_recorded'
+    assert projection.registry_version is None
+    assert projection.lifecycle_status is None
+    assert projection.capability_provenance.value == 'unavailable'
+    assert projection.access_form is None
     assert projection.limitation
     if result is not None:
         assert projection.status_label == 'Failed'
@@ -639,7 +649,7 @@ def test_workbench_keeps_provider_reference_separate_when_no_result_exists(
         ExternalTaskRecord(
             task_id='tsk_accepted_without_result',
             claim_id=claim_id,
-            service_identity='damage_assessment',
+            service_identity=ASSESSOR_SERVICE_IDENTITY,
             requested_action='request_assessment',
             integration_source=IntegrationSource.FIXTURE,
             status=ExternalTaskOperationStatus.ACCEPTED,
@@ -659,10 +669,54 @@ def test_workbench_keeps_provider_reference_separate_when_no_result_exists(
 
     assert response.status_code == 200
     lifecycle = response.json()['items'][0]['lifecycle']
+    assert lifecycle['registry_version'] == 'external-service-lifecycle.v1'
+    assert lifecycle['lifecycle_status'] == 'accepted'
+    assert lifecycle['catalogue_reference'] == 'P3-ASSESSOR'
+    assert lifecycle['capability_provenance'] == 'simulated'
+    assert lifecycle['access_form'] == 'controlled assessor simulation'
     assert lifecycle['provider_reference'] == 'provider_ack_001'
     assert lifecycle['result'] is None
     assert lifecycle['result_verification_state'] is None
     assert lifecycle['status_label'] == 'Completion not confirmed'
+
+
+def test_workbench_marks_contradictory_registered_source_unavailable(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, _ = _create_claim_with_context(
+        client, auth_headers, repository, key_suffix='invalid-registered-source'
+    )
+    recorded_at = now_utc()
+    historical_task = ExternalTaskRecord(
+        task_id='tsk_invalid_registered_source',
+        claim_id=claim_id,
+        service_identity=ASSESSOR_SERVICE_IDENTITY,
+        requested_action='vehicle_damage_assessment',
+        integration_source=IntegrationSource.CONFIGURED_SERVICE,
+        status=ExternalTaskOperationStatus.PREPARED,
+        created_at=recorded_at,
+        updated_at=recorded_at,
+    )
+    # Simulate a record written before registry validation guarded repository writes.
+    repository._external_tasks[historical_task.task_id] = historical_task
+
+    response = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/external-requests',
+        headers=staff_auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        'items': [],
+        'page': {'next_cursor': None},
+        'status': 'unavailable',
+        'limitation': (
+            'External-service lifecycle records are inconsistent and cannot be displayed safely.'
+        ),
+    }
 
 
 @pytest.mark.parametrize(
@@ -723,7 +777,7 @@ def test_workbench_projects_formal_external_results_without_settling_claim_state
         ExternalTaskRecord(
             task_id=task_id,
             claim_id=claim_id,
-            service_identity='damage_assessment',
+            service_identity=ASSESSOR_SERVICE_IDENTITY,
             requested_action='request_assessment',
             integration_source=IntegrationSource.FIXTURE,
             status=task_status,
@@ -857,7 +911,7 @@ def test_external_wait_count_matches_the_named_pending_task_projection(
             ExternalTaskRecord(
                 task_id=f'tsk_wait_{suffix}',
                 claim_id=claim_id,
-                service_identity='damage_assessment',
+                service_identity=ASSESSOR_SERVICE_IDENTITY,
                 requested_action='request_assessment',
                 integration_source=IntegrationSource.FIXTURE,
                 status=status,
@@ -1638,6 +1692,8 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
     assert detail['revision'] == final_claim.revision
     assert detail['claim_state']['workflow_state'] == 'created'
     assert detail['integration_summary']['claim_creation_status'] == 'created'
+    assert detail['integration_summary']['claim_number'] == creation['claim_number']
+    assert detail['integration_summary']['expected_by'] == creation['expected_by']
     assert detail['integration_summary']['assessor_routing_status'] == 'assigned'
     assert detail['customer_next_step']['status'] == 'assessor_assigned'
     assert detail['customer_next_step']['expected_by'] == routing['expected_by']
@@ -1647,16 +1703,41 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
         create_decision.decision_id,
         creation['external_claim_id'],
     ]
+    assert detail['work_summary']['queue_key'] == 'waiting_third_party'
     active_response = client.get('/api/v1/workbench/claims', headers=staff_auth_headers)
-    assert all(item['claim_id'] != claim_id for item in active_response.json()['items'])
+    assert claim_id in {item['claim_id'] for item in active_response.json()['items']}
     queue_response = client.get(
-        '/api/v1/workbench/claims?view=completed', headers=staff_auth_headers
+        '/api/v1/workbench/claims?view=waiting_third_party', headers=staff_auth_headers
     )
     queue_item = next(
         item for item in queue_response.json()['items'] if item['claim_id'] == claim_id
     )
-    assert queue_item['work_summary']['queue_key'] == 'completed'
+    assert queue_item['work_summary']['queue_key'] == 'waiting_third_party'
+    assert queue_item['integration_summary']['claim_creation_status'] == 'created'
+    assert 'claim_number' not in queue_item['integration_summary']
+    assert 'expected_by' not in queue_item['integration_summary']
+    assert queue_item['ownership']['state'] == 'unassigned'
     assert queue_item['ownership']['primary_assignee'] is None
+
+
+def test_workbench_detail_keeps_claim_creation_identity_null_without_external_claim(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, _ = _create_claim_with_context(client, auth_headers, repository)
+
+    response = client.get(
+        f'/api/v1/workbench/claims/{claim_id}',
+        headers=staff_auth_headers,
+    )
+
+    assert response.status_code == 200
+    integration = response.json()['integration_summary']
+    assert integration['claim_creation_status'] is None
+    assert integration['claim_number'] is None
+    assert integration['expected_by'] is None
 
 
 def test_handoff_acceptance_is_atomic_revision_safe_and_idempotent(
@@ -1707,6 +1788,48 @@ def test_handoff_acceptance_is_atomic_revision_safe_and_idempotent(
     assert stale.status_code == 409
     assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
     assert stale.json()['error']['current_revision'] == claim.revision
+
+
+def test_created_claim_with_active_staff_handoff_remains_actionable(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, handoff_id, revision = _request_staff_support(client, auth_headers, repository)
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    created = claim.model_copy(
+        update={
+            'terminal_disposition': ClaimTerminalDisposition(
+                value=TerminalDispositionValue.COMPLETED,
+                reason_code=TerminalDispositionReasonCode.CLAIM_CREATED,
+                source_refs=['dec_created', 'ext_created'],
+                recorded_by=ActorReference(actor_type=ActorType.SYSTEM, actor_id='test'),
+                recorded_at=claim.updated_at,
+                recorded_revision=claim.revision + 1,
+            ),
+            'external_claim': ExternalClaimResult(
+                external_claim_id='ext_created',
+                claim_number='NWF-2026-CREATED',
+                creation_status=ClaimCreationStatus.CREATED,
+                route='standard_motor_intake',
+                next_step='Claims intake review',
+                source=IntegrationSource.FIXTURE,
+                created_at=claim.updated_at,
+            ),
+            'revision': claim.revision + 1,
+        }
+    )
+    repository.save_claim(created, expected_revision=claim.revision)
+    detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers)
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body['work_summary']['queue_key'] == 'processing'
+    assert any(
+        action['action_code'] == 'human.accept_handoff' and action['target_ref'] == handoff_id
+        for action in body['allowed_actions']
+    )
 
 
 def test_claim_conversations_list_only_sessions_held_by_current_staff(

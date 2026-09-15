@@ -473,6 +473,11 @@ Question candidates are calculated by these principles rather than by form order
 The new system is not a flat enum. It has five namespaces. A TurnPlan may contain multiple
 conversation moves and multiple command proposals, but only one primary Runtime control directive.
 
+The `claim` namespace contains claimant-scoped proposals to reuse or remove persisted Evidence.
+The Agent may read the bounded `evidence.history` projection and request explicit confirmation;
+the Evidence API, retention policy, and audit boundary remain responsible for any attachment or
+removal. A history result never exposes storage keys or grants mutation authority.
+
 #### 7.1 Conversation Moves: Communication Only
 
 | Action | Meaning |
@@ -498,11 +503,31 @@ conversation moves and multiple command proposals, but only one primary Runtime 
 | `claim.recompute_form` | Recalculate content branches, field selection, and question candidates from accepted facts without creating facts |
 | `claim.register_evidence` | Register evidence identity, type, provenance, storage reference, and processing state without automatically confirming extracted values |
 | `claim.set_evidence_state` | Record states including received, incomplete, unofficial, conflicting, and pending_generation |
+| `claim.propose_evidence_reuse` | Propose one claimant-owned historical Evidence item after an authorised history lookup; no attachment occurs |
+| `claim.propose_evidence_remove` | Propose governed removal of one persisted Evidence item; no retention or storage action occurs |
+| `claim.reuse_evidence` | After exact claimant confirmation, request an idempotent backend attachment of the existing Evidence identity without copying the file object |
+| `claim.remove_evidence` | After exact claimant confirmation, request the backend retention policy to detach, mark unavailable, or delete as permitted |
 | `claim.upsert_work_item` | Create or update unresolved work, responsible party, blocked action, and completion evidence |
 | `claim.save_progress` | Persist the current draft, unresolved work, and resume point without claiming a formal Claim has been created |
 | `claim.resume_draft` | Resume from the latest Claim State and recalculate without allowing an old session to overwrite newer state |
 | `claim.prepare_creation` | Check whether facts, confirmations, idempotency, and professional judgement needed for the current creation action are complete |
 | `claim.create` | Create and route the formal Claim through the claims adapter; report completion to the claimant only after a real success result |
+
+The two confirmed Evidence actions are Runtime-only execution actions. Runtime matches the
+authenticated claimant, target Claim, source Claim, Evidence identity, proposal reference, and
+confirmation reference before invoking a provider-neutral backend port. It checks the current
+workflow state and Claim revision before a first execution, and it looks up an existing result by
+the same idempotency key before treating a stale revision as a conflict. The backend remains
+authoritative for retention, consent and permission policy, audit persistence, Evidence linkage,
+and whether removal means detach, claimant-history removal with retention, or physical deletion.
+The current Evidence API implements the first two: reuse creates an auditable link to the existing
+Evidence object, while source removal hides it from claimant history without deleting the object.
+
+The backend port returns `succeeded`, `rejected`, `unavailable`, `failed`, or `unknown`. Runtime
+reports success only when the result identifies the same action and Evidence, includes an
+auditable state-change reference, and the resulting Claim revision is visible in authoritative
+persistence. An absent handler is `unavailable`; a timeout or ambiguous side effect is `unknown`
+and must be reconciled by the same idempotency key before retry.
 
 #### 7.3 Human and Review Actions: Obtain Support or Professional Authority
 

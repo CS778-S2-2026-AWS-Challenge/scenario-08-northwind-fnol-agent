@@ -196,6 +196,16 @@ class EvidenceSource(str, Enum):
     EXTERNAL_SYSTEM = 'external_system'
 
 
+class EvidenceHistoryState(str, Enum):
+    AVAILABLE = 'available'
+    REMOVED = 'removed'
+
+
+class EvidenceClaimLinkState(str, Enum):
+    ACTIVE = 'active'
+    DETACHED = 'detached'
+
+
 class FormSource(str, Enum):
     CLAIMANT = 'claimant'
     IMAGE = 'image'
@@ -518,6 +528,7 @@ class ProposedContentsItem(ContractModel):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     relation: AssertionRelation | None = None
     reported_text: str | None = Field(default=None, max_length=5000)
+    source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ContentsItemAssertion(ContractModel):
@@ -614,6 +625,18 @@ class AssessorRoutingResult(ContractModel):
 
 class ClaimantExternalServiceAction(ContractModel):
     service_identity: str
+    registry_version: str = Field(
+        default='external-service-lifecycle.v1', min_length=1, max_length=100
+    )
+    lifecycle_status: str = Field(min_length=1, max_length=100)
+    catalogue_reference: str | None = None
+    capability_provenance: str = Field(min_length=1, max_length=100)
+    access_form: str = Field(min_length=1, max_length=200)
+    status_label: str = Field(min_length=1, max_length=120)
+    status_detail: str = Field(min_length=1, max_length=500)
+    pending_owner: str = Field(min_length=1, max_length=80)
+    next_action: str = Field(min_length=1, max_length=500)
+    limitation: str = Field(min_length=1, max_length=500)
     service_name: str
     provider: str
     purpose: str
@@ -623,6 +646,29 @@ class ClaimantExternalServiceAction(ContractModel):
     routing: AssessorRoutingResult | None = None
     failure_code: AssessorRoutingFailureCode | None = None
     can_request: bool
+
+
+class ExternalCapabilityProjection(ContractModel):
+    """Server-owned third-party capability row shared by claimant and staff."""
+
+    registry_version: str = Field(
+        default='external-service-lifecycle.v1', min_length=1, max_length=100
+    )
+    service_identity: str
+    catalogue_reference: str | None = None
+    service_name: str
+    provider_name: str
+    product_families: tuple[str, ...]
+    purpose: str
+    access_form: str
+    adapter_kind: str
+    uses_external_task: bool
+    required_fields: tuple[str, ...] = ()
+    disclosure_fields: tuple[str, ...] = ()
+    official_url: str | None = None
+    official_phone: str | None = None
+    result_semantics: str
+    limitation: str
 
 
 class AssessorRoutingOperation(ContractModel):
@@ -877,6 +923,7 @@ class ProposedFormChange(ContractModel):
     precision: FactPrecision = FactPrecision.EXACT
     relation: AssertionRelation | None = None
     reported_text: str | None = Field(default=None, max_length=5000)
+    source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class AgentAuthority(ContractModel):
@@ -905,6 +952,14 @@ class RuntimeInvocationTrace(ContractModel):
     latency_ms: float = Field(ge=0)
 
 
+class RuntimeEvidenceTrace(ContractModel):
+    """Bounded Evidence identity recorded for one successful model turn."""
+
+    evidence_id: str = Field(min_length=1, max_length=100)
+    media_type: str = Field(min_length=1, max_length=100)
+    outcome: Literal['submitted'] = 'submitted'
+
+
 class RuntimeTraceRecord(ContractModel):
     """Provider trace retained alongside the applied Runtime turn records."""
 
@@ -913,9 +968,10 @@ class RuntimeTraceRecord(ContractModel):
     session_id: str
     model_profile_id: str
     trigger_message_id: str
+    evidence: list[RuntimeEvidenceTrace] = Field(default_factory=list, max_length=20)
     invocations: list[RuntimeInvocationTrace] = Field(min_length=1, max_length=2)
     tool_call_id: str
-    tool_name: Literal['claim.read']
+    tool_name: str = Field(pattern=r'^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$')
     tool_arguments: dict[str, Any] = Field(default_factory=dict)
     tool_output: dict[str, Any] = Field(default_factory=dict)
     tool_result_status: Literal['succeeded', 'unavailable', 'failed']
@@ -1021,6 +1077,27 @@ class EvidenceReference(ContractModel):
         return self
 
 
+class EvidenceMaterialVersion(ContractModel):
+    """Immutable snapshot of one replaced material generation."""
+
+    version: int = Field(ge=1)
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    original_filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    references: list[EvidenceReference] = Field(default_factory=list, max_length=50)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    proposed_fields: dict[str, StructuredFormField] = Field(default_factory=dict)
+    wait_type: EvidenceWaitType | None = None
+    responsible_party: ResponsibleParty | None = None
+    expected_by: datetime | None = None
+    expected_timing: str | None = Field(default=None, max_length=200)
+    context_summary: str | None = Field(default=None, max_length=1000)
+    archived_at: datetime
+    reason: Literal['claimant_replacement']
+
+
 class EvidenceRecord(ContractModel):
     """One piece of material on a claim, its condition, and what it says about others."""
 
@@ -1033,7 +1110,11 @@ class EvidenceRecord(ContractModel):
     media_type: str | None = None
     size_bytes: int | None = Field(default=None, ge=0)
     source: EvidenceSource
+    claimant_history_state: EvidenceHistoryState = EvidenceHistoryState.AVAILABLE
+    claimant_history_removed_at: datetime | None = None
     references: list[EvidenceReference] = Field(default_factory=list, max_length=50)
+    material_version: int = Field(default=1, ge=1)
+    material_history: list[EvidenceMaterialVersion] = Field(default_factory=list)
     related_fields: list[str] = Field(default_factory=list)
     needed_for: list[str] = Field(default_factory=list)
     provenance: dict[str, Any] = Field(default_factory=dict)
@@ -1045,6 +1126,49 @@ class EvidenceRecord(ContractModel):
     context_summary: str | None = Field(default=None, max_length=1000)
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode='after')
+    def validate_material_history(self) -> 'EvidenceRecord':
+        if (self.claimant_history_state is EvidenceHistoryState.REMOVED) != (
+            self.claimant_history_removed_at is not None
+        ):
+            raise ValueError('Removed claimant Evidence history must record when it was removed.')
+        versions = [item.version for item in self.material_history]
+        if versions != list(range(1, self.material_version)):
+            raise ValueError(
+                'Evidence material history must contain every prior version exactly once.'
+            )
+        if any(item.archived_at > self.updated_at for item in self.material_history):
+            raise ValueError(
+                'Evidence material history cannot be archived after the record update.'
+            )
+        return self
+
+
+class EvidenceClaimLink(ContractModel):
+    """Auditable attachment of one existing Evidence object to another Claim."""
+
+    link_id: str
+    evidence_id: str
+    source_claim_id: str
+    target_claim_id: str
+    customer_id: str
+    state: EvidenceClaimLinkState
+    created_at: datetime
+    updated_at: datetime
+    detached_at: datetime | None = None
+
+    @model_validator(mode='after')
+    def validate_link_state(self) -> 'EvidenceClaimLink':
+        if self.source_claim_id == self.target_claim_id:
+            raise ValueError('An Evidence reuse link must connect two different Claims.')
+        if (self.state is EvidenceClaimLinkState.DETACHED) != (self.detached_at is not None):
+            raise ValueError('A detached Evidence link must record when it was detached.')
+        if self.updated_at < self.created_at:
+            raise ValueError('An Evidence link cannot be updated before it was created.')
+        if self.detached_at is not None and self.detached_at != self.updated_at:
+            raise ValueError('An Evidence link detachment must be its latest update.')
+        return self
 
 
 class HandoffEvidenceItem(ContractModel):
@@ -1106,6 +1230,13 @@ class HandoffRecord(ContractModel):
     created_at: datetime
     accepted_at: datetime | None = None
     resolved_at: datetime | None = None
+    # Support handoffs temporarily interrupt the claimant workflow. These values
+    # preserve the authoritative continuation target without creating a second
+    # claim-state record.
+    # Legacy records may not have a continuation target; resolution then preserves
+    # the current Claim state rather than inventing a default.
+    resume_workflow_state: WorkflowState | None = None
+    resume_next_action: AgentAction | None = None
 
 
 class ClaimantHandoff(ContractModel):
@@ -1116,6 +1247,16 @@ class ClaimantHandoff(ContractModel):
     support_need: SupportNeed
     summary: str
     created_at: datetime
+
+
+class ClaimantResolvedSupportHandoff(ContractModel):
+    """Claimant-safe evidence that a support handoff was completed."""
+
+    handoff_id: str
+    type: HandoffType
+    status: Literal['resolved'] = 'resolved'
+    completed_at: datetime
+    customer_update: str | None = None
 
 
 class WorkbenchSession(ContractModel):
@@ -1282,6 +1423,14 @@ class StaffActionMutationResponse(ContractModel):
     customer_update: CustomerUpdateRecord | None = None
 
 
+class ExternalTaskReconciliationResponse(ContractModel):
+    claim_id: str
+    task_id: str
+    revision: int = Field(ge=1)
+    routing: AssessorRoutingResult
+    staff_action: StaffActionRecord
+
+
 class SignalDecisionRequest(ContractModel):
     decision: SignalDecisionValue
     reason_codes: list[str] = Field(min_length=1, max_length=20)
@@ -1324,6 +1473,8 @@ class WorkbenchHandoff(ContractModel):
     created_at: datetime
     accepted_at: datetime | None = None
     resolved_at: datetime | None = None
+    resume_workflow_state: WorkflowState | None = None
+    resume_next_action: AgentAction | None = None
 
 
 class AcceptHandoffRequest(ContractModel):
@@ -1460,6 +1611,7 @@ class ClaimantEvidence(ContractModel):
 
     evidence_id: str
     claim_id: str
+    source_claim_id: str | None = None
     kind: str
     status: EvidenceStatus
     file_status: EvidenceFileStatus
@@ -1470,6 +1622,8 @@ class ClaimantEvidence(ContractModel):
     related_fields: list[str] = Field(default_factory=list)
     needed_for: list[str] = Field(default_factory=list)
     claimant_note: str | None = None
+    reused: bool = False
+    can_remove: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -1483,6 +1637,7 @@ class RegisterEvidenceRequest(ContractModel):
 
 
 class RequestEvidenceUploadRequest(ContractModel):
+    evidence_id: str | None = Field(default=None, min_length=1, max_length=120)
     kind: str = Field(min_length=1, max_length=100)
     original_filename: str = Field(min_length=1, max_length=255)
     media_type: str = Field(min_length=1, max_length=100)
@@ -1552,6 +1707,52 @@ class EvidenceListResponse(ContractModel):
     revision: int
     items: list[ClaimantEvidence]
     customer_next_step: CustomerNextStep
+
+
+class ClaimantEvidenceHistoryItem(ContractModel):
+    """Claimant-safe metadata for Evidence retained across Claims."""
+
+    evidence_id: str
+    source_claim_id: str
+    kind: str
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    original_filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = None
+    source: EvidenceSource
+    provenance_summary: list[str] = Field(default_factory=list, max_length=20)
+    can_reuse: bool = False
+    can_remove: bool = False
+    linked_claim_ids: list[str] = Field(default_factory=list, max_length=100)
+    created_at: datetime
+    updated_at: datetime
+
+
+class ClaimantEvidenceHistoryResponse(ContractModel):
+    """Account-scoped claimant Evidence history projection."""
+
+    items: list[ClaimantEvidenceHistoryItem]
+    page: PageInfo
+
+
+class EvidenceActionRequestPayload(ContractModel):
+    source_claim_id: str = Field(min_length=1, max_length=120)
+    proposal_ref: str = Field(min_length=1, max_length=200)
+    confirmation_ref: str = Field(min_length=1, max_length=200)
+
+
+class ClaimantEvidenceActionResponse(ContractModel):
+    action: Literal['reuse', 'remove']
+    status: Literal['succeeded', 'rejected', 'unavailable', 'failed', 'unknown']
+    reason_code: str = Field(min_length=1, max_length=100)
+    evidence_id: str
+    source_claim_id: str
+    target_claim_id: str
+    revision: int | None = Field(default=None, ge=1)
+    state_change_refs: list[str] = Field(default_factory=list, max_length=20)
+    retryable: bool = False
+    message: str
 
 
 class EvidenceMutationResponse(ContractModel):
@@ -1676,10 +1877,12 @@ class ClaimantClaim(ContractModel):
     evidence_summary: EvidenceSummary
     external_claim: ExternalClaimResult | None = None
     external_service_action: ClaimantExternalServiceAction | None = None
+    external_capabilities: list[ExternalCapabilityProjection] = Field(default_factory=list)
     dynamic_form: 'DynamicFormProjection | None' = None
     customer_next_step: CustomerNextStep
     incomplete_context: ClaimantIncompleteContext | None = None
     handoff: ClaimantHandoff | None = None
+    resolved_support_handoff: ClaimantResolvedSupportHandoff | None = None
     created_at: datetime
     updated_at: datetime
 

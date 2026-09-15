@@ -7,7 +7,16 @@ import {
 } from './ProjectedAction.jsx'
 import { canSubmitProjectedAction, findProjectedAction, isProjectedInputRequired } from '../projected-action.js'
 
-export function HandoffResolution({ handoff, allowedAction, onResolve }) {
+export function HandoffResolution({
+  handoff,
+  allowedAction,
+  onResolve,
+  eyebrow = 'Accepted handoff',
+  title = 'Continue and resolve staff assistance',
+  actionLabel = 'Record resolution',
+  submitLabel = 'Resolve handoff',
+  compact = false,
+}) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -34,20 +43,20 @@ export function HandoffResolution({ handoff, allowedAction, onResolve }) {
   }
 
   return (
-    <section className="action-panel" aria-labelledby="handoff-resolution-title">
+    <section className={`action-panel${compact ? ' action-panel--compact' : ''}`} aria-labelledby="handoff-resolution-title">
       <div className="action-panel__heading">
-        <div><p className="eyebrow">Accepted handoff</p><h2 id="handoff-resolution-title">Continue and resolve staff assistance</h2></div>
+        <div><p className="eyebrow">{eyebrow}</p><h2 id="handoff-resolution-title">{title}</h2></div>
         {allowedAction && <span className="assigned-chip">{allowedAction.label}</span>}
       </div>
       <p>{handoff.requested_action}</p>
-      <HandoffContext handoff={handoff} />
+      {!compact && <HandoffContext handoff={handoff} />}
       <ProjectedActionState action={allowedAction} absentMessage="No handoff-resolution action is projected for this handoff." />
-      {!open && executable && <button className="button button--secondary" type="button" onClick={() => setOpen(true)}>Record resolution</button>}
+      {!open && executable && <button className="button button--secondary" type="button" onClick={() => setOpen(true)}>{actionLabel}</button>}
       {open && executable && (
         <form className="action-form" onSubmit={submit}>
           {allowedAction.inputs.map((input) => <ProjectedActionInput input={input} key={input.field_code} />)}
           <p>{allowedAction.confirmation?.message}</p>
-          <div className="form-actions"><button className="button button--ghost" type="button" onClick={() => setOpen(false)}>Cancel</button><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Recording...' : 'Resolve handoff'}</button></div>
+          <div className="form-actions"><button className="button button--ghost" type="button" onClick={() => setOpen(false)}>Cancel</button><button className={compact ? 'button button--secondary' : 'button button--primary'} type="submit" disabled={busy}>{busy ? 'Recording...' : submitLabel}</button></div>
           {error && <p className="form-error" role="alert">{error}</p>}
         </form>
       )}

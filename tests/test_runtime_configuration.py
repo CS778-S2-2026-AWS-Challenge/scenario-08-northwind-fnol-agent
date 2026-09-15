@@ -67,7 +67,7 @@ def test_runtime_snapshot_selects_each_keyed_model_profile() -> None:
     configurations = ConfigurationRepository()
     releases = ReleaseSetRepository()
     records: dict[str, ConfigurationRecord] = {}
-    for profile_id in ('qwen-local', 'nowcoding-gpt56terra'):
+    for profile_id in ('qwen-local', 'nowcoding-gpt55'):
         record = ConfigurationRecord(
             configuration_id=f'cfg_{profile_id}',
             domain='model',
@@ -109,7 +109,7 @@ def test_runtime_snapshot_selects_each_keyed_model_profile() -> None:
     assert default_model is not None
     assert default_model.values['profile_id'] == 'qwen-local'
     assert snapshot.model('qwen-local') == records['qwen-local']
-    assert snapshot.model('nowcoding-gpt56terra') == records['nowcoding-gpt56terra']
+    assert snapshot.model('nowcoding-gpt55') == records['nowcoding-gpt55']
 
 
 def _knowledge(

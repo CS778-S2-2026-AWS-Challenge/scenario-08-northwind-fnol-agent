@@ -1,6 +1,6 @@
 from typing import cast
 
-from fastapi import APIRouter, Depends, Header, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 
 from backend.adapters.evidence_storage import (
     EvidenceStorage,
@@ -11,7 +11,10 @@ from backend.adapters.evidence_storage import (
 from backend.core.auth import Principal, require_claimant, require_durable_claimant
 from backend.core.errors import ApiError
 from backend.domain.models import (
+    ClaimantEvidenceActionResponse,
+    ClaimantEvidenceHistoryResponse,
     CompleteEvidenceUploadRequest,
+    EvidenceActionRequestPayload,
     EvidenceCompleteResponse,
     EvidenceFactDecisionRequest,
     EvidenceFactDecisionResponse,
@@ -26,12 +29,16 @@ from backend.repositories.protocols import PersistenceRepository
 from backend.services.evidence import (
     complete_upload,
     decide_evidence_facts,
+    execute_evidence_action,
     list_evidence,
+    list_evidence_history,
     register_evidence,
     request_upload,
 )
 
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant-evidence'])
+
+account_router = APIRouter(prefix='/api/v1/evidence', tags=['claimant-evidence'])
 
 
 def repository_for(request: Request) -> PersistenceRepository:
@@ -40,6 +47,88 @@ def repository_for(request: Request) -> PersistenceRepository:
 
 def storage_for(request: Request) -> EvidenceStorage:
     return cast(EvidenceStorage, request.app.state.evidence_storage)
+
+
+@account_router.get('', response_model=ClaimantEvidenceHistoryResponse)
+def read_evidence_history(
+    request: Request,
+    limit: int = Query(default=25, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+    principal: Principal = Depends(require_claimant),
+) -> ClaimantEvidenceHistoryResponse:
+    return list_evidence_history(repository_for(request), principal, limit=limit, cursor=cursor)
+
+
+def _mutate_historical_evidence(
+    claim_id: str,
+    evidence_id: str,
+    action: str,
+    payload: EvidenceActionRequestPayload,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> ClaimantEvidenceActionResponse:
+    return execute_evidence_action(
+        repository_for(request),
+        principal,
+        claim_id,
+        evidence_id,
+        action,
+        payload,
+        idempotency_key,
+        if_match,
+    )
+
+
+@router.post(
+    '/{claim_id}/evidence/{evidence_id}/reuse',
+    response_model=ClaimantEvidenceActionResponse,
+)
+def reuse_historical_evidence(
+    claim_id: str,
+    evidence_id: str,
+    payload: EvidenceActionRequestPayload,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> ClaimantEvidenceActionResponse:
+    return _mutate_historical_evidence(
+        claim_id,
+        evidence_id,
+        'reuse',
+        payload,
+        request,
+        principal,
+        idempotency_key,
+        if_match,
+    )
+
+
+@router.post(
+    '/{claim_id}/evidence/{evidence_id}/remove',
+    response_model=ClaimantEvidenceActionResponse,
+)
+def remove_historical_evidence(
+    claim_id: str,
+    evidence_id: str,
+    payload: EvidenceActionRequestPayload,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> ClaimantEvidenceActionResponse:
+    return _mutate_historical_evidence(
+        claim_id,
+        evidence_id,
+        'remove',
+        payload,
+        request,
+        principal,
+        idempotency_key,
+        if_match,
+    )
 
 
 def _upload_size_error(*, exceeds_global_limit: bool) -> ApiError:

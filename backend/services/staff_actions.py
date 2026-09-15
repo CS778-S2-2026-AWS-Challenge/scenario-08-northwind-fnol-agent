@@ -1,7 +1,12 @@
 from typing import Any
 
+from backend.adapters.claims_service import AssessorServiceAdapter
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
+from backend.domain.external_services import (
+    ExternalTaskOperationStatus,
+    ExternalTaskResultVerification,
+)
 from backend.domain.ids import new_id
 from backend.domain.models import (
     AcceptHandoffRequest,
@@ -13,6 +18,7 @@ from backend.domain.models import (
     CustomerNextStep,
     CustomerSupport,
     CustomerUpdateRecord,
+    ExternalTaskReconciliationResponse,
     FraudSignal,
     HandoffMutationResponse,
     HandoffRecord,
@@ -50,6 +56,7 @@ from backend.repositories.protocols import (
     staff_agent_execution_for,
     with_staff_agent_source,
 )
+from backend.services.integrations import reconcile_assessor_routing
 from backend.services.staff_access import ClaimStaffAccess, require_claim_collaborator
 from backend.services.staff_presence import require_claimable_staff
 from backend.services.support import (
@@ -295,6 +302,211 @@ def accept_handoff(
         source=source,
     )
     return response
+
+
+def accept_external_review(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    task_id: str,
+    payload: AcceptHandoffRequest,
+    idempotency_key: str | None,
+    if_match: str | None,
+) -> StaffActionMutationResponse:
+    """Assign one exact external-service review without changing its source records.
+
+    Args:
+        repository: Authoritative Claim, external-task, staff-action, and replay storage.
+        principal: Authenticated staff member accepting the projected work.
+        claim_id: Claim that owns the external task.
+        task_id: Exact external task projected as requiring staff review.
+        payload: Self-assignment request constrained by the projected action.
+        idempotency_key: Required actor-and-route replay identity.
+        if_match: Required current Claim revision.
+
+    Returns:
+        The created or replayed task-linked StaffAction and resulting Claim revision.
+
+    Raises:
+        ApiError: Authority, task state, ownership, presence, revision, or idempotency
+            validation fails.
+    """
+
+    key = require_idempotency_key(idempotency_key)
+    expected = parse_if_match(if_match)
+    route = f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task_id}/accept-review'
+    fingerprint = request_fingerprint(payload.model_dump(mode='json'))
+    replay = _retry(repository, principal.subject, route, key, fingerprint)
+    if replay is not None:
+        return StaffActionMutationResponse.model_validate(replay)
+    claim = _staff_claim(repository, principal, claim_id)
+    presence = repository.get_staff_presence(principal.subject)
+    require_claimable_staff(repository, principal)
+    projected_action = require_workbench_action(
+        repository,
+        principal,
+        claim,
+        expected,
+        'external.accept_review',
+        task_id,
+    )
+    task = next(
+        (
+            item
+            for item in repository.list_external_tasks_internal(claim_id)
+            if item.task_id == task_id
+        ),
+        None,
+    )
+    if task is None:
+        raise _not_found('The external task was not found.')
+    results = [
+        item
+        for item in repository.list_external_task_results_internal(claim_id)
+        if item.task_id == task_id
+    ]
+    if task.status is ExternalTaskOperationStatus.TERMINAL_FAILURE:
+        action_type = 'external_failure_review'
+    elif results and results[-1].verification in {
+        ExternalTaskResultVerification.UNVERIFIED,
+        ExternalTaskResultVerification.INCONSISTENT,
+        ExternalTaskResultVerification.REVIEW_REQUIRED,
+    }:
+        action_type = 'external_result_review'
+    else:
+        raise _validation('This external task does not require a staff review.')
+    requested_assignee = payload.assignee_id or principal.subject
+    if requested_assignee != principal.subject:
+        raise ApiError(
+            status_code=403,
+            code='ACCESS_DENIED',
+            message='Staff can accept an external-service review only for their own account.',
+        )
+    if claim.assignee_id not in {None, principal.subject}:
+        raise ApiError(
+            status_code=409,
+            code='OWNERSHIP_CONFLICT',
+            message='The Claim is already assigned to another staff member.',
+        )
+    timestamp = now_utc()
+    action = StaffActionRecord(
+        action_id=new_id('act'),
+        claim_id=claim_id,
+        action_type=action_type,
+        status=StaffActionStatus.IN_PROGRESS,
+        assigned_to=principal.subject,
+        requested_outcome=WORK_ITEM_TYPE_REGISTRY[action_type].requested_outcome,
+        source_refs=projected_action.source_refs,
+        created_at=timestamp,
+    )
+    updated = claim.model_copy(
+        update={
+            'assignee_id': principal.subject,
+            'revision': claim.revision + 1,
+            'updated_at': timestamp,
+        }
+    )
+    response = StaffActionMutationResponse(action=action, revision=updated.revision)
+    idempotency = IdempotencyRecord(
+        actor_id=principal.subject,
+        route=route,
+        key=key,
+        request_fingerprint=fingerprint,
+        claim_id=claim_id,
+        session_id=claim.active_session_id or '',
+        action_registry_version=projected_action.registry_version,
+        action_code=projected_action.action_code,
+        target_ref=projected_action.target_ref,
+        response_payload=response.model_dump(mode='json'),
+    )
+    _save(
+        repository,
+        updated,
+        expected,
+        idempotency,
+        staff_action=action,
+        required_staff_id=principal.subject,
+        required_staff_revision=presence.revision if presence is not None else None,
+    )
+    return response
+
+
+def reconcile_external_response(
+    repository: PersistenceRepository,
+    adapter: AssessorServiceAdapter,
+    principal: Principal,
+    claim_id: str,
+    task_id: str,
+    idempotency_key: str | None,
+    if_match: str | None,
+) -> ExternalTaskReconciliationResponse:
+    """Reconcile one exact unknown external task through the staff authority boundary.
+
+    Args:
+        repository: Authoritative Claim, external-operation, staff-action, and replay storage.
+        adapter: Configured provider-neutral assessor status-check boundary.
+        principal: Authenticated staff member performing the projected reconciliation.
+        claim_id: Claim that owns the unknown external operation.
+        task_id: Exact external task projected as requiring reconciliation.
+        idempotency_key: Required actor-and-route replay identity.
+        if_match: Required current Claim revision.
+
+    Returns:
+        The atomically persisted routing outcome and completed reconciliation StaffAction.
+
+    Raises:
+        ApiError: Authority, ownership, presence, revision, adapter, lifecycle, persistence,
+            or idempotency validation fails.
+    """
+
+    key = require_idempotency_key(idempotency_key)
+    expected = parse_if_match(if_match)
+    route = f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task_id}/reconcile'
+    fingerprint = request_fingerprint(
+        {'claim_id': claim_id, 'task_id': task_id, 'expected_revision': expected}
+    )
+    replay = _retry(repository, principal.subject, route, key, fingerprint)
+    if replay is not None:
+        return ExternalTaskReconciliationResponse.model_validate(replay)
+    claim = _staff_claim(repository, principal, claim_id)
+    presence = repository.get_staff_presence(principal.subject)
+    require_claimable_staff(repository, principal)
+    projected_action = require_workbench_action(
+        repository,
+        principal,
+        claim,
+        expected,
+        'external.reconcile_response',
+        task_id,
+    )
+    if claim.assignee_id not in {None, principal.subject}:
+        raise ApiError(
+            status_code=409,
+            code='OWNERSHIP_CONFLICT',
+            message='The Claim is already assigned to another staff member.',
+        )
+    reconcile_assessor_routing(
+        repository,
+        adapter,
+        claim_id,
+        task_id,
+        key,
+        expected,
+        staff_actor_id=principal.subject,
+        staff_route=route,
+        staff_request_fingerprint=fingerprint,
+        staff_action_registry_version=projected_action.registry_version,
+        required_staff_revision=presence.revision if presence is not None else None,
+    )
+    persisted = repository.find_idempotency(principal.subject, route, key)
+    if persisted is None or persisted.response_payload is None:
+        raise ApiError(
+            status_code=500,
+            code='INTERNAL_ERROR',
+            message='The reconciled staff operation could not be restored.',
+            retryable=True,
+        )
+    return ExternalTaskReconciliationResponse.model_validate(persisted.response_payload)
 
 
 def send_staff_message(
@@ -608,6 +820,7 @@ def _apply_state_changes(claim: WorkingClaim, payload: UpdateStaffActionRequest)
         'claim_state.customer_support': CustomerSupport,
         'claim_state.fraud_signal': FraudSignal,
         'claim_state.workflow_state': WorkflowState,
+        'claim_state.next_action': AgentAction,
     }
     updates: dict[str, Any] = {}
     for change in payload.state_changes:

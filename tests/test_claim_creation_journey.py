@@ -99,6 +99,9 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
         key='at01-complete-vp-requirements',
     )
     assert confirmed_body['customer_next_step']['status'] == 'ready_to_create'
+    ready_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert ready_claim is not None
+    assert ready_claim.claim_state.workflow_state.value == 'ready_for_next'
 
     creation_headers = {
         **auth_headers,
@@ -163,6 +166,22 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
     assert result['external_claim']['next_step']
     assert result['external_claim']['expected_by']
     assert result['customer_next_step']['status'] == 'claim_created'
+    creation_decision = repository.get_agent_decision(
+        claim_id,
+        result['decision']['decision_id'],
+        'cus_demo',
+    )
+    assert creation_decision is not None
+    assert creation_decision.action_code == 'claim.create'
+    assert creation_decision.required_tools == [{'tool': 'claims_service.create_claim'}]
+    creation_idempotency = repository.find_idempotency(
+        'cus_demo',
+        f'/api/v1/claims/{claim_id}/creation',
+        'at01-controlled-creation',
+    )
+    assert creation_idempotency is not None
+    assert creation_idempotency.action_code == 'claim.create'
+    assert creation_idempotency.target_ref == claim_id
 
     claimant_view = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
     assert claimant_view.status_code == 200

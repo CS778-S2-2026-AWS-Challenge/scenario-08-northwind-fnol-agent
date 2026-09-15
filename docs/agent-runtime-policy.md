@@ -20,16 +20,14 @@ The target object catalogue, FNOL problem mapping, and delivery levels are recor
 recorded in [Agent Runtime Migration](design/agent-runtime/agent-runtime-migration.md). Current
 implementation evidence is tracked in [Agent Runtime Progress](status/agent-runtime-progress.md).
 
-The current repository has a legacy static eight-action registry and deterministic
-proposal validation. The target contract in
-[Agent Runtime Target](design/agent-runtime/agent-runtime-target.md)
-replaces that flat enum with multidimensional turn plans and namespaced actions, but the
-compatibility migration is not yet implemented. A first provider-neutral Model Gateway is implemented with a
-minimal `ModelRequest` and `ModelResponse`, an OpenAI-compatible adapter, structured
-proposal validation, bounded context projection, server-rendered claimant responses, and
-normalised failure mapping. It does not yet implement the complete Instruction Compiler,
-namespaced execution plans, tool execution, qualified fallback, usage persistence, or complete
-trajectory records defined here. The Control Plane does publish four independently versioned
+The current model-backed claimant path uses the namespaced proposal contract and begins each turn
+with a registered `claim.read` tool call. The legacy static eight-action schema remains only as a
+rejected compatibility boundary; it cannot regain execution authority. The provider-neutral Model
+Gateway implements `ModelRequest` and `ModelResponse`, OpenAI-compatible and Bedrock adapters,
+strict structured proposal validation, bounded context projection, server-rendered claimant
+responses, and normalised failure mapping. It does not yet implement every action handler,
+qualified fallback, or complete target trajectory capability defined here. The Control Plane
+publishes four independently versioned
 Agent configuration components and one Release Set pins the exact revisions used by a turn. This
 is the implemented policy-loading boundary, not evidence that the target `TurnPlan`,
 `ExecutionPlan`, or `TurnResult` migration is complete.
@@ -86,6 +84,12 @@ immutable Runtime Snapshot. The same snapshot supplies the instruction, branch e
 knowledge selection, model transport, action/tool restrictions, and persisted provenance. A new
 publication affects the next turn and cannot mutate the snapshot already selected for an active
 turn.
+
+The executable claimant instruction is `northwind-fnol-claimant-v6`. Its final provider response
+must contain a registered `action_code` and `runtime_action_code` pairing. The instruction may
+guide selection, but the `ModelRuntimeProposal` schema and Action Registry enforce membership,
+pairing, and authority. Deprecated flat actions, invented directives, and published-rule-only
+interrupts proposed by a model fail before Claim State mutation.
 
 The configuration layer may restrict capabilities but cannot invent them. Action codes, tool
 names, and branch rule IDs must already exist in their server Registries. The policy must retain
@@ -273,7 +277,7 @@ one primary Runtime control directive. The action system has five namespaces:
 | Namespace | Responsibility | Representative registered actions |
 | --- | --- | --- |
 | `conversation` | communicate without a business side effect | acknowledge, answer, explain, ask, clarify, confirm material content, summarise, present options, state a limitation |
-| `claim` | prepare or make revision-checked Claim changes | open or resume a draft, propose/apply/correct facts, recompute the form, register evidence, update WorkItems, save progress, prepare creation, create |
+| `claim` | prepare or make revision-checked Claim changes | open or resume a draft, propose/apply/correct facts, recompute the form, register evidence, propose governed Evidence reuse/removal, update WorkItems, save progress, prepare creation, create |
 | `human` | obtain support, professional judgement, or approval | offer support, create handoff, request professional review, request approval, record decision |
 | `external` | coordinate a third-party request through its full lifecycle | discover capability, load requirements, prepare, classify, check authority, submit, track, verify, reconcile, retry, cancel, escalate failure |
 | `runtime` | control execution of the turn | continue, wait for user, wait for external work, pause for review, interrupt urgently, stop without a Claim, fail safely |
@@ -326,6 +330,17 @@ action-level authority check.
   idempotency where applicable, disclosure manifest, and bounded result contract.
 - Structured customer policy and claim history use authorised record lookup. Knowledge
   RAG is used for approved documents and retains source version and section citations.
+- Account-level Evidence history uses the claimant-scoped `evidence.history` tool. It returns
+  bounded metadata and provenance summaries only; history visibility does not grant permission
+  to attach or remove a file. A paginated result exposes its opaque continuation cursor and an
+  explicit non-exhaustive limitation until the final page is read.
+- Confirmed reuse and persisted removal use the Runtime-only `claim.reuse_evidence` and
+  `claim.remove_evidence` actions. Runtime must match the exact claimant, Claim, Evidence, source
+  Claim, proposal, confirmation, revision, and idempotency identity before calling the registered
+  `evidence.reuse` or `evidence.remove` backend capability. The repository-backed capability
+  persists the relation or governed removal and returns revision-backed audit evidence; missing
+  handlers still fail as unavailable. Only a persisted backend result with an auditable state-change reference may produce claimant
+  success wording; rejected, failed, unavailable, and unknown results remain distinct.
 - Retrieved instructions are untrusted content. They cannot change Agent Policy, grant
   tool access, widen customer-data visibility, or authorise an action.
 - Missing, conflicting, expired, wrong-insurer, wrong-product, wrong-jurisdiction, or

@@ -548,6 +548,7 @@ def test_claim_creation_returns_complete_result_and_deduplicates_by_working_clai
     stored = repository.get_claim_internal(claim_id)
     assert stored is not None
     assert stored.revision == 2
+    assert stored.assignee_id is None
     assert stored.claim_state.workflow_state.value == 'created'
     assert claimant_view.status_code == 200
     assert claimant_view.json()['external_claim'] == body
@@ -1629,6 +1630,10 @@ class PendingClaimsAdapter(ClaimsServiceAdapter):
         )
 
 
+class MismatchedSourceClaimsAdapter(PendingClaimsAdapter):
+    integration_source = IntegrationSource.FIXTURE
+
+
 def test_app_accepts_replaceable_claims_adapter_without_public_schema_changes() -> None:
     repository = FixtureRepository()
     app = create_app(repository=repository, claims_service_adapter=PendingClaimsAdapter())
@@ -1661,6 +1666,42 @@ def test_app_accepts_replaceable_claims_adapter_without_public_schema_changes() 
     assert response.json()['external_claim_id'] is None
     assert response.json()['claim_number'] is None
     assert response.json()['source'] == 'configured_service'
+
+
+def test_claim_creation_rejects_an_adapter_result_with_a_mismatched_source() -> None:
+    repository = FixtureRepository()
+    app = create_app(repository=repository, claims_service_adapter=MismatchedSourceClaimsAdapter())
+    with TestClient(app) as client:
+        created = create_working_claim(client, 'mismatched-source-adapter')
+        claim = created['claim']
+        session = created['session']
+        assert isinstance(claim, dict)
+        assert isinstance(session, dict)
+        claim_id = str(claim['claim_id'])
+        decision_id = 'dec_mismatched_source_adapter'
+        save_authorisation(
+            repository,
+            claim_id=claim_id,
+            customer_id='cus_demo',
+            session_id=str(session['session_id']),
+            decision_id=decision_id,
+            revision=1,
+            action=AgentAction.CREATE_CLAIM,
+            reason_code='CLAIM_CREATION_AUTHORISED',
+        )
+
+        response = client.post(
+            '/internal/v1/claims/create',
+            headers=INTEGRATION_AUTH,
+            json=creation_payload(claim_id, 1, decision_id),
+        )
+
+    assert response.status_code == 502
+    assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    assert stored.external_claim is None
+    assert stored.revision == 1
 
 
 def test_mock_adapters_reject_changed_payload_for_the_same_provider_reference() -> None:

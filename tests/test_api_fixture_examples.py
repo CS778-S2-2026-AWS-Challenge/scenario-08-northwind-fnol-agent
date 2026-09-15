@@ -8,6 +8,7 @@ from backend.domain.models import (
     ClaimantEvidence,
     ClaimantSession,
     EvidenceListResponse,
+    EvidenceRecord,
     FormPatchResponse,
     MessageListResponse,
     MessageVisibility,
@@ -220,8 +221,11 @@ def test_api_fixture_reuses_canonical_at08_records_and_relationships() -> None:
     assert evidence_ids == set(canonical_evidence_by_id)
     for item in evidence.items:
         canonical_evidence = canonical_evidence_by_id[item.evidence_id]
-        for field_name in ClaimantEvidence.model_fields:
+        for field_name in set(ClaimantEvidence.model_fields) & set(EvidenceRecord.model_fields):
             assert getattr(item, field_name) == getattr(canonical_evidence, field_name)
+        assert item.source_claim_id is None
+        assert item.reused is False
+        assert item.can_remove is False
         assert claim.created_at <= item.created_at <= item.updated_at <= claim.updated_at
 
 

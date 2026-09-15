@@ -434,14 +434,17 @@ combinations return `422 PROVIDER_CONFIGURATION_INVALID`.
 For the `model` domain, `values` is a closed provider-neutral object containing
 `protocol`, `provider`, `model_identifier`, `base_url`, `credential_environment_variable`,
 `profile_id`, `purpose`, `privacy_class`, `prompt_version`, `evaluation_status`,
-`timeout_seconds`, `structured_output`, and `tools`. The credential field contains only an
+`timeout_seconds`, `structured_output`, `tools`, `image_input`, and `document_input`. The
+credential field contains only an
 environment-variable name; the secret itself remains outside the configuration record. Every
 model configuration must declare `impact=high`; an omitted or normal impact returns `422
 PROVIDER_CONFIGURATION_INVALID` and cannot enter the lifecycle. Model validation permits
-publication only when `evaluation_status` is `configured`; protocol, base URL, and credential
-environment-variable name match the deployment-owned startup settings; and purpose, privacy
-class, executable prompt identifier, and structured-output capability match the claimant Runtime
-contract. The current executable prompt identifier is `northwind-fnol-claimant-v5`. A
+publication only when `evaluation_status` is `configured`; profile ID, provider, model identifier,
+protocol, base URL, credential environment-variable name, purpose, privacy class, executable
+prompt identifier, and capabilities match one exact entry in the deployment-owned model binding
+allow-list. The allow-list does not publish a model; the independently approved configuration and
+active Release Set remain the selectable-catalogue authority. The current executable prompt
+identifier is `northwind-fnol-claimant-v6`. A
 degraded, unavailable, deployment-mismatched, or Runtime-incompatible profile returns `422
 PROVIDER_CONFIGURATION_UNAVAILABLE` and remains a draft. Other invalid or incomplete model values
 return `422 PROVIDER_CONFIGURATION_INVALID`.
@@ -915,6 +918,12 @@ record disagrees with.
 `references` does not appear in the claimant projection. A claimant is told a check is in
 progress; which side is doubted, and why, is staff-only.
 
+Staff handoff projections also retain the authoritative `resume_workflow_state` and
+`resume_next_action` captured when support was requested. These continuation fields are
+optional for legacy handoff records; when absent, resolving the handoff preserves the
+current Claim state rather than inventing a continuation target. These fields are
+staff-facing only and are not included in the claimant handoff projection.
+
 Extracted facts use the structured form envelope with `source` set to `image` or `document`. They remain `proposed` until claimant confirmation or an authorised staff decision.
 
 ### Current Compatibility Agent Decision
@@ -1145,6 +1154,7 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `POST` | `/claims/{claim_id}/creation` | Create an external claim after deterministic validation |
 | `POST` | `/claims/{claim_id}/assessor-routing/consent` | Record bounded claimant permission for the contextual assessor action |
 | `POST` | `/claims/{claim_id}/assessor-routing` | Send the authorised assessor request and return its claimant-safe state |
+| `GET` | `/claims/{claim_id}/external-capabilities` | Read the server-owned third-party capability catalogue for the Claim product family |
 | `GET` | `/claims/{claim_id}/evidence` | List claimant-visible evidence state |
 | `POST` | `/claims/{claim_id}/evidence` | Register expected, missing, or pending evidence |
 | `POST` | `/claims/{claim_id}/evidence/uploads` | Request an evidence upload target |
@@ -1161,7 +1171,7 @@ Returns the published claimant model catalog without endpoint credentials. The r
 `default_model_profile_id` (selected by the deployment `MODEL_PROFILE_ID` when that profile is
 published and configured, otherwise the first available published profile) and each
 profile's stable ID, provider model label, protocol, structured-output capability, tool-call
-capability, and `availability`. The frontend uses the default when creating a Session, while a
+capability, image-input capability, document-input capability, and `availability`. The frontend uses the default when creating a Session, while a
 message may select another published and available profile in the same conversation.
 
 ### `POST /api/v1/claims`
@@ -1245,13 +1255,28 @@ Response `200`:
   },
   "external_claim": null,
   "external_service_action": null,
+  "external_capabilities": [],
   "dynamic_form": null,
   "customer_next_step": {},
   "handoff": null,
+  "resolved_support_handoff": null,
   "created_at": "2026-08-10T03:40:00Z",
   "updated_at": "2026-08-10T03:50:00Z"
 }
 ```
+
+`resolved_support_handoff` is present only on Claim detail, and is otherwise `null`. It is
+claimant-safe completion evidence containing exactly `handoff_id`, `type`, `status`,
+`completed_at`, and `customer_update`. The `customer_update` is the claimant-safe update written
+when the handoff is resolved; staff result summaries and internal action identifiers are never
+projected. The object is derived from the latest claimant-created `human_support` or
+`urgent_support` HandoffRecord only when that record is resolved and has a matching completed
+`handoff_support` resolution event.
+Professional review, staff-created or cancelled/rejected work, ordinary staff updates, and
+terminal Claims never produce this field. A newer claimant support request clears the previous
+projection until the newer request is eligible and resolved. This field reports staff assistance
+completion only; it does not mean that the Claim is complete, created externally, covered, or
+otherwise terminal. `customer_next_step` remains the authoritative continuation action.
 
 The claimant-facing `evidence_summary` MUST be calculated only from evidence records visible through the claimant evidence projection. It MUST NOT include counts derived from `internal_only` evidence or any record excluded from `GET /claims/{claim_id}/evidence`. The persisted Working Claim retains the authoritative aggregate over the full persisted evidence set for staff and operational use; persistence adapters MUST preserve that full aggregate. Claimant-safe aggregation is applied only at the claimant projection boundary.
 
@@ -1260,10 +1285,23 @@ The `form` contains claimant-visible structured field records. `external_claim`,
 `external_service_action` is omitted as `null` until an external participant action is a
 relevant next step. The controlled assessor action appears only after a motor claim has been
 created on the fixture route, its location is confirmed, and no open handoff or professional
-review blocks the action. It contains the service and provider labels, purpose, claimant-safe
-summary of the minimum data to be shared, consent state, progress/result state, and the
-provider-neutral routing result when accepted. It never exposes the raw consent record,
-authorisation decision, internal signals, or complete claim context.
+review blocks the action. It contains the compatibility `status` plus the canonical lifecycle
+registry version, lifecycle status, catalogue reference, capability provenance, access form,
+label, detail, pending owner, next action, and limitation. These canonical fields are derived by
+the backend from the same registry used by Agent and Workbench consumers. It also contains the
+service and provider labels, purpose, claimant-safe summary of the minimum data to be shared,
+consent state, progress/result state, and the provider-neutral routing result when accepted. It
+never exposes the raw consent record, authorisation decision, internal signals, or complete claim
+context.
+
+`external_capabilities` is the claimant-safe catalogue derived from the canonical
+`external-service-lifecycle.v1` registry. Rows are filtered by the Claim product family and
+contain the service identity, purpose, access form, required and disclosure fields, provider label,
+official URL or phone when published, result semantics, and limitation. Internal provenance and
+operation evidence are not included. A row with `uses_external_task: false` is an official manual
+link or phone path and does not create an ExternalTask; a task-capable row still requires the
+existing consent, authority, idempotency, delivery, reconciliation, and result-verification
+contracts before any side effect.
 
 `dynamic_form` is the claimant-safe Dynamic Form projection applicable to the returned Claim
 snapshot. It is built from the newest applied branch evaluation valid at or before the current
@@ -1331,9 +1369,9 @@ Request:
   "model_profile_id": "qwen-local",
   "content": {
     "type": "text",
-    "text": "I was rear-ended while stopped at traffic lights. Nobody is injured."
+    "text": "I was rear-ended while stopped at traffic lights. Please review the photo."
   },
-  "evidence_refs": []
+  "evidence_refs": ["evd_01J4Y7V5QJ"]
 }
 ```
 
@@ -1343,10 +1381,22 @@ does not create a new Claim or clear the conversation. The selected profile is p
 Session as the latest default and in the Runtime provenance for the exact turn. Empty text
 without evidence is rejected.
 
+`evidence_refs` is also the explicit per-message disclosure boundary for model input. Before a
+model call, each ID must resolve to claimant-visible Evidence on the authenticated claimant's
+current Claim, use a supported image/PDF media type, and be in an uploaded, processing, or ready
+file state. Duplicate, unknown, cross-Claim, staff/external internal-only, incomplete, invalid,
+expired, superseded, missing, or unavailable references are rejected before the Agent runs. The
+Runtime passes a turn-scoped resolver rather than an object URL or storage key, and the resolver
+repeats the visibility, record, and immutable-object checks whenever an adapter reads bytes. A
+structured form fact or contents item attributed to an attachment must name that exact Evidence
+ID. It is persisted with `image` or `document` provenance and remains `proposed` for claimant
+confirmation.
+
 On the target namespaced Runtime path the model must first call `claim.read`. The Runtime executes
 the read against the authenticated Claim, sends the assistant tool call and result back to the
-same model, and accepts the final `conversation.answer` or an authorised
-`human.create_handoff` plus a registered runtime directive.
+same model, and accepts only a registered `action_code` and `runtime_action_code` pairing. An
+unknown directive such as `runtime.confirm_claimant_facts`, a deprecated flat action, or an
+invalid pairing is rejected before Claim State mutation.
 The validated proposal is then applied through the ordinary revision-checked Claim transaction.
 The response includes the resulting Claim revision and compatibility decision projection, while
 the distinct TurnPlan, AgentProposal, ExecutionPlan, ActionEnvelope, ToolResult, TurnResult, and
@@ -1362,6 +1412,13 @@ Both outcomes use provider-neutral messages, preserve the current Claim revision
 the claimant message, Agent decision, or idempotency result. A schema-valid partial result is still
 discarded unless the adapter normalises the provider termination state as complete. Provider
 response bodies, credentials, prompts, and internal model context are never returned.
+
+If the claim-scoped external-service records cannot be read or cannot be represented by the
+canonical lifecycle registry, the endpoint returns `503 EXTERNAL_LIFECYCLE_CONTEXT_UNAVAILABLE`
+before model execution or Claim mutation. `retryable` is `true` only for a temporary persistence
+read failure. Cross-Claim records, contradictory capability provenance, invalid task/result
+relationships, unsupported registry mappings, invalid result-verification combinations, and
+context overflow return the same bounded code with `retryable: false`.
 
 Response `200`:
 
@@ -1503,9 +1560,16 @@ Request:
 All fields must exist and be confirmable. Response `200` returns the new claim revision, confirmed fields, any new decision, and the current customer next step.
 
 When all controlled intake fields are confirmed, `customer_next_step.status` becomes
-`ready_to_create`. Confirmation does not itself invoke an external claims service.
+`ready_to_create` and `workflow_state` becomes `ready_for_next`. A later material edit that makes
+the registered requirements incomplete returns the workflow to `collecting`. Confirmation does
+not itself invoke an external claims service.
 
 ### `POST /api/v1/claims/{claim_id}/creation`
+
+This endpoint is the live handler for the registered `claim.create` action. It accepts only a
+`ready_for_next` Claim and dispatches a typed, revision-checked, idempotent command through the
+configured `claims_service.create_claim` binding before using the existing provider-neutral
+adapter. The model cannot call or authorise this endpoint by emitting an action name.
 
 The claimant client MAY offer a guided Motor presentation over the same resources used by the
 conversational intake. The guided presentation creates the Working Claim before its first page is
@@ -1527,6 +1591,15 @@ The `standard_motor_intake` fixture route leaves a newly created Working Claim u
 online staff member takes ownership only through the explicit, authorised handoff-acceptance
 action. This preserves the same ownership contract for fixture and normal identity modes without
 pretending that the prototype has an approved workforce-allocation policy.
+The `standard_motor_intake` route leaves the created Working Claim unassigned. An authenticated
+claims professional must accept the Claim through the Workbench ownership boundary before taking
+staff-only actions. Claim creation does not invent a fixture staff identity or bypass the existing
+assignment contract.
+
+Claim creation records its completed external-claim disposition. If the claimant later opens a
+Staff Assistance handoff, that active handoff takes precedence in the Workbench projection until
+it is resolved: the queue is `processing` and the registered accept, claimant-message, and resolve
+actions remain available. A created Claim with no active handoff remains in the completed queue.
 
 Creates an external claim through the configured provider-neutral claims adapter. The endpoint
 accepts no provider payload. It derives the confirmed form, evidence references, pending evidence,
@@ -1574,6 +1647,16 @@ Response `201`:
   },
   "external_service_action": {
     "service_identity": "vehicle_damage_assessment_routing",
+    "registry_version": "external-service-lifecycle.v1",
+    "lifecycle_status": "consent_required",
+    "catalogue_reference": "P3-ASSESSOR",
+    "capability_provenance": "simulated",
+    "access_form": "controlled assessor simulation",
+    "status_label": "Permission needed",
+    "status_detail": "Claimant permission is required before any information is shared.",
+    "pending_owner": "claimant",
+    "next_action": "Review and grant the task-specific permission before submission.",
+    "limitation": "Simulation-only; it must not be described as a production provider.",
     "service_name": "Vehicle damage assessment",
     "provider": "Controlled assessment fixture",
     "purpose": "Request an assessor for the vehicle damage recorded in this claim. This does not decide coverage or approve repairs.",
@@ -1743,6 +1826,55 @@ The `status_url` returned by upload completion is this Claim Evidence collection
 projection for the same Evidence record: clients reread it after `202` and do
 not manufacture `processing`, `ready`, `failed`, or retry state locally.
 
+### `GET /api/v1/evidence`
+
+Returns the authenticated claimant's history of completed or processing file
+uploads across Claims. The response is paginated with `limit` and an opaque
+`cursor`. Entries retain the source Claim, Evidence identity, safe file
+metadata, processing state, and a bounded provenance summary. The endpoint
+filters by the authenticated customer and claimant-owned source before
+projection; it never returns storage keys, internal object paths, checksums,
+or unrestricted provenance. Registration-only Evidence with no uploaded file
+is not included.
+
+`can_reuse` is true only for a claimant-owned file in a reusable processing
+state. `can_remove` is true only for a ready claimant-owned item that is not
+invalid, expired, superseded, or otherwise retention-blocked. Active links to
+other Claims are returned as `linked_claim_ids`.
+
+### `POST /api/v1/claims/{claim_id}/evidence/{evidence_id}/reuse`
+
+Attaches an eligible Evidence object from another Claim owned by the same
+claimant. This creates an auditable relation to the existing `evidence_id`; it
+does not copy file bytes or expose a storage key. The request requires the
+source Claim, Runtime proposal reference, claimant confirmation reference,
+`Idempotency-Key`, and `If-Match` for the target Claim revision. `proposal_ref` must identify a
+persisted Runtime proposal for this Claim, active session, Evidence, source Claim, action, and
+revision. `confirmation_ref` must identify a later claimant-visible `MessageRecord` in that same
+session containing the claimant's explicit confirmation. References supplied only in the request
+body are not authorization evidence and are rejected before any mutation.
+
+The response is a typed action result with `status`, `reason_code`, the target
+revision when applied, and `state_change_refs`. `succeeded` is returned only
+after the relation, Claim evidence projection, Branch Evaluation, idempotency
+record, and audit event are persisted together. Processing, failed, invalid,
+expired, superseded, cross-customer, already-linked, or stale items are
+rejected without changing Claim State.
+
+### `POST /api/v1/claims/{claim_id}/evidence/{evidence_id}/remove`
+
+Removes an Evidence item through the governed claimant API. When the source
+Claim is the target, removal hides the item from claimant history while
+retaining the immutable Evidence object and audit/provenance record. When the
+item is reused from another Claim, removal detaches only the target relation;
+the source Evidence remains available from its original Claim. Physical object
+deletion is not performed by the browser or Agent.
+
+The request and response use the same persisted proposal/confirmation, idempotency, revision, and
+typed-outcome rules as `reuse`. A rejected or ambiguous result does not claim
+that the item was removed; the client must refresh the authoritative history
+and reconcile an unknown outcome with the same idempotency key.
+
 ### `POST /api/v1/claims/{claim_id}/evidence`
 
 Registers evidence when no file is currently available.
@@ -1775,12 +1907,36 @@ Request:
 
 ```json
 {
+  "evidence_id": "evd_01J4Y7V5QJ",
   "kind": "incident_image",
   "original_filename": "rear-damage.jpg",
   "media_type": "image/jpeg",
   "size_bytes": 1842201
 }
 ```
+
+`evidence_id` is optional. When omitted, the request creates a new claimant Evidence record.
+When present, it targets an existing claimant-owned Evidence requirement on the same Claim and
+reuses that identity. `kind` MUST match the existing requirement. The request preserves
+`needed_for`, `related_fields`, `claimant_note`, `created_at`, and ownership while updating the
+file metadata and moving the record to `status=pending` and `file_status=awaiting_upload`.
+
+An existing requirement accepts an upload when `file_status` is `not_available` or `failed`.
+Material with `status=invalid` also accepts a replacement when `file_status=ready`. The server
+returns `409 INVALID_STATE_TRANSITION` for active uploads, valid received material, superseded
+material, or any other ineligible lifecycle combination. A target from another Claim or a
+non-claimant Evidence source is not exposed and returns `404 RESOURCE_NOT_FOUND`; a mismatched
+`kind` returns `422 VALIDATION_ERROR`.
+
+The Evidence requirement keeps its stable `evidence_id`, while each actual file uses a monotonic
+`material_version`. Replacing failed or invalid material archives the complete prior generation in
+typed, append-only `material_history`: file metadata, status, references, checksum and other
+provenance, processing/extraction decisions, and proposed Claim fields sourced only by that
+generation. The new current generation does not inherit those material-specific values. The stable
+requirement retains requirement-origin provenance such as `reported_in_message_id` and
+`captured_at`. A proposed image/document field sourced exclusively by the replaced generation is
+removed from the current form so corrected processing can propose it again; confirmed, disputed,
+or multi-source fields are not removed.
 
 Response `201`:
 
@@ -1820,6 +1976,11 @@ capability expires MUST re-sign the same upload intent without creating another 
 record or advancing Claim revision. The adapter MAY use fixture
 storage or the active profile's object storage without changing the client
 contract.
+
+Idempotent replay of an existing-requirement request returns the original `evidence_id`, upload
+intent, and revision while the capability remains valid. A replay after capability expiry re-signs
+the same identity under the existing upload-intent rules. Storage failure before persistence leaves
+the requirement and Claim revision unchanged.
 
 An anonymous browser session may continue its conversation and read its own
 Claim, but it cannot create a durable Evidence record or receive an upload
@@ -1893,7 +2054,10 @@ Request:
 
 This request requires `Idempotency-Key` and `If-Match`. Every selected field
 must still be `proposed`, use `image` or `document` as its source, and reference
-the same evidence item. A confirmed fact becomes `confirmed`. A rejected fact
+the same evidence item and current material generation. Extracted proposals retain both the stable
+`evidence_id` and the generation-specific
+`evidence:{evidence_id}:material:{material_version}` reference. A confirmed fact becomes
+`confirmed`. A rejected fact
 uses the form status `disputed` so it cannot be mistaken for accepted claim
 information. Both outcomes retain the original source reference and record the
 proposal and decision times in internal provenance.
@@ -1960,6 +2124,8 @@ Returns staff and system updates visible to the claimant. Each update includes `
 | `POST` | `/workbench/claims/{claim_id}/requeue` | Release primary ownership when the projected action is executable |
 | `POST` | `/workbench/claims/{claim_id}/staff-actions` | Create a staff action |
 | `PATCH` | `/workbench/claims/{claim_id}/staff-actions/{action_id}` | Progress or complete a staff action |
+| `POST` | `/workbench/claims/{claim_id}/external-tasks/{task_id}/accept-review` | Accept a projected external-result or terminal-failure review |
+| `POST` | `/workbench/claims/{claim_id}/external-tasks/{task_id}/reconcile` | Reconcile one projected unknown external outcome without resubmitting it |
 | `POST` | `/workbench/claims/{claim_id}/signals/{signal_id}/decisions` | Decide an internal signal |
 | `POST` | `/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept` | Accept a handoff |
 | `POST` | `/workbench/claims/{claim_id}/messages` | Send a persisted claimant-visible staff message |
@@ -1985,9 +2151,16 @@ exposed through claimant routes. `GET /api/v1/workbench/conversations` includes 
 `POST /api/v1/workbench/agent/sessions` accepts an optional `title` and published
 `model_profile_id`, and creates a `sas_` session. The selected profile is persisted on that
 session; omitting it selects the published default. A message cannot override the session's
-profile.
-`GET /api/v1/workbench/agent/sessions` lists only sessions owned by the authenticated staff
-member. `GET /api/v1/workbench/agent/sessions/{session_id}/messages` returns that session's
+profile. If the same staff member already has a zero-message session with the same title and
+selected model profile, creation reuses the most recently updated matching session instead of
+persisting another empty session.
+
+Zero-message sessions are treated as not-yet-started drafts and are omitted from both
+`GET /api/v1/workbench/agent/sessions` and `GET /api/v1/workbench/conversations`. A session enters
+history after its first staff/assistant message pair is persisted successfully. Direct message
+access by an owned `session_id` remains available so a failed first turn can be retried without
+creating another session. Session lists otherwise contain only sessions owned by the authenticated
+staff member. `GET /api/v1/workbench/agent/sessions/{session_id}/messages` returns that session's
 ordered `staff` and `assistant` messages; another staff identity receives `404` rather than an
 ownership disclosure.
 
@@ -2058,7 +2231,9 @@ existing handler runs. The request requires `Idempotency-Key`; Claim-mutating ac
 the current `If-Match` Claim revision.
 
 `GET /api/v1/workbench/agent/capabilities` returns the credential-free published model profile
-catalog for Staff authentication.
+catalog for Staff authentication. Each model declares `structured_output`, `tools`, `image_input`,
+and `document_input` directly from the validated published configuration. These fields do not
+grant permission to access Evidence or execute an action.
 
 ### `GET /api/v1/workbench/claims`
 
@@ -2098,19 +2273,25 @@ integration status; tags; and creation and update times. It is a projection of s
 not a separately editable board record.
 
 `work_summary.queue_key` is exactly one of seven lifecycle-placement views for every listable
-Claim. The server applies terminal precedence before active placement:
+Claim. The server applies actionable staff work and an accepted provider wait before terminal
+placement:
 
 | Queue | Authoritative mapping |
 |---|---|
-| `completed` | `terminal_disposition.value=completed` |
+| `completed` | `terminal_disposition.value=completed` with no active handoff, unresolved staff-owned external attention, or accepted external task awaiting its result |
 | `abandoned` | `terminal_disposition.value=abandoned` |
 | `closed` | `terminal_disposition.value=closed` |
 | `processing` | Non-terminal `draft_active`, `staff_support`, `professional_review`, `ready_to_create`, or `creating` lifecycle |
 | `waiting_user` | `waiting_customer` without claimant material required for the current action |
 | `waiting_material` | `waiting_customer` with claimant Evidence missing information that is `required_now` |
-| `waiting_third_party` | `waiting_external`; this takes precedence over other waiting reasons |
+| `waiting_third_party` | `waiting_external`, or an accepted created-Claim external task whose provider result has not arrived; this takes precedence over terminal placement and other waiting reasons |
 
-Active handoffs and professional review therefore remain in `processing`. Operational views are
+Active handoffs, professional review, and unresolved staff-owned external-service attention
+therefore remain in `processing`, including when Claim creation has already recorded a `completed`
+terminal disposition. Completing the applicable external review or reconciling the unknown
+operation removes that temporary active placement without changing the terminal disposition. A
+reconciled accepted request then remains in `waiting_third_party` until its result arrives.
+Operational views are
 independent, overlapping projections: the same Claim may appear in `processing` and, for example,
 `human_requests` or `professional_review`; a completed Claim may also match `created_routed`.
 `all` is the union of the four active queues and excludes all three terminal queues.
@@ -2237,6 +2418,16 @@ the task remains `accepted`; counting it as waiting would tell staff the claim i
 external party while the same claim's external-request lifecycle reports that the result requires
 their review.
 
+On the Claim-detail response only, `integration_summary.claim_number` and
+`integration_summary.expected_by` project the authoritative persisted
+`WorkingClaim.external_claim` result alongside `claim_creation_status`. When no external Claim
+result exists, all three values are `null`. `claim_number` is never derived from
+`display_reference`, workflow state, queue state, or status copy, and `expected_by` is not
+invented from a client-side SLA or fixture convention. The queue-list response retains the shared
+`WorkbenchIntegrationSummary` contract and does not publish `claim_number` or `expected_by`;
+staff must open Claim detail to read those two result fields. Claim creation remains owned by the
+existing integration boundary.
+
 `section_summaries` reports availability, counts, and attention totals. Complete records are loaded
 only when staff opens a section:
 
@@ -2314,6 +2505,26 @@ exactly resolve to a non-blocked entry; they do not fall back to another action 
 tags, queues, text, role, ownership, or field counts. `customer_next_step` remains a separate
 claimant-safe projection.
 
+For one `terminal_failure` or returned result whose verification is `unverified`, `inconsistent`,
+or `review_required`, the server projects `external.accept_review` against the exact `task_id`.
+The dedicated accept-review mutation requires authenticated, claimable staff, the projected Claim
+revision, and an idempotency key. It assigns an unowned Claim to that staff member and creates a
+task-linked `external_failure_review` or `external_result_review` WorkItem. It does not change the
+external task, provider result, Claim terminal disposition, or claimant next step. The ordinary
+`work_item.update` contract completes the accepted review. After completion, the external-request
+projection reports that the task-linked staff review is recorded and clears `needs_attention`;
+the raw task and result-verification fields remain unchanged for provenance.
+
+For `unknown_outcome`, the server instead projects `external.reconcile_response` against the exact
+`task_id`. Its dedicated mutation requires the same staff authority and calls the configured
+assessor status-check adapter with the existing task, request, and operation identity. It never
+submits a second provider request. A confirmed result atomically assigns an unowned Claim, advances
+the existing task and operation to `accepted`, records the routing result and awaited Evidence,
+completes a task-linked `external_reconciliation` StaffAction, stores the actor-scoped idempotency
+response, and advances the Claim revision. An inconclusive check remains `unknown_outcome` and
+writes none of that bundle. Stale revision, unavailable staff, another owner, missing exact action,
+or changed idempotency input returns a structured conflict before settlement.
+
 ### `POST /api/v1/workbench/claims/{claim_id}/reopen`
 
 Executes only the exact non-blocked `claim.reopen` action from the current terminal Claim detail.
@@ -2344,8 +2555,9 @@ returns `404 RESOURCE_NOT_FOUND` through the existing staff-safe boundary.
 ### `GET /api/v1/workbench/claims/{claim_id}/external-requests`
 
 Returns each raw external task/request together with a backend-projected `lifecycle`. The lifecycle
-contains stakeholder and service labels, the catalogue reference and request provenance, request
-type, authority, consent, delivery and verification
+contains stakeholder and service labels, the lifecycle registry version and canonical lifecycle
+status, the catalogue reference, capability provenance, access form, and actual request provenance,
+request type, authority, consent, delivery and verification
 states, pending owner, status label/detail, provider reference, returned-result summary and
 provenance, result verification and checked Claim revision, linked evidence identifiers, limitation,
 next action, and attention flag. `provider_reference` is the provider's routing or acknowledgement
@@ -2362,6 +2574,11 @@ staff without exposing storage keys or provider payloads.
 service identity, so a persisted task can be traced to the entry permitting it. It is null for a
 service the catalogue does not name.
 
+`registry_version`, `lifecycle_status`, `capability_provenance`, and `access_form` are populated
+from the canonical registry for registered records. Historical records that predate a registry
+identity remain readable with a bounded legacy limitation; their registry version, lifecycle
+status, and access form are null, and capability provenance is `unavailable`.
+
 `provenance` says what the request actually reached, which is not the same question as what was
 configured for it:
 
@@ -2376,11 +2593,23 @@ them. `live_attempted` is currently unreachable: the only implemented service id
 controlled fixture, and clients MUST NOT read `simulated` as evidence of a provider relationship.
 
 The lifecycle's overall `verification_state`, `pending_owner`, `status_label`, `status_detail`, and
-`next_action` remain the backend-owned operational projection. An `unknown_outcome` remains awaiting
-reconciliation even when a late result record exists; the Workbench does not infer completion from
-that result. The Workbench renders those fields and MUST NOT reconstruct lifecycle status or next
-steps from raw task status strings. Raw task/request objects remain available for identity, timing,
-failure, and source traceability.
+`next_action` are one backend-owned effective projection. A received or checked result replaces
+acknowledgement-only guidance with the applicable verification or authorised-decision step. An
+`unknown_outcome` remains awaiting reconciliation even when a late result record exists; the result
+coordinate remains visible, but the Workbench does not infer completion or bypass reconciliation.
+The Workbench renders these fields and MUST NOT reconstruct lifecycle status or next steps from raw
+task status strings. Raw task/request objects remain available for identity, timing, failure, and
+source traceability.
+
+For `vehicle_damage_assessment_routing`, an accepted external task is projected as `queued` or
+`assigned` only when the authoritative `WorkingClaim.assessor_routing` status carries the same
+assessor or queue reference as the task's `provider_reference`. A missing or non-matching routing
+record leaves the lifecycle at `accepted`; it is not evidence of later progress.
+
+If a registered capability's provenance contradicts the persisted request provenance, the endpoint
+returns `200` with `status: unavailable`, an empty `items` list, and a bounded `limitation`. This
+keeps a corrupt or stale integration record visible as an unavailable resource boundary without
+claiming provider activity or converting the whole page into an internal server error.
 
 Access to policy excerpts, history evidence, fraud-review signals, and staff notes MAY be further restricted by role.
 
@@ -2712,6 +2941,38 @@ Response groups aggregate metrics only:
 Prototype metrics validate observability, not Northwind production performance. Small groups MUST not expose identifiable claim or staff behaviour.
 
 ## Internal Orchestration and Adapter API
+
+### External Service Lifecycle Registry
+
+The canonical machine-readable registry is `external-service-lifecycle.v1` in
+`backend/domain/external_service_registry.py`. Existing `ExternalTaskRecord`
+operation statuses are validated against it; consumers must not define a second
+status vocabulary. The Python backend is the producer. Claimant and Workbench API
+responses carry the applicable registry version and registry-derived presentation
+coordinates so browser consumers do not import Python modules or recreate mappings.
+
+`unknown_outcome` requires reconciliation before another side effect. `accepted`
+and `assigned` do not mean completed or verified. Result receipt, verification,
+and Claim/Evidence write-back remain separate stages. Manual and simulation-only
+capabilities cannot be represented as live provider success.
+
+The canonical projection exposes operation status, result lifecycle status, and
+result verification outcome as separate typed values. A received result is
+`unverified`; a verified result is `consistent`, `inconsistent`, or
+`review_required`. The task/result projection does not claim `written_back`
+without a separate authorised Claim/Evidence write-back record. Registry entries
+also distinguish transient statuses such as `submitting` from task statuses that
+can be persisted and projected. Definitions publish current-state invariants
+separately from transition preconditions; notably, `operation_id` and
+`dispatch_reserved_at` arise only when a prepared request reserves submission.
+
+The claimant Model Gateway receives the registry-derived effective meaning,
+responsibility, next action, attention requirement, and status detail. It does not
+reconstruct those values from raw status strings. For the assessor capability, Runtime
+also reads `WorkingClaim.assessor_routing`; `queued` or `assigned` replaces `accepted`
+only when its assessor or queue reference matches the external task's provider
+reference. TurnPlan evidence stores the resulting canonical operation coordinate,
+while the task and routing records remain authoritative.
 
 Internal endpoints are service-to-service only. The backend MAY implement an adapter in-process, but it MUST preserve these typed request and response boundaries so fixture repositories can be replaced without changing product clients.
 
@@ -3146,6 +3407,9 @@ The existing field must be resolved first.
 
 Transition provenance records source, actor, and accepted time for the file and
 each proposed fact.
+Each proposal carries both the stable Evidence identity and the current material-generation
+reference. This allows a later valid replacement to archive the old attribution and propose the
+same field again without treating old extracted state as current.
 
 ### `POST /internal/v1/claims/create`
 
@@ -3411,6 +3675,7 @@ All errors use one envelope:
 | `UPLOAD_TOO_LARGE` | `413` | File exceeds configured size |
 | `RATE_LIMITED` | `429` | Caller exceeded a limit |
 | `DEPENDENCY_UNAVAILABLE` | `503` | Required service is unavailable |
+| `EXTERNAL_LIFECYCLE_CONTEXT_UNAVAILABLE` | `503` | Claim-scoped external-service records are unavailable or cannot be represented safely for the Agent Runtime |
 | `PROJECTION_UNAVAILABLE` | `503` | Authoritative Claim facts conflict or cannot be placed in a published Workbench projection |
 | `DEPENDENCY_FAILED` | `502` | Required service returned an invalid or failed result |
 | `INTERNAL_ERROR` | `500` | Unexpected server failure |

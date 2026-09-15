@@ -50,7 +50,7 @@ def _context() -> StaffAgentContext:
         conversation=(),
         knowledge=(),
         knowledge_status='no_evidence',
-        model_profile_id='nowcoding-gpt56terra',
+        model_profile_id='nowcoding-gpt55',
     )
 
 
@@ -60,7 +60,7 @@ def test_gateway_staff_agent_builds_structured_request_and_returns_output() -> N
         ModelResponse(
             completion_status=ModelCompletionStatus.COMPLETE,
             structured_output=output.model_dump(mode='json'),
-            provider_model='gpt-5.6-terra',
+            provider_model='gpt-5.5',
             provider_request_id='req-1',
             usage=ModelUsage(input_tokens=20, output_tokens=5, total_tokens=25),
         )
@@ -70,9 +70,9 @@ def test_gateway_staff_agent_builds_structured_request_and_returns_output() -> N
     result = GatewayStaffAgent(gateway, ModelOperationsRecorder(operations)).respond(_context())
 
     assert result.output.answer == 'Check the evidence trail.'
-    assert result.provider_model == 'gpt-5.6-terra'
+    assert result.provider_model == 'gpt-5.5'
     request = gateway.requests[0]
-    assert request.model_profile_id == 'nowcoding-gpt56terra'
+    assert request.model_profile_id == 'nowcoding-gpt55'
     assert request.required_capabilities == ModelCapabilities(structured_output=True)
     message_content = request.messages[1].content
     assert message_content is not None
@@ -82,7 +82,7 @@ def test_gateway_staff_agent_builds_structured_request_and_returns_output() -> N
     assert operation.state.value == 'succeeded'
     assert operation.result is not None
     assert operation.result['total_tokens'] == 25
-    assert operation.result['provider_model'] == 'gpt-5.6-terra'
+    assert operation.result['provider_model'] == 'gpt-5.5'
 
 
 def test_profile_selecting_staff_agent_uses_session_model_profile() -> None:
@@ -91,7 +91,7 @@ def test_profile_selecting_staff_agent_uses_session_model_profile() -> None:
         ModelResponse(
             completion_status=ModelCompletionStatus.COMPLETE,
             structured_output=output.model_dump(mode='json'),
-            provider_model='gpt-5.6-terra',
+            provider_model='gpt-5.5',
             provider_request_id='req-profile-selector',
         )
     )
@@ -99,7 +99,7 @@ def test_profile_selecting_staff_agent_uses_session_model_profile() -> None:
     result = ProfileSelectingStaffAgent(lambda profile_id: gateway).respond(_context())
 
     assert result.output.answer == 'Use the saved model profile.'
-    assert gateway.requests[0].model_profile_id == 'nowcoding-gpt56terra'
+    assert gateway.requests[0].model_profile_id == 'nowcoding-gpt55'
 
 
 @pytest.mark.parametrize(

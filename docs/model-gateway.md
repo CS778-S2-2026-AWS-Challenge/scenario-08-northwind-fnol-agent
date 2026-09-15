@@ -18,6 +18,9 @@ normalise:
 - system, user, assistant, and tool messages;
 - optional JSON-schema structured output;
 - function-tool declarations and calls;
+- text, image Evidence, and PDF Evidence content blocks. Evidence blocks contain only an
+  Evidence ID and media type; an already-authorised resolver supplies bounded bytes to the
+  adapter, so storage keys and object URLs never enter the model contract;
 - assistant text, provider-neutral completion status, raw finish reason, provider model and
   request identity; and
 - input, output, and total token usage when supplied by the endpoint.
@@ -27,6 +30,17 @@ turn: it advertises the read-only `claim.read` tool, validates and executes that
 the authenticated `WorkingClaim`, then sends the assistant tool call and typed tool result back
 to the same model for a namespaced final response. The model never executes a tool, writes Claim
 State, creates a claim, or authorises a handoff by itself; the Runtime performs those checks.
+
+When a claimant message explicitly carries `evidence_refs`, the message boundary resolves only
+claimant-visible records on that claimant's Claim whose lifecycle and media type permit model
+input. Staff and external-system Evidence remains internal-only even when it belongs to the same
+Claim. The boundary binds eligible IDs and media types to a resolver that exists for that turn
+only. The adapter must use that same resolver for the initial `claim.read` request and its
+continuation; it re-checks the allow-list, claimant visibility, current record, media type,
+lifecycle state, and immutable storage key before reading bytes. Arbitrary URLs, storage keys,
+unselected Evidence, internal-only Evidence, and cross-Claim records never enter the model
+request. Missing content or a profile without the required image/document capability fails before
+a text fallback can be attempted.
 
 The applied claimant Runtime persists the claimant and agent messages, the Claim revision and
 validated form changes, the compatibility decision projection, a bounded `RuntimeTraceRecord`,
@@ -49,20 +63,28 @@ current-action fields permitted by the latest Branch Evaluation. Inactive, syste
 later-action, hidden, and unregistered fields remain outside routine model context. When no Branch
 Evaluation exists, a compatibility allow-list restricts the context to approved intake fields.
 
-The projection also excludes Claim, Customer, Session, and Evidence resource identities; actor
-identities; internal fraud, coverage, and severity signals; provider fingerprints; routes;
+The projection also excludes Claim, Customer, Session, and unrelated Evidence resource identities;
+actor identities; internal fraud, coverage, and severity signals; provider fingerprints; routes;
 timestamps; and external Claim or assessor results. Bounded source references for selected facts
 may be included so the model can distinguish supported facts and corrections; Runtime still owns
 source validation and role visibility.
+For an explicitly attached file only, `attached_evidence` contains its Evidence ID and media type
+so a structured proposal can identify which selected object supports a fact. It contains no
+filename, object location, customer identity, or storage metadata.
 For current-action fields whose values are intentionally excluded, `known_field_codes` tells the
 model that the field already exists without disclosing its value. This supports non-repetition
 without widening the routine model-data projection.
 
-The model-facing proposal schema can suggest a registered field value, purpose, confidence,
-precision, relation, and the claimant wording that supports it. Runtime verifies whether that
-wording directly supports the normalized value. A supported explicit claimant fact is recorded
-with claimant provenance; a model interpretation remains `source: inference` and `status:
-proposed`. Policy, history, document, and staff provenance require their trusted server paths.
+The model-facing proposal schema can suggest a registered field value or contents item, purpose,
+confidence, precision, relation, the claimant wording that supports it, and an optional
+`source_evidence_id`. Runtime verifies whether claimant wording directly supports the normalized
+value and whether an Evidence source names an exact attachment from this turn with the matching
+image/document media type. A supported explicit claimant fact is recorded with claimant
+provenance. An attachment-derived form value or contents item is always `proposed`, uses `image`
+or `document` source, and retains the Evidence ID on both its current projection and immutable
+assertion; it cannot become confirmed through model output. A model interpretation without either
+source remains `source: inference` and `status: proposed`. Policy, history, and staff provenance
+still require their trusted server paths.
 
 The model-facing `proposed_signals` collection has a maximum length of zero. Any response that
 attempts to create an internal signal is malformed and the entire turn is rejected before a
@@ -79,7 +101,8 @@ Each persisted model-backed decision records `proposal_source: model_gateway` an
 provenance containing the runtime profile, executable prompt identifier, provider-reported model
 identifier, and provider request identifier when supplied. These references are internal-only and
 are absent from claimant messages and decision projections. Token usage persistence remains a
-current limitation.
+current limitation. A successful multimodal Runtime trace additionally records only the selected
+Evidence ID, media type, and `submitted` outcome; raw bytes and storage metadata are excluded.
 
 The model-facing schema does not contain the server-only `controlled_rule_authorised`
 marker, and rejects a response that tries to provide it. The target request exposes only the
@@ -92,12 +115,13 @@ context lookup, and permits one typed re-plan. The target model-backed path uses
 tool-call side channel for `claim.read` and never mixes it with the legacy eight-action response.
 The first request names `claim.read` as the required tool; compatible adapters force that exact
 tool choice and disable parallel tool calls rather than relying on prompt compliance. The
-continuation is then constrained to the currently wired `conversation.answer` and
-`runtime.continue` literal action codes. The continuation may propose `human.create_handoff`, but
-that proposal remains advisory and is blocked from mutation; matching deterministic support or
-safety input is handled before the provider call. Claim creation and external participant actions
-remain separate handlers and are never reported as complete merely because a model requested
-them.
+continuation is constrained to registered `action_code` and `runtime_action_code` pairs. Ordinary
+intake uses `conversation.answer` with `runtime.wait_for_user` or `runtime.continue`; human support
+uses `human.create_handoff` with `runtime.pause_for_review`. Claim preparation, creation, and
+prior-Evidence proposals use only their explicitly registered directives. The proposal remains
+advisory and cannot authorise a mutation; matching deterministic safety input is handled before
+the provider call. External participant actions remain separate handlers and are never reported
+as complete merely because a model requested them.
 
 The default `controlled` profile continues to use `ControlledAgent`. The
 `model_gateway` profile is enabled only through explicit startup configuration. A
@@ -117,6 +141,12 @@ to be `configured` and checks the request purpose, privacy class, prompt version
 capability requirements against the selected profile. A `degraded` or `unavailable` profile fails
 closed. This boundary does not discover provider capabilities remotely; a capability declaration
 must still be supported by repeatable adapter tests and the selected endpoint.
+
+Image and document input are separate declared capabilities. A request that requires one of them
+is rejected before transport when the selected profile does not declare support. A configured
+profile must also provide an authorised Evidence resolver for a multimodal request; a missing or
+empty resolution returns `evidence_unavailable` and is never reported as a successful text-only
+fallback.
 
 ## Implemented Adapters
 
@@ -149,6 +179,10 @@ model and Runtime authority validation before it can affect Claim State.
 | `MODEL_TIMEOUT_SECONDS` | Positive request timeout; default `30` |
 | `MODEL_SUPPORTS_STRUCTURED_OUTPUT` | Declared endpoint capability required by `GatewayAgent` |
 | `MODEL_SUPPORTS_TOOLS` | Declared endpoint tool-call capability |
+| `MODEL_SUPPORTS_IMAGE_INPUT` | Declared endpoint capability for image Evidence blocks; default `false` |
+| `MODEL_SUPPORTS_DOCUMENT_INPUT` | Declared endpoint capability for PDF Evidence blocks; default `false` |
+| `MODEL_RUNTIME_BINDINGS_PATH` | Path to the deployment-owned, non-secret list of model bindings that Control Plane publication is allowed to reference |
+| `NORTHWIND_QWEN_BASE_URL` | Environment-owned Qwen endpoint resolved by the checked-in binding manifest |
 
 For an unauthenticated local server, leave `MODEL_API_KEY_ENV` empty. For an
 authenticated endpoint, set it to a separate secret environment variable name, for
@@ -160,20 +194,55 @@ output and tool requests are rejected before transport when the selected adapter
 not declare the required capability. `GatewayAgent` requires structured output, so that
 capability must be enabled for the `model_gateway` runtime to start.
 
+`MODEL_RUNTIME_BINDINGS_PATH` is an allow-list, not the model catalogue. It lets the deployment
+approve more than one exact profile, adapter, endpoint, model, and credential-name combination
+without putting a credential in configuration. A profile becomes selectable only after a matching
+high-impact model configuration is independently approved, published, and included in the active
+Release Set. A provider, model identifier, endpoint, prompt, capability, or credential-reference
+mismatch fails validation with `PROVIDER_CONFIGURATION_UNAVAILABLE`.
+
 Both published claimant profiles use this adapter contract:
 
 | Profile | Model | Role | Required capabilities |
 | --- | --- | --- | --- |
-| `qwen-local` | `qwen3.8-27b` at `http://100.71.25.5:8080/v1` | deployment default through `MODEL_PROFILE_ID` | structured output and tools |
-| `nowcoding-gpt56terra` | `gpt-5.6-terra` through the existing nowcoding endpoint | selectable | structured output and tools |
+| `qwen-local` | `qwen3.8-27b` through the environment-owned Qwen endpoint | deployment default through `MODEL_PROFILE_ID` | structured output and tools |
+| `nowcoding-gpt55` | `gpt-5.5` through the existing nowcoding endpoint | selectable | structured output and tools |
 
-The nowcoding profile was verified on 14 September 2026 with live strict structured-output and
-forced tool-call requests before publication. The credential reference is stored as a secret
+The nowcoding `gpt-5.5` endpoint was verified on 15 September 2026 with live strict
+structured-output and forced tool-call requests. That verifies provider compatibility, not a
+complete claimant turn or permanent availability. The credential reference is stored as an
 environment-variable name only. A Release Set binds each selectable model in a keyed
 `model:<profile_id>` slot. The selected profile is the default for a Session, but each message may
 explicitly select another published profile in the same conversation. The Runtime persists the
 actual profile used for every turn and updates the Session's latest selection; it never silently
 switches providers or falls back to a different profile.
+
+The checked-in `config/model-runtime-bindings.json` is the current non-secret VP deployment
+allow-list. Private endpoints are represented by environment-variable references and resolved only
+inside the deployment process. The backend ships a reviewed initial Runtime Release that registers
+and publishes the complete Agent policy plus every binding in this allow-list. A Control Plane
+scope with no Release Set history installs that initial Release during application composition, so
+both `qwen-local` and `nowcoding-gpt55` are available through the capabilities APIs on a clean
+deployment. The initializer runs only for a never-initialised scope. Existing active, superseded,
+withdrawn, or otherwise inactive Release Set history remains authoritative and is never repaired or
+overwritten on startup.
+
+For a later governed replacement, an operator supplies independent administrator bearer tokens
+through process environment variables and publishes the prompt and model slots while preserving
+the active Release Set's other references:
+
+```powershell
+$env:NORTHWIND_CONTROL_PLANE_AUTHOR_TOKEN = '<author bearer token>'
+$env:NORTHWIND_CONTROL_PLANE_APPROVER_TOKEN = '<independent approver bearer token>'
+$env:NORTHWIND_QWEN_BASE_URL = '<private Qwen endpoint>'
+py -3.12 scripts/publish_fnol_model_release.py `
+  --validation-evidence 'Live strict schema and forced tool-call probes passed.'
+```
+
+The replacement command never accepts or prints the provider credential. It refuses publication when the
+credential environment variable named by a configured profile is unavailable, when there is no
+active complete Release Set to extend, or when the resulting active snapshot does not contain the
+exact two-profile catalogue.
 
 The Workbench Staff Agent uses the same published profile catalog under its separate
 `staff_assistant` purpose and `staff_internal_fnol` privacy class. Its selected profile is
@@ -197,7 +266,7 @@ reason, usage, configured model identity, and AWS request identity into `ModelRe
 authentication, rate-limit, provider, timeout, and malformed-output failures use the same
 provider-neutral errors as other adapters.
 
-The executable claimant prompt is `northwind-fnol-claimant-v5`, stored under
+The executable claimant prompt is `northwind-fnol-claimant-v6`, stored under
 `backend/prompts/`. It defines the bounded motor, home, and contents VP behaviour, natural-language
 correction, current-action questioning, context lookup, and handoff proposals. Runtime injects the
 Branch Evaluation, minimum Claim projection, bounded knowledge citations, typed tool results, and
@@ -244,7 +313,8 @@ The gateway distinguishes:
 - `incomplete_response`;
 - `refused_response`;
 - `malformed_response`;
-- `unsupported_capability`; and
+- `unsupported_capability`;
+- `evidence_unavailable`; and
 - `configuration`.
 
 Only bounded, provider-neutral messages leave the adapter. Timeout, rate-limit, and
@@ -272,6 +342,9 @@ idempotency records unchanged.
 - The compatibility gateway still normalises provider tool calls into structured
   `AgentProposal.required_tools`; those context operations are bounded by Runtime policy and a
   single re-plan.
+- The Agent/Runtime path can consume authorised Evidence references supplied on a claimant
+  message. The claimant client remains responsible for supplying the selected Evidence IDs; it
+  cannot infer capability, visibility, or storage access.
 - Provider retries, fallback selection, circuit breaking, usage persistence, and model
   evaluation thresholds are not yet implemented. A configured runtime never substitutes
   a fixture or another provider silently.

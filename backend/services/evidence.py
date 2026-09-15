@@ -1,3 +1,6 @@
+import re
+from datetime import datetime
+
 from backend.adapters.evidence_storage import (
     EvidenceStorage,
     EvidenceStorageUnavailable,
@@ -7,6 +10,8 @@ from backend.adapters.evidence_storage import (
 )
 from backend.core.auth import Principal, require_durable_claimant
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.agent_action_commands import build_claim_context_command
+from backend.domain.agent_action_registry import ActionActorRole, ExecutionAuthority
 from backend.domain.branch_registry import validate_registered_field_value
 from backend.domain.evidence import evidence_state_for, evidence_summary_for
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
@@ -15,13 +20,20 @@ from backend.domain.models import (
     ActorReference,
     ActorType,
     ClaimantEvidence,
+    ClaimantEvidenceActionResponse,
+    ClaimantEvidenceHistoryItem,
+    ClaimantEvidenceHistoryResponse,
     CompleteEvidenceProcessingRequest,
     CompleteEvidenceUploadRequest,
+    EvidenceActionRequestPayload,
+    EvidenceClaimLinkState,
     EvidenceCompleteResponse,
     EvidenceFactDecisionRequest,
     EvidenceFactDecisionResponse,
     EvidenceFileStatus,
+    EvidenceHistoryState,
     EvidenceListResponse,
+    EvidenceMaterialVersion,
     EvidenceMutationResponse,
     EvidenceProcessingResponse,
     EvidenceRecord,
@@ -31,7 +43,9 @@ from backend.domain.models import (
     EvidenceWaitType,
     FormSource,
     FormStatus,
+    MessageVisibility,
     NeededFor,
+    PageInfo,
     RegisterEvidenceRequest,
     RequestEvidenceUploadRequest,
     ResponsibleParty,
@@ -46,9 +60,16 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.agent_evidence_actions import (
+    EvidenceActionConfirmation,
+    RepositoryEvidenceActionBackend,
+    execute_confirmed_evidence_action,
+)
 from backend.services.branching import build_applied_branch_evaluation
 from backend.services.evidence_visibility import claimant_visible_evidence
 from backend.services.support import (
+    decode_cursor,
+    encode_cursor,
     now_utc,
     parse_if_match,
     request_fingerprint,
@@ -65,6 +86,177 @@ ARRIVED_MATERIAL_STATUSES = frozenset(
         EvidenceStatus.EXPIRED,
     }
 )
+
+_REPLACEABLE_FILE_STATUSES = frozenset(
+    {EvidenceFileStatus.NOT_AVAILABLE, EvidenceFileStatus.FAILED}
+)
+
+_REQUIREMENT_PROVENANCE_KEYS = frozenset({'captured_at', 'reported_in_message_id'})
+
+_EXPLICIT_CONFIRMATION_PATTERN = re.compile(
+    r'\b(?:yes|yeah|yep|confirm(?:ed)?|i agree|go ahead|please do(?: it)?|'
+    r'please (?:reuse|remove|attach|detach) (?:it|this|that)?)\b',
+    re.IGNORECASE,
+)
+_NEGATED_CONFIRMATION_PATTERN = re.compile(
+    r"\b(?:no|not|don't|do not|cancel|never|rather not)\b", re.IGNORECASE
+)
+
+
+def _message_text(message: object) -> str:
+    content = getattr(message, 'content', None)
+    if not isinstance(content, dict):
+        return ''
+    text = content.get('text')
+    return text.strip() if isinstance(text, str) else ''
+
+
+def _is_explicit_evidence_confirmation(text: str) -> bool:
+    return (
+        bool(text)
+        and not _NEGATED_CONFIRMATION_PATTERN.search(text)
+        and bool(_EXPLICIT_CONFIRMATION_PATTERN.search(text))
+    )
+
+
+def _validate_persisted_evidence_action_authority(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    *,
+    action: str,
+    evidence_id: str,
+    source_claim_id: str,
+    proposal_ref: str,
+    confirmation_ref: str,
+    expected_revision: int,
+) -> None:
+    """Bind a public Evidence mutation to one persisted Runtime proposal and reply."""
+
+    expected_action = f'claim.propose_evidence_{action}'
+    matching_turn = None
+    for session in repository.list_sessions_for_claim(claim.claim_id, claim.customer_id):
+        for message in repository.list_messages(
+            claim.claim_id,
+            session.session_id,
+            claim.customer_id,
+        ):
+            if message.actor is not ActorType.CLAIMANT:
+                continue
+            runtime_turn = repository.get_runtime_turn_for_trigger(
+                claim.claim_id,
+                message.message_id,
+                claim.customer_id,
+            )
+            if runtime_turn is not None and runtime_turn.proposal.proposal_id == proposal_ref:
+                matching_turn = runtime_turn
+                break
+        if matching_turn is not None:
+            break
+
+    if matching_turn is None:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The Evidence action proposal is not a persisted Runtime proposal.',
+        )
+
+    proposal = matching_turn.proposal
+    if (
+        matching_turn.turn_plan.session_id != claim.active_session_id
+        or proposal.action_code != expected_action
+        or proposal.claim_id != claim.claim_id
+        or proposal.evidence_id != evidence_id
+        or proposal.source_claim_id != source_claim_id
+        or matching_turn.result.resulting_claim_revision != expected_revision
+        or matching_turn.result.resulting_claim_revision != claim.revision
+    ):
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The Evidence action proposal does not match the current Claim context.',
+        )
+
+    confirmation = repository.get_message(
+        claim.claim_id,
+        matching_turn.turn_plan.session_id,
+        confirmation_ref,
+        claim.customer_id,
+    )
+    if (
+        confirmation is None
+        or confirmation.actor is not ActorType.CLAIMANT
+        or confirmation.visibility is not MessageVisibility.CLAIMANT_VISIBLE
+        or confirmation.created_at <= proposal.created_at
+        or not _is_explicit_evidence_confirmation(_message_text(confirmation))
+    ):
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The Evidence action confirmation is not a persisted claimant confirmation.',
+        )
+
+
+def _material_source_ref(evidence_id: str, version: int) -> str:
+    return f'evidence:{evidence_id}:material:{version}'
+
+
+def _has_material_generation(evidence: EvidenceRecord) -> bool:
+    """Distinguish an actual file generation from requirement-level metadata."""
+
+    return evidence.file_status in {EvidenceFileStatus.FAILED, EvidenceFileStatus.READY}
+
+
+def _requirement_provenance(evidence: EvidenceRecord) -> dict[str, object]:
+    """Retain the stable requirement source without carrying old material state."""
+
+    return {
+        key: value
+        for key, value in evidence.provenance.items()
+        if key in _REQUIREMENT_PROVENANCE_KEYS
+    }
+
+
+def _material_proposed_fields(
+    claim: WorkingClaim,
+    evidence: EvidenceRecord,
+) -> dict[str, StructuredFormField]:
+    generation_refs = {
+        evidence.evidence_id,
+        _material_source_ref(evidence.evidence_id, evidence.material_version),
+    }
+    return {
+        code: field
+        for code, field in claim.form.items()
+        if field.status is FormStatus.PROPOSED
+        and field.source in {FormSource.IMAGE, FormSource.DOCUMENT}
+        and bool(field.source_refs)
+        and set(field.source_refs) <= generation_refs
+    }
+
+
+def _archive_material_generation(
+    evidence: EvidenceRecord,
+    proposed_fields: dict[str, StructuredFormField],
+    archived_at: datetime,
+) -> EvidenceMaterialVersion:
+    return EvidenceMaterialVersion(
+        version=evidence.material_version,
+        status=evidence.status,
+        file_status=evidence.file_status,
+        original_filename=evidence.original_filename,
+        media_type=evidence.media_type,
+        size_bytes=evidence.size_bytes,
+        references=evidence.references,
+        provenance=evidence.provenance,
+        proposed_fields=proposed_fields,
+        wait_type=evidence.wait_type,
+        responsible_party=evidence.responsible_party,
+        expected_by=evidence.expected_by,
+        expected_timing=evidence.expected_timing,
+        context_summary=evidence.context_summary,
+        archived_at=archived_at,
+        reason='claimant_replacement',
+    )
 
 
 def _claim_not_found() -> ApiError:
@@ -83,10 +275,54 @@ def _evidence_not_found() -> ApiError:
     )
 
 
-def _claimant_evidence(evidence: EvidenceRecord) -> ClaimantEvidence:
+def _existing_upload_requirement(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    principal: Principal,
+    payload: RequestEvidenceUploadRequest,
+) -> EvidenceRecord | None:
+    """Resolve and validate an optional existing Evidence upload target."""
+
+    if payload.evidence_id is None:
+        return None
+    evidence = repository.get_evidence(claim.claim_id, payload.evidence_id, principal.subject)
+    if evidence is None or evidence.source is not EvidenceSource.CLAIMANT:
+        raise _evidence_not_found()
+    if evidence.kind != payload.kind:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The upload kind does not match the existing evidence requirement.',
+            details=[
+                ErrorDetail(
+                    field='kind',
+                    reason='Use the kind recorded on the selected evidence requirement.',
+                )
+            ],
+        )
+    replaceable = evidence.file_status in _REPLACEABLE_FILE_STATUSES or (
+        evidence.status is EvidenceStatus.INVALID
+        and evidence.file_status is EvidenceFileStatus.READY
+    )
+    if not replaceable or evidence.status is EvidenceStatus.SUPERSEDED:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='This evidence item cannot accept a new upload in its current state.',
+        )
+    return evidence
+
+
+def _claimant_evidence(
+    evidence: EvidenceRecord,
+    *,
+    target_claim_id: str | None = None,
+    reused: bool = False,
+) -> ClaimantEvidence:
     return ClaimantEvidence(
         evidence_id=evidence.evidence_id,
-        claim_id=evidence.claim_id,
+        claim_id=target_claim_id or evidence.claim_id,
+        source_claim_id=evidence.claim_id if reused else None,
         kind=evidence.kind,
         status=evidence.status,
         file_status=evidence.file_status,
@@ -97,6 +333,8 @@ def _claimant_evidence(evidence: EvidenceRecord) -> ClaimantEvidence:
         related_fields=evidence.related_fields,
         needed_for=evidence.needed_for,
         claimant_note=evidence.claimant_note,
+        reused=reused,
+        can_remove=(reused or _can_remove_evidence(evidence)),
         created_at=evidence.created_at,
         updated_at=evidence.updated_at,
     )
@@ -218,11 +456,226 @@ def list_evidence(
     if claim is None:
         raise _claim_not_found()
     evidence = claimant_visible_evidence(repository.list_evidence(claim_id, principal.subject))
+    source_records = {
+        item.evidence_id: item for item in repository.list_evidence_for_customer(principal.subject)
+    }
+    linked = []
+    for link in repository.list_evidence_claim_links(principal.subject, claim_id):
+        if link.state is not EvidenceClaimLinkState.ACTIVE:
+            continue
+        source = source_records.get(link.evidence_id)
+        if source is not None and source.claim_id == link.source_claim_id:
+            linked.append(_claimant_evidence(source, target_claim_id=claim_id, reused=True))
     return EvidenceListResponse(
         claim_id=claim_id,
         revision=claim.revision,
-        items=[_claimant_evidence(record) for record in evidence],
+        items=[_claimant_evidence(record) for record in evidence] + linked,
         customer_next_step=claim.customer_next_step,
+    )
+
+
+def list_evidence_history(
+    repository: PersistenceRepository,
+    principal: Principal,
+    *,
+    limit: int,
+    cursor: str | None,
+) -> ClaimantEvidenceHistoryResponse:
+    """List claimant-owned uploaded Evidence across all Claims.
+
+    Args:
+        repository: Authoritative Claim and Evidence repository.
+        principal: Authenticated claimant whose records may be returned.
+        limit: Maximum number of records in this page.
+        cursor: Opaque offset cursor returned by a previous call.
+
+    Returns:
+        A claimant-safe, paginated Evidence history projection.
+
+    Raises:
+        ApiError: If the cursor is invalid or the principal is not eligible for
+            durable claimant storage.
+    """
+    require_durable_claimant(principal)
+    records = [
+        record
+        for record in repository.list_evidence_for_customer(principal.subject)
+        if record.file_status
+        in {
+            EvidenceFileStatus.UPLOADED,
+            EvidenceFileStatus.PROCESSING,
+            EvidenceFileStatus.READY,
+            EvidenceFileStatus.FAILED,
+        }
+        and record.claimant_history_state is EvidenceHistoryState.AVAILABLE
+    ]
+    offset = decode_cursor(cursor)
+    page_records = records[offset : offset + min(max(limit, 1), 100)]
+    next_offset = offset + len(page_records)
+    links = repository.list_evidence_claim_links(principal.subject)
+    linked_claims: dict[str, list[str]] = {}
+    for link in links:
+        if link.state is EvidenceClaimLinkState.ACTIVE:
+            linked_claims.setdefault(link.evidence_id, []).append(link.target_claim_id)
+    return ClaimantEvidenceHistoryResponse(
+        items=[
+            _history_item(record, linked_claim_ids=linked_claims.get(record.evidence_id, []))
+            for record in page_records
+        ],
+        page=PageInfo(
+            next_cursor=encode_cursor(next_offset) if next_offset < len(records) else None
+        ),
+    )
+
+
+def _can_remove_evidence(record: EvidenceRecord) -> bool:
+    return (
+        record.source is EvidenceSource.CLAIMANT
+        and record.file_status is EvidenceFileStatus.READY
+        and record.status
+        not in {
+            EvidenceStatus.INVALID,
+            EvidenceStatus.EXPIRED,
+            EvidenceStatus.SUPERSEDED,
+        }
+        and record.claimant_history_state is EvidenceHistoryState.AVAILABLE
+    )
+
+
+def _history_item(
+    record: EvidenceRecord,
+    *,
+    linked_claim_ids: list[str] | None = None,
+) -> ClaimantEvidenceHistoryItem:
+    reusable = (
+        record.source is EvidenceSource.CLAIMANT
+        and record.file_status is EvidenceFileStatus.READY
+        and record.status
+        not in {EvidenceStatus.INVALID, EvidenceStatus.EXPIRED, EvidenceStatus.SUPERSEDED}
+    )
+    return ClaimantEvidenceHistoryItem(
+        evidence_id=record.evidence_id,
+        source_claim_id=record.claim_id,
+        kind=record.kind,
+        status=record.status,
+        file_status=record.file_status,
+        original_filename=record.original_filename,
+        media_type=record.media_type,
+        size_bytes=record.size_bytes,
+        source=record.source,
+        provenance_summary=['claimant_upload'] if record.source is EvidenceSource.CLAIMANT else [],
+        can_reuse=reusable,
+        can_remove=_can_remove_evidence(record),
+        linked_claim_ids=sorted(linked_claim_ids or []),
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
+def execute_evidence_action(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    evidence_id: str,
+    action: str,
+    payload: EvidenceActionRequestPayload,
+    idempotency_key: str | None,
+    if_match: str | None,
+) -> ClaimantEvidenceActionResponse:
+    """Apply one claimant-confirmed Evidence reuse or removal operation."""
+
+    require_durable_claimant(principal)
+    if action not in {'reuse', 'remove'}:
+        raise ApiError(
+            status_code=404,
+            code='RESOURCE_NOT_FOUND',
+            message='The evidence action was not found.',
+        )
+    if payload.source_claim_id != (payload.source_claim_id.strip()):
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The source Claim reference is invalid.',
+        )
+    key = require_idempotency_key(idempotency_key)
+    expected_revision = parse_if_match(if_match)
+    action_code = f'claim.{action}_evidence'
+    claim = repository.get_claim(claim_id, principal.subject)
+    if claim is None:
+        raise _claim_not_found()
+    backend_route = f'/internal/v1/claims/{claim_id}/evidence-actions/{action_code}'
+    backend_fingerprint = request_fingerprint(
+        {
+            'action_code': action_code,
+            'claim_id': claim_id,
+            'evidence_id': evidence_id,
+            'source_claim_id': payload.source_claim_id,
+            'expected_revision': expected_revision,
+            'proposal_ref': payload.proposal_ref,
+            'confirmation_ref': payload.confirmation_ref,
+        }
+    )
+    existing = repository.find_idempotency(principal.subject, backend_route, key)
+    if existing is not None and existing.request_fingerprint != backend_fingerprint:
+        raise ApiError(
+            status_code=409,
+            code='IDEMPOTENCY_CONFLICT',
+            message='The idempotency key was already used for a different Evidence action.',
+        )
+    if existing is None:
+        _validate_persisted_evidence_action_authority(
+            repository,
+            claim,
+            action=action,
+            evidence_id=evidence_id,
+            source_claim_id=payload.source_claim_id,
+            proposal_ref=payload.proposal_ref,
+            confirmation_ref=payload.confirmation_ref,
+            expected_revision=expected_revision,
+        )
+    command = build_claim_context_command(
+        action_code,
+        {
+            'claim_id': claim_id,
+            'evidence_id': evidence_id,
+            'source_claim_id': payload.source_claim_id,
+            'expected_revision': expected_revision,
+            'proposal_ref': payload.proposal_ref,
+        },
+        proposer_role=ActionActorRole.RUNTIME,
+        approved_authority=ExecutionAuthority.CLAIMANT_STAFF_OR_PUBLISHED_RULE,
+        authority_reference=payload.confirmation_ref,
+        workflow_state=claim.claim_state.workflow_state,
+        expected_revision=expected_revision,
+        idempotency_key=key,
+    )
+    confirmation = EvidenceActionConfirmation(
+        claimant_id=principal.subject,
+        action_code=action_code,
+        claim_id=claim_id,
+        evidence_id=evidence_id,
+        source_claim_id=payload.source_claim_id,
+        proposal_ref=payload.proposal_ref,
+        confirmation_ref=payload.confirmation_ref,
+        confirmed=True,
+    )
+    result = execute_confirmed_evidence_action(
+        repository,
+        command,
+        confirmation,
+        RepositoryEvidenceActionBackend(repository),
+    )
+    return ClaimantEvidenceActionResponse(
+        action=action,
+        status=result.status.value,
+        reason_code=result.reason_code,
+        evidence_id=result.evidence_id,
+        source_claim_id=payload.source_claim_id,
+        target_claim_id=claim_id,
+        revision=result.resulting_revision,
+        state_change_refs=list(result.state_change_refs),
+        retryable=result.retryable,
+        message=result.claimant_message,
     )
 
 
@@ -398,7 +851,8 @@ def request_upload(
     if claim is None:
         raise _claim_not_found()
     _validate_revision(claim, expected_revision)
-    evidence_id = new_id('evd')
+    requirement = _existing_upload_requirement(repository, claim, principal, payload)
+    evidence_id = requirement.evidence_id if requirement is not None else new_id('evd')
     try:
         target = storage.create_upload_target(
             claim_id=claim_id,
@@ -432,27 +886,88 @@ def request_upload(
         ) from error
 
     timestamp = now_utc()
-    evidence = EvidenceRecord(
-        evidence_id=evidence_id,
-        claim_id=claim_id,
-        kind=payload.kind,
-        # The upload has been registered and has not finished. That is a fact about
-        # the file, not about the material, so the business condition is that the
-        # claim is still waiting and the file status carries the rest.
-        status=EvidenceStatus.PENDING,
-        file_status=EvidenceFileStatus.AWAITING_UPLOAD,
-        original_filename=payload.original_filename,
-        media_type=payload.media_type,
-        size_bytes=payload.size_bytes,
-        source=EvidenceSource.CLAIMANT,
-        wait_type='claimant',
-        responsible_party='claimant',
-        context_summary='Waiting for the claimant to complete the evidence upload.',
-        provenance={'storage_key': target.storage_key},
-        created_at=timestamp,
-        updated_at=timestamp,
+    claim_for_update = claim
+    if requirement is None:
+        evidence = EvidenceRecord(
+            evidence_id=evidence_id,
+            claim_id=claim_id,
+            kind=payload.kind,
+            # The upload has been registered and has not finished. That is a fact about
+            # the file, not about the material, so the business condition is that the
+            # claim is still waiting and the file status carries the rest.
+            status=EvidenceStatus.PENDING,
+            file_status=EvidenceFileStatus.AWAITING_UPLOAD,
+            original_filename=payload.original_filename,
+            media_type=payload.media_type,
+            size_bytes=payload.size_bytes,
+            source=EvidenceSource.CLAIMANT,
+            wait_type='claimant',
+            responsible_party='claimant',
+            context_summary='Waiting for the claimant to complete the evidence upload.',
+            provenance={'storage_key': target.storage_key},
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+    else:
+        replacing_material = _has_material_generation(requirement)
+        proposed_fields = (
+            _material_proposed_fields(claim, requirement) if replacing_material else {}
+        )
+        material_version = requirement.material_version + (1 if replacing_material else 0)
+        material_history = list(requirement.material_history)
+        if replacing_material:
+            material_history.append(
+                _archive_material_generation(requirement, proposed_fields, timestamp)
+            )
+            claim_for_update = claim.model_copy(
+                update={
+                    'form': {
+                        code: field
+                        for code, field in claim.form.items()
+                        if code not in proposed_fields
+                    }
+                }
+            )
+        current_provenance = (
+            _requirement_provenance(requirement)
+            if replacing_material
+            else dict(requirement.provenance)
+        )
+        current_provenance['storage_key'] = target.storage_key
+        evidence = requirement.model_copy(
+            update={
+                'status': EvidenceStatus.PENDING,
+                'file_status': EvidenceFileStatus.AWAITING_UPLOAD,
+                'original_filename': payload.original_filename,
+                'media_type': payload.media_type,
+                'size_bytes': payload.size_bytes,
+                'references': [],
+                'material_version': material_version,
+                'material_history': material_history,
+                'wait_type': EvidenceWaitType.CLAIMANT,
+                'responsible_party': ResponsibleParty.CLAIMANT,
+                'expected_by': None,
+                'expected_timing': None,
+                'context_summary': 'Waiting for the claimant to complete the evidence upload.',
+                'provenance': _with_transition(
+                    current_provenance,
+                    _transition_entry(
+                        field_code=None,
+                        from_state=requirement.file_status.value,
+                        to_state=EvidenceFileStatus.AWAITING_UPLOAD.value,
+                        source=requirement.source.value,
+                        at=timestamp.isoformat(),
+                        actor_type=ActorType.CLAIMANT.value,
+                        actor_id=principal.subject,
+                    ),
+                ),
+                'updated_at': timestamp,
+            }
+        )
+    updated_claim = _updated_claim(
+        claim_for_update,
+        _records_with(repository, claim_for_update, evidence),
     )
-    updated_claim = _updated_claim(claim, _records_with(repository, claim, evidence))
     response = EvidenceUploadResponse(
         evidence_id=evidence_id,
         revision=updated_claim.revision,
@@ -822,7 +1337,10 @@ def complete_evidence_processing(
         fact.field_code: StructuredFormField(
             value=fact.value,
             source=form_source,
-            source_refs=[evidence_id],
+            source_refs=[
+                evidence_id,
+                _material_source_ref(evidence_id, evidence.material_version),
+            ],
             status=FormStatus.PROPOSED,
             needed_for=NeededFor.CURRENT_ACTION,
             confidence=fact.confidence,
@@ -951,6 +1469,8 @@ def decide_evidence_facts(
         if field_code not in claim.form
         or claim.form[field_code].status is not FormStatus.PROPOSED
         or evidence_id not in claim.form[field_code].source_refs
+        or _material_source_ref(evidence_id, evidence.material_version)
+        not in claim.form[field_code].source_refs
         or claim.form[field_code].source not in {FormSource.IMAGE, FormSource.DOCUMENT}
     ]
     if duplicate_codes or unavailable_codes:
