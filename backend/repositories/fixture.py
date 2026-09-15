@@ -1721,7 +1721,7 @@ class FixtureRepository(PersistenceRepository):
             if runtime_records is not None
             else None
         )
-        if existing_runtime is not None:
+        if runtime_records is not None and existing_runtime is not None:
             raise IdempotencyConflict(runtime_records.turn_plan.turn_id)
 
         if create_claim and claim.claim_id in self._claims:

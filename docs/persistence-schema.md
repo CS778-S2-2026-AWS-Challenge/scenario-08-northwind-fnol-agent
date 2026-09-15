@@ -156,8 +156,6 @@ the append-only audit collection through a bounded, filterable projection.
     idempotency response.
     The initial claimant bootstrap uses the same boundary while creating the transient Claim
     and Session in that accepted transaction; no empty Claim is visible before the first turn.
-12. Resolve a current task-specific claimant consent before invoking an external participant.
-13. Reserve an immutable external-operation identity and fingerprint before invocation, then
 13. Resolve a current task-specific claimant consent before invoking an external participant.
 14. Reserve an immutable external-operation identity and fingerprint before invocation, then
     recover its accepted result independently of a later Claim State compare-and-set.
