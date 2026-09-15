@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import WorkbenchPage from './WorkbenchPage.jsx'
 
 const api = vi.hoisted(() => ({
@@ -49,14 +49,23 @@ vi.mock('../hooks/usePersistentTabs.js', () => ({ usePersistentTabs: () => tabs 
 vi.mock('../components/NavigationRail.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimTabs.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimWorkspace.jsx', () => ({
-  default: ({ detail, resources, externalActionNotice, onAccept, onReopen, onExternalTaskAction, onRetryExternalActionContext }) => <div>
+  default: ({ detail, resources, externalActionNotices = [], onAccept, onReopen, onExternalTaskAction, onRetryExternalActionContext, onRetry }) => <div>
     {detail && <output data-testid="claim-revision">Claim revision {detail.revision}</output>}
     {resources.handoffs?.error && <p>Handoff context unavailable</p>}
     {resources.externalRequests?.error && <p>External context unavailable</p>}
-    {externalActionNotice && <div role="alert"><p>{externalActionNotice.message}</p><p>{externalActionNotice.taskId}</p><button type="button" onClick={onRetryExternalActionContext}>Retry external readback</button></div>}
+    {externalActionNotices.map((notice) => (
+      <div role="alert" key={`${notice.claimId}:${notice.taskId}`}>
+        <p>{notice.message}</p>
+        <p>{notice.taskId}</p>
+        <button type="button" disabled={notice.recovering} onClick={() => onRetryExternalActionContext(notice.taskId)}>
+          Retry external readback
+        </button>
+      </div>
+    ))}
+    <button type="button" onClick={onRetry}>Test claim refresh</button>
     {detail?.work_summary?.primary_action_code === 'claim.reopen' && <button type="button" onClick={() => onReopen(detail.allowed_actions[0], { reason: 'New material received.' }, 'reopen-route-key').catch(() => {})}>Test projected reopen</button>}
     {detail?.work_summary?.primary_action_code === 'human.accept_handoff' && <button type="button" onClick={() => onAccept({ handoff_id: 'hnd_1' }).catch(() => {})}>Test projected accept</button>}
-    {detail?.work_summary?.primary_action_code?.startsWith('external.') && <button type="button" onClick={() => {
+    {detail?.work_summary?.primary_action_code?.startsWith('external.') && !externalActionNotices.length && <button type="button" onClick={() => {
       const promise = onExternalTaskAction(detail.allowed_actions[0], {})
       externalActionTracker.lastPromise = promise
       promise.catch(() => {})
@@ -129,8 +138,18 @@ function LocationProbe() {
   return <output data-testid="location">{location.pathname}{location.search}</output>
 }
 
+function NavigationProbe() {
+  const navigate = useNavigate()
+  return (
+    <>
+      <button type="button" onClick={() => navigate('/workbench/claims/clm_route_1')}>Navigate Claim A</button>
+      <button type="button" onClick={() => navigate('/workbench/claims/clm_route_2')}>Navigate Claim B</button>
+    </>
+  )
+}
+
 function renderPage(initialEntry) {
-  const page = <><WorkbenchPage /><LocationProbe /></>
+  const page = <><WorkbenchPage /><LocationProbe /><NavigationProbe /></>
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
