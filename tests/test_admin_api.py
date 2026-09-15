@@ -13,8 +13,10 @@ from backend.domain.configuration import (
     AuditEvent,
     ConfigurationApprovalRecord,
     ConfigurationRecord,
+    ModelRuntimeBinding,
     ValidationRequest,
 )
+from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID
 from backend.repositories.configuration import (
     ConfigurationIdempotencyRecord,
     SQLiteConfigurationRepository,
@@ -39,7 +41,10 @@ def _model_client() -> TestClient:
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         model_protocol_adapter='openai_compatible',
+        model_profile_id='approved-profile',
+        model_provider='approved-provider',
         model_base_url='https://approved-model.example/v1',
+        model_identifier='approved-model',
         model_api_key_env='NORTHWIND_MODEL_API_KEY',
     )
     return TestClient(create_app(settings))
@@ -55,7 +60,7 @@ def _model_values(**overrides: object) -> dict[str, object]:
         'profile_id': 'approved-profile',
         'purpose': 'agent_turn',
         'privacy_class': 'synthetic_fnol',
-        'prompt_version': 'northwind-fnol-motor-claimant-v4',
+        'prompt_version': MOTOR_CLAIMANT_PROMPT_ID,
         'evaluation_status': 'configured',
         'timeout_seconds': 30,
         'structured_output': True,
@@ -578,6 +583,9 @@ def test_model_configuration_cannot_downgrade_its_impact_classification(
     ('field', 'value'),
     [
         ('protocol', 'unregistered_protocol'),
+        ('provider', 'unapproved-provider'),
+        ('model_identifier', 'unapproved-model'),
+        ('profile_id', 'unapproved-profile'),
         ('base_url', 'https://unapproved.example/v1'),
         ('credential_environment_variable', 'UNAPPROVED_PROCESS_SECRET'),
         ('evaluation_status', 'degraded'),
@@ -1212,7 +1220,6 @@ def test_provider_configuration_validator_rejects_incomplete_domains(
 
 def test_provider_configuration_validator_enforces_secret_references_and_model_binding() -> None:
     from backend.core.errors import ApiError
-    from backend.domain.configuration import ModelRuntimeBinding
 
     with pytest.raises(ApiError) as plaintext:
         _reject_plaintext_secrets({'api_key': 'never-store'})
@@ -1232,17 +1239,124 @@ def test_provider_configuration_validator_enforces_secret_references_and_model_b
             'model',
             _model_values(),
             for_validation=True,
-            model_runtime_binding=ModelRuntimeBinding(
-                protocol='openai_compatible',
-                base_url='https://different.example/v1',
-                credential_environment_variable='NORTHWIND_MODEL_API_KEY',
-                purpose='agent_turn',
-                privacy_class='synthetic_fnol',
-                prompt_version='northwind-fnol-motor-claimant-v4',
-                structured_output=True,
+            model_runtime_bindings=(
+                ModelRuntimeBinding(
+                    profile_id='approved-profile',
+                    provider='approved-provider',
+                    model_identifier='approved-model',
+                    protocol='openai_compatible',
+                    base_url='https://different.example/v1',
+                    credential_environment_variable='NORTHWIND_MODEL_API_KEY',
+                    purpose='agent_turn',
+                    privacy_class='synthetic_fnol',
+                    prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
+                    structured_output=True,
+                ),
             ),
         )
     assert mismatch.value.code == 'PROVIDER_CONFIGURATION_UNAVAILABLE'
+
+
+def test_model_validation_accepts_each_deployment_bound_profile() -> None:
+    bindings = (
+        ModelRuntimeBinding(
+            profile_id='qwen-local',
+            protocol='openai_compatible',
+            provider='qwen-local',
+            model_identifier='qwen3.8-27b',
+            base_url='http://model.example.test/v1',
+            credential_environment_variable=None,
+            purpose='agent_turn',
+            privacy_class='synthetic_fnol',
+            prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
+            structured_output=True,
+            tools=True,
+        ),
+        ModelRuntimeBinding(
+            profile_id='nowcoding-gpt55',
+            protocol='openai_compatible',
+            provider='nowcoding',
+            model_identifier='gpt-5.5',
+            base_url='https://nowcoding.example.test/v1',
+            credential_environment_variable='NORTHWIND_MODEL_API_KEY',
+            purpose='agent_turn',
+            privacy_class='synthetic_fnol',
+            prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
+            structured_output=True,
+            tools=True,
+        ),
+    )
+
+    for binding in bindings:
+        _validate_configuration_values(
+            'model',
+            {
+                **binding.model_dump(mode='json'),
+                'evaluation_status': 'configured',
+                'timeout_seconds': 30.0,
+            },
+            for_validation=True,
+            model_runtime_bindings=bindings,
+        )
+
+
+def test_admin_api_validates_a_secondary_deployment_bound_model_without_a_secret() -> None:
+    binding = ModelRuntimeBinding(
+        profile_id='nowcoding-gpt55',
+        protocol='openai_compatible',
+        provider='nowcoding',
+        model_identifier='gpt-5.5',
+        base_url='https://nowcoding.example.test/v1',
+        credential_environment_variable='NORTHWIND_MODEL_API_KEY',
+        purpose='agent_turn',
+        privacy_class='synthetic_fnol',
+        prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
+        structured_output=True,
+        tools=True,
+    )
+    settings = Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+        model_runtime_bindings=(binding,),
+    )
+
+    with TestClient(create_app(settings)) as client:
+        created = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('secondary-model-create'),
+            json={
+                'domain': 'model',
+                'impact': 'high',
+                'values': {
+                    **binding.model_dump(mode='json'),
+                    'evaluation_status': 'configured',
+                    'timeout_seconds': 30.0,
+                },
+                'reason': 'Register a secondary deployment-bound model.',
+            },
+        )
+        assert created.status_code == 201, created.text
+
+        validated = client.post(
+            f'/internal/v1/admin/configurations/{created.json()["configuration_id"]}/validate',
+            headers=_post_headers('secondary-model-validate', 1),
+            json={
+                'scenario_results': [
+                    {
+                        'scenario_id': 'secondary-model-contract',
+                        'outcome': 'passed',
+                        'evidence': 'Structured output and tool calls passed.',
+                    }
+                ]
+            },
+        )
+
+        assert validated.status_code == 200, validated.text
+        assert validated.json()['state'] == 'awaiting_approval'
+        assert validated.json()['values']['model_identifier'] == 'gpt-5.5'
+        assert validated.json()['values']['credential_environment_variable'] == (
+            'NORTHWIND_MODEL_API_KEY'
+        )
 
 
 def test_idempotent_create_replays_and_conflicts() -> None:

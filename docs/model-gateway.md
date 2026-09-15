@@ -115,12 +115,13 @@ context lookup, and permits one typed re-plan. The target model-backed path uses
 tool-call side channel for `claim.read` and never mixes it with the legacy eight-action response.
 The first request names `claim.read` as the required tool; compatible adapters force that exact
 tool choice and disable parallel tool calls rather than relying on prompt compliance. The
-continuation is then constrained to the currently wired `conversation.answer` and
-`runtime.continue` literal action codes. The continuation may propose `human.create_handoff`, but
-that proposal remains advisory and is blocked from mutation; matching deterministic support or
-safety input is handled before the provider call. Claim creation and external participant actions
-remain separate handlers and are never reported as complete merely because a model requested
-them.
+continuation is constrained to registered `action_code` and `runtime_action_code` pairs. Ordinary
+intake uses `conversation.answer` with `runtime.wait_for_user` or `runtime.continue`; human support
+uses `human.create_handoff` with `runtime.pause_for_review`. Claim preparation, creation, and
+prior-Evidence proposals use only their explicitly registered directives. The proposal remains
+advisory and cannot authorise a mutation; matching deterministic safety input is handled before
+the provider call. External participant actions remain separate handlers and are never reported
+as complete merely because a model requested them.
 
 The default `controlled` profile continues to use `ControlledAgent`. The
 `model_gateway` profile is enabled only through explicit startup configuration. A
@@ -180,6 +181,8 @@ model and Runtime authority validation before it can affect Claim State.
 | `MODEL_SUPPORTS_TOOLS` | Declared endpoint tool-call capability |
 | `MODEL_SUPPORTS_IMAGE_INPUT` | Declared endpoint capability for image Evidence blocks; default `false` |
 | `MODEL_SUPPORTS_DOCUMENT_INPUT` | Declared endpoint capability for PDF Evidence blocks; default `false` |
+| `MODEL_RUNTIME_BINDINGS_PATH` | Path to the deployment-owned, non-secret list of model bindings that Control Plane publication is allowed to reference |
+| `NORTHWIND_QWEN_BASE_URL` | Environment-owned Qwen endpoint resolved by the checked-in binding manifest |
 
 For an unauthenticated local server, leave `MODEL_API_KEY_ENV` empty. For an
 authenticated endpoint, set it to a separate secret environment variable name, for
@@ -191,20 +194,47 @@ output and tool requests are rejected before transport when the selected adapter
 not declare the required capability. `GatewayAgent` requires structured output, so that
 capability must be enabled for the `model_gateway` runtime to start.
 
+`MODEL_RUNTIME_BINDINGS_PATH` is an allow-list, not the model catalogue. It lets the deployment
+approve more than one exact profile, adapter, endpoint, model, and credential-name combination
+without putting a credential in configuration. A profile becomes selectable only after a matching
+high-impact model configuration is independently approved, published, and included in the active
+Release Set. A provider, model identifier, endpoint, prompt, capability, or credential-reference
+mismatch fails validation with `PROVIDER_CONFIGURATION_UNAVAILABLE`.
+
 Both published claimant profiles use this adapter contract:
 
 | Profile | Model | Role | Required capabilities |
 | --- | --- | --- | --- |
-| `qwen-local` | `qwen3.8-27b` at `http://100.71.25.5:8080/v1` | deployment default through `MODEL_PROFILE_ID` | structured output and tools |
-| `nowcoding-gpt56terra` | `gpt-5.6-terra` through the existing nowcoding endpoint | selectable | structured output and tools |
+| `qwen-local` | `qwen3.8-27b` through the environment-owned Qwen endpoint | deployment default through `MODEL_PROFILE_ID` | structured output and tools |
+| `nowcoding-gpt55` | `gpt-5.5` through the existing nowcoding endpoint | selectable | structured output and tools |
 
-The nowcoding profile was verified on 14 September 2026 with live strict structured-output and
-forced tool-call requests before publication. The credential reference is stored as a secret
+The nowcoding `gpt-5.5` endpoint was verified on 15 September 2026 with live strict
+structured-output and forced tool-call requests. That verifies provider compatibility, not a
+complete claimant turn or permanent availability. The credential reference is stored as an
 environment-variable name only. A Release Set binds each selectable model in a keyed
 `model:<profile_id>` slot. The selected profile is the default for a Session, but each message may
 explicitly select another published profile in the same conversation. The Runtime persists the
 actual profile used for every turn and updates the Session's latest selection; it never silently
 switches providers or falls back to a different profile.
+
+The checked-in `config/model-runtime-bindings.json` is the current non-secret VP deployment
+allow-list. Private endpoints are represented by environment-variable references and resolved only
+inside the deployment process. After live checks have produced reviewable evidence, an operator supplies independent
+administrator bearer tokens through process environment variables and publishes the prompt and
+both model slots while preserving the active Release Set's other references:
+
+```powershell
+$env:NORTHWIND_CONTROL_PLANE_AUTHOR_TOKEN = '<author bearer token>'
+$env:NORTHWIND_CONTROL_PLANE_APPROVER_TOKEN = '<independent approver bearer token>'
+$env:NORTHWIND_QWEN_BASE_URL = '<private Qwen endpoint>'
+py -3.12 scripts/publish_fnol_model_release.py `
+  --validation-evidence 'Live strict schema and forced tool-call probes passed.'
+```
+
+The command never accepts or prints the provider credential. It refuses publication when the
+credential environment variable named by a configured profile is unavailable, when there is no
+active complete Release Set to extend, or when the resulting active snapshot does not contain the
+exact two-profile catalogue.
 
 The Workbench Staff Agent uses the same published profile catalog under its separate
 `staff_assistant` purpose and `staff_internal_fnol` privacy class. Its selected profile is
@@ -228,7 +258,7 @@ reason, usage, configured model identity, and AWS request identity into `ModelRe
 authentication, rate-limit, provider, timeout, and malformed-output failures use the same
 provider-neutral errors as other adapters.
 
-The executable claimant prompt is `northwind-fnol-claimant-v5`, stored under
+The executable claimant prompt is `northwind-fnol-claimant-v6`, stored under
 `backend/prompts/`. It defines the bounded motor, home, and contents VP behaviour, natural-language
 correction, current-action questioning, context lookup, and handoff proposals. Runtime injects the
 Branch Evaluation, minimum Claim projection, bounded knowledge citations, typed tool results, and
