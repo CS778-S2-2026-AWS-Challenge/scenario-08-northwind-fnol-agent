@@ -78,6 +78,8 @@ _REPLACEABLE_FILE_STATUSES = frozenset(
     {EvidenceFileStatus.NOT_AVAILABLE, EvidenceFileStatus.FAILED}
 )
 
+_REQUIREMENT_PROVENANCE_KEYS = frozenset({'captured_at', 'reported_in_message_id'})
+
 
 def _material_source_ref(evidence_id: str, version: int) -> str:
     return f'evidence:{evidence_id}:material:{version}'
@@ -87,6 +89,16 @@ def _has_material_generation(evidence: EvidenceRecord) -> bool:
     """Distinguish an actual file generation from requirement-level metadata."""
 
     return evidence.file_status in {EvidenceFileStatus.FAILED, EvidenceFileStatus.READY}
+
+
+def _requirement_provenance(evidence: EvidenceRecord) -> dict[str, object]:
+    """Retain the stable requirement source without carrying old material state."""
+
+    return {
+        key: value
+        for key, value in evidence.provenance.items()
+        if key in _REQUIREMENT_PROVENANCE_KEYS
+    }
 
 
 def _material_proposed_fields(
@@ -648,7 +660,11 @@ def request_upload(
                     }
                 }
             )
-        current_provenance = {} if replacing_material else dict(requirement.provenance)
+        current_provenance = (
+            _requirement_provenance(requirement)
+            if replacing_material
+            else dict(requirement.provenance)
+        )
         current_provenance['storage_key'] = target.storage_key
         evidence = requirement.model_copy(
             update={

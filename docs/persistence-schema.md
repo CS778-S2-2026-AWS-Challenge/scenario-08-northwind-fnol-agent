@@ -427,9 +427,11 @@ the append-only audit collection through a bounded, filterable projection.
   provenance, processing and extraction decisions, and any proposed Claim fields sourced only by
   that generation. Fixture and MongoDB persistence reject a shortened or rewritten history.
 - A replacement starts the new generation without the prior file's references, checksum,
-  processing state, extraction state, or fact decisions. A current Claim field is withdrawn only
-  when it is still `proposed`, has an image or document source, and all of its source references
-  identify the replaced generation. Confirmed, disputed, and multi-source fields remain current.
+  processing state, extraction state, fact decisions, or lifecycle transition history.
+  Requirement-origin provenance such as `reported_in_message_id` and `captured_at` remains on the
+  current stable requirement. A current Claim field is withdrawn only when it is still `proposed`,
+  has an image or document source, and all of its source references identify the replaced
+  generation. Confirmed, disputed, and multi-source fields remain current.
 - An extracted field names both the stable `evidence_id` and
   `evidence:{evidence_id}:material:{material_version}`. Fact decisions require the current
   generation reference so an older material cannot be mistaken for the replacement.

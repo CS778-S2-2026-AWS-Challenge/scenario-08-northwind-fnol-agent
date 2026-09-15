@@ -1852,9 +1852,11 @@ The Evidence requirement keeps its stable `evidence_id`, while each actual file 
 `material_version`. Replacing failed or invalid material archives the complete prior generation in
 typed, append-only `material_history`: file metadata, status, references, checksum and other
 provenance, processing/extraction decisions, and proposed Claim fields sourced only by that
-generation. The new current generation does not inherit those values. A proposed image/document
-field sourced exclusively by the replaced generation is removed from the current form so corrected
-processing can propose it again; confirmed, disputed, or multi-source fields are not removed.
+generation. The new current generation does not inherit those material-specific values. The stable
+requirement retains requirement-origin provenance such as `reported_in_message_id` and
+`captured_at`. A proposed image/document field sourced exclusively by the replaced generation is
+removed from the current form so corrected processing can propose it again; confirmed, disputed,
+or multi-source fields are not removed.
 
 Response `201`:
 

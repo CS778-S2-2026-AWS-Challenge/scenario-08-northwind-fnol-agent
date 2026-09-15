@@ -249,28 +249,59 @@ def test_upload_replaces_failed_or_invalid_material_on_the_same_identity(
     assert replaced.provenance['storage_key'] != evidence.provenance.get('storage_key')
 
 
-def test_replacement_archives_old_material_and_allows_corrected_fact(
+def test_message_requirement_replacement_preserves_source_and_corrects_fact(
     client: TestClient,
     auth_headers: dict[str, str],
     repository: FixtureRepository,
 ) -> None:
-    claim_id = _create_claim(client, auth_headers, 'replace-material-generation')
+    created = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'replacement-message-claim'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+    assert created.status_code == 201
+    claim_id = str(created.json()['claim']['claim_id'])
+    session_id = str(created.json()['session']['session_id'])
+    turn = client.post(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'replacement-message-requirement',
+            'If-Match': '1',
+        },
+        json={
+            'client_message_id': 'replacement-message-requirement',
+            'content': {
+                'type': 'text',
+                'text': 'The police report has not been issued and will be available later.',
+            },
+            'evidence_refs': [],
+        },
+    )
+    assert turn.status_code == 200, turn.text
+    requirements = repository.list_evidence(claim_id, 'cus_demo')
+    assert len(requirements) == 1
+    requirement = requirements[0]
+    evidence_id = requirement.evidence_id
+    source_message_id = requirement.provenance['reported_in_message_id']
+
     requested = client.post(
         f'/api/v1/claims/{claim_id}/evidence/uploads',
         headers={
             **auth_headers,
             'Idempotency-Key': 'old-material-upload',
-            'If-Match': '1',
+            'If-Match': str(turn.json()['claim_revision']),
         },
         json={
-            'kind': 'repair_quote',
+            'evidence_id': evidence_id,
+            'kind': requirement.kind,
             'original_filename': 'old-quote.pdf',
             'media_type': 'application/pdf',
             'size_bytes': 8,
         },
     )
     assert requested.status_code == 201
-    evidence_id = str(requested.json()['evidence_id'])
+    assert requested.json()['evidence_id'] == evidence_id
     storage = cast(MockEvidenceStorage, cast(FastAPI, client.app).state.evidence_storage)
     old_content = b'old-data'
     storage.put_upload(claim_id=claim_id, evidence_id=evidence_id, content=old_content)
@@ -279,7 +310,7 @@ def test_replacement_archives_old_material_and_allows_corrected_fact(
         headers={
             **auth_headers,
             'Idempotency-Key': 'old-material-complete',
-            'If-Match': '2',
+            'If-Match': str(requested.json()['revision']),
         },
         json={'upload_checksum': f'sha256:{sha256(old_content).hexdigest()}'},
     )
@@ -289,7 +320,7 @@ def test_replacement_archives_old_material_and_allows_corrected_fact(
         headers={
             'Authorization': 'Bearer synthetic-integration',
             'Idempotency-Key': 'old-material-processing',
-            'If-Match': '3',
+            'If-Match': str(completed.json()['revision']),
         },
         json={
             'facts': [
@@ -302,6 +333,7 @@ def test_replacement_archives_old_material_and_allows_corrected_fact(
         },
     )
     assert processed.status_code == 200
+    processed_revision = int(processed.json()['revision'])
 
     claim_with_proposals = repository.get_claim(claim_id, 'cus_demo')
     assert claim_with_proposals is not None
@@ -309,7 +341,7 @@ def test_replacement_archives_old_material_and_allows_corrected_fact(
     repository.save_claim(
         claim_with_proposals.model_copy(
             update={
-                'revision': 5,
+                'revision': processed_revision + 1,
                 'form': {
                     **claim_with_proposals.form,
                     'incident.location': extracted.model_copy(
@@ -328,7 +360,7 @@ def test_replacement_archives_old_material_and_allows_corrected_fact(
                 },
             }
         ),
-        expected_revision=4,
+        expected_revision=processed_revision,
     )
 
     timestamp = datetime.now(UTC)
@@ -361,9 +393,9 @@ def test_replacement_archives_old_material_and_allows_corrected_fact(
         headers={
             **auth_headers,
             'Idempotency-Key': 'corrected-material-upload',
-            'If-Match': '5',
+            'If-Match': str(processed_revision + 1),
         },
-        json=_upload_payload(evidence_id),
+        json=_upload_payload(evidence_id, kind=requirement.kind),
     )
     assert replacement.status_code == 201
     archived = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
@@ -381,6 +413,8 @@ def test_replacement_archives_old_material_and_allows_corrected_fact(
     assert prior.provenance['processing_state'] == 'completed'
     assert prior.provenance['extraction_state'] == 'proposed'
     assert prior.provenance['fact_decisions'] == {'incident.description': 'proposed'}
+    assert prior.provenance['validation_state'] == 'invalid'
+    assert prior.provenance['reported_in_message_id'] == source_message_id
     assert prior.proposed_fields['incident.description'].value == (
         'Incorrect extracted description.'
     )
@@ -391,6 +425,11 @@ def test_replacement_archives_old_material_and_allows_corrected_fact(
     assert 'processing_state' not in archived.provenance
     assert 'extraction_state' not in archived.provenance
     assert 'fact_decisions' not in archived.provenance
+    assert 'validation_state' not in archived.provenance
+    assert archived.provenance['reported_in_message_id'] == source_message_id
+    assert len(archived.provenance['transition_history']) == 1
+    assert archived.provenance['transition_history'][0]['from'] == 'ready'
+    assert archived.provenance['transition_history'][0]['to'] == 'awaiting_upload'
     assert 'incident.description' not in claim_after_replacement.form
     assert claim_after_replacement.form['incident.location'].status is FormStatus.CONFIRMED
     assert claim_after_replacement.form['incident.cause'].source_refs[-1] == (
@@ -404,7 +443,7 @@ def test_replacement_archives_old_material_and_allows_corrected_fact(
         headers={
             **auth_headers,
             'Idempotency-Key': 'corrected-material-complete',
-            'If-Match': '6',
+            'If-Match': str(replacement.json()['revision']),
         },
         json={'upload_checksum': f'sha256:{sha256(corrected_content).hexdigest()}'},
     )
@@ -414,7 +453,7 @@ def test_replacement_archives_old_material_and_allows_corrected_fact(
         headers={
             'Authorization': 'Bearer synthetic-integration',
             'Idempotency-Key': 'corrected-material-processing',
-            'If-Match': '7',
+            'If-Match': str(corrected_complete.json()['revision']),
         },
         json={
             'facts': [
@@ -436,6 +475,7 @@ def test_replacement_archives_old_material_and_allows_corrected_fact(
         f'evidence:{evidence_id}:material:2',
     ]
     assert corrected.provenance['upload_checksum'] != old_checksum
+    assert corrected.provenance['reported_in_message_id'] == source_message_id
     assert corrected.material_history == archived.material_history
 
 
