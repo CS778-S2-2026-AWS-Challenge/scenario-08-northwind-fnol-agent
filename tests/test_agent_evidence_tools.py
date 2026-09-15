@@ -218,7 +218,10 @@ def test_history_tool_is_bounded_to_authenticated_claimant_records() -> None:
     }
     assert set(source_refs) == {'evd_ready', 'evd_processing'}
     assert all('storage_key' not in item for item in items)
-    assert all(item['can_remove'] is False for item in items)
+    assert {item['evidence_id']: item['can_remove'] for item in items} == {
+        'evd_ready': True,
+        'evd_processing': False,
+    }
     assert result['page'] == {'next_cursor': None}
 
 
@@ -317,7 +320,7 @@ def test_reuse_proposal_requires_owned_ready_evidence_and_requests_confirmation(
     assert proposed['source_claim_id'] == source.claim_id
 
 
-def test_reuse_and_remove_fail_closed_for_ineligible_or_unavailable_paths() -> None:
+def test_reuse_and_remove_fail_closed_for_ineligible_paths() -> None:
     repository = FixtureRepository()
     target = _claim()
     repository._claims[target.claim_id] = target
@@ -342,9 +345,22 @@ def test_reuse_and_remove_fail_closed_for_ineligible_or_unavailable_paths() -> N
         evidence_id='evd_processing',
         removal_scope='persisted',
     )
-    assert unavailable['status'] == 'unavailable'
-    assert unavailable['reason'] == 'PERSISTED_REMOVE_HANDLER_UNAVAILABLE'
-    assert unavailable['can_remove'] is False
+    assert unavailable == {'status': 'rejected', 'reason': 'EVIDENCE_NOT_REMOVABLE'}
+
+    repository.save_evidence(
+        _evidence('evd_ready_remove', target.claim_id),
+        target.customer_id,
+    )
+    proposed = validate_evidence_proposal(
+        repository,
+        target,
+        action_code='claim.propose_evidence_remove',
+        evidence_id='evd_ready_remove',
+        removal_scope='persisted',
+    )
+    assert proposed['status'] == 'proposed'
+    assert proposed['reason'] == 'CLAIMANT_CONFIRMATION_REQUIRED_BEFORE_EVIDENCE_API_REMOVE'
+    assert proposed['can_remove'] is True
 
 
 def test_evidence_proposals_reject_invalid_identity_source_and_scope() -> None:
@@ -480,7 +496,7 @@ def test_runtime_requires_successful_history_before_accepting_evidence_proposal(
         ),
     )
     assert checked.action_code == 'claim.propose_evidence_reuse'
-    assert checked.customer_reason == 'The selected Evidence is eligible for a reuse proposal only.'
+    assert checked.customer_reason == 'The selected Evidence is eligible for a reuse proposal.'
     assert 'has not been attached or copied' in checked.customer_response
     assert 'Please confirm whether you want Northwind to reuse' in checked.customer_response
     assert checked.customer_next_step.status == 'confirm_evidence_reuse'
@@ -562,10 +578,10 @@ def test_runtime_marks_truncated_history_as_non_exhaustive() -> None:
     ('scope', 'expected_response'),
     [
         ('draft', 'Select the draft file in the upload composer'),
-        ('persisted', 'cannot remove the persisted record'),
+        ('persisted', 'Please confirm whether you want Northwind to remove'),
     ],
 )
-def test_runtime_reports_unavailable_removal_without_claiming_success(
+def test_runtime_reports_removal_proposal_without_claiming_success(
     scope: str,
     expected_response: str,
 ) -> None:

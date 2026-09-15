@@ -201,6 +201,8 @@
 .evidence-history-details div { min-width: 0; }
 .evidence-history-details dt { color: var(--color-text-muted); font-size: var(--font-size-caption); }
 .evidence-history-details dd { margin: var(--space-1) 0 0; overflow-wrap: anywhere; color: var(--color-text-secondary); font-size: var(--font-size-body); }
+.evidence-history-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.evidence-history-action-message { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-caption); line-height: var(--line-height-body); }
 .evidence-history-state, .evidence-history-stale { margin-top: var(--space-6); padding: var(--space-4); border: var(--border-component); border-radius: var(--radius-xl); background: var(--color-surface); }
 .evidence-history-state.is-error { border-color: var(--color-danger); background: var(--color-danger-soft); }
 .evidence-history-state p, .evidence-history-stale p { margin-bottom: var(--space-4); }

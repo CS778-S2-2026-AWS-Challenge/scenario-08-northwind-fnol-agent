@@ -100,10 +100,12 @@ from backend.services.agent import (
     InvariantGuardedAgent,
     UnavailableAgent,
 )
+from backend.services.agent_action_execution import ClaimantRuntimeActionDispatcher
 from backend.services.external_service_entry import (
     assert_adapter_matches_entry,
     resolve_external_service_entry,
 )
+from backend.services.initial_runtime_release import install_initial_runtime_release
 from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.model_profiles import model_configuration
@@ -159,6 +161,16 @@ def create_app(
         if resolved_settings.developer_mode
         else SQLiteKnowledgeAdminRepository(resolved_settings.control_plane_db_path)
     )
+    if (
+        resolved_settings.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY
+        and resolved_settings.model_runtime_bindings
+    ):
+        install_initial_runtime_release(
+            resolved_settings,
+            resolved_configuration_repository,
+            resolved_release_set_repository,
+            resolved_knowledge_admin_repository,
+        )
     runtime_configuration_resolver = RuntimeConfigurationResolver(
         resolved_configuration_repository,
         resolved_release_set_repository,
@@ -288,6 +300,7 @@ def create_app(
     # than by individual routers.  No router, service, seed path, or adapter
     # can reach an unguarded handoff write.
     app.state.claim_repository = guarded_handoff_repository(bundle.repository)
+    app.state.claimant_runtime_action_dispatcher = ClaimantRuntimeActionDispatcher()
     if resolved_settings.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
         if agent_turn_provider is not None:
             raise ValueError(

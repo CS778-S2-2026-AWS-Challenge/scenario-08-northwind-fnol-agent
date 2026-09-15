@@ -46,6 +46,7 @@ function SummaryState({ message, error = false }) {
 
 export default function ExternalServiceRecords({
   records,
+  capabilities = [],
   allowedActions = [],
   claimRevision,
   onAction,
@@ -57,6 +58,7 @@ export default function ExternalServiceRecords({
         <span>{records.length} requests</span>
       </header>
       <p className="section-intro">Each request keeps its purpose, disclosure scope, authority, delivery state, and recovery path together.</p>
+      {capabilities.length > 0 && <div className="record-list capability-list">{capabilities.map((capability) => <CapabilityRecord capability={capability} key={capability.service_identity} />)}</div>}
       {records.length ? (
         <div className="record-list">
           {records.map((record) => (
@@ -71,6 +73,13 @@ export default function ExternalServiceRecords({
       ) : <p className="empty-note">No external-service request is recorded for this Claim.</p>}
     </section>
   )
+}
+
+function CapabilityRecord({ capability }) {
+  return <details className="record-row external-record capability-record">
+    <summary><span><strong>{words(capability.service_name)}</strong><small>{words(capability.access_form)} · {words(capability.provider_name)}</small></span><span className="record-status">Available</span></summary>
+    <div className="record-body"><div className="external-overview"><OverviewItem label="Purpose" value={capability.purpose} /><OverviewItem label="Required fields" value={capability.required_fields.join(', ') || 'None registered'} /><OverviewItem label="Disclosure" value={capability.disclosure_fields.join(', ') || 'No disclosure required'} /><OverviewItem label="Result" value={capability.result_semantics} /></div>{capability.official_url && <p><a href={capability.official_url} target="_blank" rel="noreferrer">Official information</a>{capability.official_phone ? ` · ${capability.official_phone}` : ''}</p>}<p className="record-note">{capability.limitation}</p></div>
+  </details>
 }
 
 function ExternalServiceRecord({ record, actions, onAction }) {

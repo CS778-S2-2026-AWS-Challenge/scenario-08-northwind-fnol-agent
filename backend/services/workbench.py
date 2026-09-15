@@ -13,6 +13,7 @@ from backend.domain.external_service_registry import (
     InvalidExternalLifecycleTransition,
     assert_projection_provenance,
     build_lifecycle_projection,
+    capability_catalogue,
     projection_metadata,
 )
 from backend.domain.external_services import (
@@ -1912,6 +1913,7 @@ def _build_projection(
             ),
         ),
         customer_next_step=claim.customer_next_step,
+        external_capabilities=list(capability_catalogue(claim.incident_type)),
     )
 
 
