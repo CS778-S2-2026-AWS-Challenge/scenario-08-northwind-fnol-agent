@@ -1262,12 +1262,12 @@ Response `200`:
 ```
 
 `resolved_support_handoff` is present only on Claim detail, and is otherwise `null`. It is
-claimant-safe completion evidence with `status: "resolved"`, `completed_at`, and the
-resolution `customer_update`; the event id and handoff timestamp remain available for
-durable provenance. It is
-derived from the latest claimant-created `human_support` or `urgent_support` HandoffRecord only
-when that record is resolved and has a matching completed `handoff_support` resolution event.
-The projection contains the handoff id, support type, resolution event id, and resolution time.
+claimant-safe completion evidence containing exactly `handoff_id`, `type`, `status`,
+`completed_at`, and `customer_update`. The `customer_update` is the claimant-safe update written
+when the handoff is resolved; staff result summaries and internal action identifiers are never
+projected. The object is derived from the latest claimant-created `human_support` or
+`urgent_support` HandoffRecord only when that record is resolved and has a matching completed
+`handoff_support` resolution event.
 Professional review, staff-created or cancelled/rejected work, ordinary staff updates, and
 terminal Claims never produce this field. A newer claimant support request clears the previous
 projection until the newer request is eligible and resolved. This field reports staff assistance
