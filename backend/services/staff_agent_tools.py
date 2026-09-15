@@ -306,44 +306,15 @@ class StaffToolDispatcher:
         filters = payload.model_dump(mode='json', exclude_none=True, exclude={'limit'})
         candidates = self._repository.search_claims_internal(filters, payload.limit)
         matches: list[dict[str, Any]] = []
-        for claim in candidates:
-            projection = self._claim(claim.claim_id)
+        for candidate in candidates:
+            claim = candidate.claim
             external_reference = (
                 claim.external_claim.claim_number if claim.external_claim is not None else None
             )
-            reference_values = {claim.claim_id, projection.display_reference}
-            if payload.claim_reference and payload.claim_reference not in reference_values:
-                continue
-            if payload.customer_reference and payload.customer_reference != claim.customer_id:
-                continue
-            if payload.external_reference and payload.external_reference != external_reference:
-                continue
-            if not _date_matches(_field_text(claim, 'incident.occurred_at'), payload.incident_date):
-                continue
-            if payload.created_date and claim.created_at.date() != payload.created_date:
-                continue
-            if (
-                payload.product_family
-                and (_field_text(claim, 'claim.product_family') or claim.incident_type)
-                != payload.product_family
-            ):
-                continue
-            if (
-                payload.lifecycle_state
-                and projection.lifecycle_state.value != payload.lifecycle_state
-            ):
-                continue
-            assignee = projection.ownership.primary_assignee
-            if payload.assignee_id and (
-                assignee is None or assignee.staff_id != payload.assignee_id
-            ):
-                continue
-            if payload.queue and projection.work_summary.queue_key != payload.queue:
-                continue
             matches.append(
                 {
                     'claim_id': claim.claim_id,
-                    'display_reference': projection.display_reference,
+                    'display_reference': external_reference or claim.claim_id,
                     'matched_fields': [
                         key
                         for key, value in payload.model_dump(exclude_none=True).items()
@@ -351,7 +322,7 @@ class StaffToolDispatcher:
                     ],
                     'incident_date': _field_text(claim, 'incident.occurred_at'),
                     'product_family': _field_text(claim, 'claim.product_family'),
-                    'lifecycle_state': projection.lifecycle_state.value,
+                    'lifecycle_state': candidate.lifecycle_state.value,
                     'revision': claim.revision,
                     'created_at': claim.created_at.isoformat(),
                     'updated_at': claim.updated_at.isoformat(),

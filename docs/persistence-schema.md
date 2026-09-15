@@ -368,6 +368,12 @@ the append-only audit collection through a bounded, filterable projection.
   message, a cross-session reference, or a changed draft contract rejects the complete mutation.
 - A successful execution response is built from repository readback of the persisted execution
   record. Claimant routes never expose Staff Agent execution evidence or its internal source links.
+- The Staff Claim search boundary derives lifecycle, active queue, and effective assignee from the
+  Working Claim plus its current Evidence and handoff records. Fixture and MongoDB repositories
+  apply those derived filters together with the registered identity, date, family, and external
+  reference filters before the caller's result limit. The boundary returns a lightweight search
+  candidate only; it does not enumerate or construct full Workbench Claim projections in the
+  dispatcher.
 
 ## Claim Lifecycle, Follow-up, and Retention Invariants
 

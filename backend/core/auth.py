@@ -47,7 +47,6 @@ def _synthetic_profiles(settings: Settings) -> tuple[_SyntheticProfile, ...]:
                 scopes=CLAIMANT_SCOPES,
                 auth_source='developer:synthetic_claimant',
                 synthetic=True,
-                roles=frozenset({'claims_professional'}),
             ),
         ),
         _SyntheticProfile(
@@ -58,6 +57,7 @@ def _synthetic_profiles(settings: Settings) -> tuple[_SyntheticProfile, ...]:
                 scopes=STAFF_SCOPES,
                 auth_source='developer:synthetic_staff',
                 synthetic=True,
+                roles=frozenset({'claims_professional'}),
             ),
         ),
         _SyntheticProfile(

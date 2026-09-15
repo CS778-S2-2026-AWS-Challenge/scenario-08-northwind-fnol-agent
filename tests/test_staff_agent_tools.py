@@ -1,6 +1,15 @@
-from datetime import UTC, datetime
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from typing import Annotated, Any
 
-from backend.core.auth import Principal
+import mongomock
+import pytest
+from fastapi import Depends
+from fastapi.testclient import TestClient
+
+from backend.app import create_app
+from backend.core.auth import Principal, require_staff
+from backend.core.config import IdentityMode, Settings
 from backend.domain.agent_tool_registry import STAFF_TOOL_REGISTRY
 from backend.domain.knowledge import KnowledgeChunk, KnowledgeSearch
 from backend.domain.models import (
@@ -14,10 +23,14 @@ from backend.domain.models import (
     MessageVisibility,
     ResponsibleParty,
     SessionRecord,
+    WorkflowState,
     WorkingClaim,
 )
 from backend.domain.staff_agent_tools import StaffToolResult
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.mongodb import MongoDBRepository
+from backend.repositories.protocols import PersistenceRepository
+from backend.services.agent import ControlledAgent
 from backend.services.staff_agent_tools import StaffToolDispatcher
 
 
@@ -123,6 +136,59 @@ def _dispatcher() -> StaffToolDispatcher:
             roles=frozenset({'claims_professional'}),
         ),
     )
+
+
+def _staff_principal() -> Principal:
+    return Principal(
+        subject='stf_tool_reader',
+        actor_type='staff',
+        scopes=frozenset({'workbench:read'}),
+        auth_source='test:verified',
+        synthetic=True,
+        roles=frozenset({'claims_professional'}),
+    )
+
+
+def _seed_bounded_search(repository: PersistenceRepository) -> None:
+    base = datetime(2026, 9, 14, 2, 30, tzinfo=UTC)
+    cases = (
+        ('clm_older_match', 'cus_older_match', base, WorkflowState.AWAITING_EVIDENCE, 'stf_match'),
+        (
+            'clm_newer_non_match',
+            'cus_newer_non_match',
+            base + timedelta(hours=1),
+            WorkflowState.COLLECTING,
+            'stf_other',
+        ),
+    )
+    for claim_id, customer_id, timestamp, workflow_state, assignee_id in cases:
+        session_id = f'ses_{claim_id}'
+        claim = WorkingClaim(
+            claim_id=claim_id,
+            customer_id=customer_id,
+            channel=Channel.WEB_AGENT,
+            locale='en-NZ',
+            claim_state={'workflow_state': workflow_state},
+            assignee_id=assignee_id,
+            active_session_id=session_id,
+            customer_next_step=CustomerNextStep(
+                status='continue_claim',
+                summary='Continue the claim.',
+                responsible_party=ResponsibleParty.CLAIMANT,
+            ),
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+        repository.create_claim(
+            claim,
+            SessionRecord(
+                session_id=session_id,
+                claim_id=claim_id,
+                customer_id=customer_id,
+                started_at=timestamp,
+                last_active_at=timestamp,
+            ),
+        )
 
 
 def _execute(
@@ -391,3 +457,101 @@ def test_knowledge_tool_preserves_governed_citation_identity() -> None:
     assert result.record_ids == ['chunk_collision']
     assert result.source_refs == ['knowledge:doc_motor_wording:chunk_collision:1.0']
     assert result.output['items'][0]['checksum'] == 'sha256:synthetic'
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'mongodb'])
+@pytest.mark.parametrize(
+    ('filters', 'matched_field'),
+    [
+        ({'queue': 'waiting_user', 'limit': 1}, 'queue'),
+        ({'assignee_id': 'stf_match', 'limit': 1}, 'assignee_id'),
+        ({'lifecycle_state': 'waiting_customer', 'limit': 1}, 'lifecycle_state'),
+    ],
+)
+def test_claim_search_applies_derived_filters_before_limit(
+    repository_kind: str,
+    filters: dict[str, object],
+    matched_field: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository: PersistenceRepository
+    if repository_kind == 'fixture':
+        repository = FixtureRepository()
+    else:
+        mongo_repository = MongoDBRepository(
+            mongomock.MongoClient(), f'staff_search_{matched_field}'
+        )
+
+        def without_transaction(operation: Callable[[Any], Any]) -> Any:
+            return operation(None)
+
+        monkeypatch.setattr(mongo_repository, '_atomic', without_transaction)
+        repository = mongo_repository
+    _seed_bounded_search(repository)
+    dispatcher = StaffToolDispatcher(repository, _staff_principal())
+
+    result = _execute(dispatcher, 'staff.claim.search', filters, 1)
+
+    assert result.status == 'succeeded'
+    assert result.record_ids == ['clm_older_match']
+    assert result.output['items'][0]['matched_fields'] == [matched_field]
+
+
+def test_claim_search_does_not_build_workbench_projections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = FixtureRepository()
+    _seed_bounded_search(repository)
+
+    def reject_full_projection(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError('Claim search must not build a full Workbench projection.')
+
+    monkeypatch.setattr(
+        'backend.services.staff_agent_tools.get_workbench_claim_detail',
+        reject_full_projection,
+    )
+    result = _execute(
+        StaffToolDispatcher(repository, _staff_principal()),
+        'staff.claim.search',
+        {'queue': 'waiting_user', 'limit': 1},
+        1,
+    )
+
+    assert result.status == 'succeeded'
+    assert result.record_ids == ['clm_older_match']
+
+
+def test_synthetic_credentials_enforce_staff_tool_role_boundary() -> None:
+    repository = _repository()
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        repository,
+        ControlledAgent(),
+    )
+
+    @app.get('/__staff_tool_auth_test')
+    def execute_claim_search(
+        principal: Annotated[Principal, Depends(require_staff)],
+    ) -> StaffToolResult:
+        return _execute(
+            StaffToolDispatcher(repository, principal),
+            'staff.claim.search',
+            {'created_date': '2026-09-14'},
+            1,
+        )
+
+    with TestClient(app) as client:
+        staff_response = client.get(
+            '/__staff_tool_auth_test',
+            headers={'Authorization': 'Bearer synthetic-staff'},
+        )
+        claimant_response = client.get(
+            '/__staff_tool_auth_test',
+            headers={'Authorization': 'Bearer synthetic-claimant'},
+        )
+
+    assert staff_response.status_code == 200
+    assert staff_response.json()['status'] == 'succeeded'
+    assert staff_response.json()['record_ids'] == ['clm_staff_tool']
+    assert claimant_response.status_code == 403
+    assert claimant_response.json()['error']['code'] == 'ACCESS_DENIED'

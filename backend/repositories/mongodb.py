@@ -77,6 +77,11 @@ from backend.domain.staff_agent import (
     StaffAgentMessage,
     StaffAgentSession,
 )
+from backend.domain.staff_agent_tools import (
+    StaffClaimSearchCandidate,
+    build_staff_claim_search_candidate,
+    staff_claim_search_matches,
+)
 from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.protocols import (
     DemoSeedConflict,
@@ -740,7 +745,9 @@ class MongoDBRepository:
     def list_claims_internal(self) -> list[WorkingClaim]:
         return self._list('claim', WorkingClaim, {}, '-updated_at')
 
-    def search_claims_internal(self, filters: dict[str, object], limit: int) -> list[WorkingClaim]:
+    def search_claims_internal(
+        self, filters: dict[str, object], limit: int
+    ) -> list[StaffClaimSearchCandidate]:
         """Query registered Claim keys at MongoDB and return only bounded candidates."""
         query: dict[str, Any] = {'record_type': 'claim'}
         claim_reference = filters.get('claim_reference')
@@ -759,12 +766,22 @@ class MongoDBRepository:
                 '$gte': f'{created}T00:00:00',
                 '$lt': f'{created}T23:59:59.999999',
             }
-        cursor = self._collection.find(query).sort([('updated_at', -1), ('_id', -1)]).limit(limit)
-        records: list[WorkingClaim] = []
+        cursor = self._collection.find(query).sort([('updated_at', -1), ('_id', -1)])
+        records: list[StaffClaimSearchCandidate] = []
         for document in cursor:
-            record = self._model_from_document(document, WorkingClaim)
-            if record is not None:
-                records.append(record)
+            claim = self._model_from_document(document, WorkingClaim)
+            if claim is None:
+                continue
+            candidate = build_staff_claim_search_candidate(
+                claim,
+                self.list_evidence(claim.claim_id, claim.customer_id),
+                self.list_handoffs(claim.claim_id, claim.customer_id),
+            )
+            if not staff_claim_search_matches(candidate, filters):
+                continue
+            records.append(candidate)
+            if len(records) >= limit:
+                break
         return records
 
     def promote_claim_owner(

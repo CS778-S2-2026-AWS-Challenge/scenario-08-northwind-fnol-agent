@@ -53,6 +53,11 @@ from backend.domain.staff_agent import (
     StaffAgentMessage,
     StaffAgentSession,
 )
+from backend.domain.staff_agent_tools import (
+    StaffClaimSearchCandidate,
+    build_staff_claim_search_candidate,
+    staff_claim_search_matches,
+)
 from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.protocols import (
     DemoSeedConflict,
@@ -851,45 +856,20 @@ class FixtureRepository(PersistenceRepository):
             reverse=True,
         )
 
-    def search_claims_internal(self, filters: dict[str, object], limit: int) -> list[WorkingClaim]:
+    def search_claims_internal(
+        self, filters: dict[str, object], limit: int
+    ) -> list[StaffClaimSearchCandidate]:
         """Apply registered Claim filters before returning a bounded candidate set."""
-        matches: list[WorkingClaim] = []
+        matches: list[StaffClaimSearchCandidate] = []
         for claim in sorted(self._claims.values(), key=lambda item: item.updated_at, reverse=True):
-            if filters.get('claim_reference') and filters['claim_reference'] not in {
-                claim.claim_id,
-                claim.external_claim.claim_number if claim.external_claim else None,
-            }:
+            candidate = build_staff_claim_search_candidate(
+                claim,
+                [item for item in self._evidence.values() if item.claim_id == claim.claim_id],
+                [item for item in self._handoffs.values() if item.claim_id == claim.claim_id],
+            )
+            if not staff_claim_search_matches(candidate, filters):
                 continue
-            if filters.get('customer_reference') and (
-                filters['customer_reference'] != claim.customer_id
-            ):
-                continue
-            if filters.get('external_reference') and (
-                claim.external_claim is None
-                or filters['external_reference'] != claim.external_claim.claim_number
-            ):
-                continue
-            if filters.get('created_date') and (
-                claim.created_at.date().isoformat() != filters['created_date']
-            ):
-                continue
-            if filters.get('incident_date'):
-                incident = claim.form.get('incident.occurred_at')
-                if incident is None or str(incident.value)[:10] != filters['incident_date']:
-                    continue
-            if (
-                filters.get('product_family')
-                and (
-                    (
-                        claim.form.get('claim.product_family')
-                        and claim.form['claim.product_family'].value
-                    )
-                    or claim.incident_type
-                )
-                != filters['product_family']
-            ):
-                continue
-            matches.append(deepcopy(claim))
+            matches.append(candidate.model_copy(deep=True))
             if len(matches) >= limit:
                 break
         return matches

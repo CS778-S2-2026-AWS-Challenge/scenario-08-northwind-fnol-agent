@@ -1,12 +1,167 @@
 """Typed, provider-neutral contracts for bounded Staff Agent read tools."""
 
+from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from backend.domain.models import ContractModel
+from backend.domain.models import (
+    ContractModel,
+    EvidenceFileStatus,
+    EvidenceRecord,
+    EvidenceStatus,
+    HandoffRecord,
+    HandoffStatus,
+    HandoffType,
+    NeededFor,
+    ResponsibleParty,
+    WorkflowState,
+    WorkingClaim,
+)
+from backend.domain.workbench import ClaimLifecycleState, WorkbenchQueueKey
+
+
+class StaffClaimSearchCandidate(ContractModel):
+    """Minimal authoritative projection returned by the Claim search boundary."""
+
+    claim: WorkingClaim
+    lifecycle_state: ClaimLifecycleState
+    assignee_id: str | None = None
+    queue: WorkbenchQueueKey
+
+
+def _pending_evidence(records: Sequence[EvidenceRecord]) -> list[EvidenceRecord]:
+    pending_file_states = {
+        EvidenceFileStatus.AWAITING_UPLOAD,
+        EvidenceFileStatus.UPLOADING,
+        EvidenceFileStatus.UPLOADED,
+        EvidenceFileStatus.PROCESSING,
+        EvidenceFileStatus.FAILED,
+    }
+    return [
+        record
+        for record in records
+        if record.status
+        in {
+            EvidenceStatus.PENDING,
+            EvidenceStatus.MISSING,
+            EvidenceStatus.INVALID,
+            EvidenceStatus.UNOFFICIAL,
+        }
+        or record.file_status in pending_file_states
+    ]
+
+
+def build_staff_claim_search_candidate(
+    claim: WorkingClaim,
+    evidence: Sequence[EvidenceRecord],
+    handoffs: Sequence[HandoffRecord],
+) -> StaffClaimSearchCandidate:
+    """Build the registered search fields without constructing a full Workbench Claim."""
+
+    active_handoffs = sorted(
+        (
+            item
+            for item in handoffs
+            if item.status not in {HandoffStatus.RESOLVED, HandoffStatus.CANCELLED}
+        ),
+        key=lambda item: item.created_at,
+    )
+    pending_evidence = _pending_evidence(evidence)
+    if (
+        claim.claim_state.workflow_state is WorkflowState.CREATED
+        or claim.external_claim is not None
+    ):
+        lifecycle = ClaimLifecycleState.CREATED
+    elif (
+        any(item.type is HandoffType.PROFESSIONAL_REVIEW for item in active_handoffs)
+        or claim.claim_state.workflow_state is WorkflowState.PROFESSIONAL_REVIEW
+    ):
+        lifecycle = ClaimLifecycleState.PROFESSIONAL_REVIEW
+    elif active_handoffs:
+        lifecycle = ClaimLifecycleState.STAFF_SUPPORT
+    elif claim.claim_state.workflow_state is WorkflowState.READY_FOR_NEXT:
+        lifecycle = ClaimLifecycleState.READY_TO_CREATE
+    elif claim.claim_state.workflow_state is WorkflowState.AWAITING_EVIDENCE:
+        lifecycle = (
+            ClaimLifecycleState.WAITING_EXTERNAL
+            if any(
+                item.responsible_party is ResponsibleParty.EXTERNAL_PARTY
+                for item in pending_evidence
+            )
+            else ClaimLifecycleState.WAITING_CUSTOMER
+        )
+    else:
+        lifecycle = ClaimLifecycleState.DRAFT_ACTIVE
+
+    assigned_handoff = next(
+        (item for item in reversed(active_handoffs) if item.assigned_to is not None),
+        None,
+    )
+    assignee_id = assigned_handoff.assigned_to if assigned_handoff else claim.assignee_id
+    if active_handoffs:
+        queue = WorkbenchQueueKey.PROCESSING
+    elif claim.terminal_disposition is not None:
+        queue = WorkbenchQueueKey(claim.terminal_disposition.value.value)
+    elif lifecycle is ClaimLifecycleState.WAITING_EXTERNAL:
+        queue = WorkbenchQueueKey.WAITING_THIRD_PARTY
+    elif lifecycle is ClaimLifecycleState.WAITING_CUSTOMER:
+        claimant_material_required = any(
+            NeededFor.CURRENT_ACTION in item.needed_for
+            and item.responsible_party is ResponsibleParty.CLAIMANT
+            for item in pending_evidence
+        )
+        queue = (
+            WorkbenchQueueKey.WAITING_MATERIAL
+            if claimant_material_required
+            else WorkbenchQueueKey.WAITING_USER
+        )
+    else:
+        queue = WorkbenchQueueKey.PROCESSING
+    return StaffClaimSearchCandidate(
+        claim=claim,
+        lifecycle_state=lifecycle,
+        assignee_id=assignee_id,
+        queue=queue,
+    )
+
+
+def staff_claim_search_matches(
+    candidate: StaffClaimSearchCandidate,
+    filters: Mapping[str, object],
+) -> bool:
+    """Apply every registered Claim filter to one authoritative search projection."""
+
+    claim = candidate.claim
+    external_reference = claim.external_claim.claim_number if claim.external_claim else None
+    claim_references = {claim.claim_id, external_reference}
+    incident = claim.form.get('incident.occurred_at')
+    incident_date = str(incident.value)[:10] if incident and incident.value is not None else None
+    family_field = claim.form.get('claim.product_family')
+    product_family = (
+        str(family_field.value)
+        if family_field and family_field.value is not None
+        else claim.incident_type
+    )
+    return all(
+        (
+            not filters.get('claim_reference') or filters['claim_reference'] in claim_references,
+            not filters.get('customer_reference')
+            or filters['customer_reference'] == claim.customer_id,
+            not filters.get('external_reference')
+            or filters['external_reference'] == external_reference,
+            not filters.get('created_date')
+            or str(filters['created_date']) == claim.created_at.date().isoformat(),
+            not filters.get('incident_date') or str(filters['incident_date']) == incident_date,
+            not filters.get('product_family') or filters['product_family'] == product_family,
+            not filters.get('lifecycle_state')
+            or filters['lifecycle_state'] == candidate.lifecycle_state.value,
+            not filters.get('assignee_id') or filters['assignee_id'] == candidate.assignee_id,
+            not filters.get('queue') or filters['queue'] == candidate.queue.value,
+        )
+    )
 
 
 class StaffToolResultStatus(StrEnum):

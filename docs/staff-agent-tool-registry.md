@@ -30,7 +30,7 @@ The active registry is version `v1.0`. The following table describes its handler
 
 | Tool | Bounded input | Result projection | Release state |
 | --- | --- | --- | --- |
-| `staff.claim.search` | One or more registered Claim, customer, date, family, lifecycle, queue, assignee, or external-reference filters; maximum 25. | Candidate identity, matching fields, effective time, lifecycle, and revision. | Read-only Runtime executable; repository applies the bounded candidate query before projection. |
+| `staff.claim.search` | One or more registered Claim, customer, date, family, lifecycle, queue, assignee, or external-reference filters; maximum 25. | Candidate identity, matching fields, effective time, lifecycle, and revision. | Read-only Runtime executable; the repository applies every registered filter before the result limit and returns only the bounded search projection. |
 | `staff.claim.read` | One `claim_id`. | Current staff-safe Claim summary, ownership, work, integration, next step, and revision. | Read-only Runtime executable. |
 | `staff.session.search` | One `claim_id` plus optional session, date, status, actor, or bounded message-text filter; maximum 25. | Claim-linked session identities and metadata. | Read-only Runtime executable. |
 | `staff.session.read` | One `claim_id` and `session_id`; maximum 50 messages. | Session metadata and bounded Claim conversation messages. | Read-only Runtime executable. |

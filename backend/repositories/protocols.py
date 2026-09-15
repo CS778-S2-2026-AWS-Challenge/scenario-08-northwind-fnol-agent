@@ -35,6 +35,7 @@ from backend.domain.staff_agent import (
     StaffAgentMessageRole,
     StaffAgentSession,
 )
+from backend.domain.staff_agent_tools import StaffClaimSearchCandidate
 from backend.domain.staff_identity import StaffPresenceRecord
 
 
@@ -273,7 +274,9 @@ class ClaimRepository(Protocol):
         """Return claims for an authorised staff projection."""
         raise NotImplementedError
 
-    def search_claims_internal(self, filters: dict[str, object], limit: int) -> list[WorkingClaim]:
+    def search_claims_internal(
+        self, filters: dict[str, object], limit: int
+    ) -> list[StaffClaimSearchCandidate]:
         """Return only bounded Claim candidates matching registered staff filters."""
         raise NotImplementedError
 
