@@ -1704,6 +1704,9 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
         item for item in queue_response.json()['items'] if item['claim_id'] == claim_id
     )
     assert queue_item['work_summary']['queue_key'] == 'completed'
+    assert queue_item['integration_summary']['claim_creation_status'] == 'created'
+    assert 'claim_number' not in queue_item['integration_summary']
+    assert 'expected_by' not in queue_item['integration_summary']
     assert queue_item['ownership']['state'] == 'unassigned'
     assert queue_item['ownership']['primary_assignee'] is None
 

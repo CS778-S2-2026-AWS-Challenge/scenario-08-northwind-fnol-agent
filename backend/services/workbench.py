@@ -78,6 +78,7 @@ from backend.domain.workbench import (
     WorkbenchAllowedAction,
     WorkbenchClaimantSummary,
     WorkbenchClaimDetail,
+    WorkbenchClaimDetailIntegrationSummary,
     WorkbenchClaimFilterMetadata,
     WorkbenchClaimListItem,
     WorkbenchClaimListResponse,
@@ -958,8 +959,6 @@ def _integration_summary(
         claim_creation_status=(
             claim.external_claim.creation_status.value if claim.external_claim else None
         ),
-        claim_number=(claim.external_claim.claim_number if claim.external_claim else None),
-        expected_by=(claim.external_claim.expected_by if claim.external_claim else None),
         assessor_routing_status=(
             claim.assessor_routing.routing_status.value if claim.assessor_routing else None
         ),
@@ -1730,6 +1729,13 @@ def _build_projection(
     )
     if not include_detail:
         return WorkbenchClaimListItem(**base)
+    base['integration_summary'] = WorkbenchClaimDetailIntegrationSummary(
+        claim_creation_status=integration_summary.claim_creation_status,
+        claim_number=(claim.external_claim.claim_number if claim.external_claim else None),
+        expected_by=(claim.external_claim.expected_by if claim.external_claim else None),
+        assessor_routing_status=integration_summary.assessor_routing_status,
+        waiting_external_services=integration_summary.waiting_external_services,
+    )
     unavailable_external = external_limitation is not None
     return WorkbenchClaimDetail(
         **base,

@@ -11668,7 +11668,7 @@
             "$ref": "#/components/schemas/WorkbenchIncidentSummary"
           },
           "integration_summary": {
-            "$ref": "#/components/schemas/WorkbenchIntegrationSummary"
+            "$ref": "#/components/schemas/WorkbenchClaimDetailIntegrationSummary"
           },
           "lifecycle_state": {
             "$ref": "#/components/schemas/ClaimLifecycleState"
@@ -11739,6 +11739,65 @@
           "customer_next_step"
         ],
         "title": "WorkbenchClaimDetail",
+        "type": "object"
+      },
+      "WorkbenchClaimDetailIntegrationSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "assessor_routing_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assessor Routing Status"
+          },
+          "claim_creation_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Creation Status"
+          },
+          "claim_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Number"
+          },
+          "expected_by": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected By"
+          },
+          "waiting_external_services": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchWaitingExternalService"
+            },
+            "title": "Waiting External Services",
+            "type": "array"
+          }
+        },
+        "title": "WorkbenchClaimDetailIntegrationSummary",
         "type": "object"
       },
       "WorkbenchClaimFilterMetadata": {
@@ -12676,29 +12735,6 @@
               }
             ],
             "title": "Claim Creation Status"
-          },
-          "claim_number": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Claim Number"
-          },
-          "expected_by": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expected By"
           },
           "waiting_external_services": {
             "items": {

@@ -355,10 +355,13 @@ class WorkbenchWaitingExternalService(ContractModel):
 
 class WorkbenchIntegrationSummary(ContractModel):
     claim_creation_status: str | None = None
-    claim_number: str | None = None
-    expected_by: datetime | None = None
     assessor_routing_status: str | None = None
     waiting_external_services: list[WorkbenchWaitingExternalService] = Field(default_factory=list)
+
+
+class WorkbenchClaimDetailIntegrationSummary(WorkbenchIntegrationSummary):
+    claim_number: str | None = None
+    expected_by: datetime | None = None
 
 
 class WorkbenchActionConfirmation(ContractModel):
@@ -491,6 +494,7 @@ class WorkbenchClaimFilterMetadata(ContractModel):
 
 
 class WorkbenchClaimDetail(WorkbenchClaimListItem):
+    integration_summary: WorkbenchClaimDetailIntegrationSummary
     active_session_id: str | None = None
     claim_state: ClaimState
     contents_items: list[ContentsItem] = Field(default_factory=list)
