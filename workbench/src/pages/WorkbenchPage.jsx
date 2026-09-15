@@ -51,6 +51,7 @@ export default function WorkbenchPage() {
   const detailRequestId = useRef(0)
   const backgroundRefreshId = useRef(0)
   const resourceRequestIds = useRef({})
+  const conversationRequestId = useRef(0)
   const selectedConversationSessionIdRef = useRef(null)
   const [resources, setResources] = useState({})
   const [detailLoading, setDetailLoading] = useState(false)
@@ -277,20 +278,29 @@ export default function WorkbenchPage() {
     }
   }, [applyDetailProjection, token])
 
-  const loadResource = useCallback(async (name, ownerId, loader) => {
+  const loadResource = useCallback(async (name, ownerId, loader, { isCurrent } = {}) => {
     const requestId = (resourceRequestIds.current[name] || 0) + 1
     resourceRequestIds.current[name] = requestId
+    const requestIsCurrent = () => (
+      currentClaimIdRef.current === ownerId
+      && resourceRequestIds.current[name] === requestId
+      && (!isCurrent || isCurrent())
+    )
     setResources((current) => ({
       ...current,
       [name]: { ...(current[name] || {}), loading: true, error: null },
     }))
     try {
       const response = await loader()
-      if (currentClaimIdRef.current !== ownerId || resourceRequestIds.current[name] !== requestId) return null
+      if (!requestIsCurrent()) {
+        return { status: 'superseded', ownerId, resourceName: name }
+      }
       setResources((current) => ({ ...current, [name]: resourceState(response) }))
-      return response
+      return { status: 'applied', ownerId, resourceName: name, response }
     } catch (error) {
-      if (currentClaimIdRef.current !== ownerId || resourceRequestIds.current[name] !== requestId) return null
+      if (!requestIsCurrent()) {
+        return { status: 'superseded', ownerId, resourceName: name }
+      }
       setResources((current) => ({
         ...current,
         [name]: {
@@ -303,12 +313,50 @@ export default function WorkbenchPage() {
           error,
         },
       }))
-      return null
+      return { status: 'failed', ownerId, resourceName: name, error }
     }
   }, [])
 
   const loadConversationResources = useCallback(async (id, requestedSessionId) => {
-    const sessions = await loadResource(
+    const requestId = ++conversationRequestId.current
+    const isCurrent = () => (
+      conversationRequestId.current === requestId
+      && currentClaimIdRef.current === id
+      && (
+        !requestedSessionId
+        || (selectedConversationSessionIdRef.current
+          || detailRef.current?.active_session_id
+          || null) === requestedSessionId
+      )
+    )
+
+    setResources((current) => {
+      const previous = current.messages || {}
+      const sameResolvedSession = Boolean(
+        requestedSessionId
+        && previous.resolved_session_id === requestedSessionId,
+      )
+
+      return {
+        ...current,
+        messages: {
+          ...(sameResolvedSession ? previous : {}),
+          items: sameResolvedSession ? previous.items || [] : [],
+          page: sameResolvedSession
+            ? previous.page || { next_cursor: null }
+            : { next_cursor: null },
+          status: sameResolvedSession ? previous.status || 'available' : 'available',
+          limitation: sameResolvedSession ? previous.limitation || null : null,
+          loading: true,
+          stale: false,
+          error: null,
+          requested_session_id: requestedSessionId || null,
+          resolved_session_id: sameResolvedSession ? requestedSessionId : null,
+        },
+      }
+    })
+
+    const sessionsResult = await loadResource(
       'sessions',
       id,
       () => workbenchApi.sessionsForTarget(
@@ -316,10 +364,11 @@ export default function WorkbenchPage() {
         id,
         requestedSessionId,
       ),
+      { isCurrent },
     )
 
-    if (!sessions) {
-      if (currentClaimIdRef.current === id) {
+    if (sessionsResult.status !== 'applied') {
+      if (sessionsResult.status === 'failed' && isCurrent()) {
         setResources((current) => {
           const previous = current.messages || {}
 
@@ -332,23 +381,31 @@ export default function WorkbenchPage() {
               limitation: 'Conversation messages cannot be loaded until the session list is available.',
               loading: false,
               stale: Boolean(previous.items?.length),
-              error: current.sessions?.error || null,
-              resolved_session_id:
-                previous.resolved_session_id || null,
+              error: sessionsResult.error,
+              requested_session_id: requestedSessionId || null,
+              resolved_session_id: previous.resolved_session_id || null,
             },
           }
         })
       }
-      return
+      return {
+        status: sessionsResult.status,
+        ownerId: id,
+        resourceName: 'messages',
+        sessionId: requestedSessionId || null,
+        error: sessionsResult.error,
+      }
     }
 
+    const sessions = sessionsResult.response
     const session = sessions.resolved_session || null
 
     if (!session) {
-      if (currentClaimIdRef.current === id) {
+      if (isCurrent()) {
         const message = requestedSessionId
           ? 'The requested claimant session is not available. Return to the Claim and open an available conversation.'
           : 'No claimant session is available for this Claim.'
+        const error = new Error(message)
 
         setResources((current) => ({
           ...current,
@@ -359,15 +416,31 @@ export default function WorkbenchPage() {
             limitation: null,
             loading: false,
             stale: false,
-            error: new Error(message),
+            error,
+            requested_session_id: requestedSessionId || null,
             resolved_session_id: null,
           },
         }))
+
+        return {
+          status: 'failed',
+          ownerId: id,
+          resourceName: 'messages',
+          sessionId: requestedSessionId || null,
+          error,
+        }
       }
-      return
+
+      return {
+        status: 'superseded',
+        ownerId: id,
+        resourceName: 'messages',
+        sessionId: requestedSessionId || null,
+      }
     }
 
-    await loadResource(
+    const targetSessionId = requestedSessionId || session.session_id
+    const messagesResult = await loadResource(
       'messages',
       id,
       async () => ({
@@ -376,9 +449,16 @@ export default function WorkbenchPage() {
           id,
           session.session_id,
         )),
+        requested_session_id: targetSessionId,
         resolved_session_id: session.session_id,
       }),
+      { isCurrent },
     )
+
+    return {
+      ...messagesResult,
+      sessionId: targetSessionId,
+    }
   }, [loadResource, token])
 
   const loadSectionResources = useCallback(async (id, section) => {
@@ -848,11 +928,17 @@ export default function WorkbenchPage() {
       && currentClaimIdRef.current === sendingClaimId
       && currentSessionId === operation.sessionId
     ) {
-      await loadConversationResources(
+      const readback = await loadConversationResources(
         current.claim_id,
         operation.sessionId,
       )
+      if (readback.status === 'applied' && readback.sessionId === operation.sessionId) {
+        return readback
+      }
+      throw messageReadbackError(readback)
     }
+
+    throw messageReadbackError({ status: 'superseded' })
   }
 
   async function performOwnershipAction(action, payload) {
@@ -1122,8 +1208,21 @@ function resourceState(response = {}) {
     loading: false,
     stale: false,
     error: null,
+    requested_session_id: response.requested_session_id || null,
     resolved_session_id: response.resolved_session_id || null,
   }
+}
+
+function messageReadbackError(result) {
+  const failed = result?.status === 'failed'
+  const error = new Error(failed
+    ? 'Your message was sent, but the Workbench could not confirm it in the conversation because the message refresh failed. Keep this draft and retry the conversation refresh before sending again.'
+    : 'Your message was sent, but another conversation refresh replaced its confirmation. Keep this draft and review the refreshed conversation before sending again.')
+  error.code = 'MESSAGE_READBACK_FAILED'
+  error.retryable = true
+  error.readbackFailure = true
+  error.requestId = result?.error?.requestId || null
+  return error
 }
 
 function enrichConversation(conversation, context) {

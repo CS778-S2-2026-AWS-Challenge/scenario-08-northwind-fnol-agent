@@ -312,6 +312,219 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     expect(state.messageReads).toContain('ses_25')
   })
 
+  it('removes the active-session projection while a historical session is loading', async () => {
+    let finishHistoricalRead
+    const messagesBySession = {
+      ses_25: [{
+        message_id: 'msg_historical_slow',
+        session_id: 'ses_25',
+        actor: 'claimant',
+        visibility: 'shared',
+        content: { type: 'text', text: 'Historical session loaded.' },
+        created_at: '2026-09-09T03:00:00Z',
+      }],
+      ses_26: [{
+        message_id: 'msg_active_before_switch',
+        session_id: 'ses_26',
+        actor: 'claimant',
+        visibility: 'shared',
+        content: { type: 'text', text: 'Active session must disappear.' },
+        created_at: '2026-09-10T03:00:00Z',
+      }],
+    }
+    const { fetchMock, state } = createJourneyService({
+      messagesBySession,
+      onMessageRead(sessionId) {
+        if (sessionId !== 'ses_25') return null
+        return new Promise((resolve) => {
+          finishHistoricalRead = () => resolve(jsonResponse(200, {
+            items: messagesBySession.ses_25.map((message) => ({ ...message })),
+            page: { next_cursor: null },
+          }))
+        })
+      },
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderJourney('ses_26', { withSessionSwitcher: true })
+
+    expect(await screen.findByText('Active session must disappear.')).toBeVisible()
+    await userEvent.setup().click(
+      screen.getByRole('button', { name: 'Open historical test session' }),
+    )
+    await waitFor(() => expect(state.messageReads).toContain('ses_25'))
+
+    expect(screen.queryByText('Active session must disappear.')).not.toBeInTheDocument()
+    expect(screen.queryByText('Historical session loaded.')).not.toBeInTheDocument()
+    expect(screen.getByText('Loading current records...')).toBeVisible()
+
+    finishHistoricalRead()
+    expect(await screen.findByText('Historical session loaded.')).toBeVisible()
+    expect(screen.queryByText('Active session must disappear.')).not.toBeInTheDocument()
+  })
+
+  it('does not restore active-session messages when a historical session load fails', async () => {
+    const messagesBySession = {
+      ses_25: [],
+      ses_26: [{
+        message_id: 'msg_active_before_failure',
+        session_id: 'ses_26',
+        actor: 'claimant',
+        visibility: 'shared',
+        content: { type: 'text', text: 'Active session must stay hidden.' },
+        created_at: '2026-09-10T03:00:00Z',
+      }],
+    }
+    const { fetchMock } = createJourneyService({
+      messagesBySession,
+      onMessageRead(sessionId) {
+        if (sessionId !== 'ses_25') return null
+        return jsonResponse(500, {
+          error: {
+            code: 'INTERNAL_ERROR',
+            message: 'The historical conversation could not be loaded.',
+            details: [],
+            retryable: true,
+          },
+        })
+      },
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderJourney('ses_26', { withSessionSwitcher: true })
+
+    expect(await screen.findByText('Active session must stay hidden.')).toBeVisible()
+    await userEvent.setup().click(
+      screen.getByRole('button', { name: 'Open historical test session' }),
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The historical conversation could not be loaded.',
+    )
+    expect(screen.queryByText('Active session must stay hidden.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('log', { name: 'Claimant conversation messages' })).not.toBeInTheDocument()
+  })
+
+  it('ignores a late active-session response after the historical session is applied', async () => {
+    let finishActiveRead
+    let holdActiveRead = true
+    const messagesBySession = {
+      ses_25: [{
+        message_id: 'msg_historical_winner',
+        session_id: 'ses_25',
+        actor: 'claimant',
+        visibility: 'shared',
+        content: { type: 'text', text: 'Historical response wins.' },
+        created_at: '2026-09-09T03:00:00Z',
+      }],
+      ses_26: [{
+        message_id: 'msg_late_active',
+        session_id: 'ses_26',
+        actor: 'claimant',
+        visibility: 'shared',
+        content: { type: 'text', text: 'Late active response must be ignored.' },
+        created_at: '2026-09-10T03:00:00Z',
+      }],
+    }
+    const { fetchMock, state } = createJourneyService({
+      messagesBySession,
+      onMessageRead(sessionId) {
+        if (sessionId !== 'ses_26' || !holdActiveRead) return null
+        holdActiveRead = false
+        return new Promise((resolve) => {
+          finishActiveRead = () => resolve(jsonResponse(200, {
+            items: messagesBySession.ses_26.map((message) => ({ ...message })),
+            page: { next_cursor: null },
+          }))
+        })
+      },
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderJourney('ses_26', { withSessionSwitcher: true })
+
+    await waitFor(() => expect(state.messageReads).toContain('ses_26'))
+    await userEvent.setup().click(
+      screen.getByRole('button', { name: 'Open historical test session' }),
+    )
+    expect(await screen.findByText('Historical response wins.')).toBeVisible()
+
+    finishActiveRead()
+    await waitFor(() => {
+      expect(screen.getByText('Historical response wins.')).toBeVisible()
+      expect(screen.queryByText('Late active response must be ignored.')).not.toBeInTheDocument()
+    })
+  })
+
+  it('keeps the draft and reports a recoverable readback error after a successful post', async () => {
+    const { fetchMock, state } = createJourneyService({
+      onMessageRead(sessionId, serviceState) {
+        if (sessionId !== 'ses_26' || messageReadCount(serviceState, sessionId) === 1) {
+          return null
+        }
+        return jsonResponse(500, {
+          error: {
+            code: 'INTERNAL_ERROR',
+            message: 'The latest conversation messages could not be read.',
+            details: [],
+            retryable: true,
+          },
+        })
+      },
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderJourney()
+
+    const sendButton = await screen.findByRole('button', { name: 'Send message' })
+    await waitFor(() => expect(sendButton).toBeEnabled())
+    await userEvent.setup().click(sendButton)
+
+    expect(await screen.findByText(/message refresh failed/i)).toBeVisible()
+    expect(screen.getByLabelText('Message to claimant')).toHaveValue('Journey staff reply')
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Retry section' })).toBeEnabled()
+    expect(state.postRequests).toHaveLength(1)
+    expect(state.messagesBySession.ses_26).toHaveLength(1)
+    expect(tabs.update).not.toHaveBeenCalledWith('clm_journey', { draft: '' })
+  })
+
+  it('does not confirm a send when a competing refresh supersedes its readback', async () => {
+    let finishSendReadback
+    const { fetchMock, state } = createJourneyService({
+      onMessageRead(sessionId, serviceState) {
+        if (sessionId !== 'ses_26') return null
+        const readCount = messageReadCount(serviceState, sessionId)
+        if (readCount !== 2) return null
+        return new Promise((resolve) => {
+          finishSendReadback = () => resolve(jsonResponse(200, {
+            items: serviceState.messagesBySession.ses_26.map((message) => ({ ...message })),
+            page: { next_cursor: null },
+          }))
+        })
+      },
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderJourney()
+
+    const sendButton = await screen.findByRole('button', { name: 'Send message' })
+    await waitFor(() => expect(sendButton).toBeEnabled())
+    const ledger = screen.getByRole('log', { name: 'Claimant conversation messages' })
+    Object.defineProperty(ledger, 'scrollHeight', { configurable: true, value: 800 })
+    ledger.scrollTop = 91
+
+    await userEvent.setup().click(sendButton)
+    await waitFor(() => {
+      expect(messageReadCount(state, 'ses_26')).toBeGreaterThanOrEqual(3)
+      expect(ledger).toHaveTextContent('Journey staff reply')
+    })
+
+    finishSendReadback()
+
+    expect(await screen.findByText(/another conversation refresh replaced its confirmation/i)).toBeVisible()
+    expect(screen.getByLabelText('Message to claimant')).toHaveValue('Journey staff reply')
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect(ledger.scrollTop).toBe(91)
+    expect(state.postRequests).toHaveLength(1)
+    expect(tabs.update).not.toHaveBeenCalledWith('clm_journey', { draft: '' })
+  })
+
   it('does not clear or force-scroll a historical session when an active-session send finishes', async () => {
     let finishSend
     let finishHistoricalRead
@@ -364,12 +577,14 @@ describe('WorkbenchPage staff session browser/API journey', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open historical test session' }))
     await waitFor(() => expect(state.messageReads).toContain('ses_25'))
-    expect(screen.getByLabelText('Message to claimant')).toBeDisabled()
-    expect(screen.getByText('Read-only conversation')).toBeVisible()
-    expect(screen.getByText('Refreshing this section')).toBeVisible()
+    expect(screen.getByText('Loading current records...')).toBeVisible()
+    expect(screen.queryByLabelText('Message to claimant')).not.toBeInTheDocument()
+    expect(screen.queryByText('Historical session remains selected')).not.toBeInTheDocument()
 
     finishHistoricalRead()
     expect(await screen.findByText('Historical session remains selected')).toBeVisible()
+    expect(screen.getByLabelText('Message to claimant')).toBeDisabled()
+    expect(screen.getByText('Read-only conversation')).toBeVisible()
     const historicalLedger = screen.getByRole('log', { name: 'Claimant conversation messages' })
     Object.defineProperty(historicalLedger, 'scrollHeight', { configurable: true, value: 900 })
     historicalLedger.scrollTop = 137

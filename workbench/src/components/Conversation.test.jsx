@@ -432,6 +432,8 @@ describe('Conversation', () => {
       handoffs: [handoff],
       profile: { staff_id: 'stf_demo', display_name: 'Demo Staff' },
       resource: {
+        requested_session_id: 'ses_old',
+        resolved_session_id: 'ses_old',
         items: [{
           message_id: 'msg_old',
           session_id: 'ses_old',
@@ -440,6 +442,7 @@ describe('Conversation', () => {
           created_at: '2026-09-08T10:00:00Z',
         }],
       },
+      requestedSessionId: 'ses_old',
       draft: 'A staff reply',
       onDraft: vi.fn(),
       onAccept: vi.fn(),
@@ -523,7 +526,7 @@ describe('Conversation', () => {
     expect(screen.getByLabelText('Message to claimant')).toHaveValue('Retry this safely')
   })
 
-  it('uses the actually loaded session instead of the URL as send authority', () => {
+  it('never renders a resolved session under a different requested session', () => {
     const onSend = vi.fn()
 
     renderConversation({
@@ -538,6 +541,7 @@ describe('Conversation', () => {
         }],
       },
       resource: {
+        requested_session_id: 'ses_active',
         resolved_session_id: 'ses_old',
         items: [{
           message_id: 'msg_old',
@@ -547,13 +551,15 @@ describe('Conversation', () => {
           created_at: '2026-09-10T05:00:00Z',
         }],
       },
+      requestedSessionId: 'ses_active',
       draft: 'Must not send',
       onDraft: vi.fn(),
       onSend,
     }, '/workbench/claims/clm_1/conversation?session=ses_active')
 
-    expect(screen.getByText('Old session message.')).toBeVisible()
-    expect(screen.getByLabelText('Message to claimant')).toBeDisabled()
+    expect(screen.queryByText('Old session message.')).not.toBeInTheDocument()
+    expect(screen.getByText('Loading current records...')).toBeVisible()
+    expect(screen.queryByLabelText('Message to claimant')).not.toBeInTheDocument()
     expect(onSend).not.toHaveBeenCalled()
   })
 
@@ -565,10 +571,12 @@ describe('Conversation', () => {
       },
       resource: {
         items: [],
+        requested_session_id: 'ses_missing',
         resolved_session_id: null,
         status: 'unavailable',
         error: 'The requested claimant session is not available. Return to the Claim and open an available conversation.',
       },
+      requestedSessionId: 'ses_missing',
       draft: '',
       onDraft: vi.fn(),
       onSend: vi.fn(),

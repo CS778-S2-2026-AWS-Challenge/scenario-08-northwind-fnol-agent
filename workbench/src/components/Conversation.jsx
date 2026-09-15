@@ -25,15 +25,20 @@ export default function Conversation({
   const completedSendKeyRef = useRef(null)
   const currentConversationKeyRef = useRef(null)
   const messageListRef = useRef(null)
-  const messageSessionId = resource?.items?.find(
-    (message) => message.session_id,
-  )?.session_id
-  const displayedSessionId = resource?.resolved_session_id || messageSessionId || null
-  const viewSessionId = requestedSessionId || displayedSessionId
+  const resourceRequestedSessionId = resource?.requested_session_id || null
+  const displayedSessionId = resource?.resolved_session_id || null
+  const viewSessionId = requestedSessionId || resourceRequestedSessionId || displayedSessionId
   const conversationKey = conversationIdentity(detail.claim_id, viewSessionId)
+  const resourceTargetsView = Boolean(
+    viewSessionId
+      && (resourceRequestedSessionId
+        ? resourceRequestedSessionId === viewSessionId
+        : !displayedSessionId || displayedSessionId === viewSessionId),
+  )
   const displayedSessionMatchesView = Boolean(
     displayedSessionId
-      && (!requestedSessionId || displayedSessionId === requestedSessionId),
+      && resourceTargetsView
+      && displayedSessionId === viewSessionId,
   )
   const isCurrentSession = Boolean(
     displayedSessionMatchesView
@@ -50,11 +55,42 @@ export default function Conversation({
   const sendAction = currentProjectedAction(detail, 'conversation.send_claimant_message', displayedSessionId)
   const acceptAction = currentProjectedAction(detail, 'human.accept_handoff', handoff?.handoff_id)
   const resolveAction = currentProjectedAction(detail, 'human.resolve_handoff', handoff?.handoff_id)
-  const canSend = isCurrentSession && canSubmitCurrentAction(sendAction, detail.revision)
-  const timeline = conversationTimeline(resource?.items || [], handoff, profile)
+  const canSend = Boolean(
+    isCurrentSession
+      && !resource?.error
+      && resource?.status !== 'unavailable'
+      && canSubmitCurrentAction(sendAction, detail.revision),
+  )
+  const timeline = conversationTimeline(
+    displayedSessionMatchesView ? resource?.items || [] : [],
+    handoff,
+    profile,
+  )
   const waitingForTakeover = assistanceState.key === 'waiting-request'
   const sending = Boolean(conversationKey && pendingSendKey === conversationKey)
   const visibleSendError = sendError?.key === conversationKey ? sendError.message : ''
+  const readbackBlocksResend = Boolean(
+    sendError?.key === conversationKey && sendError.readbackFailure,
+  )
+  const viewResource = displayedSessionMatchesView
+    ? resource
+    : resourceTargetsView && (resource?.error || resource?.status === 'unavailable')
+      ? {
+        ...resource,
+        items: [],
+        resolved_session_id: null,
+      }
+      : {
+        ...resource,
+        items: [],
+        status: 'available',
+        limitation: null,
+        loading: true,
+        stale: false,
+        error: null,
+        requested_session_id: viewSessionId,
+        resolved_session_id: null,
+      }
 
   useLayoutEffect(() => {
     currentConversationKeyRef.current = conversationKey
@@ -84,7 +120,12 @@ export default function Conversation({
       completedSendKeyRef.current = sendKey
       setCompletedSends((current) => current + 1)
     } catch (nextError) {
-      setSendError({ key: sendKey, message: nextError.message })
+      setSendError({
+        key: sendKey,
+        message: nextError.message,
+        readbackFailure: Boolean(nextError.readbackFailure),
+        sentDraft: draft.trim(),
+      })
     } finally {
       setPendingSendKey((current) => current === sendKey ? null : current)
     }
@@ -109,7 +150,7 @@ export default function Conversation({
     : sendAction?.blocked_reason || 'Messaging is not available for this claim yet.'
 
   return (
-    <ResourceBoundary resource={resource} onRetry={onRetry} contentAvailable={Boolean(resource?.resolved_session_id)} quietRefresh={sending}>
+    <ResourceBoundary resource={viewResource} onRetry={onRetry} contentAvailable={displayedSessionMatchesView} quietRefresh={sending}>
       <section className="conversation-view">
         {handoff && !waitingForTakeover && (
           <AssistanceStatus
@@ -167,7 +208,14 @@ export default function Conversation({
               id="staff-reply"
               rows="1"
               value={draft}
-              onChange={(event) => onDraft(event.target.value)}
+              onChange={(event) => {
+                const nextDraft = event.target.value
+                if (
+                  readbackBlocksResend
+                  && nextDraft.trim() !== sendError.sentDraft
+                ) setSendError(null)
+                onDraft(nextDraft)
+              }}
               disabled={!canSend}
               placeholder={placeholder}
               aria-describedby={!canSend ? 'staff-message-status' : undefined}
@@ -175,7 +223,7 @@ export default function Conversation({
             <button
               className="staff-composer__send"
               type="submit"
-              disabled={!canSend || !draft.trim() || sending}
+              disabled={!canSend || !draft.trim() || sending || readbackBlocksResend}
               aria-label="Send message"
               aria-busy={sending}
               title={sending ? 'Sending message' : 'Send message'}
