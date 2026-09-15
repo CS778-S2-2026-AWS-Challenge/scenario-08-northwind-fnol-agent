@@ -38,8 +38,15 @@ import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
 import ClaimDocuments from './components/ClaimDocuments.jsx'
 import { documentAttentionCount } from './claimDocumentProjection.js'
+import {
+  ClaimProgressDisclosure,
+  ConversationActionCard,
+  ConversationEvent,
+  ConversationInfoPanel,
+} from './components/ConversationContext.jsx'
 
 const FIELD_LABELS = {
+  'claim.product_family': 'Claim type',
   'incident.description': 'What happened',
   'incident.injury_or_danger': 'Injury or immediate danger',
   'incident.occurred_at': 'When it happened',
@@ -144,7 +151,7 @@ function assistancePresentation({ handoff, nextStep, requesting, reviewingReply,
   return null
 }
 
-function buildConversationTimeline(messages, handoff, completedAssistance) {
+function buildConversationTimeline(messages, handoff, completedAssistance, resumeContext) {
   const timeline = messages.map((message) => ({
     key: message.message_id,
     kind: 'message',
@@ -158,9 +165,17 @@ function buildConversationTimeline(messages, handoff, completedAssistance) {
   ))
 
   if (handoff) {
-    const events = []
+    const handoffStartedAt = Date.parse(handoff.created_at || '')
     if (!hasRecordedEvent('staff assistance requested')) {
-      events.push({
+      const firstMessageAfterRequest = Number.isFinite(handoffStartedAt)
+        ? timeline.findIndex((item) => (
+            Date.parse(item.message?.created_at || '') >= handoffStartedAt
+          ))
+        : -1
+      const requestInsertAt = firstMessageAfterRequest >= 0
+        ? firstMessageAfterRequest
+        : timeline.length
+      timeline.splice(requestInsertAt, 0, {
         key: `assistance-requested-${handoff.handoff_id}`,
         kind: 'system-event',
         text: 'Staff assistance requested',
@@ -170,20 +185,20 @@ function buildConversationTimeline(messages, handoff, completedAssistance) {
       ['accepted', 'in_progress'].includes(handoff.status)
       && !hasRecordedEvent('joined the conversation')
     ) {
-      events.push({
+      const firstCurrentStaffMessage = timeline.findIndex((item) => (
+        item.message?.actor === 'staff'
+        && (!Number.isFinite(handoffStartedAt)
+          || Date.parse(item.message.created_at || '') >= handoffStartedAt)
+      ))
+      const joinedInsertAt = firstCurrentStaffMessage >= 0
+        ? firstCurrentStaffMessage
+        : timeline.length
+      timeline.splice(joinedInsertAt, 0, {
         key: `assistance-joined-${handoff.handoff_id}`,
         kind: 'system-event',
         text: 'Northwind staff joined the conversation',
       })
     }
-    const handoffStartedAt = Date.parse(handoff.created_at || '')
-    const firstCurrentStaffMessage = timeline.findIndex((item) => (
-      item.message?.actor === 'staff'
-      && (!Number.isFinite(handoffStartedAt)
-        || Date.parse(item.message.created_at || '') >= handoffStartedAt)
-    ))
-    const insertAt = firstCurrentStaffMessage >= 0 ? firstCurrentStaffMessage : timeline.length
-    timeline.splice(insertAt, 0, ...events)
   }
 
   if (
@@ -194,6 +209,30 @@ function buildConversationTimeline(messages, handoff, completedAssistance) {
       key: `assistance-completed-${completedAssistance.handoff_id}`,
       kind: 'system-event',
       text: 'Staff assistance completed',
+    })
+  }
+  if (resumeContext && !hasRecordedEvent('claim resumed')) {
+    const boundaryMessageIndex = resumeContext.resumed_after_message_id
+      ? timeline.findIndex((item) => item.message?.message_id === resumeContext.resumed_after_message_id)
+      : -1
+    const resumedAt = Date.parse(resumeContext.resumed_at || '')
+    const firstMessageAfterResume = boundaryMessageIndex < 0 && Number.isFinite(resumedAt)
+      ? timeline.findIndex((item) => (
+          item.message && Date.parse(item.message.created_at || '') >= resumedAt
+        ))
+      : -1
+    const insertAt = boundaryMessageIndex >= 0
+      ? boundaryMessageIndex + 1
+      : firstMessageAfterResume >= 0
+        ? firstMessageAfterResume
+        : resumeContext.has_resume_boundary
+          ? 0
+          : timeline.length
+    timeline.splice(insertAt, 0, {
+      key: `claim-resumed-${resumeContext.resumed_at || 'current'}`,
+      kind: 'conversation-event',
+      title: 'Claim resumed',
+      detail: 'Continuing from your previous conversation',
     })
   }
   return timeline
@@ -251,11 +290,36 @@ function claimProgress(nextStep, dynamicForm) {
   const requirements = dynamicForm?.requirements
   const total = requirements?.current_action_total || 0
   const current = requirements?.current_action_satisfied || 0
+  const items = requirements
+    ? [
+        ...(requirements.satisfied || []).map((fieldCode) => ({
+          fieldCode,
+          label: fieldLabel(fieldCode),
+          state: 'complete',
+        })),
+        ...(requirements.missing_required_now || []).map((fieldCode) => ({
+          fieldCode,
+          label: fieldLabel(fieldCode),
+          state: 'required',
+        })),
+        ...(requirements.pending_later || []).map((fieldCode) => ({
+          fieldCode,
+          label: fieldLabel(fieldCode),
+          state: 'later',
+        })),
+      ]
+    : []
   return {
     current,
     total,
-    label: requirements?.ready ? 'Ready to create' : nextStep?.summary || 'Describe the incident',
+    label: requirements?.ready
+      ? 'Ready to create'
+      : ['human_support_queued', 'human_support_in_progress', 'urgent_support_queued']
+          .includes(nextStep?.status)
+        ? ''
+        : nextStep?.summary || '',
     available: Boolean(requirements),
+    items,
   }
 }
 
@@ -301,6 +365,7 @@ function App() {
   const [detailsTab, setDetailsTab] = useState('summary')
   const [mobileView, setMobileView] = useState('chat')
   const [workspaceView, setWorkspaceView] = useState('chat')
+  const [workspaceActive, setWorkspaceActive] = useState(false)
   const [runtimeCapabilities, setRuntimeCapabilities] = useState({
     claim_types: ['motor', 'home', 'contents'],
     models: [],
@@ -313,6 +378,7 @@ function App() {
   const [evidenceSyncNotice, setEvidenceSyncNotice] = useState('')
   const [evidencePollingKey, setEvidencePollingKey] = useState(0)
   const [resumeContext, setResumeContext] = useState(null)
+  const [expandedConversationPanels, setExpandedConversationPanels] = useState({})
   const [externalServiceInteraction, setExternalServiceInteraction] = useState({
     claimId: null,
     consentChecked: false,
@@ -335,11 +401,22 @@ function App() {
   const dismissedComposerEvidenceIds = useRef(new Set())
   const detailsTabRefs = useRef({})
   const conversationPanelRef = useRef(null)
+  const messageListRef = useRef(null)
+  const followLatestMessages = useRef(true)
+  const forceLatestMessages = useRef(false)
   const confirmedClaimProjections = useRef(new Map())
   const hasStarted = claim !== null
+  const isWorkspaceActive = hasStarted && workspaceActive
   const savedReports = claimHistory === null
     ? null
     : claimHistory.filter((item) => item.can_resume)
+  const conversationReports = claim
+    ? claimHistory?.some((item) => item.claim_id === claim.claim_id)
+      ? claimHistory
+          .map((item) => item.claim_id === claim.claim_id ? claim : item)
+          .filter((item) => item.claim_id === claim.claim_id || item.can_resume)
+      : [claim, ...(savedReports || [])]
+    : []
   const selectedHistoryClaim = claimHistory?.find((item) => item.claim_id === selectedHistoryClaimId)
     || (claim?.claim_id === selectedHistoryClaimId ? claim : null)
   const documentOutstandingCount = evidenceLoadStatus === 'ready'
@@ -398,7 +475,7 @@ function App() {
     if (nextPage === 'claim-evidence' && selectedHistoryClaimId) return `/account/claims/${encodeURIComponent(selectedHistoryClaimId)}/evidence`
     if (nextPage === 'files') return '/files'
     if (nextPage === 'how-it-works') return '/how-it-works'
-    if (claim?.claim_id) return `/claims/${claim.claim_id}`
+    if (isWorkspaceActive && claim?.claim_id) return `/claims/${claim.claim_id}`
     return '/'
   }
 
@@ -418,7 +495,7 @@ function App() {
     if (/^\/account\/claims\/[^/]+\/evidence$/.test(pathname)) return account ? 'claim-evidence' : 'login'
     if (/^\/account\/claims\/[^/]+$/.test(pathname)) return account ? 'claim-features' : 'login'
     if (pathname === '/files') return account ? 'files' : 'login'
-    if (pathname === '/how-it-works') return hasStarted ? 'home' : 'how-it-works'
+    if (pathname === '/how-it-works') return 'how-it-works'
     if (pathname.startsWith('/claims/')) return claim?.claim_id ? 'home' : 'home'
     return 'home'
   }
@@ -427,12 +504,13 @@ function App() {
     const onPopState = () => {
       const path = globalThis.location?.pathname || '/'
       const nextPage = pageForPath(path)
+      setWorkspaceActive(path.startsWith('/claims/') && Boolean(claim))
       const historyClaimMatch = path.match(/^\/account\/claims\/([^/]+)/)
       setSelectedHistoryClaimId(historyClaimMatch ? decodeURIComponent(historyClaimMatch[1]) : null)
       setPageState(nextPage)
       const canonicalPath = ['claim-history', 'claim-features', 'claim-evidence'].includes(nextPage)
         ? path
-        : nextPage === 'home' && claim?.claim_id
+        : nextPage === 'home' && path.startsWith('/claims/') && claim?.claim_id
           ? `/claims/${claim.claim_id}`
           : routeForPage(nextPage)
       if (path !== canonicalPath) {
@@ -462,11 +540,11 @@ function App() {
                   ? '/files'
                   : page === 'how-it-works'
                     ? '/how-it-works'
-                    : claim?.claim_id ? `/claims/${claim.claim_id}` : '/'
+                    : isWorkspaceActive && claim?.claim_id ? `/claims/${claim.claim_id}` : '/'
     if (globalThis.location?.pathname !== expectedPath) {
       globalThis.history?.replaceState({ northwindRoute: page }, '', expectedPath)
     }
-  }, [page, claim?.claim_id, selectedHistoryClaimId])
+  }, [isWorkspaceActive, page, claim?.claim_id, selectedHistoryClaimId])
 
   const isBusy = [
     'starting',
@@ -488,12 +566,8 @@ function App() {
     () => contentsItems.filter((item) => item.status === 'proposed'),
     [contentsItems],
   )
-  const confirmedFields = useMemo(
-    () => Object.entries(form).filter(([, field]) => field.status === 'confirmed'),
-    [form],
-  )
   const inputLabel = INPUT_LABELS[nextStep?.status] || 'Add more information'
-  const progress = useMemo(() => claimProgress(nextStep, dynamicForm), [nextStep, dynamicForm])
+  const progress = useMemo(() => claimProgress(nextStep, dynamicForm), [dynamicForm, nextStep])
   const serviceConsentChecked = externalServiceInteraction.claimId === claim?.claim_id
     && externalServiceInteraction.consentChecked
   const serviceError = externalServiceInteraction.claimId === claim?.claim_id
@@ -523,9 +597,48 @@ function App() {
     status,
   ])
   const conversationTimeline = useMemo(
-    () => buildConversationTimeline(messages, handoff, completedAssistance),
-    [completedAssistance, handoff, messages],
+    () => buildConversationTimeline(messages, handoff, completedAssistance, resumeContext),
+    [completedAssistance, handoff, messages, resumeContext],
   )
+  const lastAgentMessageId = useMemo(() => (
+    [...conversationTimeline]
+      .reverse()
+      .find((item) => item.kind === 'message' && item.message.actor === 'agent')
+      ?.message.message_id || null
+  ), [conversationTimeline])
+  const reviewItemCount = proposedFields.length + proposedContentsItems.length
+  const conversationActionKind = claim?.external_service_action
+    ? 'external-service'
+    : reviewItemCount > 0
+      ? 'review-details'
+      : nextStep?.status === 'ready_to_create' && !claim?.external_claim
+        ? 'create-claim'
+        : null
+
+  useEffect(() => {
+    followLatestMessages.current = true
+    forceLatestMessages.current = true
+  }, [claim?.claim_id])
+
+  useEffect(() => {
+    const messageList = messageListRef.current
+    if (!messageList || !isWorkspaceActive || workspaceView !== 'chat') return
+    if (!followLatestMessages.current && !forceLatestMessages.current) return
+    messageList.scrollTop = messageList.scrollHeight
+    followLatestMessages.current = true
+    forceLatestMessages.current = false
+  }, [
+    assistanceState,
+    claim?.external_claim,
+    conversationActionKind,
+    conversationTimeline,
+    evidenceSyncNotice,
+    failedMessage,
+    isWorkspaceActive,
+    pendingMessage,
+    status,
+    workspaceView,
+  ])
 
   useEffect(() => {
     setAssistanceReplyReview((current) => {
@@ -850,7 +963,7 @@ function App() {
         : item)
       : [...current, { id: localId, name: file.name, status: 'uploading', statusLabel: 'Uploading…' }])
     try {
-      let activeClaim = claim
+      let activeClaim = isWorkspaceActive ? claim : null
       if (!activeClaim) {
         const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType, modelProfileId: selectedModel })
         activeClaim = created.claim
@@ -862,6 +975,14 @@ function App() {
         setContentsItems(activeClaim.contents_items || [])
         setDynamicForm(activeClaim.dynamic_form || null)
         setNextStep(activeClaim.customer_next_step)
+        setMessages([])
+        setHandoff(null)
+        setEvidenceItems([])
+        setResumeContext(null)
+        setExpandedConversationPanels({})
+        setWorkspaceView('chat')
+        setMobileView('chat')
+        setWorkspaceActive(true)
       }
       if (existingAttempt) {
         const authoritative = await getClaimEvidence(activeClaim.claim_id)
@@ -994,6 +1115,7 @@ function App() {
     if (!text || isBusy) return
     const isAssistanceReply = assistanceState?.key === 'response_needed'
 
+    forceLatestMessages.current = true
     setError('')
     setFailedMessage(null)
     if (isAssistanceReply) {
@@ -1003,8 +1125,8 @@ function App() {
         messageId: null,
       })
     }
-    setStatus(hasStarted ? 'sending' : 'starting')
-    let messageWasSubmitted = Boolean(claim)
+    setStatus(isWorkspaceActive ? 'sending' : 'starting')
+    let messageWasSubmitted = isWorkspaceActive
     try {
       if (pendingSubmission.current?.text !== text) {
         pendingSubmission.current = {
@@ -1016,8 +1138,8 @@ function App() {
       }
       const operation = pendingSubmission.current
       setPendingMessage({ text })
-      let activeClaim = claim
-      let activeSessionId = sessionId
+      let activeClaim = isWorkspaceActive ? claim : null
+      let activeSessionId = isWorkspaceActive ? sessionId : null
       if (!activeClaim) {
         const created = await createClaim({
           idempotencyKey: operation.claimKey,
@@ -1034,6 +1156,14 @@ function App() {
         setContentsItems(created.claim.contents_items || [])
         setDynamicForm(created.claim.dynamic_form || null)
         setNextStep(created.claim.customer_next_step)
+        setMessages([])
+        setHandoff(null)
+        setEvidenceItems([])
+        setResumeContext(null)
+        setExpandedConversationPanels({})
+        setWorkspaceView('chat')
+        setMobileView('chat')
+        setWorkspaceActive(true)
         messageWasSubmitted = true
       }
 
@@ -1106,6 +1236,7 @@ function App() {
       setDraft('')
       setError('')
       setFailedMessage(null)
+      setResumeContext(null)
       setWorkspaceView('chat')
       setMobileView('chat')
       return
@@ -1128,8 +1259,10 @@ function App() {
       setNextStep(created.claim.customer_next_step)
       setHandoff(null)
       setEvidenceItems([])
+      setResumeContext(null)
       setWorkspaceView('chat')
       setMobileView('chat')
+      setWorkspaceActive(true)
       setDraft('')
       setStatus('idle')
     } catch (requestError) {
@@ -1390,7 +1523,14 @@ function App() {
       setDynamicForm(current.dynamic_form || null)
       setNextStep(current.customer_next_step)
       setHandoff(current.handoff || null)
-      setResumeContext(session.resume)
+      setResumeContext({
+        ...session.resume,
+        resumed_at: session.started_at,
+        resumed_after_message_id: conversation.items.at(-1)?.message_id || null,
+        has_resume_boundary: true,
+      })
+      setWorkspaceActive(true)
+      setPageState('home')
       setStatus('idle')
     } catch (requestError) {
       showError(requestError)
@@ -1431,6 +1571,7 @@ function App() {
         setDynamicForm(created.claim.dynamic_form || null)
         setNextStep(created.claim.customer_next_step)
       }
+      setWorkspaceActive(true)
       setWorkspaceView('chat'); setPage('home'); setAuthStatus('idle')
     } catch (requestError) {
       setClaimantAccessToken(null)
@@ -1480,6 +1621,7 @@ function App() {
         setDynamicForm(created.claim.dynamic_form || null)
         setNextStep(created.claim.customer_next_step)
       }
+      setWorkspaceActive(true)
       setWorkspaceView('chat'); setPage('home'); setAuthStatus('idle')
     } catch (requestError) {
       setClaimantAccessToken(null)
@@ -1507,8 +1649,10 @@ function App() {
     clearComposerAttachments()
     setEvidenceItems([])
     setResumeContext(null)
+    setExpandedConversationPanels({})
     setWorkspaceView('chat')
     setMobileView('chat')
+    setWorkspaceActive(false)
     setPage('home', { replace: true })
     setAuthStatus('idle')
   }
@@ -1590,6 +1734,23 @@ function App() {
     setPage('home')
   }
 
+  function returnToLanding() {
+    clearComposerAttachments()
+    pendingSubmission.current = null
+    setDraft('')
+    setClaimType('')
+    setError('')
+    setFailedMessage(null)
+    setPendingMessage(null)
+    setWorkspaceView('chat')
+    setMobileView('chat')
+    setWorkspaceActive(false)
+    setPageState('home')
+    if (globalThis.location?.pathname !== '/') {
+      globalThis.history?.pushState({ northwindRoute: 'home' }, '', '/')
+    }
+  }
+
   async function saveProfile(event) {
     event.preventDefault()
     const formData = new FormData(event.currentTarget)
@@ -1614,21 +1775,102 @@ function App() {
     finally { setAuthStatus('idle') }
   }
 
+  function conversationPanelExpanded(panel) {
+    if (!claim?.claim_id) return false
+    return Boolean(expandedConversationPanels[`${claim.claim_id}:${panel}`])
+  }
+
+  function handleMessageListScroll(event) {
+    const messageList = event.currentTarget
+    followLatestMessages.current = (
+      messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight <= 1
+    )
+  }
+
+  function toggleConversationPanel(panel) {
+    if (!claim?.claim_id) return
+    const panelKey = `${claim.claim_id}:${panel}`
+    setExpandedConversationPanels((current) => ({
+      ...current,
+      [panelKey]: !current[panelKey],
+    }))
+  }
+
+  function openClaimDetailsFromConversation() {
+    setDetailsOpen(true)
+    setMobileView('details')
+  }
+
+  function renderConversationAction() {
+    if (conversationActionKind === 'external-service') {
+      return (
+        <ExternalServiceAction
+          action={claim.external_service_action}
+          consentChecked={serviceConsentChecked}
+          setConsentChecked={setServiceConsentChecked}
+          onRequest={requestVehicleAssessment}
+          status={status}
+          error={serviceError}
+          expanded={conversationPanelExpanded('external-service')}
+          onToggle={() => toggleConversationPanel('external-service')}
+        />
+      )
+    }
+    if (conversationActionKind === 'review-details') {
+      return (
+        <ConversationActionCard
+          icon="≡"
+          title="Review claim details"
+          description={`${reviewItemCount} ${reviewItemCount === 1 ? 'detail needs' : 'details need'} your confirmation before we continue.`}
+          status={`${reviewItemCount} to review`}
+          onClick={openClaimDetailsFromConversation}
+        />
+      )
+    }
+    if (conversationActionKind === 'create-claim') {
+      return (
+        <ConversationActionCard
+          icon="✓"
+          title="Create your claim"
+          description="Your required details are complete and ready to send to Northwind."
+          status={status === 'creating-claim' ? 'Creating…' : 'Ready'}
+          onClick={createConfirmedClaim}
+          disabled={isBusy}
+        />
+      )
+    }
+    return null
+  }
+
   const isUrgentSupport = handoff?.support_need === 'urgent'
 
   return (
-    <div className={`customer-app ${!hasStarted && page === 'home' ? 'entry-shell' : ''}`}>
-      <header className={`product-header ${hasStarted && !['login', 'register'].includes(page) ? 'is-intake-header' : ''}`}>
-        <a className="brand" href="/" onClick={(event) => { event.preventDefault(); setPage('home') }} aria-label="Northwind home">
-          <span className="brand-mark">N</span>
-          <span>Northwind Insurance</span>
-        </a>
-        {!hasStarted && page !== 'home' && page !== 'how-it-works' && (
+    <div className={`customer-app ${!isWorkspaceActive && page === 'home' ? 'entry-shell' : ''}`}>
+      <header className={`product-header ${isWorkspaceActive && !['login', 'register'].includes(page) ? 'is-intake-header' : ''}`}>
+        <div className="header-leading">
+          <a className="brand" href="/" onClick={(event) => { event.preventDefault(); setPage('home') }} aria-label="Northwind home">
+            <span className="brand-mark">N</span>
+            <span>Northwind Insurance</span>
+          </a>
+          {isWorkspaceActive && !['login', 'register'].includes(page) && (
+            <button
+              className="header-back-to-start"
+              type="button"
+              aria-label="Back to start"
+              onClick={returnToLanding}
+              disabled={isBusy}
+            >
+              <span aria-hidden="true">←</span>
+              <span>Back</span>
+            </button>
+          )}
+        </div>
+        {!isWorkspaceActive && page !== 'home' && page !== 'how-it-works' && (
           <button className="login-button" type="button" onClick={() => setPage(account ? 'account' : 'login')}>
             {account ? 'My account' : 'Log in'}
           </button>
         )}
-        {hasStarted && !['login', 'register'].includes(page) && (
+        {isWorkspaceActive && !['login', 'register'].includes(page) && (
           <div className="header-actions">
             <button className="aux-link" type="button" onClick={() => setPage('home')}>Use the traditional web form</button>
             {status === 'requesting-support' || handoff ? (
@@ -1645,7 +1887,7 @@ function App() {
         )}
       </header>
 
-      {!hasStarted && page === 'how-it-works' ? (
+      {!isWorkspaceActive && page === 'how-it-works' ? (
         <main className="how-it-works-page">
           <section className="how-it-works-card" aria-labelledby="how-it-works-title">
             <button className="back-link" type="button" onClick={() => setPage('home')}>← Back</button>
@@ -1655,7 +1897,7 @@ function App() {
             <p>Our claims assistant keeps track of the details, asks only for what is still needed, and explains the next step clearly. You can start without an account and log in later if you want to save your progress.</p>
           </section>
         </main>
-      ) : !hasStarted && ['claim-history', 'claim-features', 'claim-evidence'].includes(page) ? (
+      ) : !isWorkspaceActive && ['claim-history', 'claim-features', 'claim-evidence'].includes(page) ? (
         <main className="evidence-history-page">
           {account ? (
             <section className="evidence-history-page-content" aria-labelledby="account-claim-view-title">
@@ -1727,7 +1969,7 @@ function App() {
             <p className="claim-history-state" role="status">Checking your account…</p>
           )}
         </main>
-      ) : !hasStarted && page === 'files' ? (
+      ) : !isWorkspaceActive && page === 'files' ? (
         <main className="evidence-history-page">
           {account ? (
             <section className="evidence-history-page-content" aria-labelledby="account-evidence-history-title">
@@ -1744,7 +1986,7 @@ function App() {
             <p className="evidence-history-state" role="status">Checking your account…</p>
           )}
         </main>
-      ) : !hasStarted && page === 'account' && account ? (
+      ) : !isWorkspaceActive && page === 'account' && account ? (
         <main className="auth-page auth-page-account">
           <section className="login-card account-card" aria-labelledby="account-title">
             <button className="back-link" type="button" onClick={() => setPage('home')}>← Back to claims</button>
@@ -1822,7 +2064,7 @@ function App() {
             </div>
           </section>
         </main>
-      ) : !hasStarted ? (
+      ) : !isWorkspaceActive ? (
         <main className="entry-page">
           <section className="entry-hero" aria-labelledby="entry-title">
             <div className="entry-content">
@@ -1847,7 +2089,7 @@ function App() {
                   models={runtimeCapabilities.models}
                   selectedModel={selectedModel}
                   setSelectedModel={setSelectedModel}
-                  claimTypeLocked={Boolean(sessionId)}
+                  claimTypeLocked={isWorkspaceActive && Boolean(sessionId)}
                   attachments={attachments}
                   onFileSelected={handleFileSelected}
                   onRemoveAttachment={removeComposerAttachment}
@@ -1935,24 +2177,28 @@ function App() {
             </div>
             <div className="intake-history-label">Conversation history</div>
             <div className="intake-history-list">
-              <button className="intake-history-item is-active" type="button" aria-current="page">
-                <span className="intake-history-title">Current claim</span>
-                <span className="intake-history-meta">{claim.incident_type || 'New report'} · {claim.claim_id}</span>
-              </button>
-              {(savedReports || [])
-                .filter((report) => report.claim_id !== claim.claim_id)
-                .map((report) => (
+              {conversationReports.map((report) => {
+                const isCurrent = report.claim_id === claim.claim_id
+                return (
                   <button
-                    className="intake-history-item"
+                    className={`intake-history-item ${isCurrent ? 'is-active' : ''}`}
                     type="button"
                     key={report.claim_id}
-                    onClick={() => resumeSavedReport(report.claim_id)}
+                    aria-current={isCurrent ? 'page' : undefined}
+                    onClick={isCurrent ? undefined : () => resumeSavedReport(report.claim_id)}
                     disabled={isBusy}
                   >
-                    <span className="intake-history-title">{report.incident_type || 'Incident report'}</span>
-                    <span className="intake-history-meta">{report.customer_next_step.summary}</span>
+                    <span className="intake-history-title">
+                      {isCurrent ? 'Current claim' : report.incident_type || 'Incident report'}
+                    </span>
+                    <span className="intake-history-meta">
+                      {isCurrent
+                        ? `${report.incident_type || 'New report'} · ${report.claim_id}`
+                        : report.customer_next_step.summary}
+                    </span>
                   </button>
-                ))}
+                )
+              })}
             </div>
             <div className="intake-history-bottom">
               <button className="intake-profile" type="button" onClick={() => {
@@ -2086,58 +2332,46 @@ function App() {
               )}
             </div>
             <div className="conversation-heading">
-              <div>
-                <div className="claim-status">{claim.incident_type || 'Claim'} · {handoff ? 'Staff assistance active' : 'In progress'}</div>
-                <h1 id="conversation-title">{claim.claim_id}</h1>
+              <div className="conversation-heading-main">
+                <button
+                  className="conversation-back-button"
+                  type="button"
+                  aria-label="Back to Claim history"
+                  title="Back to Claim history"
+                  onClick={openClaimHistory}
+                >
+                  <span aria-hidden="true">←</span>
+                </button>
+                <div className="claim-heading-identity">
+                  <span>Claim:</span>
+                  <h1 id="conversation-title">{claim.claim_id}</h1>
+                </div>
               </div>
+              <div className="claim-status">{handoff ? 'Staff assistance active' : 'In progress'}</div>
             </div>
 
-            {assistanceState && (
-              <section
-                className={`assistance-status assistance-status-${assistanceState.key}`}
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-              >
-                <span className="assistance-status-icon" aria-hidden="true">
-                  {assistanceState.key === 'completed' ? '✓' : '●'}
-                </span>
-                <div>
-                  <h2>{assistanceState.title}</h2>
-                  <p>{assistanceState.description}</p>
-                </div>
-              </section>
-            )}
+            <ClaimProgressDisclosure
+              progress={progress}
+              expanded={conversationPanelExpanded('progress')}
+              onToggle={() => toggleConversationPanel('progress')}
+            />
 
-            <section
-              className="journey-progress"
-              aria-label={progress.available
-                ? `Claim progress: ${progress.current} of ${progress.total} current details satisfied, ${progress.label}`
-                : `Claim progress: ${progress.label}`}
+            <div
+              ref={messageListRef}
+              className="message-list"
+              aria-live="polite"
+              onScroll={handleMessageListScroll}
             >
-              <div className="journey-progress-heading">
-                <span>{progress.available
-                  ? `${progress.current} of ${progress.total} needed now`
-                  : 'Start your report'}</span>
-                <strong>{progress.label}</strong>
-              </div>
-              <div className="progress-track" aria-hidden="true">
-                <span
-                  className="progress-fill"
-                  style={{
-                    '--progress-width': progress.total > 0
-                      ? `${(progress.current / progress.total) * 100}%`
-                      : '0%',
-                  }}
-                />
-              </div>
-              <p>{progress.available
-                ? `${progress.current} ${progress.current === 1 ? 'requirement is' : 'requirements are'} satisfied for the current action.`
-                : 'Describe what happened and Northwind will identify what is needed next.'}</p>
-            </section>
-
-            <div className="message-list" aria-live="polite">
               {conversationTimeline.map((item) => {
+                if (item.kind === 'conversation-event') {
+                  return (
+                    <ConversationEvent
+                      key={item.key}
+                      title={item.title}
+                      detail={item.detail}
+                    />
+                  )
+                }
                 if (item.kind === 'system-event') {
                   return (
                     <div className="conversation-system-event" key={item.key}>
@@ -2183,10 +2417,20 @@ function App() {
                     <div className="agent-body">
                       <div className="agent-label">Claims assistant</div>
                       <div className="agent-text"><p>{messageText(message)}</p><button className="listen-message" type="button" onClick={() => { if (globalThis.speechSynthesis) { globalThis.speechSynthesis.cancel(); globalThis.speechSynthesis.speak(new SpeechSynthesisUtterance(messageText(message))) } }}>Listen</button></div>
+                      {item.key === lastAgentMessageId && conversationActionKind && (
+                        <div className="conversation-agent-action">
+                          {renderConversationAction()}
+                        </div>
+                      )}
                     </div>
                   </article>
                 )
               })}
+              {!lastAgentMessageId && conversationActionKind && (
+                <div className="conversation-agent-action is-standalone">
+                  {renderConversationAction()}
+                </div>
+              )}
               {status === 'sending' && pendingMessage && (
                 <article className="message message-claimant is-pending" aria-label="Message sending">
                   <p className="message-author">You</p>
@@ -2201,71 +2445,65 @@ function App() {
                   <p className="message-state">{failedMessage.message}</p>
                 </article>
               )}
+              {isUrgentSupport && handoff && ['queued', 'accepted'].includes(handoff.status) && (
+                <ConversationEvent
+                  icon="!"
+                  title="Urgent support · Normal intake has paused"
+                  detail={handoff.summary}
+                  tone="urgent"
+                />
+              )}
+
+              {assistanceState && !isUrgentSupport && (
+                <ConversationEvent
+                  icon={assistanceState.key === 'completed' ? '✓' : '●'}
+                  title={assistanceState.title}
+                  detail={assistanceState.description}
+                  tone={assistanceState.key === 'response_needed' ? 'attention' : 'info'}
+                />
+              )}
+
+              {claim.external_claim && (
+                <>
+                  <ConversationEvent
+                    icon={claim.external_claim.creation_status === 'failed' ? '!' : '✓'}
+                    title={claim.external_claim.creation_status === 'created'
+                      ? `Claim ${claim.external_claim.claim_number} created`
+                      : claim.external_claim.creation_status === 'pending'
+                        ? 'Claim creation in progress'
+                        : 'Claim creation needs attention'}
+                    tone={claim.external_claim.creation_status === 'failed' ? 'attention' : 'success'}
+                  />
+                  <ConversationInfoPanel
+                    title="Claim details"
+                    summary={[claim.external_claim.claim_number, claim.external_claim.route]
+                      .filter(Boolean)
+                      .join(' · ')}
+                    expanded={conversationPanelExpanded('claim-created')}
+                    onToggle={() => toggleConversationPanel('claim-created')}
+                  >
+                    <dl className="conversation-detail-list">
+                      {claim.external_claim.route && (
+                        <div><dt>Route</dt><dd>{claim.external_claim.route}</dd></div>
+                      )}
+                      {claim.external_claim.next_step && (
+                        <div><dt>Next step</dt><dd>{claim.external_claim.next_step}</dd></div>
+                      )}
+                      {claim.external_claim.expected_by && (
+                        <div>
+                          <dt>Expected by</dt>
+                          <dd>{new Date(claim.external_claim.expected_by).toLocaleString()}</dd>
+                        </div>
+                      )}
+                    </dl>
+                  </ConversationInfoPanel>
+                </>
+              )}
+
+              {evidenceSyncNotice && (
+                <ConversationEvent icon="●" title={evidenceSyncNotice} tone="info" />
+              )}
             </div>
-
-            {resumeContext && (
-              <section className="resume-summary" aria-labelledby="resume-summary-title">
-                <p className="transfer-label">Claim resumed</p>
-                <h2 id="resume-summary-title">Continue where you left off</h2>
-                {resumeContext.summary && <p>{resumeContext.summary}</p>}
-                {resumeContext.pending_items.length > 0 && (
-                  <dl>
-                    <div>
-                      <dt>Pending</dt>
-                      <dd>{resumeContext.pending_items.join(', ')}</dd>
-                    </div>
-                  </dl>
-                )}
-                {resumeContext.prior_commitments.length > 0 && (
-                  <p>{resumeContext.prior_commitments.join(' ')}</p>
-                )}
-              </section>
-            )}
-
-            {isUrgentSupport && handoff && ['queued', 'accepted'].includes(handoff.status) && (
-              <section
-                className="transfer-state is-urgent"
-                aria-live="assertive"
-                aria-labelledby="transfer-title"
-              >
-                <p className="transfer-label">Urgent support</p>
-                <h2 id="transfer-title">Normal intake has paused</h2>
-                <p>{handoff.summary}</p>
-              </section>
-            )}
-
-            {claim.external_claim && (
-              <section className="claim-created" role="status" aria-labelledby="claim-created-title">
-                <p className="transfer-label">Claim created</p>
-                <h2 id="claim-created-title">{claim.external_claim.claim_number}</h2>
-                <dl>
-                  <div><dt>Route</dt><dd>{claim.external_claim.route}</dd></div>
-                  <div><dt>Next step</dt><dd>{claim.external_claim.next_step}</dd></div>
-                  <div>
-                    <dt>Expected by</dt>
-                    <dd>{new Date(claim.external_claim.expected_by).toLocaleString()}</dd>
-                  </div>
-                </dl>
-              </section>
-            )}
-
-            {claim.external_service_action && (
-              <ExternalServiceAction
-                action={claim.external_service_action}
-                consentChecked={serviceConsentChecked}
-                setConsentChecked={setServiceConsentChecked}
-                onRequest={requestVehicleAssessment}
-                status={status}
-                error={serviceError}
-              />
-            )}
-
-            {evidenceSyncNotice && (
-              <p className="backend-status" role="status">
-                <span className="status-dot" />
-                <span>{evidenceSyncNotice}</span>
-              </p>
-            )}
 
             <MessageComposer
               draft={draft}
@@ -2440,24 +2678,6 @@ function App() {
               </section>
             )}
 
-            {(confirmedFields.length > 0 || contentsItems.length > 0)
-              && proposedFields.length === 0
-              && proposedContentsItems.length === 0 && (
-              <div className="next-step" role="status">
-                <span>Next</span>
-                <p>{nextStep?.summary}</p>
-                {nextStep?.status === 'ready_to_create' && !claim.external_claim && (
-                  <button
-                    className="primary-button"
-                    type="button"
-                    onClick={createConfirmedClaim}
-                    disabled={isBusy}
-                  >
-                    {status === 'creating-claim' ? 'Creating claim...' : 'Create claim'}
-                  </button>
-                )}
-              </div>
-            )}
             </div>
             <div
               id="claim-details-documents-panel"
