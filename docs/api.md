@@ -1154,6 +1154,7 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `POST` | `/claims/{claim_id}/creation` | Create an external claim after deterministic validation |
 | `POST` | `/claims/{claim_id}/assessor-routing/consent` | Record bounded claimant permission for the contextual assessor action |
 | `POST` | `/claims/{claim_id}/assessor-routing` | Send the authorised assessor request and return its claimant-safe state |
+| `GET` | `/claims/{claim_id}/external-capabilities` | Read the server-owned third-party capability catalogue for the Claim product family |
 | `GET` | `/claims/{claim_id}/evidence` | List claimant-visible evidence state |
 | `POST` | `/claims/{claim_id}/evidence` | Register expected, missing, or pending evidence |
 | `POST` | `/claims/{claim_id}/evidence/uploads` | Request an evidence upload target |
@@ -1254,6 +1255,7 @@ Response `200`:
   },
   "external_claim": null,
   "external_service_action": null,
+  "external_capabilities": [],
   "dynamic_form": null,
   "customer_next_step": {},
   "handoff": null,
@@ -1291,6 +1293,15 @@ service and provider labels, purpose, claimant-safe summary of the minimum data 
 consent state, progress/result state, and the provider-neutral routing result when accepted. It
 never exposes the raw consent record, authorisation decision, internal signals, or complete claim
 context.
+
+`external_capabilities` is the claimant-safe catalogue derived from the canonical
+`external-service-lifecycle.v1` registry. Rows are filtered by the Claim product family and
+contain the service identity, purpose, access form, required and disclosure fields, provider label,
+official URL or phone when published, result semantics, and limitation. Internal provenance and
+operation evidence are not included. A row with `uses_external_task: false` is an official manual
+link or phone path and does not create an ExternalTask; a task-capable row still requires the
+existing consent, authority, idempotency, delivery, reconciliation, and result-verification
+contracts before any side effect.
 
 `dynamic_form` is the claimant-safe Dynamic Form projection applicable to the returned Claim
 snapshot. It is built from the newest applied branch evaluation valid at or before the current
@@ -1549,9 +1560,16 @@ Request:
 All fields must exist and be confirmable. Response `200` returns the new claim revision, confirmed fields, any new decision, and the current customer next step.
 
 When all controlled intake fields are confirmed, `customer_next_step.status` becomes
-`ready_to_create`. Confirmation does not itself invoke an external claims service.
+`ready_to_create` and `workflow_state` becomes `ready_for_next`. A later material edit that makes
+the registered requirements incomplete returns the workflow to `collecting`. Confirmation does
+not itself invoke an external claims service.
 
 ### `POST /api/v1/claims/{claim_id}/creation`
+
+This endpoint is the live handler for the registered `claim.create` action. It accepts only a
+`ready_for_next` Claim and dispatches a typed, revision-checked, idempotent command through the
+configured `claims_service.create_claim` binding before using the existing provider-neutral
+adapter. The model cannot call or authorise this endpoint by emitting an action name.
 
 The claimant client MAY offer a guided Motor presentation over the same resources used by the
 conversational intake. The guided presentation creates the Working Claim before its first page is

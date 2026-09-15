@@ -8,6 +8,7 @@ from backend.domain.branch_registry import (
     validate_registered_field_value,
 )
 from backend.domain.evidence import evidence_summary_for
+from backend.domain.external_service_registry import capability_catalogue
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
 from backend.domain.intake import next_requirement_step
@@ -310,6 +311,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         evidence_summary=evidence_summary_for(claimant_evidence),
         external_claim=claim.external_claim,
         external_service_action=external_service_action,
+        external_capabilities=list(capability_catalogue(claim.incident_type)),
         dynamic_form=claimant_dynamic_form_projection(repository, claim),
         customer_next_step=claimant_next_step(repository, claim, external_service_action),
         incomplete_context=_claimant_incomplete_context(repository, claim),
@@ -1091,6 +1093,18 @@ def update_form(
     next_step = next_requirement_step(candidate_branch_evaluation.requirements)
     updated_claim = projected_claim.model_copy(
         update={
+            'claim_state': projected_claim.claim_state.model_copy(
+                update={
+                    'workflow_state': (
+                        WorkflowState.READY_FOR_NEXT
+                        if candidate_branch_evaluation.requirements.ready
+                        else WorkflowState.COLLECTING
+                        if projected_claim.claim_state.workflow_state
+                        is WorkflowState.READY_FOR_NEXT
+                        else projected_claim.claim_state.workflow_state
+                    )
+                }
+            ),
             'customer_next_step': next_step,
             'revision': claim.revision + 1,
             'updated_at': timestamp,
@@ -1257,7 +1271,18 @@ def confirm_form_fields(
             'form': {**claim.form, **confirmed_fields},
             'contents_items': confirmed_contents_items,
             'incident_type': incident_type,
-            'claim_state': claim.claim_state.model_copy(update={'next_action': AgentAction.ASK}),
+            'claim_state': claim.claim_state.model_copy(
+                update={
+                    'next_action': AgentAction.ASK,
+                    'workflow_state': (
+                        WorkflowState.READY_FOR_NEXT
+                        if resolved_requirements.ready
+                        else WorkflowState.COLLECTING
+                        if claim.claim_state.workflow_state is WorkflowState.READY_FOR_NEXT
+                        else claim.claim_state.workflow_state
+                    ),
+                }
+            ),
             'customer_next_step': next_step,
             'revision': claim.revision + 1,
             'updated_at': timestamp,

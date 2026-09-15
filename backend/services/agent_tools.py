@@ -14,6 +14,38 @@ from backend.domain.models import (
 )
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.evidence import list_evidence_history
+from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
+
+
+def dispatch_external_service_tool(
+    dispatcher: ExternalCapabilityDispatcher,
+    *,
+    tool_name: str,
+    service_identity: str,
+    product_family: str,
+    arguments: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Execute one registered external-service tool through Runtime policy code."""
+
+    contract = tool_contract(tool_name)
+    if not tool_name.startswith('external_service.'):
+        raise ValueError('Only external_service tools may use this dispatcher.')
+    operation = tool_name.removeprefix('external_service.')
+    result = dispatcher.execute(
+        service_identity,
+        operation,
+        arguments or {},
+        product_family=product_family,
+    )
+    return {
+        'tool': contract.name,
+        'status': result.status,
+        'service_identity': result.service_identity,
+        'registry_version': result.registry_version,
+        'uses_external_task': result.uses_external_task,
+        'payload': dict(result.payload),
+        'next_action': result.next_action,
+    }
 
 
 def read_evidence_history_for_runtime(

@@ -3,6 +3,12 @@ from hashlib import sha256
 from backend.adapters.claims_service import ClaimsServiceAdapter
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.agent_action_commands import ClaimContextCommand, build_claim_context_command
+from backend.domain.agent_action_registry import (
+    ActionActorRole,
+    ExecutionAuthority,
+    action_contract,
+)
 from backend.domain.branch_registry import BranchRuleEvaluator
 from backend.domain.models import (
     ActorType,
@@ -20,6 +26,11 @@ from backend.domain.models import (
     WorkflowState,
 )
 from backend.repositories.protocols import IdempotencyRecord, PersistenceRepository
+from backend.services.agent_action_execution import (
+    ClaimantRuntimeActionDispatcher,
+    ClaimContextHandlerOutcome,
+)
+from backend.services.agent_action_mapping import map_claim_context_execution_to_api
 from backend.services.external_services import claimant_assessor_action
 from backend.services.integrations import create_external_claim
 from backend.services.support import (
@@ -42,6 +53,7 @@ def _invalid_state(message: str, details: list[ErrorDetail] | None = None) -> Ap
 def create_claim_from_confirmed_report(
     repository: PersistenceRepository,
     adapter: ClaimsServiceAdapter,
+    action_dispatcher: ClaimantRuntimeActionDispatcher,
     principal: Principal,
     claim_id: str,
     idempotency_key: str | None,
@@ -114,6 +126,9 @@ def create_claim_from_confirmed_report(
                     claim_id=claim_id,
                     session_id=claim.active_session_id or '',
                     decision_id=recovered_decision.decision_id,
+                    action_registry_version=action_contract('claim.create').version,
+                    action_code='claim.create',
+                    target_ref=claim_id,
                     response_payload=response.model_dump(mode='json'),
                 )
             )
@@ -170,97 +185,135 @@ def create_claim_from_confirmed_report(
     if not claimant_messages:
         raise _invalid_state('A claimant message is required before claim creation.')
 
-    timestamp = now_utc()
-    decision = AgentDecisionRecord(
-        decision_id=decision_id,
-        claim_id=claim_id,
-        session_id=session_id,
-        trigger_message_id=claimant_messages[-1].message_id,
-        action=AgentAction.CREATE_CLAIM,
-        reason_codes=['CLAIM_CREATION_AUTHORISED'],
-        customer_reason=(
-            'The registered current-action requirements are satisfied and no open handoff '
-            'blocks creation.'
-        ),
-        customer_response=(
-            'Your confirmed report is being created through the configured claims service.'
-        ),
-        state_changes=[StateChange(path='claim_state.next_action', to='CREATE_CLAIM')],
-        proposed_signals=[],
-        required_tools=[{'tool': 'claims_service', 'operation': 'create_claim'}],
-        next_action_requirements=[],
-        customer_next_step=claim.customer_next_step,
-        authority=AgentAuthority(
-            proposed_by='controlled_claim_creation_rule',
-            validated_by='deterministic_rule_engine',
-            outcome=AuthorityOutcome.AUTHORISED,
-        ),
-        form_changes={},
-        resulting_revision=claim.revision,
-        created_at=timestamp,
+    command = build_claim_context_command(
+        'claim.create',
+        {
+            'claim_id': claim_id,
+            'expected_revision': expected_revision,
+            'authorised_decision_ref': decision_id,
+            'idempotency_key': key,
+        },
+        proposer_role=ActionActorRole.RUNTIME,
+        approved_authority=ExecutionAuthority.STAFF_OR_PUBLISHED_RULE,
+        authority_reference='published-rule:claim-creation-requirements-v1',
+        workflow_state=claim.claim_state.workflow_state,
+        expected_revision=expected_revision,
+        idempotency_key=key,
     )
-    repository.save_agent_decision(decision, principal.subject)
+    live_response: ClaimCreationResponse | None = None
 
-    evidence = repository.list_evidence(claim_id, principal.subject)
-    confirmed_form = {
-        field_code: field
-        for field_code, field in claim.form.items()
-        if field.status is FormStatus.CONFIRMED
-    }
-    result, _replayed = create_external_claim(
-        repository,
-        adapter,
-        CreateExternalClaimRequest(
-            working_claim_id=claim_id,
-            claim_revision=claim.revision,
-            authorised_decision_id=decision.decision_id,
-            confirmed_form=confirmed_form,
-            evidence_refs=[item.evidence_id for item in evidence],
-            pending_evidence=[
-                PendingEvidenceReference(
-                    evidence_id=item.evidence_id,
-                    kind=item.kind,
-                    needed_for=item.needed_for,
-                )
-                for item in evidence
-                if item.status is EvidenceStatus.PENDING
-            ],
-            route=f'standard_{claim.incident_type}_intake',
-        ),
-    )
-    updated = repository.get_claim(claim_id, principal.subject)
-    if updated is None:
+    def create_from_command(_command: ClaimContextCommand) -> ClaimContextHandlerOutcome:
+        nonlocal live_response
+        timestamp = now_utc()
+        decision = AgentDecisionRecord(
+            decision_id=decision_id,
+            claim_id=claim_id,
+            session_id=session_id,
+            trigger_message_id=claimant_messages[-1].message_id,
+            action=AgentAction.CREATE_CLAIM,
+            action_code='claim.create',
+            reason_codes=['CLAIM_CREATION_AUTHORISED'],
+            customer_reason=(
+                'The registered current-action requirements are satisfied and no open handoff '
+                'blocks creation.'
+            ),
+            customer_response=(
+                'Your confirmed report is being created through the configured claims service.'
+            ),
+            state_changes=[StateChange(path='claim_state.next_action', to='CREATE_CLAIM')],
+            proposed_signals=[],
+            required_tools=[{'tool': 'claims_service.create_claim'}],
+            next_action_requirements=[],
+            customer_next_step=claim.customer_next_step,
+            authority=AgentAuthority(
+                proposed_by='controlled_claim_creation_rule',
+                validated_by='deterministic_rule_engine',
+                outcome=AuthorityOutcome.AUTHORISED,
+            ),
+            form_changes={},
+            resulting_revision=claim.revision,
+            created_at=timestamp,
+        )
+        repository.save_agent_decision(decision, principal.subject)
+
+        evidence = repository.list_evidence(claim_id, principal.subject)
+        confirmed_form = {
+            field_code: field
+            for field_code, field in claim.form.items()
+            if field.status is FormStatus.CONFIRMED
+        }
+        result, _replayed = create_external_claim(
+            repository,
+            adapter,
+            CreateExternalClaimRequest(
+                working_claim_id=claim_id,
+                claim_revision=claim.revision,
+                authorised_decision_id=decision.decision_id,
+                confirmed_form=confirmed_form,
+                evidence_refs=[item.evidence_id for item in evidence],
+                pending_evidence=[
+                    PendingEvidenceReference(
+                        evidence_id=item.evidence_id,
+                        kind=item.kind,
+                        needed_for=item.needed_for,
+                    )
+                    for item in evidence
+                    if item.status is EvidenceStatus.PENDING
+                ],
+                route=f'standard_{claim.incident_type}_intake',
+            ),
+        )
+        updated = repository.get_claim(claim_id, principal.subject)
+        if updated is None:
+            raise ApiError(
+                status_code=500,
+                code='INTERNAL_ERROR',
+                message='The created claim could not be restored.',
+                retryable=True,
+            )
+        claimant_decision = ClaimantDecision(
+            decision_id=decision.decision_id,
+            action=decision.action,
+            reason_codes=decision.reason_codes,
+            customer_reason=decision.customer_reason,
+            customer_next_step=updated.customer_next_step,
+        )
+        live_response = ClaimCreationResponse(
+            claim_id=claim_id,
+            revision=updated.revision,
+            decision=claimant_decision,
+            external_claim=result,
+            external_service_action=claimant_assessor_action(repository, updated),
+            customer_next_step=updated.customer_next_step,
+        )
+        repository.save_idempotency(
+            IdempotencyRecord(
+                actor_id=principal.subject,
+                route=route,
+                key=key,
+                request_fingerprint=fingerprint,
+                claim_id=claim_id,
+                session_id=session_id,
+                decision_id=decision.decision_id,
+                action_registry_version=command.contract_version,
+                action_code=command.action_code,
+                target_ref=claim_id,
+                response_payload=live_response.model_dump(mode='json'),
+            )
+        )
+        return ClaimContextHandlerOutcome(
+            claim_id=claim_id,
+            resulting_revision=updated.revision,
+        )
+
+    execution = action_dispatcher.execute(repository, command, create_from_command)
+    execution_error = map_claim_context_execution_to_api(execution)
+    if execution_error is not None:
+        raise execution_error
+    if live_response is None:
         raise ApiError(
             status_code=500,
             code='INTERNAL_ERROR',
-            message='The created claim could not be restored.',
-            retryable=True,
+            message='The live claim creation handler returned no response.',
         )
-    claimant_decision = ClaimantDecision(
-        decision_id=decision.decision_id,
-        action=decision.action,
-        reason_codes=decision.reason_codes,
-        customer_reason=decision.customer_reason,
-        customer_next_step=updated.customer_next_step,
-    )
-    response = ClaimCreationResponse(
-        claim_id=claim_id,
-        revision=updated.revision,
-        decision=claimant_decision,
-        external_claim=result,
-        external_service_action=claimant_assessor_action(repository, updated),
-        customer_next_step=updated.customer_next_step,
-    )
-    repository.save_idempotency(
-        IdempotencyRecord(
-            actor_id=principal.subject,
-            route=route,
-            key=key,
-            request_fingerprint=fingerprint,
-            claim_id=claim_id,
-            session_id=session_id,
-            decision_id=decision.decision_id,
-            response_payload=response.model_dump(mode='json'),
-        )
-    )
-    return response
+    return live_response
