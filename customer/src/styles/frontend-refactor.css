@@ -403,24 +403,6 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   background: transparent;
 }
 .conversation-heading-main { display: flex; min-width: 0; align-items: center; gap: var(--space-2); }
-.conversation-back-button {
-  display: inline-grid;
-  width: var(--size-control-touch);
-  height: var(--size-control-touch);
-  flex: 0 0 var(--size-control-touch);
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
-  background: transparent;
-  font: inherit;
-  font-size: var(--font-size-section);
-  line-height: var(--line-height-heading);
-  cursor: pointer;
-}
-.conversation-back-button:hover { color: var(--color-text-primary); background: var(--color-accent-soft); }
-.conversation-back-button:focus-visible { outline: var(--border-focus); outline-offset: var(--space-1); }
 .claim-status, .transfer-label { color: var(--color-accent-strong); font-size: var(--font-size-caption); font-weight: var(--font-weight-semibold); text-transform: uppercase; letter-spacing: .08em; }
 .claim-heading-identity { display: flex; min-width: 0; align-items: baseline; gap: var(--space-2); color: var(--color-text-primary); }
 .claim-heading-identity > span { flex: 0 0 auto; font-size: var(--font-size-section); font-weight: var(--font-weight-semibold); }
@@ -646,6 +628,137 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 .conversation-action-details .service-progress,
 .conversation-action-details .service-result.is-success { background: var(--color-accent-soft); }
 .conversation-action-details .service-result.is-error { background: var(--color-danger-soft); }
+.service-recommendation-card {
+  display: grid;
+  width: min(100%, var(--measure-reading));
+  grid-template-columns: var(--space-10) minmax(0, 1fr) auto;
+  grid-template-areas:
+    "icon provider provider"
+    ". purpose purpose"
+    ". meta cta";
+  align-items: start;
+  column-gap: var(--space-3);
+  row-gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-component);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-none);
+}
+.service-recommendation-card:hover {
+  border-color: var(--color-accent-light);
+  background: var(--color-page);
+}
+.service-recommendation-card:focus-within {
+  outline: var(--border-focus);
+  outline-offset: var(--space-1);
+}
+.service-recommendation-icon {
+  display: grid;
+  grid-area: icon;
+  width: var(--space-10);
+  height: var(--space-10);
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  color: var(--color-accent-strong);
+  background: var(--color-accent-soft);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+}
+.service-recommendation-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.service-recommendation-purpose {
+  display: grid;
+  min-width: 0;
+}
+.service-recommendation-provider {
+  display: flex;
+  grid-area: provider;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-body);
+}
+.service-recommendation-provider strong {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+}
+.service-recommendation-external { margin-left: auto; white-space: nowrap; }
+.service-recommendation-purpose {
+  grid-area: purpose;
+  gap: var(--space-1);
+}
+.service-recommendation-meta {
+  display: flex;
+  grid-area: meta;
+  align-self: center;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-body);
+}
+.service-recommendation-type,
+.service-recommendation-relationship {
+  color: var(--color-accent-strong);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-body);
+}
+.service-recommendation-title {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-heading);
+}
+.service-recommendation-description {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.service-recommendation-relationship { color: var(--color-text-muted); }
+.service-recommendation-cta {
+  display: inline-flex;
+  grid-area: cta;
+  min-height: var(--size-control-touch);
+  align-self: end;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border: var(--border-action);
+  border-radius: var(--radius-md);
+  color: var(--color-accent-strong);
+  background: var(--color-accent-soft);
+  font-size: var(--font-size-control);
+  font-weight: var(--font-weight-semibold);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.service-recommendation-cta:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text-primary);
+  background: var(--color-accent-light);
+}
+.service-recommendation-cta:focus-visible {
+  outline: var(--border-focus);
+  outline-offset: var(--space-1);
+}
 .conversation-info-trigger {
   display: flex;
   width: 100%;
@@ -900,6 +1013,19 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   .conversation-action-trigger { grid-template-columns: var(--space-8) minmax(0, 1fr); }
   .conversation-action-meta { grid-column: 2; justify-content: space-between; }
   .conversation-action-copy > span { white-space: normal; }
+  .service-recommendation-card {
+    grid-template-columns: var(--space-10) minmax(0, 1fr);
+    grid-template-areas:
+      "icon provider"
+      ". purpose"
+      ". meta"
+      ". cta";
+    column-gap: var(--space-2);
+    row-gap: var(--space-1);
+    padding: var(--space-2);
+  }
+  .service-recommendation-cta { justify-self: start; }
+  .service-recommendation-external { margin-left: 0; }
   .conversation-info-copy { display: grid; gap: 0; }
   .conversation-detail-list { grid-template-columns: 1fr; }
   .conversation-event { width: 100%; align-self: flex-start; }

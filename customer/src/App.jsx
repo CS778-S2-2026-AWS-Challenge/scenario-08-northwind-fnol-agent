@@ -2390,15 +2390,6 @@ function App() {
             </div>
             <div className="conversation-heading">
               <div className="conversation-heading-main">
-                <button
-                  className="conversation-back-button"
-                  type="button"
-                  aria-label="Back to Claim history"
-                  title="Back to Claim history"
-                  onClick={openClaimHistory}
-                >
-                  <span aria-hidden="true">←</span>
-                </button>
                 <div className="claim-heading-identity">
                   <span>Claim:</span>
                   <h1 id="conversation-title">{claim.claim_id}</h1>
