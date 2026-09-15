@@ -1364,6 +1364,13 @@ the claimant message, Agent decision, or idempotency result. A schema-valid part
 discarded unless the adapter normalises the provider termination state as complete. Provider
 response bodies, credentials, prompts, and internal model context are never returned.
 
+If the claim-scoped external-service records cannot be read or cannot be represented by the
+canonical lifecycle registry, the endpoint returns `503 EXTERNAL_LIFECYCLE_CONTEXT_UNAVAILABLE`
+before model execution or Claim mutation. `retryable` is `true` only for a temporary persistence
+read failure. Cross-Claim records, contradictory capability provenance, invalid task/result
+relationships, unsupported registry mappings, invalid result-verification combinations, and
+context overflow return the same bounded code with `retryable: false`.
+
 Response `200`:
 
 ```json
@@ -2790,6 +2797,14 @@ can be persisted and projected. Definitions publish current-state invariants
 separately from transition preconditions; notably, `operation_id` and
 `dispatch_reserved_at` arise only when a prepared request reserves submission.
 
+The claimant Model Gateway receives the registry-derived effective meaning,
+responsibility, next action, attention requirement, and status detail. It does not
+reconstruct those values from raw status strings. For the assessor capability, Runtime
+also reads `WorkingClaim.assessor_routing`; `queued` or `assigned` replaces `accepted`
+only when its assessor or queue reference matches the external task's provider
+reference. TurnPlan evidence stores the resulting canonical operation coordinate,
+while the task and routing records remain authoritative.
+
 Internal endpoints are service-to-service only. The backend MAY implement an adapter in-process, but it MUST preserve these typed request and response boundaries so fixture repositories can be replaced without changing product clients.
 
 | Method | Path | Purpose |
@@ -3488,6 +3503,7 @@ All errors use one envelope:
 | `UPLOAD_TOO_LARGE` | `413` | File exceeds configured size |
 | `RATE_LIMITED` | `429` | Caller exceeded a limit |
 | `DEPENDENCY_UNAVAILABLE` | `503` | Required service is unavailable |
+| `EXTERNAL_LIFECYCLE_CONTEXT_UNAVAILABLE` | `503` | Claim-scoped external-service records are unavailable or cannot be represented safely for the Agent Runtime |
 | `PROJECTION_UNAVAILABLE` | `503` | Authoritative Claim facts conflict or cannot be placed in a published Workbench projection |
 | `DEPENDENCY_FAILED` | `502` | Required service returned an invalid or failed result |
 | `INTERNAL_ERROR` | `500` | Unexpected server failure |
