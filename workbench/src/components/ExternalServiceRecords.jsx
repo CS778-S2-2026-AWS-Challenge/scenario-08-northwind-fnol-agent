@@ -237,7 +237,7 @@ function projectedTaskActions(actions, taskId, revision) {
 
 function initialValues(inputs) {
   return Object.fromEntries(
-    inputs.map((input) => [input.field_code, input.choices?.[0]?.value || '']),
+    inputs.map((input) => [input.field_code, '']),
   )
 }
 
