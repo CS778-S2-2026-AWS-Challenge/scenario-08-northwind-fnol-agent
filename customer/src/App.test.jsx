@@ -155,6 +155,8 @@ describe('claimant intake projection', () => {
     })
     api.getClaim.mockResolvedValue(initialClaim)
     api.bootstrapClaim.mockResolvedValue({
+      claim: initialClaim,
+      session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
       claim_id: initialClaim.claim_id,
       session_id: 'ses_ui_vp',
       claimant_message: claimantMessage,
@@ -277,11 +279,9 @@ describe('claimant intake projection', () => {
       pushLiveUpdate = onEvent
       return new Promise(() => {})
     })
-    api.submitClaimMessage
-      .mockResolvedValueOnce(initialTurn())
-      .mockImplementationOnce(() => new Promise((resolve) => {
-        resolveReply = resolve
-      }))
+    api.submitClaimMessage.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveReply = resolve
+    }))
     api.requestHumanSupport.mockResolvedValue({
       revision: 3,
       handoff: assistanceHandoff(),
@@ -480,29 +480,19 @@ describe('claimant intake projection', () => {
       claim_revision: 2,
       decision: { customer_next_step: initialClaim.customer_next_step },
     })
-    api.bootstrapClaim
-      .mockResolvedValueOnce({
-        claim_id: initialClaim.claim_id,
-        session_id: 'ses_ui_vp',
-        claimant_message: claimantMessage,
-        agent_message: agentMessage,
-        form_changes: [],
-        contents_item_changes: [],
-        dynamic_form: null,
-        claim_revision: 2,
-        decision: { customer_next_step: initialClaim.customer_next_step },
-      })
-      .mockResolvedValueOnce({
-        claim_id: 'clm_ui_second',
-        session_id: 'ses_ui_second',
-        claimant_message: claimantMessage,
-        agent_message: agentMessage,
-        form_changes: [],
-        contents_item_changes: [],
-        dynamic_form: null,
-        claim_revision: 2,
-        decision: { customer_next_step: initialClaim.customer_next_step },
-      })
+    api.bootstrapClaim.mockResolvedValueOnce({
+      claim: initialClaim,
+      session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
+      claim_id: initialClaim.claim_id,
+      session_id: 'ses_ui_vp',
+      claimant_message: claimantMessage,
+      agent_message: agentMessage,
+      form_changes: [],
+      contents_item_changes: [],
+      dynamic_form: null,
+      claim_revision: 2,
+      decision: { customer_next_step: initialClaim.customer_next_step },
+    })
     api.listClaims.mockResolvedValue({
       items: [
         {
@@ -568,6 +558,12 @@ describe('claimant intake projection', () => {
       },
     })
     api.bootstrapClaim.mockResolvedValue({
+      claim: {
+        ...initialClaim,
+        form: dynamicForm().form,
+        dynamic_form: dynamicForm(),
+      },
+      session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
       claim_id: initialClaim.claim_id,
       session_id: 'ses_ui_vp',
       claimant_message: claimantMessage,

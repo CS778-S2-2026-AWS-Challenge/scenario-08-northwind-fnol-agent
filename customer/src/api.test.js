@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  bootstrapClaim,
   createClaim,
   listEvidenceHistory,
   listClaims,
@@ -113,6 +114,34 @@ describe('claim creation contract', () => {
           channel: 'web_agent',
           locale: 'en-NZ',
           incident_type: 'home',
+          model_profile_id: 'qwen-local',
+        }),
+      }),
+    )
+  })
+
+  it('submits the first message through the canonical claim creation route', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ claim_id: 'clm_1' }), { status: 201 }))
+
+    await bootstrapClaim({
+      idempotencyKey: 'claim-bootstrap-contract',
+      incidentType: 'motor',
+      modelProfileId: 'qwen-local',
+      clientMessageId: 'message-1',
+      text: 'My parked car was damaged overnight.',
+    })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/claims',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'Idempotency-Key': 'claim-bootstrap-contract' }),
+        body: JSON.stringify({
+          incident_type: 'motor',
+          initial_message: {
+            client_message_id: 'message-1',
+            content: { type: 'text', text: 'My parked car was damaged overnight.' },
+          },
           model_profile_id: 'qwen-local',
         }),
       }),

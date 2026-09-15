@@ -55,6 +55,14 @@ returned result per task, its source and receipt time, linked Evidence identifie
 state, verification time, and checked Claim revision. Later provider attempts and reconciliation
 records remain target contracts.
 
+The initial claimant turn is one create transaction, not a Claim create followed by a message
+mutation. The accepted bundle creates the Claim and active Session and persists the claimant
+message, Agent message, validated decision, applied branch evaluation, Runtime trace and records,
+optional turn children, and idempotency result together. Agent or validation failure writes none
+of the bundle. Concurrent requests carrying the same actor, route, idempotency key, and request
+fingerprint resolve to one stored Claim and replay its authoritative result; a changed fingerprint
+conflicts without creating another Claim.
+
 ## Logical Record Groups
 
 | Group | Records | Primary ownership |

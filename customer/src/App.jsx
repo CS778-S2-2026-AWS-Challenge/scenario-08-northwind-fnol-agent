@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ApiRequestError,
+  bootstrapClaim,
   confirmClaimFields,
   createClaim,
-  bootstrapClaim,
   createExternalClaim,
   grantAssessorConsent,
   getAuthenticatedAccount,
@@ -1028,13 +1028,10 @@ function App() {
           clientMessageId: operation.clientMessageId,
           text,
         })
-        activeSessionId = turn.session_id
-        activeClaim = await getClaim(turn.claim_id)
+        activeSessionId = turn.session.session_id
+        activeClaim = turn.claim
+        rememberClaimInHistory(activeClaim)
         setClaim(activeClaim)
-        activeClaim = created.claim
-        activeSessionId = created.session.session_id
-        rememberClaimInHistory(created.claim)
-        setClaim(created.claim)
         setSessionId(activeSessionId)
         setForm(activeClaim.form)
         setContentsItems(activeClaim.contents_items || [])

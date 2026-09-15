@@ -15,7 +15,7 @@ from backend.core.auth import Principal, require_claimant
 from backend.core.errors import ApiError
 from backend.domain.ids import new_id
 from backend.domain.models import (
-    BootstrapClaimRequest,
+    Channel,
     ClaimantClaim,
     ClaimantExternalServiceResponse,
     ClaimantSession,
@@ -31,6 +31,8 @@ from backend.domain.models import (
     FormPatchRequest,
     FormPatchResponse,
     GrantAssessorConsentRequest,
+    InitialClaimMessageRequest,
+    InitialClaimTurnResponse,
     MessageListResponse,
     MessageTurnResponse,
     PauseSessionResponse,
@@ -61,7 +63,7 @@ from backend.services.messages import submit_message
 from backend.services.model_profiles import select_model_profile
 from backend.services.resume import start_session_with_recovery
 from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
-from backend.services.support import now_utc
+from backend.services.support import now_utc, request_fingerprint
 
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant'])
 logger = logging.getLogger(__name__)
@@ -114,13 +116,17 @@ def evidence_storage_for(request: Request) -> EvidenceStorage:
     return cast(EvidenceStorage, request.app.state.evidence_storage)
 
 
-@router.post('', response_model=CreateClaimResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    '',
+    response_model=CreateClaimResponse | InitialClaimTurnResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 def create_claim(
     request: Request,
     payload: CreateClaimRequest,
     principal: Principal = Depends(require_claimant),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
-) -> CreateClaimResponse:
+) -> CreateClaimResponse | InitialClaimTurnResponse:
     if payload.model_profile_id is not None:
         payload = payload.model_copy(
             update={'model_profile_id': select_model_profile(request, payload.model_profile_id)}
@@ -129,16 +135,38 @@ def create_claim(
         payload = payload.model_copy(
             update={'model_profile_id': select_model_profile(request, None)}
         )
+    if payload.initial_message is not None:
+        initial = payload.initial_message
+        bootstrap_payload = initial.model_copy(
+            update={
+                'incident_type': payload.incident_type,
+                'model_profile_id': payload.model_profile_id,
+            }
+        )
+        return _bootstrap_claim(
+            request,
+            bootstrap_payload,
+            principal,
+            idempotency_key,
+            route='/api/v1/claims',
+            fingerprint=request_fingerprint(payload.model_dump(mode='json')),
+            channel=payload.channel,
+            locale=payload.locale,
+        )
     return start_claim(repository_for(request), principal, payload, idempotency_key)
 
 
-@router.post('/bootstrap', response_model=MessageTurnResponse, status_code=status.HTTP_201_CREATED)
-def bootstrap_claim(
+def _bootstrap_claim(
     request: Request,
-    payload: BootstrapClaimRequest,
-    principal: Principal = Depends(require_claimant),
-    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
-) -> MessageTurnResponse:
+    payload: InitialClaimMessageRequest,
+    principal: Principal,
+    idempotency_key: str | None,
+    *,
+    route: str,
+    fingerprint: str,
+    channel: Channel,
+    locale: str,
+) -> InitialClaimTurnResponse:
     model_profile_id = payload.model_profile_id
     if model_profile_id is not None:
         model_profile_id = select_model_profile(request, model_profile_id)
@@ -150,8 +178,8 @@ def bootstrap_claim(
     claim = WorkingClaim(
         claim_id=claim_id,
         customer_id=principal.subject,
-        channel='web_agent',
-        locale='en-NZ',
+        channel=channel,
+        locale=locale,
         incident_type=payload.incident_type,
         claim_state=ClaimState(),
         active_session_id=session_id,
@@ -177,7 +205,7 @@ def bootstrap_claim(
         content=payload.content,
         model_profile_id=model_profile_id,
     )
-    return submit_message(
+    turn = submit_message(
         repository_for(request),
         agent_for(request),
         policy_history_adapter_for(request),
@@ -190,7 +218,14 @@ def bootstrap_claim(
         runtime_agent_policy_for(request),
         bootstrap_claim=claim,
         bootstrap_session=session,
-        bootstrap_route='/api/v1/claims/bootstrap',
+        bootstrap_route=route,
+        bootstrap_fingerprint=fingerprint,
+    )
+    repository = repository_for(request)
+    return InitialClaimTurnResponse(
+        **turn.model_dump(mode='python'),
+        claim=get_claim(repository, principal, turn.claim_id),
+        session=get_session(repository, principal, turn.claim_id, turn.session_id),
     )
 
 

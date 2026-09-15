@@ -1344,16 +1344,36 @@ Only one active claimant session per claim is permitted. If an active session al
 
 Returns session status, compact resume summary, unresolved questions, pending items, prior commitments, and current customer next step. It MUST NOT return hidden internal state or the complete conversation by default.
 
-### `POST /api/v1/claims/bootstrap`
+### `POST /api/v1/claims` (initial message)
 
-The initial claimant turn may be submitted through the bootstrap boundary with one
-`Idempotency-Key`. The server prepares the transient Claim and Session, executes the
-normal Agent turn, and commits Claim, Session, both messages, Agent/Runtime records,
-revision, and the idempotency result in one accepted repository transaction. A replay
-with the same key and request fingerprint returns the original `MessageTurnResponse`;
+The initial claimant turn may be submitted by including an `initial_message` object in the
+claim creation request with one `Idempotency-Key`:
+
+```json
+{
+  "channel": "web_agent",
+  "locale": "en-NZ",
+  "incident_type": "motor",
+  "model_profile_id": "qwen-local",
+  "initial_message": {
+    "client_message_id": "mobile-7fce2f14",
+    "content": {
+      "type": "text",
+      "text": "My parked car was damaged overnight."
+    }
+  }
+}
+```
+
+The server prepares the transient Claim and Session, executes the normal Agent turn, and
+commits Claim, Session, both messages, Agent/Runtime records, revision, and the idempotency
+result in one accepted repository transaction. The `201` response contains the authoritative
+`claim` and `session` objects together with the normal `MessageTurnResponse` fields. The client
+does not need a second read before rendering the accepted first turn. A replay with the same
+key and request fingerprint returns the same logical result without invoking another turn;
 the same key with different input returns `409 IDEMPOTENCY_CONFLICT`. A definitive
 failure commits none of these records and does not expose an empty Claim to Workbench.
-The existing later-message endpoint remains unchanged.
+The existing no-message claim creation and later-message endpoints remain unchanged.
 
 ### `POST /api/v1/claims/{claim_id}/sessions/{session_id}/messages`
 
