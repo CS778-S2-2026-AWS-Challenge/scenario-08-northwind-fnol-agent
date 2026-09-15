@@ -35,6 +35,7 @@ from backend.domain.support_intent import (
 
 if TYPE_CHECKING:
     from backend.domain.model_gateway import ModelEvidenceContentResolver
+    from backend.domain.external_service_registry import ExternalServiceLifecycleProjection
     from backend.services.runtime_agent_policy import RuntimeAgentPolicySnapshot
     from backend.services.runtime_configuration import RuntimeConfigurationSnapshot
 
@@ -188,6 +189,7 @@ class AgentTurnContext:
     conversation_messages: tuple[MessageRecord, ...] = ()
     runtime_configuration_snapshot: RuntimeConfigurationSnapshot | None = None
     runtime_policy: RuntimeAgentPolicySnapshot | None = None
+    external_services: tuple[ExternalServiceLifecycleProjection, ...] = ()
     tool_results: tuple[dict[str, object], ...] = ()
 
 

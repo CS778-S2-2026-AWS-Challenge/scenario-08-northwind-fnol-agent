@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.domain.external_services import (
+    ASSESSOR_SERVICE_IDENTITY,
     ExternalTaskDelivery,
     ExternalTaskEvidenceLink,
     ExternalTaskFailureCode,
@@ -668,6 +669,46 @@ def test_workbench_keeps_provider_reference_separate_when_no_result_exists(
     assert lifecycle['result'] is None
     assert lifecycle['result_verification_state'] is None
     assert lifecycle['status_label'] == 'Completion not confirmed'
+
+
+def test_workbench_marks_contradictory_registered_source_unavailable(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, _ = _create_claim_with_context(
+        client, auth_headers, repository, key_suffix='invalid-registered-source'
+    )
+    recorded_at = now_utc()
+    repository.save_external_task(
+        ExternalTaskRecord(
+            task_id='tsk_invalid_registered_source',
+            claim_id=claim_id,
+            service_identity=ASSESSOR_SERVICE_IDENTITY,
+            requested_action='vehicle_damage_assessment',
+            integration_source=IntegrationSource.CONFIGURED_SERVICE,
+            status=ExternalTaskOperationStatus.PREPARED,
+            created_at=recorded_at,
+            updated_at=recorded_at,
+        ),
+        'cus_demo',
+    )
+
+    response = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/external-requests',
+        headers=staff_auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        'items': [],
+        'page': {'next_cursor': None},
+        'status': 'unavailable',
+        'limitation': (
+            'External-service lifecycle records are inconsistent and cannot be displayed safely.'
+        ),
+    }
 
 
 @pytest.mark.parametrize(

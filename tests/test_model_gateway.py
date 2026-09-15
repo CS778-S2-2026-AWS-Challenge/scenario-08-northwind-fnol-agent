@@ -1,5 +1,6 @@
 import json
 import os
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import cast
@@ -24,6 +25,17 @@ from backend.domain.configuration import (
     ConfigurationRecord,
     ConfigurationState,
     now_utc,
+)
+from backend.domain.external_service_registry import (
+    ExternalLifecycleStatus,
+    build_lifecycle_projection,
+)
+from backend.domain.external_services import (
+    ASSESSOR_REQUESTED_ACTION,
+    ASSESSOR_SERVICE_IDENTITY,
+    ExternalTaskDelivery,
+    ExternalTaskOperationStatus,
+    ExternalTaskRecord,
 )
 from backend.domain.knowledge import (
     KnowledgeChunk,
@@ -53,6 +65,8 @@ from backend.domain.models import (
     ActorType,
     AgentAction,
     AgentProposalSource,
+    AssessorRoutingResult,
+    AssessorRoutingStatus,
     AuthorityOutcome,
     Channel,
     ContentsItem,
@@ -63,6 +77,7 @@ from backend.domain.models import (
     FormSource,
     FormStatus,
     FraudSignal,
+    IntegrationSource,
     NeededFor,
     ResponsibleParty,
     StructuredFormField,
@@ -1937,6 +1952,7 @@ def submit_model_message(
     protocol: str,
     message_text: str = 'A synthetic rear-end incident.',
     tools: bool = False,
+    repository_setup: Callable[[FixtureRepository, str], None] | None = None,
 ) -> tuple[httpx.Response, FixtureRepository, WorkingClaim, str, str]:
     registry = ModelGatewayRegistry()
     registry.register(protocol, lambda _config: gateway)
@@ -1958,6 +1974,8 @@ def submit_model_message(
         assert created.status_code == 201
         claim_id = created.json()['claim']['claim_id']
         session_id = created.json()['session']['session_id']
+        if repository_setup is not None:
+            repository_setup(repository, claim_id)
         before_claim = repository.get_claim(claim_id, 'cus_demo')
         assert before_claim is not None
         response = client.post(
@@ -1965,7 +1983,7 @@ def submit_model_message(
             headers={
                 **headers,
                 'Idempotency-Key': f'{protocol}-message',
-                'If-Match': '1',
+                'If-Match': str(before_claim.revision),
             },
             json={
                 'client_message_id': f'{protocol}-client-message',
@@ -2279,6 +2297,7 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
     assert set(model_context) == {
         'branch',
         'claim',
+        'external_services',
         'message_text',
         'evidence_reference_count',
         'attached_evidence',
@@ -2291,6 +2310,7 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
         'conversation_history',
         'field_value_contracts',
     }
+    assert model_context['external_services'] == []
     assert model_context['branch'] is None
     assert model_context['evidence_reference_count'] == 0
     assert model_context['attached_evidence'] == []
@@ -2367,6 +2387,123 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
         'total_tokens': 40,
         'latency_ms': operation.result['latency_ms'],
     }
+
+
+def test_gateway_agent_receives_only_bounded_external_lifecycle_context() -> None:
+    gateway = StaticGateway(ModelResponse(structured_output=_model_proposal_output()))
+    lifecycle = build_lifecycle_projection(
+        service_identity='vehicle_damage_assessment_routing',
+        operation_status=ExternalLifecycleStatus.UNKNOWN_OUTCOME,
+    )
+
+    GatewayAgent(gateway).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim(),
+            session_id='ses-external-context',
+            trigger_message_id='msg-external-context',
+            message_text='Did the assessor receive the request?',
+            evidence_refs=[],
+            external_services=(lifecycle,),
+        )
+    )
+
+    assert gateway.last_request is not None
+    model_content = gateway.last_request.messages[1].content
+    assert model_content is not None
+    model_context = json.loads(model_content)
+    assert model_context['external_services'] == [lifecycle.model_dump(mode='json')]
+    serialised_context = json.dumps(model_context['external_services'])
+    assert 'provider_reference' not in serialised_context
+    assert 'delivery_evidence' not in serialised_context
+    assert 'staff_meaning' not in serialised_context
+
+
+def test_message_turn_persists_selected_external_lifecycle_coordinates() -> None:
+    def seed_external_task(repository: FixtureRepository, claim_id: str) -> None:
+        timestamp = datetime(2026, 9, 15, 1, 0, tzinfo=UTC)
+        repository.save_external_task(
+            ExternalTaskRecord(
+                task_id='task-runtime-context',
+                claim_id=claim_id,
+                service_identity=ASSESSOR_SERVICE_IDENTITY,
+                requested_action=ASSESSOR_REQUESTED_ACTION,
+                integration_source=IntegrationSource.FIXTURE,
+                status=ExternalTaskOperationStatus.ACCEPTED,
+                delivery=ExternalTaskDelivery.SUBMITTED,
+                delivery_evidence='Controlled simulation acknowledgement.',
+                provider_reference='simulation-reference',
+                created_at=timestamp,
+                updated_at=timestamp,
+            ),
+            'cus_demo',
+        )
+        claim = repository.get_claim_internal(claim_id)
+        assert claim is not None
+        repository.save_claim(
+            claim.model_copy(
+                update={
+                    'revision': claim.revision + 1,
+                    'assessor_routing': AssessorRoutingResult(
+                        routing_status=AssessorRoutingStatus.ASSIGNED,
+                        assessor_reference='simulation-reference',
+                        queue_reference='queue-runtime-context',
+                        next_step='Await the simulated assessment.',
+                    ),
+                    'assessor_routing_fingerprint': 'runtime-context-fingerprint',
+                }
+            ),
+            expected_revision=claim.revision,
+        )
+
+    gateway = RuntimeSequenceGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='external-lifecycle-read',
+                        name='claim.read',
+                        arguments={},
+                    )
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output=_runtime_model_output(),
+            ),
+        ]
+    )
+    response, repository, _before_claim, claim_id, _session_id = submit_model_message(
+        gateway,
+        protocol='external_lifecycle_evidence',
+        tools=True,
+        repository_setup=seed_external_task,
+    )
+
+    assert response.status_code == 200, response.text
+    model_context = json.loads(gateway.requests[-1].messages[1].content or '{}')
+    assert model_context['external_services'][0]['operation_status'] == 'assigned'
+    assert model_context['external_services'][0]['status_label'] == 'Assessor assigned'
+    runtime_turn = repository.get_runtime_turn_for_trigger(
+        claim_id,
+        response.json()['claimant_message']['message_id'],
+        'cus_demo',
+    )
+    assert runtime_turn is not None
+    assert runtime_turn.turn_plan.registry_versions == {
+        'external_service_lifecycle': 'external-service-lifecycle.v1'
+    }
+    assert [
+        item.model_dump(mode='json') for item in runtime_turn.turn_plan.external_lifecycle_context
+    ] == [
+        {
+            'registry_version': 'external-service-lifecycle.v1',
+            'service_identity': ASSESSOR_SERVICE_IDENTITY,
+            'operation_status': 'assigned',
+            'result_status': None,
+            'result_verification': None,
+        }
+    ]
 
 
 def test_gateway_agent_receives_bounded_branch_context() -> None:

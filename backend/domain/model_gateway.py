@@ -5,6 +5,7 @@ from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from backend.domain.external_service_registry import ExternalServiceLifecycleProjection
 from backend.domain.models import (
     AgentAction,
     AssertionRelation,
@@ -253,6 +254,9 @@ class ModelTurnContext(ModelContract):
     conversation_history: list[ModelProvenanceMessage] = Field(default_factory=list)
     field_value_contracts: dict[str, dict[str, Any]] = Field(default_factory=dict)
     branch: ModelBranchContext | None = None
+    external_services: list[ExternalServiceLifecycleProjection] = Field(
+        default_factory=list, max_length=8
+    )
     knowledge_status: Literal[
         'not_requested', 'evidence_found', 'no_evidence', 'timeout', 'unavailable'
     ] = 'not_requested'

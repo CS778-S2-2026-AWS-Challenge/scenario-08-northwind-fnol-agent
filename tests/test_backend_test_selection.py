@@ -63,6 +63,33 @@ def test_branch_registry_contract_test_runs_the_focused_suite() -> None:
     assert selection.tests == ('tests/test_branch_registry.py',)
 
 
+def test_pytest_suffix_test_module_runs_the_focused_suite() -> None:
+    selection = select_tests(['tests/branch_registry_test.py'])
+
+    assert selection.mode == 'scoped'
+    assert selection.tests == ('tests/branch_registry_test.py',)
+
+
+def test_journey_run_support_changes_select_their_consumer_suite() -> None:
+    selection = select_tests(
+        [
+            'tests/journey_runs/__main__.py',
+            'tests/journey_runs/engine.py',
+            'tests/journey_runs/motor_collision.py',
+        ]
+    )
+
+    assert selection.mode == 'scoped'
+    assert selection.tests == ('tests/test_journey_runs.py',)
+
+
+def test_unknown_test_support_module_runs_the_complete_suite() -> None:
+    selection = select_tests(['tests/custom_support/builders.py'])
+
+    assert selection.mode == 'full'
+    assert selection.tests == ('tests',)
+
+
 def test_vp_mapping_document_runs_the_focused_contract_suite() -> None:
     selection = select_tests(['docs/vp-field-branch-mapping.md'])
 

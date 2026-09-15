@@ -67,6 +67,7 @@ from backend.domain.runtime import (
     ActionEnvelopeRecord,
     AgentProposalRecord,
     ExecutionPlanRecord,
+    ExternalLifecycleContextCoordinate,
     RuntimeTurnRecords,
     RuntimeWorkItemRecord,
     ToolResultRecord,
@@ -87,6 +88,10 @@ from backend.services.agent import (
     AgentTurnProvider,
     authorised_state_changes,
     validate_proposal,
+)
+from backend.services.agent_external_lifecycle import (
+    ExternalLifecycleContextError,
+    build_agent_external_lifecycle_context,
 )
 from backend.services.agent_tools import (
     read_evidence_history_for_runtime,
@@ -1780,6 +1785,19 @@ def submit_message(
         if message.visibility is not MessageVisibility.INTERNAL_ONLY
     )[-12:]
     persisted_review_signals = repository.list_review_signals(claim_id, principal.subject)
+    try:
+        external_services = build_agent_external_lifecycle_context(
+            repository,
+            claim_id,
+            claim.assessor_routing,
+        )
+    except ExternalLifecycleContextError as error:
+        raise ApiError(
+            status_code=503,
+            code='EXTERNAL_LIFECYCLE_CONTEXT_UNAVAILABLE',
+            message='The external-service lifecycle context cannot be represented safely.',
+            retryable=error.retryable,
+        ) from error
     agent_context = AgentTurnContext(
         claim=claim,
         session_id=session_id,
@@ -1806,6 +1824,7 @@ def submit_message(
             )
         ),
         conversation_messages=conversation_messages,
+        external_services=external_services,
     )
     proposal = agent.propose_turn(agent_context)
     if runtime_policy is not None:
@@ -2336,6 +2355,21 @@ def submit_message(
         conversation_moves=['acknowledge', 'collect_or_confirm_facts'],
         candidate_fields=sorted({change.field_code for change in proposal.form_changes}),
         tool_requests=list(proposal.required_tools),
+        registry_versions=(
+            {'external_service_lifecycle': agent_context.external_services[0].registry_version}
+            if agent_context.external_services
+            else {}
+        ),
+        external_lifecycle_context=[
+            ExternalLifecycleContextCoordinate(
+                registry_version=item.registry_version,
+                service_identity=item.service_identity,
+                operation_status=item.operation_status,
+                result_status=item.result_status,
+                result_verification=item.result_verification,
+            )
+            for item in agent_context.external_services
+        ],
         runtime_directive=runtime_directive,
         limitations=list(
             dict.fromkeys(
