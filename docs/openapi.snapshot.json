@@ -3085,10 +3085,25 @@
             "title": "Claim Revision",
             "type": "integer"
           },
+          "execution_boundary": {
+            "enum": [
+              "claimant_api",
+              "external_service",
+              "conversation"
+            ],
+            "title": "Execution Boundary",
+            "type": "string"
+          },
           "projection_version": {
             "const": "v1",
             "default": "v1",
             "title": "Projection Version",
+            "type": "string"
+          },
+          "registry_version": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Registry Version",
             "type": "string"
           },
           "required_inputs": {
@@ -3103,6 +3118,12 @@
             "minLength": 1,
             "title": "Target Ref",
             "type": "string"
+          },
+          "visibility": {
+            "const": "claimant",
+            "default": "claimant",
+            "title": "Visibility",
+            "type": "string"
           }
         },
         "required": [
@@ -3111,7 +3132,9 @@
           "action_id",
           "target_ref",
           "available",
-          "claim_revision"
+          "claim_revision",
+          "registry_version",
+          "execution_boundary"
         ],
         "title": "ClaimantPrimaryAction",
         "type": "object"
@@ -6591,6 +6614,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/DynamicFormProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "primary_action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantPrimaryAction"
               },
               {
                 "type": "null"

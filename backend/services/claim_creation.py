@@ -104,6 +104,7 @@ def create_claim_from_confirmed_report(
             and recovered_decision.action is AgentAction.CREATE_CLAIM
             and recovered_decision.authority.outcome is AuthorityOutcome.AUTHORISED
         ):
+            external_service_action = claimant_assessor_action(repository, claim)
             response = ClaimCreationResponse(
                 claim_id=claim_id,
                 revision=claim.revision,
@@ -115,13 +116,13 @@ def create_claim_from_confirmed_report(
                     customer_next_step=claim.customer_next_step,
                 ),
                 external_claim=claim.external_claim,
-                external_service_action=claimant_assessor_action(repository, claim),
+                external_service_action=external_service_action,
                 customer_next_step=claim.customer_next_step,
                 primary_action=project_claimant_primary_action(
                     claim_id=claim_id,
                     claim_revision=claim.revision,
                     next_step=claim.customer_next_step,
-                    external_service_action=claimant_assessor_action(repository, claim),
+                    external_service_action=external_service_action,
                 ),
             )
             repository.save_idempotency(
@@ -285,18 +286,19 @@ def create_claim_from_confirmed_report(
             customer_reason=decision.customer_reason,
             customer_next_step=updated.customer_next_step,
         )
+        external_service_action = claimant_assessor_action(repository, updated)
         live_response = ClaimCreationResponse(
             claim_id=claim_id,
             revision=updated.revision,
             decision=claimant_decision,
             external_claim=result,
-            external_service_action=claimant_assessor_action(repository, updated),
+            external_service_action=external_service_action,
             customer_next_step=updated.customer_next_step,
             primary_action=project_claimant_primary_action(
                 claim_id=claim_id,
                 claim_revision=updated.revision,
                 next_step=updated.customer_next_step,
-                external_service_action=claimant_assessor_action(repository, updated),
+                external_service_action=external_service_action,
             ),
         )
         repository.save_idempotency(

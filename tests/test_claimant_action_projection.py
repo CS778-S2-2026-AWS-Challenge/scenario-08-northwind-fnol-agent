@@ -1,3 +1,4 @@
+from backend.domain.agent_action_registry import action_contract
 from backend.domain.models import (
     AssessorRoutingResult,
     AssessorRoutingStatus,
@@ -6,7 +7,10 @@ from backend.domain.models import (
     CustomerNextStep,
     ResponsibleParty,
 )
-from backend.services.claimant_action_projection import project_claimant_primary_action
+from backend.services.claimant_action_projection import (
+    CLAIMANT_ACTION_REGISTRY_VERSION,
+    project_claimant_primary_action,
+)
 
 
 def next_step(status: str, required_items: list[str] | None = None) -> CustomerNextStep:
@@ -52,13 +56,17 @@ def test_external_service_is_the_authoritative_primary_action() -> None:
     )
 
     assert projection.action_type == 'external_service'
-    assert projection.action_code == 'external_service.request'
+    assert projection.action_code == 'external.prepare_request'
     assert projection.action_id == 'external-service:vehicle_damage_assessment_routing'
     assert projection.target_ref == 'vehicle_damage_assessment_routing'
     assert projection.available is True
     assert projection.required_inputs == ['claimant_consent']
     assert projection.claim_revision == 7
+    assert projection.registry_version == CLAIMANT_ACTION_REGISTRY_VERSION
+    assert projection.visibility == 'claimant'
+    assert projection.execution_boundary == 'external_service'
     assert projection.projection_version == 'v1'
+    assert action_contract(projection.action_code).action_code == projection.action_code
 
 
 def test_ready_to_create_projects_claim_creation_action() -> None:
@@ -87,9 +95,23 @@ def test_other_next_steps_are_non_actionable_conversation_projection() -> None:
     )
 
     assert projection.action_type == 'conversation'
-    assert projection.action_code == 'conversation.next_step'
+    assert projection.action_code == 'conversation.present_options'
     assert projection.action_id == 'customer-next-step:more_information_needed'
     assert projection.target_ref == 'clm_3'
     assert projection.available is False
     assert projection.required_inputs == ['property.address']
     assert projection.claim_revision == 4
+    assert projection.execution_boundary == 'conversation'
+
+
+def test_every_claimant_projection_action_resolves_in_authoritative_registry() -> None:
+    for action_code in {
+        'conversation.present_options',
+        'claim.create',
+        'external.prepare_request',
+        'external.submit_request',
+        'external.track_request',
+        'external.retry_request',
+        'external.reconcile_response',
+    }:
+        assert action_contract(action_code).action_code == action_code

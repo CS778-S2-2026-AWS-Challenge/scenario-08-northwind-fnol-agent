@@ -1325,12 +1325,19 @@ def confirm_form_fields(
         updated_claim,
         confirmed_fields,
     )
+    external_service_action = claimant_assessor_action(repository, updated_claim)
     response = FormConfirmationResponse(
         claim_id=claim_id,
         revision=updated_claim.revision,
         confirmed_fields=claimant_confirmed_fields,
         confirmed_contents_items=_claimant_contents_items(repository, updated_claim),
         customer_next_step=next_step,
+        primary_action=project_claimant_primary_action(
+            claim_id=updated_claim.claim_id,
+            claim_revision=updated_claim.revision,
+            next_step=next_step,
+            external_service_action=external_service_action,
+        ),
         dynamic_form=claimant_dynamic_form_projection(repository, updated_claim),
     )
     repository.save_idempotency(

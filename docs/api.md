@@ -649,14 +649,18 @@ The canonical backend record has these fields. API projections omit fields the c
 `primary_action` is the authoritative claimant action projection. It is additive to
 `customer_next_step` and `external_service_action`, which remain available for their existing
 contracts. Its `action_type` is `claim_creation`, `external_service`, or `conversation`;
-`action_code` is the stable registered action code; `action_id` is the stable identity for the
-action instance; and `target_ref` identifies the Claim or registered external service. `available`
-is the backend decision that the action may currently be presented as actionable. `required_inputs`
-contains the backend-owned input identifiers still needed before that action can be completed.
-`claim_revision` is the Claim revision used to derive the projection and `projection_version` is
-currently `v1`. The backend emits exactly one projection and gives external-service state
-precedence over Claim creation and conversation continuation; the frontend must not reconstruct
-or override this ordering. A projection refresh is required whenever its `claim_revision` changes.
+`action_code` resolves in the published Agent action registry (`claim.create`, the applicable
+`external.*` lifecycle operation, or `conversation.present_options`); `action_id` is the stable
+identity for the action instance; and `target_ref` identifies the Claim or registered external
+service. `available` is the backend decision that the action may currently be presented as
+actionable. `required_inputs` contains the backend-owned input identifiers still needed before
+that action can be completed. `registry_version`, `visibility`, and `execution_boundary` identify
+the registry contract, claimant-safe visibility, and server-side operation boundary. `claim_revision`
+is the Claim revision used to derive the projection and `projection_version` is currently `v1`.
+The backend emits exactly one projection and gives external-service state precedence over Claim
+creation and conversation continuation; the frontend must not reconstruct or override this
+ordering. A projection refresh is required whenever its `claim_revision` changes. Form confirmation
+responses include the same projection and preserve it in idempotent replay payloads.
 | `created_at` | timestamp | Yes | Server-generated creation time |
 | `updated_at` | timestamp | Yes | Server-generated last material update time |
 
@@ -1559,7 +1563,9 @@ Request:
 }
 ```
 
-All fields must exist and be confirmable. Response `200` returns the new claim revision, confirmed fields, any new decision, and the current customer next step.
+All fields must exist and be confirmable. Response `200` returns the new claim revision, confirmed
+fields, any new decision, the current customer next step, and the authoritative `primary_action`
+for that same revision. An idempotent replay returns the stored complete response.
 
 When all controlled intake fields are confirmed, `customer_next_step.status` becomes
 `ready_to_create` and `workflow_state` becomes `ready_for_next`. A later material edit that makes

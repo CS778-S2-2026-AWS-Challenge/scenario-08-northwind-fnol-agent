@@ -227,6 +227,8 @@ def test_explicit_human_request_preserves_confirmed_context(
         revision=int(str(turn['claim_revision'])),
     )
     assert continued['decision'] is None
+    assert continued['primary_action']['claim_revision'] == continued['claim_revision']
+    assert continued['primary_action']['action_code'] == 'conversation.present_options'
     stored_continued = repository.get_message(
         claim_id,
         session_id,

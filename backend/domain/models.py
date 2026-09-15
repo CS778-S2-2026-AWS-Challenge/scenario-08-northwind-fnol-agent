@@ -437,6 +437,9 @@ class ClaimantPrimaryAction(ContractModel):
     available: bool
     required_inputs: list[str] = Field(default_factory=list)
     claim_revision: int = Field(ge=1)
+    registry_version: str = Field(min_length=1, max_length=40)
+    visibility: Literal['claimant'] = 'claimant'
+    execution_boundary: Literal['claimant_api', 'external_service', 'conversation']
     projection_version: Literal['v1'] = 'v1'
 
 
@@ -1925,6 +1928,7 @@ class FormConfirmationResponse(ContractModel):
     confirmed_contents_items: list[ClaimantContentsItem] = Field(default_factory=list)
     decision: ClaimantDecision | None = None
     customer_next_step: CustomerNextStep
+    primary_action: ClaimantPrimaryAction | None = None
     dynamic_form: 'DynamicFormProjection | None' = None
 
 
