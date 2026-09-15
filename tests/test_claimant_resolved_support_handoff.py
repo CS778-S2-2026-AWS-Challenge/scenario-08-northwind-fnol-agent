@@ -97,6 +97,9 @@ def test_claimant_detail_projects_only_latest_resolved_support_handoff(
     assert projection == second.json()['resolved_support_handoff']
     assert projection['handoff_id'] == handoff_id
     assert projection['type'] == HandoffType.HUMAN_SUPPORT.value
+    assert projection['status'] == 'resolved'
+    assert projection['completed_at']
+    assert projection['customer_update']
     assert projection['resolution_event_id'] == action_id
     assert (
         'resolved_support_handoff'
