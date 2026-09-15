@@ -59,6 +59,7 @@ export default function WorkbenchPage() {
   const [agentOpen, setAgentOpen] = useState(false)
   const [agentSessionId, setAgentSessionId] = useState(null)
   const [revisionNotice, setRevisionNotice] = useState(null)
+  const [externalActionNotice, setExternalActionNotice] = useState(null)
   const isConversations = location.pathname === '/workbench/conversations' || location.pathname.startsWith('/workbench/conversations/')
   const isAgentRoute = Boolean(routeAgentSessionId)
   const selectedSessionId = new URLSearchParams(location.search).get('session')
@@ -935,6 +936,10 @@ export default function WorkbenchPage() {
         }
       }
       if (mutationSucceeded) {
+        setExternalActionNotice(externalActionRecoveryNotice(
+          previous.claim_id,
+          projectedAction.target_ref,
+        ))
         throw externalActionReadbackError(externalReadbackError || error)
       }
       if (externalReadbackError) {
@@ -947,8 +952,39 @@ export default function WorkbenchPage() {
       try {
         await loadSectionResources(previous.claim_id, 'external-services', { propagateError: true })
       } catch (error) {
+        setExternalActionNotice(externalActionRecoveryNotice(
+          previous.claim_id,
+          projectedAction.target_ref,
+        ))
         throw externalActionReadbackError(error)
       }
+    }
+    setExternalActionNotice((current) => (
+      current?.claimId === previous.claim_id
+        && current?.taskId === projectedAction.target_ref
+        ? null
+        : current
+    ))
+  }
+
+  async function refreshExternalActionContext() {
+    const notice = externalActionNotice
+    if (!notice || currentClaimIdRef.current !== notice.claimId) return
+
+    const [claimReadback, externalReadback] = await Promise.allSettled([
+      loadDetail(notice.claimId, { propagateError: true }),
+      loadSectionResources(notice.claimId, 'external-services', { propagateError: true }),
+    ])
+    if (
+      claimReadback.status === 'fulfilled'
+      && externalReadback.status === 'fulfilled'
+      && currentClaimIdRef.current === notice.claimId
+    ) {
+      setExternalActionNotice((current) => (
+        current?.claimId === notice.claimId && current?.taskId === notice.taskId
+          ? null
+          : current
+      ))
     }
   }
 
@@ -1073,7 +1109,7 @@ export default function WorkbenchPage() {
             <section className="workspace-region">
               <ClaimTabs tabs={tabs.tabs} activeId={claimId || tabs.activeId} onActivate={activateTab} onClose={closeTab} />
               <div id="open-claim-panel" className="open-claim-panel" role="tabpanel" aria-labelledby={claimId ? `open-claim-tab-${claimId}` : undefined} tabIndex={0}>
-                <ClaimWorkspace detail={detail} resources={resources} loading={detailLoading} stale={detailStale} error={detailError} section={currentSection} draft={currentTab?.draft || ''} profile={profile} onSection={changeSection} onDraft={(draft) => claimId && tabs.update(claimId, { draft })} onRetry={() => loadDetail(claimId)} onRetrySection={() => loadSectionResources(claimId, currentSection)} onAccept={acceptHandoff} onResolve={resolveHandoff} onSignalDecision={decideSignal} onCreateAction={createStaffAction} onUpdateAction={updateStaffAction} onLoadEvidence={loadEvidence} onSend={sendMessage} onOwnershipAction={performOwnershipAction} onReopen={reopenClaim} onExternalTaskAction={performExternalTaskAction} />
+                <ClaimWorkspace detail={detail} resources={resources} loading={detailLoading} stale={detailStale} error={detailError} externalActionNotice={externalActionNotice?.claimId === claimId ? externalActionNotice : null} section={currentSection} draft={currentTab?.draft || ''} profile={profile} onSection={changeSection} onDraft={(draft) => claimId && tabs.update(claimId, { draft })} onRetry={() => loadDetail(claimId)} onRetrySection={() => loadSectionResources(claimId, currentSection)} onRetryExternalActionContext={refreshExternalActionContext} onAccept={acceptHandoff} onResolve={resolveHandoff} onSignalDecision={decideSignal} onCreateAction={createStaffAction} onUpdateAction={updateStaffAction} onLoadEvidence={loadEvidence} onSend={sendMessage} onOwnershipAction={performOwnershipAction} onReopen={reopenClaim} onExternalTaskAction={performExternalTaskAction} />
               </div>
             </section>
           </div>
@@ -1296,6 +1332,14 @@ function queueRequestFilters(filters, cursor = null) {
     ...(filters.updatedAfter ? { updated_after: filters.updatedAfter } : {}),
     limit: 25,
     ...(cursor ? { cursor } : {}),
+  }
+}
+
+function externalActionRecoveryNotice(claimId, taskId) {
+  return {
+    claimId,
+    taskId,
+    message: `The action for external task ${taskId} may have completed. Its outcome is not confirmed. Do not submit it again until Claim and External Services state has been refreshed.`,
   }
 }
 
