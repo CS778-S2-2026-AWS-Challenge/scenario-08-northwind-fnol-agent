@@ -275,7 +275,7 @@ export default function WorkbenchPage() {
     }
   }, [applyDetailProjection, token])
 
-  const loadResource = useCallback(async (name, ownerId, loader) => {
+  const loadResource = useCallback(async (name, ownerId, loader, { propagateError = false } = {}) => {
     const requestId = (resourceRequestIds.current[name] || 0) + 1
     resourceRequestIds.current[name] = requestId
     setResources((current) => ({
@@ -301,6 +301,7 @@ export default function WorkbenchPage() {
           error,
         },
       }))
+      if (propagateError) throw error
       return null
     }
   }, [])
@@ -379,7 +380,7 @@ export default function WorkbenchPage() {
     )
   }, [loadResource, token])
 
-  const loadSectionResources = useCallback(async (id, section) => {
+  const loadSectionResources = useCallback(async (id, section, { propagateError = false } = {}) => {
     const loaders = {
       summary: [],
       fields: [['fields', () => workbenchApi.fields(token, id)]],
@@ -400,7 +401,9 @@ export default function WorkbenchPage() {
       )
       return
     }
-    await Promise.all((loaders[section] || []).map(([name, loader]) => loadResource(name, id, loader)))
+    await Promise.all((loaders[section] || []).map(([name, loader]) => (
+      loadResource(name, id, loader, { propagateError })
+    )))
   }, [
     detail?.active_session_id,
     loadConversationResources,
@@ -698,7 +701,7 @@ export default function WorkbenchPage() {
     }, { replace: true })
   }
 
-  async function runClaimMutation(label, operation) {
+  async function runClaimMutation(label, operation, { strictReadback = false } = {}) {
     const previous = detailRef.current
     if (!previous) throw new Error('The current Claim projection is unavailable. Refresh the Claim before acting.')
     const mutationRequestId = ++detailRequestId.current
@@ -741,7 +744,10 @@ export default function WorkbenchPage() {
       throw error
     }
     if (currentClaimIdRef.current === previous.claim_id) {
-      await Promise.all([loadDetail(previous.claim_id), loadClaims()])
+      await Promise.all([
+        loadDetail(previous.claim_id, { propagateError: strictReadback }),
+        loadClaims(),
+      ])
     } else {
       await loadClaims()
     }
@@ -877,8 +883,9 @@ export default function WorkbenchPage() {
       throw new Error('This external-service action contains an input that was not published by the server. Refresh the Claim before acting.')
     }
 
+    let mutationSucceeded = false
     try {
-      await runClaimMutation(projectedAction.label, (current) => {
+      await runClaimMutation(projectedAction.label, async (current) => {
         const currentAction = findProjectedAction(
           current.allowed_actions,
           projectedAction.action_code,
@@ -891,37 +898,57 @@ export default function WorkbenchPage() {
         ) {
           throw new Error('The projected external-service action changed before it could be submitted. Refresh the Claim and review the current action.')
         }
+
+        let result
         if (currentAction.action_code === 'external.accept_review') {
-          return workbenchApi.acceptExternalTaskReview(
+          result = await workbenchApi.acceptExternalTaskReview(
             token,
             current.claim_id,
             currentAction.target_ref,
             current.revision,
             payload,
           )
-        }
-        if (currentAction.action_code === 'external.reconcile_response') {
+        } else if (currentAction.action_code === 'external.reconcile_response') {
           if (Object.keys(payload).length) {
             throw new Error('The reconciliation action does not accept browser-supplied fields. Refresh the Claim before acting.')
           }
-          return workbenchApi.reconcileExternalTaskResponse(
+          result = await workbenchApi.reconcileExternalTaskResponse(
             token,
             current.claim_id,
             currentAction.target_ref,
             current.revision,
           )
+        } else {
+          throw new Error('This projected external-service action is not connected in the current Workbench build. Refresh after the client is updated.')
         }
-        throw new Error('This projected external-service action is not connected in the current Workbench build. Refresh after the client is updated.')
-      })
+
+        mutationSucceeded = true
+        return result
+      }, { strictReadback: true })
     } catch (error) {
+      let externalReadbackError = null
       if (currentClaimIdRef.current === previous.claim_id) {
-        await loadSectionResources(previous.claim_id, 'external-services')
+        try {
+          await loadSectionResources(previous.claim_id, 'external-services', { propagateError: true })
+        } catch (readbackError) {
+          externalReadbackError = readbackError
+        }
+      }
+      if (mutationSucceeded) {
+        throw externalActionReadbackError(externalReadbackError || error)
+      }
+      if (externalReadbackError) {
+        error.message = `${error.message} External-service state could not be refreshed, so the current outcome remains unconfirmed. Do not submit the action again until the projections are available.`
       }
       throw error
     }
 
     if (currentClaimIdRef.current === previous.claim_id) {
-      await loadSectionResources(previous.claim_id, 'external-services')
+      try {
+        await loadSectionResources(previous.claim_id, 'external-services', { propagateError: true })
+      } catch (error) {
+        throw externalActionReadbackError(error)
+      }
     }
   }
 
@@ -1270,6 +1297,16 @@ function queueRequestFilters(filters, cursor = null) {
     limit: 25,
     ...(cursor ? { cursor } : {}),
   }
+}
+
+function externalActionReadbackError(cause) {
+  const error = new Error(
+    'The external-service action was submitted, but authoritative readback did not complete. '
+    + 'The outcome is not confirmed. Do not submit the action again until both Claim and External Services can be refreshed.',
+  )
+  error.code = 'READBACK_UNAVAILABLE'
+  error.cause = cause
+  return error
 }
 
 function queueFilterKey(filters) {
