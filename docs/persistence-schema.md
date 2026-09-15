@@ -624,7 +624,12 @@ Evidence record or protected object.
 - An external task uses an opaque `tsk_` identifier and remains separate from Claim State. Its
   integration source, status, and timestamps are stored with the claim association. A
   task keeps its original claim, service, action, source class, and creation time across status
-  updates, and a changed state must advance `updated_at` so a stale concurrent write fails. A
+  updates, and a changed state must advance `updated_at` so a stale concurrent write fails. Before
+  Fixture or MongoDB accepts a new or changed task, its service identity must exist in the
+  canonical External Service Lifecycle Registry, permit `ExternalTask` persistence, allow the
+  persisted status, and agree with the request provenance derived from integration source and
+  delivery. Historical unknown records remain readable as legacy/unavailable projections, but
+  cannot be created or advanced through the repository write contract. A
   task-to-evidence link is accepted only when the named Evidence record exists under the same
   claim and customer. It is immutable for `(claim_id, evidence_id)` and cannot name a task on
   another claim; repeated material cannot acquire a second external origin.

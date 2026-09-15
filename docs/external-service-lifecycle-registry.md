@@ -55,6 +55,10 @@ Claim/Evidence write-back record.
   request. Workbench returns an explicit unavailable resource when stored records
   contradict this boundary; it does not guess, expose the inconsistent row, or turn
   the whole request into a generic server error.
+- New `ExternalTaskRecord` writes must name a registered capability that permits
+  tasks, use one of that capability's persisted statuses, and agree with its
+  provenance. Historical unknown or contradictory records remain readable only as
+  explicit legacy or unavailable projections.
 - `submitting` is an observable transient status. It is declared separately
   from persisted/projectable task statuses and never appears in an
   `ExternalTaskRecord` projection.
@@ -82,7 +86,9 @@ The machine-readable definitions include claimant, staff, and Agent meanings,
 terminality, allowed next transitions, state invariants, transition
 preconditions, recovery, and Claim State effects. Consumer surfaces should
 retrieve these definitions rather than defining local labels or transitions.
-This PR exposes the registry to backend consumers; browser-facing consumers
-must use a later API projection and must not import Python modules directly.
+Claimant and Workbench API projections expose the registry version, canonical
+lifecycle status, catalogue reference, capability provenance, access form,
+limitation, effective label, pending owner, and next action. Browser consumers
+use those fields and must not import Python modules or recreate the mappings.
 Manual entries explicitly set `uses_external_task=false` and therefore do not
 create a synthetic task or enter the consent-gated Northwind-send lifecycle.

@@ -8,6 +8,7 @@ from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.evidence import is_in_conflict, unresolved_conflicts
 from backend.domain.external_service_registry import (
+    ExternalCapabilityProvenance,
     ExternalLifecycleStatus,
     InvalidExternalLifecycleTransition,
     assert_projection_provenance,
@@ -2276,6 +2277,10 @@ def _external_lifecycle(
         owner = WorkbenchResponsibility(canonical_projection.pending_owner)
         next_action = canonical_projection.next_action
         attention = canonical_projection.needs_attention
+        registry_version = canonical_projection.registry_version
+        lifecycle_status = canonical_projection.operation_status
+        capability_provenance = canonical_projection.provenance
+        access_form = canonical_projection.access_form
     else:
         label = projection.label
         detail = projection.detail
@@ -2283,6 +2288,10 @@ def _external_lifecycle(
         owner = WorkbenchResponsibility(projection.pending_owner)
         next_action = projection.next_action
         attention = projection.needs_attention
+        registry_version = None
+        lifecycle_status = None
+        capability_provenance = ExternalCapabilityProvenance.UNAVAILABLE
+        access_form = None
         if result is not None and status is ExternalTaskOperationStatus.ACCEPTED:
             verification = result.verification.value
             owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
@@ -2313,7 +2322,11 @@ def _external_lifecycle(
     return WorkbenchExternalLifecycle(
         stakeholder='external_party',
         service=task.service_identity,
+        registry_version=registry_version,
+        lifecycle_status=lifecycle_status,
         catalogue_reference=projection_catalogue,
+        capability_provenance=capability_provenance,
+        access_form=access_form,
         provenance=projection_provenance,
         request_type=task.requested_action,
         authority_state='recorded' if request is not None else 'not_recorded',
