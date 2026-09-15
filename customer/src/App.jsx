@@ -1588,17 +1588,6 @@ function App() {
         }
       }
       setAccount(await getAuthenticatedAccount())
-      if (!claim) {
-        const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null, modelProfileId: selectedModel })
-        rememberClaimInHistory(created.claim)
-        setClaim(created.claim)
-        setSessionId(created.session.session_id)
-        if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
-        setForm(created.claim.form)
-        setContentsItems(created.claim.contents_items || [])
-        setDynamicForm(created.claim.dynamic_form || null)
-        setNextStep(created.claim.customer_next_step)
-      }
       setWorkspaceActive(true)
       setWorkspaceView('chat'); setPage('home'); setAuthStatus('idle')
     } catch (requestError) {
@@ -1638,17 +1627,6 @@ function App() {
         }
       }
       setAccount(await getAuthenticatedAccount())
-      if (!claim) {
-        const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null, modelProfileId: selectedModel })
-        rememberClaimInHistory(created.claim)
-        setClaim(created.claim)
-        setSessionId(created.session.session_id)
-        if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
-        setForm(created.claim.form)
-        setContentsItems(created.claim.contents_items || [])
-        setDynamicForm(created.claim.dynamic_form || null)
-        setNextStep(created.claim.customer_next_step)
-      }
       setWorkspaceActive(true)
       setWorkspaceView('chat'); setPage('home'); setAuthStatus('idle')
     } catch (requestError) {

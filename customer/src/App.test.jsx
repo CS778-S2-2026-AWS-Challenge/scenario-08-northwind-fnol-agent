@@ -209,6 +209,50 @@ describe('claimant intake projection', () => {
     expect(screen.queryByRole('listbox', { name: 'Model' })).not.toBeInTheDocument()
   })
 
+  it('returns from login to an empty local workspace without creating a Claim', async () => {
+    const user = userEvent.setup()
+    api.loginClaimant.mockResolvedValue({ access_token: 'claimant-token' })
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.type(screen.getByLabelText('Email address'), 'test@example.test')
+    await user.type(screen.getByLabelText('Password'), 'correct-horse')
+    await user.click(screen.getAllByRole('button', { name: 'Log in' }).at(-1))
+
+    expect(await screen.findByPlaceholderText('Tell us what happened…')).toBeVisible()
+    expect(api.createClaim).not.toHaveBeenCalled()
+    expect(api.promoteAnonymousClaim).not.toHaveBeenCalled()
+    expect(screen.queryByText(initialClaim.claim_id)).not.toBeInTheDocument()
+  })
+
+  it('returns from registration to an empty local workspace without creating a Claim', async () => {
+    const user = userEvent.setup()
+    api.registerClaimant.mockResolvedValue({ access_token: 'claimant-token' })
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Create an account' }))
+    await user.type(screen.getByLabelText('Your name'), 'Test claimant')
+    await user.type(screen.getByLabelText('Email address'), 'test@example.test')
+    await user.type(screen.getByLabelText('Password'), 'correct-horse')
+    await user.type(screen.getByLabelText('Confirm password'), 'correct-horse')
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
+
+    expect(await screen.findByPlaceholderText('Tell us what happened…')).toBeVisible()
+    expect(api.createClaim).not.toHaveBeenCalled()
+    expect(api.promoteAnonymousClaim).not.toHaveBeenCalled()
+    expect(screen.queryByText(initialClaim.claim_id)).not.toBeInTheDocument()
+  })
+
   it('shows one server-confirmed delivery failure with retry guidance', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage.mockRejectedValue(Object.assign(
