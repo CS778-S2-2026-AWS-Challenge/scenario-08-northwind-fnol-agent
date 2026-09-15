@@ -1398,6 +1398,14 @@ class StaffActionMutationResponse(ContractModel):
     customer_update: CustomerUpdateRecord | None = None
 
 
+class ExternalTaskReconciliationResponse(ContractModel):
+    claim_id: str
+    task_id: str
+    revision: int = Field(ge=1)
+    routing: AssessorRoutingResult
+    staff_action: StaffActionRecord
+
+
 class SignalDecisionRequest(ContractModel):
     decision: SignalDecisionValue
     reason_codes: list[str] = Field(min_length=1, max_length=20)

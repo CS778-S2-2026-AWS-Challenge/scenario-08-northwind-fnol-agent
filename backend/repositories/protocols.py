@@ -617,6 +617,11 @@ class PersistenceRepository(ClaimRepository, Protocol):
         link: ExternalTaskEvidenceLink,
         branch_evaluation: BranchEvaluationRecord,
         customer_id: str,
+        *,
+        staff_action: StaffActionRecord | None = None,
+        idempotency: IdempotencyRecord | None = None,
+        required_staff_id: str | None = None,
+        required_staff_revision: int | None = None,
     ) -> None:
         """Atomically settle one unknown assessor request as accepted.
 
@@ -625,10 +630,15 @@ class PersistenceRepository(ClaimRepository, Protocol):
             expected_revision: Claim revision that must still be current.
             task: Existing external task advanced to accepted.
             operation: Existing assessor operation advanced to accepted.
+            request: Existing request whose dispatch is confirmed by reconciliation.
             evidence: Pending material now owed by the accepted task.
             link: Immutable task-to-evidence relationship for that material.
             branch_evaluation: Applied branch projection for the new Claim revision.
             customer_id: Customer who owns every persisted record.
+            staff_action: Optional completed Workbench action recorded with the settlement.
+            idempotency: Optional staff mutation replay record.
+            required_staff_id: Staff presence identity that must remain claimable.
+            required_staff_revision: Presence revision required by the staff mutation.
 
         Returns:
             None.

@@ -55,6 +55,7 @@ from backend.domain.models import (
     SessionStatus,
     SignalDecisionRecord,
     StaffActionRecord,
+    StaffActionStatus,
     WorkingClaim,
 )
 from backend.domain.retrieval import (
@@ -1633,6 +1634,11 @@ class MongoDBRepository:
         link: ExternalTaskEvidenceLink,
         branch_evaluation: BranchEvaluationRecord,
         customer_id: str,
+        *,
+        staff_action: StaffActionRecord | None = None,
+        idempotency: IdempotencyRecord | None = None,
+        required_staff_id: str | None = None,
+        required_staff_revision: int | None = None,
     ) -> None:
         """Atomically settle one unknown assessor operation in MongoDB.
 
@@ -1646,6 +1652,10 @@ class MongoDBRepository:
             link: Immutable relationship between the task and material.
             branch_evaluation: Applied branch projection for the new Claim revision.
             customer_id: Customer who owns every record.
+            staff_action: Optional completed reconciliation action persisted atomically.
+            idempotency: Optional staff mutation replay record persisted atomically.
+            required_staff_id: Staff identity that must remain claimable through the write.
+            required_staff_revision: Exact presence revision guarded by the transaction.
 
         Returns:
             None.
@@ -1660,6 +1670,47 @@ class MongoDBRepository:
             self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
             if claim.revision != expected_revision + 1 or claim.customer_id != customer_id:
                 raise KeyError(claim.claim_id)
+            if (staff_action is None) is not (idempotency is None):
+                raise KeyError(claim.claim_id)
+            if staff_action is not None and idempotency is not None:
+                if (
+                    required_staff_id is None
+                    or claim.assignee_id != required_staff_id
+                    or staff_action.claim_id != claim.claim_id
+                    or staff_action.assigned_to != required_staff_id
+                    or staff_action.completed_by != required_staff_id
+                    or staff_action.status is not StaffActionStatus.COMPLETED
+                    or task.task_id not in staff_action.source_refs
+                    or idempotency.actor_id != required_staff_id
+                    or idempotency.claim_id != claim.claim_id
+                    or idempotency.action_code != 'external.reconcile_response'
+                    or idempotency.target_ref != task.task_id
+                ):
+                    raise KeyError(claim.claim_id)
+                self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
+                presence_query = {
+                    '_id': self._record_id('staff_presence', required_staff_id),
+                    'record_type': 'staff_presence',
+                    'online': True,
+                    'available': True,
+                    'expires_at': {'$gt': datetime.now(UTC).isoformat()},
+                }
+                if required_staff_revision is not None:
+                    presence_query['revision'] = required_staff_revision
+                presence = self._collection.find_one(presence_query, session=mongo_session)
+                if presence is None:
+                    raise KeyError('staff_not_available')
+                guard = self._collection.update_one(
+                    {
+                        '_id': presence['_id'],
+                        'record_type': 'staff_presence',
+                        'revision': presence['revision'],
+                    },
+                    {'$inc': {'revision': 1}},
+                    session=mongo_session,
+                )
+                if guard.modified_count != 1:
+                    raise KeyError('staff_not_available')
             current_task = self._get(
                 'external_task',
                 task.task_id,
@@ -1787,6 +1838,16 @@ class MongoDBRepository:
                 claim_id=claim.claim_id,
                 session=mongo_session,
             )
+            if staff_action is not None and idempotency is not None:
+                self._put(
+                    'staff_action',
+                    staff_action.action_id,
+                    staff_action,
+                    customer_id=customer_id,
+                    claim_id=claim.claim_id,
+                    session=mongo_session,
+                )
+                self._save_idempotency(idempotency, mongo_session)
 
         self._atomic(persist)
 

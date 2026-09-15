@@ -13,7 +13,7 @@ from backend.domain.workbench import (
     WorkbenchActionInputControl,
 )
 
-WORKBENCH_ACTION_REGISTRY_VERSION = '2026-09-11.1'
+WORKBENCH_ACTION_REGISTRY_VERSION = '2026-09-15.1'
 
 
 class WorkbenchActionTargetType(StrEnum):
@@ -23,6 +23,7 @@ class WorkbenchActionTargetType(StrEnum):
     WORK_ITEM = 'work_item'
     SESSION = 'session'
     COLLABORATION_REQUEST = 'collaboration_request'
+    EXTERNAL_TASK = 'external_task'
 
 
 class WorkbenchActionPermission(StrEnum):
@@ -94,6 +95,30 @@ WORK_ITEM_TYPE_REGISTRY = {
     item.action_type: item
     for item in (
         RegisteredWorkItemType(
+            'external_result_review',
+            'External result review',
+            'Review the returned external-service result and its source evidence.',
+            'external_result_review_completed',
+            ('EXTERNAL_RESULT_REVIEWED',),
+            (),
+        ),
+        RegisteredWorkItemType(
+            'external_failure_review',
+            'External failure review',
+            'Review the terminal external-service failure and decide the safe follow-up.',
+            'external_failure_review_completed',
+            ('EXTERNAL_FAILURE_REVIEWED',),
+            (),
+        ),
+        RegisteredWorkItemType(
+            'external_reconciliation',
+            'External reconciliation',
+            'Reconcile the existing external operation before any further request.',
+            'external_reconciliation_completed',
+            ('EXTERNAL_OUTCOME_RECONCILED',),
+            (),
+        ),
+        RegisteredWorkItemType(
             'claimant_support',
             'Claimant support',
             'Continue claimant support for this Claim.',
@@ -152,6 +177,44 @@ def _input(
 WORKBENCH_ACTION_REGISTRY = {
     item.action_code: item
     for item in (
+        RegisteredWorkbenchAction(
+            'external.accept_review',
+            WorkbenchActionTargetType.EXTERNAL_TASK,
+            'Accept external-service review',
+            'Take responsibility for reviewing this exact external-service record.',
+            WorkbenchActionPermission.ANY_STAFF,
+            ConfirmationLevel.EXPLICIT,
+            'Accepting this review assigns the Claim and records staff work for this task.',
+            ('ownership.assign', 'work_item.create', 'claim.revision.advance'),
+            failure_codes=(
+                'ACCESS_DENIED',
+                'IDEMPOTENCY_CONFLICT',
+                'OWNERSHIP_CONFLICT',
+                'RESOURCE_NOT_FOUND',
+                'REVISION_CONFLICT',
+                'STAFF_NOT_AVAILABLE',
+                'VALIDATION_ERROR',
+            ),
+        ),
+        RegisteredWorkbenchAction(
+            'external.reconcile_response',
+            WorkbenchActionTargetType.EXTERNAL_TASK,
+            'Reconcile external outcome',
+            'Check the existing provider operation before any further side effect.',
+            WorkbenchActionPermission.ANY_STAFF,
+            ConfirmationLevel.EXPLICIT,
+            'This checks the existing operation identity; it does not submit a new request.',
+            ('external_task.reconcile', 'claim.revision.advance'),
+            claimant_visible_effects=('customer_next_step.update',),
+            failure_codes=(
+                'ACCESS_DENIED',
+                'DEPENDENCY_FAILED',
+                'IDEMPOTENCY_CONFLICT',
+                'INVALID_STATE_TRANSITION',
+                'RESOURCE_NOT_FOUND',
+                'REVISION_CONFLICT',
+            ),
+        ),
         RegisteredWorkbenchAction(
             'human.accept_handoff',
             WorkbenchActionTargetType.HANDOFF,
