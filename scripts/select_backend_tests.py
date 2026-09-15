@@ -20,8 +20,8 @@ TOOLING_FULL_PATHS = {
     '.github/workflows/ci.yml',
     'pyproject.toml',
     'backend/requirements-dev.txt',
-    'scripts/select_backend_tests.py',
 }
+SELECTOR_TEST_PATH = 'tests/test_backend_test_selection.py'
 TEST_SUPPORT_CONSUMERS = {
     'tests/journey_runs/': ('tests/test_journey_runs.py',),
 }
@@ -176,6 +176,7 @@ BACKEND_CONSUMER_RULES = (
             'backend/domain/agent_tool_registry.py',
             'backend/domain/branch_registry.py',
             'backend/services/agent_action_execution.py',
+            'backend/services/agent_evidence_actions.py',
             'backend/services/agent_action_mapping.py',
         ),
         (
@@ -183,9 +184,12 @@ BACKEND_CONSUMER_RULES = (
             'tests/test_agent_action_execution.py',
             'tests/test_agent_action_mapping.py',
             'tests/test_agent_action_registry.py',
+            'tests/test_agent_evidence_action_execution.py',
+            'tests/test_agent_evidence_tools.py',
             'tests/test_branch_registry.py',
             'tests/test_namespaced_runtime.py',
             'tests/test_runtime_agent_policy.py',
+            'tests/test_staff_tool_registry.py',
         ),
     ),
 )
@@ -227,6 +231,8 @@ def select_tests(changed_paths: Sequence[str], *, full: bool = False) -> TestSel
     for raw_path in paths:
         path = PurePosixPath(raw_path.replace('\\', '/'))
         path_text = path.as_posix()
+        if path_text == 'scripts/select_backend_tests.py':
+            selected.add(SELECTOR_TEST_PATH)
         if path_text == 'docs/vp-field-branch-mapping.md':
             selected.add('tests/test_branch_registry.py')
         if path_text in {'backend/requirements-dev.txt', 'pyproject.toml'}:
