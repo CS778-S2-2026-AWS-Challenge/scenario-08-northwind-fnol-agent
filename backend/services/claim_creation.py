@@ -31,6 +31,7 @@ from backend.services.agent_action_execution import (
     ClaimContextHandlerOutcome,
 )
 from backend.services.agent_action_mapping import map_claim_context_execution_to_api
+from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.external_services import claimant_assessor_action
 from backend.services.integrations import create_external_claim
 from backend.services.support import (
@@ -285,6 +286,12 @@ def create_claim_from_confirmed_report(
             external_claim=result,
             external_service_action=claimant_assessor_action(repository, updated),
             customer_next_step=updated.customer_next_step,
+            primary_action=project_claimant_primary_action(
+                claim_id=claim_id,
+                claim_revision=updated.revision,
+                next_step=updated.customer_next_step,
+                external_service_action=claimant_assessor_action(repository, updated),
+            ),
         )
         repository.save_idempotency(
             IdempotencyRecord(

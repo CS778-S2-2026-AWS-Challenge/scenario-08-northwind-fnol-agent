@@ -644,6 +644,19 @@ The canonical backend record has these fields. API projections omit fields the c
 | `external_service_consents` | array | Yes | Internal task-specific consent records; omitted from claimant projections |
 | `assessor_routing` | object | No | Provider-neutral assessor result after an authorised request succeeds |
 | `customer_next_step` | object | Yes | Claimant-safe status, responsibility, and expected timing |
+| `primary_action` | object | Yes on Claimant Claim, message, form, and creation projections | One backend-owned claimant action for the returned Claim revision; clients must not derive precedence from other fields |
+
+`primary_action` is the authoritative claimant action projection. It is additive to
+`customer_next_step` and `external_service_action`, which remain available for their existing
+contracts. Its `action_type` is `claim_creation`, `external_service`, or `conversation`;
+`action_code` is the stable registered action code; `action_id` is the stable identity for the
+action instance; and `target_ref` identifies the Claim or registered external service. `available`
+is the backend decision that the action may currently be presented as actionable. `required_inputs`
+contains the backend-owned input identifiers still needed before that action can be completed.
+`claim_revision` is the Claim revision used to derive the projection and `projection_version` is
+currently `v1`. The backend emits exactly one projection and gives external-service state
+precedence over Claim creation and conversation continuation; the frontend must not reconstruct
+or override this ordering. A projection refresh is required whenever its `claim_revision` changes.
 | `created_at` | timestamp | Yes | Server-generated creation time |
 | `updated_at` | timestamp | Yes | Server-generated last material update time |
 

@@ -427,6 +427,19 @@ class CustomerNextStep(ContractModel):
     required_items: list[str] = Field(default_factory=list)
 
 
+class ClaimantPrimaryAction(ContractModel):
+    """Authoritative claimant-safe action projection for the current revision."""
+
+    action_type: Literal['claim_creation', 'external_service', 'conversation']
+    action_code: str = Field(min_length=1, max_length=100)
+    action_id: str = Field(min_length=1, max_length=200)
+    target_ref: str = Field(min_length=1, max_length=200)
+    available: bool
+    required_inputs: list[str] = Field(default_factory=list)
+    claim_revision: int = Field(ge=1)
+    projection_version: Literal['v1'] = 'v1'
+
+
 class TemporalFactValue(ContractModel):
     """A claimant time statement without invented precision."""
 
@@ -1789,6 +1802,7 @@ class ClaimantClaim(ContractModel):
     external_service_action: ClaimantExternalServiceAction | None = None
     dynamic_form: 'DynamicFormProjection | None' = None
     customer_next_step: CustomerNextStep
+    primary_action: ClaimantPrimaryAction | None = None
     incomplete_context: ClaimantIncompleteContext | None = None
     handoff: ClaimantHandoff | None = None
     resolved_support_handoff: ClaimantResolvedSupportHandoff | None = None
@@ -1851,6 +1865,7 @@ class FormPatchResponse(ContractModel):
     revision: int
     updated_fields: dict[str, StructuredFormField]
     customer_next_step: CustomerNextStep
+    primary_action: ClaimantPrimaryAction | None = None
     dynamic_form: 'DynamicFormProjection | None' = None
 
 
@@ -1888,6 +1903,7 @@ class MessageTurnResponse(ContractModel):
     decision: ClaimantDecision | None = None
     handoff: ClaimantHandoff | None = None
     dynamic_form: 'DynamicFormProjection | None' = None
+    primary_action: ClaimantPrimaryAction | None = None
 
 
 class MessageListResponse(ContractModel):
@@ -1919,6 +1935,7 @@ class ClaimCreationResponse(ContractModel):
     external_claim: ExternalClaimResult
     external_service_action: ClaimantExternalServiceAction | None = None
     customer_next_step: CustomerNextStep
+    primary_action: ClaimantPrimaryAction | None = None
 
 
 class DemoResetResponse(ContractModel):

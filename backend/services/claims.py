@@ -67,6 +67,7 @@ from backend.services.branching import (
     build_applied_branch_evaluation,
     claimant_dynamic_form_projection,
 )
+from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.claimant_form_projection import project_claimant_form_fields
 from backend.services.evidence_visibility import claimant_visible_evidence
 from backend.services.external_services import claimant_assessor_action, claimant_next_step
@@ -300,6 +301,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
                     if customer_update is not None
                     else None,
                 )
+    next_step = claimant_next_step(repository, claim, external_service_action)
     return ClaimantClaim(
         claim_id=claim.claim_id,
         revision=claim.revision,
@@ -311,7 +313,13 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         external_claim=claim.external_claim,
         external_service_action=external_service_action,
         dynamic_form=claimant_dynamic_form_projection(repository, claim),
-        customer_next_step=claimant_next_step(repository, claim, external_service_action),
+        customer_next_step=next_step,
+        primary_action=project_claimant_primary_action(
+            claim_id=claim.claim_id,
+            claim_revision=claim.revision,
+            next_step=next_step,
+            external_service_action=external_service_action,
+        ),
         incomplete_context=_claimant_incomplete_context(repository, claim),
         handoff=handoff,
         resolved_support_handoff=resolved_support_handoff,
@@ -1137,6 +1145,12 @@ def update_form(
         revision=updated_claim.revision,
         updated_fields=claimant_updated_fields,
         customer_next_step=next_step,
+        primary_action=project_claimant_primary_action(
+            claim_id=updated_claim.claim_id,
+            claim_revision=updated_claim.revision,
+            next_step=next_step,
+            external_service_action=claimant_assessor_action(repository, updated_claim),
+        ),
         dynamic_form=claimant_dynamic_form_projection(repository, updated_claim),
     )
 

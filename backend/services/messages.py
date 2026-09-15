@@ -112,8 +112,10 @@ from backend.services.branching import (
     claimant_dynamic_form_projection,
     latest_applied_branch_evaluation,
 )
+from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.claimant_form_projection import project_claimant_form_fields
 from backend.services.evidence_visibility import default_evidence_visibility
+from backend.services.external_services import claimant_assessor_action, claimant_next_step
 from backend.services.fact_resolution import (
     provenance_messages_for_fields,
     resolve_contents_item_change,
@@ -400,6 +402,12 @@ def _message_turn_response(
         if claim is not None
         else decision.form_changes
     )
+    external_service_action = claimant_assessor_action(repository, claim) if claim else None
+    next_step = (
+        claimant_next_step(repository, claim, external_service_action)
+        if claim is not None
+        else decision.customer_next_step
+    )
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=claimant_message.session_id,
@@ -422,6 +430,16 @@ def _message_turn_response(
             else None
         ),
         dynamic_form=dynamic_form,
+        primary_action=(
+            project_claimant_primary_action(
+                claim_id=claim_id,
+                claim_revision=decision.resulting_revision,
+                next_step=next_step,
+                external_service_action=external_service_action,
+            )
+            if claim is not None
+            else None
+        ),
     )
 
 
@@ -463,6 +481,16 @@ def _namespaced_turn_response(
         decision=None,
         handoff=None,
         dynamic_form=claimant_dynamic_form_projection(repository, claim),
+        primary_action=project_claimant_primary_action(
+            claim_id=claim_id,
+            claim_revision=claim_revision,
+            next_step=claimant_next_step(
+                repository,
+                claim,
+                claimant_assessor_action(repository, claim),
+            ),
+            external_service_action=claimant_assessor_action(repository, claim),
+        ),
     )
 
 

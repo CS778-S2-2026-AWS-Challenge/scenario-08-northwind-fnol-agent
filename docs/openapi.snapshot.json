@@ -1753,6 +1753,16 @@
               }
             ]
           },
+          "primary_action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantPrimaryAction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "revision": {
             "minimum": 1.0,
             "title": "Revision",
@@ -2314,6 +2324,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ClaimantIncompleteContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "primary_action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantPrimaryAction"
               },
               {
                 "type": "null"
@@ -3029,6 +3049,71 @@
           "created_at"
         ],
         "title": "ClaimantMessage",
+        "type": "object"
+      },
+      "ClaimantPrimaryAction": {
+        "additionalProperties": false,
+        "description": "Authoritative claimant-safe action projection for the current revision.",
+        "properties": {
+          "action_code": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Action Code",
+            "type": "string"
+          },
+          "action_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Action Id",
+            "type": "string"
+          },
+          "action_type": {
+            "enum": [
+              "claim_creation",
+              "external_service",
+              "conversation"
+            ],
+            "title": "Action Type",
+            "type": "string"
+          },
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "claim_revision": {
+            "minimum": 1.0,
+            "title": "Claim Revision",
+            "type": "integer"
+          },
+          "projection_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Projection Version",
+            "type": "string"
+          },
+          "required_inputs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Inputs",
+            "type": "array"
+          },
+          "target_ref": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Target Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action_type",
+          "action_code",
+          "action_id",
+          "target_ref",
+          "available",
+          "claim_revision"
+        ],
+        "title": "ClaimantPrimaryAction",
         "type": "object"
       },
       "ClaimantResolvedSupportHandoff": {
@@ -6565,6 +6650,16 @@
               }
             ]
           },
+          "primary_action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantPrimaryAction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -8068,6 +8163,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ClaimantHandoff"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "primary_action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantPrimaryAction"
               },
               {
                 "type": "null"
