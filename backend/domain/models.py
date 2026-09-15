@@ -1106,6 +1106,13 @@ class HandoffRecord(ContractModel):
     created_at: datetime
     accepted_at: datetime | None = None
     resolved_at: datetime | None = None
+    # Support handoffs temporarily interrupt the claimant workflow. These values
+    # preserve the authoritative continuation target without creating a second
+    # claim-state record.
+    # Legacy records may not have a continuation target; resolution then preserves
+    # the current Claim state rather than inventing a default.
+    resume_workflow_state: WorkflowState | None = None
+    resume_next_action: AgentAction | None = None
 
 
 class ClaimantHandoff(ContractModel):
@@ -1116,6 +1123,16 @@ class ClaimantHandoff(ContractModel):
     support_need: SupportNeed
     summary: str
     created_at: datetime
+
+
+class ClaimantResolvedSupportHandoff(ContractModel):
+    """Claimant-safe evidence that a support handoff was completed."""
+
+    handoff_id: str
+    type: HandoffType
+    status: Literal['resolved'] = 'resolved'
+    completed_at: datetime
+    customer_update: str | None = None
 
 
 class WorkbenchSession(ContractModel):
@@ -1324,6 +1341,8 @@ class WorkbenchHandoff(ContractModel):
     created_at: datetime
     accepted_at: datetime | None = None
     resolved_at: datetime | None = None
+    resume_workflow_state: WorkflowState | None = None
+    resume_next_action: AgentAction | None = None
 
 
 class AcceptHandoffRequest(ContractModel):
@@ -1706,6 +1725,7 @@ class ClaimantClaim(ContractModel):
     customer_next_step: CustomerNextStep
     incomplete_context: ClaimantIncompleteContext | None = None
     handoff: ClaimantHandoff | None = None
+    resolved_support_handoff: ClaimantResolvedSupportHandoff | None = None
     created_at: datetime
     updated_at: datetime
 

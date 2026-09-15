@@ -69,11 +69,20 @@ def _claim_not_found() -> ApiError:
 def claimant_handoff(handoff: HandoffRecord) -> ClaimantHandoff:
     if handoff.support_need is None:
         raise ValueError('An internal handoff cannot be projected as a claimant support request.')
+    summary = handoff.packet.promised_next_step
+    if handoff.status in {HandoffStatus.ACCEPTED, HandoffStatus.IN_PROGRESS}:
+        summary = (
+            'A Northwind staff member is now assisting you.'
+            if handoff.support_need is not SupportNeed.URGENT
+            else 'A Northwind support request has been prioritised for you.'
+        )
+    elif handoff.status is HandoffStatus.RESOLVED:
+        summary = 'Your report is ready to continue online.'
     return ClaimantHandoff(
         handoff_id=handoff.handoff_id,
         status=handoff.status,
         support_need=handoff.support_need,
-        summary=handoff.packet.promised_next_step,
+        summary=summary,
         created_at=handoff.created_at,
     )
 
@@ -274,6 +283,8 @@ def build_handoff(
         packet=packet,
         source_message_id=source_message_id,
         created_at=timestamp,
+        resume_workflow_state=claim.claim_state.workflow_state,
+        resume_next_action=claim.claim_state.next_action,
     )
     next_step = CustomerNextStep(
         status=(

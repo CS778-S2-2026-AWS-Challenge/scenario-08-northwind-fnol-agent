@@ -20,6 +20,7 @@ from backend.domain.models import (
     ClaimantContentsItem,
     ClaimantHandoff,
     ClaimantIncompleteContext,
+    ClaimantResolvedSupportHandoff,
     ClaimantSession,
     ClaimListItem,
     ClaimListResponse,
@@ -37,6 +38,8 @@ from backend.domain.models import (
     FormPatchResponse,
     FormSource,
     FormStatus,
+    HandoffStatus,
+    HandoffType,
     NeededFor,
     PageInfo,
     PauseSessionResponse,
@@ -47,6 +50,7 @@ from backend.domain.models import (
     SessionRecord,
     SessionRecoveryContext,
     SessionStatus,
+    StaffActionStatus,
     StartSessionRequest,
     StructuredFormField,
     WorkflowState,
@@ -244,6 +248,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
     # action, so reading the action twice could let the two disagree again.
     external_service_action = claimant_assessor_action(repository, claim)
     handoff: ClaimantHandoff | None = None
+    resolved_support_handoff: ClaimantResolvedSupportHandoff | None = None
     if claim.active_session_id is not None:
         # Claimant receives only the public lifecycle state, never staff routing data.
         open_handoffs = [
@@ -254,6 +259,47 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         if open_handoffs:
             active = open_handoffs[-1]
             handoff = claimant_handoff(active)
+    if claim.terminal_disposition is None:
+        support_handoffs = [
+            item
+            for item in repository.list_handoffs(claim.claim_id, claim.customer_id)
+            if item.support_need is not None
+            and item.type in {HandoffType.HUMAN_SUPPORT, HandoffType.URGENT_SUPPORT}
+        ]
+        latest_support = max(
+            support_handoffs,
+            key=lambda item: (item.created_at, item.handoff_id),
+            default=None,
+        )
+        if latest_support is not None and latest_support.status is HandoffStatus.RESOLVED:
+            resolution_event = next(
+                (
+                    action
+                    for action in reversed(repository.list_staff_actions(claim.claim_id))
+                    if action.action_type == 'handoff_support'
+                    and action.status is StaffActionStatus.COMPLETED
+                    and action.completed_at is not None
+                    and latest_support.handoff_id in action.source_refs
+                ),
+                None,
+            )
+            if latest_support.resolved_at is not None and resolution_event is not None:
+                customer_update = next(
+                    (
+                        update
+                        for update in reversed(repository.list_customer_updates(claim.claim_id))
+                        if latest_support.handoff_id in update.related_refs
+                    ),
+                    None,
+                )
+                resolved_support_handoff = ClaimantResolvedSupportHandoff(
+                    handoff_id=latest_support.handoff_id,
+                    type=latest_support.type,
+                    completed_at=resolution_event.completed_at,
+                    customer_update=customer_update.summary
+                    if customer_update is not None
+                    else None,
+                )
     return ClaimantClaim(
         claim_id=claim.claim_id,
         revision=claim.revision,
@@ -268,6 +314,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         customer_next_step=claimant_next_step(repository, claim, external_service_action),
         incomplete_context=_claimant_incomplete_context(repository, claim),
         handoff=handoff,
+        resolved_support_handoff=resolved_support_handoff,
         created_at=claim.created_at,
         updated_at=claim.updated_at,
     )
