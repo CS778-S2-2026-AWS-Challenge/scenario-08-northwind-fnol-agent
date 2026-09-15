@@ -5,6 +5,16 @@ from enum import Enum
 from pydantic import Field, model_validator
 
 from backend.domain.evidence import is_in_conflict
+from backend.domain.external_service_registry import (
+    ExternalTaskResultVerification as _ExternalTaskResultVerification,
+)
+from backend.domain.external_service_registry import (
+    assert_external_task_registry_compatible as assert_registry_compatible,
+)
+from backend.domain.external_service_registry import (
+    assert_operation_status_registered,
+    assert_persisted_operation_transition,
+)
 from backend.domain.models import (
     ActorType,
     ContractModel,
@@ -16,6 +26,8 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.domain.retrieval import RetrievalSource
+
+ExternalTaskResultVerification = _ExternalTaskResultVerification
 
 ASSESSOR_SERVICE_IDENTITY = 'vehicle_damage_assessment_routing'
 
@@ -286,6 +298,7 @@ class ExternalTaskRecord(ContractModel):
 
     @model_validator(mode='after')
     def validate_task_state(self) -> 'ExternalTaskRecord':
+        assert_operation_status_registered(self.status.value)
         if self.updated_at < self.created_at:
             raise ValueError('External task update cannot precede creation.')
         if self.delivery is ExternalTaskDelivery.SUBMITTED:
@@ -325,6 +338,16 @@ class ExternalTaskRecord(ContractModel):
                 f'not {self.status.value}.'
             )
         return self
+
+
+def assert_external_task_registry_compatible(task: ExternalTaskRecord) -> None:
+    """Validate a task write without preventing historical records from being read."""
+
+    assert_registry_compatible(
+        service_identity=task.service_identity,
+        operation_status=task.status.value,
+        request_provenance=request_provenance(task).value,
+    )
 
 
 class ExternalTaskEvidenceLink(ContractModel):
@@ -682,23 +705,6 @@ def assert_disclosure_within_consent(
             f'{request.request_id}: consent {consent.consent_ref} does not permit '
             f'{", ".join(beyond)}.'
         )
-
-
-class ExternalTaskResultVerification(str, Enum):
-    """How far a provider result has been checked against the claim.
-
-    There is deliberately no value meaning "this is now a confirmed claim fact".
-    A provider answer is evidence about the claim, never the claim's own record
-    of what is true, and `docs/agent-behaviour-catalogue.md` keeps material facts
-    proposed until the claim's own confirmation path accepts them. Promotion to a
-    confirmed fact is a claim-level decision made elsewhere, so this enum cannot
-    express it and no caller can shortcut to it.
-    """
-
-    UNVERIFIED = 'unverified'
-    CONSISTENT = 'consistent'
-    INCONSISTENT = 'inconsistent'
-    REVIEW_REQUIRED = 'review_required'
 
 
 class ExternalTaskResult(ContractModel):
@@ -1507,6 +1513,11 @@ def assert_task_transition_is_permitted(
                     f'{current.provider_reference} already, so accepting it on the same '
                     'reference records no reconciliation.'
                 )
+
+    try:
+        assert_persisted_operation_transition(current.status.value, proposed.status.value)
+    except ValueError as exc:
+        raise TaskTransitionNotPermittedError(str(exc)) from exc
 
 
 class TaskHasNotFailedError(ValueError):

@@ -18,6 +18,9 @@ normalise:
 - system, user, assistant, and tool messages;
 - optional JSON-schema structured output;
 - function-tool declarations and calls;
+- text, image Evidence, and PDF Evidence content blocks. Evidence blocks contain only an
+  Evidence ID and media type; an already-authorised resolver supplies bounded bytes to the
+  adapter, so storage keys and object URLs never enter the model contract;
 - assistant text, provider-neutral completion status, raw finish reason, provider model and
   request identity; and
 - input, output, and total token usage when supplied by the endpoint.
@@ -27,6 +30,17 @@ turn: it advertises the read-only `claim.read` tool, validates and executes that
 the authenticated `WorkingClaim`, then sends the assistant tool call and typed tool result back
 to the same model for a namespaced final response. The model never executes a tool, writes Claim
 State, creates a claim, or authorises a handoff by itself; the Runtime performs those checks.
+
+When a claimant message explicitly carries `evidence_refs`, the message boundary resolves only
+claimant-visible records on that claimant's Claim whose lifecycle and media type permit model
+input. Staff and external-system Evidence remains internal-only even when it belongs to the same
+Claim. The boundary binds eligible IDs and media types to a resolver that exists for that turn
+only. The adapter must use that same resolver for the initial `claim.read` request and its
+continuation; it re-checks the allow-list, claimant visibility, current record, media type,
+lifecycle state, and immutable storage key before reading bytes. Arbitrary URLs, storage keys,
+unselected Evidence, internal-only Evidence, and cross-Claim records never enter the model
+request. Missing content or a profile without the required image/document capability fails before
+a text fallback can be attempted.
 
 The applied claimant Runtime persists the claimant and agent messages, the Claim revision and
 validated form changes, the compatibility decision projection, a bounded `RuntimeTraceRecord`,
@@ -49,20 +63,28 @@ current-action fields permitted by the latest Branch Evaluation. Inactive, syste
 later-action, hidden, and unregistered fields remain outside routine model context. When no Branch
 Evaluation exists, a compatibility allow-list restricts the context to approved intake fields.
 
-The projection also excludes Claim, Customer, Session, and Evidence resource identities; actor
-identities; internal fraud, coverage, and severity signals; provider fingerprints; routes;
+The projection also excludes Claim, Customer, Session, and unrelated Evidence resource identities;
+actor identities; internal fraud, coverage, and severity signals; provider fingerprints; routes;
 timestamps; and external Claim or assessor results. Bounded source references for selected facts
 may be included so the model can distinguish supported facts and corrections; Runtime still owns
 source validation and role visibility.
+For an explicitly attached file only, `attached_evidence` contains its Evidence ID and media type
+so a structured proposal can identify which selected object supports a fact. It contains no
+filename, object location, customer identity, or storage metadata.
 For current-action fields whose values are intentionally excluded, `known_field_codes` tells the
 model that the field already exists without disclosing its value. This supports non-repetition
 without widening the routine model-data projection.
 
-The model-facing proposal schema can suggest a registered field value, purpose, confidence,
-precision, relation, and the claimant wording that supports it. Runtime verifies whether that
-wording directly supports the normalized value. A supported explicit claimant fact is recorded
-with claimant provenance; a model interpretation remains `source: inference` and `status:
-proposed`. Policy, history, document, and staff provenance require their trusted server paths.
+The model-facing proposal schema can suggest a registered field value or contents item, purpose,
+confidence, precision, relation, the claimant wording that supports it, and an optional
+`source_evidence_id`. Runtime verifies whether claimant wording directly supports the normalized
+value and whether an Evidence source names an exact attachment from this turn with the matching
+image/document media type. A supported explicit claimant fact is recorded with claimant
+provenance. An attachment-derived form value or contents item is always `proposed`, uses `image`
+or `document` source, and retains the Evidence ID on both its current projection and immutable
+assertion; it cannot become confirmed through model output. A model interpretation without either
+source remains `source: inference` and `status: proposed`. Policy, history, and staff provenance
+still require their trusted server paths.
 
 The model-facing `proposed_signals` collection has a maximum length of zero. Any response that
 attempts to create an internal signal is malformed and the entire turn is rejected before a
@@ -79,7 +101,8 @@ Each persisted model-backed decision records `proposal_source: model_gateway` an
 provenance containing the runtime profile, executable prompt identifier, provider-reported model
 identifier, and provider request identifier when supplied. These references are internal-only and
 are absent from claimant messages and decision projections. Token usage persistence remains a
-current limitation.
+current limitation. A successful multimodal Runtime trace additionally records only the selected
+Evidence ID, media type, and `submitted` outcome; raw bytes and storage metadata are excluded.
 
 The model-facing schema does not contain the server-only `controlled_rule_authorised`
 marker, and rejects a response that tries to provide it. The target request exposes only the
@@ -118,6 +141,12 @@ capability requirements against the selected profile. A `degraded` or `unavailab
 closed. This boundary does not discover provider capabilities remotely; a capability declaration
 must still be supported by repeatable adapter tests and the selected endpoint.
 
+Image and document input are separate declared capabilities. A request that requires one of them
+is rejected before transport when the selected profile does not declare support. A configured
+profile must also provide an authorised Evidence resolver for a multimodal request; a missing or
+empty resolution returns `evidence_unavailable` and is never reported as a successful text-only
+fallback.
+
 ## Implemented Adapters
 
 ### OpenAI-Compatible
@@ -149,6 +178,8 @@ model and Runtime authority validation before it can affect Claim State.
 | `MODEL_TIMEOUT_SECONDS` | Positive request timeout; default `30` |
 | `MODEL_SUPPORTS_STRUCTURED_OUTPUT` | Declared endpoint capability required by `GatewayAgent` |
 | `MODEL_SUPPORTS_TOOLS` | Declared endpoint tool-call capability |
+| `MODEL_SUPPORTS_IMAGE_INPUT` | Declared endpoint capability for image Evidence blocks; default `false` |
+| `MODEL_SUPPORTS_DOCUMENT_INPUT` | Declared endpoint capability for PDF Evidence blocks; default `false` |
 
 For an unauthenticated local server, leave `MODEL_API_KEY_ENV` empty. For an
 authenticated endpoint, set it to a separate secret environment variable name, for
@@ -244,7 +275,8 @@ The gateway distinguishes:
 - `incomplete_response`;
 - `refused_response`;
 - `malformed_response`;
-- `unsupported_capability`; and
+- `unsupported_capability`;
+- `evidence_unavailable`; and
 - `configuration`.
 
 Only bounded, provider-neutral messages leave the adapter. Timeout, rate-limit, and
@@ -272,6 +304,9 @@ idempotency records unchanged.
 - The compatibility gateway still normalises provider tool calls into structured
   `AgentProposal.required_tools`; those context operations are bounded by Runtime policy and a
   single re-plan.
+- The Agent/Runtime path can consume authorised Evidence references supplied on a claimant
+  message. The claimant client remains responsible for supplying the selected Evidence IDs; it
+  cannot infer capability, visibility, or storage access.
 - Provider retries, fallback selection, circuit breaking, usage persistence, and model
   evaluation thresholds are not yet implemented. A configured runtime never substitutes
   a fixture or another provider silently.

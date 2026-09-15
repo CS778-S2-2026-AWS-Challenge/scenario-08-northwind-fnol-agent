@@ -116,7 +116,10 @@ def test_new_session_preserves_saved_evidence_state_provenance_and_visibility(
     proposal = processed.json()['proposed_fields'][PROPOSED_FIELD_CODE]
     assert proposal['status'] == 'proposed'
     assert proposal['source'] == 'image'
-    assert proposal['source_refs'] == [evidence_id]
+    assert proposal['source_refs'] == [
+        evidence_id,
+        f'evidence:{evidence_id}:material:1',
+    ]
 
     stored_before = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
     claim_before = repository.get_claim(claim_id, 'cus_demo')
@@ -155,7 +158,10 @@ def test_new_session_preserves_saved_evidence_state_provenance_and_visibility(
     # not been made yet.
     assert current_claim.form[PROPOSED_FIELD_CODE].model_dump(mode='json') == before_proposed
     assert current_claim.form[PROPOSED_FIELD_CODE].status.value == 'proposed'
-    assert current_claim.form[PROPOSED_FIELD_CODE].source_refs == [evidence_id]
+    assert current_claim.form[PROPOSED_FIELD_CODE].source_refs == [
+        evidence_id,
+        f'evidence:{evidence_id}:material:1',
+    ]
 
     claimant_claim = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
     assert claimant_claim.status_code == 200

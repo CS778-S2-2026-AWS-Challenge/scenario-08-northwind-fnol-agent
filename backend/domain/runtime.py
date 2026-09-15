@@ -9,6 +9,10 @@ from typing import Any, Literal
 
 from pydantic import Field
 
+from backend.domain.external_service_registry import (
+    ExternalLifecycleStatus,
+    ExternalTaskResultVerification,
+)
 from backend.domain.models import (
     AgentAuthority,
     AgentProposalSource,
@@ -18,6 +22,16 @@ from backend.domain.models import (
     ProposedFormChange,
     RuntimeConfigurationProvenance,
 )
+
+
+class ExternalLifecycleContextCoordinate(ContractModel):
+    """Exact registry-derived lifecycle input selected for one Agent turn."""
+
+    registry_version: str = Field(min_length=1, max_length=100)
+    service_identity: str = Field(min_length=1, max_length=100)
+    operation_status: ExternalLifecycleStatus
+    result_status: ExternalLifecycleStatus | None = None
+    result_verification: ExternalTaskResultVerification | None = None
 
 
 class TurnPlanRecord(ContractModel):
@@ -30,10 +44,19 @@ class TurnPlanRecord(ContractModel):
     conversation_moves: list[str] = Field(default_factory=list, max_length=20)
     candidate_fields: list[str] = Field(default_factory=list, max_length=100)
     tool_requests: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    registry_versions: dict[str, str] = Field(default_factory=dict, max_length=20)
+    external_lifecycle_context: list[ExternalLifecycleContextCoordinate] = Field(
+        default_factory=list,
+        max_length=8,
+    )
     runtime_directive: Literal[
         'runtime.continue',
         'runtime.wait_for_user',
+        'runtime.wait_for_external',
         'runtime.pause_for_review',
+        'runtime.interrupt_urgent',
+        'runtime.stop_no_claim',
+        'runtime.fail_safe',
     ]
     limitations: list[str] = Field(default_factory=list, max_length=20)
     created_at: datetime

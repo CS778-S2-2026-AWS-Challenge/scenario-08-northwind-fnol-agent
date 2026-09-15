@@ -608,6 +608,7 @@ def _apply_state_changes(claim: WorkingClaim, payload: UpdateStaffActionRequest)
         'claim_state.customer_support': CustomerSupport,
         'claim_state.fraud_signal': FraudSignal,
         'claim_state.workflow_state': WorkflowState,
+        'claim_state.next_action': AgentAction,
     }
     updates: dict[str, Any] = {}
     for change in payload.state_changes:

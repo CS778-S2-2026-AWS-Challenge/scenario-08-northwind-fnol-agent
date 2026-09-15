@@ -79,6 +79,31 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'claim-tab-summary')
   })
 
+  it('collapses the Claim summary only while Conversation is selected', () => {
+    const { rerender } = render(<ClaimWorkspace
+      {...props}
+      section="conversation"
+      resources={{
+        handoffs: { status: 'available', items: [] },
+        messages: { status: 'available', items: [], resolved_session_id: null },
+      }}
+    />)
+
+    expect(screen.queryByRole('heading', { name: 'Alex Morgan', level: 1 })).not.toBeInTheDocument()
+    expect(screen.getByRole('tablist', { name: 'Claim sections' })).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Claimant conversation' })).not.toBeInTheDocument()
+    expect(screen.getByRole('log', { name: 'Claimant conversation messages' })).toBeVisible()
+
+    rerender(<ClaimWorkspace
+      {...props}
+      section="fields"
+      resources={{ fields: { status: 'available', items: [] } }}
+    />)
+
+    expect(screen.getByRole('heading', { name: 'Alex Morgan', level: 1 })).toBeVisible()
+    expect(screen.getByRole('tab', { name: 'Claim information' })).toHaveAttribute('aria-selected', 'true')
+  })
+
   it('supports arrow-key tab activation', async () => {
     const onSection = vi.fn()
     const user = userEvent.setup()
@@ -399,6 +424,8 @@ describe('ClaimWorkspace navigation', () => {
         allowed_actions: [acceptAction],
         integration_summary: {
           claim_creation_status: 'created',
+          claim_number: 'NW-CLAIM-1042',
+          expected_by: '2026-09-16T01:30:00Z',
           assessor_routing_status: 'assigned',
           waiting_external_services: [{
             task_id: 'tsk_assessor_1',
@@ -439,11 +466,14 @@ describe('ClaimWorkspace navigation', () => {
     const unknownStatus = within(integrationSection).getByText('Unknown Outcome')
     expect(createdStatus).toHaveClass('record-status--confirmed')
     expect(assignedStatus).toHaveClass('record-status--confirmed')
+    expect(within(integrationSection).getByText('Claim number')).toBeVisible()
+    expect(within(integrationSection).getByText('NW-CLAIM-1042')).toBeVisible()
+    expect(within(integrationSection).getByText('Expected by')).toBeVisible()
+    expect(within(integrationSection).getByText(formatDateTime('2026-09-16T01:30:00Z'))).toBeVisible()
     expect(screen.getByText('Vehicle Damage Assessor')).toBeVisible()
     expect(screen.getByText('Vehicle Damage Assessment')).toBeVisible()
     expect(unknownStatus).toHaveClass('record-status--attention')
-    expect(screen.getByText('Projection limit')).toBeVisible()
-    expect(screen.getByText(/Claim number and provider timeline are not published/i)).toBeVisible()
+    expect(within(integrationSection).queryByText('Projection limit')).not.toBeInTheDocument()
   })
 
   it('keeps partial recovery fields explicit when an optional due time is absent', () => {
@@ -485,8 +515,14 @@ describe('ClaimWorkspace navigation', () => {
         ...detail,
         lifecycle_state: 'created',
         workflow_state: 'created',
+        customer_next_step: {
+          ...detail.customer_next_step,
+          expected_by: '2026-09-20T02:00:00Z',
+        },
         integration_summary: {
           claim_creation_status: null,
+          claim_number: null,
+          expected_by: null,
           assessor_routing_status: null,
           waiting_external_services: [],
         },
@@ -496,9 +532,13 @@ describe('ClaimWorkspace navigation', () => {
     const integrationHeading = screen.getByRole('heading', { name: 'Claim and external progress' })
     const integrationSection = integrationHeading.closest('section')
     expect(integrationHeading).toBeVisible()
-    expect(within(integrationSection).getAllByText('Not recorded')).toHaveLength(2)
+    expect(within(integrationSection).getByText('Claim number')).toBeVisible()
+    expect(within(integrationSection).getByText('Expected by')).toBeVisible()
+    expect(within(integrationSection).getAllByText('Not recorded')).toHaveLength(4)
     expect(within(integrationSection).getByText('No external service is currently projected as waiting.')).toBeVisible()
     expect(within(integrationSection).queryByText('Created')).not.toBeInTheDocument()
+    expect(within(integrationSection).queryByText(detail.display_reference)).not.toBeInTheDocument()
+    expect(within(integrationSection).queryByText(formatDateTime('2026-09-20T02:00:00Z'))).not.toBeInTheDocument()
   })
 
   it('does not invent recovery or integration sections when those projections are absent', () => {

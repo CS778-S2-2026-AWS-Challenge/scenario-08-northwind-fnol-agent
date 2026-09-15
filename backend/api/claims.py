@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from backend.adapters.claims_service import AssessorServiceAdapter, ClaimsServiceAdapter
+from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal, require_claimant
 from backend.core.errors import ApiError
@@ -107,6 +108,10 @@ def _assessor_entry_for(request: Request) -> ExternalServiceEntryDecision:
 
 def policy_history_adapter_for(request: Request) -> PolicyHistoryAdapter:
     return cast(PolicyHistoryAdapter, request.app.state.policy_history_adapter)
+
+
+def evidence_storage_for(request: Request) -> EvidenceStorage:
+    return cast(EvidenceStorage, request.app.state.evidence_storage)
 
 
 @router.post('', response_model=CreateClaimResponse, status_code=status.HTTP_201_CREATED)
@@ -438,16 +443,17 @@ def create_message(
             update={'model_profile_id': select_model_profile(request, payload.model_profile_id)}
         )
     return submit_message(
-        repository_for(request),
-        agent_for(request),
-        policy_history_adapter_for(request),
-        principal,
-        claim_id,
-        session_id,
-        payload,
-        idempotency_key,
-        if_match,
-        runtime_agent_policy_for(request),
+        repository=repository_for(request),
+        agent=agent_for(request),
+        policy_history_adapter=policy_history_adapter_for(request),
+        principal=principal,
+        claim_id=claim_id,
+        session_id=session_id,
+        payload=payload,
+        idempotency_key=idempotency_key,
+        if_match=if_match,
+        runtime_agent_policy_resolver=runtime_agent_policy_for(request),
+        evidence_storage=evidence_storage_for(request),
     )
 
 

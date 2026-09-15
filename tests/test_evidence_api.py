@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, cast
 
@@ -12,7 +12,12 @@ from backend.adapters.evidence_storage import (
     MockEvidenceStorage,
     StoredUpload,
 )
-from backend.domain.models import EvidenceFileStatus
+from backend.domain.models import (
+    EvidenceFileStatus,
+    EvidenceRecord,
+    EvidenceSource,
+    EvidenceStatus,
+)
 from backend.repositories.fixture import FixtureRepository
 
 
@@ -92,6 +97,205 @@ def test_pending_evidence_is_saved_visible_and_does_not_block_current_work(
     assert response.json()['evidence']['evidence_id'] in {
         source_ref for result in evaluation.branch_results for source_ref in result.source_refs
     }
+
+
+def test_claimant_can_read_evidence_history_across_owned_claims(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    first = create_claim(client, auth_headers, 'history-first-claim')
+    second = create_claim(client, auth_headers, 'history-second-claim')
+    first_id = str(cast(dict[str, object], first['claim'])['claim_id'])
+    second_id = str(cast(dict[str, object], second['claim'])['claim_id'])
+
+    evidence_ids = []
+    for claim_id, key in (
+        (first_id, 'history-first-evidence'),
+        (second_id, 'history-second-evidence'),
+    ):
+        response = client.post(
+            f'/api/v1/claims/{claim_id}/evidence/uploads',
+            headers={**auth_headers, 'Idempotency-Key': key, 'If-Match': '1'},
+            json={
+                'kind': 'other_document',
+                'original_filename': 'history.jpg',
+                'media_type': 'image/jpeg',
+                'size_bytes': 7,
+            },
+        )
+        assert response.status_code == 201
+        evidence_id = str(response.json()['evidence_id'])
+        evidence_ids.append(evidence_id)
+        checksum = put_fixture_upload(client, claim_id, evidence_id, 7)
+        complete = client.post(
+            f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
+            headers={**auth_headers, 'Idempotency-Key': f'{key}-complete', 'If-Match': '2'},
+            json={'upload_checksum': checksum},
+        )
+        assert complete.status_code == 202
+
+    response = client.get('/api/v1/evidence?limit=1', headers=auth_headers)
+    assert response.status_code == 200
+    assert len(response.json()['items']) == 1
+    assert response.json()['items'][0]['source_claim_id'] == first_id
+    assert response.json()['items'][0]['evidence_id'] == evidence_ids[0]
+    assert 'storage_key' not in response.json()['items'][0]
+    assert response.json()['page']['next_cursor'] is not None
+
+    second_page = client.get(
+        f'/api/v1/evidence?cursor={response.json()["page"]["next_cursor"]}',
+        headers=auth_headers,
+    )
+    assert second_page.status_code == 200
+    assert second_page.json()['items'][0]['source_claim_id'] == second_id
+
+
+def _seed_history_evidence(
+    repository: FixtureRepository,
+    *,
+    claim_id: str,
+    customer_id: str,
+    evidence_id: str,
+    file_status: EvidenceFileStatus,
+    source: EvidenceSource = EvidenceSource.CLAIMANT,
+    status: EvidenceStatus = EvidenceStatus.RECEIVED,
+) -> None:
+    timestamp = datetime.now(UTC)
+    repository.save_evidence(
+        EvidenceRecord(
+            evidence_id=evidence_id,
+            claim_id=claim_id,
+            kind='other_document',
+            status=status,
+            file_status=file_status,
+            original_filename=f'{evidence_id}.jpg',
+            media_type='image/jpeg',
+            size_bytes=128,
+            source=source,
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+        customer_id,
+    )
+
+
+def test_evidence_history_is_account_scoped_and_filters_non_claimant_file_states(
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    first = client.post(
+        '/api/v1/auth/sessions',
+        json={'email': 'claimant.one@example.invalid', 'password': 'northwind-demo-one'},
+    )
+    second = client.post(
+        '/api/v1/auth/sessions',
+        json={'email': 'claimant.two@example.invalid', 'password': 'northwind-demo-two'},
+    )
+    assert first.status_code == 201
+    assert second.status_code == 201
+    first_headers = {'Authorization': f'Bearer {first.json()["access_token"]}'}
+    second_headers = {'Authorization': f'Bearer {second.json()["access_token"]}'}
+    first_claim = create_claim(client, first_headers, 'history-boundary-first-claim')
+    second_claim = create_claim(client, second_headers, 'history-boundary-second-claim')
+    first_claim_id = str(cast(dict[str, object], first_claim['claim'])['claim_id'])
+    second_claim_id = str(cast(dict[str, object], second_claim['claim'])['claim_id'])
+
+    for index, file_status in enumerate(
+        (
+            EvidenceFileStatus.UPLOADED,
+            EvidenceFileStatus.PROCESSING,
+            EvidenceFileStatus.READY,
+            EvidenceFileStatus.FAILED,
+        )
+    ):
+        _seed_history_evidence(
+            repository,
+            claim_id=first_claim_id,
+            customer_id='cus_demo',
+            evidence_id=f'evd-history-{file_status.value}',
+            file_status=file_status,
+            status=EvidenceStatus.PENDING if index == 0 else EvidenceStatus.RECEIVED,
+        )
+    _seed_history_evidence(
+        repository,
+        claim_id=first_claim_id,
+        customer_id='cus_demo',
+        evidence_id='evd-awaiting-upload',
+        file_status=EvidenceFileStatus.AWAITING_UPLOAD,
+    )
+    _seed_history_evidence(
+        repository,
+        claim_id=first_claim_id,
+        customer_id='cus_demo',
+        evidence_id='evd-non-claimant-source',
+        file_status=EvidenceFileStatus.READY,
+        source=EvidenceSource.EXTERNAL_SYSTEM,
+    )
+    _seed_history_evidence(
+        repository,
+        claim_id=second_claim_id,
+        customer_id='cus_other',
+        evidence_id='evd-other-claimant',
+        file_status=EvidenceFileStatus.READY,
+    )
+
+    response = client.get('/api/v1/evidence', headers=first_headers)
+
+    assert response.status_code == 200
+    items = response.json()['items']
+    assert {item['file_status'] for item in items} == {
+        'uploaded',
+        'processing',
+        'ready',
+        'failed',
+    }
+    assert all(item['source_claim_id'] == first_claim_id for item in items)
+    assert 'evd-awaiting-upload' not in {item['evidence_id'] for item in items}
+    assert 'evd-non-claimant-source' not in {item['evidence_id'] for item in items}
+    assert 'evd-other-claimant' not in {item['evidence_id'] for item in items}
+
+    other_claimant_response = client.get('/api/v1/evidence', headers=second_headers)
+    assert other_claimant_response.status_code == 200
+    assert [item['evidence_id'] for item in other_claimant_response.json()['items']] == [
+        'evd-other-claimant'
+    ]
+
+
+@pytest.mark.parametrize(
+    'headers',
+    [
+        {'Authorization': 'Bearer synthetic-staff'},
+        {'Authorization': 'Bearer synthetic-integration'},
+        {'Authorization': 'Bearer synthetic-admin'},
+    ],
+)
+def test_account_evidence_history_rejects_non_claimant_credentials(
+    client: TestClient,
+    headers: dict[str, str],
+) -> None:
+    response = client.get('/api/v1/evidence', headers=headers)
+
+    assert response.status_code == 403
+    assert response.json()['error']['code'] == 'ACCESS_DENIED'
+
+
+def test_account_evidence_history_rejects_anonymous_sessions_and_invalid_cursors(
+    client: TestClient,
+) -> None:
+    anonymous = client.get(
+        '/api/v1/evidence',
+        headers={'X-Northwind-Anonymous-Session': '4c7f9f6e-0f31-4ce3-a5cc-5e3a4d8e4b10'},
+    )
+    invalid_cursor = client.get(
+        '/api/v1/evidence?cursor=not-a-valid-cursor',
+        headers={'Authorization': 'Bearer synthetic-claimant'},
+    )
+
+    assert anonymous.status_code == 401
+    assert anonymous.json()['error']['code'] == 'AUTHENTICATION_REQUIRED'
+    assert invalid_cursor.status_code == 422
+    assert invalid_cursor.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert invalid_cursor.json()['error']['details'][0]['field'] == 'cursor'
 
 
 @pytest.mark.parametrize(
@@ -480,7 +684,10 @@ def test_processed_evidence_facts_stay_proposed_until_the_claimant_decides(
     assert processed.json()['file_status'] == 'ready'
     assert proposal['status'] == 'proposed'
     assert proposal['source'] == expected_source
-    assert proposal['source_refs'] == [evidence_id]
+    assert proposal['source_refs'] == [
+        evidence_id,
+        f'evidence:{evidence_id}:material:1',
+    ]
 
     before_decision = client.get(
         f'/api/v1/claims/{claim_id}',
@@ -516,7 +723,10 @@ def test_processed_evidence_facts_stay_proposed_until_the_claimant_decides(
     assert decided.json()['revision'] == 5
     assert updated['status'] == expected_status
     assert updated['source'] == expected_source
-    assert updated['source_refs'] == [evidence_id]
+    assert updated['source_refs'] == [
+        evidence_id,
+        f'evidence:{evidence_id}:material:1',
+    ]
     assert updated['updated_at'] >= proposal['updated_at']
 
     repeated_decision = client.post(
@@ -1229,4 +1439,7 @@ def test_processing_cannot_replace_an_unresolved_field_from_an_earlier_source(
     assert after is not None
     field_after = after.form['incident.description']
     assert field_after.model_dump(mode='json') == field_before.model_dump(mode='json')
-    assert field_after.source_refs == [first_evidence_id]
+    assert field_after.source_refs == [
+        first_evidence_id,
+        f'evidence:{first_evidence_id}:material:1',
+    ]

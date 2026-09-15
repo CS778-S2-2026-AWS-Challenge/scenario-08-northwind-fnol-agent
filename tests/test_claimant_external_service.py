@@ -204,6 +204,15 @@ def test_claimant_assessor_action_appears_only_after_a_relevant_created_motor_cl
     assert created.status_code == 200
     action = created.json()['external_service_action']
     assert action['status'] == 'consent_required'
+    assert action['registry_version'] == 'external-service-lifecycle.v1'
+    assert action['lifecycle_status'] == 'consent_required'
+    assert action['catalogue_reference'] == 'P3-ASSESSOR'
+    assert action['capability_provenance'] == 'simulated'
+    assert action['access_form'] == 'controlled assessor simulation'
+    assert action['status_label'] == 'Permission needed'
+    assert action['pending_owner'] == 'claimant'
+    assert action['next_action']
+    assert 'Simulation-only' in action['limitation']
     assert action['provider'] == 'Controlled assessment fixture'
     assert action['purpose'].endswith('This does not decide coverage or approve repairs.')
     assert len(action['shared_data_summary']) == 4
