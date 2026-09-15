@@ -80,6 +80,8 @@ def test_controlled_requirement_values_follow_the_field_registry(
         ('There is no danger from the leak, but the fire is still burning.', 'fire'),
         ('There is no ongoing risk from the water now, but the ceiling is collapsing.', 'collapse'),
         ('There is no danger from the leak, but part of the house is exposed.', 'exposure'),
+        ('There is no ongoing risk of collapse.', None),
+        ('There is no current danger of exposure.', None),
         ('The leak is not active anymore.', None),
         ('The ceiling is not collapsing.', None),
         ('Nothing is exposed.', None),

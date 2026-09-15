@@ -173,6 +173,11 @@ HOME_COLLAPSE_PATTERNS = (re.compile(r'\b(?:collapse|collapsing)\b', re.IGNORECA
 HOME_COLLAPSE_NEGATION_PATTERNS = (
     re.compile(r'\b(?:no|without\s+(?:a|any))\s+(?:risk\s+of\s+)?collapse\b', re.IGNORECASE),
     re.compile(
+        r'\bno\s+(?:(?:ongoing|current|immediate)\s+)?(?:risk|danger)\s+'
+        r'(?:from|of)\s+[^,;.!?]{0,40}\bcollapse\b',
+        re.IGNORECASE,
+    ),
+    re.compile(
         r'\b[^.!?]{0,30}\b(?:is|are)\s+(?:not|no\s+longer)\s+collapsing\b',
         re.IGNORECASE,
     ),
@@ -180,6 +185,11 @@ HOME_COLLAPSE_NEGATION_PATTERNS = (
 HOME_EXPOSURE_PATTERNS = (re.compile(r'\b(?:exposure|exposed)\b', re.IGNORECASE),)
 HOME_EXPOSURE_NEGATION_PATTERNS = (
     re.compile(r'\b(?:no|without\s+(?:an?|any))\s+exposure\b', re.IGNORECASE),
+    re.compile(
+        r'\bno\s+(?:(?:ongoing|current|immediate)\s+)?(?:risk|danger)\s+'
+        r'(?:from|of)\s+[^,;.!?]{0,40}\bexpos(?:ure|ed)\b',
+        re.IGNORECASE,
+    ),
     re.compile(
         r'\b(?:nothing|no\s+part|the\s+property)\b[^.!?]{0,30}'
         r'\b(?:is|was)?\s*(?:not\s+)?exposed\b',
@@ -512,8 +522,6 @@ def _controlled_requirement_value(field_code: str, message_text: str) -> Any | N
         # statements while preventing "ongoing risk from water" from matching
         # the active-leak vocabulary.
         risk_text = text
-        for pattern in HOME_RISK_NONE_PATTERNS:
-            risk_text = pattern.sub('', risk_text)
         risk_patterns = (
             ('active_leak', HOME_ACTIVE_LEAK_PATTERNS, HOME_ACTIVE_LEAK_NEGATION_PATTERNS),
             ('fire', HOME_FIRE_PATTERNS, HOME_FIRE_NEGATION_PATTERNS),
@@ -521,10 +529,24 @@ def _controlled_requirement_value(field_code: str, message_text: str) -> Any | N
             ('exposure', HOME_EXPOSURE_PATTERNS, HOME_EXPOSURE_NEGATION_PATTERNS),
             ('other', HOME_OTHER_RISK_PATTERNS, HOME_OTHER_RISK_NEGATION_PATTERNS),
         )
+        has_named_negation = any(
+            any(pattern.search(text) for pattern in negation_patterns)
+            for _, _, negation_patterns in risk_patterns[:-1]
+        )
+        # Keep a named hazard in place when its own negation is present. The
+        # broad "no risk" cleanup must not expose the denied noun to the
+        # positive signal matcher (for example, "no risk of collapse").
+        for _, _, negation_patterns in risk_patterns:
+            for pattern in negation_patterns:
+                risk_text = pattern.sub('', risk_text)
+        for pattern in HOME_RISK_NONE_PATTERNS:
+            risk_text = pattern.sub('', risk_text)
         for value, signal_patterns, negation_patterns in risk_patterns:
             if _contains_unnegated_signal(risk_text, signal_patterns, negation_patterns):
                 return value
-        if any(pattern.search(text) for pattern in HOME_RISK_NONE_PATTERNS):
+        if not has_named_negation and any(
+            pattern.search(text) for pattern in HOME_RISK_NONE_PATTERNS
+        ):
             return 'none'
         return None
     if field_code == 'property.habitable':
