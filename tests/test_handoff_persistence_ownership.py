@@ -135,6 +135,8 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
     assert in_progress.status is HandoffStatus.IN_PROGRESS
     assert in_progress.assigned_to == 'stf_demo'
     assert in_progress.accepted_at is not None
+    assert in_progress.resume_workflow_state is not None
+    assert in_progress.resume_next_action is not None
 
     resolved = client.post(
         f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/resolve',
@@ -232,6 +234,8 @@ def test_handoff_mutations_require_the_exact_current_projected_action(
     accepted_handoff = repository.get_handoff(claim_id, handoff_id, queued_claim.customer_id)
     accepted_claim = repository.get_claim_internal(claim_id)
     assert accepted_handoff is not None
+    assert accepted_handoff.resume_workflow_state is not None
+    assert accepted_handoff.resume_next_action is not None
     assert accepted_claim is not None
     repository.save_handoff(
         accepted_handoff.model_copy(update={'assigned_to': None}), accepted_claim.customer_id
@@ -723,6 +727,8 @@ def test_guard_rejects_invalid_payload_and_terminal_rewrite(
     )
     accepted_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
     assert accepted_handoff is not None
+    assert accepted_handoff.resume_workflow_state is not None
+    assert accepted_handoff.resume_next_action is not None
     resolved = client.post(
         f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/resolve',
         headers={
