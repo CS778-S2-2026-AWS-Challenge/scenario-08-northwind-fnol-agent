@@ -12552,6 +12552,14 @@
             ],
             "title": "Resolved At"
           },
+          "resume_next_action": {
+            "$ref": "#/components/schemas/AgentAction",
+            "default": "ASK"
+          },
+          "resume_workflow_state": {
+            "$ref": "#/components/schemas/WorkflowState",
+            "default": "collecting"
+          },
           "source_message_id": {
             "anyOf": [
               {

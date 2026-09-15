@@ -1338,6 +1338,8 @@ class WorkbenchHandoff(ContractModel):
     created_at: datetime
     accepted_at: datetime | None = None
     resolved_at: datetime | None = None
+    resume_workflow_state: WorkflowState = WorkflowState.COLLECTING
+    resume_next_action: AgentAction = AgentAction.ASK
 
 
 class AcceptHandoffRequest(ContractModel):

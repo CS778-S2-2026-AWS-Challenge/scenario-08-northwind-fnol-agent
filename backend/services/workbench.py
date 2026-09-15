@@ -284,6 +284,8 @@ def workbench_handoff(handoff: HandoffRecord) -> WorkbenchHandoff:
         created_at=handoff.created_at,
         accepted_at=handoff.accepted_at,
         resolved_at=handoff.resolved_at,
+        resume_workflow_state=handoff.resume_workflow_state,
+        resume_next_action=handoff.resume_next_action,
     )
 
 

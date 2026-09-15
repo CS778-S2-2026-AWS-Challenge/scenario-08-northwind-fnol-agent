@@ -916,6 +916,10 @@ record disagrees with.
 `references` does not appear in the claimant projection. A claimant is told a check is in
 progress; which side is doubted, and why, is staff-only.
 
+Staff handoff projections also retain the authoritative `resume_workflow_state` and
+`resume_next_action` captured when support was requested. These continuation fields are
+staff-facing only and are not included in the claimant handoff projection.
+
 Extracted facts use the structured form envelope with `source` set to `image` or `document`. They remain `proposed` until claimant confirmation or an authorised staff decision.
 
 ### Current Compatibility Agent Decision
