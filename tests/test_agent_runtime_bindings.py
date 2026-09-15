@@ -1,10 +1,17 @@
+from typing import cast
+
 import pytest
 
+from backend.domain.agent_action_commands import build_claim_context_command
+from backend.domain.agent_action_registry import ActionActorRole, ExecutionAuthority
 from backend.domain.agent_tool_registry import tool_contract
 from backend.domain.model_gateway import ModelRuntimeProposal
-from backend.domain.models import CustomerNextStep
+from backend.domain.models import CustomerNextStep, WorkflowState
+from backend.repositories.protocols import ClaimRepository
 from backend.services.agent_action_execution import (
     ActionBindingStatus,
+    ClaimantRuntimeActionDispatcher,
+    ClaimContextExecutionStatus,
     ClaimContextHandlerBinding,
     ClaimContextHandlerOutcome,
     action_binding_table,
@@ -46,6 +53,51 @@ def test_binding_table_rejects_unknown_or_overlapping_status_labels() -> None:
         )
 
 
+def test_live_claimant_dispatcher_publishes_only_real_production_bindings() -> None:
+    rows = ClaimantRuntimeActionDispatcher().binding_table()
+    executable = {
+        row.action_code: row.tool_name
+        for row in rows
+        if row.status is ActionBindingStatus.RUNTIME_EXECUTABLE
+    }
+
+    assert executable == {
+        'claim.apply_fact_patch': 'claim_store.compare_and_set',
+        'claim.create': 'claims_service.create_claim',
+        'claim.prepare_creation': None,
+        'claim.register_evidence': 'claim_store.compare_and_set',
+        'human.create_handoff': 'handoff_store.create',
+    }
+    assert next(row for row in rows if row.action_code == 'external.submit_request').status is (
+        ActionBindingStatus.UNAVAILABLE
+    )
+
+
+def test_live_claimant_dispatcher_rejects_invalid_or_unbound_actions() -> None:
+    with pytest.raises(ValueError, match='Unknown live claimant action bindings'):
+        ClaimantRuntimeActionDispatcher({'claim.not_registered': None})
+    with pytest.raises(ValueError, match='does not match claim.prepare_creation tool contract'):
+        ClaimantRuntimeActionDispatcher({'claim.prepare_creation': 'claim_store.compare_and_set'})
+
+    command = build_claim_context_command(
+        'claim.prepare_creation',
+        {'claim_id': 'clm_unbound', 'expected_revision': 1},
+        proposer_role=ActionActorRole.RUNTIME,
+        approved_authority=ExecutionAuthority.RUNTIME_VALIDATION,
+        authority_reference='test:unbound-live-action',
+        workflow_state=WorkflowState.READY_FOR_NEXT,
+        expected_revision=1,
+    )
+    result = ClaimantRuntimeActionDispatcher({}).execute(
+        cast(ClaimRepository, object()),
+        command,
+        _binding_handler,
+    )
+
+    assert result.status is ClaimContextExecutionStatus.REJECTED
+    assert result.reason_code == 'UNSUPPORTED_ACTION'
+
+
 def test_tool_contract_accepts_canonical_and_compatibility_names() -> None:
     assert tool_contract('knowledge_search').name == 'knowledge.search'
     assert tool_contract('knowledge.search').name == 'knowledge.search'
@@ -67,6 +119,7 @@ def test_runtime_proposal_accepts_all_registered_runtime_directives() -> None:
         ('conversation.answer', 'runtime.continue'),
         ('conversation.answer', 'runtime.wait_for_user'),
         ('human.create_handoff', 'runtime.pause_for_review'),
+        ('claim.prepare_creation', 'runtime.continue'),
         ('claim.create', 'runtime.continue'),
         ('claim.create', 'runtime.wait_for_external'),
         ('runtime.stop_no_claim', 'runtime.stop_no_claim'),

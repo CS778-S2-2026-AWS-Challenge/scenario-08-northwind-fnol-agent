@@ -41,11 +41,13 @@ reference is a malformed dependency result and is not committed.
 
 The public API remains unchanged when the active adapter changes.
 
-Creation is one registered Claim action within a larger turn. A model may propose
-`claim.prepare_creation` or `claim.create`, but Runtime must place an approved
-`claim.create` ActionEnvelope in the `ExecutionPlan` before the adapter is called. The
-adapter result becomes part of `TurnResult`; the response draft is corrected from that
-real result before creation is described to the claimant.
+Creation is one registered Claim action within the claimant journey. A model may propose
+`claim.prepare_creation`, but model output cannot authorise `claim.create`. The authenticated
+creation boundary translates the claimant's explicit submission and the published readiness rule
+into a typed `claim.create` command. The production dispatcher validates its action contract,
+authority, current `ready_for_next` lifecycle, expected revision, idempotency identity, and
+`claims_service.create_claim` binding before the adapter is called. The real adapter result is then
+persisted and projected to the claimant; no model draft can describe creation as complete first.
 
 ## Authority, Revision, and Idempotency
 

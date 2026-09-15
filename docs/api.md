@@ -1580,9 +1580,16 @@ Request:
 All fields must exist and be confirmable. Response `200` returns the new claim revision, confirmed fields, any new decision, and the current customer next step.
 
 When all controlled intake fields are confirmed, `customer_next_step.status` becomes
-`ready_to_create`. Confirmation does not itself invoke an external claims service.
+`ready_to_create` and `workflow_state` becomes `ready_for_next`. A later material edit that makes
+the registered requirements incomplete returns the workflow to `collecting`. Confirmation does
+not itself invoke an external claims service.
 
 ### `POST /api/v1/claims/{claim_id}/creation`
+
+This endpoint is the live handler for the registered `claim.create` action. It accepts only a
+`ready_for_next` Claim and dispatches a typed, revision-checked, idempotent command through the
+configured `claims_service.create_claim` binding before using the existing provider-neutral
+adapter. The model cannot call or authorise this endpoint by emitting an action name.
 
 The claimant client MAY offer a guided Motor presentation over the same resources used by the
 conversational intake. The guided presentation creates the Working Claim before its first page is
