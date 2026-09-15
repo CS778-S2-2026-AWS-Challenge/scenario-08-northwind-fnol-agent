@@ -1032,6 +1032,27 @@ class EvidenceReference(ContractModel):
         return self
 
 
+class EvidenceMaterialVersion(ContractModel):
+    """Immutable snapshot of one replaced material generation."""
+
+    version: int = Field(ge=1)
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    original_filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    references: list[EvidenceReference] = Field(default_factory=list, max_length=50)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    proposed_fields: dict[str, StructuredFormField] = Field(default_factory=dict)
+    wait_type: EvidenceWaitType | None = None
+    responsible_party: ResponsibleParty | None = None
+    expected_by: datetime | None = None
+    expected_timing: str | None = Field(default=None, max_length=200)
+    context_summary: str | None = Field(default=None, max_length=1000)
+    archived_at: datetime
+    reason: Literal['claimant_replacement']
+
+
 class EvidenceRecord(ContractModel):
     """One piece of material on a claim, its condition, and what it says about others."""
 
@@ -1045,6 +1066,8 @@ class EvidenceRecord(ContractModel):
     size_bytes: int | None = Field(default=None, ge=0)
     source: EvidenceSource
     references: list[EvidenceReference] = Field(default_factory=list, max_length=50)
+    material_version: int = Field(default=1, ge=1)
+    material_history: list[EvidenceMaterialVersion] = Field(default_factory=list)
     related_fields: list[str] = Field(default_factory=list)
     needed_for: list[str] = Field(default_factory=list)
     provenance: dict[str, Any] = Field(default_factory=dict)
@@ -1056,6 +1079,19 @@ class EvidenceRecord(ContractModel):
     context_summary: str | None = Field(default=None, max_length=1000)
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode='after')
+    def validate_material_history(self) -> 'EvidenceRecord':
+        versions = [item.version for item in self.material_history]
+        if versions != list(range(1, self.material_version)):
+            raise ValueError(
+                'Evidence material history must contain every prior version exactly once.'
+            )
+        if any(item.archived_at > self.updated_at for item in self.material_history):
+            raise ValueError(
+                'Evidence material history cannot be archived after the record update.'
+            )
+        return self
 
 
 class HandoffEvidenceItem(ContractModel):
@@ -1513,6 +1549,7 @@ class RegisterEvidenceRequest(ContractModel):
 
 
 class RequestEvidenceUploadRequest(ContractModel):
+    evidence_id: str | None = Field(default=None, min_length=1, max_length=120)
     kind: str = Field(min_length=1, max_length=100)
     original_filename: str = Field(min_length=1, max_length=255)
     media_type: str = Field(min_length=1, max_length=100)

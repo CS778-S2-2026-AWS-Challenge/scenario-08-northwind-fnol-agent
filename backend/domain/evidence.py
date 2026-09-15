@@ -180,6 +180,48 @@ def is_registered_evidence_shape(record: EvidenceRecord) -> bool:
     return True
 
 
+def assert_material_history_is_append_only(
+    previous: EvidenceRecord | None,
+    incoming: EvidenceRecord,
+) -> None:
+    """Reject mutation or removal of an Evidence material-history entry."""
+
+    if previous is None:
+        return
+    prior_history = previous.material_history
+    if len(incoming.material_history) < len(prior_history):
+        raise ValueError('Evidence material history cannot be shortened.')
+    if incoming.material_history[: len(prior_history)] != prior_history:
+        raise ValueError('Evidence material history is append-only.')
+    if incoming.material_version < previous.material_version:
+        raise ValueError('Evidence material version cannot move backwards.')
+    if incoming.material_version == previous.material_version:
+        if incoming.material_history != prior_history:
+            raise ValueError('A material-history entry requires a new material version.')
+        return
+    if incoming.material_version != previous.material_version + 1:
+        raise ValueError('Evidence material version must advance one generation at a time.')
+    if len(incoming.material_history) != len(prior_history) + 1:
+        raise ValueError('A replaced material must append exactly one history entry.')
+    archived = incoming.material_history[-1]
+    if (
+        archived.version != previous.material_version
+        or archived.status is not previous.status
+        or archived.file_status is not previous.file_status
+        or archived.original_filename != previous.original_filename
+        or archived.media_type != previous.media_type
+        or archived.size_bytes != previous.size_bytes
+        or archived.references != previous.references
+        or archived.provenance != previous.provenance
+        or archived.wait_type is not previous.wait_type
+        or archived.responsible_party is not previous.responsible_party
+        or archived.expected_by != previous.expected_by
+        or archived.expected_timing != previous.expected_timing
+        or archived.context_summary != previous.context_summary
+    ):
+        raise ValueError('The appended material history must preserve the replaced generation.')
+
+
 def evidence_summary_for(records: Sequence[EvidenceRecord]) -> EvidenceSummary:
     """Count what a claim has, is waiting for, and must act on.
 

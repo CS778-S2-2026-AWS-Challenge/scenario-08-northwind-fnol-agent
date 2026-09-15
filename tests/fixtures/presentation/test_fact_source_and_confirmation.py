@@ -133,7 +133,10 @@ def test_an_extracted_fact_names_its_source_and_waits_for_a_person(
 
     # Source: the claim can say the image produced this, and which image.
     assert field.source is FormSource.IMAGE
-    assert field.source_refs == [evidence_id]
+    assert field.source_refs == [
+        evidence_id,
+        f'evidence:{evidence_id}:material:1',
+    ]
     assert field.confidence == 0.87
 
     # Confirmation state: nobody has agreed to it yet.
@@ -146,7 +149,10 @@ def test_an_extracted_fact_names_its_source_and_waits_for_a_person(
     projected_field = projected_body['form'][FIELD]
     assert projected_field['status'] == 'proposed'
     assert projected_field['source'] == 'image'
-    assert projected_field['source_refs'] == [evidence_id]
+    assert projected_field['source_refs'] == [
+        evidence_id,
+        f'evidence:{evidence_id}:material:1',
+    ]
     assert 'provenance' not in json.dumps(projected_body).lower()
 
 
@@ -182,7 +188,10 @@ def test_a_decision_changes_confirmation_state_without_losing_the_source(
     assert field.value == EXTRACTED
     assert field.source is source_before
     assert field.source_refs == refs_before
-    assert refs_before == [evidence_id]
+    assert refs_before == [
+        evidence_id,
+        f'evidence:{evidence_id}:material:1',
+    ]
 
 
 def state_claimant_fact(client: TestClient, claim_id: str, revision: int, value: str) -> Any:
@@ -266,7 +275,7 @@ def test_the_source_and_confirmation_check_is_repeatable(
                     field.status,
                     field.value,
                     field.confidence,
-                    field.source_refs == [evidence_id],
+                    field.source_refs == [evidence_id, f'evidence:{evidence_id}:material:1'],
                 )
             )
 

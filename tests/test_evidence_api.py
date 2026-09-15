@@ -684,7 +684,10 @@ def test_processed_evidence_facts_stay_proposed_until_the_claimant_decides(
     assert processed.json()['file_status'] == 'ready'
     assert proposal['status'] == 'proposed'
     assert proposal['source'] == expected_source
-    assert proposal['source_refs'] == [evidence_id]
+    assert proposal['source_refs'] == [
+        evidence_id,
+        f'evidence:{evidence_id}:material:1',
+    ]
 
     before_decision = client.get(
         f'/api/v1/claims/{claim_id}',
@@ -720,7 +723,10 @@ def test_processed_evidence_facts_stay_proposed_until_the_claimant_decides(
     assert decided.json()['revision'] == 5
     assert updated['status'] == expected_status
     assert updated['source'] == expected_source
-    assert updated['source_refs'] == [evidence_id]
+    assert updated['source_refs'] == [
+        evidence_id,
+        f'evidence:{evidence_id}:material:1',
+    ]
     assert updated['updated_at'] >= proposal['updated_at']
 
     repeated_decision = client.post(
@@ -1433,4 +1439,7 @@ def test_processing_cannot_replace_an_unresolved_field_from_an_earlier_source(
     assert after is not None
     field_after = after.form['incident.description']
     assert field_after.model_dump(mode='json') == field_before.model_dump(mode='json')
-    assert field_after.source_refs == [first_evidence_id]
+    assert field_after.source_refs == [
+        first_evidence_id,
+        f'evidence:{first_evidence_id}:material:1',
+    ]
