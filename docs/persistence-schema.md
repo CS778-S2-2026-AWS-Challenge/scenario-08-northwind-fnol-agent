@@ -196,6 +196,11 @@ the append-only audit collection through a bounded, filterable projection.
     without scanning action history or inferring terminal state from a missing Session.
 37. Resolve and atomically reopen one eligible abandoned/closed Claim by staff actor, exact action,
     target, expected revision, and idempotency key while preserving the active-session pointer.
+38. Search Sessions within one authorised Claim by registered Session and message filters while
+    examining at most 100 Sessions and 200 messages per Session, stopping once the requested result
+    limit is satisfied, and returning unavailable when the examined-set bound cannot prove a
+    complete result (`SEARCH_SCOPE_EXCEEDED`). Read at most the requested newest 50 messages for
+    one explicit Session.
 
 ## Development/Test Identity Invariants
 
@@ -368,6 +373,27 @@ the append-only audit collection through a bounded, filterable projection.
   message, a cross-session reference, or a changed draft contract rejects the complete mutation.
 - A successful execution response is built from repository readback of the persisted execution
   record. Claimant routes never expose Staff Agent execution evidence or its internal source links.
+- The Staff Claim search boundary derives lifecycle, active queue, and effective assignee from the
+  Working Claim plus its current Evidence and handoff records. The MongoDB adapter stores that
+  derived state in an adapter-owned `staff_search` projection on the Claim document. It contains
+  only `claim_id`, customer/external references, created/incident dates, product family, lifecycle,
+  effective assignee, queue, and `updated_at`; it is not part of `WorkingClaim` or any API response.
+  Claim, Evidence, and handoff writes refresh the projection in the same transaction or write
+  boundary, and repository initialisation backfills pre-contract Claim documents before serving
+  searches. MongoDB indexes every registered derived search field and applies all filters plus a
+  database-side limit without per-Claim Evidence or handoff reads. Fixture and MongoDB behavior
+  remains equivalent. The dispatcher receives only the bounded lightweight candidates and never
+  enumerates or constructs full Workbench Claim projections.
+- Staff Session search is Claim/customer scoped before any Session or Message read. Repository
+  adapters apply exact Session ID, start date, and status predicates at their indexed Session
+  boundary, evaluate actor and closed typed text only within a maximum of 100 candidate Sessions
+  and 200 messages per Session, and stop as soon as the requested result limit is satisfied. Exceeding
+  either examined-set limit fails closed as unavailable with `SEARCH_SCOPE_EXCEEDED`; it cannot be
+  reported as no result.
+  Session read queries only the requested newest message window. Its Staff Agent projection
+  contains allow-listed Session identity/status/timestamps and closed `{type: text, text: ...}`
+  content; customer identity, model/session internals, and undeclared nested Message fields remain
+  persistence-only.
 
 ## Claim Lifecycle, Follow-up, and Retention Invariants
 

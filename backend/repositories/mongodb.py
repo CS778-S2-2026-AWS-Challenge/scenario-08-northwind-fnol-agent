@@ -9,7 +9,7 @@ document details below the repository boundary.
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn, TypeVar
 
 from pydantic import BaseModel, TypeAdapter
@@ -78,11 +78,21 @@ from backend.domain.staff_agent import (
     StaffAgentMessage,
     StaffAgentSession,
 )
+from backend.domain.staff_agent_tools import (
+    STAFF_SESSION_MAX_EXAMINED,
+    STAFF_SESSION_MESSAGE_MAX_EXAMINED,
+    StaffClaimSearchCandidate,
+    StaffClaimSearchProjection,
+    StaffSessionSearchCandidate,
+    build_staff_claim_search_candidate,
+    build_staff_claim_search_projection,
+)
 from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.protocols import (
     DemoSeedConflict,
     IdempotencyConflict,
     IdempotencyRecord,
+    RepositorySearchLimitExceeded,
     RevisionConflict,
     ValidationSeedGraph,
     validate_staff_agent_execution,
@@ -254,6 +264,41 @@ class MongoDBRepository:
             },
         )
         self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('claim_id', 1),
+                ('customer_id', 1),
+                ('started_at', -1),
+                ('_id', -1),
+            ],
+            name='staff_session_search_claim_started',
+            partialFilterExpression={'record_type': 'session'},
+        )
+        self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('claim_id', 1),
+                ('customer_id', 1),
+                ('status', 1),
+                ('started_at', -1),
+                ('_id', -1),
+            ],
+            name='staff_session_search_claim_status_started',
+            partialFilterExpression={'record_type': 'session'},
+        )
+        self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('claim_id', 1),
+                ('session_id', 1),
+                ('customer_id', 1),
+                ('created_at', -1),
+                ('_id', -1),
+            ],
+            name='staff_session_message_lookup',
+            partialFilterExpression={'record_type': 'message'},
+        )
+        self._collection.create_index(
             [('record_type', 1), ('claim_id', 1), ('source_session_id', 1)],
             unique=True,
             name='follow_up_source_session_unique',
@@ -280,6 +325,21 @@ class MongoDBRepository:
             name='external_task_result_task_unique',
             partialFilterExpression={'record_type': 'external_task_result'},
         )
+        for search_field in (
+            'external_reference',
+            'created_date',
+            'incident_date',
+            'product_family',
+            'lifecycle_state',
+            'assignee_id',
+            'queue',
+        ):
+            self._collection.create_index(
+                [('record_type', 1), (f'staff_search.{search_field}', 1), ('updated_at', -1)],
+                name=f'staff_claim_search_{search_field}',
+                partialFilterExpression={'record_type': 'claim'},
+            )
+        self._backfill_staff_search_projections()
 
     def connection_status(self) -> str:
         try:
@@ -295,6 +355,91 @@ class MongoDBRepository:
     def _record_id(kind: str, identifier: str) -> str:
         return f'{kind}:{identifier}'
 
+    def _staff_search_projection(
+        self,
+        claim: WorkingClaim,
+        *,
+        session: Any = None,
+    ) -> StaffClaimSearchProjection:
+        evidence = [
+            record
+            for record in (
+                self._model_from_document(document, EvidenceRecord)
+                for document in self._collection.find(
+                    {
+                        'record_type': 'evidence',
+                        'claim_id': claim.claim_id,
+                        'customer_id': claim.customer_id,
+                    },
+                    session=session,
+                )
+            )
+            if record is not None
+        ]
+        handoffs = [
+            record
+            for record in (
+                self._model_from_document(document, HandoffRecord)
+                for document in self._collection.find(
+                    {
+                        'record_type': 'handoff',
+                        'claim_id': claim.claim_id,
+                        'customer_id': claim.customer_id,
+                    },
+                    session=session,
+                )
+            )
+            if record is not None
+        ]
+        return build_staff_claim_search_projection(
+            build_staff_claim_search_candidate(claim, evidence, handoffs)
+        )
+
+    def _refresh_staff_search_projection(
+        self,
+        claim_id: str,
+        customer_id: str,
+        *,
+        session: Any = None,
+    ) -> None:
+        document = self._collection.find_one(
+            {
+                '_id': self._record_id('claim', claim_id),
+                'record_type': 'claim',
+                'customer_id': customer_id,
+            },
+            session=session,
+        )
+        claim = self._model_from_document(document, WorkingClaim)
+        if claim is None:
+            raise KeyError(claim_id)
+        projection = self._staff_search_projection(claim, session=session)
+        result = self._collection.update_one(
+            {
+                '_id': self._record_id('claim', claim_id),
+                'record_type': 'claim',
+                'customer_id': customer_id,
+                'revision': claim.revision,
+            },
+            {'$set': {'staff_search': projection.model_dump(mode='json')}},
+            session=session,
+        )
+        if result.matched_count != 1:
+            raise RevisionConflict(claim.revision)
+
+    def _backfill_staff_search_projections(self) -> None:
+        """Populate the adapter-owned projection for pre-contract Claim documents."""
+
+        documents = self._collection.find(
+            {'record_type': 'claim', 'staff_search': {'$exists': False}},
+            projection={'claim_id': 1, 'customer_id': 1},
+        )
+        for document in documents:
+            claim_id = document.get('claim_id')
+            customer_id = document.get('customer_id')
+            if isinstance(claim_id, str) and isinstance(customer_id, str):
+                self._refresh_staff_search_projection(claim_id, customer_id)
+
     def _put(
         self,
         kind: str,
@@ -306,6 +451,12 @@ class MongoDBRepository:
         session: Any = None,
     ) -> None:
         document = model.model_dump(mode='json')
+        if kind == 'claim':
+            if not isinstance(model, WorkingClaim):
+                raise TypeError('Claim records require WorkingClaim.')
+            document['staff_search'] = self._staff_search_projection(
+                model, session=session
+            ).model_dump(mode='json')
         document.update(
             {
                 '_id': self._record_id(kind, identifier),
@@ -340,6 +491,14 @@ class MongoDBRepository:
         except DuplicateKeyError as error:
             conflict_key = document.get('client_message_id') or identifier
             raise IdempotencyConflict(str(conflict_key)) from error
+        if kind in {'evidence', 'handoff'}:
+            if claim_id is None or customer_id is None:
+                raise KeyError(identifier)
+            self._refresh_staff_search_projection(
+                claim_id,
+                customer_id,
+                session=session,
+            )
 
     def _reject_client_message_conflict(
         self,
@@ -741,6 +900,51 @@ class MongoDBRepository:
     def list_claims_internal(self) -> list[WorkingClaim]:
         return self._list('claim', WorkingClaim, {}, '-updated_at')
 
+    def search_claims_internal(
+        self, filters: dict[str, object], limit: int
+    ) -> list[StaffClaimSearchCandidate]:
+        """Query registered Claim keys at MongoDB and return only bounded candidates."""
+        query: dict[str, Any] = {'record_type': 'claim'}
+        claim_reference = filters.get('claim_reference')
+        if claim_reference:
+            query['$or'] = [
+                {'claim_id': claim_reference},
+                {'staff_search.external_reference': claim_reference},
+            ]
+        if filters.get('customer_reference'):
+            query['customer_id'] = filters['customer_reference']
+        if filters.get('external_reference'):
+            query['staff_search.external_reference'] = filters['external_reference']
+        if filters.get('created_date'):
+            query['staff_search.created_date'] = str(filters['created_date'])
+        for search_field in (
+            'incident_date',
+            'product_family',
+            'lifecycle_state',
+            'assignee_id',
+            'queue',
+        ):
+            value = filters.get(search_field)
+            if value:
+                query[f'staff_search.{search_field}'] = str(value)
+        cursor = self._collection.find(query).sort([('updated_at', -1), ('_id', -1)]).limit(limit)
+        records: list[StaffClaimSearchCandidate] = []
+        for document in cursor:
+            claim = self._model_from_document(document, WorkingClaim)
+            projection_payload = document.get('staff_search')
+            if claim is None or not isinstance(projection_payload, dict):
+                continue
+            projection = StaffClaimSearchProjection.model_validate(projection_payload)
+            records.append(
+                StaffClaimSearchCandidate(
+                    claim=claim,
+                    lifecycle_state=projection.lifecycle_state,
+                    assignee_id=projection.assignee_id,
+                    queue=projection.queue,
+                )
+            )
+        return records
+
     def promote_claim_owner(
         self,
         claim_id: str,
@@ -757,7 +961,12 @@ class MongoDBRepository:
         )
         self._collection.update_one(
             {'_id': self._record_id('claim', claim_id), 'record_type': 'claim'},
-            {'$set': {'customer_id': customer_id}},
+            {
+                '$set': {
+                    'customer_id': customer_id,
+                    'staff_search.customer_reference': customer_id,
+                }
+            },
         )
         return self.get_claim(claim_id, customer_id)
 
@@ -790,6 +999,7 @@ class MongoDBRepository:
             },
             {
                 **claim.model_dump(mode='json'),
+                'staff_search': self._staff_search_projection(claim).model_dump(mode='json'),
                 '_id': self._record_id('claim', claim.claim_id),
                 'record_type': 'claim',
                 'customer_id': claim.customer_id,
@@ -1035,6 +1245,85 @@ class MongoDBRepository:
             'started_at',
         )
 
+    def search_sessions_internal(
+        self,
+        claim_id: str,
+        customer_id: str,
+        filters: dict[str, object],
+        limit: int,
+    ) -> list[StaffSessionSearchCandidate]:
+        """Search a bounded Claim-scoped Session set without loading message bodies wholesale."""
+
+        query: dict[str, Any] = {
+            'record_type': 'session',
+            'claim_id': claim_id,
+            'customer_id': customer_id,
+        }
+        if filters.get('session_id'):
+            query['_id'] = self._record_id('session', str(filters['session_id']))
+        if filters.get('started_date'):
+            day = str(filters['started_date'])
+            next_day = (datetime.fromisoformat(day) + timedelta(days=1)).date().isoformat()
+            query['started_at'] = {
+                '$gte': f'{day}T00:00:00Z',
+                '$lt': f'{next_day}T00:00:00Z',
+            }
+        if filters.get('status'):
+            query['status'] = filters['status']
+        cursor = (
+            self._collection.find(query)
+            .sort([('started_at', -1), ('_id', -1)])
+            .limit(STAFF_SESSION_MAX_EXAMINED + 1)
+        )
+        matches: list[StaffSessionSearchCandidate] = []
+        for examined, document in enumerate(cursor, start=1):
+            if examined > STAFF_SESSION_MAX_EXAMINED:
+                raise RepositorySearchLimitExceeded(
+                    'The Session search exceeded its maximum examined set; narrow the filters.'
+                )
+            session = self._model_from_document(document, SessionRecord)
+            if session is None:
+                continue
+            message_query: dict[str, Any] = {
+                'record_type': 'message',
+                'claim_id': claim_id,
+                'session_id': session.session_id,
+                'customer_id': customer_id,
+            }
+            message_documents = list(
+                self._collection.find(
+                    message_query,
+                    projection={'actor': 1, 'content.type': 1, 'content.text': 1},
+                )
+                .sort([('created_at', 1), ('_id', 1)])
+                .limit(STAFF_SESSION_MESSAGE_MAX_EXAMINED + 1)
+            )
+            if len(message_documents) > STAFF_SESSION_MESSAGE_MAX_EXAMINED:
+                raise RepositorySearchLimitExceeded(
+                    'The Session message search exceeded its maximum examined set; '
+                    'narrow the filters.'
+                )
+            actor = filters.get('actor')
+            if actor and not any(document.get('actor') == actor for document in message_documents):
+                continue
+            message_contains = filters.get('message_contains')
+            if message_contains:
+                expected = str(message_contains).casefold()
+                if not any(
+                    isinstance(content := document.get('content'), dict)
+                    and content.get('type') == 'text'
+                    and isinstance(text := content.get('text'), str)
+                    and expected in text.casefold()
+                    for document in message_documents
+                ):
+                    continue
+            matches.append(
+                StaffSessionSearchCandidate(session=session, message_count=len(message_documents))
+            )
+            if len(matches) >= limit:
+                break
+        return matches
+
     def _claim_owned(
         self,
         claim_id: str,
@@ -1109,6 +1398,34 @@ class MongoDBRepository:
             {'claim_id': claim_id, 'session_id': session_id, 'customer_id': customer_id},
             'created_at',
         )
+
+    def list_recent_messages(
+        self,
+        claim_id: str,
+        session_id: str,
+        customer_id: str,
+        limit: int,
+    ) -> list[MessageRecord]:
+        documents = (
+            self._collection.find(
+                {
+                    'record_type': 'message',
+                    'claim_id': claim_id,
+                    'session_id': session_id,
+                    'customer_id': customer_id,
+                }
+            )
+            .sort([('created_at', -1), ('_id', -1)])
+            .limit(limit)
+        )
+        messages = [
+            message
+            for message in (
+                self._model_from_document(document, MessageRecord) for document in documents
+            )
+            if message is not None
+        ]
+        return list(reversed(messages))
 
     def save_agent_decision(self, decision: AgentDecisionRecord, customer_id: str) -> None:
         if (
@@ -3258,6 +3575,9 @@ class MongoDBRepository:
             },
             {
                 **claim.model_dump(mode='json'),
+                'staff_search': self._staff_search_projection(
+                    claim, session=mongo_session
+                ).model_dump(mode='json'),
                 '_id': self._record_id('claim', claim.claim_id),
                 'record_type': 'claim',
                 'customer_id': claim.customer_id,
