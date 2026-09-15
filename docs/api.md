@@ -2055,6 +2055,8 @@ Returns staff and system updates visible to the claimant. Each update includes `
 | `POST` | `/workbench/claims/{claim_id}/requeue` | Release primary ownership when the projected action is executable |
 | `POST` | `/workbench/claims/{claim_id}/staff-actions` | Create a staff action |
 | `PATCH` | `/workbench/claims/{claim_id}/staff-actions/{action_id}` | Progress or complete a staff action |
+| `POST` | `/workbench/claims/{claim_id}/external-tasks/{task_id}/accept-review` | Accept a projected external-result or terminal-failure review |
+| `POST` | `/workbench/claims/{claim_id}/external-tasks/{task_id}/reconcile` | Reconcile one projected unknown external outcome without resubmitting it |
 | `POST` | `/workbench/claims/{claim_id}/signals/{signal_id}/decisions` | Decide an internal signal |
 | `POST` | `/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept` | Accept a handoff |
 | `POST` | `/workbench/claims/{claim_id}/messages` | Send a persisted claimant-visible staff message |
@@ -2202,19 +2204,25 @@ integration status; tags; and creation and update times. It is a projection of s
 not a separately editable board record.
 
 `work_summary.queue_key` is exactly one of seven lifecycle-placement views for every listable
-Claim. The server applies terminal precedence before active placement:
+Claim. The server applies actionable staff work and an accepted provider wait before terminal
+placement:
 
 | Queue | Authoritative mapping |
 |---|---|
-| `completed` | `terminal_disposition.value=completed` |
+| `completed` | `terminal_disposition.value=completed` with no active handoff, unresolved staff-owned external attention, or accepted external task awaiting its result |
 | `abandoned` | `terminal_disposition.value=abandoned` |
 | `closed` | `terminal_disposition.value=closed` |
 | `processing` | Non-terminal `draft_active`, `staff_support`, `professional_review`, `ready_to_create`, or `creating` lifecycle |
 | `waiting_user` | `waiting_customer` without claimant material required for the current action |
 | `waiting_material` | `waiting_customer` with claimant Evidence missing information that is `required_now` |
-| `waiting_third_party` | `waiting_external`; this takes precedence over other waiting reasons |
+| `waiting_third_party` | `waiting_external`, or an accepted created-Claim external task whose provider result has not arrived; this takes precedence over terminal placement and other waiting reasons |
 
-Active handoffs and professional review therefore remain in `processing`. Operational views are
+Active handoffs, professional review, and unresolved staff-owned external-service attention
+therefore remain in `processing`, including when Claim creation has already recorded a `completed`
+terminal disposition. Completing the applicable external review or reconciling the unknown
+operation removes that temporary active placement without changing the terminal disposition. A
+reconciled accepted request then remains in `waiting_third_party` until its result arrives.
+Operational views are
 independent, overlapping projections: the same Claim may appear in `processing` and, for example,
 `human_requests` or `professional_review`; a completed Claim may also match `created_routed`.
 `all` is the union of the four active queues and excludes all three terminal queues.
@@ -2427,6 +2435,26 @@ non-blocked `allowed_actions` entry. Clients display a Staff next action only wh
 exactly resolve to a non-blocked entry; they do not fall back to another action or infer one from
 tags, queues, text, role, ownership, or field counts. `customer_next_step` remains a separate
 claimant-safe projection.
+
+For one `terminal_failure` or returned result whose verification is `unverified`, `inconsistent`,
+or `review_required`, the server projects `external.accept_review` against the exact `task_id`.
+The dedicated accept-review mutation requires authenticated, claimable staff, the projected Claim
+revision, and an idempotency key. It assigns an unowned Claim to that staff member and creates a
+task-linked `external_failure_review` or `external_result_review` WorkItem. It does not change the
+external task, provider result, Claim terminal disposition, or claimant next step. The ordinary
+`work_item.update` contract completes the accepted review. After completion, the external-request
+projection reports that the task-linked staff review is recorded and clears `needs_attention`;
+the raw task and result-verification fields remain unchanged for provenance.
+
+For `unknown_outcome`, the server instead projects `external.reconcile_response` against the exact
+`task_id`. Its dedicated mutation requires the same staff authority and calls the configured
+assessor status-check adapter with the existing task, request, and operation identity. It never
+submits a second provider request. A confirmed result atomically assigns an unowned Claim, advances
+the existing task and operation to `accepted`, records the routing result and awaited Evidence,
+completes a task-linked `external_reconciliation` StaffAction, stores the actor-scoped idempotency
+response, and advances the Claim revision. An inconclusive check remains `unknown_outcome` and
+writes none of that bundle. Stale revision, unavailable staff, another owner, missing exact action,
+or changed idempotency input returns a structured conflict before settlement.
 
 ### `POST /api/v1/workbench/claims/{claim_id}/reopen`
 

@@ -729,6 +729,15 @@ def test_assessor_reconciliation_is_one_atomic_mongodb_settlement(
     request = repository.list_external_task_requests_internal(claim.claim_id)[0]
     claim_before = repository.get_claim_internal(claim.claim_id)
     assert claim_before is not None
+    presence = StaffPresenceRecord(
+        staff_id='staff-reconciliation',
+        online=True,
+        available=True,
+        last_seen_at=datetime.now(UTC),
+        expires_at=datetime(2027, 1, 1, tzinfo=UTC),
+        updated_at=datetime.now(UTC),
+    )
+    repository.save_staff_presence(presence)
 
     result, replayed = reconcile_assessor_routing(
         repository,
@@ -737,6 +746,11 @@ def test_assessor_reconciliation_is_one_atomic_mongodb_settlement(
         task_before.task_id,
         'mongo-reconciliation',
         claim_before.revision,
+        staff_actor_id=presence.staff_id,
+        staff_route='/api/v1/workbench/reconcile',
+        staff_request_fingerprint='mongo-staff-reconciliation-fingerprint',
+        staff_action_registry_version='2026-09-15.1',
+        required_staff_revision=presence.revision,
     )
 
     assert replayed is False
@@ -751,11 +765,26 @@ def test_assessor_reconciliation_is_one_atomic_mongodb_settlement(
     assert claim_after is not None
     assert claim_after.revision == claim_before.revision + 1
     assert claim_after.assessor_routing == result
+    assert claim_after.assignee_id == presence.staff_id
     evidence = repository.list_evidence(claim.claim_id, claim.customer_id)
     links = repository.list_external_task_evidence_links_internal(claim.claim_id)
     assert len(evidence) == len(links) == 1
     assert links[0].task_id == task_after.task_id
     assert links[0].evidence_id == evidence[0].evidence_id
+    staff_actions = repository.list_staff_actions(claim.claim_id)
+    assert len(staff_actions) == 1
+    assert staff_actions[0].action_type == 'external_reconciliation'
+    assert staff_actions[0].status is StaffActionStatus.COMPLETED
+    stored_replay = repository.find_idempotency(
+        presence.staff_id,
+        '/api/v1/workbench/reconcile',
+        'mongo-reconciliation',
+    )
+    assert stored_replay is not None
+    assert stored_replay.target_ref == task_after.task_id
+    stored_presence = repository.get_staff_presence(presence.staff_id)
+    assert stored_presence is not None
+    assert stored_presence.revision == presence.revision + 1
 
 
 @pytest.mark.parametrize(

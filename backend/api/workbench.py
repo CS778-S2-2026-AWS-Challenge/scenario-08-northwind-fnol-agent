@@ -5,6 +5,7 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 
+from backend.adapters.claims_service import AssessorServiceAdapter
 from backend.adapters.evidence_storage import EvidenceStorage, EvidenceStorageUnavailable
 from backend.core.auth import Principal, require_staff
 from backend.core.errors import ApiError
@@ -17,6 +18,7 @@ from backend.domain.models import (
     CreateStaffMessageRequest,
     CreateTransferRequest,
     DecideCollaborationRequest,
+    ExternalTaskReconciliationResponse,
     HandoffMutationResponse,
     ReopenClaimRequest,
     RequeueClaimRequest,
@@ -60,9 +62,12 @@ from backend.services.review_writeback import (
     decide_review_signal,
     get_review_connected_workbench_detail,
 )
+from backend.services.runtime_integrations import RuntimeIntegrationPolicy
 from backend.services.staff_actions import (
+    accept_external_review,
     accept_handoff,
     create_staff_action,
+    reconcile_external_response,
     resolve_handoff,
     send_staff_message,
     update_staff_action,
@@ -107,6 +112,12 @@ def create_staff_message(
 
 def repository_for(request: Request) -> PersistenceRepository:
     return cast(PersistenceRepository, request.app.state.claim_repository)
+
+
+def assessor_adapter_for(request: Request) -> AssessorServiceAdapter:
+    policy = cast(RuntimeIntegrationPolicy, request.app.state.runtime_integration_policy)
+    policy.require('assessor_service')
+    return cast(AssessorServiceAdapter, request.app.state.assessor_service_adapter)
 
 
 @conversation_router.get('', response_model=WorkbenchConversationsResponse)
@@ -476,6 +487,54 @@ def create_action(
 ) -> StaffActionMutationResponse:
     return create_staff_action(
         repository_for(request), principal, claim_id, payload, idempotency_key, if_match
+    )
+
+
+@router.post(
+    '/{claim_id}/external-tasks/{task_id}/accept-review',
+    response_model=StaffActionMutationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def accept_external_task_review(
+    claim_id: str,
+    task_id: str,
+    payload: AcceptHandoffRequest,
+    request: Request,
+    principal: Principal = Depends(require_staff),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> StaffActionMutationResponse:
+    return accept_external_review(
+        repository_for(request),
+        principal,
+        claim_id,
+        task_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )
+
+
+@router.post(
+    '/{claim_id}/external-tasks/{task_id}/reconcile',
+    response_model=ExternalTaskReconciliationResponse,
+)
+def reconcile_external_task_response(
+    claim_id: str,
+    task_id: str,
+    request: Request,
+    principal: Principal = Depends(require_staff),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> ExternalTaskReconciliationResponse:
+    return reconcile_external_response(
+        repository_for(request),
+        assessor_adapter_for(request),
+        principal,
+        claim_id,
+        task_id,
+        idempotency_key,
+        if_match,
     )
 
 
