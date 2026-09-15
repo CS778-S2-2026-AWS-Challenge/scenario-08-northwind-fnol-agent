@@ -46,6 +46,15 @@ def test_initial_bootstrap_persists_claim_and_turn_once(
     assert len(messages) == 2
     claimant_message = next(message for message in messages if message.actor is ActorType.CLAIMANT)
     assert claimant_message.client_message_id == 'bootstrap-message-1'
+    stored_operation = repository.find_idempotency(
+        'cus_demo',
+        '/api/v1/claims',
+        'bootstrap-operation-1',
+    )
+    assert stored_operation is not None
+    assert stored_operation.claim_id == claim_id
+    assert stored_operation.session_id == session_id
+    assert stored_operation.message_id == claimant_message.message_id
 
     changed_payload = {
         **payload,
