@@ -40,6 +40,7 @@ export default function WorkbenchPage() {
   const [conversationsError, setConversationsError] = useState(null)
   const [detail, setDetail] = useState(null)
   const detailRef = useRef(null)
+  const rootRestoreAttemptedRef = useRef(false)
   const currentClaimIdRef = useRef(claimId)
   currentClaimIdRef.current = claimId
   const detailRequestId = useRef(0)
@@ -443,6 +444,44 @@ export default function WorkbenchPage() {
       setSearchParams(normalized, { replace: true })
     }
   }, [filterMetadata, searchParams, setSearchParams])
+  useEffect(() => {
+    if (
+      rootRestoreAttemptedRef.current
+      || location.pathname !== '/workbench'
+      || !filterMetadata
+    ) return
+
+    rootRestoreAttemptedRef.current = true
+    if (!viewAvailable) return
+
+    const activeTab = tabs.tabs.find((tab) => tab.claimId === tabs.activeId)
+    if (!activeTab) return
+
+    const section = CLAIM_SECTIONS.has(activeTab.section)
+      ? activeTab.section
+      : 'summary'
+    const suffix = section === 'summary' ? '' : `/${section}`
+    const sessionId = section === 'conversation'
+      ? activeTab.sessionId || null
+      : null
+
+    navigate(
+      queueRoute(
+        `/workbench/claims/${activeTab.claimId}${suffix}`,
+        queueFilters,
+        sessionId,
+      ),
+      { replace: true },
+    )
+  }, [
+    filterMetadata,
+    location.pathname,
+    navigate,
+    queueFilters,
+    tabs.activeId,
+    tabs.tabs,
+    viewAvailable,
+  ])
   useEffect(() => {
     loadClaims()
   }, [loadClaims])
