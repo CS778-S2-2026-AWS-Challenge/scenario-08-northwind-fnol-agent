@@ -10,6 +10,7 @@ import QueuePanel from '../components/QueuePanel.jsx'
 import StaffAgent from '../components/StaffAgent.jsx'
 import { usePersistentTabs } from '../hooks/usePersistentTabs.js'
 import { actionFailureMessage, failureReason, failureReference } from '../failure.js'
+import { canSubmitProjectedAction, findProjectedAction } from '../projected-action.js'
 import { revisionNotice as buildRevisionNotice } from '../revision.js'
 import ConversationsPage from './ConversationsPage.jsx'
 
@@ -38,6 +39,10 @@ export default function WorkbenchPage() {
   const [conversations, setConversations] = useState([])
   const [conversationsLoading, setConversationsLoading] = useState(false)
   const [conversationsError, setConversationsError] = useState(null)
+  const [assistanceRequests, setAssistanceRequests] = useState([])
+  const [assistanceRequestsLoading, setAssistanceRequestsLoading] = useState(false)
+  const [assistanceRequestsError, setAssistanceRequestsError] = useState(null)
+  const conversationsRequestId = useRef(0)
   const [detail, setDetail] = useState(null)
   const detailRef = useRef(null)
   const rootRestoreAttemptedRef = useRef(false)
@@ -405,16 +410,77 @@ export default function WorkbenchPage() {
   ])
 
   const loadConversations = useCallback(async ({ propagateError = false } = {}) => {
+    const requestId = ++conversationsRequestId.current
     setConversationsLoading(true)
     setConversationsError(null)
-    try {
-      const response = await workbenchApi.conversations(token)
-      setConversations(response.items || [])
-    } catch (error) {
-      setConversationsError(error)
-      if (propagateError) throw error
-    } finally {
-      setConversationsLoading(false)
+    setAssistanceRequestsLoading(true)
+    setAssistanceRequestsError(null)
+    const [conversationResult, assistanceResult] = await Promise.allSettled([
+      workbenchApi.conversations(token),
+      workbenchApi.claims(token, {
+        view: 'human_requests',
+        assignee_id: 'unassigned',
+        limit: 25,
+      }),
+    ])
+    if (requestId !== conversationsRequestId.current) return
+
+    const baseConversations = conversationResult.status === 'fulfilled'
+      ? conversationResult.value.items || []
+      : []
+    const requestClaims = assistanceResult.status === 'fulfilled'
+      ? (assistanceResult.value.items || []).filter((item) => (
+        item.work_summary?.primary_action_code === 'human.accept_handoff'
+      ))
+      : []
+    const claimIds = [...new Set([
+      ...baseConversations.filter((item) => item.kind === 'claim').map((item) => item.claim_id),
+      ...requestClaims.map((item) => item.claim_id),
+    ].filter(Boolean))]
+    const contextEntries = await Promise.all(claimIds.map(async (id) => {
+      const [detailResult, handoffResult] = await Promise.allSettled([
+        workbenchApi.claim(token, id),
+        workbenchApi.handoffs(token, id),
+      ])
+      return [id, {
+        detail: detailResult.status === 'fulfilled' ? detailResult.value : null,
+        detailError: detailResult.status === 'rejected' ? detailResult.reason : null,
+        handoffs: handoffResult.status === 'fulfilled' ? handoffResult.value.items || [] : [],
+        handoffError: handoffResult.status === 'rejected' ? handoffResult.reason : null,
+      }]
+    }))
+    if (requestId !== conversationsRequestId.current) return
+    const contexts = new Map(contextEntries)
+
+    if (conversationResult.status === 'fulfilled') {
+      setConversations(baseConversations.map((conversation) => (
+        enrichConversation(conversation, contexts.get(conversation.claim_id))
+      )))
+    } else {
+      setConversations([])
+      setConversationsError(conversationResult.reason)
+    }
+
+    if (assistanceResult.status === 'fulfilled') {
+      setAssistanceRequests(requestClaims.map((claim) => (
+        assistanceRequestProjection(claim, contexts.get(claim.claim_id))
+      )))
+    } else {
+      setAssistanceRequests([])
+      setAssistanceRequestsError(assistanceResult.reason)
+    }
+    setConversationsLoading(false)
+    setAssistanceRequestsLoading(false)
+    if (propagateError) {
+      const contextError = contextEntries
+        .flatMap(([, context]) => [context.detailError, context.handoffError])
+        .find(Boolean)
+      const refreshError = conversationResult.status === 'rejected'
+        ? conversationResult.reason
+        : assistanceResult.status === 'rejected'
+          ? assistanceResult.reason
+          : contextError
+      if (refreshError) throw refreshError
     }
   }, [token])
 
@@ -530,6 +596,49 @@ export default function WorkbenchPage() {
   function openClaim(claim) {
     tabs.open(claim)
     navigate(queueRoute(`/workbench/claims/${claim.claim_id}`, queueFilters))
+  }
+
+  function reviewAssistanceRequest(request) {
+    const id = request.claim_id
+    const sessionId = request.detail?.active_session_id || null
+    tabs.open(request.detail || request)
+    if (sessionId) {
+      tabs.update(id, { section: 'conversation', sessionId })
+      navigate(queueRoute(`/workbench/claims/${id}/conversation`, queueFilters, sessionId))
+      return
+    }
+    navigate(queueRoute(`/workbench/claims/${id}`, queueFilters))
+  }
+
+  async function takeOverAssistanceRequest(request) {
+    if (
+      !request.detail
+      || !request.handoff
+      || !canSubmitProjectedAction(request.action)
+      || request.action.based_on_revision !== request.detail.revision
+    ) {
+      throw new Error(request.blockedReason || 'This assistance request cannot be taken over from the current projection. Review the latest Claim state and try again.')
+    }
+    try {
+      await workbenchApi.acceptHandoff(
+        token,
+        request.claim_id,
+        request.handoff.handoff_id,
+        request.detail.revision,
+      )
+    } catch (error) {
+      let latest = null
+      try {
+        latest = await workbenchApi.claim(token, request.claim_id)
+      } catch {
+        // The list reload below remains the authoritative recovery attempt.
+      }
+      await loadConversations()
+      error.message = actionFailureMessage('Taking over the conversation', error, latest)
+      throw error
+    }
+    await Promise.all([loadConversations(), loadClaims()])
+    reviewAssistanceRequest(request)
   }
 
   function activateTab(id) {
@@ -850,6 +959,12 @@ export default function WorkbenchPage() {
             onRetry={loadConversations}
             onOpenConversation={openConversation}
             selectedStaffAgentSessionId={agentSessionId}
+            assistanceRequests={assistanceRequests}
+            assistanceLoading={assistanceRequestsLoading}
+            assistanceError={assistanceRequestsError}
+            onRetryAssistance={loadConversations}
+            onReviewRequest={reviewAssistanceRequest}
+            onTakeOver={takeOverAssistanceRequest}
           />
         ) : (
           <div className={`workbench-layout${queueVisible ? '' : ' queue-hidden'}`}>
@@ -993,6 +1108,57 @@ function resourceState(response = {}) {
     error: null,
     resolved_session_id: response.resolved_session_id || null,
   }
+}
+
+function enrichConversation(conversation, context) {
+  if (conversation.kind !== 'claim' || !context) return conversation
+  const handoff = context.detail?.active_session_id === conversation.session_id
+    ? latestCustomerAssistance(context.handoffs)
+    : null
+  return {
+    ...conversation,
+    detail: context.detail,
+    assistance: handoff ? {
+      ...handoff,
+      waitingForCustomer: ['accepted', 'in_progress'].includes(handoff.status)
+        && context.detail?.customer_next_step?.responsible_party === 'claimant',
+    } : null,
+    contextUnavailable: Boolean(context.detailError || context.handoffError),
+  }
+}
+
+function assistanceRequestProjection(claim, context = {}) {
+  const detail = context.detail
+  const targetRef = detail?.work_summary?.primary_action_target_ref
+    || claim.work_summary?.primary_action_target_ref
+  const handoff = latestCustomerAssistance(context.handoffs, targetRef)
+  const action = findProjectedAction(
+    detail?.allowed_actions,
+    'human.accept_handoff',
+    handoff?.handoff_id || targetRef,
+  )
+  const blockedReason = action?.blocked_reason
+    || (context.detailError || context.handoffError
+      ? 'The latest request context is unavailable. Review the Claim before taking over.'
+      : 'No take-over action is projected for this request.')
+  return {
+    ...claim,
+    detail,
+    handoff,
+    action,
+    canTakeOver: handoff?.status === 'queued'
+      && canSubmitProjectedAction(action)
+      && action.based_on_revision === detail?.revision,
+    blockedReason,
+  }
+}
+
+function latestCustomerAssistance(handoffs = [], targetRef = null) {
+  if (targetRef) {
+    const targeted = handoffs.find((item) => item.handoff_id === targetRef)
+    if (targeted?.support_need === 'human_requested') return targeted
+  }
+  return [...handoffs].reverse().find((item) => item.support_need === 'human_requested') || null
 }
 
 function settledResourceState(result, previous = {}) {
