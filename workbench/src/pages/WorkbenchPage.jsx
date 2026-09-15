@@ -855,6 +855,76 @@ export default function WorkbenchPage() {
     await runClaimMutation(action.label, operation)
   }
 
+  async function performExternalTaskAction(action, payload = {}) {
+    const previous = detailRef.current
+    const projectedAction = findProjectedAction(
+      previous?.allowed_actions,
+      action.action_code,
+      action.target_ref,
+    )
+    if (
+      !previous
+      || action.target_type !== 'external_task'
+      || projectedAction?.target_type !== 'external_task'
+      || projectedAction.based_on_revision !== previous.revision
+      || !canSubmitProjectedAction(projectedAction)
+    ) {
+      throw new Error('The projected external-service action no longer matches this Claim revision. Refresh the Claim and review the current action.')
+    }
+
+    const declaredInputs = new Set((projectedAction.inputs || []).map((input) => input.field_code))
+    if (Object.keys(payload).some((field) => !declaredInputs.has(field))) {
+      throw new Error('This external-service action contains an input that was not published by the server. Refresh the Claim before acting.')
+    }
+
+    try {
+      await runClaimMutation(projectedAction.label, (current) => {
+        const currentAction = findProjectedAction(
+          current.allowed_actions,
+          projectedAction.action_code,
+          projectedAction.target_ref,
+        )
+        if (
+          currentAction?.target_type !== 'external_task'
+          || currentAction.based_on_revision !== current.revision
+          || !canSubmitProjectedAction(currentAction)
+        ) {
+          throw new Error('The projected external-service action changed before it could be submitted. Refresh the Claim and review the current action.')
+        }
+        if (currentAction.action_code === 'external.accept_review') {
+          return workbenchApi.acceptExternalTaskReview(
+            token,
+            current.claim_id,
+            currentAction.target_ref,
+            current.revision,
+            payload,
+          )
+        }
+        if (currentAction.action_code === 'external.reconcile_response') {
+          if (Object.keys(payload).length) {
+            throw new Error('The reconciliation action does not accept browser-supplied fields. Refresh the Claim before acting.')
+          }
+          return workbenchApi.reconcileExternalTaskResponse(
+            token,
+            current.claim_id,
+            currentAction.target_ref,
+            current.revision,
+          )
+        }
+        throw new Error('This projected external-service action is not connected in the current Workbench build. Refresh after the client is updated.')
+      })
+    } catch (error) {
+      if (currentClaimIdRef.current === previous.claim_id) {
+        await loadSectionResources(previous.claim_id, 'external-services')
+      }
+      throw error
+    }
+
+    if (currentClaimIdRef.current === previous.claim_id) {
+      await loadSectionResources(previous.claim_id, 'external-services')
+    }
+  }
+
   async function reopenClaim(action, payload, idempotencyKey) {
     const current = detail
     if (
@@ -976,7 +1046,7 @@ export default function WorkbenchPage() {
             <section className="workspace-region">
               <ClaimTabs tabs={tabs.tabs} activeId={claimId || tabs.activeId} onActivate={activateTab} onClose={closeTab} />
               <div id="open-claim-panel" className="open-claim-panel" role="tabpanel" aria-labelledby={claimId ? `open-claim-tab-${claimId}` : undefined} tabIndex={0}>
-                <ClaimWorkspace detail={detail} resources={resources} loading={detailLoading} stale={detailStale} error={detailError} section={currentSection} draft={currentTab?.draft || ''} profile={profile} onSection={changeSection} onDraft={(draft) => claimId && tabs.update(claimId, { draft })} onRetry={() => loadDetail(claimId)} onRetrySection={() => loadSectionResources(claimId, currentSection)} onAccept={acceptHandoff} onResolve={resolveHandoff} onSignalDecision={decideSignal} onCreateAction={createStaffAction} onUpdateAction={updateStaffAction} onLoadEvidence={loadEvidence} onSend={sendMessage} onOwnershipAction={performOwnershipAction} onReopen={reopenClaim} />
+                <ClaimWorkspace detail={detail} resources={resources} loading={detailLoading} stale={detailStale} error={detailError} section={currentSection} draft={currentTab?.draft || ''} profile={profile} onSection={changeSection} onDraft={(draft) => claimId && tabs.update(claimId, { draft })} onRetry={() => loadDetail(claimId)} onRetrySection={() => loadSectionResources(claimId, currentSection)} onAccept={acceptHandoff} onResolve={resolveHandoff} onSignalDecision={decideSignal} onCreateAction={createStaffAction} onUpdateAction={updateStaffAction} onLoadEvidence={loadEvidence} onSend={sendMessage} onOwnershipAction={performOwnershipAction} onReopen={reopenClaim} onExternalTaskAction={performExternalTaskAction} />
               </div>
             </section>
           </div>

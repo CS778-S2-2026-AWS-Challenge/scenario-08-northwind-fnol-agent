@@ -13,7 +13,10 @@ const api = vi.hoisted(() => ({
   conversations: vi.fn(),
   handoffs: vi.fn(),
   collaborationRequests: vi.fn(),
+  externalRequests: vi.fn(),
   acceptHandoff: vi.fn(),
+  acceptExternalTaskReview: vi.fn(),
+  reconcileExternalTaskResponse: vi.fn(),
   reopenClaim: vi.fn(),
 }))
 
@@ -42,11 +45,13 @@ vi.mock('../hooks/usePersistentTabs.js', () => ({ usePersistentTabs: () => tabs 
 vi.mock('../components/NavigationRail.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimTabs.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimWorkspace.jsx', () => ({
-  default: ({ detail, resources, onAccept, onReopen }) => <div>
+  default: ({ detail, resources, onAccept, onReopen, onExternalTaskAction }) => <div>
     {detail && <output data-testid="claim-revision">Claim revision {detail.revision}</output>}
     {resources.handoffs?.error && <p>Handoff context unavailable</p>}
+    {resources.externalRequests?.error && <p>External context unavailable</p>}
     {detail?.work_summary?.primary_action_code === 'claim.reopen' && <button type="button" onClick={() => onReopen(detail.allowed_actions[0], { reason: 'New material received.' }, 'reopen-route-key').catch(() => {})}>Test projected reopen</button>}
     {detail?.work_summary?.primary_action_code === 'human.accept_handoff' && <button type="button" onClick={() => onAccept({ handoff_id: 'hnd_1' }).catch(() => {})}>Test projected accept</button>}
+    {detail?.work_summary?.primary_action_code?.startsWith('external.') && <button type="button" onClick={() => onExternalTaskAction(detail.allowed_actions[0], {}).catch(() => {})}>Test projected external action</button>}
   </div>,
 }))
 vi.mock('../components/StaffAgent.jsx', () => ({
@@ -158,6 +163,7 @@ describe('WorkbenchPage queue routing', () => {
     api.messages.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.handoffs.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.collaborationRequests.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.externalRequests.mockResolvedValue({ items: [], page: { next_cursor: null }, status: 'available' })
   })
 
   it('restores the persisted active Claim section and claimant session from the Workbench root', async () => {
@@ -535,6 +541,151 @@ describe('WorkbenchPage queue routing', () => {
     ))
     await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 2'))
     expect(api.claim).toHaveBeenCalledTimes(2)
+  })
+
+  it('executes an exact projected external review and reads back Claim and external-service state before settling', async () => {
+    const user = userEvent.setup()
+    const externalAction = {
+      action_code: 'external.accept_review',
+      target_type: 'external_task',
+      target_ref: 'tsk_assessor_1',
+      label: 'Accept external-service review',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+      inputs: [],
+    }
+    const actionable = {
+      ...claim,
+      revision: 4,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: externalAction.action_code,
+        primary_action_target_ref: externalAction.target_ref,
+      },
+      allowed_actions: [externalAction],
+    }
+    const latest = {
+      ...actionable,
+      revision: 5,
+      work_summary: {
+        ...actionable.work_summary,
+        primary_action_code: null,
+        primary_action_target_ref: null,
+      },
+      allowed_actions: [],
+    }
+    api.claim.mockResolvedValueOnce(actionable).mockResolvedValue(latest)
+    api.acceptExternalTaskReview.mockResolvedValue({ revision: 5 })
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+
+    await waitFor(() => expect(api.acceptExternalTaskReview).toHaveBeenCalledWith(
+      'staff-token',
+      'clm_route_1',
+      'tsk_assessor_1',
+      4,
+      {},
+    ))
+    await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 5'))
+    await waitFor(() => expect(api.externalRequests).toHaveBeenCalledWith('staff-token', 'clm_route_1'))
+    expect(api.claim).toHaveBeenCalledTimes(2)
+  })
+
+  it('reads back external-service state after a stale external action conflict', async () => {
+    const user = userEvent.setup()
+    const externalAction = {
+      action_code: 'external.accept_review',
+      target_type: 'external_task',
+      target_ref: 'tsk_assessor_1',
+      label: 'Accept external-service review',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+      inputs: [],
+    }
+    const actionable = {
+      ...claim,
+      revision: 4,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: externalAction.action_code,
+        primary_action_target_ref: externalAction.target_ref,
+      },
+      allowed_actions: [externalAction],
+    }
+    const latest = {
+      ...actionable,
+      revision: 5,
+      work_summary: {
+        ...actionable.work_summary,
+        primary_action_code: null,
+        primary_action_target_ref: null,
+      },
+      allowed_actions: [],
+    }
+    api.claim.mockResolvedValueOnce(actionable).mockResolvedValue(latest)
+    api.acceptExternalTaskReview.mockRejectedValue(Object.assign(
+      new Error('Revision mismatch.'),
+      { status: 409, code: 'REVISION_CONFLICT', requestId: 'req_external_1' },
+    ))
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+
+    await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 5'))
+    await waitFor(() => expect(api.externalRequests).toHaveBeenCalledWith('staff-token', 'clm_route_1'))
+    expect(api.acceptExternalTaskReview).toHaveBeenCalledTimes(1)
+  })
+
+  it('performs authoritative readback after an ambiguous external reconciliation outcome without blind resubmission', async () => {
+    const user = userEvent.setup()
+    const externalAction = {
+      action_code: 'external.reconcile_response',
+      target_type: 'external_task',
+      target_ref: 'tsk_assessor_2',
+      label: 'Reconcile external outcome',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+      inputs: [],
+    }
+    const actionable = {
+      ...claim,
+      revision: 4,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: externalAction.action_code,
+        primary_action_target_ref: externalAction.target_ref,
+      },
+      allowed_actions: [externalAction],
+    }
+    const latest = {
+      ...actionable,
+      revision: 5,
+      work_summary: {
+        ...actionable.work_summary,
+        primary_action_code: null,
+        primary_action_target_ref: null,
+      },
+      allowed_actions: [],
+    }
+    api.claim.mockResolvedValueOnce(actionable).mockResolvedValue(latest)
+    api.reconcileExternalTaskResponse.mockRejectedValue(Object.assign(
+      new Error('The Workbench service could not be reached.'),
+      { status: 0, code: 'NETWORK_ERROR', retryable: true },
+    ))
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+
+    await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 5'))
+    await waitFor(() => expect(api.externalRequests).toHaveBeenCalledWith('staff-token', 'clm_route_1'))
+    expect(api.reconcileExternalTaskResponse).toHaveBeenCalledWith(
+      'staff-token',
+      'clm_route_1',
+      'tsk_assessor_2',
+      4,
+    )
+    expect(api.reconcileExternalTaskResponse).toHaveBeenCalledTimes(1)
   })
 
   it('discards a late background refresh after a controlled action loads a newer revision', async () => {

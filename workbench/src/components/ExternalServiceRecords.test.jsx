@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import ExternalServiceRecords, { ExternalServiceSummary } from './ExternalServiceRecords.jsx'
 
 const request = {
@@ -196,4 +196,98 @@ describe('ExternalServiceRecords', () => {
 
     expect(screen.getByText('Loading third-party tasks...')).toBeInTheDocument()
   })
+  it('renders and submits only the exact external-task action for the current Claim revision', async () => {
+    const user = userEvent.setup()
+    const onAction = vi.fn().mockResolvedValue(undefined)
+    const projected = {
+      registry_version: '2026-09-15.1',
+      action_code: 'external.accept_review',
+      target_type: 'external_task',
+      target_ref: 'tsk_1',
+      label: 'Accept external-service review',
+      purpose: 'Take responsibility for reviewing this exact external-service record.',
+      availability: 'confirmation_required',
+      blocked_reason: null,
+      confirmation: {
+        level: 'explicit',
+        message: 'Accepting this review assigns the Claim and records staff work for this task.',
+      },
+      expected_effects: ['ownership.assign', 'work_item.create', 'claim.revision.advance'],
+      source_refs: ['tsk_1'],
+      inputs: [],
+      payload_defaults: {},
+      result_state: 'not_started',
+      based_on_revision: 7,
+    }
+    render(<ExternalServiceRecords
+      records={[request]}
+      allowedActions={[
+        projected,
+        { ...projected, target_ref: 'tsk_other', label: 'Wrong target' },
+        { ...projected, based_on_revision: 6, label: 'Stale action' },
+      ]}
+      claimRevision={7}
+      onAction={onAction}
+    />)
+
+    await user.click(screen.getByText('Vehicle Damage Assessor'))
+    const panel = screen.getByRole('heading', { name: 'Accept external-service review' }).closest('section')
+    expect(within(panel).getByText(projected.purpose)).toBeVisible()
+    expect(within(panel).getByText(/tsk_1.*Claim revision 7/)).toBeVisible()
+    expect(screen.queryByText('Wrong target')).not.toBeInTheDocument()
+    expect(screen.queryByText('Stale action')).not.toBeInTheDocument()
+
+    await user.click(within(panel).getByRole('button', { name: 'Review Accept external-service review' }))
+    expect(within(panel).getByText(projected.confirmation.message)).toBeVisible()
+    await user.click(within(panel).getByRole('button', { name: 'Accept external-service review' }))
+
+    await waitFor(() => expect(onAction).toHaveBeenCalledWith(projected, {}))
+  })
+
+  it('keeps a server-blocked external-task action non-executable and shows its reason', async () => {
+    const user = userEvent.setup()
+    const onAction = vi.fn()
+    const blocked = {
+      action_code: 'external.accept_review',
+      target_type: 'external_task',
+      target_ref: 'tsk_1',
+      label: 'Accept external-service review',
+      purpose: 'Review this exact task.',
+      availability: 'blocked',
+      blocked_reason: 'Another staff member already owns this Claim.',
+      confirmation: { level: 'explicit', message: 'Confirm.' },
+      expected_effects: [],
+      source_refs: [],
+      inputs: [],
+      result_state: 'not_started',
+      based_on_revision: 7,
+    }
+    render(<ExternalServiceRecords
+      records={[request]}
+      allowedActions={[blocked]}
+      claimRevision={7}
+      onAction={onAction}
+    />)
+
+    await user.click(screen.getByText('Vehicle Damage Assessor'))
+    expect(screen.getAllByText('Another staff member already owns this Claim.')[0]).toBeVisible()
+    expect(screen.queryByRole('button', { name: /Review Accept external-service review/ })).not.toBeInTheDocument()
+    expect(onAction).not.toHaveBeenCalled()
+  })
+
+  it('does not invent an action from lifecycle attention without an exact projection', async () => {
+    const user = userEvent.setup()
+    render(<ExternalServiceRecords
+      records={[request]}
+      allowedActions={[]}
+      claimRevision={7}
+      onAction={vi.fn()}
+    />)
+
+    await user.click(screen.getByText('Vehicle Damage Assessor'))
+    expect(screen.getAllByText('Reconcile by operation or provider reference before any retry.')[0]).toBeVisible()
+    expect(screen.queryByText('Projected staff action')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /external-service review/i })).not.toBeInTheDocument()
+  })
+
 })

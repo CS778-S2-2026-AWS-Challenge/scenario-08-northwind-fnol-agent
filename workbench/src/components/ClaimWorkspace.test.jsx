@@ -176,6 +176,42 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.queryByText('This work is assigned to another staff member.')).not.toBeInTheDocument()
   })
 
+  it('routes an exact external-task primary action to External Services without inferring from lifecycle state', async () => {
+    const user = userEvent.setup()
+    const onSection = vi.fn()
+    const externalAction = {
+      action_code: 'external.reconcile_response',
+      target_type: 'external_task',
+      target_ref: 'tsk_assessor_1',
+      label: 'Reconcile external outcome',
+      purpose: 'Check the existing provider operation before any further side effect.',
+      availability: 'confirmation_required',
+      confirmation: { level: 'explicit', message: 'This checks the existing operation identity; it does not submit a new request.' },
+      expected_effects: ['external_task.reconcile', 'claim.revision.advance'],
+      inputs: [],
+      result_state: 'not_started',
+      based_on_revision: 4,
+    }
+    render(<ClaimWorkspace
+      {...props}
+      onSection={onSection}
+      detail={{
+        ...detail,
+        work_summary: {
+          ...detail.work_summary,
+          primary_action_code: externalAction.action_code,
+          primary_action_target_ref: externalAction.target_ref,
+        },
+        allowed_actions: [externalAction],
+      }}
+    />)
+
+    expect(screen.getByRole('heading', { name: 'Reconcile external outcome' })).toBeVisible()
+    expect(screen.getByText('tsk_assessor_1')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Open external services' }))
+    expect(onSection).toHaveBeenCalledWith('external-services')
+  })
+
   it('does not present a blocked or inexact backend pair as the staff next action', () => {
     const blocked = {
       action_code: 'human.accept_handoff',

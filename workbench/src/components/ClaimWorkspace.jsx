@@ -21,11 +21,14 @@ const SECTIONS = [
   ['activity', 'Activity'],
 ]
 
-export default function ClaimWorkspace({ detail, resources = {}, loading, error, stale, section, draft, profile, onSection, onDraft, onAccept, onResolve, onSignalDecision, onUpdateAction, onLoadEvidence, onSend, onOwnershipAction, onReopen, onRetry, onRetrySection }) {
+export default function ClaimWorkspace({ detail, resources = {}, loading, error, stale, section, draft, profile, onSection, onDraft, onAccept, onResolve, onSignalDecision, onUpdateAction, onLoadEvidence, onSend, onOwnershipAction, onReopen, onExternalTaskAction, onRetry, onRetrySection }) {
   if (loading && !detail) return <main className="claim-state" role="status"><span className="loading-mark" /><p>Loading Claim...</p></main>
   if (error && !detail) return <ClaimUnavailable error={error} onRetry={onRetry} />
   if (!detail) return <EmptyWorkspace />
   const interactionDetail = loading || stale || error ? { ...detail, allowed_actions: [] } : detail
+  const externalActions = resourceActionContextUnavailable(resources.externalRequests)
+    ? []
+    : interactionDetail.allowed_actions
 
   return (
     <main className="claim-workspace">
@@ -40,11 +43,20 @@ export default function ClaimWorkspace({ detail, resources = {}, loading, error,
         {section === 'fields' && <ClaimFields resource={resources.fields} onRetry={onRetrySection} />}
         {section === 'evidence' && <ResourceBoundary resource={resources.evidence} onRetry={onRetrySection}><EvidenceRecords claimId={detail.claim_id} records={resources.evidence?.items || []} onLoadEvidence={onLoadEvidence} /></ResourceBoundary>}
         {section === 'references' && <ResourceBoundary resource={resources.retrievals} onRetry={onRetrySection}><ReferenceRecords records={resources.retrievals?.items || []} /></ResourceBoundary>}
-        {section === 'external-services' && <ResourceBoundary resource={resources.externalRequests} onRetry={onRetrySection}><ExternalServiceRecords records={resources.externalRequests?.items || []} /></ResourceBoundary>}
+        {section === 'external-services' && <ResourceBoundary resource={resources.externalRequests} onRetry={onRetrySection}><ExternalServiceRecords records={resources.externalRequests?.items || []} allowedActions={externalActions} claimRevision={interactionDetail.revision} onAction={onExternalTaskAction} /></ResourceBoundary>}
         {section === 'signals' && <ResourceBoundary resource={resources.signals} onRetry={onRetrySection}><SignalReviews key={detail.claim_id} signals={resources.signals?.items || []} allowedActions={interactionDetail.allowed_actions} onDecision={onSignalDecision} /></ResourceBoundary>}
         {section === 'activity' && <Activity key={detail.claim_id} detail={interactionDetail} resources={resources} onResolve={onResolve} onUpdateAction={onUpdateAction} onRetry={onRetrySection} />}
       </div>
     </main>
+  )
+}
+
+function resourceActionContextUnavailable(resource) {
+  return Boolean(
+    resource?.loading
+    || resource?.error
+    || resource?.stale
+    || ['partial', 'unavailable'].includes(resource?.status),
   )
 }
 
