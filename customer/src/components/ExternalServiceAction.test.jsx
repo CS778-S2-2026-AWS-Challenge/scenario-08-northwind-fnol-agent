@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import ExternalServiceAction from './ExternalServiceAction'
+import ExternalServiceAction, { ExternalServiceOverview } from './ExternalServiceAction'
 
 // `docs/frontend-and-runtime-quality-standard.md` 8.1 requires a component test for
 // component display and interaction behaviour. The backend regressions prove the
@@ -19,18 +19,136 @@ const BASE_ACTION = {
   can_request: false,
 }
 
-function renderAction(action) {
+function renderAction(action, props = {}) {
   return render(
     <ExternalServiceAction
       action={{ ...BASE_ACTION, ...action }}
-      consentChecked={false}
-      setConsentChecked={vi.fn()}
-      onRequest={vi.fn()}
-      status="idle"
-      error={null}
+      consentChecked={props.consentChecked ?? false}
+      setConsentChecked={props.setConsentChecked ?? vi.fn()}
+      onRequest={props.onRequest ?? vi.fn()}
+      status={props.status ?? 'idle'}
+      error={props.error ?? null}
     />,
   )
 }
+
+describe('controlled assessor claimant states', () => {
+  it('requires claimant permission before enabling the first assessor request', () => {
+    const action = {
+      status: 'consent_required',
+      consent_status: 'not_recorded',
+      can_request: true,
+    }
+    const { rerender } = renderAction(action)
+
+    expect(screen.getByText('What will be shared')).toBeInTheDocument()
+    expect(screen.getByText('Your confirmed incident region')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox')).not.toBeChecked()
+    expect(
+      screen.getByRole('button', { name: /agree and request assessor/i }),
+    ).toBeDisabled()
+
+    rerender(
+      <ExternalServiceAction
+        action={{ ...BASE_ACTION, ...action }}
+        consentChecked
+        setConsentChecked={vi.fn()}
+        onRequest={vi.fn()}
+        status="idle"
+        error={null}
+      />,
+    )
+
+    expect(
+      screen.getByRole('button', { name: /agree and request assessor/i }),
+    ).toBeEnabled()
+  })
+
+  it('keeps a ready request distinct from a sent or completed request', () => {
+    render(
+      <ExternalServiceOverview
+        action={{ ...BASE_ACTION, status: 'ready_to_request', can_request: true }}
+      />,
+    )
+
+    expect(screen.getByText('Ready to request')).toBeInTheDocument()
+    expect(screen.getByText(/No request has been sent yet/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Assessor assigned/i)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    [
+      'queued',
+      'Request accepted into the assessor queue',
+      'The assessor request is waiting in the controlled queue.',
+    ],
+    [
+      'assigned',
+      'Assessor assigned',
+      'A controlled assessor is assigned. The assessment is still in progress.',
+    ],
+  ])('does not present %s progress as completed service', (status, heading, nextStep) => {
+    renderAction({
+      status,
+      routing: {
+        next_step: nextStep,
+        queue_reference: 'queue-42',
+        assessor_reference: status === 'assigned' ? 'assessor-7' : null,
+        expected_by: '2026-09-16T01:30:00Z',
+        limitations: ['Controlled simulation only; no production provider is connected.'],
+      },
+    })
+
+    expect(screen.getByText(heading)).toBeInTheDocument()
+    expect(screen.getByText(nextStep)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Controlled simulation only; no production provider is connected/i),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/assessment complete/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/claim decision complete/i)).not.toBeInTheDocument()
+  })
+
+  it('keeps terminal failure with Northwind and exposes no claimant retry control', () => {
+    renderAction({
+      status: 'terminal_failure',
+      failure_code: 'access_denied',
+      can_request: false,
+    })
+
+    expect(screen.getByText('Assessment request not sent')).toBeInTheDocument()
+    expect(screen.getByText(/Northwind must review the request before trying again/i)).toBeInTheDocument()
+    expect(screen.getByText(/Northwind needs to review this before another request/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('shows the persistent claimant-safe assessor status without inventing provider completion', () => {
+    render(
+      <ExternalServiceOverview
+        action={{
+          ...BASE_ACTION,
+          status: 'queued',
+          routing: {
+            next_step: 'The request is queued with the controlled assessment fixture.',
+            queue_reference: 'queue-42',
+            assessor_reference: null,
+            expected_by: '2026-09-16T01:30:00Z',
+            limitations: ['Simulation-only; it must not be described as a production provider.'],
+          },
+        }}
+      />,
+    )
+
+    expect(screen.getByText('Vehicle damage assessment')).toBeInTheDocument()
+    expect(screen.getByText('Controlled assessment fixture')).toBeInTheDocument()
+    expect(screen.getByText('Permission recorded')).toBeInTheDocument()
+    expect(screen.getByText('Request queued')).toBeInTheDocument()
+    expect(screen.getByText('queue-42')).toBeInTheDocument()
+    expect(
+      screen.getByText(/Simulation-only; it must not be described as a production provider/i),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/does not mean the service is complete/i)).toBeInTheDocument()
+  })
+})
 
 describe('an assessment request whose outcome is not confirmed', () => {
   it('says the request may already have arrived and not to resend it', () => {
