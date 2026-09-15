@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from journey_runs.household import CONTENTS, HOME, KNOWN_STOPS, HouseholdScenario, run_household
 from journey_runs.motor_collision import MOTOR_COLLISION_PACK, run_motor_collision
 from journey_runs.record import (
     AgentTurn,
@@ -39,6 +40,31 @@ def test_the_motor_collision_journey_reaches_its_end_and_reports_every_disagreem
     # The fixture runtime can never produce a completed run.
     assert record.result_class is not ResultClass.COMPLETED
     assert JourneyRunRecord.model_validate_json(record.model_dump_json()) == record
+
+
+@pytest.mark.parametrize('scenario', [HOME, CONTENTS], ids=['home', 'contents'])
+def test_a_household_journey_stops_only_where_the_stop_is_reported_or_documented(
+    scenario: HouseholdScenario,
+) -> None:
+    run = run_household(scenario, head='test')
+    record = run.record
+
+    assert JourneyRunRecord.model_validate_json(record.model_dump_json()) == record
+    assert all(check.holds for check in record.visibility_checks)
+    assert [check.seam for check in record.seam_checks if check.defect_ref == 'untracked'] == []
+    assert record.result_class is not ResultClass.COMPLETED
+    if run.stopped_at is None:
+        assert record.steps[-1].name == 'create the claim'
+        assert record.steps[-1].outcome is StepOutcome.SUCCEEDED
+    elif run.stopped_at in scenario.unavailable:
+        assert record.result_class is ResultClass.UNAVAILABLE
+        assert [capability.capability for capability in record.unavailable_capabilities] == [
+            scenario.unavailable[run.stopped_at]
+        ]
+    else:
+        # A stall nobody has reported must fail here, so it reaches its owner.
+        assert run.stopped_at in KNOWN_STOPS
+        assert record.result_class in {ResultClass.FAILED, ResultClass.BLOCKED}
 
 
 def test_a_run_that_stops_early_records_no_later_material_as_delivered() -> None:
