@@ -19,6 +19,7 @@ from backend.domain.models import (
     ClaimState,
     CustomerNextStep,
     EvidenceFileStatus,
+    EvidenceHistoryState,
     EvidenceRecord,
     EvidenceSource,
     EvidenceStatus,
@@ -409,3 +410,200 @@ def test_false_backend_success_is_not_presented_as_completed() -> None:
     assert result.status is EvidenceActionStatus.FAILED
     assert result.reason_code == 'UNVERIFIED_PERSISTED_RESULT'
     assert 'reused' not in result.claimant_message
+
+
+class _FailingBackend:
+    def __init__(self, phase: str, error: Exception) -> None:
+        self.phase = phase
+        self.error = error
+
+    def find_result(self, request: EvidenceActionRequest) -> EvidenceActionBackendResult | None:
+        if self.phase == 'find':
+            raise self.error
+        return None
+
+    def execute(self, request: EvidenceActionRequest) -> EvidenceActionBackendResult:
+        if self.phase == 'execute':
+            raise self.error
+        raise AssertionError('execute should not be reached')
+
+
+@pytest.mark.parametrize(
+    ('error', 'status', 'reason'),
+    [
+        (TimeoutError('lookup timed out'), EvidenceActionStatus.UNKNOWN, 'RECONCILIATION_TIMEOUT'),
+        (
+            ConnectionError('backend unavailable'),
+            EvidenceActionStatus.UNAVAILABLE,
+            'BACKEND_UNAVAILABLE',
+        ),
+        (RuntimeError('lookup failed'), EvidenceActionStatus.FAILED, 'DEPENDENCY_FAILURE'),
+    ],
+)
+def test_backend_lookup_failures_preserve_typed_outcomes(
+    error: Exception,
+    status: EvidenceActionStatus,
+    reason: str,
+) -> None:
+    result = execute_confirmed_evidence_action(
+        _repository(),
+        _command(),
+        _confirmation(),
+        _FailingBackend('find', error),
+    )
+
+    assert result.status is status
+    assert result.reason_code == reason
+    assert result.retryable is (status is EvidenceActionStatus.FAILED)
+
+
+@pytest.mark.parametrize(
+    ('error', 'status', 'reason'),
+    [
+        (TimeoutError('execution timed out'), EvidenceActionStatus.UNKNOWN, 'BACKEND_TIMEOUT'),
+        (
+            ConnectionError('backend unavailable'),
+            EvidenceActionStatus.UNAVAILABLE,
+            'BACKEND_UNAVAILABLE',
+        ),
+        (RuntimeError('execution failed'), EvidenceActionStatus.FAILED, 'DEPENDENCY_FAILURE'),
+    ],
+)
+def test_backend_execution_failures_preserve_typed_outcomes(
+    error: Exception,
+    status: EvidenceActionStatus,
+    reason: str,
+) -> None:
+    result = execute_confirmed_evidence_action(
+        _repository(),
+        _command(),
+        _confirmation(),
+        _FailingBackend('execute', error),
+    )
+
+    assert result.status is status
+    assert result.reason_code == reason
+    assert result.retryable is (status is EvidenceActionStatus.FAILED)
+
+
+class _StaticBackend:
+    def __init__(self, result: object | None, *, replay: bool = False) -> None:
+        self.result = result
+        self.replay = replay
+
+    def find_result(self, request: EvidenceActionRequest) -> EvidenceActionBackendResult | None:
+        return self.result if self.replay else None  # type: ignore[return-value]
+
+    def execute(self, request: EvidenceActionRequest) -> EvidenceActionBackendResult:
+        return self.result  # type: ignore[return-value]
+
+
+@pytest.mark.parametrize('replay', [False, True])
+def test_non_typed_backend_result_fails_closed(replay: bool) -> None:
+    result = execute_confirmed_evidence_action(
+        _repository(),
+        _command(),
+        _confirmation(),
+        _StaticBackend(object(), replay=replay),
+    )
+
+    assert result.status is EvidenceActionStatus.FAILED
+    assert result.reason_code == 'INVALID_BACKEND_RESULT'
+
+
+@pytest.mark.parametrize(
+    'result_update',
+    [
+        {'action_code': 'claim.other_action'},
+        {'reason_code': ' '},
+        {'resulting_revision': None},
+        {'resulting_revision': 1},
+        {'state_change_refs': ()},
+    ],
+)
+def test_invalid_backend_success_metadata_fails_closed(
+    result_update: dict[str, object],
+) -> None:
+    request = EvidenceActionRequest(
+        action_code='claim.reuse_evidence',
+        claimant_id='cus_owner',
+        claim_id='clm_target',
+        evidence_id='evd_history',
+        source_claim_id='clm_source',
+        expected_revision=1,
+        idempotency_key='evidence-action-1',
+        proposal_ref='turn:proposal-1',
+        confirmation_ref='message:confirmation-1',
+    )
+    result = EvidenceActionBackendResult(
+        action_code=request.action_code,
+        status=EvidenceActionStatus.SUCCEEDED,
+        claim_id=request.claim_id,
+        evidence_id=request.evidence_id,
+        source_claim_id=request.source_claim_id,
+        idempotency_key=request.idempotency_key,
+        reason_code='SUCCEEDED',
+        resulting_revision=2,
+        state_change_refs=('evidence-link:link-1',),
+    )
+    result = replace(result, **result_update)
+
+    checked = execute_confirmed_evidence_action(
+        _repository(),
+        _command(),
+        _confirmation(),
+        _StaticBackend(result),
+    )
+
+    assert checked.status is EvidenceActionStatus.FAILED
+    assert checked.reason_code == 'INVALID_BACKEND_RESULT'
+
+
+def test_replayed_success_allows_an_older_persisted_revision() -> None:
+    repository = _repository()
+    result = EvidenceActionBackendResult(
+        action_code='claim.reuse_evidence',
+        status=EvidenceActionStatus.SUCCEEDED,
+        claim_id='clm_target',
+        evidence_id='evd_history',
+        source_claim_id='clm_source',
+        idempotency_key='evidence-action-1',
+        reason_code='EVIDENCE_REUSED',
+        resulting_revision=2,
+        state_change_refs=('evidence-link:link-1',),
+    )
+
+    checked = execute_confirmed_evidence_action(
+        repository,
+        _command(),
+        _confirmation(),
+        _StaticBackend(result, replay=True),
+    )
+
+    assert checked.status is EvidenceActionStatus.FAILED
+    assert checked.reason_code == 'UNVERIFIED_PERSISTED_RESULT'
+
+
+def test_removed_evidence_is_rejected_before_backend() -> None:
+    repository = _repository()
+    repository.save_evidence(
+        _evidence('clm_source').model_copy(
+            update={
+                'claimant_history_state': EvidenceHistoryState.REMOVED,
+                'claimant_history_removed_at': datetime.now(UTC),
+            }
+        ),
+        'cus_owner',
+    )
+    backend = RecordingBackend(repository)
+
+    result = execute_confirmed_evidence_action(
+        repository,
+        _command(),
+        _confirmation(),
+        backend,
+    )
+
+    assert result.status is EvidenceActionStatus.REJECTED
+    assert result.reason_code == 'EVIDENCE_NOT_REUSABLE'
+    assert backend.calls == []
