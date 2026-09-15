@@ -1352,9 +1352,9 @@ Request:
   "model_profile_id": "qwen-local",
   "content": {
     "type": "text",
-    "text": "I was rear-ended while stopped at traffic lights. Nobody is injured."
+    "text": "I was rear-ended while stopped at traffic lights. Please review the photo."
   },
-  "evidence_refs": []
+  "evidence_refs": ["evd_01J4Y7V5QJ"]
 }
 ```
 
@@ -1363,6 +1363,17 @@ optional `model_profile_id` selects any currently published claimant profile for
 does not create a new Claim or clear the conversation. The selected profile is persisted in the
 Session as the latest default and in the Runtime provenance for the exact turn. Empty text
 without evidence is rejected.
+
+`evidence_refs` is also the explicit per-message disclosure boundary for model input. Before a
+model call, each ID must resolve to claimant-visible Evidence on the authenticated claimant's
+current Claim, use a supported image/PDF media type, and be in an uploaded, processing, or ready
+file state. Duplicate, unknown, cross-Claim, staff/external internal-only, incomplete, invalid,
+expired, superseded, missing, or unavailable references are rejected before the Agent runs. The
+Runtime passes a turn-scoped resolver rather than an object URL or storage key, and the resolver
+repeats the visibility, record, and immutable-object checks whenever an adapter reads bytes. A
+structured form fact or contents item attributed to an attachment must name that exact Evidence
+ID. It is persisted with `image` or `document` provenance and remains `proposed` for claimant
+confirmation.
 
 On the target namespaced Runtime path the model must first call `claim.read`. The Runtime executes
 the read against the authenticated Claim, sends the assistant tool call and result back to the
@@ -1827,12 +1838,36 @@ Request:
 
 ```json
 {
+  "evidence_id": "evd_01J4Y7V5QJ",
   "kind": "incident_image",
   "original_filename": "rear-damage.jpg",
   "media_type": "image/jpeg",
   "size_bytes": 1842201
 }
 ```
+
+`evidence_id` is optional. When omitted, the request creates a new claimant Evidence record.
+When present, it targets an existing claimant-owned Evidence requirement on the same Claim and
+reuses that identity. `kind` MUST match the existing requirement. The request preserves
+`needed_for`, `related_fields`, `claimant_note`, `created_at`, and ownership while updating the
+file metadata and moving the record to `status=pending` and `file_status=awaiting_upload`.
+
+An existing requirement accepts an upload when `file_status` is `not_available` or `failed`.
+Material with `status=invalid` also accepts a replacement when `file_status=ready`. The server
+returns `409 INVALID_STATE_TRANSITION` for active uploads, valid received material, superseded
+material, or any other ineligible lifecycle combination. A target from another Claim or a
+non-claimant Evidence source is not exposed and returns `404 RESOURCE_NOT_FOUND`; a mismatched
+`kind` returns `422 VALIDATION_ERROR`.
+
+The Evidence requirement keeps its stable `evidence_id`, while each actual file uses a monotonic
+`material_version`. Replacing failed or invalid material archives the complete prior generation in
+typed, append-only `material_history`: file metadata, status, references, checksum and other
+provenance, processing/extraction decisions, and proposed Claim fields sourced only by that
+generation. The new current generation does not inherit those material-specific values. The stable
+requirement retains requirement-origin provenance such as `reported_in_message_id` and
+`captured_at`. A proposed image/document field sourced exclusively by the replaced generation is
+removed from the current form so corrected processing can propose it again; confirmed, disputed,
+or multi-source fields are not removed.
 
 Response `201`:
 
@@ -1872,6 +1907,11 @@ capability expires MUST re-sign the same upload intent without creating another 
 record or advancing Claim revision. The adapter MAY use fixture
 storage or the active profile's object storage without changing the client
 contract.
+
+Idempotent replay of an existing-requirement request returns the original `evidence_id`, upload
+intent, and revision while the capability remains valid. A replay after capability expiry re-signs
+the same identity under the existing upload-intent rules. Storage failure before persistence leaves
+the requirement and Claim revision unchanged.
 
 An anonymous browser session may continue its conversation and read its own
 Claim, but it cannot create a durable Evidence record or receive an upload
@@ -1945,7 +1985,10 @@ Request:
 
 This request requires `Idempotency-Key` and `If-Match`. Every selected field
 must still be `proposed`, use `image` or `document` as its source, and reference
-the same evidence item. A confirmed fact becomes `confirmed`. A rejected fact
+the same evidence item and current material generation. Extracted proposals retain both the stable
+`evidence_id` and the generation-specific
+`evidence:{evidence_id}:material:{material_version}` reference. A confirmed fact becomes
+`confirmed`. A rejected fact
 uses the form status `disputed` so it cannot be mistaken for accepted claim
 information. Both outcomes retain the original source reference and record the
 proposal and decision times in internal provenance.
@@ -3251,6 +3294,9 @@ The existing field must be resolved first.
 
 Transition provenance records source, actor, and accepted time for the file and
 each proposed fact.
+Each proposal carries both the stable Evidence identity and the current material-generation
+reference. This allows a later valid replacement to archive the old attribution and propose the
+same field again without treating old extracted state as current.
 
 ### `POST /internal/v1/claims/create`
 
