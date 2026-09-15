@@ -304,6 +304,7 @@ class ModelProposedContentsItem(ModelContract):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     relation: AssertionRelation | None = None
     reported_text: str | None = Field(default=None, max_length=5000)
+    source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ModelAgentProposal(ModelContract):

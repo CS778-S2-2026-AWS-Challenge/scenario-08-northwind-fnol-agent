@@ -1248,6 +1248,17 @@ class MultimodalRuntimeGateway(RuntimeSequenceGateway):
         return self.responses.pop(0)
 
 
+class MultimodalCompatibilityGateway(MultimodalRuntimeGateway):
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return ModelCapabilities(
+            structured_output=True,
+            tools=False,
+            image_input=True,
+            document_input=True,
+        )
+
+
 class StaticKnowledgeRetriever:
     def __init__(self, chunks: list[KnowledgeChunk]) -> None:
         self.chunks = chunks
@@ -1382,6 +1393,157 @@ def test_gateway_agent_keeps_attached_evidence_scoped_across_the_tool_round() ->
             'outcome': 'submitted',
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ('target_evidence_id', 'target_media_type'),
+    [
+        ('evd_photo', 'image/png'),
+        ('evd_inventory', 'application/pdf'),
+    ],
+)
+def test_gateway_agent_preserves_contents_attachment_provenance(
+    target_evidence_id: str,
+    target_media_type: str,
+) -> None:
+    gateway = MultimodalRuntimeGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(call_id='read-contents', name='claim.read', arguments={})
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output={
+                    **_runtime_model_output(),
+                    'contents_item_changes': [
+                        {
+                            'description': 'Laptop computer',
+                            'category': 'electronics',
+                            'quantity': 1,
+                            'loss_type': 'damaged',
+                            'ownership': 'owned',
+                            'confidence': 0.88,
+                            'source_evidence_id': target_evidence_id,
+                        }
+                    ],
+                },
+            ),
+        ]
+    )
+    evidence = (
+        AgentEvidenceReference(evidence_id='evd_photo', media_type='image/png'),
+        AgentEvidenceReference(evidence_id='evd_inventory', media_type='application/pdf'),
+    )
+
+    proposal = GatewayAgent(gateway).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim(),
+            session_id='ses-contents-evidence',
+            trigger_message_id='msg-contents-evidence',
+            message_text='My laptop was damaged. Please review these attachments.',
+            evidence_refs=[item.evidence_id for item in evidence],
+            evidence=evidence,
+            evidence_resolver=EvidenceResolver(b'contents-evidence'),
+        )
+    )
+
+    assert proposal.contents_item_changes[0].source_evidence_id == target_evidence_id
+    assert len(gateway.requests) == 2
+    assert all(request.required_capabilities.image_input for request in gateway.requests)
+    assert all(request.required_capabilities.document_input for request in gateway.requests)
+    assert target_media_type in {item.media_type for item in evidence}
+
+
+def test_gateway_agent_compatibility_path_preserves_contents_attachment_provenance() -> None:
+    response = model_turn_output()
+    gateway = MultimodalCompatibilityGateway(
+        [
+            response.model_copy(
+                update={
+                    'completion_status': ModelCompletionStatus.COMPLETE,
+                    'structured_output': {
+                        **cast(dict[str, object], response.structured_output),
+                        'contents_item_changes': [
+                            {
+                                'description': 'Laptop computer',
+                                'category': 'electronics',
+                                'quantity': 1,
+                                'loss_type': 'damaged',
+                                'ownership': 'owned',
+                                'source_evidence_id': 'evd_inventory',
+                            }
+                        ],
+                    },
+                }
+            )
+        ]
+    )
+    evidence = (
+        AgentEvidenceReference(evidence_id='evd_photo', media_type='image/png'),
+        AgentEvidenceReference(evidence_id='evd_inventory', media_type='application/pdf'),
+    )
+
+    proposal = GatewayAgent(gateway).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim(),
+            session_id='ses-contents-evidence-compatibility',
+            trigger_message_id='msg-contents-evidence-compatibility',
+            message_text='My laptop was damaged. Please review these attachments.',
+            evidence_refs=[item.evidence_id for item in evidence],
+            evidence=evidence,
+            evidence_resolver=EvidenceResolver(b'contents-evidence'),
+        )
+    )
+
+    assert proposal.contents_item_changes[0].source_evidence_id == 'evd_inventory'
+    assert len(gateway.requests) == 1
+
+
+def test_gateway_agent_rejects_unattached_contents_evidence_source() -> None:
+    gateway = MultimodalRuntimeGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(call_id='read-contents', name='claim.read', arguments={})
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output={
+                    **_runtime_model_output(),
+                    'contents_item_changes': [
+                        {
+                            'description': 'Laptop computer',
+                            'category': 'electronics',
+                            'quantity': 1,
+                            'loss_type': 'damaged',
+                            'ownership': 'owned',
+                            'source_evidence_id': 'evd_not_attached',
+                        }
+                    ],
+                },
+            ),
+        ]
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        GatewayAgent(gateway).propose_turn(
+            AgentTurnContext(
+                claim=_working_claim(),
+                session_id='ses-unattached-contents',
+                trigger_message_id='msg-unattached-contents',
+                message_text='Review the attached contents photo.',
+                evidence_refs=['evd_photo'],
+                evidence=(AgentEvidenceReference(evidence_id='evd_photo', media_type='image/png'),),
+                evidence_resolver=EvidenceResolver(b'contents-evidence'),
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
 
 
 def test_gateway_agent_rejects_an_unattached_model_evidence_source() -> None:

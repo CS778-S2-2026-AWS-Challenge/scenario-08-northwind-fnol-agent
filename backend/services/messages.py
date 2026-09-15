@@ -97,6 +97,7 @@ from backend.services.branching import (
     latest_applied_branch_evaluation,
 )
 from backend.services.claimant_form_projection import project_claimant_form_fields
+from backend.services.evidence_visibility import default_evidence_visibility
 from backend.services.fact_resolution import (
     provenance_messages_for_fields,
     resolve_contents_item_change,
@@ -173,6 +174,7 @@ class _TurnEvidenceResolver:
             evidence is None
             or evidence.file_status not in _MODEL_EVIDENCE_FILE_STATES
             or evidence.media_type != media_type
+            or default_evidence_visibility(evidence.source) is MessageVisibility.INTERNAL_ONLY
             or evidence.status
             in {
                 EvidenceStatus.INVALID,
@@ -763,6 +765,7 @@ def _build_contents_item_changes(
     timestamp: datetime,
     authority_outcome: AuthorityOutcome,
     branch_evaluation: BranchEvaluationResult,
+    evidence_media_types: dict[str, str] | None = None,
 ) -> list[ContentsItem]:
     if not proposal.contents_item_changes or authority_outcome is not AuthorityOutcome.AUTHORISED:
         return []
@@ -781,6 +784,22 @@ def _build_contents_item_changes(
     }
     changes: list[ContentsItem] = []
     for item in proposal.contents_item_changes:
+        evidence_source: FormSource | None = None
+        if item.source_evidence_id is not None:
+            media_type = (evidence_media_types or {}).get(item.source_evidence_id)
+            evidence_source = (
+                FormSource.IMAGE
+                if media_type is not None and media_type.startswith('image/')
+                else FormSource.DOCUMENT
+                if media_type == 'application/pdf'
+                else None
+            )
+            if evidence_source is None:
+                raise ApiError(
+                    status_code=500,
+                    code='INTERNAL_ERROR',
+                    message='The Agent proposed an invalid contents Evidence source.',
+                )
         existing = existing_by_id.get(item.item_id or '')
         if item.item_id is not None and existing is None:
             raise ApiError(
@@ -799,8 +818,12 @@ def _build_contents_item_changes(
             existing=existing,
             proposal=item,
             item_id=existing.item_id if existing is not None else new_id('itm'),
-            source_ref=claimant_message.message_id,
-            message_text=str(claimant_message.content.get('text', '')) or None,
+            source_ref=item.source_evidence_id or claimant_message.message_id,
+            message_text=(
+                None
+                if item.source_evidence_id is not None
+                else str(claimant_message.content.get('text', '')) or None
+            ),
             timestamp=timestamp,
             accepted_status=FormStatus.PROPOSED,
             updated_by=ActorReference(
@@ -808,7 +831,11 @@ def _build_contents_item_changes(
                 actor_id=proposal.proposal_source.value,
             ),
         )
-        if not claimant_supplied:
+        if evidence_source is not None:
+            contents_item = contents_item.model_copy(
+                update={'source': evidence_source, 'status': FormStatus.PROPOSED}
+            )
+        elif not claimant_supplied:
             contents_item = contents_item.model_copy(update={'source': FormSource.INFERENCE})
         changes.append(contents_item)
     return changes
@@ -1658,6 +1685,7 @@ def submit_message(
         if (
             evidence.file_status not in _MODEL_EVIDENCE_FILE_STATES
             or evidence.media_type not in _MODEL_EVIDENCE_MEDIA_TYPES
+            or default_evidence_visibility(evidence.source) is MessageVisibility.INTERNAL_ONLY
             or evidence.status
             in {
                 EvidenceStatus.INVALID,
@@ -1922,6 +1950,7 @@ def submit_message(
         timestamp,
         authority.outcome,
         branch_evaluation,
+        {item.evidence_id: item.media_type for item in turn_evidence},
     )
     conflicting_fields = [
         field_code

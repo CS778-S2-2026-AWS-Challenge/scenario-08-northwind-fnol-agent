@@ -1345,12 +1345,13 @@ Session as the latest default and in the Runtime provenance for the exact turn. 
 without evidence is rejected.
 
 `evidence_refs` is also the explicit per-message disclosure boundary for model input. Before a
-model call, each ID must resolve to the authenticated claimant's current Claim, use a supported
-image/PDF media type, and be in an uploaded, processing, or ready file state. Duplicate, unknown,
-cross-Claim, incomplete, invalid, expired, superseded, missing, or unavailable references are
-rejected before the Agent runs. The Runtime passes a turn-scoped resolver rather than an object
-URL or storage key, and the resolver repeats the record and immutable-object checks whenever an
-adapter reads bytes. A structured fact attributed to an attachment must name that exact Evidence
+model call, each ID must resolve to claimant-visible Evidence on the authenticated claimant's
+current Claim, use a supported image/PDF media type, and be in an uploaded, processing, or ready
+file state. Duplicate, unknown, cross-Claim, staff/external internal-only, incomplete, invalid,
+expired, superseded, missing, or unavailable references are rejected before the Agent runs. The
+Runtime passes a turn-scoped resolver rather than an object URL or storage key, and the resolver
+repeats the visibility, record, and immutable-object checks whenever an adapter reads bytes. A
+structured form fact or contents item attributed to an attachment must name that exact Evidence
 ID. It is persisted with `image` or `document` provenance and remains `proposed` for claimant
 confirmation.
 

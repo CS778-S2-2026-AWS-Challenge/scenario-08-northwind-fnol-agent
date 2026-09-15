@@ -36,6 +36,7 @@ from backend.domain.model_gateway import (
     ModelGatewayErrorCode,
     ModelKnowledgeCitation,
     ModelMessage,
+    ModelProposedContentsItem,
     ModelProposedFormChange,
     ModelProvenanceMessage,
     ModelRequest,
@@ -382,6 +383,30 @@ def _model_form_change(
     )
 
 
+def _model_contents_item_change(
+    item: ModelProposedContentsItem,
+    *,
+    evidence: tuple[AgentEvidenceReference, ...],
+) -> ProposedContentsItem:
+    if item.source_evidence_id is not None and item.source_evidence_id not in {
+        record.evidence_id for record in evidence
+    }:
+        raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+    return ProposedContentsItem(
+        item_id=item.item_id,
+        description=item.description,
+        category=item.category,
+        quantity=item.quantity,
+        loss_type=item.loss_type,
+        ownership=item.ownership,
+        estimated_value=item.estimated_value,
+        confidence=item.confidence,
+        relation=item.relation,
+        reported_text=item.reported_text,
+        source_evidence_id=item.source_evidence_id,
+    )
+
+
 def _agent_proposal(
     proposal: ModelAgentProposal,
     *,
@@ -404,18 +429,7 @@ def _agent_proposal(
             for change in proposal.form_changes
         ],
         contents_item_changes=[
-            ProposedContentsItem(
-                item_id=item.item_id,
-                description=item.description,
-                category=item.category,
-                quantity=item.quantity,
-                loss_type=item.loss_type,
-                ownership=item.ownership,
-                estimated_value=item.estimated_value,
-                confidence=item.confidence,
-                relation=item.relation,
-                reported_text=item.reported_text,
-            )
+            _model_contents_item_change(item, evidence=evidence)
             for item in proposal.contents_item_changes
         ],
         state_changes=proposal.state_changes,
@@ -501,10 +515,10 @@ class GatewayAgent:
             'authoritative, and do not repeat a question already answered by a confirmed fact. '
             'Every form change value must match field_value_contracts exactly: use JSON booleans '
             'for boolean fields and only a listed string for enum fields. For a fact read from an '
-            'attached Evidence block, set source_evidence_id to the exact matching ID in '
-            'attached_evidence and leave reported_text empty. Never use an Evidence ID that is '
-            'not listed there. Attachment-derived facts remain proposals for claimant '
-            'confirmation. Do not derive contents ownership or value from an attachment.'
+            'attached Evidence block, including a contents item, set source_evidence_id to the '
+            'exact matching ID in attached_evidence and leave reported_text empty. Never use an '
+            'Evidence ID that is not listed there. Attachment-derived facts remain proposals for '
+            'claimant confirmation. Do not derive contents ownership or value from an attachment.'
         )
         prompt_version = (
             context.runtime_policy.instruction.prompt_version
@@ -693,18 +707,7 @@ class GatewayAgent:
                         for change in runtime_proposal.form_changes
                     ],
                     contents_item_changes=[
-                        ProposedContentsItem(
-                            item_id=item.item_id,
-                            description=item.description,
-                            category=item.category,
-                            quantity=item.quantity,
-                            loss_type=item.loss_type,
-                            ownership=item.ownership,
-                            estimated_value=item.estimated_value,
-                            confidence=item.confidence,
-                            relation=item.relation,
-                            reported_text=item.reported_text,
-                        )
+                        _model_contents_item_change(item, evidence=context.evidence)
                         for item in runtime_proposal.contents_item_changes
                     ],
                     state_changes=[],
