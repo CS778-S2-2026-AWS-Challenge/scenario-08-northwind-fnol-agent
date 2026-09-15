@@ -8,12 +8,12 @@ from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.evidence import is_in_conflict, unresolved_conflicts
 from backend.domain.external_service_registry import (
-    capability_catalogue,
     ExternalCapabilityProvenance,
     ExternalLifecycleStatus,
     InvalidExternalLifecycleTransition,
     assert_projection_provenance,
     build_lifecycle_projection,
+    capability_catalogue,
     projection_metadata,
 )
 from backend.domain.external_services import (

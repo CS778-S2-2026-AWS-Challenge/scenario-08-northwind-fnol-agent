@@ -1,12 +1,14 @@
 from backend.domain.external_service_registry import capability_catalogue
-from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
 from backend.services.agent_tools import dispatch_external_service_tool
+from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
 
 
 def test_catalogue_is_product_scoped_and_contains_real_manual_entry() -> None:
     motor = capability_catalogue('motor')
     assert any(item.service_identity == 'vehicle_repairer_booking' for item in motor)
-    police = next(item for item in motor if item.service_identity == 'police_105_reporting_guidance')
+    police = next(
+        item for item in motor if item.service_identity == 'police_105_reporting_guidance'
+    )
     assert police.official_phone == '105'
     assert police.uses_external_task is False
 
