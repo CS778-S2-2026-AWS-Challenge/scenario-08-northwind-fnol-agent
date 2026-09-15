@@ -219,9 +219,17 @@ switches providers or falls back to a different profile.
 
 The checked-in `config/model-runtime-bindings.json` is the current non-secret VP deployment
 allow-list. Private endpoints are represented by environment-variable references and resolved only
-inside the deployment process. After live checks have produced reviewable evidence, an operator supplies independent
-administrator bearer tokens through process environment variables and publishes the prompt and
-both model slots while preserving the active Release Set's other references:
+inside the deployment process. The backend ships a reviewed initial Runtime Release that registers
+and publishes the complete Agent policy plus every binding in this allow-list. A Control Plane
+scope with no Release Set history installs that initial Release during application composition, so
+both `qwen-local` and `nowcoding-gpt55` are available through the capabilities APIs on a clean
+deployment. The initializer runs only for a never-initialised scope. Existing active, superseded,
+withdrawn, or otherwise inactive Release Set history remains authoritative and is never repaired or
+overwritten on startup.
+
+For a later governed replacement, an operator supplies independent administrator bearer tokens
+through process environment variables and publishes the prompt and model slots while preserving
+the active Release Set's other references:
 
 ```powershell
 $env:NORTHWIND_CONTROL_PLANE_AUTHOR_TOKEN = '<author bearer token>'
@@ -231,7 +239,7 @@ py -3.12 scripts/publish_fnol_model_release.py `
   --validation-evidence 'Live strict schema and forced tool-call probes passed.'
 ```
 
-The command never accepts or prints the provider credential. It refuses publication when the
+The replacement command never accepts or prints the provider credential. It refuses publication when the
 credential environment variable named by a configured profile is unavailable, when there is no
 active complete Release Set to extend, or when the resulting active snapshot does not contain the
 exact two-profile catalogue.
