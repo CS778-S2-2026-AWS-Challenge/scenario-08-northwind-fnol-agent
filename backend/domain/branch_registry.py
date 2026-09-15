@@ -421,6 +421,7 @@ class BranchRuleEvaluator:
                 'knowledge_search',
                 'policy_history',
                 'claim_history',
+                'evidence.history',
                 'professional_review',
                 'evidence_registry',
             ],

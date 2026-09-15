@@ -518,6 +518,7 @@ class ProposedContentsItem(ContractModel):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     relation: AssertionRelation | None = None
     reported_text: str | None = Field(default=None, max_length=5000)
+    source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ContentsItemAssertion(ContractModel):
@@ -877,6 +878,7 @@ class ProposedFormChange(ContractModel):
     precision: FactPrecision = FactPrecision.EXACT
     relation: AssertionRelation | None = None
     reported_text: str | None = Field(default=None, max_length=5000)
+    source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class AgentAuthority(ContractModel):
@@ -905,6 +907,14 @@ class RuntimeInvocationTrace(ContractModel):
     latency_ms: float = Field(ge=0)
 
 
+class RuntimeEvidenceTrace(ContractModel):
+    """Bounded Evidence identity recorded for one successful model turn."""
+
+    evidence_id: str = Field(min_length=1, max_length=100)
+    media_type: str = Field(min_length=1, max_length=100)
+    outcome: Literal['submitted'] = 'submitted'
+
+
 class RuntimeTraceRecord(ContractModel):
     """Provider trace retained alongside the applied Runtime turn records."""
 
@@ -913,6 +923,7 @@ class RuntimeTraceRecord(ContractModel):
     session_id: str
     model_profile_id: str
     trigger_message_id: str
+    evidence: list[RuntimeEvidenceTrace] = Field(default_factory=list, max_length=20)
     invocations: list[RuntimeInvocationTrace] = Field(min_length=1, max_length=2)
     tool_call_id: str
     tool_name: Literal['claim.read']
@@ -1021,6 +1032,27 @@ class EvidenceReference(ContractModel):
         return self
 
 
+class EvidenceMaterialVersion(ContractModel):
+    """Immutable snapshot of one replaced material generation."""
+
+    version: int = Field(ge=1)
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    original_filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    references: list[EvidenceReference] = Field(default_factory=list, max_length=50)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    proposed_fields: dict[str, StructuredFormField] = Field(default_factory=dict)
+    wait_type: EvidenceWaitType | None = None
+    responsible_party: ResponsibleParty | None = None
+    expected_by: datetime | None = None
+    expected_timing: str | None = Field(default=None, max_length=200)
+    context_summary: str | None = Field(default=None, max_length=1000)
+    archived_at: datetime
+    reason: Literal['claimant_replacement']
+
+
 class EvidenceRecord(ContractModel):
     """One piece of material on a claim, its condition, and what it says about others."""
 
@@ -1034,6 +1066,8 @@ class EvidenceRecord(ContractModel):
     size_bytes: int | None = Field(default=None, ge=0)
     source: EvidenceSource
     references: list[EvidenceReference] = Field(default_factory=list, max_length=50)
+    material_version: int = Field(default=1, ge=1)
+    material_history: list[EvidenceMaterialVersion] = Field(default_factory=list)
     related_fields: list[str] = Field(default_factory=list)
     needed_for: list[str] = Field(default_factory=list)
     provenance: dict[str, Any] = Field(default_factory=dict)
@@ -1045,6 +1079,19 @@ class EvidenceRecord(ContractModel):
     context_summary: str | None = Field(default=None, max_length=1000)
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode='after')
+    def validate_material_history(self) -> 'EvidenceRecord':
+        versions = [item.version for item in self.material_history]
+        if versions != list(range(1, self.material_version)):
+            raise ValueError(
+                'Evidence material history must contain every prior version exactly once.'
+            )
+        if any(item.archived_at > self.updated_at for item in self.material_history):
+            raise ValueError(
+                'Evidence material history cannot be archived after the record update.'
+            )
+        return self
 
 
 class HandoffEvidenceItem(ContractModel):
@@ -1106,6 +1153,13 @@ class HandoffRecord(ContractModel):
     created_at: datetime
     accepted_at: datetime | None = None
     resolved_at: datetime | None = None
+    # Support handoffs temporarily interrupt the claimant workflow. These values
+    # preserve the authoritative continuation target without creating a second
+    # claim-state record.
+    # Legacy records may not have a continuation target; resolution then preserves
+    # the current Claim state rather than inventing a default.
+    resume_workflow_state: WorkflowState | None = None
+    resume_next_action: AgentAction | None = None
 
 
 class ClaimantHandoff(ContractModel):
@@ -1116,6 +1170,16 @@ class ClaimantHandoff(ContractModel):
     support_need: SupportNeed
     summary: str
     created_at: datetime
+
+
+class ClaimantResolvedSupportHandoff(ContractModel):
+    """Claimant-safe evidence that a support handoff was completed."""
+
+    handoff_id: str
+    type: HandoffType
+    status: Literal['resolved'] = 'resolved'
+    completed_at: datetime
+    customer_update: str | None = None
 
 
 class WorkbenchSession(ContractModel):
@@ -1324,6 +1388,8 @@ class WorkbenchHandoff(ContractModel):
     created_at: datetime
     accepted_at: datetime | None = None
     resolved_at: datetime | None = None
+    resume_workflow_state: WorkflowState | None = None
+    resume_next_action: AgentAction | None = None
 
 
 class AcceptHandoffRequest(ContractModel):
@@ -1483,6 +1549,7 @@ class RegisterEvidenceRequest(ContractModel):
 
 
 class RequestEvidenceUploadRequest(ContractModel):
+    evidence_id: str | None = Field(default=None, min_length=1, max_length=120)
     kind: str = Field(min_length=1, max_length=100)
     original_filename: str = Field(min_length=1, max_length=255)
     media_type: str = Field(min_length=1, max_length=100)
@@ -1706,6 +1773,7 @@ class ClaimantClaim(ContractModel):
     customer_next_step: CustomerNextStep
     incomplete_context: ClaimantIncompleteContext | None = None
     handoff: ClaimantHandoff | None = None
+    resolved_support_handoff: ClaimantResolvedSupportHandoff | None = None
     created_at: datetime
     updated_at: datetime
 

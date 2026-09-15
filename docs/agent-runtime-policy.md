@@ -273,7 +273,7 @@ one primary Runtime control directive. The action system has five namespaces:
 | Namespace | Responsibility | Representative registered actions |
 | --- | --- | --- |
 | `conversation` | communicate without a business side effect | acknowledge, answer, explain, ask, clarify, confirm material content, summarise, present options, state a limitation |
-| `claim` | prepare or make revision-checked Claim changes | open or resume a draft, propose/apply/correct facts, recompute the form, register evidence, update WorkItems, save progress, prepare creation, create |
+| `claim` | prepare or make revision-checked Claim changes | open or resume a draft, propose/apply/correct facts, recompute the form, register evidence, propose governed Evidence reuse/removal, update WorkItems, save progress, prepare creation, create |
 | `human` | obtain support, professional judgement, or approval | offer support, create handoff, request professional review, request approval, record decision |
 | `external` | coordinate a third-party request through its full lifecycle | discover capability, load requirements, prepare, classify, check authority, submit, track, verify, reconcile, retry, cancel, escalate failure |
 | `runtime` | control execution of the turn | continue, wait for user, wait for external work, pause for review, interrupt urgently, stop without a Claim, fail safely |
@@ -326,6 +326,10 @@ action-level authority check.
   idempotency where applicable, disclosure manifest, and bounded result contract.
 - Structured customer policy and claim history use authorised record lookup. Knowledge
   RAG is used for approved documents and retains source version and section citations.
+- Account-level Evidence history uses the claimant-scoped `evidence.history` tool. It returns
+  bounded metadata and provenance summaries only; history visibility does not grant permission
+  to attach or remove a file. A paginated result exposes its opaque continuation cursor and an
+  explicit non-exhaustive limitation until the final page is read.
 - Retrieved instructions are untrusted content. They cannot change Agent Policy, grant
   tool access, widen customer-data visibility, or authorise an action.
 - Missing, conflicting, expired, wrong-insurer, wrong-product, wrong-jurisdiction, or

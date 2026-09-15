@@ -5,6 +5,7 @@ from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from backend.domain.external_service_registry import ExternalServiceLifecycleProjection
 from backend.domain.models import (
     AgentAction,
     AssertionRelation,
@@ -247,11 +248,15 @@ class ModelTurnContext(ModelContract):
     claim: ModelClaimContext
     message_text: str | None = None
     evidence_reference_count: int = Field(ge=0)
+    attached_evidence: list[ModelAttachedEvidenceContext] = Field(default_factory=list)
     professional_review_required: bool = False
     provenance_messages: list[ModelProvenanceMessage] = Field(default_factory=list)
     conversation_history: list[ModelProvenanceMessage] = Field(default_factory=list)
     field_value_contracts: dict[str, dict[str, Any]] = Field(default_factory=dict)
     branch: ModelBranchContext | None = None
+    external_services: list[ExternalServiceLifecycleProjection] = Field(
+        default_factory=list, max_length=8
+    )
     knowledge_status: Literal[
         'not_requested', 'evidence_found', 'no_evidence', 'timeout', 'unavailable'
     ] = 'not_requested'
@@ -276,6 +281,11 @@ class ModelProvenanceMessage(ModelContract):
     content: str
 
 
+class ModelAttachedEvidenceContext(ModelContract):
+    evidence_id: str = Field(min_length=1, max_length=100)
+    media_type: str = Field(min_length=1, max_length=100)
+
+
 class ModelProposedFormChange(ModelContract):
     field_code: str = Field(min_length=1, max_length=100)
     value: Any
@@ -284,6 +294,7 @@ class ModelProposedFormChange(ModelContract):
     precision: FactPrecision = FactPrecision.EXACT
     relation: AssertionRelation | None = None
     reported_text: str | None = Field(default=None, max_length=5000)
+    source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ModelProposedContentsItem(ModelContract):
@@ -297,6 +308,7 @@ class ModelProposedContentsItem(ModelContract):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     relation: AssertionRelation | None = None
     reported_text: str | None = Field(default=None, max_length=5000)
+    source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ModelAgentProposal(ModelContract):
@@ -322,7 +334,12 @@ class ModelRuntimeProposal(ModelContract):
     persistence, and every side effect.
     """
 
-    action_code: Literal['conversation.answer', 'human.create_handoff']
+    action_code: Literal[
+        'conversation.answer',
+        'human.create_handoff',
+        'claim.propose_evidence_reuse',
+        'claim.propose_evidence_remove',
+    ]
     runtime_action_code: Literal[
         'runtime.continue',
         'runtime.wait_for_user',
@@ -336,6 +353,9 @@ class ModelRuntimeProposal(ModelContract):
     contents_item_changes: list[ModelProposedContentsItem] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
     handoff_priority: str | None = None
+    evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
+    source_claim_id: str | None = Field(default=None, min_length=1, max_length=120)
+    removal_scope: Literal['draft', 'persisted'] | None = None
 
 
 class ModelGatewayErrorCode(str, Enum):

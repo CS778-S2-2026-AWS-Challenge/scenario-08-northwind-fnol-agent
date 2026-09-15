@@ -22,6 +22,9 @@ TOOLING_FULL_PATHS = {
     'backend/requirements-dev.txt',
     'scripts/select_backend_tests.py',
 }
+TEST_SUPPORT_CONSUMERS = {
+    'tests/journey_runs/': ('tests/test_journey_runs.py',),
+}
 
 
 @dataclass(frozen=True)
@@ -78,11 +81,16 @@ def select_tests(changed_paths: Sequence[str], *, full: bool = False) -> TestSel
         if path_text.startswith('backend/'):
             backend_changed = True
         if path_text.startswith('tests/') and path_text.endswith('.py'):
-            selected.add(path_text)
-        if path_text == 'tests/conftest.py' or path_text.startswith(
-            ('tests/fixtures/', 'tests/helpers/', 'tests/support/')
-        ):
-            shared_change = True
+            if _is_pytest_module(path):
+                selected.add(path_text)
+            elif path_text == 'tests/conftest.py' or path_text.startswith(
+                ('tests/fixtures/', 'tests/helpers/', 'tests/support/')
+            ):
+                shared_change = True
+            elif consumers := _test_support_consumers(path_text):
+                selected.update(consumers)
+            else:
+                shared_change = True
 
         if path_text.startswith(('backend/api/claims.py', 'backend/services/claims.py')):
             selected.update(
@@ -179,6 +187,21 @@ def select_tests(changed_paths: Sequence[str], *, full: bool = False) -> TestSel
 
 def _normalise_path(path: str) -> str:
     return PurePosixPath(path.replace('\\', '/')).as_posix()
+
+
+def _is_pytest_module(path: PurePosixPath) -> bool:
+    """Return whether pytest treats the path as a test module by default."""
+
+    return path.name.startswith('test_') or path.name.endswith('_test.py')
+
+
+def _test_support_consumers(path: str) -> tuple[str, ...]:
+    """Return the durable test modules that exercise a support-module path."""
+
+    for prefix, consumers in TEST_SUPPORT_CONSUMERS.items():
+        if path.startswith(prefix):
+            return consumers
+    return ()
 
 
 def changed_python_files(changed: Sequence[str]) -> tuple[str, ...]:

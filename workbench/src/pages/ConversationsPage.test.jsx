@@ -12,6 +12,21 @@ const claimConversation = {
   status: 'active',
 }
 
+const assistanceRequest = {
+  claim_id: 'clm_help',
+  display_reference: 'clm_help',
+  incident: { family: 'motor', summary: 'Vehicle was hit while parked.' },
+  detail: { integration_summary: { claim_creation_status: null } },
+  handoff: {
+    handoff_id: 'hnd_help',
+    status: 'queued',
+    reason: 'Customer asked to speak with staff.',
+    created_at: '2026-09-14T02:00:00Z',
+    packet: { incident_summary: 'Parked vehicle damage; registration is confirmed.' },
+  },
+  canTakeOver: true,
+}
+
 const agentConversations = [
   agentConversation('sas_evidence', 'Evidence review', 'Police report is still pending.', 0, 2),
   agentConversation('sas_policy', 'Policy wording', 'Excess and coverage notes.', 1),
@@ -51,6 +66,68 @@ function renderPage(overrides = {}) {
   }
   return { ...render(<ConversationsPage {...props} />), props }
 }
+
+it('reviews an incoming assistance request without claiming it and confirms take-over separately', async () => {
+  const user = userEvent.setup()
+  const onReviewRequest = vi.fn()
+  const onTakeOver = vi.fn().mockResolvedValue(undefined)
+  renderPage({ assistanceRequests: [assistanceRequest], onReviewRequest, onTakeOver })
+
+  const requests = screen.getByRole('heading', { name: 'Human assistance requests' }).closest('section')
+  expect(requests).toHaveTextContent('Waiting request')
+  expect(requests).toHaveTextContent('Parked vehicle damage; registration is confirmed.')
+  expect(requests).toHaveTextContent('Claim not yet created')
+  expect(requests).toHaveTextContent('Customer asked to speak with staff.')
+
+  await user.click(within(requests).getByRole('button', { name: 'Review' }))
+  expect(onReviewRequest).toHaveBeenCalledWith(assistanceRequest)
+  expect(onTakeOver).not.toHaveBeenCalled()
+
+  await user.click(within(requests).getByRole('button', { name: 'Take over' }))
+  expect(onTakeOver).not.toHaveBeenCalled()
+  await user.click(within(requests).getByRole('button', { name: 'Confirm take over' }))
+  expect(onTakeOver).toHaveBeenCalledWith(assistanceRequest)
+})
+
+it('separates active workflow states from completed assistance history', () => {
+  const actionNeeded = {
+    ...claimConversation,
+    conversation_id: 'claim:ses_action',
+    session_id: 'ses_action',
+    title: 'Claim NW-2001',
+    detail: { work_summary: { unread_claimant_messages: 1 } },
+    assistance: { status: 'in_progress', waitingForCustomer: false },
+  }
+  const waiting = {
+    ...claimConversation,
+    conversation_id: 'claim:ses_waiting',
+    session_id: 'ses_waiting',
+    title: 'Claim NW-2002',
+    detail: { work_summary: { unread_claimant_messages: 0 } },
+    assistance: { status: 'in_progress', waitingForCustomer: true },
+  }
+  const completed = {
+    ...claimConversation,
+    conversation_id: 'claim:ses_completed',
+    session_id: 'ses_completed',
+    title: 'Claim NW-2003',
+    detail: { work_summary: { unread_claimant_messages: 0 } },
+    assistance: { status: 'resolved', waitingForCustomer: false },
+  }
+
+  renderPage({ conversations: [actionNeeded, waiting, completed] })
+
+  const active = screen.getByRole('heading', { name: 'My active conversations' }).closest('section')
+  expect(active).toHaveTextContent('Claim NW-2001')
+  expect(active).toHaveTextContent('Action needed')
+  expect(active).toHaveTextContent('Claim NW-2002')
+  expect(active).toHaveTextContent('Waiting for customer')
+  expect(active).not.toHaveTextContent('Claim NW-2003')
+
+  const history = screen.getByRole('heading', { name: 'Completed assistance' }).closest('section')
+  expect(history).toHaveTextContent('Claim NW-2003')
+  expect(history).toHaveTextContent('Completed')
+})
 
 it('shows one compact Staff Agent history without page-level current or new sections', () => {
   renderPage({ selectedStaffAgentSessionId: 'sas_evidence' })

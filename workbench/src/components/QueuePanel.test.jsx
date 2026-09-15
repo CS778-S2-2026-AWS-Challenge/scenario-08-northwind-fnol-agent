@@ -143,6 +143,45 @@ describe('QueuePanel', () => {
     expect(onPriority).toHaveBeenCalledWith('high')
   })
 
+  it('surfaces backend-projected attention context without inventing queue state', () => {
+    const lastClaimantActivity = '2026-09-03T00:45:00Z'
+    renderQueue({
+      claims: [{
+        ...claim,
+        priority_projection: {
+          level: 'high',
+          reasons: [{
+            code: 'OPEN_HANDOFF',
+            summary: 'A claimant support handoff needs staff action.',
+            source_refs: ['hnd_1'],
+          }],
+        },
+        work_summary: {
+          ...claim.work_summary,
+          primary_blocker: 'Police Report',
+          incomplete_context: {
+            resume_point: 'incident_details',
+          },
+          external_wait_count: 2,
+          last_claimant_activity_at: lastClaimantActivity,
+        },
+      }],
+    })
+
+    expect(screen.getByText('Why now').parentElement).toHaveTextContent(
+      'A claimant support handoff needs staff action.',
+    )
+    expect(screen.getByText('Needs attention').parentElement).toHaveTextContent('Police Report')
+    expect(screen.getByText('Incomplete').parentElement).toHaveTextContent('Resume Incident Details')
+    expect(screen.getByText('External wait').parentElement).toHaveTextContent('2 services waiting')
+
+    const claimantActivity = screen.getByText('Claimant activity').parentElement
+    expect(claimantActivity.querySelector('time')).toHaveAttribute('datetime', lastClaimantActivity)
+    expect(screen.getByText(/Claim updated/)).toHaveAttribute('datetime', claim.updated_at)
+    expect(screen.queryByText(/Unread/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Overdue/)).not.toBeInTheDocument()
+  })
+
   it('distinguishes filtered no-results and clears the current filter state', async () => {
     const onClearFilters = vi.fn()
     const user = userEvent.setup()

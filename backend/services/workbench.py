@@ -7,17 +7,26 @@ from typing import Any, TypeVar
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.evidence import is_in_conflict, unresolved_conflicts
+from backend.domain.external_service_registry import (
+    ExternalLifecycleStatus,
+    InvalidExternalLifecycleTransition,
+    assert_projection_provenance,
+    build_lifecycle_projection,
+    projection_metadata,
+)
 from backend.domain.external_services import (
+    ASSESSOR_SERVICE_IDENTITY,
     ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
     ExternalTaskResult,
     ExternalTaskResultVerification,
-    catalogue_reference,
     request_provenance,
 )
 from backend.domain.models import (
     AgentAction,
+    AssessorRoutingResult,
+    AssessorRoutingStatus,
     ClaimCollaborationRequest,
     ClaimCreationStatus,
     CollaborationRequestKind,
@@ -69,6 +78,7 @@ from backend.domain.workbench import (
     WorkbenchAllowedAction,
     WorkbenchClaimantSummary,
     WorkbenchClaimDetail,
+    WorkbenchClaimDetailIntegrationSummary,
     WorkbenchClaimFilterMetadata,
     WorkbenchClaimListItem,
     WorkbenchClaimListResponse,
@@ -284,6 +294,8 @@ def workbench_handoff(handoff: HandoffRecord) -> WorkbenchHandoff:
         created_at=handoff.created_at,
         accepted_at=handoff.accepted_at,
         resolved_at=handoff.resolved_at,
+        resume_workflow_state=handoff.resume_workflow_state,
+        resume_next_action=handoff.resume_next_action,
     )
 
 
@@ -344,12 +356,12 @@ def _lifecycle(
         or claim.external_claim is not None
     ):
         return ClaimLifecycleState.CREATED
-    if any(item.type is HandoffType.PROFESSIONAL_REVIEW for item in active_handoffs):
-        return ClaimLifecycleState.PROFESSIONAL_REVIEW
+    if active_handoffs:
+        if any(item.type is HandoffType.PROFESSIONAL_REVIEW for item in active_handoffs):
+            return ClaimLifecycleState.PROFESSIONAL_REVIEW
+        return ClaimLifecycleState.STAFF_SUPPORT
     if claim.claim_state.workflow_state is WorkflowState.PROFESSIONAL_REVIEW:
         return ClaimLifecycleState.PROFESSIONAL_REVIEW
-    if active_handoffs:
-        return ClaimLifecycleState.STAFF_SUPPORT
     if claim.claim_state.workflow_state is WorkflowState.READY_FOR_NEXT:
         return ClaimLifecycleState.READY_TO_CREATE
     if claim.claim_state.workflow_state is WorkflowState.AWAITING_EVIDENCE:
@@ -1719,6 +1731,13 @@ def _build_projection(
     )
     if not include_detail:
         return WorkbenchClaimListItem(**base)
+    base['integration_summary'] = WorkbenchClaimDetailIntegrationSummary(
+        claim_creation_status=integration_summary.claim_creation_status,
+        claim_number=(claim.external_claim.claim_number if claim.external_claim else None),
+        expected_by=(claim.external_claim.expected_by if claim.external_claim else None),
+        assessor_routing_status=integration_summary.assessor_routing_status,
+        waiting_external_services=integration_summary.waiting_external_services,
+    )
     unavailable_external = external_limitation is not None
     return WorkbenchClaimDetail(
         **base,
@@ -2198,79 +2217,104 @@ def _external_lifecycle(
     request: Any | None,
     result: ExternalTaskResult | None = None,
     result_evidence: Sequence[EvidenceRecord] = (),
+    assessor_routing: AssessorRoutingResult | None = None,
 ) -> WorkbenchExternalLifecycle:
     status = task.status
-    if status is ExternalTaskOperationStatus.PREPARED:
-        label = 'Pending'
-        detail = 'The request is prepared and has not been submitted.'
-        verification = 'not_started'
-        owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
-        next_action = 'Review the projected disclosure, authority, and consent before submission.'
-        attention = False
-    elif status is ExternalTaskOperationStatus.ACCEPTED:
-        label = 'Completion not confirmed'
-        detail = 'The provider acknowledged the request; no verified completed result is recorded.'
-        verification = 'pending_verification'
-        owner = WorkbenchResponsibility.EXTERNAL_PARTY
-        next_action = 'Track the provider result and verify it before reconciling Claim State.'
-        attention = False
-    elif status is ExternalTaskOperationStatus.RETRYABLE_FAILURE:
-        label = 'Failed'
-        detail = 'The request failed before a verified result; the same operation may be retried.'
-        verification = 'failed_unverified'
-        owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
-        next_action = 'Correct the dependency problem, then retry with the same operation identity.'
-        attention = True
-    elif status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
-        label = 'Outcome not confirmed'
-        detail = 'Submission may have occurred; the result remains unknown.'
-        verification = 'reconciliation_required'
-        owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
-        next_action = 'Reconcile by operation or provider reference before any retry.'
-        attention = True
-    else:
-        label = 'Failed'
-        detail = 'The request failed and requires staff review.'
-        verification = 'review_required'
-        owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
-        next_action = 'Review the failure before another request is attempted.'
-        attention = True
-    if result is not None and status is ExternalTaskOperationStatus.ACCEPTED:
-        verification = result.verification.value
-        owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
-        if result.verification is ExternalTaskResultVerification.UNVERIFIED:
-            label = 'Result awaiting verification'
-            detail = 'A provider result is recorded but has not been checked against the Claim.'
-            next_action = 'Verify the returned result against its evidence and the current Claim.'
-            attention = True
-        elif result.verification is ExternalTaskResultVerification.CONSISTENT:
-            label = 'Result checked'
-            detail = (
-                'The returned result was checked as consistent evidence; it is not Claim State.'
+    projection = projection_metadata(status.value)
+    result_status = None
+    if result is not None:
+        result_status = (
+            ExternalLifecycleStatus.RESULT_RECEIVED
+            if result.verification is ExternalTaskResultVerification.UNVERIFIED
+            else ExternalLifecycleStatus.RESULT_VERIFIED
+        )
+    try:
+        projected_provenance = request_provenance(task)
+        assert_projection_provenance(
+            service_identity=task.service_identity,
+            request_provenance=projected_provenance.value,
+        )
+        service_progress_status = None
+        service_progress_reference = None
+        if (
+            task.service_identity == ASSESSOR_SERVICE_IDENTITY
+            and task.status is ExternalTaskOperationStatus.ACCEPTED
+            and assessor_routing is not None
+            and assessor_routing.routing_status
+            in {AssessorRoutingStatus.QUEUED, AssessorRoutingStatus.ASSIGNED}
+        ):
+            routing_reference = (
+                assessor_routing.assessor_reference or assessor_routing.queue_reference
             )
-            next_action = 'Use the checked result only through an authorised Claim decision.'
-            attention = False
-        elif result.verification is ExternalTaskResultVerification.INCONSISTENT:
-            label = 'Result conflicts with Claim'
-            detail = 'The returned result was checked and conflicts with the Claim.'
-            next_action = 'Review the conflicting result and cited evidence before continuing.'
-            attention = True
-        else:
-            label = 'Result requires review'
-            detail = 'The returned result needs professional review before it can be used.'
-            next_action = 'Review the result, evidence, and checked Claim revision.'
-            attention = True
-    fixture = task.integration_source.value == 'fixture'
-    limitation = (
-        'Synthetic fixture record; no production provider completion is verified.'
-        if fixture
-        else None
-    )
+            service_progress_status = assessor_routing.routing_status.value
+            service_progress_reference = routing_reference
+        canonical_projection = build_lifecycle_projection(
+            service_identity=task.service_identity,
+            operation_status=status.value,
+            result_status=result_status,
+            result_verification=result.verification if result is not None else None,
+            provider_reference=task.provider_reference,
+            service_progress_status=service_progress_status,
+            service_progress_reference=service_progress_reference,
+        )
+        projection_limitation = canonical_projection.limitation
+        projection_catalogue = canonical_projection.catalogue_reference
+        projection_provenance = projected_provenance
+    except KeyError:
+        # Historical records predate the canonical catalogue. They remain readable,
+        # but are explicitly legacy/unavailable and never claim registry authority.
+        canonical_projection = None
+        projection_limitation = (
+            'Legacy external-service record; canonical registry metadata is unavailable.'
+        )
+        projection_catalogue = None
+        projection_provenance = request_provenance(task)
+    if canonical_projection is not None:
+        label = canonical_projection.status_label
+        detail = canonical_projection.status_detail
+        verification = canonical_projection.verification_state
+        owner = WorkbenchResponsibility(canonical_projection.pending_owner)
+        next_action = canonical_projection.next_action
+        attention = canonical_projection.needs_attention
+    else:
+        label = projection.label
+        detail = projection.detail
+        verification = projection.verification_state
+        owner = WorkbenchResponsibility(projection.pending_owner)
+        next_action = projection.next_action
+        attention = projection.needs_attention
+        if result is not None and status is ExternalTaskOperationStatus.ACCEPTED:
+            verification = result.verification.value
+            owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
+            if result.verification is ExternalTaskResultVerification.UNVERIFIED:
+                label = 'Result awaiting verification'
+                detail = 'A provider result is recorded but has not been checked against the Claim.'
+                next_action = (
+                    'Verify the returned result against its evidence and the current Claim.'
+                )
+                attention = True
+            elif result.verification is ExternalTaskResultVerification.CONSISTENT:
+                label = 'Result checked'
+                detail = (
+                    'The returned result was checked as consistent evidence; it is not Claim State.'
+                )
+                next_action = 'Use the checked result only through an authorised Claim decision.'
+                attention = False
+            elif result.verification is ExternalTaskResultVerification.INCONSISTENT:
+                label = 'Result conflicts with Claim'
+                detail = 'The returned result was checked and conflicts with the Claim.'
+                next_action = 'Review the conflicting result and cited evidence before continuing.'
+                attention = True
+            else:
+                label = 'Result requires review'
+                detail = 'The returned result needs professional review before it can be used.'
+                next_action = 'Review the result, evidence, and checked Claim revision.'
+                attention = True
     return WorkbenchExternalLifecycle(
         stakeholder='external_party',
         service=task.service_identity,
-        catalogue_reference=catalogue_reference(task),
-        provenance=request_provenance(task),
+        catalogue_reference=projection_catalogue,
+        provenance=projection_provenance,
         request_type=task.requested_action,
         authority_state='recorded' if request is not None else 'not_recorded',
         consent_state=(
@@ -2301,7 +2345,7 @@ def _external_lifecycle(
             )
             for item in result_evidence
         ],
-        limitation=limitation,
+        limitation=projection_limitation,
         next_action=next_action,
         needs_attention=attention,
     )
@@ -2331,26 +2375,38 @@ def list_workbench_external_requests(
     results_by_task = {item.task_id: item for item in results}
     evidence_by_id = {item.evidence_id: item for item in evidence}
     items = []
-    for task in tasks:
-        external_request = by_task.get(task.task_id)
-        result = results_by_task.get(task.task_id)
-        items.append(
-            WorkbenchExternalRequest(
-                request=external_request,
-                task=task,
-                lifecycle=_external_lifecycle(
-                    task,
-                    external_request,
-                    result,
-                    [
-                        evidence_by_id[evidence_id]
-                        for evidence_id in result.evidence_ids
-                        if evidence_id in evidence_by_id
-                    ]
-                    if result is not None
-                    else [],
-                ),
+    try:
+        for task in tasks:
+            external_request = by_task.get(task.task_id)
+            result = results_by_task.get(task.task_id)
+            items.append(
+                WorkbenchExternalRequest(
+                    request=external_request,
+                    task=task,
+                    lifecycle=_external_lifecycle(
+                        task,
+                        external_request,
+                        result,
+                        [
+                            evidence_by_id[evidence_id]
+                            for evidence_id in result.evidence_ids
+                            if evidence_id in evidence_by_id
+                        ]
+                        if result is not None
+                        else [],
+                        claim.assessor_routing,
+                    ),
+                )
             )
+    except (InvalidExternalLifecycleTransition, ValueError):
+        return WorkbenchResourcePage(
+            items=[],
+            page={'next_cursor': None},
+            status=ResourceAvailability.UNAVAILABLE,
+            limitation=(
+                'External-service lifecycle records are inconsistent and cannot be displayed '
+                'safely.'
+            ),
         )
     items.sort(key=lambda item: (item.task.created_at, item.task.task_id))
     return _page(items, limit, cursor)
