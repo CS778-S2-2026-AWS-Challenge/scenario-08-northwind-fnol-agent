@@ -4,6 +4,7 @@ import {
   createClaim,
   listEvidenceHistory,
   listClaims,
+  requestEvidenceUpload,
   setClaimantAccessToken,
   streamClaimUpdates,
 } from './api.js'
@@ -144,6 +145,50 @@ describe('Evidence history contract', () => {
       expect.objectContaining({
         signal: controller.signal,
         headers: expect.objectContaining({ Authorization: 'Bearer claimant-session-token' }),
+      }),
+    )
+  })
+})
+
+describe('Evidence upload contract', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken('claimant-session-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('targets the original Evidence requirement when its identity is supplied', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ evidence_id: 'evd_required' }), { status: 201 }))
+    const file = new File(['quote'], 'repair-quote.pdf', { type: 'application/pdf' })
+
+    await requestEvidenceUpload({
+      claimId: 'clm_1',
+      revision: 7,
+      file,
+      kind: 'repair_quote',
+      evidenceId: 'evd_required',
+      idempotencyKey: 'requirement-upload',
+    })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/claims/clm_1/evidence/uploads',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Idempotency-Key': 'requirement-upload',
+          'If-Match': '7',
+        }),
+        body: JSON.stringify({
+          evidence_id: 'evd_required',
+          kind: 'repair_quote',
+          original_filename: 'repair-quote.pdf',
+          media_type: 'application/pdf',
+          size_bytes: file.size,
+        }),
       }),
     )
   })

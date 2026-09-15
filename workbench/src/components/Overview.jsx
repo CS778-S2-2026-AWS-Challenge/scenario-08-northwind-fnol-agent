@@ -123,6 +123,8 @@ function IntegrationSummary({ summary }) {
       </div>
       <div className="summary-grid">
         <SummaryStatusItem label="Claim creation" value={summary.claim_creation_status} />
+        <SummaryItem label="Claim number" value={summary.claim_number} />
+        <SummaryItem label="Expected by" value={formatDateTime(summary.expected_by)} />
         <SummaryStatusItem label="Assessor routing" value={summary.assessor_routing_status} />
       </div>
       {waiting.length ? (
@@ -138,7 +140,6 @@ function IntegrationSummary({ summary }) {
           ))}
         </ul>
       ) : <p className="empty-note">No external service is currently projected as waiting.</p>}
-      <p className="record-note"><strong>Projection limit</strong> Claim number and provider timeline are not published by this Workbench summary and are not inferred from lifecycle or queue state.</p>
     </section>
   )
 }
