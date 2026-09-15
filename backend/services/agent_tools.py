@@ -5,7 +5,13 @@ from collections.abc import Mapping
 from backend.core.auth import Principal
 from backend.domain.agent_action_registry import action_contract
 from backend.domain.agent_tool_registry import tool_contract
-from backend.domain.models import EvidenceFileStatus, EvidenceSource, EvidenceStatus, WorkingClaim
+from backend.domain.models import (
+    EvidenceFileStatus,
+    EvidenceHistoryState,
+    EvidenceSource,
+    EvidenceStatus,
+    WorkingClaim,
+)
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.evidence import list_evidence_history
 from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
@@ -111,9 +117,9 @@ def validate_evidence_proposal(
 ) -> dict[str, object]:
     """Validate an Evidence reuse/removal proposal without performing a side effect.
 
-    This is the backend boundary for the two new proposal actions. It deliberately
-    returns ``unavailable`` for persisted removal because no governed remove handler
-    exists yet; callers must not convert that result into a completed operation.
+    This is the backend boundary for the two proposal actions. It never performs
+    a side effect: a valid persisted action is returned as ``proposed`` and still
+    requires the claimant confirmation and Evidence API mutation boundary.
     """
 
     if action_code not in {'claim.propose_evidence_reuse', 'claim.propose_evidence_remove'}:
@@ -137,6 +143,8 @@ def validate_evidence_proposal(
     if action_code == 'claim.propose_evidence_reuse':
         if source_claim_id != record.claim_id:
             return {'status': 'rejected', 'reason': 'SOURCE_CLAIM_MISMATCH'}
+        if record.claimant_history_state is EvidenceHistoryState.REMOVED:
+            return {'status': 'rejected', 'reason': 'EVIDENCE_HISTORY_REMOVED'}
         if not (
             record.file_status is EvidenceFileStatus.READY
             and record.status
@@ -159,12 +167,20 @@ def validate_evidence_proposal(
             'reason': 'DRAFT_REMOVAL_IS_FRONTEND_OWNED',
             'evidence_id': record.evidence_id,
         }
+    if not (
+        record.file_status is EvidenceFileStatus.READY
+        and record.status
+        not in {EvidenceStatus.INVALID, EvidenceStatus.EXPIRED, EvidenceStatus.SUPERSEDED}
+        and record.claimant_history_state is EvidenceHistoryState.AVAILABLE
+    ):
+        return {'status': 'rejected', 'reason': 'EVIDENCE_NOT_REMOVABLE'}
     return {
-        'status': 'unavailable',
-        'reason': 'PERSISTED_REMOVE_HANDLER_UNAVAILABLE',
+        'status': 'proposed',
+        'reason': 'CLAIMANT_CONFIRMATION_REQUIRED_BEFORE_EVIDENCE_API_REMOVE',
         'evidence_id': record.evidence_id,
-        'can_remove': False,
-        'limitations': ['Retention and audit policy do not currently expose a remove API.'],
+        'source_claim_id': record.claim_id,
+        'target_claim_id': claim.claim_id,
+        'can_remove': True,
     }
 
 

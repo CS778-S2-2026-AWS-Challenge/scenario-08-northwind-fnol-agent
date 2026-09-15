@@ -723,15 +723,19 @@ def test_validation_seed_same_key_race_real_mongodb_replica_set() -> None:
                 )
             )
             claim_evidence = repository.list_evidence(claim.claim_id, claim.customer_id)
-            assert len(claim_evidence) == 1
+            # Each claim now carries its family's produced materials in addition to
+            # the single synthetic cross-role reference. The per-kind assertion below
+            # is the invariant this race test needs to preserve.
+            assert sum(item.kind == 'claimant_attachment' for item in claim_evidence) == 1
             evidence.extend(claim_evidence)
 
         assert len(sessions) == 3
         assert len({session.session_id for session in sessions}) == 3
         assert len(messages) == 12
         assert len({message.message_id for message in messages}) == 12
-        assert len(evidence) == 3
-        assert len({item.evidence_id for item in evidence}) == 3
+        assert len(evidence) > 3
+        assert sum(item.kind == 'claimant_attachment' for item in evidence) == 3
+        assert len({item.evidence_id for item in evidence}) == len(evidence)
         assert (
             repository._collection.count_documents(
                 {

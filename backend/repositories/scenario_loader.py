@@ -615,6 +615,8 @@ def claimant_evidence_for(entry: EvidencePathEntry) -> list[ClaimantEvidence]:
         'expected_by',
         'expected_timing',
         'context_summary',
+        'claimant_history_state',
+        'claimant_history_removed_at',
     }
     return [
         ClaimantEvidence.model_validate(

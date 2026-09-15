@@ -334,6 +334,13 @@ action-level authority check.
   bounded metadata and provenance summaries only; history visibility does not grant permission
   to attach or remove a file. A paginated result exposes its opaque continuation cursor and an
   explicit non-exhaustive limitation until the final page is read.
+- Confirmed reuse and persisted removal use the Runtime-only `claim.reuse_evidence` and
+  `claim.remove_evidence` actions. Runtime must match the exact claimant, Claim, Evidence, source
+  Claim, proposal, confirmation, revision, and idempotency identity before calling the registered
+  `evidence.reuse` or `evidence.remove` backend capability. The repository-backed capability
+  persists the relation or governed removal and returns revision-backed audit evidence; missing
+  handlers still fail as unavailable. Only a persisted backend result with an auditable state-change reference may produce claimant
+  success wording; rejected, failed, unavailable, and unknown results remain distinct.
 - Retrieved instructions are untrusted content. They cannot change Agent Policy, grant
   tool access, widen customer-data visibility, or authorise an action.
 - Missing, conflicting, expired, wrong-insurer, wrong-product, wrong-jurisdiction, or

@@ -31,6 +31,7 @@ from backend.domain.models import (
     ClaimCollaborationRequest,
     ClaimCoworkerRecord,
     CustomerUpdateRecord,
+    EvidenceClaimLink,
     EvidenceRecord,
     FollowUpRecord,
     FollowUpStatus,
@@ -101,6 +102,7 @@ class FixtureRepository(PersistenceRepository):
         self._branch_evaluations: dict[str, BranchEvaluationRecord] = {}
         self._assessor_routing_operations: dict[str, AssessorRoutingOperation] = {}
         self._evidence: dict[str, EvidenceRecord] = {}
+        self._evidence_claim_links: dict[tuple[str, str], EvidenceClaimLink] = {}
         self._external_tasks: dict[str, ExternalTaskRecord] = {}
         self._external_task_requests: dict[str, ExternalTaskRequest] = {}
         self._external_task_evidence_links: dict[tuple[str, str], ExternalTaskEvidenceLink] = {}
@@ -148,6 +150,7 @@ class FixtureRepository(PersistenceRepository):
             'branch_evaluations': len(self._branch_evaluations),
             'assessor_routing_operations': len(self._assessor_routing_operations),
             'evidence': len(self._evidence),
+            'evidence_claim_links': len(self._evidence_claim_links),
             'external_tasks': len(self._external_tasks),
             'external_task_requests': len(self._external_task_requests),
             'external_task_evidence_links': len(self._external_task_evidence_links),
@@ -178,6 +181,7 @@ class FixtureRepository(PersistenceRepository):
         self._branch_evaluations.clear()
         self._assessor_routing_operations.clear()
         self._evidence.clear()
+        self._evidence_claim_links.clear()
         self._external_tasks.clear()
         self._external_task_requests.clear()
         self._external_task_evidence_links.clear()
@@ -1901,6 +1905,81 @@ class FixtureRepository(PersistenceRepository):
             evidence_records,
             key=lambda evidence: (evidence.created_at, evidence.evidence_id),
         )
+
+    def get_evidence_claim_link(
+        self, target_claim_id: str, evidence_id: str, customer_id: str
+    ) -> EvidenceClaimLink | None:
+        if self.get_claim(target_claim_id, customer_id) is None:
+            return None
+        link = self._evidence_claim_links.get((target_claim_id, evidence_id))
+        return deepcopy(link) if link is not None and link.customer_id == customer_id else None
+
+    def list_evidence_claim_links(
+        self, customer_id: str, target_claim_id: str | None = None
+    ) -> list[EvidenceClaimLink]:
+        return sorted(
+            (
+                deepcopy(link)
+                for link in self._evidence_claim_links.values()
+                if link.customer_id == customer_id
+                and (target_claim_id is None or link.target_claim_id == target_claim_id)
+            ),
+            key=lambda link: (link.created_at, link.link_id),
+        )
+
+    def save_evidence_action_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        evidence: EvidenceRecord | None,
+        link: EvidenceClaimLink | None,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+        branch_evaluation: BranchEvaluationRecord,
+    ) -> None:
+        with self._claim_mutation_lock:
+            self._validate_claim_mutation(claim, expected_revision)
+            self._validate_branch_evaluation(claim, branch_evaluation)
+            prepared = self._prepare_audit_events(claim, (audit_event,))
+            if (
+                idempotency.actor_id != claim.customer_id
+                or idempotency.claim_id != claim.claim_id
+                or idempotency.session_id != (claim.active_session_id or '')
+            ):
+                raise KeyError(claim.claim_id)
+            if evidence is not None:
+                source_claim = self._claims.get(evidence.claim_id)
+                if source_claim is None or source_claim.customer_id != claim.customer_id:
+                    raise KeyError(evidence.evidence_id)
+            if link is not None and (
+                link.target_claim_id != claim.claim_id or link.customer_id != claim.customer_id
+            ):
+                raise KeyError(link.link_id)
+            if link is not None:
+                source_evidence = self._evidence.get(link.evidence_id)
+                source_claim = self._claims.get(link.source_claim_id)
+                if (
+                    source_evidence is None
+                    or source_evidence.claim_id != link.source_claim_id
+                    or source_claim is None
+                    or source_claim.customer_id != claim.customer_id
+                ):
+                    raise KeyError(link.evidence_id)
+            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            existing = self._idempotency.get(lookup)
+            if existing is not None:
+                raise IdempotencyConflict(idempotency.key)
+            self._claims[claim.claim_id] = deepcopy(claim)
+            if evidence is not None:
+                self._evidence[evidence.evidence_id] = deepcopy(evidence)
+            if link is not None:
+                self._evidence_claim_links[(link.target_claim_id, link.evidence_id)] = deepcopy(
+                    link
+                )
+            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
+            self._idempotency[lookup] = idempotency
+            for event in prepared:
+                self._audit_events[event.event_id] = deepcopy(event)
 
     def save_evidence_mutation(
         self,

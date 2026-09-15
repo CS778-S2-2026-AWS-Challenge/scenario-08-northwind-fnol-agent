@@ -105,11 +105,34 @@ def test_vp_mapping_document_runs_the_focused_contract_suite() -> None:
     assert selection.tests == ('tests/test_branch_registry.py',)
 
 
-def test_ci_selector_change_runs_the_complete_suite() -> None:
+def test_ci_selector_change_runs_its_contract_tests() -> None:
     selection = select_tests(['scripts/select_backend_tests.py'])
 
-    assert selection.mode == 'full'
-    assert selection.tests == ('tests',)
+    assert selection.mode == 'scoped'
+    assert selection.tests == ('tests/test_backend_test_selection.py',)
+
+
+def test_agent_evidence_action_change_selects_runtime_action_consumers() -> None:
+    selection = select_tests(
+        [
+            'backend/domain/agent_action_registry.py',
+            'backend/domain/agent_tool_registry.py',
+            'backend/services/agent_evidence_actions.py',
+            'tests/test_agent_evidence_action_execution.py',
+        ]
+    )
+
+    assert selection.mode == 'scoped'
+    assert {
+        'tests/test_agent_action_commands.py',
+        'tests/test_agent_action_execution.py',
+        'tests/test_agent_action_mapping.py',
+        'tests/test_agent_action_registry.py',
+        'tests/test_agent_evidence_action_execution.py',
+        'tests/test_agent_evidence_tools.py',
+        'tests/test_runtime_agent_policy.py',
+        'tests/test_staff_tool_registry.py',
+    } <= set(selection.tests)
 
 
 def test_static_checks_use_only_changed_python_files_for_scoped_prs() -> None:

@@ -286,6 +286,14 @@ def _input_schema_for(action_code: str) -> ActionInputSchema:
             _field('evidence_id', ActionInputType.STRING),
             _field('removal_scope', ActionInputType.STRING),
         )
+    if action_code in {'claim.reuse_evidence', 'claim.remove_evidence'}:
+        return _schema(
+            _field('claim_id', ActionInputType.STRING),
+            _field('evidence_id', ActionInputType.STRING),
+            _field('source_claim_id', ActionInputType.STRING),
+            _field('expected_revision', ActionInputType.INTEGER),
+            _field('proposal_ref', ActionInputType.STRING),
+        )
 
     if action_code.startswith('claim.'):
         return _schema(
@@ -648,6 +656,65 @@ def _evidence_specs() -> list[AgentActionContract]:
             prohibited_outcomes=(
                 'Do not delete an object-storage key, erase provenance, or report a persisted '
                 'item as removed unless the Evidence API confirms it.',
+            ),
+        ),
+        _spec(
+            'claim.reuse_evidence',
+            'Attach confirmed historical Evidence without duplicating its file object.',
+            actor_roles=(ActionActorRole.RUNTIME,),
+            authority=ExecutionAuthority.CLAIMANT_STAFF_OR_PUBLISHED_RULE,
+            lifecycle_states=_MUTABLE_WORKFLOW_STATES,
+            preconditions=(
+                'authorised_claim_scope',
+                'explicit_claimant_confirmation',
+                'current_claim_revision',
+                'evidence_ownership_verified',
+                'source_claim_verified',
+                'reusable_processing_state',
+                'retention_and_permission_checked',
+            ),
+            tools=('evidence.reuse',),
+            side_effect=ActionSideEffectClass.INTERNAL_WRITE,
+            idempotency=ActionIdempotencyPolicy.REQUIRED,
+            state_effect=ActionStateEffect.CLAIM_MUTATION,
+            visibility=(ActionVisibility.CLAIMANT,),
+            confirmation=True,
+            response_obligations=(
+                'Report reuse only after the backend returns a persisted, auditable Claim '
+                'relation and Runtime verifies the resulting Claim revision.',
+            ),
+            prohibited_outcomes=(
+                'Do not copy the file object, bypass the Evidence service, reuse across '
+                'claimants, or present an unavailable or unknown result as attached.',
+            ),
+        ),
+        _spec(
+            'claim.remove_evidence',
+            'Apply a confirmed persisted-Evidence removal through retention and audit policy.',
+            actor_roles=(ActionActorRole.RUNTIME,),
+            authority=ExecutionAuthority.CLAIMANT_STAFF_OR_PUBLISHED_RULE,
+            lifecycle_states=_MUTABLE_WORKFLOW_STATES,
+            preconditions=(
+                'authorised_claim_scope',
+                'explicit_claimant_confirmation',
+                'current_claim_revision',
+                'evidence_ownership_verified',
+                'source_claim_verified',
+                'retention_and_permission_checked',
+            ),
+            tools=('evidence.remove',),
+            side_effect=ActionSideEffectClass.INTERNAL_WRITE,
+            idempotency=ActionIdempotencyPolicy.REQUIRED,
+            state_effect=ActionStateEffect.CLAIM_MUTATION,
+            visibility=(ActionVisibility.CLAIMANT,),
+            confirmation=True,
+            response_obligations=(
+                'Report the server-selected detach, unavailable, or deletion outcome only '
+                'after auditable persistence and revision verification.',
+            ),
+            prohibited_outcomes=(
+                'Do not delete an object-storage key directly, erase provenance, or present '
+                'a retention-blocked, failed, or unknown result as removed.',
             ),
         ),
     ]

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  applyEvidenceHistoryAction,
   createClaim,
   listEvidenceHistory,
   listClaims,
@@ -145,6 +146,41 @@ describe('Evidence history contract', () => {
       expect.objectContaining({
         signal: controller.signal,
         headers: expect.objectContaining({ Authorization: 'Bearer claimant-session-token' }),
+      }),
+    )
+  })
+
+  it('posts a revision-checked governed Evidence action with claimant references', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ status: 'succeeded' }), { status: 200 }))
+    const controller = new AbortController()
+
+    await applyEvidenceHistoryAction({
+      claimId: 'clm_target',
+      evidenceId: 'evd_source',
+      action: 'reuse',
+      sourceClaimId: 'clm_source',
+      revision: 7,
+      proposalRef: 'proposal-1',
+      confirmationRef: 'confirmation-1',
+      idempotencyKey: 'evidence-action-1',
+      signal: controller.signal,
+    })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/claims/clm_target/evidence/evd_source/reuse',
+      expect.objectContaining({
+        method: 'POST',
+        signal: controller.signal,
+        headers: expect.objectContaining({
+          Authorization: 'Bearer claimant-session-token',
+          'Idempotency-Key': 'evidence-action-1',
+          'If-Match': '7',
+        }),
+        body: JSON.stringify({
+          source_claim_id: 'clm_source',
+          proposal_ref: 'proposal-1',
+          confirmation_ref: 'confirmation-1',
+        }),
       }),
     )
   })
