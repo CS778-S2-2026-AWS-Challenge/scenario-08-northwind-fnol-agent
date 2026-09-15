@@ -138,7 +138,7 @@ describe('controlled assessor claimant states', () => {
       />,
     )
 
-    expect(screen.getByText('Vehicle damage assessment')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Vehicle damage assessment' })).toBeInTheDocument()
     expect(screen.getByText('Controlled assessment fixture')).toBeInTheDocument()
     expect(screen.getByText('Permission recorded')).toBeInTheDocument()
     expect(screen.getByText('Request queued')).toBeInTheDocument()
