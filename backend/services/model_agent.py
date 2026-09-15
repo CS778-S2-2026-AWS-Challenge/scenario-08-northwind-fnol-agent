@@ -256,6 +256,7 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
             else None
         ),
         knowledge_status=context.knowledge_status,
+        external_services=list(context.external_services),
         knowledge_citations=[
             ModelKnowledgeCitation(
                 document_id=chunk.document_id,
@@ -437,6 +438,9 @@ class GatewayAgent:
             'grounded in the claimant message. Preserve approximate values and reported_text. '
             'Do not claim that a formal Claim was created, an external provider was contacted, '
             'or a staff member accepted the handoff unless the Runtime returns that result. '
+            'Treat external_services as read-only Runtime facts. Follow their claimant meaning, '
+            'limitation, pending owner, and next action; never infer provider completion, advance '
+            'a lifecycle status, or retry an unknown outcome from model judgement. '
             'Use conversation_history only as context; Claim State and registered facts are '
             'authoritative, and do not repeat a question already answered by a confirmed fact. '
             'Every form change value must match field_value_contracts exactly: use JSON booleans '
