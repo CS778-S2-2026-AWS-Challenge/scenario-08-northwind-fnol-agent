@@ -85,12 +85,14 @@ BACKEND_CONSUMER_RULES = (
     ),
     (
         (
+            'backend/domain/external_service_registry.py',
             'backend/domain/external_services.py',
             'backend/services/external_services.py',
             'backend/services/integrations.py',
         ),
         (
             'tests/test_external_service_entry.py',
+            'tests/test_external_service_registry.py',
             'tests/test_external_service_validation.py',
             'tests/test_external_task_api.py',
             'tests/test_external_task_request.py',
@@ -100,6 +102,8 @@ BACKEND_CONSUMER_RULES = (
             'tests/test_external_task_status.py',
             'tests/test_external_task_transition.py',
             'tests/test_integrations.py',
+            'tests/test_agent_external_lifecycle.py',
+            'tests/test_model_gateway.py',
         ),
     ),
     (
@@ -144,6 +148,7 @@ BACKEND_CONSUMER_RULES = (
             'backend/services/messages.py',
             'backend/services/runtime_agent_policy.py',
             'backend/services/runtime_work_items.py',
+            'backend/services/staff_agent.py',
         ),
         (
             'tests/test_agent.py',
@@ -160,6 +165,7 @@ BACKEND_CONSUMER_RULES = (
             'tests/test_runtime_agent_policy.py',
             'tests/test_runtime_work_items.py',
             'tests/test_staff_agent.py',
+            'tests/test_staff_agent_gateway.py',
         ),
     ),
     (

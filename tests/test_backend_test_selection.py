@@ -211,6 +211,24 @@ def test_agent_gateway_change_selects_agent_consumers() -> None:
     assert 'tests/test_staff_agent.py' in selection.tests
 
 
+def test_external_registry_change_selects_lifecycle_consumers() -> None:
+    selection = select_tests(['backend/domain/external_service_registry.py'])
+
+    assert selection.mode == 'scoped'
+    assert 'tests/test_external_service_registry.py' in selection.tests
+    assert 'tests/test_agent_external_lifecycle.py' in selection.tests
+    assert 'tests/test_model_gateway.py' in selection.tests
+
+
+def test_staff_agent_service_change_selects_staff_consumers() -> None:
+    selection = select_tests(['backend/services/staff_agent.py'])
+
+    assert selection.mode == 'scoped'
+    assert 'tests/test_staff_agent.py' in selection.tests
+    assert 'tests/test_staff_agent_gateway.py' in selection.tests
+    assert 'tests/test_mongodb_repository.py' in selection.tests
+
+
 def test_unknown_backend_module_still_runs_the_complete_suite() -> None:
     selection = select_tests(['backend/services/new_unmapped_service.py'])
 
