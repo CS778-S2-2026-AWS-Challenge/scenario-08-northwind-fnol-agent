@@ -69,6 +69,8 @@ const FIELD_SOURCE_LABELS = {
   staff: 'Provided by Northwind support',
 }
 
+const SUPPORT_HANDOFF_TYPES = new Set(['human_support', 'urgent_support'])
+
 function fieldLabel(fieldCode) {
   return FIELD_LABELS[fieldCode] || fieldCode.split('.').at(-1).replaceAll('_', ' ')
 }
@@ -107,7 +109,7 @@ function assistancePresentation({ handoff, nextStep, requesting, reviewingReply,
       description: 'Your request has been sent. You can continue adding information while you wait.',
     }
   }
-  if (handoff?.status === 'resolved' || completed) {
+  if (completed) {
     return {
       key: 'completed',
       title: 'Staff assistance completed',
@@ -140,7 +142,7 @@ function assistancePresentation({ handoff, nextStep, requesting, reviewingReply,
   return null
 }
 
-function buildConversationTimeline(messages, handoff, completedAssistanceClaimId) {
+function buildConversationTimeline(messages, handoff, completedAssistance) {
   const timeline = messages.map((message) => ({
     key: message.message_id,
     kind: 'message',
@@ -183,11 +185,11 @@ function buildConversationTimeline(messages, handoff, completedAssistanceClaimId
   }
 
   if (
-    completedAssistanceClaimId
+    completedAssistance
     && !hasRecordedEvent('staff assistance completed')
   ) {
     timeline.push({
-      key: `assistance-completed-${completedAssistanceClaimId}`,
+      key: `assistance-completed-${completedAssistance.handoff_id}`,
       kind: 'system-event',
       text: 'Staff assistance completed',
     })
@@ -489,26 +491,27 @@ function App() {
     && assistanceReplyReview.claimId === claim?.claim_id
     && assistanceReplyReview.handoffId === handoff?.handoff_id,
   )
-  const completedAssistanceClaimId = !handoff && nextStep?.status === 'staff_update'
-    ? claim?.claim_id
+  const completedAssistance = !handoff
+    && claim?.resolved_support_handoff?.status === 'resolved'
+    && SUPPORT_HANDOFF_TYPES.has(claim.resolved_support_handoff.type)
+    ? claim.resolved_support_handoff
     : null
   const assistanceState = useMemo(() => assistancePresentation({
     handoff,
     nextStep,
     requesting: status === 'requesting-support',
     reviewingReply: reviewingAssistanceReply,
-    completed: completedAssistanceClaimId === claim?.claim_id,
+    completed: Boolean(completedAssistance),
   }), [
-    completedAssistanceClaimId,
-    claim?.claim_id,
+    completedAssistance,
     handoff,
     nextStep,
     reviewingAssistanceReply,
     status,
   ])
   const conversationTimeline = useMemo(
-    () => buildConversationTimeline(messages, handoff, completedAssistanceClaimId),
-    [completedAssistanceClaimId, handoff, messages],
+    () => buildConversationTimeline(messages, handoff, completedAssistance),
+    [completedAssistance, handoff, messages],
   )
 
   useEffect(() => {

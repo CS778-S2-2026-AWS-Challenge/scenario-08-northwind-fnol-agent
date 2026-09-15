@@ -81,6 +81,16 @@ function assistanceHandoff(status = 'queued') {
   }
 }
 
+function resolvedAssistanceHandoff() {
+  return {
+    handoff_id: 'hnd_customer_support',
+    type: 'human_support',
+    status: 'resolved',
+    completed_at: '2026-09-14T01:05:00Z',
+    customer_update: 'Staff assistance is complete. You can continue your claim.',
+  }
+}
+
 function initialTurn() {
   return {
     claimant_message: claimantMessage,
@@ -335,9 +345,10 @@ describe('claimant intake projection', () => {
       ...initialClaim,
       revision: 7,
       handoff: null,
+      resolved_support_handoff: resolvedAssistanceHandoff(),
       customer_next_step: {
-        status: 'staff_update',
-        summary: 'Your report is ready to continue online.',
+        status: 'describe_incident',
+        summary: 'Describe what happened',
         responsible_party: 'claimant',
       },
     })
@@ -359,9 +370,10 @@ describe('claimant intake projection', () => {
       ...initialClaim,
       revision: 7,
       handoff: null,
+      resolved_support_handoff: resolvedAssistanceHandoff(),
       customer_next_step: {
-        status: 'staff_update',
-        summary: 'Your report is ready to continue online.',
+        status: 'describe_incident',
+        summary: 'Describe what happened',
         responsible_party: 'claimant',
       },
     }
@@ -394,6 +406,49 @@ describe('claimant intake projection', () => {
     expect(screen.getByText('You can continue your claim below.')).toBeVisible()
     expect(screen.getAllByText('Staff assistance completed')).toHaveLength(2)
     expect(screen.queryByText('Claim created')).not.toBeInTheDocument()
+  })
+
+  it('does not treat an ordinary staff update as completed assistance', async () => {
+    const user = userEvent.setup()
+    const staffUpdateClaim = {
+      ...initialClaim,
+      revision: 7,
+      handoff: null,
+      resolved_support_handoff: null,
+      customer_next_step: {
+        status: 'staff_update',
+        summary: 'A staff member updated your claim.',
+        responsible_party: 'claimant',
+      },
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({
+      items: [{ ...staffUpdateClaim, can_resume: true }],
+      page: { next_cursor: null },
+    })
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_ui_vp',
+      model_profile_id: 'qwen-local',
+      resume: {
+        customer_next_step: staffUpdateClaim.customer_next_step,
+        summary: 'A pipe burst in the kitchen.',
+        pending_items: [],
+        prior_commitments: [],
+      },
+    })
+    api.getClaim.mockResolvedValue(staffUpdateClaim)
+    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Resume claim' }))
+
+    expect(await screen.findByRole('button', { name: 'Staff assistance' })).toBeEnabled()
+    expect(screen.queryByRole('heading', { name: 'Staff assistance completed' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Staff assistance completed')).not.toBeInTheDocument()
   })
 
   it('opens a new claim conversation without clearing the previous claim', async () => {
