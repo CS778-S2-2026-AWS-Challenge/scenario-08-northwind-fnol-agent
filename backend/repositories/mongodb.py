@@ -9,7 +9,7 @@ document details below the repository boundary.
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn, TypeVar
 
 from pydantic import BaseModel, TypeAdapter
@@ -79,8 +79,11 @@ from backend.domain.staff_agent import (
     StaffAgentSession,
 )
 from backend.domain.staff_agent_tools import (
+    STAFF_SESSION_MAX_EXAMINED,
+    STAFF_SESSION_MESSAGE_MAX_EXAMINED,
     StaffClaimSearchCandidate,
     StaffClaimSearchProjection,
+    StaffSessionSearchCandidate,
     build_staff_claim_search_candidate,
     build_staff_claim_search_projection,
 )
@@ -89,6 +92,7 @@ from backend.repositories.protocols import (
     DemoSeedConflict,
     IdempotencyConflict,
     IdempotencyRecord,
+    RepositorySearchLimitExceeded,
     RevisionConflict,
     ValidationSeedGraph,
     validate_staff_agent_execution,
@@ -258,6 +262,41 @@ class MongoDBRepository:
                 'record_type': 'message',
                 'client_message_id': {'$type': 'string'},
             },
+        )
+        self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('claim_id', 1),
+                ('customer_id', 1),
+                ('started_at', -1),
+                ('_id', -1),
+            ],
+            name='staff_session_search_claim_started',
+            partialFilterExpression={'record_type': 'session'},
+        )
+        self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('claim_id', 1),
+                ('customer_id', 1),
+                ('status', 1),
+                ('started_at', -1),
+                ('_id', -1),
+            ],
+            name='staff_session_search_claim_status_started',
+            partialFilterExpression={'record_type': 'session'},
+        )
+        self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('claim_id', 1),
+                ('session_id', 1),
+                ('customer_id', 1),
+                ('created_at', -1),
+                ('_id', -1),
+            ],
+            name='staff_session_message_lookup',
+            partialFilterExpression={'record_type': 'message'},
         )
         self._collection.create_index(
             [('record_type', 1), ('claim_id', 1), ('source_session_id', 1)],
@@ -1206,6 +1245,85 @@ class MongoDBRepository:
             'started_at',
         )
 
+    def search_sessions_internal(
+        self,
+        claim_id: str,
+        customer_id: str,
+        filters: dict[str, object],
+        limit: int,
+    ) -> list[StaffSessionSearchCandidate]:
+        """Search a bounded Claim-scoped Session set without loading message bodies wholesale."""
+
+        query: dict[str, Any] = {
+            'record_type': 'session',
+            'claim_id': claim_id,
+            'customer_id': customer_id,
+        }
+        if filters.get('session_id'):
+            query['_id'] = self._record_id('session', str(filters['session_id']))
+        if filters.get('started_date'):
+            day = str(filters['started_date'])
+            next_day = (datetime.fromisoformat(day) + timedelta(days=1)).date().isoformat()
+            query['started_at'] = {
+                '$gte': f'{day}T00:00:00Z',
+                '$lt': f'{next_day}T00:00:00Z',
+            }
+        if filters.get('status'):
+            query['status'] = filters['status']
+        cursor = (
+            self._collection.find(query)
+            .sort([('started_at', -1), ('_id', -1)])
+            .limit(STAFF_SESSION_MAX_EXAMINED + 1)
+        )
+        matches: list[StaffSessionSearchCandidate] = []
+        for examined, document in enumerate(cursor, start=1):
+            if examined > STAFF_SESSION_MAX_EXAMINED:
+                raise RepositorySearchLimitExceeded(
+                    'The Session search exceeded its maximum examined set; narrow the filters.'
+                )
+            session = self._model_from_document(document, SessionRecord)
+            if session is None:
+                continue
+            message_query: dict[str, Any] = {
+                'record_type': 'message',
+                'claim_id': claim_id,
+                'session_id': session.session_id,
+                'customer_id': customer_id,
+            }
+            message_documents = list(
+                self._collection.find(
+                    message_query,
+                    projection={'actor': 1, 'content.type': 1, 'content.text': 1},
+                )
+                .sort([('created_at', 1), ('_id', 1)])
+                .limit(STAFF_SESSION_MESSAGE_MAX_EXAMINED + 1)
+            )
+            if len(message_documents) > STAFF_SESSION_MESSAGE_MAX_EXAMINED:
+                raise RepositorySearchLimitExceeded(
+                    'The Session message search exceeded its maximum examined set; '
+                    'narrow the filters.'
+                )
+            actor = filters.get('actor')
+            if actor and not any(document.get('actor') == actor for document in message_documents):
+                continue
+            message_contains = filters.get('message_contains')
+            if message_contains:
+                expected = str(message_contains).casefold()
+                if not any(
+                    isinstance(content := document.get('content'), dict)
+                    and content.get('type') == 'text'
+                    and isinstance(text := content.get('text'), str)
+                    and expected in text.casefold()
+                    for document in message_documents
+                ):
+                    continue
+            matches.append(
+                StaffSessionSearchCandidate(session=session, message_count=len(message_documents))
+            )
+            if len(matches) >= limit:
+                break
+        return matches
+
     def _claim_owned(
         self,
         claim_id: str,
@@ -1280,6 +1398,34 @@ class MongoDBRepository:
             {'claim_id': claim_id, 'session_id': session_id, 'customer_id': customer_id},
             'created_at',
         )
+
+    def list_recent_messages(
+        self,
+        claim_id: str,
+        session_id: str,
+        customer_id: str,
+        limit: int,
+    ) -> list[MessageRecord]:
+        documents = (
+            self._collection.find(
+                {
+                    'record_type': 'message',
+                    'claim_id': claim_id,
+                    'session_id': session_id,
+                    'customer_id': customer_id,
+                }
+            )
+            .sort([('created_at', -1), ('_id', -1)])
+            .limit(limit)
+        )
+        messages = [
+            message
+            for message in (
+                self._model_from_document(document, MessageRecord) for document in documents
+            )
+            if message is not None
+        ]
+        return list(reversed(messages))
 
     def save_agent_decision(self, decision: AgentDecisionRecord, customer_id: str) -> None:
         if (

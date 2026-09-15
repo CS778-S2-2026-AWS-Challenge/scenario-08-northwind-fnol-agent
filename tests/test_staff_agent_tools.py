@@ -34,7 +34,11 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
-from backend.domain.staff_agent_tools import StaffToolResult
+from backend.domain.staff_agent_tools import (
+    STAFF_SESSION_MAX_EXAMINED,
+    STAFF_SESSION_MESSAGE_MAX_EXAMINED,
+    StaffToolResult,
+)
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
 from backend.repositories.protocols import PersistenceRepository
@@ -759,3 +763,381 @@ def test_synthetic_credentials_enforce_staff_tool_role_boundary() -> None:
     assert staff_response.json()['record_ids'] == ['clm_staff_tool']
     assert claimant_response.status_code == 403
     assert claimant_response.json()['error']['code'] == 'ACCESS_DENIED'
+
+
+def test_session_read_projects_only_closed_text_content() -> None:
+    repository = _repository()
+    timestamp = datetime(2026, 9, 14, 2, 31, tzinfo=UTC)
+    repository.save_message(
+        MessageRecord(
+            message_id='msg_nested_storage_data',
+            claim_id='clm_staff_tool',
+            session_id='ses_staff_tool',
+            actor='agent',
+            visibility=MessageVisibility.CLAIMANT_VISIBLE,
+            content={
+                'type': 'text',
+                'text': 'This text is safe for the Staff Agent.',
+                'model_internal': {'storage_key': 'must-not-leak'},
+            },
+            created_at=timestamp,
+        ),
+        'cus_staff_tool',
+    )
+    repository.save_message(
+        MessageRecord(
+            message_id='msg_unsupported_content',
+            claim_id='clm_staff_tool',
+            session_id='ses_staff_tool',
+            actor='system',
+            visibility=MessageVisibility.INTERNAL_ONLY,
+            content={'type': 'internal_trace', 'text': 'unsupported-search-secret'},
+            created_at=timestamp + timedelta(seconds=1),
+        ),
+        'cus_staff_tool',
+    )
+    dispatcher = StaffToolDispatcher(repository, _staff_principal())
+
+    read_result = _execute(
+        dispatcher,
+        'staff.session.read',
+        {'claim_id': 'clm_staff_tool', 'session_id': 'ses_staff_tool'},
+        1,
+    )
+    hidden_search = _execute(
+        dispatcher,
+        'staff.session.search',
+        {'claim_id': 'clm_staff_tool', 'message_contains': 'must-not-leak'},
+        2,
+    )
+    unsupported_search = _execute(
+        dispatcher,
+        'staff.session.search',
+        {'claim_id': 'clm_staff_tool', 'message_contains': 'unsupported-search-secret'},
+        3,
+    )
+
+    output = read_result.output.model_dump(mode='json')
+    assert output['items'][0]['messages'][-1]['content'] == {
+        'type': 'text',
+        'text': 'This text is safe for the Staff Agent.',
+    }
+    assert 'model_internal' not in str(output)
+    assert 'customer_id' not in output['items'][0]['session']
+    assert hidden_search.status == 'no_result'
+    assert unsupported_search.status == 'no_result'
+
+
+def test_fixture_session_search_stops_before_unrelated_session_messages() -> None:
+    repository = _repository()
+    timestamp = datetime(2026, 9, 14, 3, 30, tzinfo=UTC)
+    newest = SessionRecord(
+        session_id='ses_newest_match',
+        claim_id='clm_staff_tool',
+        customer_id='cus_staff_tool',
+        started_at=timestamp,
+        last_active_at=timestamp,
+    )
+    repository.save_session(newest)
+    repository.save_message(
+        MessageRecord(
+            message_id='msg_newest_match',
+            claim_id=newest.claim_id,
+            session_id=newest.session_id,
+            actor='claimant',
+            visibility=MessageVisibility.CLAIMANT_VISIBLE,
+            content={'type': 'text', 'text': 'The bounded match is here.'},
+            created_at=timestamp,
+        ),
+        newest.customer_id,
+    )
+    repository._message_ids_by_session['ses_staff_tool'] = ['unrelated-message-must-not-load']
+
+    result = _execute(
+        StaffToolDispatcher(repository, _staff_principal()),
+        'staff.session.search',
+        {
+            'claim_id': 'clm_staff_tool',
+            'message_contains': 'bounded match',
+            'limit': 1,
+        },
+        1,
+    )
+
+    assert result.status == 'succeeded'
+    assert result.record_ids == ['ses_newest_match']
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'mongodb'])
+def test_session_search_filters_before_limit_with_repository_parity(
+    repository_kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository: PersistenceRepository
+    if repository_kind == 'fixture':
+        repository = FixtureRepository()
+    else:
+        mongo_repository = MongoDBRepository(
+            mongomock.MongoClient(), f'bounded_session_search_{repository_kind}'
+        )
+
+        def without_transaction(operation: Callable[[Any], Any]) -> Any:
+            return operation(None)
+
+        monkeypatch.setattr(mongo_repository, '_atomic', without_transaction)
+        repository = mongo_repository
+    timestamp = datetime(2026, 9, 14, 2, 30, tzinfo=UTC)
+    claim = WorkingClaim(
+        claim_id='clm_session_boundary',
+        customer_id='cus_session_boundary',
+        channel=Channel.WEB_AGENT,
+        locale='en-NZ',
+        active_session_id='ses_newer_non_match',
+        customer_next_step=CustomerNextStep(
+            status='continue_claim',
+            summary='Continue the claim.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+        ),
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    older = SessionRecord(
+        session_id='ses_older_match',
+        claim_id=claim.claim_id,
+        customer_id=claim.customer_id,
+        started_at=timestamp,
+        last_active_at=timestamp,
+    )
+    newer = SessionRecord(
+        session_id='ses_newer_non_match',
+        claim_id=claim.claim_id,
+        customer_id=claim.customer_id,
+        started_at=timestamp + timedelta(hours=1),
+        last_active_at=timestamp + timedelta(hours=1),
+    )
+    repository.create_claim(claim, newer)
+    repository.save_session(older)
+    repository.save_message(
+        MessageRecord(
+            message_id='msg_older_match',
+            claim_id=claim.claim_id,
+            session_id=older.session_id,
+            actor='staff',
+            visibility=MessageVisibility.INTERNAL_ONLY,
+            content={'type': 'text', 'text': 'The address was corrected.'},
+            created_at=timestamp,
+        ),
+        claim.customer_id,
+    )
+
+    matches = repository.search_sessions_internal(
+        claim.claim_id,
+        claim.customer_id,
+        {'actor': 'staff', 'message_contains': 'corrected'},
+        1,
+    )
+
+    assert [candidate.session.session_id for candidate in matches] == ['ses_older_match']
+    assert matches[0].message_count == 1
+
+
+def test_session_search_fails_closed_above_examined_cap() -> None:
+    repository = _repository()
+    timestamp = datetime(2026, 9, 14, 4, 0, tzinfo=UTC)
+    for ordinal in range(STAFF_SESSION_MAX_EXAMINED):
+        repository.save_session(
+            SessionRecord(
+                session_id=f'ses_unmatched_{ordinal:03}',
+                claim_id='clm_staff_tool',
+                customer_id='cus_staff_tool',
+                started_at=timestamp + timedelta(minutes=ordinal),
+                last_active_at=timestamp + timedelta(minutes=ordinal),
+            )
+        )
+
+    result = _execute(
+        StaffToolDispatcher(repository, _staff_principal()),
+        'staff.session.search',
+        {'claim_id': 'clm_staff_tool', 'actor': 'staff', 'limit': 1},
+        1,
+    )
+
+    assert result.status == 'unavailable'
+    assert result.failure_code == 'SEARCH_SCOPE_EXCEEDED'
+
+
+def test_session_message_search_fails_closed_above_examined_cap() -> None:
+    repository = _repository()
+    timestamp = datetime(2026, 9, 14, 4, 0, tzinfo=UTC)
+    for ordinal in range(STAFF_SESSION_MESSAGE_MAX_EXAMINED):
+        repository.save_message(
+            MessageRecord(
+                message_id=f'msg_unmatched_{ordinal:03}',
+                claim_id='clm_staff_tool',
+                session_id='ses_staff_tool',
+                actor='claimant',
+                visibility=MessageVisibility.CLAIMANT_VISIBLE,
+                content={'type': 'text', 'text': 'No matching term.'},
+                created_at=timestamp + timedelta(seconds=ordinal),
+            ),
+            'cus_staff_tool',
+        )
+
+    result = _execute(
+        StaffToolDispatcher(repository, _staff_principal()),
+        'staff.session.search',
+        {'claim_id': 'clm_staff_tool', 'message_contains': 'absent term'},
+        1,
+    )
+
+    assert result.status == 'unavailable'
+    assert result.failure_code == 'SEARCH_SCOPE_EXCEEDED'
+
+
+def test_mongodb_session_message_search_fails_closed_above_examined_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'session_message_examined_cap')
+
+    def without_transaction(operation: Callable[[Any], Any]) -> Any:
+        return operation(None)
+
+    monkeypatch.setattr(repository, '_atomic', without_transaction)
+    timestamp = datetime(2026, 9, 14, 4, 0, tzinfo=UTC)
+    claim = WorkingClaim(
+        claim_id='clm_mongo_session_cap',
+        customer_id='cus_mongo_session_cap',
+        channel=Channel.WEB_AGENT,
+        locale='en-NZ',
+        active_session_id='ses_mongo_session_cap',
+        customer_next_step=CustomerNextStep(
+            status='continue_claim',
+            summary='Continue the claim.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+        ),
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    session = SessionRecord(
+        session_id=claim.active_session_id,
+        claim_id=claim.claim_id,
+        customer_id=claim.customer_id,
+        started_at=timestamp,
+        last_active_at=timestamp,
+    )
+    repository.create_claim(claim, session)
+    for ordinal in range(STAFF_SESSION_MESSAGE_MAX_EXAMINED + 1):
+        repository.save_message(
+            MessageRecord(
+                message_id=f'msg_mongo_cap_{ordinal:03}',
+                claim_id=claim.claim_id,
+                session_id=session.session_id,
+                actor='claimant',
+                visibility=MessageVisibility.CLAIMANT_VISIBLE,
+                content={'type': 'text', 'text': 'No matching term.'},
+                created_at=timestamp + timedelta(seconds=ordinal),
+            ),
+            claim.customer_id,
+        )
+
+    result = _execute(
+        StaffToolDispatcher(repository, _staff_principal()),
+        'staff.session.search',
+        {'claim_id': claim.claim_id, 'actor': 'claimant', 'limit': 1},
+        1,
+    )
+
+    assert result.status == 'unavailable'
+    assert result.failure_code == 'SEARCH_SCOPE_EXCEEDED'
+
+
+def test_mongodb_session_search_stops_message_reads_after_small_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'session_search_read_bound')
+
+    def without_transaction(operation: Callable[[Any], Any]) -> Any:
+        return operation(None)
+
+    monkeypatch.setattr(repository, '_atomic', without_transaction)
+    timestamp = datetime(2026, 9, 14, 2, 30, tzinfo=UTC)
+    claim = WorkingClaim(
+        claim_id='clm_session_read_bound',
+        customer_id='cus_session_read_bound',
+        channel=Channel.WEB_AGENT,
+        locale='en-NZ',
+        active_session_id='ses_newest_match',
+        customer_next_step=CustomerNextStep(
+            status='continue_claim',
+            summary='Continue the claim.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+        ),
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    sessions = [
+        SessionRecord(
+            session_id=session_id,
+            claim_id=claim.claim_id,
+            customer_id=claim.customer_id,
+            started_at=timestamp + timedelta(hours=offset),
+            last_active_at=timestamp + timedelta(hours=offset),
+        )
+        for session_id, offset in (('ses_older_unrelated', 0), ('ses_newest_match', 1))
+    ]
+    repository.create_claim(claim, sessions[1])
+    repository.save_session(sessions[0])
+    for session in sessions:
+        repository.save_message(
+            MessageRecord(
+                message_id=f'msg_{session.session_id}',
+                claim_id=claim.claim_id,
+                session_id=session.session_id,
+                actor='claimant',
+                visibility=MessageVisibility.CLAIMANT_VISIBLE,
+                content={'type': 'text', 'text': 'bounded target'},
+                created_at=session.started_at,
+            ),
+            claim.customer_id,
+        )
+    original_find = repository._collection.find
+    message_session_reads: list[str] = []
+    session_limit: list[int] = []
+
+    class _TrackedCursor:
+        def __init__(self, cursor: Any) -> None:
+            self._cursor = cursor
+
+        def sort(self, *args: Any, **kwargs: Any) -> '_TrackedCursor':
+            self._cursor = self._cursor.sort(*args, **kwargs)
+            return self
+
+        def limit(self, value: int) -> '_TrackedCursor':
+            session_limit.append(value)
+            self._cursor = self._cursor.limit(value)
+            return self
+
+        def __iter__(self) -> Any:
+            return iter(self._cursor)
+
+    def tracked_find(*args: Any, **kwargs: Any) -> Any:
+        query = args[0] if args else kwargs.get('filter', {})
+        cursor = original_find(*args, **kwargs)
+        if query.get('record_type') == 'session':
+            return _TrackedCursor(cursor)
+        if query.get('record_type') == 'message':
+            message_session_reads.append(str(query.get('session_id')))
+        return cursor
+
+    monkeypatch.setattr(repository._collection, 'find', tracked_find)
+
+    matches = repository.search_sessions_internal(
+        claim.claim_id,
+        claim.customer_id,
+        {'message_contains': 'bounded target'},
+        1,
+    )
+
+    assert [candidate.session.session_id for candidate in matches] == ['ses_newest_match']
+    assert session_limit == [STAFF_SESSION_MAX_EXAMINED + 1]
+    assert set(message_session_reads) == {'ses_newest_match'}

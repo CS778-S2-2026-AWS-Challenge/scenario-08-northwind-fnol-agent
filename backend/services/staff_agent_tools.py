@@ -33,7 +33,7 @@ from backend.domain.staff_agent_tools import (
     StaffSessionSearchInput,
     StaffWorkItemListInput,
 )
-from backend.repositories.protocols import PersistenceRepository
+from backend.repositories.protocols import PersistenceRepository, RepositorySearchLimitExceeded
 from backend.services.knowledge_search import search_knowledge
 from backend.services.workbench import (
     get_workbench_claim_detail,
@@ -86,6 +86,22 @@ def _evidence_projection(record: Any) -> dict[str, Any]:
         'context_summary': record.context_summary,
         'created_at': record.created_at.isoformat(),
         'updated_at': record.updated_at.isoformat(),
+    }
+
+
+def _staff_message_projection(message: Any) -> dict[str, Any] | None:
+    """Project only the published text message contract."""
+
+    text = message.content.get('text')
+    if message.content.get('type') != 'text' or not isinstance(text, str):
+        return None
+    return {
+        'message_id': message.message_id,
+        'actor': message.actor.value,
+        'visibility': message.visibility.value,
+        'content': {'type': 'text', 'text': text},
+        'evidence_refs': list(message.evidence_refs),
+        'created_at': message.created_at.isoformat(),
     }
 
 
@@ -242,6 +258,16 @@ class StaffToolDispatcher:
                 error.message,
                 effective_filters=payload.model_dump(mode='json', exclude_none=True),
             )
+        except RepositorySearchLimitExceeded as error:
+            return self._failure(
+                tool_name,
+                call_id,
+                correlation_id,
+                StaffToolResultStatus.UNAVAILABLE,
+                'SEARCH_SCOPE_EXCEEDED',
+                str(error),
+                effective_filters=payload.model_dump(mode='json', exclude_none=True),
+            )
         except RuntimeError:
             return self._failure(
                 tool_name,
@@ -310,8 +336,18 @@ class StaffToolDispatcher:
             created_at=datetime.now(UTC),
         )
 
-    def _claim(self, claim_id: str) -> Any:
+    def _claim_detail(self, claim_id: str) -> Any:
         return get_workbench_claim_detail(self._repository, self._principal, claim_id)
+
+    def _require_claim(self, claim_id: str) -> Any:
+        claim = self._repository.get_claim_internal(claim_id)
+        if claim is None:
+            raise ApiError(
+                status_code=404,
+                code='RESOURCE_NOT_FOUND',
+                message='The claim was not found.',
+            )
+        return claim
 
     def _claim_search(
         self, raw: BaseModel
@@ -351,7 +387,7 @@ class StaffToolDispatcher:
         self, raw: BaseModel
     ) -> tuple[list[dict[str, Any]], list[str], list[str], list[str]]:
         payload = cast(StaffClaimReadInput, raw)
-        claim = self._claim(payload.claim_id)
+        claim = self._claim_detail(payload.claim_id)
         item = {
             'claim_id': claim.claim_id,
             'display_reference': claim.display_reference,
@@ -361,7 +397,14 @@ class StaffToolDispatcher:
             'workflow_state': claim.workflow_state.value,
             'ownership': claim.ownership.model_dump(mode='json'),
             'work_summary': claim.work_summary.model_dump(mode='json'),
-            'integration_summary': claim.integration_summary.model_dump(mode='json'),
+            'integration_summary': {
+                'claim_creation_status': claim.integration_summary.claim_creation_status,
+                'assessor_routing_status': claim.integration_summary.assessor_routing_status,
+                'waiting_external_services': [
+                    service.model_dump(mode='json')
+                    for service in claim.integration_summary.waiting_external_services
+                ],
+            },
             'customer_next_step': claim.customer_next_step.model_dump(mode='json'),
             'created_at': claim.created_at.isoformat(),
             'updated_at': claim.updated_at.isoformat(),
@@ -372,54 +415,36 @@ class StaffToolDispatcher:
         self, raw: BaseModel
     ) -> tuple[list[dict[str, Any]], list[str], list[str], list[str]]:
         payload = cast(StaffSessionSearchInput, raw)
-        claim = self._claim(payload.claim_id)
-        stored_claim = self._repository.get_claim_internal(claim.claim_id)
-        assert stored_claim is not None
+        stored_claim = self._require_claim(payload.claim_id)
+        filters = payload.model_dump(mode='json', exclude_none=True, exclude={'limit', 'claim_id'})
+        candidates = self._repository.search_sessions_internal(
+            stored_claim.claim_id,
+            stored_claim.customer_id,
+            filters,
+            payload.limit,
+        )
         items: list[dict[str, Any]] = []
-        for session in self._repository.list_sessions_for_claim(
-            claim.claim_id, stored_claim.customer_id
-        ):
-            if payload.session_id and session.session_id != payload.session_id:
-                continue
-            if payload.started_date and session.started_at.date() != payload.started_date:
-                continue
-            if payload.status and session.status.value != payload.status:
-                continue
-            messages = self._repository.list_messages(
-                claim.claim_id, session.session_id, stored_claim.customer_id
-            )
-            if payload.actor and not any(
-                message.actor.value == payload.actor for message in messages
-            ):
-                continue
-            if payload.message_contains and not any(
-                payload.message_contains.casefold() in str(message.content).casefold()
-                for message in messages
-            ):
-                continue
+        for candidate in candidates:
+            session = candidate.session
             items.append(
                 {
                     'session_id': session.session_id,
                     'claim_id': session.claim_id,
                     'status': session.status.value,
                     'summary': session.summary,
-                    'message_count': len(messages),
+                    'message_count': candidate.message_count,
                     'started_at': session.started_at.isoformat(),
                     'last_active_at': session.last_active_at.isoformat(),
                 }
             )
-        items.sort(key=lambda item: (item['started_at'], item['session_id']), reverse=True)
-        items = items[: payload.limit]
         ids = [str(item['session_id']) for item in items]
-        return items, [claim.claim_id, *ids], ids, []
+        return items, [stored_claim.claim_id, *ids], ids, []
 
     def _session_read(
         self, raw: BaseModel
     ) -> tuple[list[dict[str, Any]], list[str], list[str], list[str]]:
         payload = cast(StaffSessionReadInput, raw)
-        claim = self._repository.get_claim_internal(payload.claim_id)
-        self._claim(payload.claim_id)
-        assert claim is not None
+        claim = self._require_claim(payload.claim_id)
         session = self._repository.get_session(
             payload.claim_id, payload.session_id, claim.customer_id
         )
@@ -429,25 +454,37 @@ class StaffToolDispatcher:
                 code='RESOURCE_NOT_FOUND',
                 message='The session was not found in this Claim.',
             )
-        messages = self._repository.list_messages(
-            payload.claim_id, payload.session_id, claim.customer_id
-        )[-payload.message_limit :]
+        messages = self._repository.list_recent_messages(
+            payload.claim_id,
+            payload.session_id,
+            claim.customer_id,
+            payload.message_limit,
+        )
+        projected_messages = [
+            projection
+            for message in messages
+            if (projection := _staff_message_projection(message)) is not None
+        ]
         item = {
-            'session': _dump(session),
-            'messages': [
-                {
-                    'message_id': message.message_id,
-                    'actor': message.actor.value,
-                    'visibility': message.visibility.value,
-                    'content': message.content,
-                    'evidence_refs': message.evidence_refs,
-                    'created_at': message.created_at.isoformat(),
-                }
-                for message in messages
-            ],
+            'session': {
+                'session_id': session.session_id,
+                'claim_id': session.claim_id,
+                'status': session.status.value,
+                'summary': session.summary,
+                'started_at': session.started_at.isoformat(),
+                'last_active_at': session.last_active_at.isoformat(),
+                'closed_at': session.closed_at.isoformat() if session.closed_at else None,
+            },
+            'messages': projected_messages,
         }
-        ids = [session.session_id, *[message.message_id for message in messages]]
-        return [item], [claim.claim_id, *ids], ids, []
+        message_ids = [str(message['message_id']) for message in projected_messages]
+        ids = [session.session_id, *message_ids]
+        limitations = (
+            ['Unsupported message content was omitted from the Staff Agent projection.']
+            if len(projected_messages) != len(messages)
+            else []
+        )
+        return [item], [claim.claim_id, *ids], ids, limitations
 
     def _evidence_list(
         self, raw: BaseModel
@@ -470,9 +507,7 @@ class StaffToolDispatcher:
         self, raw: BaseModel
     ) -> tuple[list[dict[str, Any]], list[str], list[str], list[str]]:
         payload = cast(StaffEvidenceReadInput, raw)
-        claim = self._repository.get_claim_internal(payload.claim_id)
-        self._claim(payload.claim_id)
-        assert claim is not None
+        claim = self._require_claim(payload.claim_id)
         record = self._repository.get_evidence(
             payload.claim_id, payload.evidence_id, claim.customer_id
         )
@@ -513,9 +548,7 @@ class StaffToolDispatcher:
         self, raw: BaseModel
     ) -> tuple[list[dict[str, Any]], list[str], list[str], list[str]]:
         payload = cast(StaffPolicyHistoryInput, raw)
-        claim = self._repository.get_claim_internal(payload.claim_id)
-        self._claim(payload.claim_id)
-        assert claim is not None
+        claim = self._require_claim(payload.claim_id)
         records = []
         for record in self._repository.list_retrieval_records(payload.claim_id, claim.customer_id):
             if record.kind is not RetrievalKind.POLICY:
@@ -589,7 +622,7 @@ class StaffToolDispatcher:
         self, raw: BaseModel
     ) -> tuple[list[dict[str, Any]], list[str], list[str], list[str]]:
         payload = cast(StaffExternalTaskStatusInput, raw)
-        self._claim(payload.claim_id)
+        self._require_claim(payload.claim_id)
         raise RuntimeError('The canonical external-task registry dependency is not active.')
 
     def _customer_update_read(

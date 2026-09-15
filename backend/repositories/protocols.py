@@ -35,7 +35,10 @@ from backend.domain.staff_agent import (
     StaffAgentMessageRole,
     StaffAgentSession,
 )
-from backend.domain.staff_agent_tools import StaffClaimSearchCandidate
+from backend.domain.staff_agent_tools import (
+    StaffClaimSearchCandidate,
+    StaffSessionSearchCandidate,
+)
 from backend.domain.staff_identity import StaffPresenceRecord
 
 
@@ -55,6 +58,12 @@ class IdempotencyConflict(RepositoryConflict):
 
 class DemoSeedConflict(RepositoryConflict):
     """The controlled validation seed cannot run against a populated queue."""
+
+    pass
+
+
+class RepositorySearchLimitExceeded(RuntimeError):
+    """A bounded repository search cannot prove a complete result."""
 
     pass
 
@@ -367,6 +376,16 @@ class ClaimRepository(Protocol):
     ) -> list[SessionRecord]:
         raise NotImplementedError
 
+    def search_sessions_internal(
+        self,
+        claim_id: str,
+        customer_id: str,
+        filters: dict[str, object],
+        limit: int,
+    ) -> list[StaffSessionSearchCandidate]:
+        """Return bounded Session candidates after applying registered filters."""
+        raise NotImplementedError
+
     def find_idempotency(
         self,
         actor_id: str,
@@ -543,6 +562,16 @@ class PersistenceRepository(ClaimRepository, Protocol):
         session_id: str,
         customer_id: str,
     ) -> list[MessageRecord]:
+        raise NotImplementedError
+
+    def list_recent_messages(
+        self,
+        claim_id: str,
+        session_id: str,
+        customer_id: str,
+        limit: int,
+    ) -> list[MessageRecord]:
+        """Return at most the newest requested messages in stable ascending order."""
         raise NotImplementedError
 
     def save_agent_decision(self, decision: AgentDecisionRecord, customer_id: str) -> None:

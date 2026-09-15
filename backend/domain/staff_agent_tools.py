@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from backend.domain.knowledge import KnowledgeCitation
 from backend.domain.models import (
+    ActorType,
     ContractModel,
     CustomerNextStep,
     CustomerUpdateRecord,
@@ -20,10 +21,14 @@ from backend.domain.models import (
     HandoffRecord,
     HandoffStatus,
     HandoffType,
+    MessageRecord,
+    MessageVisibility,
     NeededFor,
     ResponsibleParty,
     SessionRecord,
+    SessionStatus,
     StaffActionRecord,
+    TextMessageContent,
     WorkbenchHandoff,
     WorkflowState,
     WorkingClaim,
@@ -63,6 +68,44 @@ class StaffClaimSearchProjection(ContractModel):
     assignee_id: str | None = None
     queue: WorkbenchQueueKey
     updated_at: datetime
+
+
+class StaffSessionSearchCandidate(ContractModel):
+    """Bounded Session metadata returned after repository-side filtering."""
+
+    session: SessionRecord
+    message_count: int = Field(ge=0)
+
+
+STAFF_SESSION_MAX_EXAMINED = 100
+STAFF_SESSION_MESSAGE_MAX_EXAMINED = 200
+
+
+def staff_session_search_matches(
+    session: SessionRecord,
+    messages: Sequence[MessageRecord],
+    filters: Mapping[str, object],
+) -> bool:
+    """Apply registered Session filters to one bounded Claim-scoped candidate."""
+
+    actor = filters.get('actor')
+    message_contains = filters.get('message_contains')
+    return all(
+        (
+            not filters.get('session_id') or filters['session_id'] == session.session_id,
+            not filters.get('started_date')
+            or str(filters['started_date']) == session.started_at.date().isoformat(),
+            not filters.get('status') or filters['status'] == session.status.value,
+            not actor or any(message.actor.value == actor for message in messages),
+            not message_contains
+            or any(
+                message.content.get('type') == 'text'
+                and isinstance(message.content.get('text'), str)
+                and str(message_contains).casefold() in str(message.content['text']).casefold()
+                for message in messages
+            ),
+        )
+    )
 
 
 def _pending_evidence(records: Sequence[EvidenceRecord]) -> list[EvidenceRecord]:
@@ -383,8 +426,8 @@ class StaffClaimReadItem(ContractModel):
 class StaffSessionSearchItem(ContractModel):
     session_id: str
     claim_id: str
-    status: str
-    summary: str | None = None
+    status: SessionStatus
+    summary: str | None = Field(default=None, max_length=5000)
     message_count: int = Field(ge=0)
     started_at: datetime
     last_active_at: datetime
@@ -392,16 +435,26 @@ class StaffSessionSearchItem(ContractModel):
 
 class StaffSessionMessageItem(ContractModel):
     message_id: str
-    actor: str
-    visibility: str
-    content: dict[str, Any]
-    evidence_refs: list[str]
+    actor: ActorType
+    visibility: MessageVisibility
+    content: TextMessageContent
+    evidence_refs: list[str] = Field(max_length=20)
     created_at: datetime
 
 
+class StaffSessionReadMetadata(ContractModel):
+    session_id: str
+    claim_id: str
+    status: SessionStatus
+    summary: str | None = Field(default=None, max_length=5000)
+    started_at: datetime
+    last_active_at: datetime
+    closed_at: datetime | None = None
+
+
 class StaffSessionReadItem(ContractModel):
-    session: SessionRecord
-    messages: list[StaffSessionMessageItem]
+    session: StaffSessionReadMetadata
+    messages: list[StaffSessionMessageItem] = Field(max_length=50)
 
 
 class StaffEvidenceItem(ContractModel):

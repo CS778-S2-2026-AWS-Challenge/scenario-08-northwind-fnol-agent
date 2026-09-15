@@ -55,9 +55,13 @@ from backend.domain.staff_agent import (
     StaffAgentSession,
 )
 from backend.domain.staff_agent_tools import (
+    STAFF_SESSION_MAX_EXAMINED,
+    STAFF_SESSION_MESSAGE_MAX_EXAMINED,
     StaffClaimSearchCandidate,
+    StaffSessionSearchCandidate,
     build_staff_claim_search_candidate,
     staff_claim_search_matches,
+    staff_session_search_matches,
 )
 from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.protocols import (
@@ -65,6 +69,7 @@ from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
     PersistenceRepository,
+    RepositorySearchLimitExceeded,
     RevisionConflict,
     ValidationSeedGraph,
     validate_staff_agent_execution,
@@ -82,6 +87,8 @@ class FixtureRepository(PersistenceRepository):
         self._claims: dict[str, WorkingClaim] = {}
         self._audit_events: dict[str, AuditEventEnvelope] = {}
         self._sessions: dict[str, SessionRecord] = {}
+        self._session_ids_by_claim: dict[tuple[str, str], list[str]] = {}
+        self._message_ids_by_session: dict[str, list[str]] = {}
         self._follow_ups: dict[str, FollowUpRecord] = {}
         self._messages: dict[str, MessageRecord] = {}
         self._runtime_traces: dict[str, RuntimeTraceRecord] = {}
@@ -158,6 +165,8 @@ class FixtureRepository(PersistenceRepository):
         self._claims.clear()
         self._audit_events.clear()
         self._sessions.clear()
+        self._session_ids_by_claim.clear()
+        self._message_ids_by_session.clear()
         self._follow_ups.clear()
         self._messages.clear()
         self._runtime_traces.clear()
@@ -316,7 +325,37 @@ class FixtureRepository(PersistenceRepository):
 
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
         self._claims[claim.claim_id] = deepcopy(claim)
+        self._store_session(session)
+
+    def _store_message(self, message: MessageRecord) -> None:
+        """Store a message and maintain the bounded-search child index."""
+
+        self._messages[message.message_id] = deepcopy(message)
+        message_ids = self._message_ids_by_session.setdefault(message.session_id, [])
+        if message.message_id not in message_ids:
+            message_ids.append(message.message_id)
+        message_ids.sort(
+            key=lambda message_id: (
+                self._messages[message_id].created_at,
+                message_id,
+            )
+        )
+
+    def _store_session(self, session: SessionRecord) -> None:
         self._sessions[session.session_id] = deepcopy(session)
+        self._message_ids_by_session.setdefault(session.session_id, [])
+        session_ids = self._session_ids_by_claim.setdefault(
+            (session.claim_id, session.customer_id), []
+        )
+        if session.session_id not in session_ids:
+            session_ids.append(session.session_id)
+        session_ids.sort(
+            key=lambda session_id: (
+                self._sessions[session_id].started_at,
+                session_id,
+            ),
+            reverse=True,
+        )
 
     def seed_validation_graph(self, graph: ValidationSeedGraph) -> IdempotencyRecord | None:
         """Serialize validation seeds so a same-key race cannot create two graphs."""
@@ -566,7 +605,7 @@ class FixtureRepository(PersistenceRepository):
         claim = self._claims.get(session.claim_id)
         if claim is None or claim.customer_id != session.customer_id:
             raise KeyError(session.claim_id)
-        self._sessions[session.session_id] = deepcopy(session)
+        self._store_session(session)
 
     def get_follow_up(
         self,
@@ -675,7 +714,7 @@ class FixtureRepository(PersistenceRepository):
             prepared_idempotency = deepcopy(idempotency)
 
             self._claims[claim.claim_id] = prepared_claim
-            self._sessions[session.session_id] = prepared_session
+            self._store_session(prepared_session)
             self._follow_ups[follow_up.follow_up_id] = prepared_follow_up
             self._idempotency[lookup] = prepared_idempotency
 
@@ -781,10 +820,8 @@ class FixtureRepository(PersistenceRepository):
 
             self._claims[claim.claim_id] = deepcopy(claim)
             if replaced_active_session is not None:
-                self._sessions[replaced_active_session.session_id] = deepcopy(
-                    replaced_active_session
-                )
-            self._sessions[session.session_id] = deepcopy(session)
+                self._store_session(replaced_active_session)
+            self._store_session(session)
             if resolved_follow_up is not None:
                 self._follow_ups[resolved_follow_up.follow_up_id] = deepcopy(resolved_follow_up)
             if branch_evaluation is not None:
@@ -875,6 +912,56 @@ class FixtureRepository(PersistenceRepository):
                 break
         return matches
 
+    def search_sessions_internal(
+        self,
+        claim_id: str,
+        customer_id: str,
+        filters: dict[str, object],
+        limit: int,
+    ) -> list[StaffSessionSearchCandidate]:
+        """Search only a bounded Claim-scoped Session and message set."""
+
+        if self.get_claim(claim_id, customer_id) is None:
+            return []
+        session_ids = self._session_ids_by_claim.get((claim_id, customer_id), [])
+        matches: list[StaffSessionSearchCandidate] = []
+        for examined, session_id in enumerate(
+            session_ids[: STAFF_SESSION_MAX_EXAMINED + 1], start=1
+        ):
+            if examined > STAFF_SESSION_MAX_EXAMINED:
+                raise RepositorySearchLimitExceeded(
+                    'The Session search exceeded its maximum examined set; narrow the filters.'
+                )
+            session = self._sessions[session_id]
+            session_filter = filters.get('session_id')
+            if session_filter and session.session_id != session_filter:
+                continue
+            if (
+                filters.get('started_date')
+                and str(filters['started_date']) != session.started_at.date().isoformat()
+            ):
+                continue
+            if filters.get('status') and str(filters['status']) != session.status.value:
+                continue
+            message_ids = self._message_ids_by_session.get(session.session_id, [])
+            if len(message_ids) > STAFF_SESSION_MESSAGE_MAX_EXAMINED:
+                raise RepositorySearchLimitExceeded(
+                    'The Session message search exceeded its maximum examined set; '
+                    'narrow the filters.'
+                )
+            messages = [self._messages[message_id] for message_id in message_ids]
+            if not staff_session_search_matches(session, messages, filters):
+                continue
+            matches.append(
+                StaffSessionSearchCandidate(
+                    session=deepcopy(session),
+                    message_count=len(messages),
+                )
+            )
+            if len(matches) >= limit:
+                break
+        return matches
+
     def save_message(self, message: MessageRecord, customer_id: str) -> None:
         if (
             self.get_claim(message.claim_id, customer_id) is None
@@ -886,7 +973,7 @@ class FixtureRepository(PersistenceRepository):
             is None
         ):
             raise KeyError(message.claim_id)
-        self._messages[message.message_id] = deepcopy(message)
+        self._store_message(message)
 
     def save_staff_agent_session(self, session: StaffAgentSession) -> None:
         existing = self._staff_agent_sessions.get(session.session_id)
@@ -1027,8 +1114,8 @@ class FixtureRepository(PersistenceRepository):
         if existing is not None and existing.request_fingerprint != idempotency.request_fingerprint:
             raise IdempotencyConflict(idempotency.key)
         self._claims[claim.claim_id] = deepcopy(claim)
-        self._sessions[session.session_id] = deepcopy(session)
-        self._messages[message.message_id] = deepcopy(message)
+        self._store_session(session)
+        self._store_message(message)
         self._idempotency[lookup] = deepcopy(idempotency)
 
     def get_message(
@@ -1072,6 +1159,18 @@ class FixtureRepository(PersistenceRepository):
             if message.claim_id == claim_id and message.session_id == session_id
         ]
         return sorted(messages, key=lambda message: (message.created_at, message.message_id))
+
+    def list_recent_messages(
+        self,
+        claim_id: str,
+        session_id: str,
+        customer_id: str,
+        limit: int,
+    ) -> list[MessageRecord]:
+        if self.get_session(claim_id, session_id, customer_id) is None:
+            return []
+        message_ids = self._message_ids_by_session.get(session_id, [])[-limit:]
+        return [deepcopy(self._messages[message_id]) for message_id in message_ids]
 
     def save_agent_decision(self, decision: AgentDecisionRecord, customer_id: str) -> None:
         if (
@@ -1545,9 +1644,9 @@ class FixtureRepository(PersistenceRepository):
             raise IdempotencyConflict(idempotency.key)
 
         self._claims[claim.claim_id] = deepcopy(claim)
-        self._sessions[session.session_id] = deepcopy(session)
-        self._messages[claimant_message.message_id] = deepcopy(claimant_message)
-        self._messages[agent_message.message_id] = deepcopy(agent_message)
+        self._store_session(session)
+        self._store_message(claimant_message)
+        self._store_message(agent_message)
         self._decisions[decision.decision_id] = deepcopy(decision)
         if handoff is not None:
             self._handoffs[handoff.handoff_id] = deepcopy(handoff)
@@ -1641,9 +1740,9 @@ class FixtureRepository(PersistenceRepository):
             and existing_idempotency.request_fingerprint != idempotency.request_fingerprint
         ):
             raise IdempotencyConflict(idempotency.key)
-        self._sessions[session.session_id] = deepcopy(session)
-        self._messages[claimant_message.message_id] = deepcopy(claimant_message)
-        self._messages[agent_message.message_id] = deepcopy(agent_message)
+        self._store_session(session)
+        self._store_message(claimant_message)
+        self._store_message(agent_message)
         self._runtime_traces[runtime_trace.trace_id] = deepcopy(runtime_trace)
         self._idempotency[lookup] = deepcopy(idempotency)
 
@@ -2459,7 +2558,7 @@ class FixtureRepository(PersistenceRepository):
         if handoff is not None:
             self._handoffs[handoff.handoff_id] = deepcopy(handoff)
         if message is not None:
-            self._messages[message.message_id] = deepcopy(message)
+            self._store_message(message)
         if staff_agent_execution is not None:
             self._staff_agent_executions[staff_agent_execution.execution_id] = deepcopy(
                 staff_agent_execution

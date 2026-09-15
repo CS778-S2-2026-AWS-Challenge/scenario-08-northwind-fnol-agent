@@ -196,6 +196,11 @@ the append-only audit collection through a bounded, filterable projection.
     without scanning action history or inferring terminal state from a missing Session.
 37. Resolve and atomically reopen one eligible abandoned/closed Claim by staff actor, exact action,
     target, expected revision, and idempotency key while preserving the active-session pointer.
+38. Search Sessions within one authorised Claim by registered Session and message filters while
+    examining at most 100 Sessions and 200 messages per Session, stopping once the requested result
+    limit is satisfied, and returning unavailable when the examined-set bound cannot prove a
+    complete result (`SEARCH_SCOPE_EXCEEDED`). Read at most the requested newest 50 messages for
+    one explicit Session.
 
 ## Development/Test Identity Invariants
 
@@ -379,6 +384,16 @@ the append-only audit collection through a bounded, filterable projection.
   database-side limit without per-Claim Evidence or handoff reads. Fixture and MongoDB behavior
   remains equivalent. The dispatcher receives only the bounded lightweight candidates and never
   enumerates or constructs full Workbench Claim projections.
+- Staff Session search is Claim/customer scoped before any Session or Message read. Repository
+  adapters apply exact Session ID, start date, and status predicates at their indexed Session
+  boundary, evaluate actor and closed typed text only within a maximum of 100 candidate Sessions
+  and 200 messages per Session, and stop as soon as the requested result limit is satisfied. Exceeding
+  either examined-set limit fails closed as unavailable with `SEARCH_SCOPE_EXCEEDED`; it cannot be
+  reported as no result.
+  Session read queries only the requested newest message window. Its Staff Agent projection
+  contains allow-listed Session identity/status/timestamps and closed `{type: text, text: ...}`
+  content; customer identity, model/session internals, and undeclared nested Message fields remain
+  persistence-only.
 
 ## Claim Lifecycle, Follow-up, and Retention Invariants
 

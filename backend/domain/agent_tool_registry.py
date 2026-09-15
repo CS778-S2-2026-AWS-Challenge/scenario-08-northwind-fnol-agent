@@ -377,9 +377,9 @@ STAFF_TOOL_REGISTRY = MappingProxyType(
 def tool_contract(name: str) -> AgentToolContract:
     canonical_name = AGENT_TOOL_COMPATIBILITY_ALIASES.get(name, name)
     try:
-        return AGENT_TOOL_REGISTRY[name]
-    except KeyError as error:
-        raise ValueError(f'Unknown Agent tool: {name}.') from error
+        return AGENT_TOOL_REGISTRY[canonical_name]
+    except KeyError:
+        raise ValueError(f'Unknown Agent tool: {name}.') from None
 
 
 def staff_tool_contract(name: str) -> StaffToolContract:
@@ -387,15 +387,6 @@ def staff_tool_contract(name: str) -> StaffToolContract:
         return STAFF_TOOL_REGISTRY[name]
     except KeyError as error:
         raise ValueError(f'Unknown Staff Agent tool: {name}.') from error
-        return AGENT_TOOL_REGISTRY[canonical_name]
-    except KeyError:
-        # Compatibility callers historically used operation identifiers such
-        # as ``knowledge_search``.  Accept the canonical namespaced contract
-        # name as well, without adding a second registry entry.
-        for contract in AGENT_TOOL_REGISTRY.values():
-            if contract.name == canonical_name:
-                return contract
-        raise ValueError(f'Unknown Agent tool: {name}.') from None
 
 
 def registered_tools() -> tuple[str, ...]:
