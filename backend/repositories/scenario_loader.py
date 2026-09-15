@@ -608,6 +608,8 @@ def claimant_evidence_for(entry: EvidencePathEntry) -> list[ClaimantEvidence]:
         # stay staff-only; what the claimant sees is the claim's evidence state.
         'references',
         'provenance',
+        'material_version',
+        'material_history',
         'wait_type',
         'responsible_party',
         'expected_by',
