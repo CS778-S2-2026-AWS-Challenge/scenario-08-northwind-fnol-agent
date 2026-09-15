@@ -146,7 +146,11 @@ describe('controlled assessor claimant states', () => {
     expect(
       screen.getByText(/Simulation-only; it must not be described as a production provider/i),
     ).toBeInTheDocument()
-    expect(screen.getByText(/does not mean the service is complete/i)).toBeInTheDocument()
+    expect(
+      screen.getByText('The request is queued with the controlled assessment fixture.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/assessment complete/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/claim decision complete/i)).not.toBeInTheDocument()
   })
 })
 
