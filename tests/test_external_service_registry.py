@@ -168,7 +168,7 @@ def test_late_result_does_not_override_unknown_outcome_reconciliation() -> None:
 @pytest.mark.parametrize(
     'status', [ExternalLifecycleStatus.QUEUED, ExternalLifecycleStatus.ASSIGNED]
 )
-def test_assessor_progress_requires_matching_provider_reference(
+def test_assessor_progress_uses_only_matching_provider_reference(
     status: ExternalLifecycleStatus,
 ) -> None:
     assert (
@@ -182,7 +182,7 @@ def test_assessor_progress_requires_matching_provider_reference(
         is status
     )
 
-    with pytest.raises(InvalidExternalLifecycleTransition, match='provider reference'):
+    assert (
         project_operation_status(
             service_identity=ASSESSOR_SERVICE_IDENTITY,
             operation_status=ExternalLifecycleStatus.ACCEPTED,
@@ -190,6 +190,8 @@ def test_assessor_progress_requires_matching_provider_reference(
             service_progress_status=status,
             service_progress_reference='provider-2',
         )
+        is ExternalLifecycleStatus.ACCEPTED
+    )
 
 
 @pytest.mark.parametrize(

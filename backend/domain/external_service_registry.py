@@ -781,9 +781,7 @@ def project_operation_status(
         or not service_progress_reference
         or provider_reference != service_progress_reference
     ):
-        raise InvalidExternalLifecycleTransition(
-            'Service progress does not match the external task provider reference.'
-        )
+        return operation
     if progress not in entry.projectable_statuses:
         raise InvalidExternalLifecycleTransition(
             f'{progress.value} is not projectable for {service_identity}.'

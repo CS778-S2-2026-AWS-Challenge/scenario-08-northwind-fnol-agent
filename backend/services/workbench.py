@@ -2236,9 +2236,8 @@ def _external_lifecycle(
             routing_reference = (
                 assessor_routing.assessor_reference or assessor_routing.queue_reference
             )
-            if task.provider_reference == routing_reference:
-                service_progress_status = assessor_routing.routing_status.value
-                service_progress_reference = routing_reference
+            service_progress_status = assessor_routing.routing_status.value
+            service_progress_reference = routing_reference
         canonical_projection = build_lifecycle_projection(
             service_identity=task.service_identity,
             operation_status=status.value,
