@@ -1,11 +1,10 @@
-import { Send } from 'lucide-react'
+import { Info, MessageSquare, Send } from 'lucide-react'
 import { useState } from 'react'
 import { formatDateTime, words } from '../format.js'
 import { canSubmitProjectedAction, findProjectedAction } from '../projected-action.js'
-import { ProjectedActionState } from './ProjectedAction.jsx'
 import ResourceBoundary from './ResourceBoundary.jsx'
 
-export default function Conversation({ detail, resource, draft, onDraft, onSend, onRetry }) {
+export default function Conversation({ detail, resource, handoffResource, draft, onDraft, onSend, onRetry }) {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState('')
   const messageSessionId = resource?.items?.find(
@@ -27,6 +26,16 @@ export default function Conversation({ detail, resource, draft, onDraft, onSend,
     displayedSessionId,
   )
   const canSend = isCurrentSession && canSubmitProjectedAction(sendAction)
+  const handoffsAvailable = handoffResource?.status === 'available'
+    && !handoffResource.loading
+    && !handoffResource.error
+  const hasAcceptedHandoff = handoffResource?.items?.some(
+    (handoff) => ['accepted', 'in_progress'].includes(handoff.status),
+  )
+  const handoffRequired = !historicalSession
+    && !canSend
+    && handoffsAvailable
+    && !hasAcceptedHandoff
 
   async function submit(event) {
     event.preventDefault()
@@ -44,17 +53,66 @@ export default function Conversation({ detail, resource, draft, onDraft, onSend,
   }
 
   const placeholder = historicalSession
-    ? 'Historical sessions are read-only'
-    : canSend
-      ? 'Write a clear claimant-safe update'
-      : 'A claimant-message action is not executable'
+    ? 'This conversation is read-only'
+    : 'Write a message…'
+  const unavailableTitle = historicalSession
+    ? 'Read-only conversation'
+    : 'Staff messaging not available yet'
+  const unavailableMessage = historicalSession
+    ? 'Open the active claimant conversation to send a message.'
+    : handoffRequired
+      ? 'An accepted staff handoff is required before you can message the claimant.'
+      : sendAction?.blocked_reason || 'Messaging is not available for this claim yet.'
 
   return (
     <ResourceBoundary resource={resource} onRetry={onRetry}>
       <section className="conversation-view">
-        <header className="content-header"><div><p className="eyebrow">Shared Claim context</p><h2>Claimant conversation</h2></div><span>{resource?.items?.length || 0} messages</span></header>
-        <div className="message-ledger">{(resource?.items || []).map((message) => <article className={`message message--${message.actor}`} key={message.message_id}><header><strong>{words(message.actor)}</strong><time>{formatDateTime(message.created_at)}</time></header><p>{message.content?.text || words(message.content?.type)}</p></article>)}</div>
-        <form className="staff-reply" onSubmit={submit}><label htmlFor="staff-reply">Reply to claimant</label><textarea id="staff-reply" rows="3" value={draft} onChange={(event) => onDraft(event.target.value)} disabled={!canSend} placeholder={placeholder} /><div><span>This message will be visible to the claimant.</span><button className="button button--primary" type="submit" disabled={!canSend || !draft.trim() || sending}><Send size={16} />{sending ? 'Sending...' : 'Send message'}</button></div>{historicalSession ? <p className="empty-note">This saved session is read-only. Open the active claimant conversation to send a message.</p> : !canSend && <ProjectedActionState action={sendAction} absentMessage="No claimant-message action is projected for this conversation." />}{sendError && <p className="form-error" role="alert">{sendError}</p>}</form>
+        <div className="message-list" role="log" aria-label="Claimant conversation messages">
+          {(resource?.items || []).length
+            ? resource.items.map((message) => (
+              <article className={`message message--${message.actor}`} key={message.message_id}>
+                <header>
+                  <strong>{words(message.actor)}</strong>
+                  <time>{formatDateTime(message.created_at)}</time>
+                </header>
+                <p>{message.content?.text || words(message.content?.type)}</p>
+              </article>
+            ))
+            : (
+              <div className="conversation-empty">
+                <MessageSquare aria-hidden="true" />
+                <strong>No messages yet</strong>
+                <p>Messages with the claimant will appear here.</p>
+              </div>
+            )}
+        </div>
+        <form className="staff-composer" onSubmit={submit}>
+          {!canSend && (
+            <div className="staff-composer__notice" id="staff-message-status" role="status">
+              <Info size={16} aria-hidden="true" />
+              <span>
+                <strong>{unavailableTitle}</strong>
+                <small>{unavailableMessage}</small>
+              </span>
+            </div>
+          )}
+          <label className="sr-only" htmlFor="staff-reply">Message to claimant</label>
+          <textarea
+            id="staff-reply"
+            value={draft}
+            onChange={(event) => onDraft(event.target.value)}
+            disabled={!canSend}
+            placeholder={placeholder}
+            aria-describedby={!canSend ? 'staff-message-status' : undefined}
+          />
+          <div className="staff-composer__actions">
+            <button className="button button--primary" type="submit" disabled={!canSend || !draft.trim() || sending}>
+              <Send size={16} aria-hidden="true" />
+              {sending ? 'Sending...' : 'Send message'}
+            </button>
+          </div>
+          {sendError && <p className="form-error" role="alert">{sendError}</p>}
+        </form>
       </section>
     </ResourceBoundary>
   )

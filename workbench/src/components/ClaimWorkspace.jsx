@@ -30,13 +30,13 @@ export default function ClaimWorkspace({ detail, resources = {}, loading, error,
   return (
     <main className="claim-workspace">
       {(loading || stale || error) && <ClaimSyncNotice loading={loading} error={error} onRetry={onRetry} />}
-      <ClaimHeader detail={detail} />
+      {section !== 'conversation' && <ClaimHeader detail={detail} />}
       <nav className="section-tabs" aria-label="Claim sections" role="tablist">
         {SECTIONS.map(([value, label], index) => <button className={section === value ? 'is-active' : ''} type="button" role="tab" id={`claim-tab-${value}`} aria-controls={`claim-panel-${value}`} aria-selected={section === value} tabIndex={section === value ? 0 : -1} key={value} onClick={() => onSection(value)} onKeyDown={(event) => moveTabFocus(event, index, onSection)}>{label}</button>)}
       </nav>
       <div role="tabpanel" id={`claim-panel-${section}`} aria-labelledby={`claim-tab-${section}`}>
         {section === 'summary' && <Overview key={detail.claim_id} detail={interactionDetail} handoffs={resources.handoffs?.items || []} collaborationRequests={resources.collaborationRequests?.items || []} supportingState={[resources.handoffs, resources.collaborationRequests]} profile={profile} onAccept={onAccept} onResolve={onResolve} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onSection={onSection} onRetry={onRetry} />}
-        {section === 'conversation' && <Conversation key={detail.claim_id} detail={interactionDetail} resource={resources.messages} draft={draft} onDraft={onDraft} onSend={onSend} onRetry={onRetrySection} />}
+        {section === 'conversation' && <Conversation key={detail.claim_id} detail={interactionDetail} resource={resources.messages} handoffResource={resources.handoffs} draft={draft} onDraft={onDraft} onSend={onSend} onRetry={onRetrySection} />}
         {section === 'fields' && <ClaimFields resource={resources.fields} onRetry={onRetrySection} />}
         {section === 'evidence' && <ResourceBoundary resource={resources.evidence} onRetry={onRetrySection}><EvidenceRecords claimId={detail.claim_id} records={resources.evidence?.items || []} onLoadEvidence={onLoadEvidence} /></ResourceBoundary>}
         {section === 'references' && <ResourceBoundary resource={resources.retrievals} onRetry={onRetrySection}><ReferenceRecords records={resources.retrievals?.items || []} /></ResourceBoundary>}

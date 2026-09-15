@@ -16,6 +16,7 @@ import { formatDateTime, words } from '../format.js'
 
 const MAX_CLAIM_SCOPE = 5
 const NEW_SESSION_TITLE = 'New Staff Agent session'
+const DRAG_THRESHOLD = 4
 
 export default function StaffAgent({
   open,
@@ -40,9 +41,10 @@ export default function StaffAgent({
   const [sessionNotice, setSessionNotice] = useState('')
   const [error, setError] = useState(null)
   const [position, setPosition] = useState(null)
-  const panelRef = useRef(null)
+  const widgetRef = useRef(null)
   const messageRef = useRef(null)
   const dragRef = useRef(null)
+  const suppressClickRef = useRef(false)
   const activeSessionIdRef = useRef(null)
   const wasOpenRef = useRef(false)
   const onSessionChangeRef = useRef(onSessionChange)
@@ -103,6 +105,21 @@ export default function StaffAgent({
     const task = window.setTimeout(loadAgent, 0)
     return () => window.clearTimeout(task)
   }, [open, loadAgent, requestedSessionId])
+
+  const positioned = position !== null
+  useEffect(() => {
+    if (!positioned) return undefined
+    const keepInViewport = () => {
+      const widget = widgetRef.current
+      if (!widget) return
+      setPosition((current) => current && clampWidgetPosition(current.left, current.top, widget))
+    }
+    keepInViewport()
+    window.addEventListener('resize', keepInViewport)
+    return () => {
+      window.removeEventListener('resize', keepInViewport)
+    }
+  }, [open, positioned])
 
   function beginNewSession() {
     setSessionNotice('')
@@ -212,41 +229,75 @@ export default function StaffAgent({
   }
 
   function beginDrag(event) {
-    if (event.target.closest('button, select, input, textarea')) return
-    const panel = panelRef.current
-    if (!panel) return
-    const rect = panel.getBoundingClientRect()
-    dragRef.current = { offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top }
-    event.currentTarget.setPointerCapture(event.pointerId)
+    if (event.button !== 0) return
+    if (event.currentTarget.classList.contains('staff-agent__header')
+      && event.target.closest('button, select, input, textarea')) return
+    const widget = widgetRef.current
+    if (!widget) return
+    const rect = widget.getBoundingClientRect()
+    dragRef.current = {
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+    }
+    event.currentTarget.setPointerCapture?.(event.pointerId)
   }
 
   function drag(event) {
-    if (!dragRef.current || !panelRef.current) return
-    const width = panelRef.current.offsetWidth
-    const height = panelRef.current.offsetHeight
-    setPosition({
-      left: Math.max(0, Math.min(window.innerWidth - width, event.clientX - dragRef.current.offsetX)),
-      top: Math.max(0, Math.min(window.innerHeight - height, event.clientY - dragRef.current.offsetY)),
-    })
+    const dragState = dragRef.current
+    const widget = widgetRef.current
+    if (!dragState || !widget) return
+    if (!dragState.moved) {
+      const movedX = Math.abs(event.clientX - dragState.startX)
+      const movedY = Math.abs(event.clientY - dragState.startY)
+      if (Math.max(movedX, movedY) < DRAG_THRESHOLD) return
+      dragState.moved = true
+    }
+    setPosition(clampWidgetPosition(
+      event.clientX - dragState.offsetX,
+      event.clientY - dragState.offsetY,
+      widget,
+    ))
   }
 
   function endDrag(event) {
+    const moved = dragRef.current?.moved
     dragRef.current = null
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
+    if (moved && event.currentTarget.classList.contains('staff-agent__bubble')) {
+      suppressClickRef.current = true
+    }
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
     }
   }
 
+  function cancelDrag(event) {
+    dragRef.current = null
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
+    }
+  }
+
+  function openAgent() {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false
+      return
+    }
+    onOpenChange(true)
+  }
+
   return (
-    <div className={`staff-agent${open ? ' is-open' : ''}`} style={position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto' } : undefined}>
+    <div ref={widgetRef} className={`staff-agent${open ? ' is-open' : ''}`} style={position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto' } : undefined}>
       {!open && (
-        <button className="staff-agent__bubble" type="button" onClick={() => onOpenChange(true)} aria-label="Open Staff Agent">
+        <button className="staff-agent__bubble" type="button" onClick={openAgent} onPointerDown={beginDrag} onPointerMove={drag} onPointerUp={endDrag} onPointerCancel={cancelDrag} aria-label="Open Staff Agent">
           <Bot size={23} />
         </button>
       )}
       {open && (
-        <section className="staff-agent__panel" aria-labelledby="staff-agent-title" ref={panelRef}>
-          <header className="staff-agent__header" onPointerDown={beginDrag} onPointerMove={drag} onPointerUp={endDrag}>
+        <section className="staff-agent__panel" aria-labelledby="staff-agent-title">
+          <header className="staff-agent__header" onPointerDown={beginDrag} onPointerMove={drag} onPointerUp={endDrag} onPointerCancel={cancelDrag}>
             <span className="staff-agent__grip" aria-hidden="true"><GripHorizontal size={18} /></span>
             <div className="staff-agent__identity">
               <h2 id="staff-agent-title">Staff Agent</h2>
@@ -364,6 +415,15 @@ export default function StaffAgent({
       )}
     </div>
   )
+}
+
+function clampWidgetPosition(left, top, widget) {
+  const maxLeft = Math.max(0, window.innerWidth - widget.offsetWidth)
+  const maxTop = Math.max(0, window.innerHeight - widget.offsetHeight)
+  return {
+    left: Math.max(0, Math.min(maxLeft, left)),
+    top: Math.max(0, Math.min(maxTop, top)),
+  }
 }
 
 function AgentMessage({ message, onExecuteDraft }) {
