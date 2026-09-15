@@ -1304,6 +1304,11 @@ class FixtureRepository(PersistenceRepository):
         link: ExternalTaskEvidenceLink,
         branch_evaluation: BranchEvaluationRecord,
         customer_id: str,
+        *,
+        staff_action: StaffActionRecord | None = None,
+        idempotency: IdempotencyRecord | None = None,
+        required_staff_id: str | None = None,
+        required_staff_revision: int | None = None,
     ) -> None:
         """Atomically settle one unknown assessor operation in fixture storage.
 
@@ -1317,6 +1322,10 @@ class FixtureRepository(PersistenceRepository):
             link: Immutable relationship between the task and material.
             branch_evaluation: Applied branch projection for the new Claim revision.
             customer_id: Customer who owns every record.
+            staff_action: Optional completed reconciliation action persisted atomically.
+            idempotency: Optional staff mutation replay record persisted atomically.
+            required_staff_id: Staff identity that must remain claimable through the write.
+            required_staff_revision: Exact presence revision guarded by the write.
 
         Returns:
             None.
@@ -1329,6 +1338,34 @@ class FixtureRepository(PersistenceRepository):
 
         with self._claim_mutation_lock:
             current_claim = self._validate_claim_mutation(claim, expected_revision)
+            if (staff_action is None) is not (idempotency is None):
+                raise KeyError(claim.claim_id)
+            presence = None
+            if staff_action is not None and idempotency is not None:
+                presence = self._staff_presence.get(required_staff_id or '')
+                if (
+                    required_staff_id is None
+                    or presence is None
+                    or not presence.is_claimable(datetime.now(UTC))
+                    or (
+                        required_staff_revision is not None
+                        and presence.revision != required_staff_revision
+                    )
+                    or claim.assignee_id != required_staff_id
+                    or staff_action.claim_id != claim.claim_id
+                    or staff_action.assigned_to != required_staff_id
+                    or staff_action.completed_by != required_staff_id
+                    or staff_action.status is not StaffActionStatus.COMPLETED
+                    or task.task_id not in staff_action.source_refs
+                    or idempotency.actor_id != required_staff_id
+                    or idempotency.claim_id != claim.claim_id
+                    or idempotency.action_code != 'external.reconcile_response'
+                    or idempotency.target_ref != task.task_id
+                ):
+                    raise KeyError(claim.claim_id)
+                lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+                if lookup in self._idempotency or staff_action.action_id in self._staff_actions:
+                    raise IdempotencyConflict(idempotency.key)
             current_task = self._external_tasks.get(task.task_id)
             current_operation = self._assessor_routing_operations.get(operation.operation_id)
             if (
@@ -1392,6 +1429,15 @@ class FixtureRepository(PersistenceRepository):
             self._evidence[evidence.evidence_id] = deepcopy(evidence)
             self._external_task_evidence_links[(link.claim_id, link.evidence_id)] = deepcopy(link)
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
+            if staff_action is not None and idempotency is not None and presence is not None:
+                self._staff_actions[staff_action.action_id] = deepcopy(staff_action)
+                self._idempotency[(idempotency.actor_id, idempotency.route, idempotency.key)] = (
+                    deepcopy(idempotency)
+                )
+                if required_staff_revision is not None:
+                    self._staff_presence[required_staff_id or ''] = deepcopy(
+                        presence.model_copy(update={'revision': presence.revision + 1})
+                    )
 
     def save_assessor_routing_preparation(
         self,

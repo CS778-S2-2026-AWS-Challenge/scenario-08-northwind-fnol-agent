@@ -605,6 +605,11 @@ Evidence record or protected object.
   writes none of those records. An unchanged replay reads the settled records and does not repeat
   the status check. `unknown_outcome` cannot become `retryable_failure`; a confirmed non-submission
   requires a separate durable reconciliation record before it can permit another attempt.
+- When an authenticated Workbench staff mutation performs that reconciliation, the same Fixture
+  lock or MongoDB transaction also checks the staff presence revision, assigns an unowned Claim to
+  that staff member, stores one completed task-linked `external_reconciliation` StaffAction, and
+  stores the exact action-code/target idempotency response. Failure of any presence, ownership,
+  revision, identity, lifecycle, or idempotency guard writes none of the settlement bundle.
 - One prepared `erq_` request carries a dispatch reservation. Runtime must hold it before any
   provider call, and the reservation is taken by an atomic compare-and-set on the stored request
   rather than by a check made before the write, so exactly one of two concurrent callers may
