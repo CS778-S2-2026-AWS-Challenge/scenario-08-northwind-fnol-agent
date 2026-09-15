@@ -2961,6 +2961,22 @@
         "additionalProperties": false,
         "description": "Claimant-safe evidence that a support handoff was completed.",
         "properties": {
+          "completed_at": {
+            "format": "date-time",
+            "title": "Completed At",
+            "type": "string"
+          },
+          "customer_update": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Update"
+          },
           "handoff_id": {
             "title": "Handoff Id",
             "type": "string"
@@ -2974,6 +2990,12 @@
             "title": "Resolved At",
             "type": "string"
           },
+          "status": {
+            "const": "resolved",
+            "default": "resolved",
+            "title": "Status",
+            "type": "string"
+          },
           "type": {
             "$ref": "#/components/schemas/HandoffType"
           }
@@ -2981,6 +3003,7 @@
         "required": [
           "handoff_id",
           "type",
+          "completed_at",
           "resolution_event_id",
           "resolved_at"
         ],
@@ -12553,12 +12576,24 @@
             "title": "Resolved At"
           },
           "resume_next_action": {
-            "$ref": "#/components/schemas/AgentAction",
-            "default": "ASK"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentAction"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "resume_workflow_state": {
-            "$ref": "#/components/schemas/WorkflowState",
-            "default": "collecting"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowState"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source_message_id": {
             "anyOf": [

@@ -1109,8 +1109,10 @@ class HandoffRecord(ContractModel):
     # Support handoffs temporarily interrupt the claimant workflow. These values
     # preserve the authoritative continuation target without creating a second
     # claim-state record.
-    resume_workflow_state: WorkflowState = WorkflowState.COLLECTING
-    resume_next_action: AgentAction = AgentAction.ASK
+    # Legacy records may not have a continuation target; resolution then preserves
+    # the current Claim state rather than inventing a default.
+    resume_workflow_state: WorkflowState | None = None
+    resume_next_action: AgentAction | None = None
 
 
 class ClaimantHandoff(ContractModel):
@@ -1128,6 +1130,9 @@ class ClaimantResolvedSupportHandoff(ContractModel):
 
     handoff_id: str
     type: HandoffType
+    status: Literal['resolved'] = 'resolved'
+    completed_at: datetime
+    customer_update: str | None = None
     resolution_event_id: str
     resolved_at: datetime
 
@@ -1338,8 +1343,8 @@ class WorkbenchHandoff(ContractModel):
     created_at: datetime
     accepted_at: datetime | None = None
     resolved_at: datetime | None = None
-    resume_workflow_state: WorkflowState = WorkflowState.COLLECTING
-    resume_next_action: AgentAction = AgentAction.ASK
+    resume_workflow_state: WorkflowState | None = None
+    resume_next_action: AgentAction | None = None
 
 
 class AcceptHandoffRequest(ContractModel):

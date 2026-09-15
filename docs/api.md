@@ -918,6 +918,8 @@ progress; which side is doubted, and why, is staff-only.
 
 Staff handoff projections also retain the authoritative `resume_workflow_state` and
 `resume_next_action` captured when support was requested. These continuation fields are
+optional for legacy handoff records; when absent, resolving the handoff preserves the
+current Claim state rather than inventing a continuation target. These fields are
 staff-facing only and are not included in the claimant handoff projection.
 
 Extracted facts use the structured form envelope with `source` set to `image` or `document`. They remain `proposed` until claimant confirmation or an authorised staff decision.
@@ -1260,6 +1262,9 @@ Response `200`:
 ```
 
 `resolved_support_handoff` is present only on Claim detail, and is otherwise `null`. It is
+claimant-safe completion evidence with `status: "resolved"`, `completed_at`, and the
+resolution `customer_update`; the event id and handoff timestamp remain available for
+durable provenance. It is
 derived from the latest claimant-created `human_support` or `urgent_support` HandoffRecord only
 when that record is resolved and has a matching completed `handoff_support` resolution event.
 The projection contains the handoff id, support type, resolution event id, and resolution time.

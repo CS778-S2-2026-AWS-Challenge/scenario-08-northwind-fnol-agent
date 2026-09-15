@@ -287,6 +287,12 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
                 resolved_support_handoff = ClaimantResolvedSupportHandoff(
                     handoff_id=latest_support.handoff_id,
                     type=latest_support.type,
+                    completed_at=resolution_event.completed_at,
+                    customer_update=(
+                        resolution_event.result.summary
+                        if resolution_event.result is not None
+                        else None
+                    ),
                     resolution_event_id=resolution_event.action_id,
                     resolved_at=latest_support.resolved_at,
                 )
