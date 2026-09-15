@@ -9,7 +9,7 @@ written outside the repository and summarised on the delivery issue. They are ne
 
 ## The record
 
-`record.JourneyRunRecord`, schema `northwind-journey-run/2`:
+`record.JourneyRunRecord`, schema `northwind-journey-run/3`:
 
 | Field | Holds |
 |---|---|
@@ -21,6 +21,7 @@ written outside the repository and summarised on the delivery issue. They are ne
 | `consents` | Each permission given or refused: purpose, step, Claim revision, disclosed fields where observable |
 | `visibility_checks` | Whether the claimant or staff can see what they should, and cannot see what they should not |
 | `seam_checks` | Questions claimant and staff must answer the same way, each `consistent`, `contradictory`, `missing`, or `unavailable` |
+| `unavailable_capabilities` | A capability the journey needs that this runtime does not provide: the capability, the step it was needed for, and the observation and document that establish it |
 | `final_state` | Claim number, expected timing, workflow and lifecycle state, queue, next step and its owner, session and active session, evidence, external-task and handoff status |
 | `effort` | Claimant messages, confirmations, uploads, consents |
 | `result_class`, `result_reason` | One class, and why |
@@ -35,6 +36,8 @@ The record rejects evidence that contradicts itself:
   those records internal (`docs/api.md`), so an API-level run says so instead of recording them as
   empty.
 - Agent turns and consents must point at a recorded step.
+- An unavailable capability must name a step the run did not attempt; a step that was attempted
+  is judged by its own outcome.
 - A delivered material must name the step that delivered it, and that step must have succeeded; an
   undelivered one names no step.
 
@@ -45,7 +48,8 @@ rejected. The first rule that matches wins:
 
 1. `failed`: a step failed, or a visibility check does not hold.
 2. `blocked`: a step was refused.
-3. `unavailable`: a step the journey needs has no capability.
+3. `unavailable`: a step the journey needs has no capability, or the run records a capability
+   this runtime does not provide.
 4. `partial`: every step succeeded, but a pack material had no route in or was not delivered, or
    claimant and staff disagree.
 5. `fixture-only`: everything was exercised and agrees, but on the fixture runtime, a simulated
