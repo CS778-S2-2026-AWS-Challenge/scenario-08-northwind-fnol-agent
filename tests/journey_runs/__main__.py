@@ -11,7 +11,8 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from .motor_collision import current_head, run_motor_collision
+from .engine import current_head
+from .motor_collision import run_motor_collision
 from .record import JourneyRunRecord
 
 
