@@ -48,10 +48,14 @@ class ExternalCapabilityProvenance(str, Enum):
 
 
 class ExternalTaskResultVerification(str, Enum):
-    """Canonical outcomes from checking a provider result against the Claim.
+    """How far a provider result has been checked against the claim.
 
-    No value promotes a provider answer into confirmed Claim State. Write-back
-    remains a separate, authorised lifecycle stage.
+    There is deliberately no value meaning "this is now a confirmed claim fact".
+    A provider answer is evidence about the claim, never the claim's own record
+    of what is true, and `docs/agent-behaviour-catalogue.md` keeps material facts
+    proposed until the claim's own confirmation path accepts them. Promotion to a
+    confirmed fact is a claim-level decision made elsewhere, so this enum cannot
+    express it and no caller can shortcut to it.
     """
 
     UNVERIFIED = 'unverified'
