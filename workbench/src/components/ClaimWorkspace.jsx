@@ -21,18 +21,36 @@ const SECTIONS = [
   ['activity', 'Activity'],
 ]
 
-export default function ClaimWorkspace({ detail, resources = {}, loading, error, stale, section, draft, profile, onSection, onDraft, onAccept, onResolve, onSignalDecision, onUpdateAction, onLoadEvidence, onSend, onOwnershipAction, onReopen, onExternalTaskAction, onRetry, onRetrySection }) {
+export default function ClaimWorkspace({ detail, resources = {}, loading, error, stale, externalActionNotice, section, draft, profile, onSection, onDraft, onAccept, onResolve, onSignalDecision, onUpdateAction, onLoadEvidence, onSend, onOwnershipAction, onReopen, onExternalTaskAction, onRetry, onRetrySection, onRetryExternalActionContext }) {
   if (loading && !detail) return <main className="claim-state" role="status"><span className="loading-mark" /><p>Loading Claim...</p></main>
   if (error && !detail) return <ClaimUnavailable error={error} onRetry={onRetry} />
   if (!detail) return <EmptyWorkspace />
-  const interactionDetail = loading || stale || error ? { ...detail, allowed_actions: [] } : detail
-  const externalActions = resourceActionContextUnavailable(resources.externalRequests)
+  const baseInteractionDetail = loading || stale || error ? { ...detail, allowed_actions: [] } : detail
+  const interactionDetail = externalActionNotice
+    ? {
+        ...baseInteractionDetail,
+        allowed_actions: (baseInteractionDetail.allowed_actions || []).filter(
+          (action) => action.target_type !== 'external_task',
+        ),
+      }
+    : baseInteractionDetail
+  const externalActions = resourceActionContextUnavailable(resources.externalRequests) || externalActionNotice
     ? []
     : interactionDetail.allowed_actions
 
   return (
     <main className="claim-workspace">
       {(loading || stale || error) && <ClaimSyncNotice loading={loading} error={error} onRetry={onRetry} />}
+      {externalActionNotice && (
+        <section className="claim-sync-notice" role="alert" aria-live="assertive">
+          <strong>External-service action outcome not confirmed</strong>
+          <p>{externalActionNotice.message}</p>
+          <p><strong>External task:</strong> {externalActionNotice.taskId}</p>
+          <button className="button button--quiet" type="button" onClick={onRetryExternalActionContext}>
+            Refresh Claim and External Services
+          </button>
+        </section>
+      )}
       {section !== 'conversation' && <ClaimHeader detail={detail} />}
       <nav className="section-tabs" aria-label="Claim sections" role="tablist">
         {SECTIONS.map(([value, label], index) => <button className={section === value ? 'is-active' : ''} type="button" role="tab" id={`claim-tab-${value}`} aria-controls={`claim-panel-${value}`} aria-selected={section === value} tabIndex={section === value ? 0 : -1} key={value} onClick={() => onSection(value)} onKeyDown={(event) => moveTabFocus(event, index, onSection)}>{label}</button>)}
