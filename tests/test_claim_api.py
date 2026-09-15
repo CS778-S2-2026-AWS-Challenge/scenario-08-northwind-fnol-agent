@@ -891,6 +891,72 @@ def test_default_home_journey_creates_without_an_unapproved_external_service(
     assert repository.list_external_task_requests_internal(claim_id) == []
 
 
+@pytest.mark.parametrize(
+    ('answer', 'expected'),
+    [
+        ('There is no ongoing risk.', 'none'),
+        ('The leak is still active.', 'active_leak'),
+    ],
+)
+def test_controlled_home_ongoing_risk_answer_uses_registered_enum(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    answer: str,
+    expected: str,
+) -> None:
+    created = create_claim(
+        client,
+        auth_headers,
+        key=f'home-risk-{expected}',
+        incident_type='home',
+    ).json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+    prepared = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(created['claim']['revision'])},
+        json={
+            'updates': [
+                {
+                    'field_code': field_code,
+                    'value': value,
+                    'status': 'confirmed',
+                }
+                for field_code, value in {
+                    'incident.description': 'A pipe leaked and damaged the kitchen.',
+                    'incident.occurred_at': '2026-09-14T09:00:00Z',
+                    'incident.injury_or_danger': False,
+                    'incident.location': '12 Queen Street, Auckland 1010',
+                    'loss.description': 'The kitchen wall and floor are water damaged.',
+                    'property.address': '12 Queen Street, Auckland 1010',
+                    'property.affected_areas': ['kitchen'],
+                }.items()
+            ]
+        },
+    )
+    assert prepared.status_code == 200, prepared.text
+    assert prepared.json()['dynamic_form']['requirements']['next_required_item'] == (
+        'property.ongoing_risk'
+    )
+
+    response = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=prepared.json()['revision'],
+        key=f'home-risk-message-{expected}',
+        client_message_id=f'home-risk-message-{expected}',
+        text=answer,
+    )
+
+    assert response.status_code == 200, response.text
+    changes = {
+        item['field_code']: item['field']['value'] for item in response.json()['form_changes']
+    }
+    assert changes['property.ongoing_risk'] == expected
+
+
 def test_default_contents_journey_preserves_the_report_without_inventing_a_provider(
     client: TestClient,
     auth_headers: dict[str, str],

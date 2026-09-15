@@ -436,10 +436,24 @@ def _controlled_requirement_value(field_code: str, message_text: str) -> Any | N
             return True
         return None
     if field_code == 'property.ongoing_risk':
-        if re.search(r'\b(?:no|none|not|no longer)\b.*\b(?:risk|leak|fire|danger)\b', lowered):
-            return False
-        if re.search(r'\b(?:active|ongoing)\b.*\b(?:risk|leak|fire|flood|danger)\b', lowered):
-            return True
+        if re.fullmatch(r'(?:no|none|nope)[.!]?', lowered) or re.search(
+            r'\b(?:no|none|not|no longer)\b.*\b(?:risk|leak|fire|danger)\b', lowered
+        ):
+            return 'none'
+        if re.search(
+            r'\b(?:active|ongoing)\b.*\b(?:leak|flood|water)\b'
+            r'|\b(?:leak|flood|water)\b.*\b(?:active|ongoing|still)\b',
+            lowered,
+        ):
+            return 'active_leak'
+        if re.search(r'\b(?:active|ongoing)\b.*\bfire\b|\bfire\b.*\b(?:active|ongoing)\b', lowered):
+            return 'fire'
+        if re.search(r'\b(?:collapse|collapsing)\b', lowered):
+            return 'collapse'
+        if re.search(r'\b(?:exposure|exposed)\b', lowered):
+            return 'exposure'
+        if re.search(r'\b(?:active|ongoing)\b.*\b(?:risk|danger)\b', lowered):
+            return 'other'
         return None
     if field_code == 'property.habitable':
         if re.search(r'\b(?:uninhabitable|unsafe to live|cannot live|can\'t live)\b', lowered):

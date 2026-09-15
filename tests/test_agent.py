@@ -1,6 +1,7 @@
 import pytest
 
 from backend.domain.agent_actions import AGENT_ACTION_DEFINITIONS, action_definition
+from backend.domain.branch_registry import validate_registered_field_value
 from backend.domain.models import (
     AgentAction,
     AuthorityOutcome,
@@ -14,6 +15,7 @@ from backend.services.agent import (
     AgentProposal,
     AgentTurnContext,
     InvariantGuardedAgent,
+    _controlled_requirement_value,
     authorised_state_changes,
     validate_proposal,
 )
@@ -36,6 +38,36 @@ def make_claim() -> WorkingClaim:
         created_at=timestamp,
         updated_at=timestamp,
     )
+
+
+@pytest.mark.parametrize(
+    ('field_code', 'message_text', 'expected'),
+    [
+        ('claim.product_family', 'This is a home claim.', 'home'),
+        ('incident.injury_or_danger', 'Nobody was hurt and there is no danger now.', False),
+        ('parties.other_parties', 'There was no other vehicle.', False),
+        ('vehicle.drivable', 'The car is safe to drive.', True),
+        ('property.ongoing_risk', 'There is no ongoing risk.', 'none'),
+        ('property.ongoing_risk', 'None.', 'none'),
+        ('property.ongoing_risk', 'The leak is still active.', 'active_leak'),
+        ('property.ongoing_risk', 'There is an ongoing fire.', 'fire'),
+        ('property.ongoing_risk', 'Part of the ceiling is collapsing.', 'collapse'),
+        ('property.ongoing_risk', 'The property is exposed to the weather.', 'exposure'),
+        ('property.ongoing_risk', 'There is another ongoing danger.', 'other'),
+        ('property.habitable', 'The house is safe to live in.', True),
+        ('property.affected_areas', 'The kitchen and hallway.', ['The kitchen and hallway.']),
+        ('policy.policy_number', 'NW-HOME-10001', 'NW-HOME-10001'),
+    ],
+)
+def test_controlled_requirement_values_follow_the_field_registry(
+    field_code: str,
+    message_text: str,
+    expected: object,
+) -> None:
+    value = _controlled_requirement_value(field_code, message_text)
+
+    assert value == expected
+    validate_registered_field_value(field_code, value)
 
 
 def test_action_registry_defines_every_action_and_separates_tools_from_semantics() -> None:
