@@ -23,7 +23,9 @@ export default function Conversation({
   const [sendError, setSendError] = useState(null)
   const [completedSends, setCompletedSends] = useState(0)
   const completedSendKeyRef = useRef(null)
+  const handledDeliveryRef = useRef(null)
   const currentConversationKeyRef = useRef(null)
+  const currentDraftRef = useRef(draft)
   const messageListRef = useRef(null)
   const resourceRequestedSessionId = resource?.requested_session_id || null
   const displayedSessionId = resource?.resolved_session_id || null
@@ -68,9 +70,22 @@ export default function Conversation({
   )
   const waitingForTakeover = assistanceState.key === 'waiting-request'
   const sending = Boolean(conversationKey && pendingSendKey === conversationKey)
-  const visibleSendError = sendError?.key === conversationKey ? sendError.message : ''
+  const deliveryReconciliation = resource?.delivery_reconciliation || null
+  const deliveryTargetsView = Boolean(
+    deliveryReconciliation
+    && deliveryReconciliation.claim_id === detail.claim_id
+    && deliveryReconciliation.session_id === viewSessionId,
+  )
+  const pendingDelivery = deliveryTargetsView
+    && deliveryReconciliation.status === 'pending'
+    ? deliveryReconciliation
+    : null
+  const visibleSendError = sendError?.key === conversationKey
+    ? sendError.message
+    : pendingDelivery?.message || ''
   const readbackBlocksResend = Boolean(
-    sendError?.key === conversationKey && sendError.readbackFailure,
+    (sendError?.key === conversationKey && sendError.readbackFailure)
+    || pendingDelivery,
   )
   const viewResource = displayedSessionMatchesView
     ? resource
@@ -97,6 +112,35 @@ export default function Conversation({
   }, [conversationKey])
 
   useLayoutEffect(() => {
+    currentDraftRef.current = draft
+  }, [draft])
+
+  useLayoutEffect(() => {
+    if (
+      !deliveryTargetsView
+      || deliveryReconciliation.status !== 'confirmed'
+      || sending
+      || handledDeliveryRef.current === deliveryReconciliation.message_id
+    ) return
+
+    handledDeliveryRef.current = deliveryReconciliation.message_id
+    setSendError((current) => (
+      current?.delivery?.message_id === deliveryReconciliation.message_id
+        ? null
+        : current
+    ))
+    if (currentDraftRef.current === deliveryReconciliation.sent_draft) onDraft('')
+    completedSendKeyRef.current = conversationKey
+    setCompletedSends((current) => current + 1)
+  }, [
+    conversationKey,
+    deliveryReconciliation,
+    deliveryTargetsView,
+    onDraft,
+    sending,
+  ])
+
+  useLayoutEffect(() => {
     const completedSendKey = completedSendKeyRef.current
     completedSendKeyRef.current = null
     if (
@@ -111,12 +155,21 @@ export default function Conversation({
     event.preventDefault()
     if (!draft.trim() || !canSend || !displayedSessionId) return
     const sendKey = conversationIdentity(detail.claim_id, displayedSessionId)
+    const submittedDraft = draft
+    const submittedMessage = draft.trim()
     setPendingSendKey(sendKey)
     setSendError(null)
     try {
-      await onSend({ message: draft.trim(), sessionId: displayedSessionId })
+      const result = await onSend({
+        message: submittedMessage,
+        sessionId: displayedSessionId,
+        draft: submittedDraft,
+      })
       if (currentConversationKeyRef.current !== sendKey) return
-      onDraft('')
+      if (result?.delivery?.message_id) {
+        handledDeliveryRef.current = result.delivery.message_id
+      }
+      if (currentDraftRef.current === submittedDraft) onDraft('')
       completedSendKeyRef.current = sendKey
       setCompletedSends((current) => current + 1)
     } catch (nextError) {
@@ -124,7 +177,8 @@ export default function Conversation({
         key: sendKey,
         message: nextError.message,
         readbackFailure: Boolean(nextError.readbackFailure),
-        sentDraft: draft.trim(),
+        sentDraft: submittedDraft,
+        delivery: nextError.delivery || null,
       })
     } finally {
       setPendingSendKey((current) => current === sendKey ? null : current)
@@ -211,14 +265,19 @@ export default function Conversation({
               onChange={(event) => {
                 const nextDraft = event.target.value
                 if (
-                  readbackBlocksResend
+                  sendError?.key === conversationKey
+                  && !sendError.readbackFailure
                   && nextDraft.trim() !== sendError.sentDraft
                 ) setSendError(null)
                 onDraft(nextDraft)
               }}
               disabled={!canSend}
               placeholder={placeholder}
-              aria-describedby={!canSend ? 'staff-message-status' : undefined}
+              aria-describedby={visibleSendError
+                ? 'staff-message-error'
+                : !canSend
+                  ? 'staff-message-status'
+                  : undefined}
             />
             <button
               className="staff-composer__send"
@@ -231,7 +290,7 @@ export default function Conversation({
               <Send size={18} aria-hidden="true" />
             </button>
           </div>
-          {visibleSendError && <p className="form-error" role="alert">{visibleSendError}</p>}
+          {visibleSendError && <p className="form-error" id="staff-message-error" role="alert">{visibleSendError}</p>}
         </form>
       </section>
     </ResourceBoundary>

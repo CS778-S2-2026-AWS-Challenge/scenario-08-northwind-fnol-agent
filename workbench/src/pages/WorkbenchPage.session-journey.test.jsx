@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import WorkbenchPage from './WorkbenchPage.jsx'
 
@@ -20,7 +21,18 @@ vi.mock('../auth/auth-context.js', () => ({
     logout: vi.fn(),
   }),
 }))
-vi.mock('../hooks/usePersistentTabs.js', () => ({ usePersistentTabs: () => tabs }))
+vi.mock('../hooks/usePersistentTabs.js', () => ({
+  usePersistentTabs: () => {
+    const [, setVersion] = useState(0)
+    return {
+      ...tabs,
+      update: (...args) => {
+        tabs.update(...args)
+        setVersion((current) => current + 1)
+      },
+    }
+  },
+}))
 vi.mock('../components/NavigationRail.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimTabs.jsx', () => ({ default: () => null }))
 vi.mock('../components/QueuePanel.jsx', () => ({ default: () => null }))
@@ -69,11 +81,21 @@ function claimDetail(revision, {
 function staffMessage(text, messageId = 'msg_staff_journey', sessionId = 'ses_26') {
   return {
     message_id: messageId,
+    claim_id: 'clm_journey',
     session_id: sessionId,
     actor: 'staff',
     visibility: 'shared',
     content: { type: 'text', text },
     created_at: '2026-09-10T06:31:00Z',
+  }
+}
+
+function staffMessageResponse(message, claimRevision) {
+  return {
+    claim_id: 'clm_journey',
+    session_id: message.session_id,
+    claim_revision: claimRevision,
+    message,
   }
 }
 
@@ -211,10 +233,7 @@ function createJourneyService({
       const message = staffMessage(request.payload.content.text)
       state.messagesBySession.ses_26.push(message)
       state.revision.value += 1
-      return jsonResponse(200, {
-        message,
-        claim_revision: state.revision.value,
-      })
+      return jsonResponse(200, staffMessageResponse(message, state.revision.value))
     }
 
     throw new Error(`Unexpected Workbench request: ${method} ${path}`)
@@ -454,11 +473,11 @@ describe('WorkbenchPage staff session browser/API journey', () => {
   })
 
   it('keeps the draft and reports a recoverable readback error after a successful post', async () => {
+    let recoveryAvailable = false
     const { fetchMock, state } = createJourneyService({
       onMessageRead(sessionId, serviceState) {
-        if (sessionId !== 'ses_26' || messageReadCount(serviceState, sessionId) === 1) {
-          return null
-        }
+        if (sessionId !== 'ses_26') return null
+        if (messageReadCount(serviceState, sessionId) === 1 || recoveryAvailable) return null
         return jsonResponse(500, {
           error: {
             code: 'INTERNAL_ERROR',
@@ -483,6 +502,67 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     expect(state.postRequests).toHaveLength(1)
     expect(state.messagesBySession.ses_26).toHaveLength(1)
     expect(tabs.update).not.toHaveBeenCalledWith('clm_journey', { draft: '' })
+
+    recoveryAvailable = true
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry section' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('log', { name: 'Claimant conversation messages' })).toHaveTextContent(
+        'Journey staff reply',
+      )
+    })
+    await waitFor(() => {
+      expect(screen.getByLabelText('Message to claimant')).toHaveValue('')
+      expect(screen.queryAllByText(/message refresh failed/i)).toHaveLength(0)
+    })
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect(state.postRequests).toHaveLength(1)
+  })
+
+  it('keeps a successful post unconfirmed until an exact stale readback catches up', async () => {
+    let readModelCaughtUp = false
+    const { fetchMock, state } = createJourneyService({
+      onMessageRead(sessionId, serviceState) {
+        if (
+          sessionId !== 'ses_26'
+          || messageReadCount(serviceState, sessionId) === 1
+          || readModelCaughtUp
+        ) return null
+        return jsonResponse(200, {
+          items: [],
+          page: { next_cursor: null },
+        })
+      },
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderJourney()
+
+    const sendButton = await screen.findByRole('button', { name: 'Send message' })
+    await waitFor(() => expect(sendButton).toBeEnabled())
+    await userEvent.setup().click(sendButton)
+
+    expect((await screen.findAllByText(/does not include it yet/i)).length).toBeGreaterThan(0)
+    expect(screen.getByRole('log', { name: 'Claimant conversation messages' })).not.toHaveTextContent(
+      'Journey staff reply',
+    )
+    expect(screen.getByLabelText('Message to claimant')).toHaveValue('Journey staff reply')
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect(state.postRequests).toHaveLength(1)
+
+    readModelCaughtUp = true
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry section' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('log', { name: 'Claimant conversation messages' })).toHaveTextContent(
+        'Journey staff reply',
+      )
+    })
+    await waitFor(() => {
+      expect(screen.getByLabelText('Message to claimant')).toHaveValue('')
+      expect(screen.queryAllByText(/does not include it yet/i)).toHaveLength(0)
+    })
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect(state.postRequests).toHaveLength(1)
   })
 
   it('does not confirm a send when a competing refresh supersedes its readback', async () => {
@@ -558,10 +638,10 @@ describe('WorkbenchPage staff session browser/API journey', () => {
             const message = staffMessage(request.payload.content.text, 'msg_delayed_send')
             serviceState.messagesBySession.ses_26.push(message)
             serviceState.revision.value += 1
-            resolve(jsonResponse(200, {
-              message,
-              claim_revision: serviceState.revision.value,
-            }))
+            resolve(jsonResponse(
+              200,
+              staffMessageResponse(message, serviceState.revision.value),
+            ))
           }
         })
       },
@@ -621,10 +701,10 @@ describe('WorkbenchPage staff session browser/API journey', () => {
           throw new TypeError('Synthetic connection dropped after commit')
         }
 
-        return jsonResponse(200, {
-          message: committedByKey.get(request.key),
-          claim_revision: serviceState.revision.value,
-        })
+        return jsonResponse(200, staffMessageResponse(
+          committedByKey.get(request.key),
+          serviceState.revision.value,
+        ))
       },
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -701,10 +781,7 @@ describe('WorkbenchPage staff session browser/API journey', () => {
         )
         state.messagesBySession.ses_27.push(message)
         state.revision.value = 9
-        return jsonResponse(200, {
-          message,
-          claim_revision: 9,
-        })
+        return jsonResponse(200, staffMessageResponse(message, 9))
       },
     })
     serviceState = service.state

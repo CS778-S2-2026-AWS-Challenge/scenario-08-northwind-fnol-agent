@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../api.js'
 import { formatDate, formatTime } from '../format.js'
@@ -41,6 +42,27 @@ function renderConversation(props, route = '/workbench/claims/clm_1/conversation
     <MemoryRouter initialEntries={[route]}>
       <Conversation {...props} />
     </MemoryRouter>,
+  )
+}
+
+function DraftConversation({ onSend }) {
+  const [draft, setDraft] = useState('First staff message')
+  return (
+    <Conversation
+      detail={{
+        ...detail,
+        allowed_actions: [{
+          action_code: 'conversation.send_claimant_message',
+          target_ref: 'ses_1',
+          based_on_revision: 1,
+          availability: 'available',
+        }],
+      }}
+      resource={{ items: [], resolved_session_id: 'ses_1' }}
+      draft={draft}
+      onDraft={setDraft}
+      onSend={onSend}
+    />
   )
 }
 
@@ -394,10 +416,39 @@ describe('Conversation', () => {
     finishSend()
     await click
     expect(onSend).toHaveBeenCalledWith({
+      draft: 'A claimant-safe update',
       message: 'A claimant-safe update',
       sessionId: 'ses_1',
     })
     await waitFor(() => expect(messageList.scrollTop).toBe(600))
+  })
+
+  it('preserves a follow-up draft typed while the first message is sending', async () => {
+    let finishSend
+    const onSend = vi.fn(() => new Promise((resolve) => {
+      finishSend = () => resolve({ delivery: { message_id: 'msg_first_staff' } })
+    }))
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/workbench/claims/clm_1/conversation?session=ses_1']}>
+        <DraftConversation onSend={onSend} />
+      </MemoryRouter>,
+    )
+
+    const textarea = screen.getByLabelText('Message to claimant')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce())
+
+    await user.clear(textarea)
+    await user.type(textarea, 'Follow-up draft written while sending')
+    expect(textarea).toHaveValue('Follow-up draft written while sending')
+
+    finishSend()
+
+    await waitFor(() => {
+      expect(textarea).toHaveValue('Follow-up draft written while sending')
+      expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled()
+    })
   })
 
   it.each([

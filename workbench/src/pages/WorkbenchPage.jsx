@@ -52,6 +52,7 @@ export default function WorkbenchPage() {
   const backgroundRefreshId = useRef(0)
   const resourceRequestIds = useRef({})
   const conversationRequestId = useRef(0)
+  const deliveryReadbackRef = useRef(null)
   const selectedConversationSessionIdRef = useRef(null)
   const [resources, setResources] = useState({})
   const [detailLoading, setDetailLoading] = useState(false)
@@ -317,8 +318,14 @@ export default function WorkbenchPage() {
     }
   }, [])
 
-  const loadConversationResources = useCallback(async (id, requestedSessionId) => {
+  const loadConversationResources = useCallback(async (
+    id,
+    requestedSessionId,
+    { expectedDelivery = null } = {},
+  ) => {
     const requestId = ++conversationRequestId.current
+    const initialPendingDelivery = expectedDelivery
+      || workbenchApi.pendingMessageDelivery(id, requestedSessionId)
     const isCurrent = () => (
       conversationRequestId.current === requestId
       && currentClaimIdRef.current === id
@@ -352,6 +359,9 @@ export default function WorkbenchPage() {
           error: null,
           requested_session_id: requestedSessionId || null,
           resolved_session_id: sameResolvedSession ? requestedSessionId : null,
+          delivery_reconciliation: initialPendingDelivery
+            ? pendingDeliveryState(initialPendingDelivery)
+            : null,
         },
       }
     })
@@ -394,6 +404,7 @@ export default function WorkbenchPage() {
         resourceName: 'messages',
         sessionId: requestedSessionId || null,
         error: sessionsResult.error,
+        delivery: initialPendingDelivery,
       }
     }
 
@@ -428,6 +439,7 @@ export default function WorkbenchPage() {
           resourceName: 'messages',
           sessionId: requestedSessionId || null,
           error,
+          delivery: initialPendingDelivery,
         }
       }
 
@@ -436,28 +448,86 @@ export default function WorkbenchPage() {
         ownerId: id,
         resourceName: 'messages',
         sessionId: requestedSessionId || null,
+        delivery: initialPendingDelivery,
       }
     }
 
     const targetSessionId = requestedSessionId || session.session_id
+    const targetDelivery = expectedDelivery
+      || workbenchApi.pendingMessageDelivery(id, session.session_id)
+    const mayReconcileDelivery = Boolean(expectedDelivery)
+      || !deliveryReadbackRef.current
     const messagesResult = await loadResource(
       'messages',
       id,
-      async () => ({
-        ...(await workbenchApi.messages(
+      async () => {
+        const response = await workbenchApi.messages(
           token,
           id,
           session.session_id,
-        )),
-        requested_session_id: targetSessionId,
-        resolved_session_id: session.session_id,
-      }),
+        )
+        let deliveryReconciliation = targetDelivery
+          ? pendingDeliveryState(targetDelivery)
+          : null
+
+        if (
+          targetDelivery
+          && messageListContainsDelivery(response.items, targetDelivery)
+          && mayReconcileDelivery
+        ) {
+          const confirmed = workbenchApi.confirmMessageDelivery(
+            targetDelivery.claim_id,
+            targetDelivery.session_id,
+            targetDelivery.message_id,
+          ) || targetDelivery
+          deliveryReconciliation = confirmedDeliveryState(confirmed)
+        }
+
+        return {
+          ...response,
+          requested_session_id: targetSessionId,
+          resolved_session_id: session.session_id,
+          delivery_reconciliation: deliveryReconciliation,
+        }
+      },
       { isCurrent },
     )
+
+    const deliveryReconciliation = messagesResult.response?.delivery_reconciliation
+      || (targetDelivery ? pendingDeliveryState(targetDelivery) : null)
+
+    if (
+      messagesResult.status === 'applied'
+      && deliveryReconciliation?.status === 'pending'
+      && isCurrent()
+    ) {
+      const error = messageReadbackError({
+        status: 'stale',
+        delivery: targetDelivery,
+      })
+      setResources((current) => ({
+        ...current,
+        messages: {
+          ...(current.messages || {}),
+          status: 'unavailable',
+          stale: Boolean(current.messages?.items?.length),
+          error,
+          delivery_reconciliation: deliveryReconciliation,
+        },
+      }))
+      return {
+        ...messagesResult,
+        status: 'unconfirmed',
+        sessionId: targetSessionId,
+        error,
+        delivery: targetDelivery,
+      }
+    }
 
     return {
       ...messagesResult,
       sessionId: targetSessionId,
+      delivery: deliveryReconciliation,
     }
   }, [loadResource, token])
 
@@ -887,15 +957,24 @@ export default function WorkbenchPage() {
 
   async function sendMessage(operation) {
     const sendingClaimId = detailRef.current?.claim_id || null
+    let expectedDelivery = null
     try {
-      await runClaimMutation('Sending the claimant message', (current) => (
-        workbenchApi.sendMessage(
+      await runClaimMutation('Sending the claimant message', async (current) => {
+        const response = await workbenchApi.sendMessage(
           token,
           current.claim_id,
           operation,
           current.revision,
         )
-      ), { backgroundDetailRefresh: true })
+        expectedDelivery = staffMessageDelivery(
+          response,
+          current.claim_id,
+          operation.sessionId,
+          operation.draft ?? operation.message,
+        )
+        deliveryReadbackRef.current = expectedDelivery
+        return response
+      }, { backgroundDetailRefresh: true })
     } catch (error) {
       if (error.code === 'REVISION_CONFLICT') {
         const current = detailRef.current
@@ -915,6 +994,9 @@ export default function WorkbenchPage() {
         }
       }
 
+      if (sameDelivery(deliveryReadbackRef.current, expectedDelivery)) {
+        deliveryReadbackRef.current = null
+      }
       throw error
     }
 
@@ -928,17 +1010,32 @@ export default function WorkbenchPage() {
       && currentClaimIdRef.current === sendingClaimId
       && currentSessionId === operation.sessionId
     ) {
-      const readback = await loadConversationResources(
-        current.claim_id,
-        operation.sessionId,
-      )
-      if (readback.status === 'applied' && readback.sessionId === operation.sessionId) {
-        return readback
+      try {
+        const readback = await loadConversationResources(
+          current.claim_id,
+          operation.sessionId,
+          { expectedDelivery },
+        )
+        if (
+          readback.status === 'applied'
+          && readback.sessionId === operation.sessionId
+          && readback.delivery?.status === 'confirmed'
+          && sameDelivery(readback.delivery, expectedDelivery)
+        ) {
+          return readback
+        }
+        throw messageReadbackError({ ...readback, delivery: expectedDelivery })
+      } finally {
+        if (sameDelivery(deliveryReadbackRef.current, expectedDelivery)) {
+          deliveryReadbackRef.current = null
+        }
       }
-      throw messageReadbackError(readback)
     }
 
-    throw messageReadbackError({ status: 'superseded' })
+    if (sameDelivery(deliveryReadbackRef.current, expectedDelivery)) {
+      deliveryReadbackRef.current = null
+    }
+    throw messageReadbackError({ status: 'superseded', delivery: expectedDelivery })
   }
 
   async function performOwnershipAction(action, payload) {
@@ -1210,19 +1307,82 @@ function resourceState(response = {}) {
     error: null,
     requested_session_id: response.requested_session_id || null,
     resolved_session_id: response.resolved_session_id || null,
+    delivery_reconciliation: response.delivery_reconciliation || null,
   }
 }
 
 function messageReadbackError(result) {
   const failed = result?.status === 'failed'
+  const stale = result?.status === 'stale' || result?.status === 'unconfirmed'
   const error = new Error(failed
-    ? 'Your message was sent, but the Workbench could not confirm it in the conversation because the message refresh failed. Keep this draft and retry the conversation refresh before sending again.'
-    : 'Your message was sent, but another conversation refresh replaced its confirmation. Keep this draft and review the refreshed conversation before sending again.')
+    ? 'Your message was saved, but the Workbench could not confirm it in the conversation because the message refresh failed. Keep this draft and retry the conversation refresh before sending again.'
+    : stale
+      ? 'Your message was saved, but the refreshed conversation does not include it yet. Keep this draft and retry the conversation refresh before sending again.'
+      : 'Your message was saved, but another conversation refresh replaced its confirmation. Keep this draft and retry the conversation refresh before sending again.')
   error.code = 'MESSAGE_READBACK_FAILED'
   error.retryable = true
   error.readbackFailure = true
   error.requestId = result?.error?.requestId || null
+  error.delivery = result?.delivery || null
   return error
+}
+
+function staffMessageDelivery(response, claimId, sessionId, sentDraft) {
+  const message = response?.message
+  if (
+    response?.claim_id !== claimId
+    || response?.session_id !== sessionId
+    || !message?.message_id
+    || message.claim_id !== claimId
+    || message.session_id !== sessionId
+  ) {
+    const error = new Error(
+      'The Workbench saved the request but did not return a valid persisted message identity. Keep this draft and retry the unchanged message so delivery can be reconciled safely.',
+    )
+    error.code = 'INVALID_RESPONSE'
+    error.retryable = true
+    throw error
+  }
+
+  return {
+    claim_id: claimId,
+    session_id: sessionId,
+    message_id: message.message_id,
+    sent_draft: sentDraft,
+  }
+}
+
+function messageListContainsDelivery(items = [], delivery) {
+  return Boolean(delivery && items.some((message) => (
+    message.message_id === delivery.message_id
+    && message.claim_id === delivery.claim_id
+    && message.session_id === delivery.session_id
+  )))
+}
+
+function sameDelivery(left, right) {
+  return Boolean(
+    left
+    && right
+    && left.claim_id === right.claim_id
+    && left.session_id === right.session_id
+    && left.message_id === right.message_id
+  )
+}
+
+function pendingDeliveryState(delivery) {
+  return {
+    ...delivery,
+    status: 'pending',
+    message: 'Your message is saved but has not been confirmed in this conversation yet. Keep this draft and retry the conversation refresh before sending another message.',
+  }
+}
+
+function confirmedDeliveryState(delivery) {
+  return {
+    ...delivery,
+    status: 'confirmed',
+  }
 }
 
 function enrichConversation(conversation, context) {
