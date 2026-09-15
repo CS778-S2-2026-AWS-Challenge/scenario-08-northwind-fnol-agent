@@ -9,13 +9,13 @@ written outside the repository and summarised on the delivery issue. They are ne
 
 ## The record
 
-`record.JourneyRunRecord`, schema `northwind-journey-run/1`:
+`record.JourneyRunRecord`, schema `northwind-journey-run/2`:
 
 | Field | Holds |
 |---|---|
 | `scenario_id`, `family`, `pack_id`, `rubric_refs` | What was run and which rubric items it evidences |
 | `configuration` | Exact head, start and finish time, runtime (`fixture`/`deployed`), provider mode (`simulated`/`live`), Agent runtime and model profile, evidence level |
-| `materials` | Every pack material: class, condition, who provides it, and how it actually arrived (`claimant_upload`, `consent_route`, `simulated_provider_result`, `no_route`) |
+| `materials` | Every pack material: class, the condition the pack declares, who provides it, how the run actually got it in (`claimant_upload`, `consent_route`, `simulated_provider_result`), or why not (`no_route`: nothing can deliver it; `not_delivered`: its step failed or was never reached), and the step that delivered it |
 | `steps` | Every route called, in order: actor (`claimant`/`staff`/`integration`), expected and actual HTTP status, outcome, resulting Claim revision, error detail |
 | `agent_turns` | Each claimant input with the Agent's reply, proposed action, reason codes, and next step, plus tool calls and Runtime decisions, or the reason they could not be observed |
 | `consents` | Each permission given or refused: purpose, step, Claim revision, disclosed fields where observable |
@@ -35,6 +35,8 @@ The record rejects evidence that contradicts itself:
   those records internal (`docs/api.md`), so an API-level run says so instead of recording them as
   empty.
 - Agent turns and consents must point at a recorded step.
+- A delivered material must name the step that delivered it, and that step must have succeeded; an
+  undelivered one names no step.
 
 ## Result classes
 
@@ -44,17 +46,43 @@ rejected. The first rule that matches wins:
 1. `failed`: a step failed, or a visibility check does not hold.
 2. `blocked`: a step was refused.
 3. `unavailable`: a step the journey needs has no capability.
-4. `partial`: every step succeeded, but a pack material had no route in, or claimant and staff
-   disagree.
+4. `partial`: every step succeeded, but a pack material had no route in or was not delivered, or
+   claimant and staff disagree.
 5. `fixture-only`: everything was exercised and agrees, but on the fixture runtime, a simulated
    provider, or a simulated provider result.
 6. `completed`: the same, on a deployed runtime with live providers.
 
 A run is stopped at its first step that does not succeed. The steps that follow are not attempted,
-so the record never implies they were.
+and every material they would have delivered is recorded as `not_delivered`, so the record never
+implies they ran.
 
 ## Runners
 
 A runner drives one scenario through the API and returns a `JourneyRunRecord`. The record and its
 classification rules are shared, so runs from different runners and families can be counted
-together. The first runner, for the motor collision journey, follows in a separate PR.
+together.
+
+```bash
+python -m tests.journey_runs --runs 10 --out ../journey-runs
+python -m tests.journey_runs --schema
+```
+
+Each run starts a fresh fixture runtime and writes one `<run_id>.json`; `--schema` prints the
+record's JSON Schema. `tests/test_journey_runs.py` runs one journey in the ordinary suite and fails
+on any `untracked` disagreement: report it to its owner, then add it to the runner's known defects.
+
+| Runner | Journey | Evidence level |
+|---|---|---|
+| `motor_collision.py` | Create, describe (`AT-01-clear-motor-creation` input), upload the claimant's pack, confirm, create, consent, route the assessor, receive the assessment | API projections on the fixture runtime; not browser; no provider contacted |
+
+The motor pack (`motor-collision-provisional-2`) is provisional until an owner freezes the rubric
+anchors. It uses the `received` motor materials in `backend/demo_data/materials/`:
+
+- the two incident photos and the police event report are uploaded by the claimant. The Police
+  form is claimant-supplied material (`P3-NZP-REPORT`,
+  `docs/research/sprint4-third-party-integration-forms.md`);
+- the consent record is Northwind's record of the consent route;
+- the assessment arrives as the fixture assessor's own result.
+
+The deliberately defective variants (unreadable, conflicting, superseded, not obtainable) belong to
+failure-path runs.
