@@ -228,6 +228,78 @@ def test_missing_backend_is_typed_unavailable_without_mutation() -> None:
     assert 'reused' not in result.claimant_message
 
 
+@pytest.mark.parametrize(
+    'command',
+    [
+        replace(_command(), payload={**_command().payload, 'evidence_id': ''}),
+        replace(_command(), idempotency_key=None),
+    ],
+    ids=['blank-identifier', 'missing-idempotency-metadata'],
+)
+def test_malformed_evidence_commands_are_rejected(command: ClaimContextCommand) -> None:
+    with pytest.raises(ValueError):
+        execute_confirmed_evidence_action(_repository(), command, _confirmation(), None)
+
+
+@pytest.mark.parametrize(
+    'command',
+    [
+        replace(_command(), action_code='claim.update_fact'),
+        replace(_command(), proposer_role=ActionActorRole.STAFF),
+    ],
+    ids=['unsupported-action', 'wrong-actor'],
+)
+def test_execution_rejects_commands_outside_the_runtime_evidence_boundary(
+    command: ClaimContextCommand,
+) -> None:
+    with pytest.raises(ValueError):
+        execute_confirmed_evidence_action(_repository(), command, _confirmation(), None)
+
+
+def test_claim_read_failure_returns_retryable_dependency_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _repository()
+
+    def fail_claim_read(claim_id: str) -> WorkingClaim | None:
+        raise RuntimeError(claim_id)
+
+    monkeypatch.setattr(repository, 'get_claim_internal', fail_claim_read)
+
+    result = execute_confirmed_evidence_action(
+        repository,
+        _command(),
+        _confirmation(),
+        None,
+    )
+
+    assert result.status is EvidenceActionStatus.FAILED
+    assert result.reason_code == 'DEPENDENCY_FAILURE'
+    assert result.retryable is True
+
+
+def test_evidence_read_failure_returns_retryable_dependency_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _repository()
+
+    def fail_evidence_read(customer_id: str) -> list[EvidenceRecord]:
+        raise RuntimeError(customer_id)
+
+    monkeypatch.setattr(repository, 'list_evidence_for_customer', fail_evidence_read)
+
+    result = execute_confirmed_evidence_action(
+        repository,
+        _command(),
+        _confirmation(),
+        None,
+    )
+
+    assert result.status is EvidenceActionStatus.FAILED
+    assert result.reason_code == 'DEPENDENCY_FAILURE'
+    assert result.retryable is True
+
+
 def test_verified_success_and_same_key_retry_execute_once() -> None:
     repository = _repository()
     backend = RecordingBackend(repository)
