@@ -304,6 +304,28 @@ export function listEvidenceHistory({ cursor, limit = 25, signal } = {}) {
   return apiRequest(`/api/v1/evidence?${params}`, { signal })
 }
 
+export function applyEvidenceHistoryAction({
+  claimId,
+  evidenceId,
+  action,
+  sourceClaimId,
+  revision,
+  proposalRef,
+  confirmationRef,
+  idempotencyKey = requestId(`evidence-${action}`),
+  signal,
+}) {
+  return apiRequest(`/api/v1/claims/${claimId}/evidence/${evidenceId}/${action}`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+    body: JSON.stringify({ source_claim_id: sourceClaimId, proposal_ref: proposalRef, confirmation_ref: confirmationRef }),
+    signal,
+  })
+}
+
 export function getClaim(claimId) {
   return apiRequest(`/api/v1/claims/${claimId}`)
 }

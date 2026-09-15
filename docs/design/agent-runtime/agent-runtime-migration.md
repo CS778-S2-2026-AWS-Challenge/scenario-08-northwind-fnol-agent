@@ -44,10 +44,12 @@ handlers meet the removal gate.
 | `CREATE_CLAIM` | `claim.prepare_creation`, then `claim.create`, plus `runtime.continue` or `runtime.wait_for_external` | External creation remains revision-checked, idempotent, authorised, and provider-neutral. |
 
 The mapping is a compatibility aid. It must not be used to claim that every target action is
-implemented. The applied claimant Runtime implements conversation answers, source-aware fact
-mutation, and deterministic handoff through existing handlers; claim creation and external
-participant actions remain explicit unavailable boundaries until their real handlers are wired.
-The mapping preserves semantic dimensions:
+implemented. The applied claimant Runtime now dispatches source-aware fact mutation, pending Evidence
+registration, deterministic handoff, creation preparation, and formal Claim creation through the
+production Claim Context dispatcher. Formal creation still uses the existing provider-neutral
+claims adapter and its revision/idempotency transaction; the dispatcher does not create a second
+write path. External participant actions remain explicit unavailable boundaries until their real
+handlers are wired. The mapping preserves semantic dimensions:
 conversation labels do not create business side effects, runtime labels do not grant tool
 authority, and material actions remain separate validated proposals.
 

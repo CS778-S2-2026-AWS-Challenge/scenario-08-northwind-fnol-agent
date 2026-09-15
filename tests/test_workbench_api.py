@@ -1703,15 +1703,16 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
         create_decision.decision_id,
         creation['external_claim_id'],
     ]
+    assert detail['work_summary']['queue_key'] == 'waiting_third_party'
     active_response = client.get('/api/v1/workbench/claims', headers=staff_auth_headers)
-    assert all(item['claim_id'] != claim_id for item in active_response.json()['items'])
+    assert claim_id in {item['claim_id'] for item in active_response.json()['items']}
     queue_response = client.get(
-        '/api/v1/workbench/claims?view=completed', headers=staff_auth_headers
+        '/api/v1/workbench/claims?view=waiting_third_party', headers=staff_auth_headers
     )
     queue_item = next(
         item for item in queue_response.json()['items'] if item['claim_id'] == claim_id
     )
-    assert queue_item['work_summary']['queue_key'] == 'completed'
+    assert queue_item['work_summary']['queue_key'] == 'waiting_third_party'
     assert queue_item['integration_summary']['claim_creation_status'] == 'created'
     assert 'claim_number' not in queue_item['integration_summary']
     assert 'expected_by' not in queue_item['integration_summary']

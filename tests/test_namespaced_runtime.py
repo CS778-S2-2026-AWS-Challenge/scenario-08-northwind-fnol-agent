@@ -69,11 +69,18 @@ class SequenceToolGateway:
                     'customer_reason': 'The current claim context was read.',
                     'customer_response': 'I have read the current claim context.',
                     'customer_next_step': {
-                        'status': 'continue_current_report',
-                        'summary': 'Continue the report when ready.',
+                        'status': 'confirmation_required',
+                        'summary': 'Review the incident description.',
                         'responsible_party': 'claimant',
-                        'required_items': [],
+                        'required_items': ['incident.description'],
                     },
+                    'form_changes': [
+                        {
+                            'field_code': 'incident.description',
+                            'value': 'Please read the current report.',
+                            'reported_text': 'Please read the current report.',
+                        }
+                    ],
                     'source_refs': [],
                 },
                 provider_model='qwen3.8-27b',
@@ -298,13 +305,16 @@ def test_namespaced_runtime_applies_claim_mutation_and_persists_runtime_records(
         body = response.json()
         assert body['claim_revision'] == 2
         assert body['decision'] is not None
-        assert body['agent_message']['content']['text'] == (
+        assert body['agent_message']['content']['text'].startswith(
             'I have read the current claim context.'
         )
 
         stored_claim = repository.get_claim(claim_id, 'cus_demo')
         assert stored_claim is not None
         assert stored_claim.revision == 2
+        assert stored_claim.form['incident.description'].value == (
+            'Please read the current report.'
+        )
         assert len(repository.list_agent_decisions(claim_id, 'cus_demo')) == 1
         trace = repository.find_runtime_trace_for_trigger(
             claim_id,
@@ -322,10 +332,23 @@ def test_namespaced_runtime_applies_claim_mutation_and_persists_runtime_records(
         )
         assert runtime_turn is not None
         assert runtime_turn.execution_plan.status == 'executed'
+        assert [item.action_code for item in runtime_turn.action_envelopes] == [
+            'conversation.answer',
+            'claim.apply_fact_patch',
+        ]
+        assert all(item.status == 'executed' for item in runtime_turn.action_envelopes)
         assert runtime_turn.result.resulting_claim_revision == 2
         assert runtime_turn.tool_results[0].output['claim_id'] == claim_id
         assert runtime_turn.tool_results[0].output['workflow_state'] == 'collecting'
         assert runtime_turn.tool_results[0].output['form'] == {}
+        idempotency = repository.find_idempotency(
+            'cus_demo',
+            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+            'runtime-message',
+        )
+        assert idempotency is not None
+        assert idempotency.action_code == 'claim.apply_fact_patch'
+        assert idempotency.target_ref == claim_id
 
         assert len(gateway.requests) == 2
 

@@ -100,6 +100,7 @@ from backend.services.agent import (
     InvariantGuardedAgent,
     UnavailableAgent,
 )
+from backend.services.agent_action_execution import ClaimantRuntimeActionDispatcher
 from backend.services.external_service_entry import (
     assert_adapter_matches_entry,
     resolve_external_service_entry,
@@ -288,6 +289,7 @@ def create_app(
     # than by individual routers.  No router, service, seed path, or adapter
     # can reach an unguarded handoff write.
     app.state.claim_repository = guarded_handoff_repository(bundle.repository)
+    app.state.claimant_runtime_action_dispatcher = ClaimantRuntimeActionDispatcher()
     if resolved_settings.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
         if agent_turn_provider is not None:
             raise ValueError(
