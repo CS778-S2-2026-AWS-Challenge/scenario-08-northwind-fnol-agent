@@ -231,7 +231,7 @@ describe('claimant intake projection', () => {
     expect(screen.getByRole('button', { name: 'Retry message' })).toBeInTheDocument()
   })
 
-  it('returns to Claim history without dropping the active conversation', async () => {
+  it('returns to Claim history from Claim tools without dropping the active conversation', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage.mockResolvedValue(initialTurn())
 
@@ -240,7 +240,8 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
 
-    await user.click(screen.getByRole('button', { name: 'Back to Claim history' }))
+    expect(screen.queryByRole('button', { name: 'Back to Claim history' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Claim history' }))
 
     expect(screen.getByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
