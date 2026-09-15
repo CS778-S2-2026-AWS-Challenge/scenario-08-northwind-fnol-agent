@@ -897,6 +897,21 @@ def test_default_home_journey_creates_without_an_unapproved_external_service(
         ('none', 'There is no ongoing risk.', 'none'),
         ('active-leak', 'The leak is still active.', 'active_leak'),
         ('mixed-fire', 'There is no leak now, but the fire is still burning.', 'fire'),
+        (
+            'mixed-fire-danger',
+            'There is no danger from the leak, but the fire is still burning.',
+            'fire',
+        ),
+        (
+            'mixed-collapse-risk',
+            'There is no ongoing risk from the water now, but the ceiling is collapsing.',
+            'collapse',
+        ),
+        (
+            'mixed-exposure-danger',
+            'There is no danger from the leak, but part of the house is exposed.',
+            'exposure',
+        ),
         ('negated-leak', 'The leak is not active anymore.', None),
         ('negated-collapse', 'The ceiling is not collapsing.', None),
         ('negated-exposure', 'Nothing is exposed.', None),

@@ -507,8 +507,13 @@ def _controlled_requirement_value(field_code: str, message_text: str) -> Any | N
             return True
         return None
     if field_code == 'property.ongoing_risk':
-        if any(pattern.search(text) for pattern in HOME_RISK_NONE_PATTERNS):
-            return 'none'
+        # Remove only the explicitly negated risk clause before looking for a
+        # positive hazard elsewhere in the message. This preserves mixed
+        # statements while preventing "ongoing risk from water" from matching
+        # the active-leak vocabulary.
+        risk_text = text
+        for pattern in HOME_RISK_NONE_PATTERNS:
+            risk_text = pattern.sub('', risk_text)
         risk_patterns = (
             ('active_leak', HOME_ACTIVE_LEAK_PATTERNS, HOME_ACTIVE_LEAK_NEGATION_PATTERNS),
             ('fire', HOME_FIRE_PATTERNS, HOME_FIRE_NEGATION_PATTERNS),
@@ -517,8 +522,10 @@ def _controlled_requirement_value(field_code: str, message_text: str) -> Any | N
             ('other', HOME_OTHER_RISK_PATTERNS, HOME_OTHER_RISK_NEGATION_PATTERNS),
         )
         for value, signal_patterns, negation_patterns in risk_patterns:
-            if _contains_unnegated_signal(text, signal_patterns, negation_patterns):
+            if _contains_unnegated_signal(risk_text, signal_patterns, negation_patterns):
                 return value
+        if any(pattern.search(text) for pattern in HOME_RISK_NONE_PATTERNS):
+            return 'none'
         return None
     if field_code == 'property.habitable':
         if re.search(r'\b(?:uninhabitable|unsafe to live|cannot live|can\'t live)\b', lowered):
