@@ -1,4 +1,5 @@
 from backend.domain.models import (
+    AgentAction,
     HandoffPacket,
     HandoffPriority,
     HandoffRecord,
@@ -7,6 +8,8 @@ from backend.domain.models import (
     HandoffType,
     StaffActionRecord,
     StaffActionStatus,
+    SupportNeed,
+    WorkflowState,
 )
 from backend.domain.workbench_action_registry import (
     WORK_ITEM_TYPE_REGISTRY,
@@ -110,6 +113,21 @@ def test_registered_target_variants_own_fixed_completion_effects() -> None:
     assert handoff_defaults['state_changes'] == [
         {'path': 'claim_state.coverage', 'to': 'clear'},
         {'path': 'claim_state.workflow_state', 'to': 'ready_for_next'},
+    ]
+
+    support_defaults = handoff_resolution_defaults(
+        handoff.model_copy(
+            update={
+                'type': HandoffType.HUMAN_SUPPORT,
+                'support_need': SupportNeed.HUMAN_REQUESTED,
+                'resume_workflow_state': WorkflowState.READY_FOR_NEXT,
+                'resume_next_action': AgentAction.CREATE_CLAIM,
+            }
+        )
+    )
+    assert support_defaults['state_changes'] == [
+        {'path': 'claim_state.workflow_state', 'to': WorkflowState.READY_FOR_NEXT.value},
+        {'path': 'claim_state.next_action', 'to': AgentAction.CREATE_CLAIM.value},
     ]
 
     work_item = StaffActionRecord(

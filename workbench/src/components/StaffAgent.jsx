@@ -12,10 +12,11 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { workbenchApi } from '../api.js'
-import { formatDateTime } from '../format.js'
+import { formatDateTime, words } from '../format.js'
 
 const MAX_CLAIM_SCOPE = 5
 const NEW_SESSION_TITLE = 'New Staff Agent session'
+const DRAG_THRESHOLD = 4
 
 export default function StaffAgent({
   open,
@@ -24,6 +25,7 @@ export default function StaffAgent({
   token,
   onSessionChange,
   onConversationChanged,
+  onBusinessActionExecuted,
 }) {
   const [sessions, setSessions] = useState([])
   const [activeSessionId, setActiveSessionId] = useState(null)
@@ -39,9 +41,10 @@ export default function StaffAgent({
   const [sessionNotice, setSessionNotice] = useState('')
   const [error, setError] = useState(null)
   const [position, setPosition] = useState(null)
-  const panelRef = useRef(null)
+  const widgetRef = useRef(null)
   const messageRef = useRef(null)
   const dragRef = useRef(null)
+  const suppressClickRef = useRef(false)
   const activeSessionIdRef = useRef(null)
   const wasOpenRef = useRef(false)
   const onSessionChangeRef = useRef(onSessionChange)
@@ -102,6 +105,21 @@ export default function StaffAgent({
     const task = window.setTimeout(loadAgent, 0)
     return () => window.clearTimeout(task)
   }, [open, loadAgent, requestedSessionId])
+
+  const positioned = position !== null
+  useEffect(() => {
+    if (!positioned) return undefined
+    const keepInViewport = () => {
+      const widget = widgetRef.current
+      if (!widget) return
+      setPosition((current) => current && clampWidgetPosition(current.left, current.top, widget))
+    }
+    keepInViewport()
+    window.addEventListener('resize', keepInViewport)
+    return () => {
+      window.removeEventListener('resize', keepInViewport)
+    }
+  }, [open, positioned])
 
   function beginNewSession() {
     setSessionNotice('')
@@ -167,6 +185,41 @@ export default function StaffAgent({
     }
   }
 
+  async function executeDraft(sourceMessage, draft) {
+    if (
+      !sourceMessage?.session_id
+      || !sourceMessage?.message_id
+      || !draft?.draft_id
+      || !draft?.claim_id
+      || !draft?.action_code
+      || !draft?.target_ref
+    ) {
+      throw new Error('This Staff Agent draft is informational and cannot execute a business action.')
+    }
+
+    const latestClaim = await workbenchApi.claim(token, draft.claim_id)
+    const response = await workbenchApi.executeStaffAgentDraft(
+      token,
+      sourceMessage.session_id,
+      sourceMessage.message_id,
+      draft.draft_id,
+      latestClaim.revision,
+      draft.payload || {},
+    )
+
+    try {
+      await onBusinessActionExecuted?.(response)
+    } catch (refreshError) {
+      setError({
+        title: 'Action executed; refresh required',
+        message: refreshError?.message
+          || 'The registered action succeeded, but the latest Workbench projection could not be loaded automatically. Refresh the Claim before taking another action.',
+        requestId: refreshError?.requestId || null,
+      })
+    }
+    return response
+  }
+
   function toggleClaim(claimId) {
     setSelectedClaimIds((current) => {
       if (current.includes(claimId)) return current.filter((item) => item !== claimId)
@@ -176,41 +229,75 @@ export default function StaffAgent({
   }
 
   function beginDrag(event) {
-    if (event.target.closest('button, select, input, textarea')) return
-    const panel = panelRef.current
-    if (!panel) return
-    const rect = panel.getBoundingClientRect()
-    dragRef.current = { offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top }
-    event.currentTarget.setPointerCapture(event.pointerId)
+    if (event.button !== 0) return
+    if (event.currentTarget.classList.contains('staff-agent__header')
+      && event.target.closest('button, select, input, textarea')) return
+    const widget = widgetRef.current
+    if (!widget) return
+    const rect = widget.getBoundingClientRect()
+    dragRef.current = {
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+    }
+    event.currentTarget.setPointerCapture?.(event.pointerId)
   }
 
   function drag(event) {
-    if (!dragRef.current || !panelRef.current) return
-    const width = panelRef.current.offsetWidth
-    const height = panelRef.current.offsetHeight
-    setPosition({
-      left: Math.max(0, Math.min(window.innerWidth - width, event.clientX - dragRef.current.offsetX)),
-      top: Math.max(0, Math.min(window.innerHeight - height, event.clientY - dragRef.current.offsetY)),
-    })
+    const dragState = dragRef.current
+    const widget = widgetRef.current
+    if (!dragState || !widget) return
+    if (!dragState.moved) {
+      const movedX = Math.abs(event.clientX - dragState.startX)
+      const movedY = Math.abs(event.clientY - dragState.startY)
+      if (Math.max(movedX, movedY) < DRAG_THRESHOLD) return
+      dragState.moved = true
+    }
+    setPosition(clampWidgetPosition(
+      event.clientX - dragState.offsetX,
+      event.clientY - dragState.offsetY,
+      widget,
+    ))
   }
 
   function endDrag(event) {
+    const moved = dragRef.current?.moved
     dragRef.current = null
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
+    if (moved && event.currentTarget.classList.contains('staff-agent__bubble')) {
+      suppressClickRef.current = true
+    }
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
     }
   }
 
+  function cancelDrag(event) {
+    dragRef.current = null
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
+    }
+  }
+
+  function openAgent() {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false
+      return
+    }
+    onOpenChange(true)
+  }
+
   return (
-    <div className={`staff-agent${open ? ' is-open' : ''}`} style={position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto' } : undefined}>
+    <div ref={widgetRef} className={`staff-agent${open ? ' is-open' : ''}`} style={position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto' } : undefined}>
       {!open && (
-        <button className="staff-agent__bubble" type="button" onClick={() => onOpenChange(true)} aria-label="Open Staff Agent">
+        <button className="staff-agent__bubble" type="button" onClick={openAgent} onPointerDown={beginDrag} onPointerMove={drag} onPointerUp={endDrag} onPointerCancel={cancelDrag} aria-label="Open Staff Agent">
           <Bot size={23} />
         </button>
       )}
       {open && (
-        <section className="staff-agent__panel" aria-labelledby="staff-agent-title" ref={panelRef}>
-          <header className="staff-agent__header" onPointerDown={beginDrag} onPointerMove={drag} onPointerUp={endDrag}>
+        <section className="staff-agent__panel" aria-labelledby="staff-agent-title">
+          <header className="staff-agent__header" onPointerDown={beginDrag} onPointerMove={drag} onPointerUp={endDrag} onPointerCancel={cancelDrag}>
             <span className="staff-agent__grip" aria-hidden="true"><GripHorizontal size={18} /></span>
             <div className="staff-agent__identity">
               <h2 id="staff-agent-title">Staff Agent</h2>
@@ -286,10 +373,16 @@ export default function StaffAgent({
                 <div className="agent-empty">
                   <span className="agent-empty__icon" aria-hidden="true"><Bot size={20} /></span>
                   <p>Ask a general question or explicitly attach up to five Claims.</p>
-                  <small>The Agent can advise and draft, but cannot execute business actions.</small>
+                  <small>The Agent can advise and draft. Registered business actions execute only after explicit staff confirmation.</small>
                 </div>
               )}
-              {messages.map((item) => <AgentMessage message={item} key={item.message_id} />)}
+              {messages.map((item) => (
+                <AgentMessage
+                  message={item}
+                  key={item.message_id}
+                  onExecuteDraft={executeDraft}
+                />
+              ))}
             </div>
 
             {sessionNotice && (
@@ -324,26 +417,216 @@ export default function StaffAgent({
   )
 }
 
-function AgentMessage({ message }) {
+function clampWidgetPosition(left, top, widget) {
+  const maxLeft = Math.max(0, window.innerWidth - widget.offsetWidth)
+  const maxTop = Math.max(0, window.innerHeight - widget.offsetHeight)
+  return {
+    left: Math.max(0, Math.min(maxLeft, left)),
+    top: Math.max(0, Math.min(maxTop, top)),
+  }
+}
+
+function AgentMessage({ message, onExecuteDraft }) {
   return (
     <article className={`agent-message agent-message--${message.role}`}>
       <header><strong>{message.role === 'assistant' ? 'Staff Agent' : 'You'}</strong><small>{message.claim_ids?.length ? `${message.claim_ids.length} Claim${message.claim_ids.length > 1 ? 's' : ''} attached` : 'General scope'}</small></header>
       <p>{message.content}</p>
-      {message.drafts?.map((draft, index) => <AgentDraft draft={draft} key={`${message.message_id}-draft-${index}`} />)}
+      {message.drafts?.map((draft, index) => (
+        <AgentDraft
+          draft={draft}
+          sourceMessage={message}
+          onExecute={onExecuteDraft}
+          key={draft.draft_id || `${message.message_id}-draft-${index}`}
+        />
+      ))}
       {!!message.source_refs?.length && <details><summary>Sources used</summary><ul>{message.source_refs.map((source) => <li key={source}>{source}</li>)}</ul></details>}
     </article>
   )
 }
 
-function AgentDraft({ draft }) {
+function AgentDraft({ draft, sourceMessage, onExecute }) {
   const [content, setContent] = useState(draft.content)
+  const [reviewing, setReviewing] = useState(false)
+  const [executing, setExecuting] = useState(false)
+  const [execution, setExecution] = useState(null)
+  const [executionError, setExecutionError] = useState(null)
+  const executable = Boolean(
+    draft.draft_id
+    && draft.claim_id
+    && draft.action_code
+    && draft.target_ref
+    && sourceMessage?.session_id
+    && sourceMessage?.message_id
+  )
+
+  async function execute() {
+    if (!executable || executing || execution) return
+    setExecuting(true)
+    setExecutionError(null)
+    try {
+      const result = await onExecute(sourceMessage, draft)
+      setExecution(result)
+      setReviewing(false)
+    } catch (error) {
+      setExecutionError(draftExecutionError(error))
+    } finally {
+      setExecuting(false)
+    }
+  }
+
   return (
-    <section className="agent-draft">
-      <header><span><strong>{draft.title}</strong><small>{draft.kind.replaceAll('_', ' ')}</small></span><button type="button" className="icon-button icon-button--small" onClick={() => navigator.clipboard.writeText(content)} aria-label={`Copy ${draft.title}`}><Clipboard size={14} /></button></header>
-      <textarea value={content} onChange={(event) => setContent(event.target.value)} aria-label={`Edit ${draft.title}`} />
+    <section className={`agent-draft${executable ? ' agent-draft--executable' : ''}`}>
+      <header>
+        <span><strong>{draft.title}</strong><small>{draft.kind.replaceAll('_', ' ')}</small></span>
+        <button type="button" className="icon-button icon-button--small" onClick={() => navigator.clipboard.writeText(content)} aria-label={`Copy ${draft.title}`}><Clipboard size={14} /></button>
+      </header>
+      <textarea
+        value={content}
+        readOnly={executable}
+        onChange={executable ? undefined : (event) => setContent(event.target.value)}
+        aria-label={executable ? `Review ${draft.title}` : `Edit ${draft.title}`}
+      />
       {draft.claim_id && <small>Draft for {draft.claim_id}</small>}
+      {executable && (
+        <div className="agent-draft__action">
+          <div>
+            <strong>Registered action</strong>
+            <small>{draft.action_code} · target {draft.target_ref}</small>
+          </div>
+          {!reviewing && !execution && (
+            <button className="button button--quiet" type="button" onClick={() => setReviewing(true)}>
+              Review action
+            </button>
+          )}
+        </div>
+      )}
+      {executable && reviewing && !execution && (
+        <div className="agent-draft__confirm">
+          <p>The Agent proposed this action. The Workbench will reload the Claim, use its current revision, and let the registered backend action decide whether execution is authorised.</p>
+          <div className="form-actions">
+            <button className="button button--ghost" type="button" disabled={executing} onClick={() => setReviewing(false)}>Cancel</button>
+            <button className="button button--primary" type="button" disabled={executing} onClick={execute}>
+              {executing ? 'Executing...' : 'Confirm and execute'}
+            </button>
+          </div>
+        </div>
+      )}
+      {execution && (() => {
+        const presentation = draftExecutionPresentation(execution)
+        return (
+          <div className="agent-draft__execution" role="status">
+            <CheckCircle2 size={16} aria-hidden="true" />
+            <span>
+              <strong>Workbench outcome: {presentation.outcome}</strong>
+              {presentation.details.map((detail) => <small key={detail}>{detail}</small>)}
+            </span>
+          </div>
+        )
+      })()}
+      {executionError && (
+        <div className="agent-draft__execution agent-draft__execution--error" role="alert">
+          <AlertCircle size={16} aria-hidden="true" />
+          <span><strong>{executionError.title}</strong><small>{executionError.message}</small></span>
+        </div>
+      )}
+      {executable && <small>The saved registered payload is executed unchanged. To change the business action, ask Staff Agent to prepare a new draft.</small>}
     </section>
   )
+}
+
+function draftExecutionPresentation(execution) {
+  const runtimeExecution = execution?.runtime_execution || {}
+  const result = runtimeExecution.result || execution?.result || {}
+  const details = []
+  const add = (label, value) => {
+    if (value === undefined || value === null || value === '') return
+    details.push(`${label}: ${value}`)
+  }
+
+  add('Handoff status', result.handoff?.status ? words(result.handoff.status) : null)
+  add('Handoff', result.handoff?.handoff_id)
+  add('Work item status', result.action?.status ? words(result.action.status) : null)
+  add('Work item', result.action?.action_id)
+  add(
+    'Signal decision',
+    result.signal_decision?.decision ? words(result.signal_decision.decision) : null,
+  )
+  add('Decision', result.signal_decision?.signal_decision_id)
+  add('Request status', result.request?.status ? words(result.request.status) : null)
+  add('Request', result.request?.request_id)
+  add('Message recorded', result.message?.message_id)
+  add(
+    'Result',
+    result.action?.result?.summary
+      || result.signal_decision?.summary
+      || result.customer_update?.summary
+      || null,
+  )
+
+  const revision = runtimeExecution.resulting_revision
+    ?? result.revision
+    ?? result.claim_revision
+    ?? null
+  add('Claim revision', revision)
+
+  if (!details.length) {
+    details.push('The registered handler returned a persisted result with no additional staff-facing fields.')
+  }
+
+  return {
+    outcome: words(runtimeExecution.outcome || execution?.outcome || 'executed'),
+    details,
+  }
+}
+
+function draftExecutionError(error) {
+  const reference = error?.requestId ? ` Reference: ${error.requestId}` : ''
+  if (
+    error?.code === 'NETWORK_ERROR'
+    || error?.code === 'DRAFT_EXECUTION_UNKNOWN'
+    || error?.status === 0
+    || (error?.status >= 500
+      && !['DEPENDENCY_UNAVAILABLE', 'DEPENDENCY_FAILED'].includes(error?.code))
+  ) {
+    return {
+      title: 'Execution outcome unknown',
+      message: `${error?.message || 'The Workbench could not confirm the execution result.'} Retry this same saved draft to reconcile the authoritative result before preparing another action.${reference}`,
+    }
+  }
+  if (error?.code === 'REVISION_CONFLICT') {
+    return {
+      title: 'Action not executed',
+      message: `The Claim changed before execution. Reload the latest Claim and review the draft again.${reference}`,
+    }
+  }
+  if (error?.code === 'ACCESS_DENIED') {
+    return {
+      title: 'Action not executed',
+      message: `This staff identity is not authorised to execute the proposed action.${reference}`,
+    }
+  }
+  if (error?.code === 'IDEMPOTENCY_CONFLICT') {
+    return {
+      title: 'Action not executed',
+      message: `This draft no longer matches the original execution identity and was not run again.${reference}`,
+    }
+  }
+  if (error?.code === 'DEPENDENCY_UNAVAILABLE' || error?.code === 'DEPENDENCY_FAILED') {
+    return {
+      title: 'Action not executed',
+      message: `A required service is unavailable, so the action was not reported as completed.${reference}`,
+    }
+  }
+  if (error?.code === 'CONFIRMATION_REQUIRED') {
+    return {
+      title: 'Action not executed',
+      message: `The backend did not receive valid explicit confirmation, so nothing was executed.${reference}`,
+    }
+  }
+  return {
+    title: 'Action not executed',
+    message: `${error?.message || 'The registered action could not be executed.'}${reference}`,
+  }
 }
 
 function scopeLabel(selectedClaimIds, claims) {

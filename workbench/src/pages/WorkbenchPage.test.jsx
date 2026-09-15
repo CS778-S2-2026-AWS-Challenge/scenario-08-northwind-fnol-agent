@@ -8,6 +8,8 @@ const api = vi.hoisted(() => ({
   claimFilterMetadata: vi.fn(),
   claims: vi.fn(),
   claim: vi.fn(),
+  sessionsForTarget: vi.fn(),
+  messages: vi.fn(),
   conversations: vi.fn(),
   handoffs: vi.fn(),
   collaborationRequests: vi.fn(),
@@ -22,6 +24,10 @@ const tabs = vi.hoisted(() => ({
   activate: vi.fn(),
   close: vi.fn(),
   update: vi.fn(),
+}))
+
+const staffAgent = vi.hoisted(() => ({
+  onBusinessActionExecuted: null,
 }))
 
 vi.mock('../api.js', () => ({ workbenchApi: api }))
@@ -44,11 +50,14 @@ vi.mock('../components/ClaimWorkspace.jsx', () => ({
   </div>,
 }))
 vi.mock('../components/StaffAgent.jsx', () => ({
-  default: ({ open, requestedSessionId }) => open && (
-    <output data-testid="staff-agent-state">
-      {requestedSessionId ? `Restoring ${requestedSessionId}` : 'New session model'}
-    </output>
-  ),
+  default: ({ open, requestedSessionId, onBusinessActionExecuted }) => {
+    staffAgent.onBusinessActionExecuted = onBusinessActionExecuted
+    return open && (
+      <output data-testid="staff-agent-state">
+        {requestedSessionId ? `Restoring ${requestedSessionId}` : 'New session model'}
+      </output>
+    )
+  },
 }))
 
 const metadata = {
@@ -124,6 +133,9 @@ function renderPage(initialEntry) {
 describe('WorkbenchPage queue routing', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    tabs.tabs = []
+    tabs.activeId = null
+    staffAgent.onBusinessActionExecuted = null
     api.claimFilterMetadata.mockResolvedValue(metadata)
     api.claims.mockResolvedValue({
       items: [claim],
@@ -131,9 +143,71 @@ describe('WorkbenchPage queue routing', () => {
       view_counts: availableCounts,
     })
     api.claim.mockResolvedValue(claim)
+    api.sessionsForTarget.mockResolvedValue({
+      items: [{ session_id: 'ses_saved' }],
+      page: { next_cursor: null },
+      resolved_session: { session_id: 'ses_saved' },
+    })
+    api.messages.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.conversations.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.handoffs.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.collaborationRequests.mockResolvedValue({ items: [], page: { next_cursor: null } })
+  })
+
+  it('restores the persisted active Claim section and claimant session from the Workbench root', async () => {
+    tabs.tabs = [{
+      claimId: 'clm_route_1',
+      label: 'NW-900',
+      section: 'conversation',
+      sessionId: 'ses_saved',
+      draft: 'Saved claimant reply',
+      expandedRecords: [],
+      pendingAction: null,
+    }]
+    tabs.activeId = 'clm_route_1'
+
+    renderPage('/workbench?view=waiting_user&search=NW-900')
+
+    await waitFor(() => {
+      const location = screen.getByTestId('location').textContent
+      expect(location).toContain('/workbench/claims/clm_route_1/conversation?')
+      expect(location).toContain('view=waiting_user')
+      expect(location).toContain('search=NW-900')
+      expect(location).toContain('session=ses_saved')
+    })
+    await waitFor(() => expect(api.claim).toHaveBeenCalledWith('staff-token', 'clm_route_1'))
+    await waitFor(() => expect(api.sessionsForTarget).toHaveBeenCalledWith(
+      'staff-token',
+      'clm_route_1',
+      'ses_saved',
+    ))
+  })
+
+  it('keeps the bare Workbench queue when no persisted active Claim exists', async () => {
+    renderPage('/workbench')
+
+    expect(await screen.findByText('NW-900')).toBeInTheDocument()
+    expect(screen.getByTestId('location')).toHaveTextContent('/workbench')
+    expect(api.claim).not.toHaveBeenCalled()
+  })
+
+  it('does not override an explicit Claim route with a different persisted active tab', async () => {
+    tabs.tabs = [{
+      claimId: 'clm_old',
+      label: 'NW-OLD',
+      section: 'conversation',
+      sessionId: 'ses_old',
+      draft: '',
+      expandedRecords: [],
+      pendingAction: null,
+    }]
+    tabs.activeId = 'clm_old'
+
+    renderPage('/workbench/claims/clm_route_1')
+
+    await waitFor(() => expect(api.claim).toHaveBeenCalledWith('staff-token', 'clm_route_1'))
+    expect(screen.getByTestId('location')).toHaveTextContent('/workbench/claims/clm_route_1')
+    expect(screen.getByTestId('location')).not.toHaveTextContent('clm_old')
   })
 
   it('preserves an unpublished URL view and does not issue a guessed queue request', async () => {
@@ -462,4 +536,53 @@ describe('WorkbenchPage queue routing', () => {
     interval.mockRestore()
     clearInterval.mockRestore()
   })
+
+  it('propagates failed queue and open-Claim refreshes after an executed Staff Agent action', async () => {
+    renderPage('/workbench/claims/clm_route_1')
+
+    expect(await screen.findByTestId('claim-revision')).toHaveTextContent('Claim revision 1')
+    await waitFor(() => expect(staffAgent.onBusinessActionExecuted).toEqual(expect.any(Function)))
+
+    const queueFailure = Object.assign(new Error('Queue refresh failed.'), { requestId: 'req-queue-refresh' })
+    const claimFailure = new Error('Claim refresh failed.')
+    api.claims.mockRejectedValueOnce(queueFailure)
+    api.claim.mockRejectedValueOnce(claimFailure)
+
+    await expect(
+      staffAgent.onBusinessActionExecuted({
+        claim_id: 'clm_route_1',
+        action_code: 'work_item.update',
+        runtime_execution: { resulting_revision: 2 },
+      }),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('Claim queue, open Claim'),
+      requestId: 'req-queue-refresh',
+    })
+  })
+
+  it('propagates failed queue and conversations refreshes after an executed Staff Agent action', async () => {
+    renderPage('/workbench/conversations')
+
+    await waitFor(() => expect(api.conversations).toHaveBeenCalled())
+    await waitFor(() => expect(staffAgent.onBusinessActionExecuted).toEqual(expect.any(Function)))
+
+    api.claims.mockRejectedValueOnce(new Error('Queue refresh failed.'))
+    const conversationFailure = Object.assign(
+      new Error('Conversation refresh failed.'),
+      { requestId: 'req-conversation-refresh' },
+    )
+    api.conversations.mockRejectedValueOnce(conversationFailure)
+
+    await expect(
+      staffAgent.onBusinessActionExecuted({
+        claim_id: 'clm_route_1',
+        action_code: 'work_item.update',
+        runtime_execution: { resulting_revision: 2 },
+      }),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('Claim queue, conversations'),
+      requestId: 'req-conversation-refresh',
+    })
+  })
+
 })

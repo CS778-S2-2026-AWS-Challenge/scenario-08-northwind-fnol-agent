@@ -104,6 +104,22 @@ AGENT_TOOL_REGISTRY = MappingProxyType(
                 'additionalProperties': False,
             },
         ),
+        'evidence.history': AgentToolContract(
+            name='evidence.history',
+            description=(
+                "Read the authenticated claimant's bounded Evidence history across Claims."
+            ),
+            purpose='claimant_evidence_reuse_and_removal',
+            input_schema={
+                'type': 'object',
+                'properties': {
+                    'limit': {'type': 'integer', 'minimum': 1, 'maximum': 50},
+                    'cursor': {'type': 'string', 'minLength': 1},
+                },
+                'required': [],
+                'additionalProperties': False,
+            },
+        ),
         'review.professional': _tool(
             'review.professional',
             'Read whether a bounded professional-review request is already recorded.',

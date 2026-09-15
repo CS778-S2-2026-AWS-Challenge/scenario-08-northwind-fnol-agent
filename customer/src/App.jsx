@@ -59,12 +59,6 @@ const INPUT_LABELS = {
   describe_loss: 'Damage or loss',
 }
 
-const HANDOFF_STATUS_LABELS = {
-  queued: 'Queued',
-  accepted: 'Accepted by Northwind support',
-  in_progress: 'Support conversation in progress',
-}
-
 const FIELD_SOURCE_LABELS = {
   claimant: 'Provided by you',
   inference: 'Suggested from your description',
@@ -74,6 +68,8 @@ const FIELD_SOURCE_LABELS = {
   claim_history: 'From your previous claim information',
   staff: 'Provided by Northwind support',
 }
+
+const SUPPORT_HANDOFF_TYPES = new Set(['human_support', 'urgent_support'])
 
 function fieldLabel(fieldCode) {
   return FIELD_LABELS[fieldCode] || fieldCode.split('.').at(-1).replaceAll('_', ' ')
@@ -100,7 +96,105 @@ function fieldValueText(field) {
 }
 
 function messageText(message) {
-  return message?.content?.type === 'text' ? message.content.text : ''
+  if (typeof message?.content?.text === 'string') return message.content.text
+  if (typeof message?.content?.summary === 'string') return message.content.summary
+  return ''
+}
+
+function assistancePresentation({ handoff, nextStep, requesting, reviewingReply, completed }) {
+  if (requesting || ['requested', 'queued'].includes(handoff?.status)) {
+    return {
+      key: 'waiting',
+      title: 'Waiting for staff',
+      description: 'Your request has been sent. You can continue adding information while you wait.',
+    }
+  }
+  if (completed) {
+    return {
+      key: 'completed',
+      title: 'Staff assistance completed',
+      description: nextStep?.responsible_party === 'claimant'
+        ? 'You can continue your claim below.'
+        : 'No action needed from you right now.',
+    }
+  }
+  if (handoff && nextStep?.responsible_party === 'claimant' && !reviewingReply) {
+    return {
+      key: 'response_needed',
+      title: 'Your response is needed',
+      description: 'Northwind staff has asked for more information.',
+    }
+  }
+  if (handoff && reviewingReply) {
+    return {
+      key: 'reviewing_reply',
+      title: 'Staff is reviewing your reply',
+      description: 'No action needed from you right now.',
+    }
+  }
+  if (['accepted', 'in_progress'].includes(handoff?.status)) {
+    return {
+      key: 'staff_helping',
+      title: 'Staff is helping you',
+      description: 'A Northwind staff member is reviewing your information.',
+    }
+  }
+  return null
+}
+
+function buildConversationTimeline(messages, handoff, completedAssistance) {
+  const timeline = messages.map((message) => ({
+    key: message.message_id,
+    kind: 'message',
+    message,
+  }))
+  const recordedSystemText = messages
+    .filter((message) => message.actor === 'system')
+    .map((message) => messageText(message).toLowerCase())
+  const hasRecordedEvent = (eventText) => recordedSystemText.some((text) => (
+    text.includes(eventText.toLowerCase())
+  ))
+
+  if (handoff) {
+    const events = []
+    if (!hasRecordedEvent('staff assistance requested')) {
+      events.push({
+        key: `assistance-requested-${handoff.handoff_id}`,
+        kind: 'system-event',
+        text: 'Staff assistance requested',
+      })
+    }
+    if (
+      ['accepted', 'in_progress'].includes(handoff.status)
+      && !hasRecordedEvent('joined the conversation')
+    ) {
+      events.push({
+        key: `assistance-joined-${handoff.handoff_id}`,
+        kind: 'system-event',
+        text: 'Northwind staff joined the conversation',
+      })
+    }
+    const handoffStartedAt = Date.parse(handoff.created_at || '')
+    const firstCurrentStaffMessage = timeline.findIndex((item) => (
+      item.message?.actor === 'staff'
+      && (!Number.isFinite(handoffStartedAt)
+        || Date.parse(item.message.created_at || '') >= handoffStartedAt)
+    ))
+    const insertAt = firstCurrentStaffMessage >= 0 ? firstCurrentStaffMessage : timeline.length
+    timeline.splice(insertAt, 0, ...events)
+  }
+
+  if (
+    completedAssistance
+    && !hasRecordedEvent('staff assistance completed')
+  ) {
+    timeline.push({
+      key: `assistance-completed-${completedAssistance.handoff_id}`,
+      kind: 'system-event',
+      text: 'Staff assistance completed',
+    })
+  }
+  return timeline
 }
 
 function evidenceFileStatusLabel(fileStatus, status) {
@@ -194,6 +288,7 @@ function App() {
   const [editingField, setEditingField] = useState(null)
   const [editValue, setEditValue] = useState('')
   const [handoff, setHandoff] = useState(null)
+  const [assistanceReplyReview, setAssistanceReplyReview] = useState(null)
   const [claimHistory, setClaimHistory] = useState(null)
   const [claimHistoryError, setClaimHistoryError] = useState('')
   const [selectedHistoryClaimId, setSelectedHistoryClaimId] = useState(() => {
@@ -391,6 +486,49 @@ function App() {
   const serviceError = externalServiceInteraction.claimId === claim?.claim_id
     ? externalServiceInteraction.error
     : null
+  const reviewingAssistanceReply = Boolean(
+    assistanceReplyReview
+    && assistanceReplyReview.claimId === claim?.claim_id
+    && assistanceReplyReview.handoffId === handoff?.handoff_id,
+  )
+  const completedAssistance = !handoff
+    && claim?.resolved_support_handoff?.status === 'resolved'
+    && SUPPORT_HANDOFF_TYPES.has(claim.resolved_support_handoff.type)
+    ? claim.resolved_support_handoff
+    : null
+  const assistanceState = useMemo(() => assistancePresentation({
+    handoff,
+    nextStep,
+    requesting: status === 'requesting-support',
+    reviewingReply: reviewingAssistanceReply,
+    completed: Boolean(completedAssistance),
+  }), [
+    completedAssistance,
+    handoff,
+    nextStep,
+    reviewingAssistanceReply,
+    status,
+  ])
+  const conversationTimeline = useMemo(
+    () => buildConversationTimeline(messages, handoff, completedAssistance),
+    [completedAssistance, handoff, messages],
+  )
+
+  useEffect(() => {
+    setAssistanceReplyReview((current) => {
+      if (!current) return current
+      if (
+        current.claimId !== claim?.claim_id
+        || current.handoffId !== handoff?.handoff_id
+      ) return null
+      if (!current.messageId) return current
+      const replyIndex = messages.findIndex((message) => message.message_id === current.messageId)
+      if (replyIndex < 0) return current
+      return messages.slice(replyIndex + 1).some((message) => message.actor === 'staff')
+        ? null
+        : current
+    })
+  }, [claim?.claim_id, handoff?.handoff_id, messages])
 
   function rememberClaimRevision(revision) {
     const numericRevision = Number(revision || 0)
@@ -825,9 +963,17 @@ function App() {
     event.preventDefault()
     const text = draft.trim()
     if (!text || isBusy) return
+    const isAssistanceReply = assistanceState?.key === 'response_needed'
 
     setError('')
     setFailedMessage(null)
+    if (isAssistanceReply) {
+      setAssistanceReplyReview({
+        claimId: claim.claim_id,
+        handoffId: handoff.handoff_id,
+        messageId: null,
+      })
+    }
     setStatus(hasStarted ? 'sending' : 'starting')
     let messageWasSubmitted = Boolean(claim)
     try {
@@ -883,11 +1029,19 @@ function App() {
       if (turn.decision) setNextStep(turn.decision.customer_next_step)
       if (turn.handoff) setHandoff(turn.handoff)
       setDraft('')
+      if (isAssistanceReply) {
+        setAssistanceReplyReview({
+          claimId: activeClaim.claim_id,
+          handoffId: handoff.handoff_id,
+          messageId: turn.claimant_message.message_id,
+        })
+      }
       pendingSubmission.current = null
       setPendingMessage(null)
       setFailedMessage(null)
       setStatus('idle')
     } catch (requestError) {
+      if (isAssistanceReply) setAssistanceReplyReview(null)
       setPendingMessage(null)
       if (messageWasSubmitted) {
         const serverConfirmedFailure = requestError instanceof ApiRequestError
@@ -1044,6 +1198,7 @@ function App() {
   async function requestSupport() {
     if (!claim || isBusy || handoff) return
     setError('')
+    setAssistanceReplyReview(null)
     setStatus('requesting-support')
     try {
       if (!pendingSupportRequest.current) {
@@ -1418,9 +1573,16 @@ function App() {
         {hasStarted && !['login', 'register'].includes(page) && (
           <div className="header-actions">
             <button className="aux-link" type="button" onClick={() => setPage('home')}>Use the traditional web form</button>
-            <button className="support-button" type="button" onClick={requestSupport} disabled={isBusy || Boolean(handoff)}>
-              {status === 'requesting-support' ? 'Opening staff assistance...' : 'Staff Assistance'}
-            </button>
+            {status === 'requesting-support' || handoff ? (
+              <span className="header-assistance-chip">
+                <span aria-hidden="true">●</span>
+                {assistanceState?.title || 'Staff assistance active'}
+              </span>
+            ) : (
+              <button className="support-button" type="button" onClick={requestSupport} disabled={isBusy}>
+                Staff assistance
+              </button>
+            )}
           </div>
         )}
       </header>
@@ -1463,7 +1625,7 @@ function App() {
                 {page === 'claim-history'
                   ? 'Your Claims are listed by their latest server-recorded update. Open a Claim to review its available features.'
                   : page === 'claim-features'
-                    ? 'Choose the information you want to review for this Claim.'
+                    ? 'Review this Claim\'s current status and available information.'
                     : 'Review the files and supporting material recorded for the selected Claim.'}
               </p>
               {page === 'claim-history' && (
@@ -1773,7 +1935,7 @@ function App() {
                   : workspaceView === 'history'
                     ? 'Your Claims are listed by their latest server-recorded update. Open a Claim to review its available features.'
                     : workspaceView === 'claim-features'
-                      ? 'Choose the information you want to review for this Claim.'
+                      ? 'Review this Claim\'s current status and available information.'
                       : workspaceView === 'external-services'
                         ? 'See the external service currently recorded for this Claim, including what may be shared and what happens next.'
                         : workspaceView === 'account'
@@ -1853,10 +2015,27 @@ function App() {
             </div>
             <div className="conversation-heading">
               <div>
-                <div className="claim-status">{claim.incident_type || 'Claim'} · {handoff ? 'Support requested' : 'In progress'}</div>
+                <div className="claim-status">{claim.incident_type || 'Claim'} · {handoff ? 'Staff assistance active' : 'In progress'}</div>
                 <h1 id="conversation-title">{claim.claim_id}</h1>
               </div>
             </div>
+
+            {assistanceState && (
+              <section
+                className={`assistance-status assistance-status-${assistanceState.key}`}
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                <span className="assistance-status-icon" aria-hidden="true">
+                  {assistanceState.key === 'completed' ? '✓' : '●'}
+                </span>
+                <div>
+                  <h2>{assistanceState.title}</h2>
+                  <p>{assistanceState.description}</p>
+                </div>
+              </section>
+            )}
 
             <section
               className="journey-progress"
@@ -1886,22 +2065,56 @@ function App() {
             </section>
 
             <div className="message-list" aria-live="polite">
-              {messages.map((message) => message.actor === 'claimant' ? (
-                <article className="msg-user" key={message.message_id}>
-                  <div>
-                    <div className="user-bubble">{messageText(message)}</div>
-                    <div className="msg-meta">{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
-                  </div>
-                </article>
-              ) : (
-                <article className="msg-agent" key={message.message_id}>
-                  <div className="agent-bar" />
-                  <div className="agent-body">
-                    <div className="agent-label">Claims assistant</div>
-                    <div className="agent-text"><p>{messageText(message)}</p><button className="listen-message" type="button" onClick={() => { if (globalThis.speechSynthesis) { globalThis.speechSynthesis.cancel(); globalThis.speechSynthesis.speak(new SpeechSynthesisUtterance(messageText(message))) } }}>Listen</button></div>
-                  </div>
-                </article>
-              ))}
+              {conversationTimeline.map((item) => {
+                if (item.kind === 'system-event') {
+                  return (
+                    <div className="conversation-system-event" key={item.key}>
+                      <span aria-hidden="true">✓</span>
+                      <span>{item.text}</span>
+                    </div>
+                  )
+                }
+                const message = item.message
+                if (message.actor === 'claimant') {
+                  return (
+                    <article className="msg-user" key={item.key}>
+                      <div>
+                        <div className="user-bubble">{messageText(message)}</div>
+                        <div className="msg-meta">{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
+                      </div>
+                    </article>
+                  )
+                }
+                if (message.actor === 'staff') {
+                  return (
+                    <article className="msg-staff" key={item.key}>
+                      <div className="staff-mark" aria-hidden="true">N</div>
+                      <div className="staff-message-body">
+                        <div className="staff-label">Northwind staff</div>
+                        <div className="staff-bubble">{messageText(message)}</div>
+                        <div className="msg-meta">{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
+                      </div>
+                    </article>
+                  )
+                }
+                if (message.actor === 'system') {
+                  return (
+                    <div className="conversation-system-event" key={item.key}>
+                      <span aria-hidden="true">✓</span>
+                      <span>{messageText(message)}</span>
+                    </div>
+                  )
+                }
+                return (
+                  <article className="msg-agent" key={item.key}>
+                    <div className="agent-bar" />
+                    <div className="agent-body">
+                      <div className="agent-label">Claims assistant</div>
+                      <div className="agent-text"><p>{messageText(message)}</p><button className="listen-message" type="button" onClick={() => { if (globalThis.speechSynthesis) { globalThis.speechSynthesis.cancel(); globalThis.speechSynthesis.speak(new SpeechSynthesisUtterance(messageText(message))) } }}>Listen</button></div>
+                    </div>
+                  </article>
+                )
+              })}
               {status === 'sending' && pendingMessage && (
                 <article className="message message-claimant is-pending" aria-label="Message sending">
                   <p className="message-author">You</p>
@@ -1937,62 +2150,15 @@ function App() {
               </section>
             )}
 
-            {handoff && ['queued', 'accepted'].includes(handoff.status) && (
+            {isUrgentSupport && handoff && ['queued', 'accepted'].includes(handoff.status) && (
               <section
-                className={`transfer-state ${isUrgentSupport ? 'is-urgent' : ''}`}
+                className="transfer-state is-urgent"
                 aria-live="assertive"
                 aria-labelledby="transfer-title"
               >
-                <p className="transfer-label">
-                  {isUrgentSupport ? 'Urgent support' : 'Human support'}
-                </p>
-                <h2 id="transfer-title">
-                  {isUrgentSupport
-                    ? 'Normal intake has paused'
-                    : handoff.status === 'queued'
-                      ? 'Your support request is queued'
-                      : 'Northwind support is handling your request'}
-                </h2>
-                <p className="handoff-status">Status: {HANDOFF_STATUS_LABELS[handoff.status] || handoff.status}</p>
+                <p className="transfer-label">Urgent support</p>
+                <h2 id="transfer-title">Normal intake has paused</h2>
                 <p>{handoff.summary}</p>
-                <dl>
-                  <div>
-                    <dt>Next owner</dt>
-                    <dd>Northwind support</dd>
-                  </div>
-                  <div>
-                    <dt>Your claim</dt>
-                    <dd>Saved with the details already provided</dd>
-                  </div>
-                </dl>
-                <p>Your message will be saved for Northwind support. You can continue here, or ask for human help again if you need it.</p>
-              </section>
-            )}
-
-            {handoff?.status === 'in_progress' && (
-              <section className="transfer-state" role="status" aria-labelledby="active-support-title">
-                <p className="transfer-label">Staff assistance</p>
-                <h2 id="active-support-title">You are connected with Northwind</h2>
-                <p className="handoff-status">Status: {HANDOFF_STATUS_LABELS[handoff.status]}</p>
-                <p>{nextStep?.summary || 'A claims professional is continuing this conversation with you.'}</p>
-                <dl>
-                  <div>
-                    <dt>Conversation</dt>
-                    <dd>New staff messages appear here automatically</dd>
-                  </div>
-                  <div>
-                    <dt>Your claim</dt>
-                    <dd>Saved with the details already provided</dd>
-                  </div>
-                </dl>
-              </section>
-            )}
-
-            {!handoff && nextStep?.status === 'staff_update' && (
-              <section className="staff-update" role="status" aria-labelledby="staff-update-title">
-                <p className="transfer-label">Northwind update</p>
-                <h2 id="staff-update-title">Your support request has been reviewed</h2>
-                <p>{nextStep.summary}</p>
               </section>
             )}
 
@@ -2033,12 +2199,23 @@ function App() {
               draft={draft}
               setDraft={setDraft}
               onSubmit={sendMessage}
-              inputLabel={inputLabel}
+              inputLabel={assistanceState?.key === 'response_needed' ? 'Reply to Northwind staff' : inputLabel}
               busy={isBusy}
-              hint={proposedFields.length > 0 || proposedContentsItems.length > 0
-                ? 'You can keep describing the incident or correct a detail while these suggestions are waiting for review.'
-                : null}
-              buttonLabel={status === 'sending' ? 'Sending...' : failedMessage ? 'Retry message' : 'Send'}
+              hint={assistanceState?.key === 'reviewing_reply'
+                ? 'No action needed from you right now. You can still add information if needed.'
+                : proposedFields.length > 0 || proposedContentsItems.length > 0
+                  ? 'You can keep describing the incident or correct a detail while these suggestions are waiting for review.'
+                  : null}
+              placeholder={assistanceState?.key === 'response_needed'
+                ? 'Reply to Northwind staff...'
+                : 'Write the details you know...'}
+              buttonLabel={status === 'sending'
+                ? 'Sending...'
+                : failedMessage
+                  ? 'Retry message'
+                  : assistanceState?.key === 'response_needed'
+                    ? 'Send reply'
+                    : 'Send'}
               error={error}
               variant="workspace"
               claimType={claimType}

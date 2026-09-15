@@ -261,6 +261,12 @@ def test_primary_rear_end_journey_preserves_context_through_handoff(
     ).json()['items']
     assert latest_handoffs[0]['status'] == 'in_progress'
     assert latest_detail['customer_next_step']['status'] == 'human_support_in_progress'
+    resolve_action = next(
+        item
+        for item in latest_detail['allowed_actions']
+        if item['action_code'] == 'human.resolve_handoff'
+        and item['target_ref'] == handoff['handoff_id']
+    )
     claimant_request_index = next(
         index
         for index, item in enumerate(latest_messages)
@@ -288,7 +294,7 @@ def test_primary_rear_end_journey_preserves_context_through_handoff(
                 'reason_codes': ['SUPPORT_NEED_MET'],
                 'source_refs': handoff['packet']['source_refs'],
             },
-            'state_changes': [],
+            'state_changes': resolve_action['payload_defaults']['state_changes'],
             'customer_update': {
                 'summary': (
                     'A Northwind staff member has reviewed your report and will contact you.'

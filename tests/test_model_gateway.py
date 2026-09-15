@@ -1,5 +1,6 @@
 import json
 import os
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import cast
@@ -24,6 +25,17 @@ from backend.domain.configuration import (
     ConfigurationRecord,
     ConfigurationState,
     now_utc,
+)
+from backend.domain.external_service_registry import (
+    ExternalLifecycleStatus,
+    build_lifecycle_projection,
+)
+from backend.domain.external_services import (
+    ASSESSOR_REQUESTED_ACTION,
+    ASSESSOR_SERVICE_IDENTITY,
+    ExternalTaskDelivery,
+    ExternalTaskOperationStatus,
+    ExternalTaskRecord,
 )
 from backend.domain.knowledge import (
     KnowledgeChunk,
@@ -53,6 +65,8 @@ from backend.domain.models import (
     ActorType,
     AgentAction,
     AgentProposalSource,
+    AssessorRoutingResult,
+    AssessorRoutingStatus,
     AuthorityOutcome,
     Channel,
     ContentsItem,
@@ -63,6 +77,7 @@ from backend.domain.models import (
     FormSource,
     FormStatus,
     FraudSignal,
+    IntegrationSource,
     NeededFor,
     ResponsibleParty,
     StructuredFormField,
@@ -79,6 +94,7 @@ from backend.repositories.fixture import FixtureRepository
 from backend.repositories.operations import OperationRepository
 from backend.repositories.release_set import ReleaseSetRepository
 from backend.services.agent import (
+    AgentEvidenceReference,
     AgentTurnContext,
     InvariantGuardedAgent,
     authorised_state_changes,
@@ -1223,6 +1239,41 @@ class RuntimeSequenceGateway:
         return self.responses.pop(0)
 
 
+class MultimodalRuntimeGateway(RuntimeSequenceGateway):
+    def __init__(self, responses: list[ModelResponse]) -> None:
+        super().__init__(responses)
+        self.resolvers: list[object] = []
+
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return ModelCapabilities(
+            structured_output=True,
+            tools=True,
+            image_input=True,
+            document_input=True,
+        )
+
+    def complete_with_evidence(
+        self,
+        request: ModelRequest,
+        resolver: object,
+    ) -> ModelResponse:
+        self.resolvers.append(resolver)
+        self.requests.append(request)
+        return self.responses.pop(0)
+
+
+class MultimodalCompatibilityGateway(MultimodalRuntimeGateway):
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return ModelCapabilities(
+            structured_output=True,
+            tools=False,
+            image_input=True,
+            document_input=True,
+        )
+
+
 class StaticKnowledgeRetriever:
     def __init__(self, chunks: list[KnowledgeChunk]) -> None:
         self.chunks = chunks
@@ -1281,6 +1332,302 @@ def _runtime_model_output() -> dict[str, object]:
         },
         'source_refs': [],
     }
+
+
+def test_gateway_agent_keeps_attached_evidence_scoped_across_the_tool_round() -> None:
+    resolver = EvidenceResolver(b'claimant-image')
+    gateway = MultimodalRuntimeGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[ModelToolCall(call_id='read-claim', name='claim.read', arguments={})],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                provider_model='vision-model',
+                provider_request_id='vision-request',
+                structured_output={
+                    **_runtime_model_output(),
+                    'form_changes': [
+                        {
+                            'field_code': 'vehicle.damage_description',
+                            'value': 'Rear bumper damage is visible.',
+                            'confidence': 0.84,
+                            'source_evidence_id': 'evd_photo',
+                        }
+                    ],
+                },
+            ),
+        ]
+    )
+
+    proposal = GatewayAgent(gateway).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim(),
+            session_id='ses-multimodal',
+            trigger_message_id='msg-multimodal',
+            message_text='Please review the attached photo.',
+            evidence_refs=['evd_photo'],
+            evidence=(
+                AgentEvidenceReference(
+                    evidence_id='evd_photo',
+                    media_type='image/png',
+                ),
+            ),
+            evidence_resolver=resolver,
+        )
+    )
+
+    assert len(gateway.requests) == 2
+    assert gateway.resolvers == [resolver, resolver]
+    for request in gateway.requests:
+        assert request.required_capabilities.image_input is True
+        assert request.required_capabilities.document_input is False
+        evidence_blocks = [
+            block
+            for block in request.messages[1].content_blocks
+            if isinstance(block, ModelEvidenceContent)
+        ]
+        assert evidence_blocks == [
+            ModelEvidenceContent(evidence_id='evd_photo', media_type='image/png')
+        ]
+    context_block = cast(ModelTextContent, gateway.requests[0].messages[1].content_blocks[0])
+    model_context = json.loads(context_block.text)
+    assert model_context['attached_evidence'] == [
+        {'evidence_id': 'evd_photo', 'media_type': 'image/png'}
+    ]
+    change = proposal.form_changes[0]
+    assert change.source is FormSource.IMAGE
+    assert change.status is FormStatus.PROPOSED
+    assert change.source_evidence_id == 'evd_photo'
+    assert proposal.runtime_trace is not None
+    assert [item.model_dump() for item in proposal.runtime_trace.evidence] == [
+        {
+            'evidence_id': 'evd_photo',
+            'media_type': 'image/png',
+            'outcome': 'submitted',
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ('target_evidence_id', 'target_media_type'),
+    [
+        ('evd_photo', 'image/png'),
+        ('evd_inventory', 'application/pdf'),
+    ],
+)
+def test_gateway_agent_preserves_contents_attachment_provenance(
+    target_evidence_id: str,
+    target_media_type: str,
+) -> None:
+    gateway = MultimodalRuntimeGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(call_id='read-contents', name='claim.read', arguments={})
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output={
+                    **_runtime_model_output(),
+                    'contents_item_changes': [
+                        {
+                            'description': 'Laptop computer',
+                            'category': 'electronics',
+                            'quantity': 1,
+                            'loss_type': 'damaged',
+                            'ownership': 'owned',
+                            'confidence': 0.88,
+                            'source_evidence_id': target_evidence_id,
+                        }
+                    ],
+                },
+            ),
+        ]
+    )
+    evidence = (
+        AgentEvidenceReference(evidence_id='evd_photo', media_type='image/png'),
+        AgentEvidenceReference(evidence_id='evd_inventory', media_type='application/pdf'),
+    )
+
+    proposal = GatewayAgent(gateway).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim(),
+            session_id='ses-contents-evidence',
+            trigger_message_id='msg-contents-evidence',
+            message_text='My laptop was damaged. Please review these attachments.',
+            evidence_refs=[item.evidence_id for item in evidence],
+            evidence=evidence,
+            evidence_resolver=EvidenceResolver(b'contents-evidence'),
+        )
+    )
+
+    assert proposal.contents_item_changes[0].source_evidence_id == target_evidence_id
+    assert len(gateway.requests) == 2
+    assert all(request.required_capabilities.image_input for request in gateway.requests)
+    assert all(request.required_capabilities.document_input for request in gateway.requests)
+    assert target_media_type in {item.media_type for item in evidence}
+
+
+def test_gateway_agent_compatibility_path_preserves_contents_attachment_provenance() -> None:
+    response = model_turn_output()
+    gateway = MultimodalCompatibilityGateway(
+        [
+            response.model_copy(
+                update={
+                    'completion_status': ModelCompletionStatus.COMPLETE,
+                    'structured_output': {
+                        **cast(dict[str, object], response.structured_output),
+                        'contents_item_changes': [
+                            {
+                                'description': 'Laptop computer',
+                                'category': 'electronics',
+                                'quantity': 1,
+                                'loss_type': 'damaged',
+                                'ownership': 'owned',
+                                'source_evidence_id': 'evd_inventory',
+                            }
+                        ],
+                    },
+                }
+            )
+        ]
+    )
+    evidence = (
+        AgentEvidenceReference(evidence_id='evd_photo', media_type='image/png'),
+        AgentEvidenceReference(evidence_id='evd_inventory', media_type='application/pdf'),
+    )
+
+    proposal = GatewayAgent(gateway).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim(),
+            session_id='ses-contents-evidence-compatibility',
+            trigger_message_id='msg-contents-evidence-compatibility',
+            message_text='My laptop was damaged. Please review these attachments.',
+            evidence_refs=[item.evidence_id for item in evidence],
+            evidence=evidence,
+            evidence_resolver=EvidenceResolver(b'contents-evidence'),
+        )
+    )
+
+    assert proposal.contents_item_changes[0].source_evidence_id == 'evd_inventory'
+    assert len(gateway.requests) == 1
+
+
+def test_gateway_agent_rejects_unattached_contents_evidence_source() -> None:
+    gateway = MultimodalRuntimeGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(call_id='read-contents', name='claim.read', arguments={})
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output={
+                    **_runtime_model_output(),
+                    'contents_item_changes': [
+                        {
+                            'description': 'Laptop computer',
+                            'category': 'electronics',
+                            'quantity': 1,
+                            'loss_type': 'damaged',
+                            'ownership': 'owned',
+                            'source_evidence_id': 'evd_not_attached',
+                        }
+                    ],
+                },
+            ),
+        ]
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        GatewayAgent(gateway).propose_turn(
+            AgentTurnContext(
+                claim=_working_claim(),
+                session_id='ses-unattached-contents',
+                trigger_message_id='msg-unattached-contents',
+                message_text='Review the attached contents photo.',
+                evidence_refs=['evd_photo'],
+                evidence=(AgentEvidenceReference(evidence_id='evd_photo', media_type='image/png'),),
+                evidence_resolver=EvidenceResolver(b'contents-evidence'),
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+
+
+def test_gateway_agent_rejects_an_unattached_model_evidence_source() -> None:
+    resolver = EvidenceResolver()
+    gateway = MultimodalRuntimeGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[ModelToolCall(call_id='read-claim', name='claim.read', arguments={})],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output={
+                    **_runtime_model_output(),
+                    'form_changes': [
+                        {
+                            'field_code': 'vehicle.damage_description',
+                            'value': 'Unsupported damage claim.',
+                            'source_evidence_id': 'evd_other_claim',
+                        }
+                    ],
+                },
+            ),
+        ]
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        GatewayAgent(gateway).propose_turn(
+            AgentTurnContext(
+                claim=_working_claim(),
+                session_id='ses-source-guard',
+                trigger_message_id='msg-source-guard',
+                message_text='Review this attachment.',
+                evidence_refs=['evd_photo'],
+                evidence=(
+                    AgentEvidenceReference(
+                        evidence_id='evd_photo',
+                        media_type='image/jpeg',
+                    ),
+                ),
+                evidence_resolver=resolver,
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+
+
+def test_gateway_agent_requires_a_turn_scoped_resolver_for_evidence() -> None:
+    gateway = MultimodalRuntimeGateway([])
+
+    with pytest.raises(ModelGatewayError) as captured:
+        GatewayAgent(gateway).propose_turn(
+            AgentTurnContext(
+                claim=_working_claim(),
+                session_id='ses-no-resolver',
+                trigger_message_id='msg-no-resolver',
+                message_text='Review this attachment.',
+                evidence_refs=['evd_photo'],
+                evidence=(
+                    AgentEvidenceReference(
+                        evidence_id='evd_photo',
+                        media_type='image/jpeg',
+                    ),
+                ),
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.EVIDENCE_UNAVAILABLE
+    assert gateway.requests == []
 
 
 def test_gateway_runtime_handoff_proposal_remains_advisory() -> None:
@@ -1605,6 +1952,7 @@ def submit_model_message(
     protocol: str,
     message_text: str = 'A synthetic rear-end incident.',
     tools: bool = False,
+    repository_setup: Callable[[FixtureRepository, str], None] | None = None,
 ) -> tuple[httpx.Response, FixtureRepository, WorkingClaim, str, str]:
     registry = ModelGatewayRegistry()
     registry.register(protocol, lambda _config: gateway)
@@ -1626,6 +1974,8 @@ def submit_model_message(
         assert created.status_code == 201
         claim_id = created.json()['claim']['claim_id']
         session_id = created.json()['session']['session_id']
+        if repository_setup is not None:
+            repository_setup(repository, claim_id)
         before_claim = repository.get_claim(claim_id, 'cus_demo')
         assert before_claim is not None
         response = client.post(
@@ -1633,7 +1983,7 @@ def submit_model_message(
             headers={
                 **headers,
                 'Idempotency-Key': f'{protocol}-message',
-                'If-Match': '1',
+                'If-Match': str(before_claim.revision),
             },
             json={
                 'client_message_id': f'{protocol}-client-message',
@@ -1935,7 +2285,7 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
             session_id='ses-gateway',
             trigger_message_id='msg-gateway',
             message_text='Please create the claim.',
-            evidence_refs=['evd_private_gateway'],
+            evidence_refs=[],
         )
     )
 
@@ -1947,8 +2297,10 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
     assert set(model_context) == {
         'branch',
         'claim',
+        'external_services',
         'message_text',
         'evidence_reference_count',
+        'attached_evidence',
         'professional_review_required',
         'knowledge_status',
         'knowledge_citations',
@@ -1958,8 +2310,10 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
         'conversation_history',
         'field_value_contracts',
     }
+    assert model_context['external_services'] == []
     assert model_context['branch'] is None
-    assert model_context['evidence_reference_count'] == 1
+    assert model_context['evidence_reference_count'] == 0
+    assert model_context['attached_evidence'] == []
     assert model_context['knowledge_status'] == 'not_requested'
     assert model_context['knowledge_citations'] == []
     assert model_context['knowledge_limitations'] == []
@@ -2033,6 +2387,123 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
         'total_tokens': 40,
         'latency_ms': operation.result['latency_ms'],
     }
+
+
+def test_gateway_agent_receives_only_bounded_external_lifecycle_context() -> None:
+    gateway = StaticGateway(ModelResponse(structured_output=_model_proposal_output()))
+    lifecycle = build_lifecycle_projection(
+        service_identity='vehicle_damage_assessment_routing',
+        operation_status=ExternalLifecycleStatus.UNKNOWN_OUTCOME,
+    )
+
+    GatewayAgent(gateway).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim(),
+            session_id='ses-external-context',
+            trigger_message_id='msg-external-context',
+            message_text='Did the assessor receive the request?',
+            evidence_refs=[],
+            external_services=(lifecycle,),
+        )
+    )
+
+    assert gateway.last_request is not None
+    model_content = gateway.last_request.messages[1].content
+    assert model_content is not None
+    model_context = json.loads(model_content)
+    assert model_context['external_services'] == [lifecycle.model_dump(mode='json')]
+    serialised_context = json.dumps(model_context['external_services'])
+    assert 'provider_reference' not in serialised_context
+    assert 'delivery_evidence' not in serialised_context
+    assert 'staff_meaning' not in serialised_context
+
+
+def test_message_turn_persists_selected_external_lifecycle_coordinates() -> None:
+    def seed_external_task(repository: FixtureRepository, claim_id: str) -> None:
+        timestamp = datetime(2026, 9, 15, 1, 0, tzinfo=UTC)
+        repository.save_external_task(
+            ExternalTaskRecord(
+                task_id='task-runtime-context',
+                claim_id=claim_id,
+                service_identity=ASSESSOR_SERVICE_IDENTITY,
+                requested_action=ASSESSOR_REQUESTED_ACTION,
+                integration_source=IntegrationSource.FIXTURE,
+                status=ExternalTaskOperationStatus.ACCEPTED,
+                delivery=ExternalTaskDelivery.SUBMITTED,
+                delivery_evidence='Controlled simulation acknowledgement.',
+                provider_reference='simulation-reference',
+                created_at=timestamp,
+                updated_at=timestamp,
+            ),
+            'cus_demo',
+        )
+        claim = repository.get_claim_internal(claim_id)
+        assert claim is not None
+        repository.save_claim(
+            claim.model_copy(
+                update={
+                    'revision': claim.revision + 1,
+                    'assessor_routing': AssessorRoutingResult(
+                        routing_status=AssessorRoutingStatus.ASSIGNED,
+                        assessor_reference='simulation-reference',
+                        queue_reference='queue-runtime-context',
+                        next_step='Await the simulated assessment.',
+                    ),
+                    'assessor_routing_fingerprint': 'runtime-context-fingerprint',
+                }
+            ),
+            expected_revision=claim.revision,
+        )
+
+    gateway = RuntimeSequenceGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='external-lifecycle-read',
+                        name='claim.read',
+                        arguments={},
+                    )
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output=_runtime_model_output(),
+            ),
+        ]
+    )
+    response, repository, _before_claim, claim_id, _session_id = submit_model_message(
+        gateway,
+        protocol='external_lifecycle_evidence',
+        tools=True,
+        repository_setup=seed_external_task,
+    )
+
+    assert response.status_code == 200, response.text
+    model_context = json.loads(gateway.requests[-1].messages[1].content or '{}')
+    assert model_context['external_services'][0]['operation_status'] == 'assigned'
+    assert model_context['external_services'][0]['status_label'] == 'Assessor assigned'
+    runtime_turn = repository.get_runtime_turn_for_trigger(
+        claim_id,
+        response.json()['claimant_message']['message_id'],
+        'cus_demo',
+    )
+    assert runtime_turn is not None
+    assert runtime_turn.turn_plan.registry_versions == {
+        'external_service_lifecycle': 'external-service-lifecycle.v1'
+    }
+    assert [
+        item.model_dump(mode='json') for item in runtime_turn.turn_plan.external_lifecycle_context
+    ] == [
+        {
+            'registry_version': 'external-service-lifecycle.v1',
+            'service_identity': ASSESSOR_SERVICE_IDENTITY,
+            'operation_status': 'assigned',
+            'result_status': None,
+            'result_verification': None,
+        }
+    ]
 
 
 def test_gateway_agent_receives_bounded_branch_context() -> None:
@@ -3094,6 +3565,53 @@ def test_published_model_capabilities_project_image_and_document_support() -> No
         image_input=True,
         document_input=True,
     )
+
+
+def test_configuration_backed_gateway_injects_only_the_call_resolver() -> None:
+    resolver = EvidenceResolver(b'authorised-image')
+    constructed: list[ModelGatewayConfig] = []
+    registry = ModelGatewayRegistry()
+
+    def build_recording_gateway(config: ModelGatewayConfig) -> ModelGateway:
+        constructed.append(config)
+        return StaticGateway(
+            ModelResponse(text='ok', completion_status=ModelCompletionStatus.COMPLETE)
+        )
+
+    registry.register('openai_compatible', build_recording_gateway)
+    settings = Settings(
+        environment='test',
+        data_runtime_profile=DataRuntimeProfile.FIXTURE,
+        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_protocol_adapter='openai_compatible',
+        model_profile_id='vision-profile',
+        model_provider='synthetic-provider',
+        model_identifier='vision-model',
+        model_base_url='https://model.example.test/v1',
+        model_supports_image_input=True,
+    )
+    gateway = ConfigurationBackedModelGateway(
+        settings,
+        ConfigurationRepository(),
+        registry,
+    )
+    request = ModelRequest(
+        model_profile_id='vision-profile',
+        messages=[
+            ModelMessage(
+                role=ModelRole.USER,
+                content_blocks=[
+                    ModelEvidenceContent(evidence_id='evd_photo', media_type='image/png')
+                ],
+            )
+        ],
+        required_capabilities=ModelCapabilities(image_input=True),
+    )
+
+    gateway.complete_with_evidence(request, resolver)
+
+    assert len(constructed) == 1
+    assert constructed[0].evidence_resolver is resolver
 
 
 def test_current_prompt_has_a_new_identifier_and_bounded_rag_instructions() -> None:
