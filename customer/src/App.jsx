@@ -819,7 +819,12 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claim?.claim_id, evidencePollingKey])
 
-  async function handleFileSelected(file, existingAttempt = null, requestedKind = null) {
+  async function handleFileSelected(
+    file,
+    existingAttempt = null,
+    requestedKind = null,
+    requestedEvidenceId = null,
+  ) {
     if (isBusy) return
     if (!hasClaimantAccessToken()) {
       setError('Sign in before uploading a file. Your anonymous conversation is still available, and you can resume it after signing in.')
@@ -833,6 +838,7 @@ function App() {
       uploadKey: requestId('evidence-upload'),
       completeKey: requestId('evidence-complete'),
       kind: requestedKind || (file.type.startsWith('image/') ? 'incident_photo' : 'other_document'),
+      evidenceId: requestedEvidenceId,
     }
     const localId = attempt.localId
     evidenceUploadControllers.current.get(localId)?.abort()
@@ -886,6 +892,7 @@ function App() {
         revision: activeClaim.revision,
         file,
         kind: attempt.kind,
+        evidenceId: attempt.evidenceId,
         idempotencyKey: attempt.uploadKey,
         signal: uploadController.signal,
       })
@@ -2464,7 +2471,12 @@ function App() {
                   items={evidenceItems}
                   loadStatus={evidenceLoadStatus}
                   busy={isBusy}
-                  onUpload={(item, file) => handleFileSelected(file, null, item.kind)}
+                  onUpload={(item, file) => handleFileSelected(
+                    file,
+                    null,
+                    item.kind,
+                    item.evidence_id,
+                  )}
                   onView={openCurrentClaimEvidence}
                 />
               )}
