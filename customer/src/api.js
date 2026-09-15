@@ -253,11 +253,17 @@ export function updateClaimFields({ claimId, revision, updates }) {
   })
 }
 
-export function requestEvidenceUpload({ claimId, revision, file, kind = 'other_document', idempotencyKey = requestId('evidence-upload'), signal }) {
+export function requestEvidenceUpload({ claimId, revision, file, kind = 'other_document', evidenceId = null, idempotencyKey = requestId('evidence-upload'), signal }) {
   return apiRequest(`/api/v1/claims/${claimId}/evidence/uploads`, {
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(revision) },
-    body: JSON.stringify({ kind, original_filename: file.name, media_type: file.type, size_bytes: file.size }),
+    body: JSON.stringify({
+      ...(evidenceId ? { evidence_id: evidenceId } : {}),
+      kind,
+      original_filename: file.name,
+      media_type: file.type,
+      size_bytes: file.size,
+    }),
     signal,
   })
 }

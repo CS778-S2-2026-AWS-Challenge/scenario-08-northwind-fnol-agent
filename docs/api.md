@@ -2341,6 +2341,16 @@ the task remains `accepted`; counting it as waiting would tell staff the claim i
 external party while the same claim's external-request lifecycle reports that the result requires
 their review.
 
+On the Claim-detail response only, `integration_summary.claim_number` and
+`integration_summary.expected_by` project the authoritative persisted
+`WorkingClaim.external_claim` result alongside `claim_creation_status`. When no external Claim
+result exists, all three values are `null`. `claim_number` is never derived from
+`display_reference`, workflow state, queue state, or status copy, and `expected_by` is not
+invented from a client-side SLA or fixture convention. The queue-list response retains the shared
+`WorkbenchIntegrationSummary` contract and does not publish `claim_number` or `expected_by`;
+staff must open Claim detail to read those two result fields. Claim creation remains owned by the
+existing integration boundary.
+
 `section_summaries` reports availability, counts, and attention totals. Complete records are loaded
 only when staff opens a section:
 
