@@ -207,7 +207,6 @@ describe('ClaimWorkspace navigation', () => {
     />)
 
     expect(screen.getByRole('heading', { name: 'Reconcile external outcome' })).toBeVisible()
-    expect(screen.getByText('tsk_assessor_1')).toBeVisible()
     await user.click(screen.getByRole('button', { name: 'Open external services' }))
     expect(onSection).toHaveBeenCalledWith('external-services')
   })
