@@ -51,23 +51,41 @@ describe('Conversation', () => {
         }],
       },
       resource: { items: [], resolved_session_id: 'ses_1' },
-      handoffResource: { status: 'available', items: [] },
       draft: 'Ready',
       onDraft: vi.fn(),
       onSend: vi.fn(),
     })
 
     expect(screen.getByText('Staff messaging not available yet')).toBeVisible()
-    expect(screen.getByText('An accepted staff handoff is required before you can message the claimant.')).toBeVisible()
+    expect(screen.getByText('Messaging is not available for this claim yet.')).toBeVisible()
+    expect(screen.queryByText(/accepted staff handoff is required/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/action|projected/i)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
   })
 
-  it('uses a generic unavailable explanation when handoff state is not reliable', () => {
+  it.each([
+    {
+      name: 'queued handoff assigned to another staff member',
+      allowedActions: [{
+        action_code: 'human.accept_handoff',
+        target_ref: 'hnd_1',
+        availability: 'blocked',
+        blocked_reason: 'This work is assigned to another staff member.',
+      }],
+    },
+    {
+      name: 'terminal Claim with no active handoff',
+      allowedActions: [{
+        action_code: 'claim.reopen',
+        target_ref: 'clm_1',
+        availability: 'blocked',
+        blocked_reason: 'A created external Claim cannot be reopened from FNOL intake.',
+      }],
+    },
+  ])('uses a neutral unavailable explanation for a $name', ({ allowedActions }) => {
     renderConversation({
-      detail,
+      detail: { ...detail, allowed_actions: allowedActions },
       resource: { items: [], resolved_session_id: 'ses_1' },
-      handoffResource: { status: 'unavailable', items: [], error: new Error('Unavailable') },
       draft: '',
       onDraft: vi.fn(),
       onSend: vi.fn(),
@@ -75,7 +93,8 @@ describe('Conversation', () => {
 
     expect(screen.getByText('Staff messaging not available yet')).toBeVisible()
     expect(screen.getByText('Messaging is not available for this claim yet.')).toBeVisible()
-    expect(screen.queryByText(/handoff is required/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/accepted staff handoff is required/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(allowedActions[0].blocked_reason)).not.toBeInTheDocument()
   })
 
   it('submits an available exact-target message action with the displayed session', async () => {

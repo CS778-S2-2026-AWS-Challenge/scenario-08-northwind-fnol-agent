@@ -36,7 +36,7 @@ export default function ClaimWorkspace({ detail, resources = {}, loading, error,
       </nav>
       <div role="tabpanel" id={`claim-panel-${section}`} aria-labelledby={`claim-tab-${section}`}>
         {section === 'summary' && <Overview key={detail.claim_id} detail={interactionDetail} handoffs={resources.handoffs?.items || []} collaborationRequests={resources.collaborationRequests?.items || []} supportingState={[resources.handoffs, resources.collaborationRequests]} profile={profile} onAccept={onAccept} onResolve={onResolve} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onSection={onSection} onRetry={onRetry} />}
-        {section === 'conversation' && <Conversation key={detail.claim_id} detail={interactionDetail} resource={resources.messages} handoffResource={resources.handoffs} draft={draft} onDraft={onDraft} onSend={onSend} onRetry={onRetrySection} />}
+        {section === 'conversation' && <Conversation key={detail.claim_id} detail={interactionDetail} resource={resources.messages} draft={draft} onDraft={onDraft} onSend={onSend} onRetry={onRetrySection} />}
         {section === 'fields' && <ClaimFields resource={resources.fields} onRetry={onRetrySection} />}
         {section === 'evidence' && <ResourceBoundary resource={resources.evidence} onRetry={onRetrySection}><EvidenceRecords claimId={detail.claim_id} records={resources.evidence?.items || []} onLoadEvidence={onLoadEvidence} /></ResourceBoundary>}
         {section === 'references' && <ResourceBoundary resource={resources.retrievals} onRetry={onRetrySection}><ReferenceRecords records={resources.retrievals?.items || []} /></ResourceBoundary>}

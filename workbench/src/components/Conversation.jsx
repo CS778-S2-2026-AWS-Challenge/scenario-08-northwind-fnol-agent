@@ -4,7 +4,7 @@ import { formatDateTime, words } from '../format.js'
 import { canSubmitProjectedAction, findProjectedAction } from '../projected-action.js'
 import ResourceBoundary from './ResourceBoundary.jsx'
 
-export default function Conversation({ detail, resource, handoffResource, draft, onDraft, onSend, onRetry }) {
+export default function Conversation({ detail, resource, draft, onDraft, onSend, onRetry }) {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState('')
   const messageSessionId = resource?.items?.find(
@@ -26,16 +26,6 @@ export default function Conversation({ detail, resource, handoffResource, draft,
     displayedSessionId,
   )
   const canSend = isCurrentSession && canSubmitProjectedAction(sendAction)
-  const handoffsAvailable = handoffResource?.status === 'available'
-    && !handoffResource.loading
-    && !handoffResource.error
-  const hasAcceptedHandoff = handoffResource?.items?.some(
-    (handoff) => ['accepted', 'in_progress'].includes(handoff.status),
-  )
-  const handoffRequired = !historicalSession
-    && !canSend
-    && handoffsAvailable
-    && !hasAcceptedHandoff
 
   async function submit(event) {
     event.preventDefault()
@@ -60,9 +50,7 @@ export default function Conversation({ detail, resource, handoffResource, draft,
     : 'Staff messaging not available yet'
   const unavailableMessage = historicalSession
     ? 'Open the active claimant conversation to send a message.'
-    : handoffRequired
-      ? 'An accepted staff handoff is required before you can message the claimant.'
-      : sendAction?.blocked_reason || 'Messaging is not available for this claim yet.'
+    : sendAction?.blocked_reason || 'Messaging is not available for this claim yet.'
 
   return (
     <ResourceBoundary resource={resource} onRetry={onRetry}>
