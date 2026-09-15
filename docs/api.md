@@ -1830,7 +1830,11 @@ Attaches an eligible Evidence object from another Claim owned by the same
 claimant. This creates an auditable relation to the existing `evidence_id`; it
 does not copy file bytes or expose a storage key. The request requires the
 source Claim, Runtime proposal reference, claimant confirmation reference,
-`Idempotency-Key`, and `If-Match` for the target Claim revision.
+`Idempotency-Key`, and `If-Match` for the target Claim revision. `proposal_ref` must identify a
+persisted Runtime proposal for this Claim, active session, Evidence, source Claim, action, and
+revision. `confirmation_ref` must identify a later claimant-visible `MessageRecord` in that same
+session containing the claimant's explicit confirmation. References supplied only in the request
+body are not authorization evidence and are rejected before any mutation.
 
 The response is a typed action result with `status`, `reason_code`, the target
 revision when applied, and `state_change_refs`. `succeeded` is returned only
@@ -1848,7 +1852,7 @@ item is reused from another Claim, removal detaches only the target relation;
 the source Evidence remains available from its original Claim. Physical object
 deletion is not performed by the browser or Agent.
 
-The request and response use the same confirmation, idempotency, revision, and
+The request and response use the same persisted proposal/confirmation, idempotency, revision, and
 typed-outcome rules as `reuse`. A rejected or ambiguous result does not claim
 that the item was removed; the client must refresh the authoritative history
 and reconcile an unknown outcome with the same idempotency key.

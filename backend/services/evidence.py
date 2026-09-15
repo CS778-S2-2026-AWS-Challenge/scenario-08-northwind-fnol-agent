@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 
 from backend.adapters.evidence_storage import (
@@ -42,6 +43,7 @@ from backend.domain.models import (
     EvidenceWaitType,
     FormSource,
     FormStatus,
+    MessageVisibility,
     NeededFor,
     PageInfo,
     RegisterEvidenceRequest,
@@ -90,6 +92,108 @@ _REPLACEABLE_FILE_STATUSES = frozenset(
 )
 
 _REQUIREMENT_PROVENANCE_KEYS = frozenset({'captured_at', 'reported_in_message_id'})
+
+_EXPLICIT_CONFIRMATION_PATTERN = re.compile(
+    r'\b(?:yes|yeah|yep|confirm(?:ed)?|i agree|go ahead|please do(?: it)?|'
+    r'please (?:reuse|remove|attach|detach) (?:it|this|that)?)\b',
+    re.IGNORECASE,
+)
+_NEGATED_CONFIRMATION_PATTERN = re.compile(
+    r"\b(?:no|not|don't|do not|cancel|never|rather not)\b", re.IGNORECASE
+)
+
+
+def _message_text(message: object) -> str:
+    content = getattr(message, 'content', None)
+    if not isinstance(content, dict):
+        return ''
+    text = content.get('text')
+    return text.strip() if isinstance(text, str) else ''
+
+
+def _is_explicit_evidence_confirmation(text: str) -> bool:
+    return (
+        bool(text)
+        and not _NEGATED_CONFIRMATION_PATTERN.search(text)
+        and bool(_EXPLICIT_CONFIRMATION_PATTERN.search(text))
+    )
+
+
+def _validate_persisted_evidence_action_authority(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    *,
+    action: str,
+    evidence_id: str,
+    source_claim_id: str,
+    proposal_ref: str,
+    confirmation_ref: str,
+    expected_revision: int,
+) -> None:
+    """Bind a public Evidence mutation to one persisted Runtime proposal and reply."""
+
+    expected_action = f'claim.propose_evidence_{action}'
+    matching_turn = None
+    for session in repository.list_sessions_for_claim(claim.claim_id, claim.customer_id):
+        for message in repository.list_messages(
+            claim.claim_id,
+            session.session_id,
+            claim.customer_id,
+        ):
+            if message.actor is not ActorType.CLAIMANT:
+                continue
+            runtime_turn = repository.get_runtime_turn_for_trigger(
+                claim.claim_id,
+                message.message_id,
+                claim.customer_id,
+            )
+            if runtime_turn is not None and runtime_turn.proposal.proposal_id == proposal_ref:
+                matching_turn = runtime_turn
+                break
+        if matching_turn is not None:
+            break
+
+    if matching_turn is None:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The Evidence action proposal is not a persisted Runtime proposal.',
+        )
+
+    proposal = matching_turn.proposal
+    if (
+        matching_turn.turn_plan.session_id != claim.active_session_id
+        or proposal.action_code != expected_action
+        or proposal.claim_id != claim.claim_id
+        or proposal.evidence_id != evidence_id
+        or proposal.source_claim_id != source_claim_id
+        or matching_turn.result.resulting_claim_revision != expected_revision
+        or matching_turn.result.resulting_claim_revision != claim.revision
+    ):
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The Evidence action proposal does not match the current Claim context.',
+        )
+
+    confirmation = repository.get_message(
+        claim.claim_id,
+        matching_turn.turn_plan.session_id,
+        confirmation_ref,
+        claim.customer_id,
+    )
+    if (
+        confirmation is None
+        or confirmation.actor is not ActorType.CLAIMANT
+        or confirmation.visibility is not MessageVisibility.CLAIMANT_VISIBLE
+        or confirmation.created_at <= proposal.created_at
+        or not _is_explicit_evidence_confirmation(_message_text(confirmation))
+    ):
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The Evidence action confirmation is not a persisted claimant confirmation.',
+        )
 
 
 def _material_source_ref(evidence_id: str, version: int) -> str:
@@ -499,6 +603,36 @@ def execute_evidence_action(
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _claim_not_found()
+    backend_route = f'/internal/v1/claims/{claim_id}/evidence-actions/{action_code}'
+    backend_fingerprint = request_fingerprint(
+        {
+            'action_code': action_code,
+            'claim_id': claim_id,
+            'evidence_id': evidence_id,
+            'source_claim_id': payload.source_claim_id,
+            'expected_revision': expected_revision,
+            'proposal_ref': payload.proposal_ref,
+            'confirmation_ref': payload.confirmation_ref,
+        }
+    )
+    existing = repository.find_idempotency(principal.subject, backend_route, key)
+    if existing is not None and existing.request_fingerprint != backend_fingerprint:
+        raise ApiError(
+            status_code=409,
+            code='IDEMPOTENCY_CONFLICT',
+            message='The idempotency key was already used for a different Evidence action.',
+        )
+    if existing is None:
+        _validate_persisted_evidence_action_authority(
+            repository,
+            claim,
+            action=action,
+            evidence_id=evidence_id,
+            source_claim_id=payload.source_claim_id,
+            proposal_ref=payload.proposal_ref,
+            confirmation_ref=payload.confirmation_ref,
+            expected_revision=expected_revision,
+        )
     command = build_claim_context_command(
         action_code,
         {
