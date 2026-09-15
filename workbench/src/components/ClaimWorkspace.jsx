@@ -40,7 +40,7 @@ export default function ClaimWorkspace({ detail, resources = {}, loading, error,
         {section === 'fields' && <ClaimFields resource={resources.fields} onRetry={onRetrySection} />}
         {section === 'evidence' && <ResourceBoundary resource={resources.evidence} onRetry={onRetrySection}><EvidenceRecords claimId={detail.claim_id} records={resources.evidence?.items || []} onLoadEvidence={onLoadEvidence} /></ResourceBoundary>}
         {section === 'references' && <ResourceBoundary resource={resources.retrievals} onRetry={onRetrySection}><ReferenceRecords records={resources.retrievals?.items || []} /></ResourceBoundary>}
-        {section === 'external-services' && <ResourceBoundary resource={resources.externalRequests} onRetry={onRetrySection}><ExternalServiceRecords records={resources.externalRequests?.items || []} /></ResourceBoundary>}
+        {section === 'external-services' && <ResourceBoundary resource={resources.externalRequests} onRetry={onRetrySection}><ExternalServiceRecords records={resources.externalRequests?.items || []} capabilities={detail.external_capabilities || []} /></ResourceBoundary>}
         {section === 'signals' && <ResourceBoundary resource={resources.signals} onRetry={onRetrySection}><SignalReviews key={detail.claim_id} signals={resources.signals?.items || []} allowedActions={interactionDetail.allowed_actions} onDecision={onSignalDecision} /></ResourceBoundary>}
         {section === 'activity' && <Activity key={detail.claim_id} detail={interactionDetail} resources={resources} onResolve={onResolve} onUpdateAction={onUpdateAction} onRetry={onRetrySection} />}
       </div>

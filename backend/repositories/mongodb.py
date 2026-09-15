@@ -44,6 +44,7 @@ from backend.domain.models import (
     ClaimCollaborationRequest,
     ClaimCoworkerRecord,
     CustomerUpdateRecord,
+    EvidenceClaimLink,
     EvidenceRecord,
     FollowUpRecord,
     FollowUpStatus,
@@ -1970,6 +1971,28 @@ class MongoDBRepository:
             if evidence is not None
         ]
 
+    def get_evidence_claim_link(
+        self, target_claim_id: str, evidence_id: str, customer_id: str
+    ) -> EvidenceClaimLink | None:
+        if not self._claim_owned(target_claim_id, customer_id):
+            return None
+        return self._get(
+            'evidence_claim_link',
+            f'{target_claim_id}:{evidence_id}',
+            EvidenceClaimLink,
+            customer_id=customer_id,
+        )
+
+    def list_evidence_claim_links(
+        self, customer_id: str, target_claim_id: str | None = None
+    ) -> list[EvidenceClaimLink]:
+        filters: dict[str, Any] = {'customer_id': customer_id}
+        if target_claim_id is not None:
+            if not self._claim_owned(target_claim_id, customer_id):
+                return []
+            filters['target_claim_id'] = target_claim_id
+        return self._list('evidence_claim_link', EvidenceClaimLink, filters, 'created_at')
+
     def save_external_task(self, task: ExternalTaskRecord, customer_id: str) -> None:
         """Create or conditionally advance one claim-owned external task.
 
@@ -3410,6 +3433,68 @@ class MongoDBRepository:
                 records=records,
             )
         )
+
+    def save_evidence_action_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        evidence: EvidenceRecord | None,
+        link: EvidenceClaimLink | None,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+        branch_evaluation: BranchEvaluationRecord,
+    ) -> None:
+        if (
+            claim.revision != expected_revision + 1
+            or idempotency.actor_id != claim.customer_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.session_id != (claim.active_session_id or '')
+            or (evidence is not None and evidence.claim_id != claim.claim_id)
+            or (link is not None and link.target_claim_id != claim.claim_id)
+        ):
+            raise KeyError(claim.claim_id)
+        self._validate_branch_evaluation(claim, branch_evaluation)
+
+        records: list[tuple[str, str, BaseModel]] = []
+        if evidence is not None:
+            records.append(('evidence', evidence.evidence_id, evidence))
+        if link is not None:
+            records.append(
+                (
+                    'evidence_claim_link',
+                    f'{link.target_claim_id}:{link.evidence_id}',
+                    link,
+                )
+            )
+        records.append(('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation))
+
+        def persist(mongo_session: Any) -> None:
+            if link is not None:
+                source_evidence = self._get(
+                    'evidence',
+                    link.evidence_id,
+                    EvidenceRecord,
+                    customer_id=claim.customer_id,
+                    session=mongo_session,
+                )
+                if source_evidence is None or source_evidence.claim_id != link.source_claim_id:
+                    raise KeyError(link.evidence_id)
+            prepared = self._prepare_audit_events(
+                claim,
+                (audit_event,),
+                mongo_session=mongo_session,
+            )
+            self._save_child_mutation(
+                claim,
+                expected_revision,
+                idempotency,
+                mongo_session,
+                records=records,
+            )
+            for event in prepared:
+                self._insert_audit_event(event, mongo_session=mongo_session)
+
+        self._atomic(persist)
 
     def save_handoff_mutation(
         self,

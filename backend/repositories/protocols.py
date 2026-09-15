@@ -16,6 +16,7 @@ from backend.domain.models import (
     ClaimCollaborationRequest,
     ClaimCoworkerRecord,
     CustomerUpdateRecord,
+    EvidenceClaimLink,
     EvidenceRecord,
     FollowUpRecord,
     HandoffRecord,
@@ -789,6 +790,29 @@ class PersistenceRepository(ClaimRepository, Protocol):
 
     def list_evidence_for_customer(self, customer_id: str) -> list[EvidenceRecord]:
         """Return Evidence owned by a customer across all of their Claims."""
+        raise NotImplementedError
+
+    def get_evidence_claim_link(
+        self, target_claim_id: str, evidence_id: str, customer_id: str
+    ) -> EvidenceClaimLink | None:
+        raise NotImplementedError
+
+    def list_evidence_claim_links(
+        self, customer_id: str, target_claim_id: str | None = None
+    ) -> list[EvidenceClaimLink]:
+        raise NotImplementedError
+
+    def save_evidence_action_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        evidence: EvidenceRecord | None,
+        link: EvidenceClaimLink | None,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+        branch_evaluation: BranchEvaluationRecord,
+    ) -> None:
+        """Atomically persist one governed reuse or removal result."""
         raise NotImplementedError
 
     def save_evidence_mutation(
