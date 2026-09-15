@@ -12,6 +12,7 @@ from backend.domain.external_service_registry import (
     assert_persisted_operation_transition,
     build_lifecycle_projection,
     lifecycle_definition,
+    project_operation_status,
     projection_metadata,
     service_registry_entry,
 )
@@ -132,6 +133,63 @@ def test_lifecycle_projection_carries_registry_and_role_safe_contract() -> None:
     assert projection.result_verification is ExternalTaskResultVerification.UNVERIFIED
     assert projection.state_invariants
     assert projection.allowed_next
+
+
+def test_verified_result_replaces_acknowledgement_guidance_without_implying_writeback() -> None:
+    projection = build_lifecycle_projection(
+        service_identity=ASSESSOR_SERVICE_IDENTITY,
+        operation_status=ExternalLifecycleStatus.ACCEPTED,
+        result_status=ExternalLifecycleStatus.RESULT_VERIFIED,
+        result_verification=ExternalTaskResultVerification.CONSISTENT,
+    )
+
+    assert projection.status_label == 'Result checked'
+    assert projection.verification_state == 'consistent'
+    assert projection.pending_owner == 'claims_professional'
+    assert 'authorised Claim decision' in projection.next_action
+    assert projection.allowed_next == (ExternalLifecycleStatus.WRITTEN_BACK,)
+
+
+def test_late_result_does_not_override_unknown_outcome_reconciliation() -> None:
+    projection = build_lifecycle_projection(
+        service_identity=ASSESSOR_SERVICE_IDENTITY,
+        operation_status=ExternalLifecycleStatus.UNKNOWN_OUTCOME,
+        result_status=ExternalLifecycleStatus.RESULT_VERIFIED,
+        result_verification=ExternalTaskResultVerification.CONSISTENT,
+    )
+
+    assert projection.status_label == 'Outcome not confirmed'
+    assert projection.verification_state == 'reconciliation_required'
+    assert projection.pending_owner == 'claims_professional'
+    assert projection.requires_reconciliation is True
+    assert projection.needs_attention is True
+
+
+@pytest.mark.parametrize(
+    'status', [ExternalLifecycleStatus.QUEUED, ExternalLifecycleStatus.ASSIGNED]
+)
+def test_assessor_progress_requires_matching_provider_reference(
+    status: ExternalLifecycleStatus,
+) -> None:
+    assert (
+        project_operation_status(
+            service_identity=ASSESSOR_SERVICE_IDENTITY,
+            operation_status=ExternalLifecycleStatus.ACCEPTED,
+            provider_reference='provider-1',
+            service_progress_status=status,
+            service_progress_reference='provider-1',
+        )
+        is status
+    )
+
+    with pytest.raises(InvalidExternalLifecycleTransition, match='provider reference'):
+        project_operation_status(
+            service_identity=ASSESSOR_SERVICE_IDENTITY,
+            operation_status=ExternalLifecycleStatus.ACCEPTED,
+            provider_reference='provider-1',
+            service_progress_status=status,
+            service_progress_reference='provider-2',
+        )
 
 
 @pytest.mark.parametrize(

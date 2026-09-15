@@ -2410,11 +2410,23 @@ them. `live_attempted` is currently unreachable: the only implemented service id
 controlled fixture, and clients MUST NOT read `simulated` as evidence of a provider relationship.
 
 The lifecycle's overall `verification_state`, `pending_owner`, `status_label`, `status_detail`, and
-`next_action` remain the backend-owned operational projection. An `unknown_outcome` remains awaiting
-reconciliation even when a late result record exists; the Workbench does not infer completion from
-that result. The Workbench renders those fields and MUST NOT reconstruct lifecycle status or next
-steps from raw task status strings. Raw task/request objects remain available for identity, timing,
-failure, and source traceability.
+`next_action` are one backend-owned effective projection. A received or checked result replaces
+acknowledgement-only guidance with the applicable verification or authorised-decision step. An
+`unknown_outcome` remains awaiting reconciliation even when a late result record exists; the result
+coordinate remains visible, but the Workbench does not infer completion or bypass reconciliation.
+The Workbench renders these fields and MUST NOT reconstruct lifecycle status or next steps from raw
+task status strings. Raw task/request objects remain available for identity, timing, failure, and
+source traceability.
+
+For `vehicle_damage_assessment_routing`, an accepted external task is projected as `queued` or
+`assigned` only when the authoritative `WorkingClaim.assessor_routing` status carries the same
+assessor or queue reference as the task's `provider_reference`. A missing or non-matching routing
+record leaves the lifecycle at `accepted`; it is not evidence of later progress.
+
+If a registered capability's provenance contradicts the persisted request provenance, the endpoint
+returns `200` with `status: unavailable`, an empty `items` list, and a bounded `limitation`. This
+keeps a corrupt or stale integration record visible as an unavailable resource boundary without
+claiming provider activity or converting the whole page into an internal server error.
 
 Access to policy excerpts, history evidence, fraud-review signals, and staff notes MAY be further restricted by role.
 

@@ -138,12 +138,16 @@ class ExternalServiceLifecycleProjection(ContractModel):
     operation_status: ExternalLifecycleStatus
     result_status: ExternalLifecycleStatus | None = None
     result_verification: ExternalTaskResultVerification | None = None
+    status_label: str = Field(min_length=1, max_length=120)
+    status_detail: str = Field(min_length=1, max_length=500)
+    verification_state: str = Field(min_length=1, max_length=80)
     claimant_meaning: str = Field(min_length=1, max_length=500)
     agent_meaning: str = Field(min_length=1, max_length=500)
     state_invariants: tuple[str, ...] = ('claim_scope',)
     transition_preconditions: tuple[str, ...] = ()
     pending_owner: str = Field(min_length=1, max_length=80)
     next_action: str = Field(min_length=1, max_length=500)
+    needs_attention: bool = False
     requires_reconciliation: bool = False
     allowed_next: tuple[ExternalLifecycleStatus, ...] = ()
 
@@ -489,6 +493,18 @@ _LEGAL_RESULT_STATUSES_BY_OPERATION: Final = MappingProxyType(
                 ExternalLifecycleStatus.RESULT_VERIFIED,
             }
         ),
+        ExternalLifecycleStatus.QUEUED: frozenset(
+            {
+                ExternalLifecycleStatus.RESULT_RECEIVED,
+                ExternalLifecycleStatus.RESULT_VERIFIED,
+            }
+        ),
+        ExternalLifecycleStatus.ASSIGNED: frozenset(
+            {
+                ExternalLifecycleStatus.RESULT_RECEIVED,
+                ExternalLifecycleStatus.RESULT_VERIFIED,
+            }
+        ),
         ExternalLifecycleStatus.RETRYABLE_FAILURE: frozenset(),
         ExternalLifecycleStatus.TERMINAL_FAILURE: frozenset(),
         ExternalLifecycleStatus.UNKNOWN_OUTCOME: frozenset(
@@ -594,17 +610,22 @@ def assert_persisted_operation_transition(current: str, proposed: str) -> None:
 
 
 class ExternalProjectionMetadata(ContractModel):
-    """Canonical staff projection metadata for one persisted operation status."""
+    """Canonical presentation metadata for one effective lifecycle status."""
 
     label: str = Field(min_length=1, max_length=120)
+    detail: str = Field(min_length=1, max_length=500)
+    verification_state: str = Field(min_length=1, max_length=80)
     pending_owner: str = Field(min_length=1, max_length=80)
     next_action: str = Field(min_length=1, max_length=500)
+    needs_attention: bool = False
 
 
 _PROJECTION_METADATA: Final = MappingProxyType(
     {
         ExternalLifecycleStatus.PREPARED: ExternalProjectionMetadata(
             label='Pending',
+            detail='The request is prepared and has not been submitted.',
+            verification_state='not_started',
             pending_owner='claims_professional',
             next_action=(
                 'Review the projected disclosure, authority, and consent before submission.'
@@ -612,35 +633,100 @@ _PROJECTION_METADATA: Final = MappingProxyType(
         ),
         ExternalLifecycleStatus.ACCEPTED: ExternalProjectionMetadata(
             label='Completion not confirmed',
+            detail='The service acknowledged the request; no completed result is recorded.',
+            verification_state='pending_verification',
             pending_owner='external_party',
             next_action='Track the provider result and verify it before reconciling Claim State.',
         ),
         ExternalLifecycleStatus.QUEUED: ExternalProjectionMetadata(
             label='Awaiting service assignment',
+            detail='The request is queued with the service; no completed result is recorded.',
+            verification_state='pending_verification',
             pending_owner='external_party',
             next_action='Track the queued operation by its operation identity.',
         ),
         ExternalLifecycleStatus.ASSIGNED: ExternalProjectionMetadata(
             label='Assessor assigned',
+            detail='An assessor is assigned; the assessment itself is not complete.',
+            verification_state='pending_verification',
             pending_owner='external_party',
             next_action='Await the assessor result and verify it against the Claim.',
         ),
         ExternalLifecycleStatus.RETRYABLE_FAILURE: ExternalProjectionMetadata(
             label='Failed',
+            detail=(
+                'The request failed before a verified result; the same operation may be retried.'
+            ),
+            verification_state='failed_unverified',
             pending_owner='claims_professional',
             next_action=(
                 'Correct the dependency problem, then retry with the same operation identity.'
             ),
+            needs_attention=True,
         ),
         ExternalLifecycleStatus.TERMINAL_FAILURE: ExternalProjectionMetadata(
             label='Failed',
+            detail='The request failed and requires staff review.',
+            verification_state='review_required',
             pending_owner='claims_professional',
             next_action='Review the failure before another request is attempted.',
+            needs_attention=True,
         ),
         ExternalLifecycleStatus.UNKNOWN_OUTCOME: ExternalProjectionMetadata(
             label='Outcome not confirmed',
+            detail='Submission may have occurred; the result remains unknown.',
+            verification_state='reconciliation_required',
             pending_owner='claims_professional',
             next_action='Reconcile by operation or provider reference before any retry.',
+            needs_attention=True,
+        ),
+    }
+)
+
+_RESULT_PROJECTION_METADATA: Final = MappingProxyType(
+    {
+        (
+            ExternalLifecycleStatus.RESULT_RECEIVED,
+            ExternalTaskResultVerification.UNVERIFIED,
+        ): ExternalProjectionMetadata(
+            label='Result awaiting verification',
+            detail='A provider result is recorded but has not been checked against the Claim.',
+            verification_state=ExternalTaskResultVerification.UNVERIFIED.value,
+            pending_owner='claims_professional',
+            next_action='Verify the returned result against its evidence and the current Claim.',
+            needs_attention=True,
+        ),
+        (
+            ExternalLifecycleStatus.RESULT_VERIFIED,
+            ExternalTaskResultVerification.CONSISTENT,
+        ): ExternalProjectionMetadata(
+            label='Result checked',
+            detail='The returned result was checked as consistent evidence; it is not Claim State.',
+            verification_state=ExternalTaskResultVerification.CONSISTENT.value,
+            pending_owner='claims_professional',
+            next_action='Use the checked result only through an authorised Claim decision.',
+        ),
+        (
+            ExternalLifecycleStatus.RESULT_VERIFIED,
+            ExternalTaskResultVerification.INCONSISTENT,
+        ): ExternalProjectionMetadata(
+            label='Result conflicts with Claim',
+            detail='The returned result was checked and conflicts with the Claim.',
+            verification_state=ExternalTaskResultVerification.INCONSISTENT.value,
+            pending_owner='claims_professional',
+            next_action='Review the conflicting result and cited evidence before continuing.',
+            needs_attention=True,
+        ),
+        (
+            ExternalLifecycleStatus.RESULT_VERIFIED,
+            ExternalTaskResultVerification.REVIEW_REQUIRED,
+        ): ExternalProjectionMetadata(
+            label='Result requires review',
+            detail='The returned result needs professional review before it can be used.',
+            verification_state=ExternalTaskResultVerification.REVIEW_REQUIRED.value,
+            pending_owner='claims_professional',
+            next_action='Review the result, evidence, and checked Claim revision.',
+            needs_attention=True,
         ),
     }
 )
@@ -658,22 +744,95 @@ def projection_metadata(status: ExternalLifecycleStatus | str) -> ExternalProjec
         ) from exc
 
 
+def project_operation_status(
+    *,
+    service_identity: str,
+    operation_status: ExternalLifecycleStatus | str,
+    provider_reference: str | None = None,
+    service_progress_status: ExternalLifecycleStatus | str | None = None,
+    service_progress_reference: str | None = None,
+) -> ExternalLifecycleStatus:
+    """Join a persisted task acknowledgement to authoritative service progress.
+
+    The assessor adapter persists request delivery as ``accepted`` on the external task
+    and stores its routing outcome on the Claim.  The registry owns the only permitted
+    join between those records, including the reference check that prevents a routing
+    result for another operation from changing this projection.
+    """
+
+    entry = service_registry_entry(service_identity)
+    operation = lifecycle_definition(operation_status).status
+    if service_progress_status is None:
+        return operation
+    if service_identity != 'vehicle_damage_assessment_routing':
+        raise InvalidExternalLifecycleTransition(
+            f'{service_identity} has no registered service-progress projection.'
+        )
+    progress = lifecycle_definition(service_progress_status).status
+    if operation is not ExternalLifecycleStatus.ACCEPTED or progress not in {
+        ExternalLifecycleStatus.QUEUED,
+        ExternalLifecycleStatus.ASSIGNED,
+    }:
+        raise InvalidExternalLifecycleTransition(
+            f'{operation.value} cannot be projected with service progress {progress.value}.'
+        )
+    if (
+        not provider_reference
+        or not service_progress_reference
+        or provider_reference != service_progress_reference
+    ):
+        raise InvalidExternalLifecycleTransition(
+            'Service progress does not match the external task provider reference.'
+        )
+    if progress not in entry.projectable_statuses:
+        raise InvalidExternalLifecycleTransition(
+            f'{progress.value} is not projectable for {service_identity}.'
+        )
+    assert_lifecycle_transition(operation, progress)
+    return progress
+
+
+def assert_projection_provenance(*, service_identity: str, request_provenance: str) -> None:
+    """Reject a persisted request source that contradicts the capability registry."""
+
+    entry = service_registry_entry(service_identity)
+    permitted = {
+        ExternalCapabilityProvenance.SIMULATED: {'simulated'},
+        ExternalCapabilityProvenance.CONFIGURED: {'configured', 'live_attempted'},
+    }.get(entry.provenance, set())
+    if request_provenance not in permitted:
+        raise InvalidExternalLifecycleTransition(
+            f'{service_identity} has registry provenance {entry.provenance.value} but request '
+            f'provenance is {request_provenance}.'
+        )
+
+
 def build_lifecycle_projection(
     *,
     service_identity: str,
     operation_status: ExternalLifecycleStatus | str,
     result_status: ExternalLifecycleStatus | str | None = None,
     result_verification: ExternalTaskResultVerification | str | None = None,
+    provider_reference: str | None = None,
+    service_progress_status: ExternalLifecycleStatus | str | None = None,
+    service_progress_reference: str | None = None,
 ) -> ExternalServiceLifecycleProjection:
     """Build one projection from the registered service and canonical status."""
 
     entry = service_registry_entry(service_identity)
-    operation = lifecycle_definition(operation_status)
+    projected_operation_status = project_operation_status(
+        service_identity=service_identity,
+        operation_status=operation_status,
+        provider_reference=provider_reference,
+        service_progress_status=service_progress_status,
+        service_progress_reference=service_progress_reference,
+    )
+    operation = lifecycle_definition(projected_operation_status)
     if not entry.uses_external_task or operation.status not in entry.projectable_statuses:
         raise InvalidExternalLifecycleTransition(
             f'{operation.status.value} is not projectable for {service_identity}.'
         )
-    metadata = projection_metadata(operation.status)
+    operation_metadata = projection_metadata(operation.status)
     result = ExternalLifecycleStatus(result_status) if result_status is not None else None
     verification = (
         ExternalTaskResultVerification(result_verification)
@@ -708,6 +867,31 @@ def build_lifecycle_projection(
         raise InvalidExternalLifecycleTransition(
             'result_verified requires a checked verification outcome.'
         )
+    result_definition = lifecycle_definition(result) if result is not None else None
+    result_metadata = (
+        _RESULT_PROJECTION_METADATA.get((result, verification)) if result is not None else None
+    )
+    if result is not None and result_metadata is None:
+        raise InvalidExternalLifecycleTransition(
+            f'{result.value} has no projection for verification {verification}.'
+        )
+    operation_requires_reconciliation = operation.requires_reconciliation
+    effective_definition = (
+        operation
+        if operation_requires_reconciliation or result_definition is None
+        else result_definition
+    )
+    effective_metadata = (
+        operation_metadata
+        if operation_requires_reconciliation or result_metadata is None
+        else result_metadata
+    )
+    state_invariants = tuple(
+        dict.fromkeys(
+            operation.state_invariants
+            + (result_definition.state_invariants if result_definition is not None else ())
+        )
+    )
     return ExternalServiceLifecycleProjection(
         service_identity=service_identity,
         catalogue_reference=entry.catalogue_reference,
@@ -717,12 +901,16 @@ def build_lifecycle_projection(
         operation_status=operation.status,
         result_status=result,
         result_verification=verification,
-        claimant_meaning=operation.claimant_meaning,
-        agent_meaning=operation.agent_meaning,
-        state_invariants=operation.state_invariants,
-        transition_preconditions=operation.transition_preconditions,
-        pending_owner=metadata.pending_owner,
-        next_action=metadata.next_action,
-        requires_reconciliation=operation.requires_reconciliation,
-        allowed_next=operation.allowed_next,
+        status_label=effective_metadata.label,
+        status_detail=effective_metadata.detail,
+        verification_state=effective_metadata.verification_state,
+        claimant_meaning=effective_definition.claimant_meaning,
+        agent_meaning=effective_definition.agent_meaning,
+        state_invariants=state_invariants,
+        transition_preconditions=effective_definition.transition_preconditions,
+        pending_owner=effective_metadata.pending_owner,
+        next_action=effective_metadata.next_action,
+        needs_attention=effective_metadata.needs_attention,
+        requires_reconciliation=operation_requires_reconciliation,
+        allowed_next=effective_definition.allowed_next,
     )
