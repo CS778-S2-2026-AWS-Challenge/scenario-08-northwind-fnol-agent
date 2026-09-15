@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -42,6 +42,57 @@ function StatefulAgentHarness() {
 }
 
 describe('StaffAgent', () => {
+  it('opens from the closed native button with the keyboard', async () => {
+    const user = userEvent.setup()
+    const onOpenChange = vi.fn()
+    renderAgent({ open: false, onOpenChange })
+
+    const trigger = screen.getByRole('button', { name: 'Open Staff Agent' })
+    trigger.focus()
+    await user.keyboard('{Enter}')
+
+    expect(onOpenChange).toHaveBeenCalledWith(true)
+  })
+
+  it('keeps a dragged closed button inside the viewport without opening it', () => {
+    const onOpenChange = vi.fn()
+    const { container } = renderAgent({ open: false, onOpenChange })
+    const trigger = screen.getByRole('button', { name: 'Open Staff Agent' })
+    const widget = container.querySelector('.staff-agent')
+    Object.defineProperties(widget, {
+      offsetWidth: { configurable: true, value: 48 },
+      offsetHeight: { configurable: true, value: 48 },
+    })
+    vi.spyOn(widget, 'getBoundingClientRect').mockReturnValue({
+      left: 900,
+      top: 650,
+      right: 948,
+      bottom: 698,
+      width: 48,
+      height: 48,
+      x: 900,
+      y: 650,
+      toJSON: () => ({}),
+    })
+    trigger.setPointerCapture = vi.fn()
+    trigger.hasPointerCapture = vi.fn(() => true)
+    trigger.releasePointerCapture = vi.fn()
+
+    fireEvent.pointerDown(trigger, { button: 0, pointerId: 1, clientX: 924, clientY: 674 })
+    fireEvent.pointerMove(trigger, { pointerId: 1, clientX: 2000, clientY: 2000 })
+    fireEvent.pointerUp(trigger, { pointerId: 1 })
+    fireEvent.click(trigger)
+
+    expect(widget).toHaveStyle({
+      left: `${window.innerWidth - 48}px`,
+      top: `${window.innerHeight - 48}px`,
+    })
+    expect(onOpenChange).not.toHaveBeenCalled()
+
+    fireEvent.click(trigger)
+    expect(onOpenChange).toHaveBeenCalledWith(true)
+  })
+
   it('restores a requested persistent session and its messages', async () => {
     vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({
       items: [{ session_id: 'sas_1', title: 'Evidence review', model_profile_id: 'qwen-local' }],
