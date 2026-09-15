@@ -102,8 +102,8 @@ describe('controlled assessor claimant states', () => {
     expect(screen.getByText(heading)).toBeInTheDocument()
     expect(screen.getByText(nextStep)).toBeInTheDocument()
     expect(
-      screen.getByText(/Controlled simulation only; no production provider is connected/i),
-    ).toBeInTheDocument()
+      screen.getAllByText(/Controlled simulation only; no production provider is connected/i),
+    ).toHaveLength(2)
     expect(screen.queryByText(/assessment complete/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/claim decision complete/i)).not.toBeInTheDocument()
   })
