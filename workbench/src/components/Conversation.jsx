@@ -1,6 +1,6 @@
 import { CheckCircle2, Clock3, Info, MessageSquare, Send, UserRoundCheck } from 'lucide-react'
-import { useState } from 'react'
-import { formatDateTime, words } from '../format.js'
+import { useLayoutEffect, useRef, useState } from 'react'
+import { formatDate, formatTime, words } from '../format.js'
 import { canSubmitProjectedAction, findProjectedAction } from '../projected-action.js'
 import ResourceBoundary from './ResourceBoundary.jsx'
 import { ProjectedActionState } from './ProjectedAction.jsx'
@@ -20,6 +20,8 @@ export default function Conversation({
 }) {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState('')
+  const [completedSends, setCompletedSends] = useState(0)
+  const messageListRef = useRef(null)
   const messageSessionId = resource?.items?.find(
     (message) => message.session_id,
   )?.session_id
@@ -40,6 +42,12 @@ export default function Conversation({
   const resolveAction = currentProjectedAction(detail, 'human.resolve_handoff', handoff?.handoff_id)
   const canSend = isCurrentSession && canSubmitCurrentAction(sendAction, detail.revision)
   const timeline = conversationTimeline(resource?.items || [], handoff, profile)
+  const waitingForTakeover = assistanceState.key === 'waiting-request'
+
+  useLayoutEffect(() => {
+    if (!completedSends || !messageListRef.current) return
+    messageListRef.current.scrollTop = messageListRef.current.scrollHeight
+  }, [completedSends])
 
   async function submit(event) {
     event.preventDefault()
@@ -49,6 +57,7 @@ export default function Conversation({
     try {
       await onSend({ message: draft.trim(), sessionId: displayedSessionId })
       onDraft('')
+      setCompletedSends((current) => current + 1)
     } catch (nextError) {
       setSendError(nextError.message)
     } finally {
@@ -75,9 +84,9 @@ export default function Conversation({
     : sendAction?.blocked_reason || 'Messaging is not available for this claim yet.'
 
   return (
-    <ResourceBoundary resource={resource} onRetry={onRetry}>
+    <ResourceBoundary resource={resource} onRetry={onRetry} contentAvailable={Boolean(resource?.resolved_session_id)} quietRefresh={sending}>
       <section className="conversation-view">
-        {handoff && (
+        {handoff && !waitingForTakeover && (
           <AssistanceStatus
             action={acceptAction}
             handoff={handoff}
@@ -85,11 +94,15 @@ export default function Conversation({
             state={assistanceState}
             revision={detail.revision}
             onAccept={onAccept}
+            resolveAction={resolveAction}
+            onResolve={onResolve}
           />
         )}
-        <ol className="message-list" role="log" aria-label="Claimant conversation messages">
+        <ol ref={messageListRef} className="message-list" role="log" aria-label="Claimant conversation messages">
           {timeline.map((item) => (
-            item.kind === 'event'
+            item.kind === 'date'
+              ? <DateDivider item={item} key={item.key} />
+              : item.kind === 'event'
               ? <SystemEvent item={item} key={item.key} />
               : <ConversationMessage message={item.message} key={item.key} />
           ))}
@@ -102,7 +115,17 @@ export default function Conversation({
           )}
         </ol>
         <form className="staff-composer" onSubmit={submit}>
-          {!canSend && (
+          {handoff && waitingForTakeover ? (
+            <AssistanceStatus
+              action={acceptAction}
+              compact
+              handoff={handoff}
+              profile={profile}
+              state={assistanceState}
+              revision={detail.revision}
+              onAccept={onAccept}
+            />
+          ) : !canSend && (
             <div className="staff-composer__notice" id="staff-message-status" role="status">
               <Info size={16} aria-hidden="true" />
               <span>
@@ -111,45 +134,46 @@ export default function Conversation({
               </span>
             </div>
           )}
-          <label className="sr-only" htmlFor="staff-reply">Message to claimant</label>
-          <textarea
-            id="staff-reply"
-            value={draft}
-            onChange={(event) => onDraft(event.target.value)}
-            disabled={!canSend}
-            placeholder={placeholder}
-            aria-describedby={!canSend ? 'staff-message-status' : undefined}
-          />
-          <div className="staff-composer__actions">
-            <button className="button button--primary" type="submit" disabled={!canSend || !draft.trim() || sending}>
-              <Send size={16} aria-hidden="true" />
-              {sending ? 'Sending...' : 'Send message'}
+          <div className="staff-composer__input">
+            <label className="sr-only" htmlFor="staff-reply">Message to claimant</label>
+            <textarea
+              id="staff-reply"
+              rows="1"
+              value={draft}
+              onChange={(event) => onDraft(event.target.value)}
+              disabled={!canSend}
+              placeholder={placeholder}
+              aria-describedby={!canSend ? 'staff-message-status' : undefined}
+            />
+            <button
+              className="staff-composer__send"
+              type="submit"
+              disabled={!canSend || !draft.trim() || sending}
+              aria-label="Send message"
+              aria-busy={sending}
+              title={sending ? 'Sending message' : 'Send message'}
+            >
+              <Send size={18} aria-hidden="true" />
             </button>
           </div>
           {sendError && <p className="form-error" role="alert">{sendError}</p>}
         </form>
-        {handoff && ['accepted', 'in_progress'].includes(handoff.status) && (
-          <HandoffResolution
-            handoff={handoff}
-            allowedAction={resolveAction}
-            onResolve={onResolve}
-            eyebrow="Assistance session"
-            title="Complete staff assistance"
-            actionLabel="Complete assistance"
-            submitLabel="Confirm completion"
-            compact
-          />
-        )}
       </section>
     </ResourceBoundary>
   )
 }
 
-function AssistanceStatus({ action, handoff, profile, state, revision, onAccept }) {
+function AssistanceStatus({ action, compact = false, handoff, profile, state, revision, onAccept, resolveAction, onResolve }) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const canAccept = handoff.status === 'queued' && canSubmitCurrentAction(action, revision)
+  const staffName = profile?.display_name || 'Current staff member'
+  const assignment = state.key === 'completed'
+    ? `Completed by ${staffName}`
+    : state.key === 'assigned'
+      ? staffName
+      : `Assigned to you · ${staffName}`
 
   async function accept() {
     if (!canAccept || busy) return
@@ -165,24 +189,45 @@ function AssistanceStatus({ action, handoff, profile, state, revision, onAccept 
   }
 
   return (
-    <aside className={`assistance-status assistance-status--${state.key}`} aria-live="polite">
+    <aside
+      className={`assistance-status assistance-status--${state.key}${compact ? ' assistance-status--composer' : ''}`}
+      id={compact ? 'staff-message-status' : undefined}
+      role={compact ? 'status' : undefined}
+      aria-live="polite"
+    >
       <span className="assistance-status__icon" aria-hidden="true">
         {state.key === 'completed' ? <CheckCircle2 /> : state.key === 'waiting-request' ? <Clock3 /> : <UserRoundCheck />}
       </span>
       <div className="assistance-status__copy">
-        <span className={`record-status${state.tone ? ` record-status--${state.tone}` : ''}`}>{state.label}</span>
-        <strong>{state.title}</strong>
-        <p>{state.description}</p>
-        {state.expectedActor && <small>Expected to act: {state.expectedActor}</small>}
-        {handoff.assigned_to === profile?.staff_id && profile?.display_name && <small>Assigned staff: {profile.display_name} · Claims professional</small>}
+        {canAccept && confirming ? (
+          <strong className="assistance-status__confirmation-message">{action.confirmation?.message}</strong>
+        ) : (
+          <>
+            {!compact && <span className="assistance-status__eyebrow">Staff assistance</span>}
+            <span className="assistance-status__summary">
+              <strong>{state.title}</strong>
+              {!compact && <small>{assignment}</small>}
+            </span>
+          </>
+        )}
       </div>
       {canAccept && !confirming && <button className="button button--secondary" type="button" onClick={() => setConfirming(true)}>Take over conversation</button>}
       {canAccept && confirming && (
         <div className="assistance-status__confirm">
-          <span>{action.confirmation?.message}</span>
           <button className="button button--ghost" type="button" disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
           <button className="button button--secondary" type="button" disabled={busy} onClick={accept}>{busy ? 'Taking over...' : 'Confirm take over'}</button>
         </div>
+      )}
+      {!compact && ['accepted', 'in_progress'].includes(handoff.status) && (
+        <HandoffResolution
+          handoff={handoff}
+          allowedAction={resolveAction}
+          onResolve={onResolve}
+          actionLabel="Complete assistance"
+          submitLabel="Confirm completion"
+          compact
+          inline
+        />
       )}
       {handoff.status === 'queued' && !canAccept && <ProjectedActionState action={action} absentMessage="No take-over action is projected for this request." />}
       {error && <p className="form-error" role="alert">{error}</p>}
@@ -195,7 +240,7 @@ function ConversationMessage({ message }) {
   return (
     <li className={`message message--${actor}`}>
       <article>
-        <header><strong>{actorLabel(actor)}</strong><time dateTime={message.created_at}>{formatDateTime(message.created_at)}</time></header>
+        <header><strong>{actorLabel(actor)}</strong><time dateTime={message.created_at}>{formatTime(message.created_at)}</time></header>
         <p>{message.content?.text || words(message.content?.type)}</p>
       </article>
     </li>
@@ -206,9 +251,13 @@ function SystemEvent({ item }) {
   return (
     <li className="conversation-event">
       <span>{item.label}</span>
-      <time dateTime={item.createdAt}>{formatDateTime(item.createdAt)}</time>
+      <time dateTime={item.createdAt}>{formatTime(item.createdAt)}</time>
     </li>
   )
+}
+
+function DateDivider({ item }) {
+  return <li className="conversation-date-divider"><span>{item.label}</span></li>
 }
 
 function conversationTimeline(messages, handoff, profile) {
@@ -234,7 +283,7 @@ function conversationTimeline(messages, handoff, profile) {
       key: `handoff:${handoff.handoff_id}:accepted`,
       kind: 'event',
       createdAt: handoff.accepted_at,
-      label: `${staffName} joined the conversation`,
+      label: `${staffName} joined`,
     })
   }
   if (handoff?.resolved_at) {
@@ -245,10 +294,25 @@ function conversationTimeline(messages, handoff, profile) {
       label: 'Staff assistance completed',
     })
   }
-  return items.sort((left, right) => (
+  const sortedItems = items.sort((left, right) => (
     new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()
       || left.key.localeCompare(right.key)
   ))
+  const timeline = []
+  let displayedDate = null
+  sortedItems.forEach((item) => {
+    const itemDate = formatDate(item.createdAt)
+    if (itemDate !== displayedDate) {
+      timeline.push({
+        key: `date:${itemDate}`,
+        kind: 'date',
+        label: itemDate,
+      })
+      displayedDate = itemDate
+    }
+    timeline.push(item)
+  })
+  return timeline
 }
 
 function assistanceDisplayState(detail, handoff) {
@@ -291,15 +355,13 @@ function assistanceDisplayState(detail, handoff) {
       label: 'Waiting request',
       tone: '',
       title: 'Customer requested staff assistance',
-      description: 'Review the conversation without taking ownership, or take over to reply.',
-      expectedActor: 'Northwind staff',
     }
   }
   return {
     key: 'assigned',
-    label: 'Assigned to me',
+    label: 'Assigned to you',
     tone: 'confirmed',
-    title: 'You are helping this customer',
+    title: 'Assigned to you',
     description: 'Continue in the shared conversation and complete assistance when the request is resolved.',
     expectedActor: 'You',
   }

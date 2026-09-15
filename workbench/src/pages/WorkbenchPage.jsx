@@ -247,7 +247,7 @@ export default function WorkbenchPage() {
     }
   }, [applyDetailProjection, token])
 
-  const refreshDetail = useCallback(async (id) => {
+  const refreshDetail = useCallback(async (id, { announceRevision = true } = {}) => {
     if (!id) return
     const refreshId = ++backgroundRefreshId.current
     const detailGeneration = detailRequestId.current
@@ -256,7 +256,7 @@ export default function WorkbenchPage() {
       applyDetailProjection(response, {
         expectedClaimId: id,
         requestId: detailGeneration,
-        announceRevision: true,
+        announceRevision,
       })
     } catch (error) {
       if (
@@ -698,7 +698,7 @@ export default function WorkbenchPage() {
     }, { replace: true })
   }
 
-  async function runClaimMutation(label, operation) {
+  async function runClaimMutation(label, operation, { backgroundDetailRefresh = false } = {}) {
     const previous = detailRef.current
     if (!previous) throw new Error('The current Claim projection is unavailable. Refresh the Claim before acting.')
     const mutationRequestId = ++detailRequestId.current
@@ -741,7 +741,12 @@ export default function WorkbenchPage() {
       throw error
     }
     if (currentClaimIdRef.current === previous.claim_id) {
-      await Promise.all([loadDetail(previous.claim_id), loadClaims()])
+      await Promise.all([
+        backgroundDetailRefresh
+          ? refreshDetail(previous.claim_id, { announceRevision: false })
+          : loadDetail(previous.claim_id),
+        loadClaims(),
+      ])
     } else {
       await loadClaims()
     }
@@ -807,7 +812,7 @@ export default function WorkbenchPage() {
           operation,
           current.revision,
         )
-      ))
+      ), { backgroundDetailRefresh: true })
     } catch (error) {
       if (error.code === 'REVISION_CONFLICT') {
         const current = detailRef.current
