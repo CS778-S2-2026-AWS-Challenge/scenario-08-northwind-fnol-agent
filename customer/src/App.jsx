@@ -36,6 +36,8 @@ import MessageComposer from './components/MessageComposer.jsx'
 import ExternalServiceAction, { ExternalServiceOverview } from './components/ExternalServiceAction.jsx'
 import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
+import ClaimDocuments from './components/ClaimDocuments.jsx'
+import { documentAttentionCount } from './claimDocumentProjection.js'
 
 const FIELD_LABELS = {
   'incident.description': 'What happened',
@@ -296,6 +298,7 @@ function App() {
     return match ? decodeURIComponent(match[1]) : null
   })
   const [detailsOpen, setDetailsOpen] = useState(true)
+  const [detailsTab, setDetailsTab] = useState('summary')
   const [mobileView, setMobileView] = useState('chat')
   const [workspaceView, setWorkspaceView] = useState('chat')
   const [runtimeCapabilities, setRuntimeCapabilities] = useState({
@@ -305,7 +308,8 @@ function App() {
   })
   const [selectedModel, setSelectedModel] = useState('')
   const [attachments, setAttachments] = useState([])
-  const [, setEvidenceItems] = useState([])
+  const [evidenceItems, setEvidenceItems] = useState([])
+  const [evidenceLoadStatus, setEvidenceLoadStatus] = useState('idle')
   const [evidenceSyncNotice, setEvidenceSyncNotice] = useState('')
   const [evidencePollingKey, setEvidencePollingKey] = useState(0)
   const [resumeContext, setResumeContext] = useState(null)
@@ -329,6 +333,8 @@ function App() {
   const evidenceClaimId = useRef(null)
   const evidenceUploadControllers = useRef(new Map())
   const dismissedComposerEvidenceIds = useRef(new Set())
+  const detailsTabRefs = useRef({})
+  const conversationPanelRef = useRef(null)
   const confirmedClaimProjections = useRef(new Map())
   const hasStarted = claim !== null
   const savedReports = claimHistory === null
@@ -336,6 +342,9 @@ function App() {
     : claimHistory.filter((item) => item.can_resume)
   const selectedHistoryClaim = claimHistory?.find((item) => item.claim_id === selectedHistoryClaimId)
     || (claim?.claim_id === selectedHistoryClaimId ? claim : null)
+  const documentOutstandingCount = evidenceLoadStatus === 'ready'
+    ? documentAttentionCount(evidenceItems)
+    : null
 
   function rememberClaimInHistory(createdClaim) {
     if (!hasClaimantAccessToken()) return
@@ -375,6 +384,10 @@ function App() {
   // setPage is a stable local navigation helper; keep this guard tied to auth state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account, page])
+
+  useEffect(() => {
+    if (conversationPanelRef.current) conversationPanelRef.current.scrollTop = 0
+  }, [workspaceView])
 
   function routeForPage(nextPage) {
     if (nextPage === 'login') return '/auth/login'
@@ -736,6 +749,7 @@ function App() {
       latestEvidenceItems.current = []
       evidenceHasLocalMutation.current = false
       setEvidenceItems([])
+      setEvidenceLoadStatus('idle')
       setAttachments([])
       setEvidencePollingKey(0)
       return undefined
@@ -746,18 +760,24 @@ function App() {
       latestEvidenceItems.current = []
       evidenceHasLocalMutation.current = false
       dismissedComposerEvidenceIds.current.clear()
+      setEvidenceItems([])
+      setEvidenceLoadStatus('loading')
+      setDetailsTab('summary')
     }
     let active = true
     getClaimEvidence(claim.claim_id)
       .then((response) => {
         if (active) {
           if (syncEvidenceProjection(response)) setEvidenceSyncNotice('')
+          setEvidenceLoadStatus('ready')
           if ((response.items || []).some((item) => item.file_status === 'processing')) {
             setEvidencePollingKey((current) => current + 1)
           }
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        if (active) setEvidenceLoadStatus('error')
+      })
     return () => { active = false }
   // The projection updater only uses stable React setters and is intentionally local to this view.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -780,6 +800,7 @@ function App() {
         if (!active) return
         const applied = syncEvidenceProjection(response)
         if (applied) setEvidenceSyncNotice('')
+        setEvidenceLoadStatus('ready')
         delay = 1500
         if (!applied || (response.items || []).some((item) => item.file_status === 'processing')) schedule()
       } catch {
@@ -798,7 +819,12 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claim?.claim_id, evidencePollingKey])
 
-  async function handleFileSelected(file, existingAttempt = null) {
+  async function handleFileSelected(
+    file,
+    existingAttempt = null,
+    requestedKind = null,
+    requestedEvidenceId = null,
+  ) {
     if (isBusy) return
     if (!hasClaimantAccessToken()) {
       setError('Sign in before uploading a file. Your anonymous conversation is still available, and you can resume it after signing in.')
@@ -811,6 +837,8 @@ function App() {
       claimKey: requestId('claim'),
       uploadKey: requestId('evidence-upload'),
       completeKey: requestId('evidence-complete'),
+      kind: requestedKind || (file.type.startsWith('image/') ? 'incident_photo' : 'other_document'),
+      evidenceId: requestedEvidenceId,
     }
     const localId = attempt.localId
     evidenceUploadControllers.current.get(localId)?.abort()
@@ -863,7 +891,8 @@ function App() {
         claimId: activeClaim.claim_id,
         revision: activeClaim.revision,
         file,
-        kind: file.type.startsWith('image/') ? 'incident_photo' : 'other_document',
+        kind: attempt.kind,
+        evidenceId: attempt.evidenceId,
         idempotencyKey: attempt.uploadKey,
         signal: uploadController.signal,
       })
@@ -1526,6 +1555,35 @@ function App() {
     }
   }
 
+  function openCurrentClaimEvidence() {
+    if (!claim?.claim_id) return
+    setSelectedHistoryClaimId(claim.claim_id)
+    setWorkspaceView('claim-evidence')
+    setMobileView('chat')
+  }
+
+  function openCurrentClaimDocuments() {
+    setWorkspaceView('chat')
+    setDetailsOpen(true)
+    setDetailsTab('documents')
+    setMobileView('details')
+  }
+
+  function handleDetailsTabKeyDown(event, currentTab) {
+    const tabs = ['summary', 'documents']
+    const currentIndex = tabs.indexOf(currentTab)
+    let nextIndex
+    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length
+    else if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
+    else if (event.key === 'Home') nextIndex = 0
+    else if (event.key === 'End') nextIndex = tabs.length - 1
+    else return
+    event.preventDefault()
+    const nextTab = tabs[nextIndex]
+    setDetailsTab(nextTab)
+    detailsTabRefs.current[nextTab]?.focus()
+  }
+
   function leaveWorkspaceUtility() {
     setWorkspaceView('chat')
     setSelectedHistoryClaimId(null)
@@ -1859,7 +1917,21 @@ function App() {
               <button type="button" onClick={() => setWorkspaceView('privacy')}>Privacy policy</button>
               <button type="button" onClick={openClaimHistory}>Claim history</button>
               <button type="button" onClick={() => setWorkspaceView('external-services')}>External services</button>
-              <button type="button" onClick={() => setWorkspaceView('files')}>Uploaded files</button>
+              <button
+                className="history-action-button"
+                type="button"
+                aria-label={documentOutstandingCount > 0
+                  ? `What to provide, ${documentOutstandingCount} outstanding`
+                  : 'What to provide'}
+                onClick={openCurrentClaimDocuments}
+              >
+                <span>What to provide</span>
+                {documentOutstandingCount > 0 && (
+                  <span className="history-action-count" aria-hidden="true">
+                    {documentOutstandingCount}
+                  </span>
+                )}
+              </button>
             </div>
             <div className="intake-history-label">Conversation history</div>
             <div className="intake-history-list">
@@ -1895,7 +1967,7 @@ function App() {
               </button>
             </div>
           </aside>
-          <section className={`conversation-panel mobile-view-${mobileView} ${workspaceView !== 'chat' ? 'is-utility' : ''}`} aria-labelledby="conversation-title">
+          <section ref={conversationPanelRef} className={`conversation-panel mobile-view-${mobileView} ${workspaceView !== 'chat' ? 'is-utility' : ''}`} aria-labelledby="conversation-title">
             <div
               className={`workspace-utility-page ${['history', 'claim-features', 'claim-evidence', 'files'].includes(workspaceView) ? 'is-claim-record-page' : ''}`}
               hidden={workspaceView === 'chat'}
@@ -2237,9 +2309,8 @@ function App() {
           <aside className={`claim-panel intake-details-panel mobile-view-${mobileView} ${detailsOpen && workspaceView === 'chat' ? 'is-open' : 'is-collapsed'} ${workspaceView !== 'chat' ? 'is-hidden' : ''}`} aria-labelledby="claim-details-title">
             <div className="claim-panel-heading">
               <div>
-                <p className="eyebrow">Structured report</p>
-                <h2 id="claim-details-title">What we have so far</h2>
-                <p className="panel-subtitle">Review or correct anything here</p>
+                <p className="eyebrow">Your claim</p>
+                <h2 id="claim-details-title">Claim details</h2>
               </div>
               <div className="details-panel-actions">
                 <span className="revision-label">Revision {claim.revision}</span>
@@ -2254,7 +2325,39 @@ function App() {
                 </button>
               </div>
             </div>
+            <div className="claim-details-tabs" role="tablist" aria-label="Claim details">
+              {[
+                ['summary', 'Summary'],
+                ['documents', 'What to provide'],
+              ].map(([tab, label]) => (
+                <button
+                  ref={(node) => { detailsTabRefs.current[tab] = node }}
+                  id={`claim-details-${tab}-tab`}
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={detailsTab === tab}
+                  aria-controls={`claim-details-${tab}-panel`}
+                  tabIndex={detailsTab === tab ? 0 : -1}
+                  onClick={() => setDetailsTab(tab)}
+                  onKeyDown={(event) => handleDetailsTabKeyDown(event, tab)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <div id="claim-details-body" hidden={!detailsOpen}>
+            <div
+              id="claim-details-summary-panel"
+              role="tabpanel"
+              aria-labelledby="claim-details-summary-tab"
+              tabIndex="0"
+              hidden={detailsTab !== 'summary'}
+            >
+            <div className="claim-details-section-heading">
+              <h3>What we have so far</h3>
+              <p className="panel-subtitle">Review or correct anything here</p>
+            </div>
             {Object.keys(form).length === 0 ? (
               <p className="empty-details">Details from your conversation will appear here.</p>
             ) : (
@@ -2355,6 +2458,29 @@ function App() {
                 )}
               </div>
             )}
+            </div>
+            <div
+              id="claim-details-documents-panel"
+              role="tabpanel"
+              aria-labelledby="claim-details-documents-tab"
+              tabIndex="0"
+              hidden={detailsTab !== 'documents'}
+            >
+              {detailsTab === 'documents' && workspaceView === 'chat' && (
+                <ClaimDocuments
+                  items={evidenceItems}
+                  loadStatus={evidenceLoadStatus}
+                  busy={isBusy}
+                  onUpload={(item, file) => handleFileSelected(
+                    file,
+                    null,
+                    item.kind,
+                    item.evidence_id,
+                  )}
+                  onView={openCurrentClaimEvidence}
+                />
+              )}
+            </div>
             </div>
           </aside>
         </main>

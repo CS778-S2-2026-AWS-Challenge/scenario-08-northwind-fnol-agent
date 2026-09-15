@@ -569,6 +569,111 @@ describe('claimant intake projection', () => {
     expect(screen.getByText('Add the affected property address')).toBeInTheDocument()
   })
 
+  it('shows what to provide from the Evidence projection and supports keyboard tab navigation', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.submitClaimMessage.mockResolvedValue({
+      claimant_message: claimantMessage,
+      agent_message: agentMessage,
+      form_changes: [],
+      contents_item_changes: [],
+      dynamic_form: null,
+      claim_revision: 2,
+      decision: { customer_next_step: initialClaim.customer_next_step },
+    })
+    const requiredEvidence = {
+      evidence_id: 'evd_required_document',
+      kind: 'repair_quote',
+      status: 'missing',
+      file_status: 'awaiting_upload',
+      needed_for: ['current_action'],
+      claimant_note: 'A repair quote is needed for this step.',
+    }
+    const receivedEvidence = {
+      ...requiredEvidence,
+      status: 'received',
+      file_status: 'ready',
+      original_filename: 'repair-quote.pdf',
+    }
+    const processingEvidence = {
+      ...receivedEvidence,
+      file_status: 'processing',
+    }
+    api.getClaimEvidence.mockResolvedValueOnce({
+      claim_id: initialClaim.claim_id,
+      revision: 2,
+      items: [requiredEvidence],
+    }).mockResolvedValue({
+      claim_id: initialClaim.claim_id,
+      revision: 4,
+      items: [receivedEvidence],
+    })
+    api.requestEvidenceUpload.mockResolvedValue({
+      evidence_id: requiredEvidence.evidence_id,
+      revision: 3,
+      upload: { method: 'PUT', url: '/upload-target', headers: {} },
+    })
+    api.uploadEvidenceContent.mockResolvedValue(undefined)
+    api.completeEvidenceUpload.mockResolvedValue({
+      revision: 4,
+      evidence: processingEvidence,
+    })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    const summaryTab = await screen.findByRole('tab', { name: 'Summary' })
+    const documentsTab = screen.getByRole('tab', { name: 'What to provide' })
+    expect(summaryTab).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('What we have so far')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'What to provide, 1 outstanding' })).toBeInTheDocument()
+
+    summaryTab.focus()
+    await user.keyboard('{ArrowRight}')
+    expect(documentsTab).toHaveFocus()
+    expect(documentsTab).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('Repair Quote')).toBeInTheDocument()
+    expect(screen.getByText('1 item needs your attention')).toBeInTheDocument()
+
+    await user.keyboard('{Home}')
+    expect(summaryTab).toHaveFocus()
+    expect(summaryTab).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('What we have so far')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'What to provide, 1 outstanding' }))
+    expect(documentsTab).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('Repair Quote')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Evidence history' })).not.toBeInTheDocument()
+
+    const documentsPanel = screen.getByRole('tabpanel', { name: 'What to provide' })
+    const uploadInput = documentsPanel.querySelector('input[type="file"]')
+    await user.upload(
+      uploadInput,
+      new File(['quote'], 'repair-quote.pdf', { type: 'application/pdf' }),
+    )
+
+    await waitFor(() => expect(api.requestEvidenceUpload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        claimId: initialClaim.claim_id,
+        evidenceId: requiredEvidence.evidence_id,
+        kind: requiredEvidence.kind,
+      }),
+    ))
+    await waitFor(
+      () => expect(api.getClaimEvidence).toHaveBeenCalledTimes(2),
+      { timeout: 2500 },
+    )
+    expect(await screen.findByText('Received')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'What to provide' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /What to provide, .* outstanding/ })).not.toBeInTheDocument()
+  })
+
   it('aborts an in-flight draft upload when its remove control is used', async () => {
     const user = userEvent.setup()
     let uploadSignal
