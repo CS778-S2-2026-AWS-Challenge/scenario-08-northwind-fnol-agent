@@ -122,7 +122,10 @@ class ModelRuntimeBinding(BaseModel):
 
     model_config = ConfigDict(extra='forbid')
 
+    profile_id: str = Field(min_length=1, max_length=100)
     protocol: str = Field(min_length=1, max_length=50)
+    provider: str = Field(min_length=1, max_length=100)
+    model_identifier: str = Field(min_length=1, max_length=300)
     base_url: str = Field(max_length=500)
     credential_environment_variable: str | None = Field(default=None, max_length=200)
     purpose: str = Field(min_length=1, max_length=100)

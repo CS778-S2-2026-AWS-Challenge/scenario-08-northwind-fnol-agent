@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from backend.core.config import (
@@ -148,6 +151,80 @@ def test_model_gateway_settings_use_only_a_secret_environment_reference(
     assert settings.model_timeout_seconds == 12.5
     assert settings.model_supports_structured_output is True
     assert settings.model_supports_tools is False
+
+
+def test_model_binding_manifest_selects_qwen_without_exposing_a_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('AGENT_RUNTIME_PROFILE', 'model_gateway')
+    monkeypatch.setenv('MODEL_RUNTIME_BINDINGS_PATH', 'config/model-runtime-bindings.json')
+    monkeypatch.setenv('NORTHWIND_QWEN_BASE_URL', 'http://qwen.test/v1')
+    monkeypatch.delenv('MODEL_BASE_URL', raising=False)
+    monkeypatch.delenv('MODEL_IDENTIFIER', raising=False)
+    monkeypatch.delenv('MODEL_API_KEY_ENV', raising=False)
+    monkeypatch.setenv('MODEL_PROVIDER', 'must-not-override-the-binding')
+    monkeypatch.setenv('MODEL_SUPPORTS_TOOLS', 'false')
+
+    settings = Settings.from_environment()
+
+    assert settings.model_profile_id == 'qwen-local'
+    assert settings.model_provider == 'qwen-local'
+    assert settings.model_identifier == 'qwen3.8-27b'
+    assert settings.model_api_key_env is None
+    assert settings.model_supports_tools is True
+    assert [item.profile_id for item in settings.model_runtime_bindings] == [
+        'qwen-local',
+        'nowcoding-gpt55',
+    ]
+    gpt = settings.model_runtime_bindings[1]
+    assert gpt.model_identifier == 'gpt-5.5'
+    assert gpt.credential_environment_variable == 'NORTHWIND_MODEL_API_KEY'
+
+
+def test_model_binding_manifest_rejects_invalid_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    path = tmp_path / 'bindings.json'
+    path.write_text('{invalid', encoding='utf-8')
+    monkeypatch.setenv('MODEL_RUNTIME_BINDINGS_PATH', str(path))
+
+    with pytest.raises(ValueError, match='must point to a valid model binding JSON file'):
+        Settings.from_environment()
+
+
+def test_model_binding_manifest_rejects_duplicate_profiles(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    source = json.loads(Path('config/model-runtime-bindings.json').read_text(encoding='utf-8'))
+    path = tmp_path / 'bindings.json'
+    path.write_text(json.dumps([source[0], source[0]]), encoding='utf-8')
+    monkeypatch.setenv('MODEL_RUNTIME_BINDINGS_PATH', str(path))
+    monkeypatch.setenv('NORTHWIND_QWEN_BASE_URL', 'http://qwen.test/v1')
+
+    with pytest.raises(ValueError, match='must not contain duplicate model profile IDs'):
+        Settings.from_environment()
+
+
+def test_model_binding_manifest_rejects_an_unknown_default_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('MODEL_RUNTIME_BINDINGS_PATH', 'config/model-runtime-bindings.json')
+    monkeypatch.setenv('NORTHWIND_QWEN_BASE_URL', 'http://qwen.test/v1')
+    monkeypatch.setenv('MODEL_PROFILE_ID', 'missing-profile')
+
+    with pytest.raises(ValueError, match='must identify a configured deployment binding'):
+        Settings.from_environment()
+
+
+def test_model_binding_manifest_rejects_a_missing_private_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('AGENT_RUNTIME_PROFILE', 'model_gateway')
+    monkeypatch.setenv('MODEL_RUNTIME_BINDINGS_PATH', 'config/model-runtime-bindings.json')
+    monkeypatch.delenv('NORTHWIND_QWEN_BASE_URL', raising=False)
+
+    with pytest.raises(ValueError, match='MODEL_BASE_URL must not be empty'):
+        Settings.from_environment()
 
 
 def test_model_gateway_runtime_requires_endpoint_and_model() -> None:

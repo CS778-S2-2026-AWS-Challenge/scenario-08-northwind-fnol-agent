@@ -439,10 +439,12 @@ credential field contains only an
 environment-variable name; the secret itself remains outside the configuration record. Every
 model configuration must declare `impact=high`; an omitted or normal impact returns `422
 PROVIDER_CONFIGURATION_INVALID` and cannot enter the lifecycle. Model validation permits
-publication only when `evaluation_status` is `configured`; protocol, base URL, and credential
-environment-variable name match the deployment-owned startup settings; and purpose, privacy
-class, executable prompt identifier, and structured-output capability match the claimant Runtime
-contract. The current executable prompt identifier is `northwind-fnol-claimant-v5`. A
+publication only when `evaluation_status` is `configured`; profile ID, provider, model identifier,
+protocol, base URL, credential environment-variable name, purpose, privacy class, executable
+prompt identifier, and capabilities match one exact entry in the deployment-owned model binding
+allow-list. The allow-list does not publish a model; the independently approved configuration and
+active Release Set remain the selectable-catalogue authority. The current executable prompt
+identifier is `northwind-fnol-claimant-v6`. A
 degraded, unavailable, deployment-mismatched, or Runtime-incompatible profile returns `422
 PROVIDER_CONFIGURATION_UNAVAILABLE` and remains a draft. Other invalid or incomplete model values
 return `422 PROVIDER_CONFIGURATION_INVALID`.
@@ -1412,8 +1414,9 @@ confirmation.
 
 On the target namespaced Runtime path the model must first call `claim.read`. The Runtime executes
 the read against the authenticated Claim, sends the assistant tool call and result back to the
-same model, and accepts the final `conversation.answer` or an authorised
-`human.create_handoff` plus a registered runtime directive.
+same model, and accepts only a registered `action_code` and `runtime_action_code` pairing. An
+unknown directive such as `runtime.confirm_claimant_facts`, a deprecated flat action, or an
+invalid pairing is rejected before Claim State mutation.
 The validated proposal is then applied through the ordinary revision-checked Claim transaction.
 The response includes the resulting Claim revision and compatibility decision projection, while
 the distinct TurnPlan, AgentProposal, ExecutionPlan, ActionEnvelope, ToolResult, TurnResult, and

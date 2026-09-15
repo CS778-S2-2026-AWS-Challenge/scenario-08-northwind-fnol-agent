@@ -388,7 +388,7 @@ def test_resume_keeps_persisted_model_profile_for_a_fresh_client(
     original_session_id = created.json()['session']['session_id']
     _, paused_session = pause_created_claim(repository, claim_id, original_session_id)
     repository.save_session(
-        paused_session.model_copy(update={'model_profile_id': 'nowcoding-gpt56terra'})
+        paused_session.model_copy(update={'model_profile_id': 'nowcoding-gpt55'})
     )
 
     resumed = client.post(
@@ -398,14 +398,14 @@ def test_resume_keeps_persisted_model_profile_for_a_fresh_client(
     )
 
     assert resumed.status_code == 201
-    assert resumed.json()['model_profile_id'] == 'nowcoding-gpt56terra'
+    assert resumed.json()['model_profile_id'] == 'nowcoding-gpt55'
     resumed_session = repository.get_session(
         claim_id,
         resumed.json()['session_id'],
         'cus_demo',
     )
     assert resumed_session is not None
-    assert resumed_session.model_profile_id == 'nowcoding-gpt56terra'
+    assert resumed_session.model_profile_id == 'nowcoding-gpt55'
 
 
 def test_resume_rejects_explicit_model_profile_conflict(
@@ -423,7 +423,7 @@ def test_resume_rejects_explicit_model_profile_conflict(
     original_session_id = created.json()['session']['session_id']
     _, paused_session = pause_created_claim(repository, claim_id, original_session_id)
     repository.save_session(
-        paused_session.model_copy(update={'model_profile_id': 'nowcoding-gpt56terra'})
+        paused_session.model_copy(update={'model_profile_id': 'nowcoding-gpt55'})
     )
 
     resumed = client.post(

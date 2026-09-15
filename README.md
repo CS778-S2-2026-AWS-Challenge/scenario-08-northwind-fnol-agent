@@ -104,6 +104,12 @@ Multimodal model input is opt-in through `MODEL_SUPPORTS_IMAGE_INPUT` and
 for a provider profile that has repeatable adapter evidence; they do not grant access to object
 storage or bypass the Evidence authorization boundary.
 
+The governed multi-model deployment allow-list is selected with
+`MODEL_RUNTIME_BINDINGS_PATH`. Private model endpoints remain environment-owned; the current
+Qwen binding resolves `NORTHWIND_QWEN_BASE_URL` at process startup rather than storing that
+address in source control. For the complete model publication contract, see
+[Provider-Neutral Model Gateway](docs/model-gateway.md).
+
 The default object store remains the deterministic fixture adapter. To run the same
 FastAPI evidence flow against local MinIO, start the packaged service and configure the
 `s3_compatible` adapter as described in
