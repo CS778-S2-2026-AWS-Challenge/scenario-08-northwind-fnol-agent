@@ -461,7 +461,7 @@ Published AA and Tower material reports high interaction and claim volumes, peak
 
 ---
 
-# Appendix A — Claimant Survey Evidence
+## Appendix A — Claimant Survey Evidence
 
 > **Data integrity note:** Results were recalculated on 13 August 2026 from the final repository export, [`claimant-survey-final-responses.csv`](./claimant-survey-final-responses.csv), collected through the linked [Google Sheets response source](https://docs.google.com/spreadsheets/d/1QVGBnV9EiZ_2JnnEHMKe2xCEuP7JLrA4KS1Vwr2KYBE/edit?gid=1673612912#gid=1673612912). The export contains 156 submissions; one non-consenting submission was excluded, leaving n=155 consenting respondents. A blank branch-dependent answer is treated as missing, not incorrect, and each percentage uses that question's actual answered denominator. Question wording is preserved in [`insurance-claim-customer-experience-survey.pdf`](./insurance-claim-customer-experience-survey.pdf). Results are exploratory rather than population estimates.
 
