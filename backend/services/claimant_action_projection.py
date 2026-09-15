@@ -24,9 +24,7 @@ class ClaimantActionDefinition:
 CLAIMANT_ACTION_REGISTRY = MappingProxyType(
     {
         'claim_creation': ClaimantActionDefinition('claim.create', 'claimant_api'),
-        'conversation': ClaimantActionDefinition(
-            'conversation.present_options', 'conversation'
-        ),
+        'conversation': ClaimantActionDefinition('conversation.present_options', 'conversation'),
         ClaimantExternalServiceStatus.CONSENT_REQUIRED: ClaimantActionDefinition(
             'external.prepare_request', 'external_service', ('claimant_consent',)
         ),

@@ -1697,7 +1697,10 @@ def submit_message(
                     return _message_only_response(
                         repository,
                         principal,
-                        claim_id, session_id, claim.revision, existing_client_message
+                        claim_id,
+                        session_id,
+                        claim.revision,
+                        existing_client_message,
                     )
                 raise _session_not_found()
             return _message_turn_response(
