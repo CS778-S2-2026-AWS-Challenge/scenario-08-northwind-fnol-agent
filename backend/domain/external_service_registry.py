@@ -677,7 +677,6 @@ def capability_catalogue(
                 purpose=entry.purpose,
                 access_form=entry.access_form,
                 adapter_kind=entry.adapter_kind,
-                provenance=entry.provenance,
                 uses_external_task=entry.uses_external_task,
                 required_fields=entry.required_fields,
                 disclosure_fields=entry.disclosure_fields,

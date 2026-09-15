@@ -615,7 +615,9 @@ class AssessorRoutingResult(ContractModel):
 
 class ClaimantExternalServiceAction(ContractModel):
     service_identity: str
-    registry_version: str = Field(default='external-service-lifecycle.v1', min_length=1, max_length=100)
+    registry_version: str = Field(
+        default='external-service-lifecycle.v1', min_length=1, max_length=100
+    )
     lifecycle_status: str = Field(min_length=1, max_length=100)
     catalogue_reference: str | None = None
     capability_provenance: str = Field(min_length=1, max_length=100)
@@ -639,7 +641,9 @@ class ClaimantExternalServiceAction(ContractModel):
 class ExternalCapabilityProjection(ContractModel):
     """Server-owned third-party capability row shared by claimant and staff."""
 
-    registry_version: str = Field(default='external-service-lifecycle.v1', min_length=1, max_length=100)
+    registry_version: str = Field(
+        default='external-service-lifecycle.v1', min_length=1, max_length=100
+    )
     service_identity: str
     catalogue_reference: str | None = None
     service_name: str
@@ -648,7 +652,6 @@ class ExternalCapabilityProjection(ContractModel):
     purpose: str
     access_form: str
     adapter_kind: str
-    provenance: str
     uses_external_task: bool
     required_fields: tuple[str, ...] = ()
     disclosure_fields: tuple[str, ...] = ()
