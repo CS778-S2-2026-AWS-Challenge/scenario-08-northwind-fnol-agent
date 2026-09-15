@@ -73,7 +73,7 @@ records remain target contracts.
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
 | Retrieval | structured policy/history results, knowledge citations, limitations, source versions | `claim_id` and retrieval identity |
 | Review | internal signals, source references, professional decisions, staff actions | `claim_id` and work identity |
-| Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps | `claim_id` and `handoff_id` |
+| Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps, and support continuation target (`resume_workflow_state`, `resume_next_action`) | `claim_id` and `handoff_id` |
 | Follow-up | due time, responsible party, attempt count, channel, outcome, status | `claim_id` and `follow_up_id` |
 | Integration | published provider configuration references, adapter capability/health projection, external-service consent, claim-creation result, durable routing operation intent/outcome, routing result, external participant task, returned task result and verification, idempotency result | integration identity, `claim_id`, task, result, or consent/operation identity |
 | External request | implemented purpose, disclosed field names, consent and authority, preparation and first send identity, controlled assessor result and verification; target capability/requirement versions, attempts, and reconciliation | `claim_id`, `request_id`, linked to `task_id` |
@@ -453,6 +453,11 @@ Evidence record or protected object.
   profile, executable prompt identifier, provider-reported model identifier, and provider request
   identifier when supplied.
   These provider references are internal-only and never enter claimant projections.
+- A successful multimodal Runtime trace may retain the exact selected Evidence ID, media type,
+  and `submitted` outcome. It never retains raw bytes, object URLs, storage keys, or provider
+  payloads. Any proposed form field or contents item derived from that attachment retains the
+  Evidence ID as its source reference and remains unconfirmed until the ordinary fact-confirmation
+  path accepts it.
 - Model-authored customer prose and model-proposed internal signals are not persistence
   authority. Claimant-visible response fields are server-rendered after deterministic
   validation, and any non-empty model signal proposal rejects the complete turn before write.

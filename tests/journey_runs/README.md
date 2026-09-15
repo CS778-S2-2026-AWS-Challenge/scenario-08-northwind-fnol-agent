@@ -62,22 +62,29 @@ implies they ran.
 
 ## Runners
 
-A runner drives one scenario through the API and returns a `JourneyRunRecord`. The record and its
+A runner drives one scenario through the API and returns a `JourneyRunRecord`. `engine.py` holds
+what every runner does the same way (route calls, uploads, delivery, the shared read-back, and
+record assembly); a runner holds its own steps, pack, and seam checks. The record and its
 classification rules are shared, so runs from different runners and families can be counted
 together.
 
 ```bash
-python -m tests.journey_runs --runs 10 --out ../journey-runs
+python -m tests.journey_runs --scenario motor --runs 10 --out ../journey-runs
+python -m tests.journey_runs --scenario home --runs 10 --out ../journey-runs
+python -m tests.journey_runs --scenario contents --runs 10 --out ../journey-runs
 python -m tests.journey_runs --schema
 ```
 
 Each run starts a fresh fixture runtime and writes one `<run_id>.json`; `--schema` prints the
-record's JSON Schema. `tests/test_journey_runs.py` runs one journey in the ordinary suite and fails
-on any `untracked` disagreement: report it to its owner, then add it to the runner's known defects.
+record's JSON Schema. `tests/test_journey_runs.py` runs each journey once in the ordinary suite. It
+fails on any `untracked` disagreement, and on a home or contents stop that is neither in
+`household.KNOWN_STOPS` nor a documented unavailable capability: report it to its owner, then
+record it there.
 
 | Runner | Journey | Evidence level |
 |---|---|---|
 | `motor_collision.py` | Create, describe (`AT-01-clear-motor-creation` input), upload the claimant's pack, confirm, create, consent, route the assessor, receive the assessment | API projections on the fixture runtime; not browser; no provider contacted |
+| `household.py` (`home`, `contents`) | Create, describe, upload the claimant's pack, then answer each `dynamic_form.requirements.next_required_item` from a scripted claimant answer and confirm the proposals, until the requirements are `ready` and the claim is created | The same |
 
 The motor pack (`motor-collision-provisional-2`) is provisional until an owner freezes the rubric
 anchors. It uses the `received` motor materials in `backend/demo_data/materials/`:
@@ -90,3 +97,19 @@ anchors. It uses the `received` motor materials in `backend/demo_data/materials/
 
 The deliberately defective variants (unreadable, conflicting, superseded, not obtainable) belong to
 failure-path runs.
+
+The home and contents runners stop when a step fails or is refused, when the next required item
+is one this runtime is documented not to capture (recorded as an unavailable capability after one
+answer), when the same item is asked for again after its answer (creation is then attempted, so the
+refusal is the evidence), or after 12 turns.
+
+- **Home (`home-water-ingress-provisional-1`):** roof-valley ingress into the lounge ceiling and an
+  adjacent room. The two incident photos and the repair assessment are claimant uploads (the
+  assessment as claimant-supplied material under `P3-REPAIRER`, manual); the disclosure consent
+  record has no home route. On the controlled runtime the journey fails at
+  `property.ongoing_risk` (#848).
+- **Contents (`contents-damaged-item-provisional-1`):** one damaged laptop. The two item photos,
+  the purchase receipt, and the replacement assessment (`P3-CONTENTS-EVIDENCE`, manual) are
+  claimant uploads; the consent record has no contents route. The theft-path Police report is
+  excluded. On the controlled runtime `contents.items` is not captured, so the run is
+  `unavailable` (`docs/model-gateway.md`; Discussion #847).

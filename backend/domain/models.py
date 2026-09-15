@@ -518,6 +518,7 @@ class ProposedContentsItem(ContractModel):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     relation: AssertionRelation | None = None
     reported_text: str | None = Field(default=None, max_length=5000)
+    source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ContentsItemAssertion(ContractModel):
@@ -877,6 +878,7 @@ class ProposedFormChange(ContractModel):
     precision: FactPrecision = FactPrecision.EXACT
     relation: AssertionRelation | None = None
     reported_text: str | None = Field(default=None, max_length=5000)
+    source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class AgentAuthority(ContractModel):
@@ -905,6 +907,14 @@ class RuntimeInvocationTrace(ContractModel):
     latency_ms: float = Field(ge=0)
 
 
+class RuntimeEvidenceTrace(ContractModel):
+    """Bounded Evidence identity recorded for one successful model turn."""
+
+    evidence_id: str = Field(min_length=1, max_length=100)
+    media_type: str = Field(min_length=1, max_length=100)
+    outcome: Literal['submitted'] = 'submitted'
+
+
 class RuntimeTraceRecord(ContractModel):
     """Provider trace retained alongside the applied Runtime turn records."""
 
@@ -913,6 +923,7 @@ class RuntimeTraceRecord(ContractModel):
     session_id: str
     model_profile_id: str
     trigger_message_id: str
+    evidence: list[RuntimeEvidenceTrace] = Field(default_factory=list, max_length=20)
     invocations: list[RuntimeInvocationTrace] = Field(min_length=1, max_length=2)
     tool_call_id: str
     tool_name: Literal['claim.read']
@@ -1106,6 +1117,13 @@ class HandoffRecord(ContractModel):
     created_at: datetime
     accepted_at: datetime | None = None
     resolved_at: datetime | None = None
+    # Support handoffs temporarily interrupt the claimant workflow. These values
+    # preserve the authoritative continuation target without creating a second
+    # claim-state record.
+    # Legacy records may not have a continuation target; resolution then preserves
+    # the current Claim state rather than inventing a default.
+    resume_workflow_state: WorkflowState | None = None
+    resume_next_action: AgentAction | None = None
 
 
 class ClaimantHandoff(ContractModel):
@@ -1116,6 +1134,16 @@ class ClaimantHandoff(ContractModel):
     support_need: SupportNeed
     summary: str
     created_at: datetime
+
+
+class ClaimantResolvedSupportHandoff(ContractModel):
+    """Claimant-safe evidence that a support handoff was completed."""
+
+    handoff_id: str
+    type: HandoffType
+    status: Literal['resolved'] = 'resolved'
+    completed_at: datetime
+    customer_update: str | None = None
 
 
 class WorkbenchSession(ContractModel):
@@ -1324,6 +1352,8 @@ class WorkbenchHandoff(ContractModel):
     created_at: datetime
     accepted_at: datetime | None = None
     resolved_at: datetime | None = None
+    resume_workflow_state: WorkflowState | None = None
+    resume_next_action: AgentAction | None = None
 
 
 class AcceptHandoffRequest(ContractModel):
@@ -1706,6 +1736,7 @@ class ClaimantClaim(ContractModel):
     customer_next_step: CustomerNextStep
     incomplete_context: ClaimantIncompleteContext | None = None
     handoff: ClaimantHandoff | None = None
+    resolved_support_handoff: ClaimantResolvedSupportHandoff | None = None
     created_at: datetime
     updated_at: datetime
 

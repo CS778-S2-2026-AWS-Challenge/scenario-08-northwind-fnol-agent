@@ -916,6 +916,12 @@ record disagrees with.
 `references` does not appear in the claimant projection. A claimant is told a check is in
 progress; which side is doubted, and why, is staff-only.
 
+Staff handoff projections also retain the authoritative `resume_workflow_state` and
+`resume_next_action` captured when support was requested. These continuation fields are
+optional for legacy handoff records; when absent, resolving the handoff preserves the
+current Claim state rather than inventing a continuation target. These fields are
+staff-facing only and are not included in the claimant handoff projection.
+
 Extracted facts use the structured form envelope with `source` set to `image` or `document`. They remain `proposed` until claimant confirmation or an authorised staff decision.
 
 ### Current Compatibility Agent Decision
@@ -1249,10 +1255,24 @@ Response `200`:
   "dynamic_form": null,
   "customer_next_step": {},
   "handoff": null,
+  "resolved_support_handoff": null,
   "created_at": "2026-08-10T03:40:00Z",
   "updated_at": "2026-08-10T03:50:00Z"
 }
 ```
+
+`resolved_support_handoff` is present only on Claim detail, and is otherwise `null`. It is
+claimant-safe completion evidence containing exactly `handoff_id`, `type`, `status`,
+`completed_at`, and `customer_update`. The `customer_update` is the claimant-safe update written
+when the handoff is resolved; staff result summaries and internal action identifiers are never
+projected. The object is derived from the latest claimant-created `human_support` or
+`urgent_support` HandoffRecord only when that record is resolved and has a matching completed
+`handoff_support` resolution event.
+Professional review, staff-created or cancelled/rejected work, ordinary staff updates, and
+terminal Claims never produce this field. A newer claimant support request clears the previous
+projection until the newer request is eligible and resolved. This field reports staff assistance
+completion only; it does not mean that the Claim is complete, created externally, covered, or
+otherwise terminal. `customer_next_step` remains the authoritative continuation action.
 
 The claimant-facing `evidence_summary` MUST be calculated only from evidence records visible through the claimant evidence projection. It MUST NOT include counts derived from `internal_only` evidence or any record excluded from `GET /claims/{claim_id}/evidence`. The persisted Working Claim retains the authoritative aggregate over the full persisted evidence set for staff and operational use; persistence adapters MUST preserve that full aggregate. Claimant-safe aggregation is applied only at the claimant projection boundary.
 
@@ -1332,9 +1352,9 @@ Request:
   "model_profile_id": "qwen-local",
   "content": {
     "type": "text",
-    "text": "I was rear-ended while stopped at traffic lights. Nobody is injured."
+    "text": "I was rear-ended while stopped at traffic lights. Please review the photo."
   },
-  "evidence_refs": []
+  "evidence_refs": ["evd_01J4Y7V5QJ"]
 }
 ```
 
@@ -1343,6 +1363,17 @@ optional `model_profile_id` selects any currently published claimant profile for
 does not create a new Claim or clear the conversation. The selected profile is persisted in the
 Session as the latest default and in the Runtime provenance for the exact turn. Empty text
 without evidence is rejected.
+
+`evidence_refs` is also the explicit per-message disclosure boundary for model input. Before a
+model call, each ID must resolve to claimant-visible Evidence on the authenticated claimant's
+current Claim, use a supported image/PDF media type, and be in an uploaded, processing, or ready
+file state. Duplicate, unknown, cross-Claim, staff/external internal-only, incomplete, invalid,
+expired, superseded, missing, or unavailable references are rejected before the Agent runs. The
+Runtime passes a turn-scoped resolver rather than an object URL or storage key, and the resolver
+repeats the visibility, record, and immutable-object checks whenever an adapter reads bytes. A
+structured form fact or contents item attributed to an attachment must name that exact Evidence
+ID. It is persisted with `image` or `document` provenance and remains `proposed` for claimant
+confirmation.
 
 On the target namespaced Runtime path the model must first call `claim.read`. The Runtime executes
 the read against the authenticated Claim, sends the assistant tool call and result back to the
