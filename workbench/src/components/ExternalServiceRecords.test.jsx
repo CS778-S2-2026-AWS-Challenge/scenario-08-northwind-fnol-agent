@@ -244,6 +244,60 @@ describe('ExternalServiceRecords', () => {
     await waitFor(() => expect(onAction).toHaveBeenCalledWith(projected, {}))
   })
 
+  it('requires an explicit staff choice for a required projected select input', async () => {
+    const user = userEvent.setup()
+    const onAction = vi.fn().mockResolvedValue(undefined)
+    const projected = {
+      action_code: 'external.accept_review',
+      target_type: 'external_task',
+      target_ref: 'tsk_1',
+      label: 'Accept external-service review',
+      purpose: 'Review this exact task.',
+      availability: 'confirmation_required',
+      blocked_reason: null,
+      confirmation: { level: 'explicit', message: 'Confirm the selected review outcome.' },
+      expected_effects: [],
+      source_refs: ['tsk_1'],
+      inputs: [{
+        field_code: 'review_outcome',
+        label: 'Review outcome',
+        control: 'select',
+        required: true,
+        choices: [
+          { value: 'accepted', label: 'Accept result' },
+          { value: 'needs_follow_up', label: 'Needs follow-up' },
+        ],
+      }],
+      result_state: 'not_started',
+      based_on_revision: 7,
+    }
+
+    render(<ExternalServiceRecords
+      records={[request]}
+      allowedActions={[projected]}
+      claimRevision={7}
+      onAction={onAction}
+    />)
+
+    await user.click(screen.getByText('Vehicle Damage Assessor'))
+    const panel = screen.getByRole('heading', { name: projected.label }).closest('section')
+    await user.click(within(panel).getByRole('button', { name: `Review ${projected.label}` }))
+
+    const select = within(panel).getByLabelText('Review outcome')
+    const submit = within(panel).getByRole('button', { name: projected.label })
+    expect(select).toHaveValue('')
+    expect(submit).toBeDisabled()
+
+    await user.selectOptions(select, 'accepted')
+    expect(select).toHaveValue('accepted')
+    expect(submit).toBeEnabled()
+    await user.click(submit)
+
+    await waitFor(() => expect(onAction).toHaveBeenCalledWith(projected, {
+      review_outcome: 'accepted',
+    }))
+  })
+
   it('keeps a server-blocked external-task action non-executable and shows its reason', async () => {
     const user = userEvent.setup()
     const onAction = vi.fn()
