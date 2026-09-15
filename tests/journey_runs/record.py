@@ -11,13 +11,14 @@ complete than it was.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from enum import StrEnum
 from typing import Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-RECORD_SCHEMA: Final = 'northwind-journey-run/2'
+RECORD_SCHEMA: Final = 'northwind-journey-run/3'
 
 
 class ResultClass(StrEnum):
@@ -233,6 +234,18 @@ class FinalState(_Record):
     handoff_status: str | None
 
 
+class UnavailableCapability(_Record):
+    """A capability the journey needs that this runtime does not provide.
+
+    `needed_for` names the step the run could not attempt without it, and `evidence` says how
+    that is known: an observation from the run and the document that sets the boundary.
+    """
+
+    capability: str = Field(min_length=1)
+    needed_for: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+
+
 class ClaimantEffort(_Record):
     messages: int = Field(ge=0)
     confirmations: int = Field(ge=0)
@@ -247,13 +260,15 @@ def classify(
     seam_checks: list[SeamCheck],
     visibility_checks: list[VisibilityCheck],
     configuration: RunConfiguration,
+    unavailable_capabilities: Sequence[UnavailableCapability] = (),
 ) -> ResultClass:
     """Derive the result class from the evidence, most severe first.
 
     - `failed`: a step errored in a way the journey did not expect, or an audience could see
       what it must not (or could not see what it must).
     - `blocked`: the system refused a step the journey needs, for a known reason.
-    - `unavailable`: a step the journey needs has no implemented capability.
+    - `unavailable`: a step the journey needs has no implemented capability, or the run records
+      a capability this runtime does not provide.
     - `partial`: every step succeeded, but a pack material had no route in or was not
       delivered, or claimant and staff disagree (a `contradictory` or `missing` seam check).
     - `fixture-only`: everything was exercised and agrees, but on the fixture runtime, a
@@ -266,7 +281,7 @@ def classify(
         return ResultClass.FAILED
     if StepOutcome.BLOCKED in outcomes:
         return ResultClass.BLOCKED
-    if StepOutcome.UNAVAILABLE in outcomes:
+    if StepOutcome.UNAVAILABLE in outcomes or unavailable_capabilities:
         return ResultClass.UNAVAILABLE
     if any(material.arrival in _UNDELIVERED for material in materials) or any(
         check.verdict in _DISAGREEMENT for check in seam_checks
@@ -282,7 +297,7 @@ def classify(
 
 
 class JourneyRunRecord(_Record):
-    record_schema: Literal['northwind-journey-run/2'] = RECORD_SCHEMA
+    record_schema: Literal['northwind-journey-run/3'] = RECORD_SCHEMA
     run_id: str
     scenario_id: str
     family: Literal['motor', 'home', 'contents']
@@ -295,6 +310,7 @@ class JourneyRunRecord(_Record):
     consents: list[ConsentRecord]
     visibility_checks: list[VisibilityCheck]
     seam_checks: list[SeamCheck]
+    unavailable_capabilities: list[UnavailableCapability] = Field(default_factory=list)
     final_state: FinalState
     effort: ClaimantEffort
     result_class: ResultClass
@@ -308,6 +324,12 @@ class JourneyRunRecord(_Record):
         for step in referenced:
             if step not in recorded:
                 raise ValueError(f'{step!r} is not a recorded step')
+        for capability in self.unavailable_capabilities:
+            if capability.needed_for in recorded:
+                raise ValueError(
+                    f'{capability.capability}: needed for {capability.needed_for!r}, which the run '
+                    'did attempt, so its outcome is the evidence, not an unavailable capability'
+                )
         succeeded = {step.name for step in self.steps if step.outcome is StepOutcome.SUCCEEDED}
         for material in self.materials:
             if (
@@ -324,6 +346,7 @@ class JourneyRunRecord(_Record):
             seam_checks=self.seam_checks,
             visibility_checks=self.visibility_checks,
             configuration=self.configuration,
+            unavailable_capabilities=self.unavailable_capabilities,
         )
         if self.result_class is not derived:
             raise ValueError(

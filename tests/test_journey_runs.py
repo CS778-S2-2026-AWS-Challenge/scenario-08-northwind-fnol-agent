@@ -17,6 +17,7 @@ from journey_runs.record import (
     SeamCheck,
     SeamVerdict,
     StepOutcome,
+    UnavailableCapability,
     VisibilityCheck,
 )
 from pydantic import ValidationError
@@ -146,6 +147,13 @@ _LEAK = [
         audience='claimant', subject='internal note', expected_visible=False, observed_visible=True
     )
 ]
+_NO_ITEM_CAPTURE = [
+    UnavailableCapability(
+        capability='contents item capture',
+        needed_for='create the claim',
+        evidence='The controlled Agent proposed no item; docs/model-gateway.md.',
+    )
+]
 
 
 @pytest.mark.parametrize(
@@ -157,6 +165,14 @@ _LEAK = [
         ({'seam_checks': _DISAGREEING, 'configuration': _FIXTURE}, ResultClass.PARTIAL),
         ({'steps': [_step(409, 'blocked')], 'seam_checks': _DISAGREEING}, ResultClass.BLOCKED),
         ({'visibility_checks': _LEAK}, ResultClass.FAILED),
+        (
+            {'unavailable_capabilities': _NO_ITEM_CAPTURE, 'configuration': _FIXTURE},
+            ResultClass.UNAVAILABLE,
+        ),
+        (
+            {'unavailable_capabilities': _NO_ITEM_CAPTURE, 'steps': [_step(409, 'blocked')]},
+            ResultClass.BLOCKED,
+        ),
     ],
 )
 def test_a_record_cannot_claim_more_than_its_evidence(
@@ -239,4 +255,12 @@ def test_a_material_is_delivered_only_by_a_step_that_succeeded(
     with pytest.raises(ValidationError, match=message):
         JourneyRunRecord.model_validate(
             _record(materials=[material], steps=steps, result_class='failed')
+        )
+
+
+def test_a_capability_is_unavailable_only_for_a_step_the_run_did_not_attempt() -> None:
+    attempted = [{**_NO_ITEM_CAPTURE[0].model_dump(), 'needed_for': 'step'}]
+    with pytest.raises(ValidationError, match='did attempt'):
+        JourneyRunRecord.model_validate(
+            _record(unavailable_capabilities=attempted, result_class='unavailable')
         )
