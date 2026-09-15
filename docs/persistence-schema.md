@@ -69,11 +69,11 @@ records remain target contracts.
 | Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
 | Staff Agent interaction | staff-owned persistent sessions, session-bound published model profile, explicitly scoped questions, source-aware answers, and drafts with stable identity; executable drafts carry a registered action proposal but remain non-executing until staff confirmation | `staff_id`, `session_id`, `message_id`, and `draft_id`; Claim IDs are per-message scope only |
 | Staff Agent execution | immutable readback evidence for one explicitly confirmed draft and its registered Workbench handler result | `execution_id = sax_{draft_id}`; linked to the owned assistant message, exact draft, Claim, action, target, expected/resulting revision, and idempotency record |
-| Agent turn | Target TurnPlan/AgentProposal/ExecutionPlan/ActionEnvelopes plus the implemented bounded Runtime Trace, ToolRequests and results, TurnResult, policy and Registry versions, usage, latency, limitations | `turn_id`/`trace_id`, linked to session and optional Claim |
+| Agent turn | Target TurnPlan/AgentProposal/ExecutionPlan/ActionEnvelopes plus the implemented bounded Runtime Trace, ToolRequests and results, TurnResult, policy and Registry versions, selected external-service lifecycle coordinates, usage, latency, limitations | `turn_id`/`trace_id`, linked to session and optional Claim |
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
 | Retrieval | structured policy/history results, knowledge citations, limitations, source versions | `claim_id` and retrieval identity |
 | Review | internal signals, source references, professional decisions, staff actions | `claim_id` and work identity |
-| Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps | `claim_id` and `handoff_id` |
+| Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps, and support continuation target (`resume_workflow_state`, `resume_next_action`) | `claim_id` and `handoff_id` |
 | Follow-up | due time, responsible party, attempt count, channel, outcome, status | `claim_id` and `follow_up_id` |
 | Integration | published provider configuration references, adapter capability/health projection, external-service consent, claim-creation result, durable routing operation intent/outcome, routing result, external participant task, returned task result and verification, idempotency result | integration identity, `claim_id`, task, result, or consent/operation identity |
 | External request | implemented purpose, disclosed field names, consent and authority, preparation and first send identity, controlled assessor result and verification; target capability/requirement versions, attempts, and reconciliation | `claim_id`, `request_id`, linked to `task_id` |
@@ -530,6 +530,13 @@ Evidence record or protected object.
   a proposal appear executed.
 - One turn may contain several conversation moves and command proposals but exactly one
   primary Runtime control directive.
+- A claimant TurnPlan records every external-service lifecycle input selected for that turn as a
+  bounded coordinate: registry version, service identity, operation status, optional result stage,
+  and optional result-verification outcome. These immutable coordinates describe the model input
+  and do not replace the external task, result, or assessor-routing records. When an accepted
+  assessor task and `WorkingClaim.assessor_routing` share the same provider reference, the stored
+  operation coordinate is the registry-projected `queued` or `assigned` value actually supplied to
+  the model; a non-matching routing record leaves the coordinate at `accepted`.
 - Every ActionEnvelope retains stable identity, namespace, registered action name,
   target, proposer, reasons, sources, inputs, preconditions, authority, expected effects,
   visibility, idempotency where applicable, and actual status.
