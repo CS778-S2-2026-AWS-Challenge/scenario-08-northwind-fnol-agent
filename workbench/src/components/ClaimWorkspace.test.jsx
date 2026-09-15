@@ -79,6 +79,31 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'claim-tab-summary')
   })
 
+  it('collapses the Claim summary only while Conversation is selected', () => {
+    const { rerender } = render(<ClaimWorkspace
+      {...props}
+      section="conversation"
+      resources={{
+        handoffs: { status: 'available', items: [] },
+        messages: { status: 'available', items: [], resolved_session_id: null },
+      }}
+    />)
+
+    expect(screen.queryByRole('heading', { name: 'Alex Morgan', level: 1 })).not.toBeInTheDocument()
+    expect(screen.getByRole('tablist', { name: 'Claim sections' })).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Claimant conversation' })).not.toBeInTheDocument()
+    expect(screen.getByRole('log', { name: 'Claimant conversation messages' })).toBeVisible()
+
+    rerender(<ClaimWorkspace
+      {...props}
+      section="fields"
+      resources={{ fields: { status: 'available', items: [] } }}
+    />)
+
+    expect(screen.getByRole('heading', { name: 'Alex Morgan', level: 1 })).toBeVisible()
+    expect(screen.getByRole('tab', { name: 'Claim information' })).toHaveAttribute('aria-selected', 'true')
+  })
+
   it('supports arrow-key tab activation', async () => {
     const onSection = vi.fn()
     const user = userEvent.setup()
