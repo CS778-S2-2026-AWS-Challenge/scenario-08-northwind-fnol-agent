@@ -211,6 +211,68 @@ describe('ClaimWorkspace navigation', () => {
     expect(onSection).toHaveBeenCalledWith('external-services')
   })
 
+  it('keeps an unconfirmed external-action warning visible after the refreshed projection removes the action', async () => {
+    const user = userEvent.setup()
+    const onRetryExternalActionContext = vi.fn()
+    const externalAction = {
+      action_code: 'external.reconcile_response',
+      target_type: 'external_task',
+      target_ref: 'tsk_assessor_1',
+      label: 'Reconcile external outcome',
+      purpose: 'Check the existing provider operation.',
+      availability: 'confirmation_required',
+      confirmation: { message: 'Check this operation?' },
+      inputs: [],
+      based_on_revision: 4,
+    }
+    const actionDetail = {
+      ...detail,
+      work_summary: {
+        ...detail.work_summary,
+        primary_action_code: externalAction.action_code,
+        primary_action_target_ref: externalAction.target_ref,
+      },
+      allowed_actions: [externalAction],
+    }
+    const { rerender } = render(<ClaimWorkspace
+      {...props}
+      detail={actionDetail}
+      resources={{ handoffs: { items: [] }, externalRequests: { status: 'available', items: [] } }}
+    />)
+
+    expect(screen.getByRole('heading', { name: 'Reconcile external outcome' })).toBeVisible()
+
+    rerender(<ClaimWorkspace
+      {...props}
+      detail={{
+        ...detail,
+        revision: 5,
+        work_summary: {
+          ...detail.work_summary,
+          primary_action_code: null,
+          primary_action_target_ref: null,
+        },
+        allowed_actions: [],
+      }}
+      resources={{ handoffs: { items: [] }, externalRequests: { status: 'unavailable', items: [], error: new Error('Refresh failed.') } }}
+      externalActionNotice={{
+        claimId: 'clm_1',
+        taskId: 'tsk_assessor_1',
+        message: 'The action for external task tsk_assessor_1 may have completed. Its outcome is not confirmed. Do not submit it again until Claim and External Services state has been refreshed.',
+      }}
+      onRetryExternalActionContext={onRetryExternalActionContext}
+    />)
+
+    const alert = screen.getByRole('alert', { name: '' })
+    expect(alert).toHaveTextContent('External-service action outcome not confirmed')
+    expect(alert).toHaveTextContent('tsk_assessor_1')
+    expect(alert).toHaveTextContent(/may have completed.*outcome is not confirmed.*do not submit it again/i)
+    expect(screen.queryByRole('heading', { name: 'Reconcile external outcome' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Refresh Claim and External Services' }))
+    expect(onRetryExternalActionContext).toHaveBeenCalledOnce()
+  })
+
   it('does not present a blocked or inexact backend pair as the staff next action', () => {
     const blocked = {
       action_code: 'human.accept_handoff',
