@@ -51,17 +51,22 @@ one:
   Coupling on the whole `backend/` directory may over-report; narrow it to the
   route/model subdirectories when implementing.
 
-- **Impact-scoped backend tests**: pull requests use
+- **Impact-scoped backend tests**: pull requests and `main` use
   `scripts/select_backend_tests.py` to select direct consumer tests from the
-  changed paths. Documentation-only changes may skip backend pytest. Shared
+  changed paths. Pull requests compare their merge base with `HEAD`; `main`
+  compares the current commit with its first parent so a merge validates only
+  the behavior it introduces. Documentation- and frontend-only changes may
+  skip backend pytest. Shared
   domain models, repository protocols, runtime composition, dependency
-  manifests, and unmapped backend changes select the complete suite. The
-  `main` branch always runs the complete suite with coverage enforcement.
-  Scoped PRs also scope Ruff and Mypy to changed Python files, while OpenAPI
-  and AuditEvent snapshot checks run only when their contract can be affected.
-  Scoped pytest runs intentionally omit the global coverage threshold; the
-  full coverage gate remains on `main`. The selector is itself covered by
-  tests and must never return an empty selection for a backend behavior change.
+  manifests, CI tooling, and unmapped backend changes select the complete
+  suite. Known Workbench, Agent, Model Gateway, Evidence, identity, Claim, and
+  external-service paths select their declared consumer suites. Scoped runs
+  also scope Ruff and Mypy to changed Python files, while OpenAPI and AuditEvent
+  snapshot checks run only when their contract can be affected. Scoped pytest
+  runs intentionally omit the global coverage threshold; full runs retain it.
+  The complete suite remains available through explicit `--full` execution.
+  The selector is itself covered by tests and must never return an empty
+  selection for a backend behavior change.
 
 - **Two-signal backend coverage**: the existing total coverage floor and changed-line
   coverage answer different questions and are both required:
