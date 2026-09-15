@@ -20,7 +20,18 @@ The internal `ClaimContextExecutionResult` is deliberately smaller than the targ
 
 The execution gate rejects stale workflow state, stale revision, unsupported actions, tool allow-list mismatches, missing Claim scope, repository conflicts, and invalid handler outcomes without presenting them as completed work. Expected dependency or service failures become bounded `failed` results rather than provider-specific exceptions. Unexpected programming errors are not swallowed by this boundary.
 
-This issue does **not** introduce the coordinated target `ExecutionPlan` / `TurnResult` persistence or public transport migration. It also does not publish a new API route or compose every namespaced action into one runtime entry point. Day 4 integration work may consume this internal boundary while the existing action-specific services remain authoritative for concrete writes.
+The live claimant composition now supplies production bindings for
+`claim.apply_fact_patch`, `claim.register_evidence`, `claim.prepare_creation`, `claim.create`,
+and `human.create_handoff`. The message boundary dispatches its one material mutation through the
+binding before committing the existing atomic Agent turn. The formal-creation boundary dispatches
+`claim.create` before the existing claims adapter is invoked. Both handlers retain their existing
+transactions; the dispatcher validates and selects them but does not persist a second Claim.
+
+Conversation-only and runtime-control actions remain part of the Runtime turn rather than Claim
+Context commands. External participant actions remain unavailable until their owning service
+handlers are composed. `ClaimantRuntimeActionDispatcher.binding_table()` is the machine-readable
+deployment evidence: registry entries absent from that table are not executable merely because a
+contract or test exists.
 
 ## Day 4 API, persistence, and audit mapping
 

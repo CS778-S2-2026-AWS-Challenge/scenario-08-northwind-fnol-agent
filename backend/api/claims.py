@@ -35,6 +35,7 @@ from backend.domain.models import (
 )
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider
+from backend.services.agent_action_execution import ClaimantRuntimeActionDispatcher
 from backend.services.claim_creation import create_claim_from_confirmed_report
 from backend.services.claimant_events import claimant_change_after, claimant_event_revision
 from backend.services.claims import (
@@ -84,6 +85,13 @@ def agent_for(request: Request) -> AgentTurnProvider:
 
 def runtime_agent_policy_for(request: Request) -> RuntimeAgentPolicyResolver:
     return cast(RuntimeAgentPolicyResolver, request.app.state.runtime_agent_policy_resolver)
+
+
+def action_dispatcher_for(request: Request) -> ClaimantRuntimeActionDispatcher:
+    return cast(
+        ClaimantRuntimeActionDispatcher,
+        request.app.state.claimant_runtime_action_dispatcher,
+    )
 
 
 def claims_adapter_for(request: Request) -> ClaimsServiceAdapter:
@@ -185,6 +193,7 @@ def create_external_claim(
     return create_claim_from_confirmed_report(
         repository_for(request),
         claims_adapter_for(request),
+        action_dispatcher_for(request),
         principal,
         claim_id,
         idempotency_key,
@@ -383,6 +392,7 @@ def create_message(
         idempotency_key=idempotency_key,
         if_match=if_match,
         runtime_agent_policy_resolver=runtime_agent_policy_for(request),
+        action_dispatcher=action_dispatcher_for(request),
         evidence_storage=evidence_storage_for(request),
     )
 

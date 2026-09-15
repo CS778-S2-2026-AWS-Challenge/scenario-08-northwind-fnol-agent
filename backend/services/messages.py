@@ -6,6 +6,12 @@ from backend.adapters.evidence_storage import EvidenceStorage, EvidenceStorageEr
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.agent_action_commands import ClaimContextCommand, build_claim_context_command
+from backend.domain.agent_action_registry import (
+    ActionActorRole,
+    ExecutionAuthority,
+    action_contract,
+)
 from backend.domain.branch_registry import (
     BranchRuleEvaluator,
     validate_registered_field_value,
@@ -89,6 +95,11 @@ from backend.services.agent import (
     authorised_state_changes,
     validate_proposal,
 )
+from backend.services.agent_action_execution import (
+    ClaimantRuntimeActionDispatcher,
+    ClaimContextHandlerOutcome,
+)
+from backend.services.agent_action_mapping import map_claim_context_execution_to_api
 from backend.services.agent_external_lifecycle import (
     ExternalLifecycleContextError,
     build_agent_external_lifecycle_context,
@@ -117,6 +128,7 @@ from backend.services.professional_reviews import build_policy_review_handoff
 from backend.services.retrieval import search_claim_history, search_policy
 from backend.services.runtime_agent_policy import (
     RuntimeAgentPolicyResolver,
+    RuntimeAgentPolicySnapshot,
     enforce_agent_proposal,
 )
 from backend.services.runtime_configuration import RuntimeConfigurationResolutionError
@@ -1439,6 +1451,80 @@ def _submit_namespaced_runtime_turn(
     return response
 
 
+def _live_mutation_command(
+    *,
+    claim: WorkingClaim,
+    claimant_message: MessageRecord,
+    idempotency_key: str,
+    form_changes: dict[str, StructuredFormField],
+    contents_item_changes: list[ContentsItem],
+    handoff: HandoffRecord | None,
+    pending_evidence: EvidenceRecord | None,
+    runtime_policy: RuntimeAgentPolicySnapshot | None,
+) -> ClaimContextCommand | None:
+    action_code: str | None = None
+    payload: dict[str, object]
+    if handoff is not None:
+        action_code = 'human.create_handoff'
+        payload = {
+            'claim_id': claim.claim_id,
+            'reason_codes': list(handoff.reason_codes),
+            'handoff_packet': handoff.model_dump(mode='json'),
+            'expected_revision': claim.revision,
+        }
+    elif pending_evidence is not None:
+        action_code = 'claim.register_evidence'
+        payload = {
+            'claim_id': claim.claim_id,
+            'evidence': pending_evidence.model_dump(mode='json'),
+            'expected_revision': claim.revision,
+        }
+    elif form_changes or contents_item_changes:
+        action_code = 'claim.apply_fact_patch'
+        payload = {
+            'claim_id': claim.claim_id,
+            'fact_patches': [
+                *(
+                    {
+                        'field_code': field_code,
+                        'field': field.model_dump(mode='json'),
+                    }
+                    for field_code, field in sorted(form_changes.items())
+                ),
+                *(
+                    {
+                        'field_code': 'contents.items',
+                        'item': item.model_dump(mode='json'),
+                    }
+                    for item in contents_item_changes
+                ),
+            ],
+            'expected_revision': claim.revision,
+        }
+    else:
+        return None
+
+    contract = action_contract(action_code)
+    tool_policy = runtime_policy.tool_policy if runtime_policy is not None else None
+    allowed_action_codes = tool_policy.allowed_action_codes if tool_policy is not None else None
+    allowed_tool_names = tool_policy.allowed_tool_names if tool_policy is not None else None
+    authority_reference = f'claimant-message:{claimant_message.message_id}'
+    if handoff is not None and 'EXPLICIT_SAFETY_SIGNAL' in handoff.reason_codes:
+        authority_reference = 'published-rule:BR-SAFETY-001'
+    return build_claim_context_command(
+        action_code,
+        payload,
+        proposer_role=ActionActorRole.RUNTIME,
+        approved_authority=contract.authority_requirement,
+        authority_reference=authority_reference,
+        workflow_state=claim.claim_state.workflow_state,
+        expected_revision=claim.revision,
+        idempotency_key=idempotency_key,
+        allowed_action_codes=allowed_action_codes,
+        allowed_tools=allowed_tool_names,
+    )
+
+
 def submit_message(
     repository: PersistenceRepository,
     agent: AgentTurnProvider,
@@ -1450,8 +1536,10 @@ def submit_message(
     idempotency_key: str | None,
     if_match: str | None,
     runtime_agent_policy_resolver: RuntimeAgentPolicyResolver | None = None,
+    action_dispatcher: ClaimantRuntimeActionDispatcher | None = None,
     evidence_storage: EvidenceStorage | None = None,
 ) -> MessageTurnResponse:
+    live_dispatcher = action_dispatcher or ClaimantRuntimeActionDispatcher()
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
     route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
@@ -1913,6 +2001,48 @@ def submit_message(
     _validate_failed_retrieval_changes(proposal, message_text)
     authority = validate_proposal(proposal)
     runtime_trace = proposal.runtime_trace
+    prepared_action_code: str | None = None
+    if (
+        runtime_trace is not None
+        and runtime_trace.action_code == 'claim.prepare_creation'
+        and authority.outcome is AuthorityOutcome.AUTHORISED
+    ):
+        tool_policy = runtime_policy.tool_policy if runtime_policy is not None else None
+        preparation = build_claim_context_command(
+            'claim.prepare_creation',
+            {'claim_id': claim_id, 'expected_revision': expected_revision},
+            proposer_role=ActionActorRole.RUNTIME,
+            approved_authority=ExecutionAuthority.RUNTIME_VALIDATION,
+            authority_reference=f'runtime-turn:{claimant_message.message_id}',
+            workflow_state=claim.claim_state.workflow_state,
+            expected_revision=expected_revision,
+            allowed_action_codes=(
+                tool_policy.allowed_action_codes if tool_policy is not None else None
+            ),
+            allowed_tools=(tool_policy.allowed_tool_names if tool_policy is not None else None),
+        )
+
+        def prepare_creation(_command: ClaimContextCommand) -> ClaimContextHandlerOutcome:
+            if not branch_evaluation.requirements.ready:
+                raise ApiError(
+                    status_code=409,
+                    code='INVALID_STATE_TRANSITION',
+                    message='The current Claim is not ready for formal creation.',
+                )
+            return ClaimContextHandlerOutcome(
+                claim_id=claim_id,
+                resulting_revision=claim.revision,
+            )
+
+        preparation_result = live_dispatcher.execute(
+            repository,
+            preparation,
+            prepare_creation,
+        )
+        preparation_error = map_claim_context_execution_to_api(preparation_result)
+        if preparation_error is not None:
+            raise preparation_error
+        prepared_action_code = preparation.action_code
     if proposal.action_code is not None:
         # The namespaced model contract is now executed by the same validated,
         # revision-checked mutation path as controlled turns. The action code is
@@ -2230,6 +2360,41 @@ def submit_message(
     )
     if updated_claim.customer_next_step != effective_next_step:
         updated_claim = updated_claim.model_copy(update={'customer_next_step': effective_next_step})
+    applied_evaluation = branch_evaluator.evaluate(
+        updated_claim,
+        latest_message=(payload.content.text if payload.content is not None else None),
+        trigger_source_refs=[claimant_message.message_id],
+        current_action=updated_claim.claim_state.next_action,
+        recomputation_reason='agent_turn_applied',
+        previous_evaluation=previous_evaluation,
+    )
+    if updated_claim.claim_state.workflow_state in {
+        WorkflowState.COLLECTING,
+        WorkflowState.READY_FOR_NEXT,
+    }:
+        updated_claim = updated_claim.model_copy(
+            update={
+                'claim_state': updated_claim.claim_state.model_copy(
+                    update={
+                        'workflow_state': (
+                            WorkflowState.READY_FOR_NEXT
+                            if applied_evaluation.requirements.ready
+                            else WorkflowState.COLLECTING
+                        )
+                    }
+                )
+            }
+        )
+    live_mutation_command = _live_mutation_command(
+        claim=claim,
+        claimant_message=claimant_message,
+        idempotency_key=key,
+        form_changes=form_changes,
+        contents_item_changes=contents_item_changes,
+        handoff=handoff,
+        pending_evidence=pending_evidence,
+        runtime_policy=runtime_policy,
+    )
     resulting_revision = updated_claim.revision
     updated_session = session_after_questions.model_copy(
         update={
@@ -2285,14 +2450,19 @@ def submit_message(
         agent_message_id=agent_message.message_id,
         decision_id=decision.decision_id,
         handoff_id=handoff.handoff_id if handoff is not None else None,
-    )
-    applied_evaluation = branch_evaluator.evaluate(
-        updated_claim,
-        latest_message=(payload.content.text if payload.content is not None else None),
-        trigger_source_refs=[claimant_message.message_id],
-        current_action=updated_claim.claim_state.next_action,
-        recomputation_reason='agent_turn_applied',
-        previous_evaluation=previous_evaluation,
+        action_registry_version=(
+            live_mutation_command.contract_version if live_mutation_command is not None else None
+        ),
+        action_code=(
+            live_mutation_command.action_code
+            if live_mutation_command is not None
+            else prepared_action_code
+        ),
+        target_ref=(
+            claim_id
+            if live_mutation_command is not None or prepared_action_code is not None
+            else None
+        ),
     )
     evaluation_record = BranchEvaluationRecord(
         evaluation_id=new_id('brn'),
@@ -2402,28 +2572,33 @@ def submit_message(
             expected_revision=expected_revision,
             source_refs=[claimant_message.message_id],
             authority=authority,
-            status='approved' if authority.outcome is AuthorityOutcome.AUTHORISED else 'rejected',
+            status='executed' if authority.outcome is AuthorityOutcome.AUTHORISED else 'rejected',
             idempotency_key=key,
             created_at=timestamp,
         )
     ]
-    envelope_records.extend(
-        ActionEnvelopeRecord(
-            envelope_id=new_id('env'),
-            turn_id=runtime_turn_id,
-            claim_id=claim_id,
-            namespace='claim',
-            action_code='claim.propose_fact_patch',
-            target_ref=change.field_code,
-            expected_revision=expected_revision,
-            source_refs=[claimant_message.message_id],
-            authority=authority,
-            status='executed' if change.field_code in form_changes else 'rejected',
-            idempotency_key=key,
-            created_at=timestamp,
-        )
-        for change in proposal.form_changes
+    executed_action_code = (
+        live_mutation_command.action_code
+        if live_mutation_command is not None
+        else prepared_action_code
     )
+    if executed_action_code is not None and executed_action_code != primary_action_code:
+        envelope_records.append(
+            ActionEnvelopeRecord(
+                envelope_id=new_id('env'),
+                turn_id=runtime_turn_id,
+                claim_id=claim_id,
+                namespace=executed_action_code.split('.', 1)[0],
+                action_code=executed_action_code,
+                target_ref=claim_id,
+                expected_revision=expected_revision,
+                source_refs=[claimant_message.message_id],
+                authority=authority,
+                status='executed',
+                idempotency_key=key,
+                created_at=timestamp,
+            )
+        )
     tool_records: list[ToolResultRecord] = []
     if runtime_trace is not None:
         tool_records.append(
@@ -2533,7 +2708,8 @@ def submit_message(
         result=turn_result,
         work_items=work_items,
     )
-    try:
+
+    def persist_agent_turn(_command: ClaimContextCommand) -> ClaimContextHandlerOutcome:
         repository.save_agent_turn(
             updated_claim,
             expected_revision,
@@ -2548,18 +2724,48 @@ def submit_message(
             runtime_trace,
             runtime_records,
         )
-    except RevisionConflict as conflict:
-        raise ApiError(
-            status_code=409,
-            code='REVISION_CONFLICT',
-            message='The claim changed after this page was loaded.',
-            retryable=True,
-            current_revision=conflict.current_revision,
-        ) from conflict
-    except IdempotencyConflict as conflict:
-        raise ApiError(
-            status_code=409,
-            code='IDEMPOTENCY_CONFLICT',
-            message='The message turn was already accepted with different retry data.',
-        ) from conflict
+        return ClaimContextHandlerOutcome(
+            claim_id=claim_id,
+            resulting_revision=updated_claim.revision,
+        )
+
+    if live_mutation_command is not None:
+        live_result = live_dispatcher.execute(
+            repository,
+            live_mutation_command,
+            persist_agent_turn,
+        )
+        live_error = map_claim_context_execution_to_api(live_result)
+        if live_error is not None:
+            raise live_error
+    else:
+        try:
+            repository.save_agent_turn(
+                updated_claim,
+                expected_revision,
+                updated_session,
+                claimant_message,
+                agent_message,
+                decision,
+                idempotency,
+                handoff,
+                pending_evidence,
+                evaluation_record,
+                runtime_trace,
+                runtime_records,
+            )
+        except RevisionConflict as conflict:
+            raise ApiError(
+                status_code=409,
+                code='REVISION_CONFLICT',
+                message='The claim changed after this page was loaded.',
+                retryable=True,
+                current_revision=conflict.current_revision,
+            ) from conflict
+        except IdempotencyConflict as conflict:
+            raise ApiError(
+                status_code=409,
+                code='IDEMPOTENCY_CONFLICT',
+                message='The message turn was already accepted with different retry data.',
+            ) from conflict
     return _message_turn_response(repository, principal, claim_id, claimant_message, decision)
