@@ -11,6 +11,7 @@ export default function Conversation({
   handoffs = [],
   profile,
   resource,
+  requestedSessionId = null,
   draft,
   onDraft,
   onAccept,
@@ -18,50 +19,74 @@ export default function Conversation({
   onSend,
   onRetry,
 }) {
-  const [sending, setSending] = useState(false)
-  const [sendError, setSendError] = useState('')
+  const [pendingSendKey, setPendingSendKey] = useState(null)
+  const [sendError, setSendError] = useState(null)
   const [completedSends, setCompletedSends] = useState(0)
+  const completedSendKeyRef = useRef(null)
+  const currentConversationKeyRef = useRef(null)
   const messageListRef = useRef(null)
   const messageSessionId = resource?.items?.find(
     (message) => message.session_id,
   )?.session_id
   const displayedSessionId = resource?.resolved_session_id || messageSessionId || null
-  const isCurrentSession = Boolean(
+  const viewSessionId = requestedSessionId || displayedSessionId
+  const conversationKey = conversationIdentity(detail.claim_id, viewSessionId)
+  const displayedSessionMatchesView = Boolean(
     displayedSessionId
+      && (!requestedSessionId || displayedSessionId === requestedSessionId),
+  )
+  const isCurrentSession = Boolean(
+    displayedSessionMatchesView
       && detail.active_session_id
       && displayedSessionId === detail.active_session_id,
   )
   const historicalSession = Boolean(
-    displayedSessionId
-      && displayedSessionId !== detail.active_session_id,
+    viewSessionId
+      && viewSessionId !== detail.active_session_id,
   )
   const handoff = isCurrentSession ? latestCustomerAssistance(handoffs) : null
-  const assistanceState = assistanceDisplayState(detail, handoff)
+  const assignment = assistanceAssignment(detail, handoff, profile)
+  const assistanceState = assistanceDisplayState(detail, handoff, assignment)
   const sendAction = currentProjectedAction(detail, 'conversation.send_claimant_message', displayedSessionId)
   const acceptAction = currentProjectedAction(detail, 'human.accept_handoff', handoff?.handoff_id)
   const resolveAction = currentProjectedAction(detail, 'human.resolve_handoff', handoff?.handoff_id)
   const canSend = isCurrentSession && canSubmitCurrentAction(sendAction, detail.revision)
   const timeline = conversationTimeline(resource?.items || [], handoff, profile)
   const waitingForTakeover = assistanceState.key === 'waiting-request'
+  const sending = Boolean(conversationKey && pendingSendKey === conversationKey)
+  const visibleSendError = sendError?.key === conversationKey ? sendError.message : ''
 
   useLayoutEffect(() => {
-    if (!completedSends || !messageListRef.current) return
+    currentConversationKeyRef.current = conversationKey
+  }, [conversationKey])
+
+  useLayoutEffect(() => {
+    const completedSendKey = completedSendKeyRef.current
+    completedSendKeyRef.current = null
+    if (
+      !completedSends
+      || completedSendKey !== conversationKey
+      || !messageListRef.current
+    ) return
     messageListRef.current.scrollTop = messageListRef.current.scrollHeight
-  }, [completedSends])
+  }, [completedSends, conversationKey])
 
   async function submit(event) {
     event.preventDefault()
     if (!draft.trim() || !canSend || !displayedSessionId) return
-    setSending(true)
-    setSendError('')
+    const sendKey = conversationIdentity(detail.claim_id, displayedSessionId)
+    setPendingSendKey(sendKey)
+    setSendError(null)
     try {
       await onSend({ message: draft.trim(), sessionId: displayedSessionId })
+      if (currentConversationKeyRef.current !== sendKey) return
       onDraft('')
+      completedSendKeyRef.current = sendKey
       setCompletedSends((current) => current + 1)
     } catch (nextError) {
-      setSendError(nextError.message)
+      setSendError({ key: sendKey, message: nextError.message })
     } finally {
-      setSending(false)
+      setPendingSendKey((current) => current === sendKey ? null : current)
     }
   }
 
@@ -90,6 +115,7 @@ export default function Conversation({
           <AssistanceStatus
             action={acceptAction}
             handoff={handoff}
+            detail={detail}
             profile={profile}
             state={assistanceState}
             revision={detail.revision}
@@ -120,6 +146,7 @@ export default function Conversation({
               action={acceptAction}
               compact
               handoff={handoff}
+              detail={detail}
               profile={profile}
               state={assistanceState}
               revision={detail.revision}
@@ -156,24 +183,24 @@ export default function Conversation({
               <Send size={18} aria-hidden="true" />
             </button>
           </div>
-          {sendError && <p className="form-error" role="alert">{sendError}</p>}
+          {visibleSendError && <p className="form-error" role="alert">{visibleSendError}</p>}
         </form>
       </section>
     </ResourceBoundary>
   )
 }
 
-function AssistanceStatus({ action, compact = false, handoff, profile, state, revision, onAccept, resolveAction, onResolve }) {
+function AssistanceStatus({ action, compact = false, handoff, detail, profile, state, revision, onAccept, resolveAction, onResolve }) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const canAccept = handoff.status === 'queued' && canSubmitCurrentAction(action, revision)
-  const staffName = profile?.display_name || 'Current staff member'
-  const assignment = state.key === 'completed'
-    ? `Completed by ${staffName}`
+  const assignment = assistanceAssignment(detail, handoff, profile)
+  const assignmentCopy = state.key === 'completed'
+    ? null
     : state.key === 'assigned'
-      ? staffName
-      : `Assigned to you · ${staffName}`
+      ? assignment.detail
+      : assignment.label
 
   async function accept() {
     if (!canAccept || busy) return
@@ -206,7 +233,7 @@ function AssistanceStatus({ action, compact = false, handoff, profile, state, re
             {!compact && <span className="assistance-status__eyebrow">Staff assistance</span>}
             <span className="assistance-status__summary">
               <strong>{state.title}</strong>
-              {!compact && <small>{assignment}</small>}
+              {!compact && assignmentCopy && <small>{assignmentCopy}</small>}
             </span>
           </>
         )}
@@ -315,7 +342,7 @@ function conversationTimeline(messages, handoff, profile) {
   return timeline
 }
 
-function assistanceDisplayState(detail, handoff) {
+function assistanceDisplayState(detail, handoff, assignment) {
   if (handoff?.status === 'resolved') {
     return {
       key: 'completed',
@@ -359,12 +386,40 @@ function assistanceDisplayState(detail, handoff) {
   }
   return {
     key: 'assigned',
-    label: 'Assigned to you',
+    label: assignment.title,
     tone: 'confirmed',
-    title: 'Assigned to you',
+    title: assignment.title,
     description: 'Continue in the shared conversation and complete assistance when the request is resolved.',
     expectedActor: 'You',
   }
+}
+
+function assistanceAssignment(detail, handoff, profile) {
+  if (handoff?.assigned_to && handoff.assigned_to === profile?.staff_id) {
+    return {
+      title: 'Assigned to you',
+      detail: profile?.display_name || null,
+      label: profile?.display_name
+        ? `Assigned to you · ${profile.display_name}`
+        : 'Assigned to you',
+    }
+  }
+
+  const projectedAssignee = detail.ownership?.primary_assignee
+  const projectedName = projectedAssignee
+    && handoff?.assigned_to
+    && projectedAssignee.staff_id === handoff.assigned_to
+    ? projectedAssignee.display_name
+    : null
+  const title = projectedName
+    ? `Assigned to ${projectedName}`
+    : 'Assigned to another staff member'
+
+  return { title, detail: null, label: title }
+}
+
+function conversationIdentity(claimId, sessionId) {
+  return claimId && sessionId ? `${claimId}:${sessionId}` : null
 }
 
 function latestCustomerAssistance(handoffs) {

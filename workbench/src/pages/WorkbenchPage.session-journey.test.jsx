@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import WorkbenchPage from './WorkbenchPage.jsx'
 
 const tabs = vi.hoisted(() => ({
@@ -77,11 +77,24 @@ function staffMessage(text, messageId = 'msg_staff_journey', sessionId = 'ses_26
   }
 }
 
-function renderJourney(sessionId = 'ses_26') {
+function JourneySessionSwitcher() {
+  const navigate = useNavigate()
+  return (
+    <button
+      type="button"
+      onClick={() => navigate('/workbench/claims/clm_journey/conversation?session=ses_25')}
+    >
+      Open historical test session
+    </button>
+  )
+}
+
+function renderJourney(sessionId = 'ses_26', { withSessionSwitcher = false } = {}) {
   return render(
     <MemoryRouter initialEntries={[
       `/workbench/claims/clm_journey/conversation?session=${sessionId}`,
     ]}>
+      {withSessionSwitcher && <JourneySessionSwitcher />}
       <Routes>
         <Route
           path="/workbench/claims/:claimId/:section"
@@ -117,6 +130,7 @@ function createJourneyService({
   })),
   pageTwoSessions = [{ session_id: 'ses_26', status: 'active' }],
   messagesBySession = { ses_25: [], ses_26: [] },
+  onMessageRead,
   onPost,
 } = {}) {
   const state = {
@@ -176,6 +190,8 @@ function createJourneyService({
     if (messageMatch) {
       const sessionId = decodeURIComponent(messageMatch[1])
       state.messageReads.push(sessionId)
+      const controlledResponse = onMessageRead?.(sessionId, state)
+      if (controlledResponse) return controlledResponse
       return jsonResponse(200, {
         items: (state.messagesBySession[sessionId] || []).map((message) => ({ ...message })),
         page: { next_cursor: null },
@@ -294,6 +310,84 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     await userEvent.setup().click(sendButton)
     expect(state.postRequests).toHaveLength(0)
     expect(state.messageReads).toContain('ses_25')
+  })
+
+  it('does not clear or force-scroll a historical session when an active-session send finishes', async () => {
+    let finishSend
+    let finishHistoricalRead
+    let holdFirstHistoricalRead = true
+    const messagesBySession = {
+      ses_25: [{
+        message_id: 'msg_historical_delayed',
+        session_id: 'ses_25',
+        actor: 'claimant',
+        visibility: 'shared',
+        content: { type: 'text', text: 'Historical session remains selected' },
+        created_at: '2026-09-09T03:00:00Z',
+      }],
+      ses_26: [],
+    }
+    const { fetchMock, state } = createJourneyService({
+      messagesBySession,
+      onMessageRead(sessionId) {
+        if (sessionId !== 'ses_25' || !holdFirstHistoricalRead) return null
+        holdFirstHistoricalRead = false
+        return new Promise((resolve) => {
+          finishHistoricalRead = () => resolve(jsonResponse(200, {
+            items: messagesBySession.ses_25.map((message) => ({ ...message })),
+            page: { next_cursor: null },
+          }))
+        })
+      },
+      onPost(request, serviceState) {
+        return new Promise((resolve) => {
+          finishSend = () => {
+            const message = staffMessage(request.payload.content.text, 'msg_delayed_send')
+            serviceState.messagesBySession.ses_26.push(message)
+            serviceState.revision.value += 1
+            resolve(jsonResponse(200, {
+              message,
+              claim_revision: serviceState.revision.value,
+            }))
+          }
+        })
+      },
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderJourney('ses_26', { withSessionSwitcher: true })
+
+    const user = userEvent.setup()
+    const sendButton = await screen.findByRole('button', { name: 'Send message' })
+    await waitFor(() => expect(sendButton).toBeEnabled())
+    await user.click(sendButton)
+    await waitFor(() => expect(state.postRequests).toHaveLength(1))
+
+    await user.click(screen.getByRole('button', { name: 'Open historical test session' }))
+    await waitFor(() => expect(state.messageReads).toContain('ses_25'))
+    expect(screen.getByLabelText('Message to claimant')).toBeDisabled()
+    expect(screen.getByText('Read-only conversation')).toBeVisible()
+    expect(screen.getByText('Refreshing this section')).toBeVisible()
+
+    finishHistoricalRead()
+    expect(await screen.findByText('Historical session remains selected')).toBeVisible()
+    const historicalLedger = screen.getByRole('log', { name: 'Claimant conversation messages' })
+    Object.defineProperty(historicalLedger, 'scrollHeight', { configurable: true, value: 900 })
+    historicalLedger.scrollTop = 137
+    const historicalReadsBeforeSendFinished = messageReadCount(state, 'ses_25')
+
+    finishSend()
+    await waitFor(() => {
+      expect(messageReadCount(state, 'ses_25')).toBeGreaterThan(
+        historicalReadsBeforeSendFinished,
+      )
+    })
+
+    expect(screen.getByText('Historical session remains selected')).toBeVisible()
+    expect(historicalLedger).not.toHaveTextContent('Journey staff reply')
+    expect(screen.getByLabelText('Message to claimant')).toBeDisabled()
+    expect(historicalLedger.scrollTop).toBe(137)
+    expect(tabs.tabs[0].draft).toBe('Journey staff reply')
+    expect(tabs.update).not.toHaveBeenCalledWith('clm_journey', { draft: '' })
   })
 
   it('retries an ambiguous committed send with the same idempotency key and persists exactly one rendered message', async () => {

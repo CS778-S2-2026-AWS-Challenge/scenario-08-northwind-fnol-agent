@@ -51,6 +51,7 @@ export default function WorkbenchPage() {
   const detailRequestId = useRef(0)
   const backgroundRefreshId = useRef(0)
   const resourceRequestIds = useRef({})
+  const selectedConversationSessionIdRef = useRef(null)
   const [resources, setResources] = useState({})
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState(null)
@@ -62,6 +63,7 @@ export default function WorkbenchPage() {
   const isConversations = location.pathname === '/workbench/conversations' || location.pathname.startsWith('/workbench/conversations/')
   const isAgentRoute = Boolean(routeAgentSessionId)
   const selectedSessionId = new URLSearchParams(location.search).get('session')
+  selectedConversationSessionIdRef.current = selectedSessionId
   const currentTab = tabs.tabs.find((tab) => tab.claimId === claimId)
   const currentSection = CLAIM_SECTIONS.has(routeSection)
     ? routeSection
@@ -804,6 +806,7 @@ export default function WorkbenchPage() {
   }
 
   async function sendMessage(operation) {
+    const sendingClaimId = detailRef.current?.claim_id || null
     try {
       await runClaimMutation('Sending the claimant message', (current) => (
         workbenchApi.sendMessage(
@@ -816,10 +819,14 @@ export default function WorkbenchPage() {
     } catch (error) {
       if (error.code === 'REVISION_CONFLICT') {
         const current = detailRef.current
+        const currentSessionId = selectedConversationSessionIdRef.current
+          || current?.active_session_id
+          || null
 
         if (
-          current?.claim_id
-          && currentClaimIdRef.current === current.claim_id
+          current?.claim_id === sendingClaimId
+          && currentClaimIdRef.current === sendingClaimId
+          && currentSessionId === operation.sessionId
         ) {
           await loadConversationResources(
             current.claim_id,
@@ -832,10 +839,14 @@ export default function WorkbenchPage() {
     }
 
     const current = detailRef.current
+    const currentSessionId = selectedConversationSessionIdRef.current
+      || current?.active_session_id
+      || null
 
     if (
-      current?.claim_id
-      && currentClaimIdRef.current === current.claim_id
+      current?.claim_id === sendingClaimId
+      && currentClaimIdRef.current === sendingClaimId
+      && currentSessionId === operation.sessionId
     ) {
       await loadConversationResources(
         current.claim_id,
@@ -981,7 +992,7 @@ export default function WorkbenchPage() {
             <section className="workspace-region">
               <ClaimTabs tabs={tabs.tabs} activeId={claimId || tabs.activeId} onActivate={activateTab} onClose={closeTab} />
               <div id="open-claim-panel" className="open-claim-panel" role="tabpanel" aria-labelledby={claimId ? `open-claim-tab-${claimId}` : undefined} tabIndex={0}>
-                <ClaimWorkspace detail={detail} resources={resources} loading={detailLoading} stale={detailStale} error={detailError} section={currentSection} draft={currentTab?.draft || ''} profile={profile} onSection={changeSection} onDraft={(draft) => claimId && tabs.update(claimId, { draft })} onRetry={() => loadDetail(claimId)} onRetrySection={() => loadSectionResources(claimId, currentSection)} onAccept={acceptHandoff} onResolve={resolveHandoff} onSignalDecision={decideSignal} onCreateAction={createStaffAction} onUpdateAction={updateStaffAction} onLoadEvidence={loadEvidence} onSend={sendMessage} onOwnershipAction={performOwnershipAction} onReopen={reopenClaim} />
+                <ClaimWorkspace detail={detail} resources={resources} loading={detailLoading} stale={detailStale} error={detailError} section={currentSection} conversationSessionId={selectedSessionId || detail?.active_session_id || null} draft={currentTab?.draft || ''} profile={profile} onSection={changeSection} onDraft={(draft) => claimId && tabs.update(claimId, { draft })} onRetry={() => loadDetail(claimId)} onRetrySection={() => loadSectionResources(claimId, currentSection)} onAccept={acceptHandoff} onResolve={resolveHandoff} onSignalDecision={decideSignal} onCreateAction={createStaffAction} onUpdateAction={updateStaffAction} onLoadEvidence={loadEvidence} onSend={sendMessage} onOwnershipAction={performOwnershipAction} onReopen={reopenClaim} />
               </div>
             </section>
           </div>

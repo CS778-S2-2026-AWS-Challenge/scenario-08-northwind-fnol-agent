@@ -6,7 +6,7 @@ import { ApiError } from '../api.js'
 import { formatDate, formatTime } from '../format.js'
 import Conversation from './Conversation.jsx'
 
-const detail = { active_session_id: 'ses_1', revision: 1, allowed_actions: [] }
+const detail = { claim_id: 'clm_1', active_session_id: 'ses_1', revision: 1, allowed_actions: [] }
 
 function assistanceHandoff(status, overrides = {}) {
   return {
@@ -179,6 +179,45 @@ describe('Conversation', () => {
 
   it.each([
     {
+      access: 'coworker',
+      primaryAssignee: { staff_id: 'stf_owner', display_name: 'Owner Staff' },
+      expectedAssignment: 'Assigned to Owner Staff',
+    },
+    {
+      access: 'read_only',
+      primaryAssignee: { staff_id: 'stf_owner' },
+      expectedAssignment: 'Assigned to another staff member',
+    },
+  ])('uses the projected handoff assignee for a $access viewer', ({ access, primaryAssignee, expectedAssignment }) => {
+    renderConversation({
+      detail: {
+        ...detail,
+        ownership: {
+          state: 'assigned',
+          current_staff_access: access,
+          primary_assignee: primaryAssignee,
+        },
+        work_summary: { unread_claimant_messages: 0 },
+        customer_next_step: { responsible_party: 'claims_professional' },
+      },
+      handoffs: [assistanceHandoff('accepted', { assigned_to: 'stf_owner' })],
+      profile: { staff_id: 'stf_viewer', display_name: 'Viewing Staff' },
+      resource: { items: [], resolved_session_id: 'ses_1' },
+      draft: '',
+      onDraft: vi.fn(),
+      onAccept: vi.fn(),
+      onResolve: vi.fn(),
+      onSend: vi.fn(),
+    })
+
+    const statusBar = screen.getByText('Staff assistance').closest('.assistance-status')
+    expect(statusBar).toHaveTextContent(expectedAssignment)
+    expect(statusBar).not.toHaveTextContent('Assigned to you')
+    expect(statusBar).not.toHaveTextContent('Viewing Staff')
+  })
+
+  it.each([
+    {
       name: 'customer reply',
       handoff: assistanceHandoff('in_progress'),
       workSummary: { unread_claimant_messages: 1 },
@@ -225,7 +264,12 @@ describe('Conversation', () => {
 
     const statusBar = screen.getByText('Staff assistance').closest('.assistance-status')
     expect(statusBar).toHaveTextContent(title)
-    expect(statusBar).toHaveTextContent(handoff.status === 'resolved' ? 'Completed by Demo Staff' : 'Assigned to you · Demo Staff')
+    if (handoff.status === 'resolved') {
+      expect(statusBar).not.toHaveTextContent('Completed by')
+      expect(statusBar).not.toHaveTextContent('Demo Staff')
+    } else {
+      expect(statusBar).toHaveTextContent('Assigned to you · Demo Staff')
+    }
     expect(screen.getByLabelText('Message to claimant')).toHaveAttribute('placeholder', placeholder)
   })
 
