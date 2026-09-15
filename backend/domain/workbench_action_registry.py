@@ -3,7 +3,11 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
-from backend.domain.models import HandoffRecord, HandoffType, StaffActionRecord
+from backend.domain.models import (
+    HandoffRecord,
+    HandoffType,
+    StaffActionRecord,
+)
 from backend.domain.workbench import (
     ConfirmationLevel,
     WorkbenchActionInputControl,
@@ -438,6 +442,15 @@ def handoff_resolution_defaults(handoff: HandoffRecord) -> dict[str, object]:
         Fixed result, state-change, and claimant-update fields.
     """
     professional_review = handoff.type is HandoffType.PROFESSIONAL_REVIEW
+    support_state_changes = []
+    if handoff.resume_workflow_state is not None and handoff.resume_next_action is not None:
+        support_state_changes = [
+            {
+                'path': 'claim_state.workflow_state',
+                'to': handoff.resume_workflow_state.value,
+            },
+            {'path': 'claim_state.next_action', 'to': handoff.resume_next_action.value},
+        ]
     return {
         'result': {
             'outcome': (
@@ -454,7 +467,7 @@ def handoff_resolution_defaults(handoff: HandoffRecord) -> dict[str, object]:
                 {'path': 'claim_state.workflow_state', 'to': 'ready_for_next'},
             ]
             if professional_review
-            else []
+            else support_state_changes
         ),
         'customer_update': {
             'responsible_party': 'claims_professional',
