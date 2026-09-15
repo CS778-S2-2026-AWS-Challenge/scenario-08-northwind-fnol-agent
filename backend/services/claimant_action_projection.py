@@ -1,9 +1,9 @@
 """Build the single claimant primary-action projection from backend state."""
 
-from dataclasses import dataclass
-from types import MappingProxyType
-
-from backend.domain.agent_action_registry import action_contract
+from backend.domain.claimant_action_registry import (
+    CLAIMANT_ACTION_REGISTRY_VERSION,
+    claimant_action_contract,
+)
 from backend.domain.models import (
     ClaimantExternalServiceAction,
     ClaimantExternalServiceStatus,
@@ -11,46 +11,15 @@ from backend.domain.models import (
     CustomerNextStep,
 )
 
-CLAIMANT_ACTION_REGISTRY_VERSION = '2026-09-15.1'
-
-
-@dataclass(frozen=True)
-class ClaimantActionDefinition:
-    action_code: str
-    execution_boundary: str
-    required_inputs: tuple[str, ...] = ()
-
-
-CLAIMANT_ACTION_REGISTRY = MappingProxyType(
-    {
-        'claim_creation': ClaimantActionDefinition('claim.create', 'claimant_api'),
-        'conversation': ClaimantActionDefinition('conversation.present_options', 'conversation'),
-        ClaimantExternalServiceStatus.CONSENT_REQUIRED: ClaimantActionDefinition(
-            'external.prepare_request', 'external_service', ('claimant_consent',)
-        ),
-        ClaimantExternalServiceStatus.READY_TO_REQUEST: ClaimantActionDefinition(
-            'external.submit_request', 'external_service'
-        ),
-        ClaimantExternalServiceStatus.RETRYABLE_FAILURE: ClaimantActionDefinition(
-            'external.retry_request', 'external_service'
-        ),
-        ClaimantExternalServiceStatus.QUEUED: ClaimantActionDefinition(
-            'external.track_request', 'external_service'
-        ),
-        ClaimantExternalServiceStatus.ASSIGNED: ClaimantActionDefinition(
-            'external.track_request', 'external_service'
-        ),
-        ClaimantExternalServiceStatus.TERMINAL_FAILURE: ClaimantActionDefinition(
-            'external.reconcile_response', 'external_service'
-        ),
-        ClaimantExternalServiceStatus.AWAITING_RECONCILIATION: ClaimantActionDefinition(
-            'external.reconcile_response', 'external_service'
-        ),
-    }
-)
-
-for _definition in CLAIMANT_ACTION_REGISTRY.values():
-    action_contract(_definition.action_code)
+_EXTERNAL_ACTION_CODES = {
+    ClaimantExternalServiceStatus.CONSENT_REQUIRED: 'claimant.request_assessment',
+    ClaimantExternalServiceStatus.READY_TO_REQUEST: 'claimant.request_assessment',
+    ClaimantExternalServiceStatus.RETRYABLE_FAILURE: 'claimant.retry_assessment',
+    ClaimantExternalServiceStatus.QUEUED: 'claimant.track_assessment',
+    ClaimantExternalServiceStatus.ASSIGNED: 'claimant.track_assessment',
+    ClaimantExternalServiceStatus.TERMINAL_FAILURE: 'claimant.await_staff_review',
+    ClaimantExternalServiceStatus.AWAITING_RECONCILIATION: ('claimant.await_reconciliation'),
+}
 
 
 def project_claimant_primary_action(
@@ -68,24 +37,33 @@ def project_claimant_primary_action(
     """
 
     if external_service_action is not None:
-        definition = CLAIMANT_ACTION_REGISTRY[external_service_action.status]
+        definition = claimant_action_contract(
+            _EXTERNAL_ACTION_CODES[external_service_action.status]
+        )
         service_identity = external_service_action.service_identity
+        required_inputs = (
+            list(definition.required_inputs)
+            if external_service_action.status is ClaimantExternalServiceStatus.CONSENT_REQUIRED
+            else []
+        )
         return ClaimantPrimaryAction(
-            action_type='external_service',
+            action_type=definition.action_type,
             action_code=definition.action_code,
             action_id=f'external-service:{service_identity}',
             target_ref=service_identity,
-            available=external_service_action.can_request,
-            required_inputs=list(definition.required_inputs),
+            available=(
+                definition.handler == 'request_assessment' and external_service_action.can_request
+            ),
+            required_inputs=required_inputs,
             claim_revision=claim_revision,
             registry_version=CLAIMANT_ACTION_REGISTRY_VERSION,
             execution_boundary=definition.execution_boundary,
         )
 
     if next_step.status == 'ready_to_create':
-        definition = CLAIMANT_ACTION_REGISTRY['claim_creation']
+        definition = claimant_action_contract('claimant.create_claim')
         return ClaimantPrimaryAction(
-            action_type='claim_creation',
+            action_type=definition.action_type,
             action_code=definition.action_code,
             action_id=f'customer-next-step:{next_step.status}',
             target_ref=claim_id,
@@ -96,13 +74,18 @@ def project_claimant_primary_action(
             execution_boundary=definition.execution_boundary,
         )
 
-    definition = CLAIMANT_ACTION_REGISTRY['conversation']
+    if next_step.status == 'confirmation_required' and next_step.required_items:
+        definition = claimant_action_contract('claimant.review_details')
+        available = True
+    else:
+        definition = claimant_action_contract('claimant.continue_conversation')
+        available = False
     return ClaimantPrimaryAction(
-        action_type='conversation',
+        action_type=definition.action_type,
         action_code=definition.action_code,
         action_id=f'customer-next-step:{next_step.status}',
         target_ref=claim_id,
-        available=False,
+        available=available,
         required_inputs=list(next_step.required_items),
         claim_revision=claim_revision,
         registry_version=CLAIMANT_ACTION_REGISTRY_VERSION,

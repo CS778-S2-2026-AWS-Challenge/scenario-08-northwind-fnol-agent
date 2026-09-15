@@ -441,7 +441,11 @@ class ClaimantPrimaryAction(ContractModel):
     """Authoritative claimant-safe action projection for the current revision."""
 
     action_type: Literal['claim_creation', 'external_service', 'conversation']
-    action_code: str = Field(min_length=1, max_length=100)
+    action_code: str = Field(
+        min_length=1,
+        max_length=100,
+        pattern=r'^claimant\.[a-z][a-z0-9_]*$',
+    )
     action_id: str = Field(min_length=1, max_length=200)
     target_ref: str = Field(min_length=1, max_length=200)
     available: bool
@@ -1620,6 +1624,7 @@ class ClaimantExternalServiceResponse(ContractModel):
     revision: int = Field(ge=1)
     action: ClaimantExternalServiceAction
     customer_next_step: CustomerNextStep
+    primary_action: ClaimantPrimaryAction
 
 
 class ClaimantEvidence(ContractModel):
@@ -1715,6 +1720,7 @@ class SupportRequestResponse(ContractModel):
     handoff: ClaimantHandoff
     revision: int
     customer_next_step: CustomerNextStep
+    primary_action: ClaimantPrimaryAction
     delivery: HandoffDelivery
 
 
@@ -1896,7 +1902,7 @@ class ClaimantClaim(ContractModel):
     external_capabilities: list[ExternalCapabilityProjection] = Field(default_factory=list)
     dynamic_form: 'DynamicFormProjection | None' = None
     customer_next_step: CustomerNextStep
-    primary_action: ClaimantPrimaryAction | None = None
+    primary_action: ClaimantPrimaryAction
     incomplete_context: ClaimantIncompleteContext | None = None
     handoff: ClaimantHandoff | None = None
     resolved_support_handoff: ClaimantResolvedSupportHandoff | None = None
@@ -1959,7 +1965,7 @@ class FormPatchResponse(ContractModel):
     revision: int
     updated_fields: dict[str, StructuredFormField]
     customer_next_step: CustomerNextStep
-    primary_action: ClaimantPrimaryAction | None = None
+    primary_action: ClaimantPrimaryAction
     dynamic_form: 'DynamicFormProjection | None' = None
 
 
@@ -1997,7 +2003,7 @@ class MessageTurnResponse(ContractModel):
     decision: ClaimantDecision | None = None
     handoff: ClaimantHandoff | None = None
     dynamic_form: 'DynamicFormProjection | None' = None
-    primary_action: ClaimantPrimaryAction | None = None
+    primary_action: ClaimantPrimaryAction
 
 
 class MessageListResponse(ContractModel):
@@ -2019,7 +2025,7 @@ class FormConfirmationResponse(ContractModel):
     confirmed_contents_items: list[ClaimantContentsItem] = Field(default_factory=list)
     decision: ClaimantDecision | None = None
     customer_next_step: CustomerNextStep
-    primary_action: ClaimantPrimaryAction | None = None
+    primary_action: ClaimantPrimaryAction
     dynamic_form: 'DynamicFormProjection | None' = None
 
 
@@ -2030,7 +2036,7 @@ class ClaimCreationResponse(ContractModel):
     external_claim: ExternalClaimResult
     external_service_action: ClaimantExternalServiceAction | None = None
     customer_next_step: CustomerNextStep
-    primary_action: ClaimantPrimaryAction | None = None
+    primary_action: ClaimantPrimaryAction
 
 
 class DemoResetResponse(ContractModel):

@@ -1754,14 +1754,7 @@
             ]
           },
           "primary_action": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ClaimantPrimaryAction"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/ClaimantPrimaryAction"
           },
           "revision": {
             "minimum": 1.0,
@@ -1774,7 +1767,8 @@
           "revision",
           "decision",
           "external_claim",
-          "customer_next_step"
+          "customer_next_step",
+          "primary_action"
         ],
         "title": "ClaimCreationResponse",
         "type": "object"
@@ -2338,14 +2332,7 @@
             ]
           },
           "primary_action": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ClaimantPrimaryAction"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/ClaimantPrimaryAction"
           },
           "resolved_support_handoff": {
             "anyOf": [
@@ -2377,6 +2364,7 @@
           "form",
           "evidence_summary",
           "customer_next_step",
+          "primary_action",
           "created_at",
           "updated_at"
         ],
@@ -3017,6 +3005,9 @@
           "customer_next_step": {
             "$ref": "#/components/schemas/CustomerNextStep"
           },
+          "primary_action": {
+            "$ref": "#/components/schemas/ClaimantPrimaryAction"
+          },
           "revision": {
             "minimum": 1.0,
             "title": "Revision",
@@ -3027,7 +3018,8 @@
           "claim_id",
           "revision",
           "action",
-          "customer_next_step"
+          "customer_next_step",
+          "primary_action"
         ],
         "title": "ClaimantExternalServiceResponse",
         "type": "object"
@@ -3176,6 +3168,7 @@
           "action_code": {
             "maxLength": 100,
             "minLength": 1,
+            "pattern": "^claimant\\.[a-z][a-z0-9_]*$",
             "title": "Action Code",
             "type": "string"
           },
@@ -6912,14 +6905,7 @@
             ]
           },
           "primary_action": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ClaimantPrimaryAction"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/ClaimantPrimaryAction"
           },
           "revision": {
             "title": "Revision",
@@ -6930,7 +6916,8 @@
           "claim_id",
           "revision",
           "confirmed_fields",
-          "customer_next_step"
+          "customer_next_step",
+          "primary_action"
         ],
         "title": "FormConfirmationResponse",
         "type": "object"
@@ -6975,14 +6962,7 @@
             ]
           },
           "primary_action": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ClaimantPrimaryAction"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/ClaimantPrimaryAction"
           },
           "revision": {
             "title": "Revision",
@@ -7000,7 +6980,8 @@
           "claim_id",
           "revision",
           "updated_fields",
-          "customer_next_step"
+          "customer_next_step",
+          "primary_action"
         ],
         "title": "FormPatchResponse",
         "type": "object"
@@ -8494,14 +8475,7 @@
             ]
           },
           "primary_action": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ClaimantPrimaryAction"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/ClaimantPrimaryAction"
           },
           "session_id": {
             "title": "Session Id",
@@ -8513,7 +8487,8 @@
           "session_id",
           "claim_revision",
           "claimant_message",
-          "form_changes"
+          "form_changes",
+          "primary_action"
         ],
         "title": "MessageTurnResponse",
         "type": "object"
@@ -11710,6 +11685,9 @@
           "handoff": {
             "$ref": "#/components/schemas/ClaimantHandoff"
           },
+          "primary_action": {
+            "$ref": "#/components/schemas/ClaimantPrimaryAction"
+          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -11719,6 +11697,7 @@
           "handoff",
           "revision",
           "customer_next_step",
+          "primary_action",
           "delivery"
         ],
         "title": "SupportRequestResponse",

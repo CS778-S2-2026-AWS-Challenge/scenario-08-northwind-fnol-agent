@@ -1,4 +1,10 @@
-from backend.domain.agent_action_registry import action_contract
+import pytest
+
+from backend.domain.claimant_action_registry import (
+    CLAIMANT_ACTION_REGISTRY,
+    CLAIMANT_ACTION_REGISTRY_VERSION,
+    claimant_action_contract,
+)
 from backend.domain.models import (
     AssessorRoutingResult,
     AssessorRoutingStatus,
@@ -7,10 +13,7 @@ from backend.domain.models import (
     CustomerNextStep,
     ResponsibleParty,
 )
-from backend.services.claimant_action_projection import (
-    CLAIMANT_ACTION_REGISTRY_VERSION,
-    project_claimant_primary_action,
-)
+from backend.services.claimant_action_projection import project_claimant_primary_action
 
 
 def next_step(status: str, required_items: list[str] | None = None) -> CustomerNextStep:
@@ -22,11 +25,15 @@ def next_step(status: str, required_items: list[str] | None = None) -> CustomerN
     )
 
 
-def assessor_action() -> ClaimantExternalServiceAction:
+def assessor_action(
+    status: ClaimantExternalServiceStatus = ClaimantExternalServiceStatus.CONSENT_REQUIRED,
+    *,
+    can_request: bool = True,
+) -> ClaimantExternalServiceAction:
     return ClaimantExternalServiceAction(
         service_identity='vehicle_damage_assessment_routing',
         registry_version='test-v1',
-        lifecycle_status='consent_required',
+        lifecycle_status=status.value,
         capability_provenance='test',
         access_form='claimant_consent',
         status_label='Consent required',
@@ -38,35 +45,95 @@ def assessor_action() -> ClaimantExternalServiceAction:
         provider='Controlled assessment fixture',
         purpose='Request an assessor.',
         shared_data_summary=['confirmed incident region'],
-        status=ClaimantExternalServiceStatus.CONSENT_REQUIRED,
+        status=status,
         routing=AssessorRoutingResult(
             routing_status=AssessorRoutingStatus.NOT_REQUIRED,
             next_step='Request consent.',
         ),
-        can_request=True,
+        can_request=can_request,
     )
 
 
-def test_external_service_is_the_authoritative_primary_action() -> None:
+@pytest.mark.parametrize(
+    ('status', 'can_request', 'action_code', 'available', 'required_inputs'),
+    [
+        (
+            ClaimantExternalServiceStatus.CONSENT_REQUIRED,
+            True,
+            'claimant.request_assessment',
+            True,
+            ['claimant_consent'],
+        ),
+        (
+            ClaimantExternalServiceStatus.READY_TO_REQUEST,
+            True,
+            'claimant.request_assessment',
+            True,
+            [],
+        ),
+        (
+            ClaimantExternalServiceStatus.RETRYABLE_FAILURE,
+            True,
+            'claimant.retry_assessment',
+            True,
+            [],
+        ),
+        (
+            ClaimantExternalServiceStatus.QUEUED,
+            False,
+            'claimant.track_assessment',
+            False,
+            [],
+        ),
+        (
+            ClaimantExternalServiceStatus.ASSIGNED,
+            False,
+            'claimant.track_assessment',
+            False,
+            [],
+        ),
+        (
+            ClaimantExternalServiceStatus.TERMINAL_FAILURE,
+            False,
+            'claimant.await_staff_review',
+            False,
+            [],
+        ),
+        (
+            ClaimantExternalServiceStatus.AWAITING_RECONCILIATION,
+            False,
+            'claimant.await_reconciliation',
+            False,
+            [],
+        ),
+    ],
+)
+def test_external_service_is_the_authoritative_primary_action(
+    status: ClaimantExternalServiceStatus,
+    can_request: bool,
+    action_code: str,
+    available: bool,
+    required_inputs: list[str],
+) -> None:
     projection = project_claimant_primary_action(
         claim_id='clm_1',
         claim_revision=7,
         next_step=next_step('ready_to_create'),
-        external_service_action=assessor_action(),
+        external_service_action=assessor_action(status, can_request=can_request),
     )
 
     assert projection.action_type == 'external_service'
-    assert projection.action_code == 'external.prepare_request'
+    assert projection.action_code == action_code
     assert projection.action_id == 'external-service:vehicle_damage_assessment_routing'
     assert projection.target_ref == 'vehicle_damage_assessment_routing'
-    assert projection.available is True
-    assert projection.required_inputs == ['claimant_consent']
+    assert projection.available is available
+    assert projection.required_inputs == required_inputs
     assert projection.claim_revision == 7
     assert projection.registry_version == CLAIMANT_ACTION_REGISTRY_VERSION
     assert projection.visibility == 'claimant'
     assert projection.execution_boundary == 'external_service'
     assert projection.projection_version == 'v1'
-    assert action_contract(projection.action_code).action_code == projection.action_code
+    assert claimant_action_contract(projection.action_code).action_code == projection.action_code
 
 
 def test_ready_to_create_projects_claim_creation_action() -> None:
@@ -78,12 +145,28 @@ def test_ready_to_create_projects_claim_creation_action() -> None:
     )
 
     assert projection.action_type == 'claim_creation'
-    assert projection.action_code == 'claim.create'
+    assert projection.action_code == 'claimant.create_claim'
     assert projection.action_id == 'customer-next-step:ready_to_create'
     assert projection.target_ref == 'clm_2'
     assert projection.available is True
     assert projection.required_inputs == ['claimant_confirmation']
     assert projection.claim_revision == 3
+
+
+def test_confirmation_required_projects_review_details() -> None:
+    projection = project_claimant_primary_action(
+        claim_id='clm_3',
+        claim_revision=4,
+        next_step=next_step(
+            'confirmation_required',
+            ['incident.occurred_at', 'incident.location'],
+        ),
+        external_service_action=None,
+    )
+
+    assert projection.action_code == 'claimant.review_details'
+    assert projection.available is True
+    assert projection.required_inputs == ['incident.occurred_at', 'incident.location']
 
 
 def test_other_next_steps_are_non_actionable_conversation_projection() -> None:
@@ -95,7 +178,7 @@ def test_other_next_steps_are_non_actionable_conversation_projection() -> None:
     )
 
     assert projection.action_type == 'conversation'
-    assert projection.action_code == 'conversation.present_options'
+    assert projection.action_code == 'claimant.continue_conversation'
     assert projection.action_id == 'customer-next-step:more_information_needed'
     assert projection.target_ref == 'clm_3'
     assert projection.available is False
@@ -105,13 +188,6 @@ def test_other_next_steps_are_non_actionable_conversation_projection() -> None:
 
 
 def test_every_claimant_projection_action_resolves_in_authoritative_registry() -> None:
-    for action_code in {
-        'conversation.present_options',
-        'claim.create',
-        'external.prepare_request',
-        'external.submit_request',
-        'external.track_request',
-        'external.retry_request',
-        'external.reconcile_response',
-    }:
-        assert action_contract(action_code).action_code == action_code
+    for action_code, contract in CLAIMANT_ACTION_REGISTRY.items():
+        assert action_code.startswith('claimant.')
+        assert claimant_action_contract(action_code) is contract

@@ -228,7 +228,7 @@ def test_explicit_human_request_preserves_confirmed_context(
     )
     assert continued['decision'] is None
     assert continued['primary_action']['claim_revision'] == continued['claim_revision']  # type: ignore[index]
-    assert continued['primary_action']['action_code'] == 'conversation.present_options'  # type: ignore[index]
+    assert continued['primary_action']['action_code'] == 'claimant.continue_conversation'  # type: ignore[index]
     stored_continued = repository.get_message(
         claim_id,
         session_id,
@@ -335,6 +335,8 @@ def test_support_endpoint_is_revision_protected_idempotent_and_claimant_safe(
 
     assert response.status_code == 201
     assert response.json()['revision'] == 2
+    assert response.json()['primary_action']['action_code'] == ('claimant.continue_conversation')
+    assert response.json()['primary_action']['claim_revision'] == response.json()['revision']
     evaluation = repository.list_branch_evaluations(claim_id, 'cus_demo')[-1]
     assert evaluation.recomputation_reason == 'handoff_created'
     assert evaluation.resulting_claim_revision == 2

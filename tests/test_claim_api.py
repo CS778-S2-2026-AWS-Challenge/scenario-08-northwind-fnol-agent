@@ -832,7 +832,7 @@ def test_vp_family_journey_confirms_registered_facts_and_creates_claim(
     assert confirmed['dynamic_form']['requirements']['ready'] is True
     assert confirmed['dynamic_form']['requirements']['missing_required_now'] == []
     assert confirmed['customer_next_step']['status'] == 'ready_to_create'
-    assert confirmed['primary_action']['action_code'] == 'claim.create'
+    assert confirmed['primary_action']['action_code'] == 'claimant.create_claim'
     assert confirmed['primary_action']['claim_revision'] == confirmed['revision']
 
     external = client.post(
