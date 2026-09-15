@@ -186,6 +186,50 @@ AGENT_TOOL_REGISTRY = MappingProxyType(
                 'additionalProperties': False,
             },
         ),
+        'evidence.reuse': _tool(
+            'evidence.reuse',
+            'Attach an existing claimant-owned Evidence identity to the current Claim.',
+            'confirmed_evidence_reuse',
+            {
+                'type': 'object',
+                'properties': {
+                    'claim_id': {'type': 'string', 'maxLength': 120},
+                    'evidence_id': {'type': 'string', 'maxLength': 100},
+                    'source_claim_id': {'type': 'string', 'maxLength': 120},
+                    'expected_revision': {'type': 'integer', 'minimum': 1},
+                },
+                'required': [
+                    'claim_id',
+                    'evidence_id',
+                    'source_claim_id',
+                    'expected_revision',
+                ],
+                'additionalProperties': False,
+            },
+            read_only=False,
+        ),
+        'evidence.remove': _tool(
+            'evidence.remove',
+            'Apply a confirmed persisted-Evidence removal under retention and audit policy.',
+            'confirmed_evidence_removal',
+            {
+                'type': 'object',
+                'properties': {
+                    'claim_id': {'type': 'string', 'maxLength': 120},
+                    'evidence_id': {'type': 'string', 'maxLength': 100},
+                    'source_claim_id': {'type': 'string', 'maxLength': 120},
+                    'expected_revision': {'type': 'integer', 'minimum': 1},
+                },
+                'required': [
+                    'claim_id',
+                    'evidence_id',
+                    'source_claim_id',
+                    'expected_revision',
+                ],
+                'additionalProperties': False,
+            },
+            read_only=False,
+        ),
         'review.professional': _tool(
             'review.professional',
             'Read whether a bounded professional-review request is already recorded.',
