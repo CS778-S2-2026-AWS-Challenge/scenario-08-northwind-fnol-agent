@@ -1,4 +1,4 @@
-"""A complete-journey run record must not claim more than its own evidence."""
+"""A complete-journey run must reach its end, and its record must not overstate it."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from journey_runs.motor_collision import MOTOR_COLLISION_PACK, run_motor_collision
 from journey_runs.record import (
     AgentTurn,
     Arrival,
@@ -15,11 +16,46 @@ from journey_runs.record import (
     RunConfiguration,
     SeamCheck,
     SeamVerdict,
+    StepOutcome,
     VisibilityCheck,
 )
 from pydantic import ValidationError
 
 _NOW = datetime(2026, 9, 15, tzinfo=UTC)
+
+
+def test_the_motor_collision_journey_reaches_its_end_and_reports_every_disagreement() -> None:
+    record = run_motor_collision(head='test')
+
+    assert {step.outcome for step in record.steps} == {StepOutcome.SUCCEEDED}
+    assert record.final_state.claim_number is not None
+    assert record.final_state.customer_next_step == 'assessor_result_under_review'
+    assert record.effort.uploads == 3
+    assert [consent.granted for consent in record.consents] == [True]
+    assert all(check.holds for check in record.visibility_checks)
+    # A disagreement nobody has reported must fail here, so it reaches its owner.
+    assert [check.seam for check in record.seam_checks if check.defect_ref == 'untracked'] == []
+    # The fixture runtime can never produce a completed run.
+    assert record.result_class is not ResultClass.COMPLETED
+    assert JourneyRunRecord.model_validate_json(record.model_dump_json()) == record
+
+
+def test_a_run_that_stops_early_records_no_later_material_as_delivered() -> None:
+    first, *rest = MOTOR_COLLISION_PACK
+    # The upload API refuses this media type, so the run stops at the first upload request.
+    pack = (first._replace(media_type='text/plain'), *rest)
+
+    record = run_motor_collision(head='test', pack=pack)
+
+    stopped = [step for step in record.steps if step.outcome is not StepOutcome.SUCCEEDED]
+    assert [(step.name, step.http_status) for step in stopped] == [
+        (f'request upload {first.path}', 415)
+    ]
+    assert record.steps[-1] == stopped[0]
+    assert [material.arrival for material in record.materials] == [Arrival.NOT_DELIVERED] * 5
+    assert [material.delivered_at_step for material in record.materials] == [None] * 5
+    assert record.consents == []
+    assert record.result_class is ResultClass.FAILED
 
 
 def _configuration(runtime: str, provider_mode: str) -> RunConfiguration:
@@ -90,7 +126,7 @@ _NO_ROUTE = [
     InputMaterial(
         path='police.pdf',
         material_class='Police report',
-        condition='received',
+        pack_condition='received',
         provided_by='external_party',
         arrival=Arrival.NO_ROUTE,
     )
@@ -171,3 +207,36 @@ def test_an_unobserved_agent_trace_must_say_why() -> None:
     assert JourneyRunRecord.model_validate(_record(agent_turns=[limited]))
     with pytest.raises(ValidationError, match='is not a recorded step'):
         JourneyRunRecord.model_validate(_record(agent_turns=[{**limited, 'step': 'other'}]))
+
+
+def _material(arrival: str, delivered_at_step: str | None) -> dict[str, Any]:
+    return {
+        'path': 'photo.jpg',
+        'material_class': 'Incident evidence',
+        'pack_condition': 'received',
+        'provided_by': 'claimant',
+        'arrival': arrival,
+        'delivered_at_step': delivered_at_step,
+        'evidence_id': 'evd_1',
+    }
+
+
+@pytest.mark.parametrize(
+    ('material', 'steps', 'message'),
+    [
+        (_material('claimant_upload', None), [_step(201, 'succeeded')], 'must name the step'),
+        (_material('not_delivered', 'step'), [_step(201, 'succeeded')], 'cannot name the step'),
+        (
+            _material('claimant_upload', 'step'),
+            [_step(500, 'failed')],
+            'not a step that succeeded',
+        ),
+    ],
+)
+def test_a_material_is_delivered_only_by_a_step_that_succeeded(
+    material: dict[str, Any], steps: list[dict[str, Any]], message: str
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        JourneyRunRecord.model_validate(
+            _record(materials=[material], steps=steps, result_class='failed')
+        )

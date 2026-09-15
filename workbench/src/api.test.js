@@ -365,3 +365,99 @@ describe('workbenchApi staff message retries', () => {
   })
 
 })
+
+
+describe('workbenchApi Staff Agent draft execution', () => {
+  beforeEach(() => {
+    clearStoredSession()
+    sessionStorage.clear()
+    vi.unstubAllGlobals()
+  })
+
+  it('sends saved draft identity, fresh revision, payload, and an idempotency key', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, {
+      claim_id: 'clm_1',
+      action_code: 'work_item.update',
+      runtime_execution: { resulting_revision: 10 },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const payload = { status: 'in_progress', note: 'Staff confirmed.' }
+    await workbenchApi.executeStaffAgentDraft(
+      'staff-token',
+      'sas_1',
+      'sam_1',
+      'sad_1',
+      9,
+      payload,
+    )
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const [url, options] = fetchMock.mock.calls[0]
+    expect(url).toBe(
+      '/api/v1/workbench/agent/sessions/sas_1/messages/sam_1/drafts/sad_1/execute',
+    )
+    expect(options.method).toBe('POST')
+    expect(options.headers.Authorization).toBe('Bearer staff-token')
+    expect(options.headers['If-Match']).toBe('9')
+    expect(options.headers['Idempotency-Key']).toEqual(expect.any(String))
+    expect(JSON.parse(options.body)).toEqual({
+      confirmed: true,
+      payload,
+    })
+  })
+
+  it('replays the original draft operation after an ambiguous result even when the Claim revision advanced', async () => {
+    const authoritative = {
+      claim_id: 'clm_1',
+      action_code: 'work_item.update',
+      outcome: 'executed',
+      result: {
+        action: { action_id: 'wki_1', status: 'in_progress' },
+        revision: 10,
+      },
+      runtime_execution: {
+        outcome: 'executed',
+        resulting_revision: 10,
+        result: {
+          action: { action_id: 'wki_1', status: 'in_progress' },
+          revision: 10,
+        },
+      },
+    }
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('connection lost'))
+      .mockResolvedValueOnce(jsonResponse(200, authoritative))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const source = [
+      'staff-token',
+      'sas_retry',
+      'sam_retry',
+      'sad_retry',
+    ]
+    const payload = { status: 'in_progress' }
+
+    await expect(
+      workbenchApi.executeStaffAgentDraft(...source, 9, payload),
+    ).rejects.toMatchObject({
+      code: 'NETWORK_ERROR',
+      retryable: true,
+    })
+
+    const replay = await workbenchApi.executeStaffAgentDraft(
+      ...source,
+      10,
+      payload,
+    )
+
+    expect(replay).toEqual(authoritative)
+    expect(fetchMock.mock.calls[1][1].headers['Idempotency-Key']).toBe(
+      fetchMock.mock.calls[0][1].headers['Idempotency-Key'],
+    )
+    expect(fetchMock.mock.calls[0][1].headers['If-Match']).toBe('9')
+    expect(fetchMock.mock.calls[1][1].headers['If-Match']).toBe('9')
+    expect(fetchMock.mock.calls[1][1].body).toBe(fetchMock.mock.calls[0][1].body)
+    expect(sessionStorage.getItem('northwind.workbench.staff-draft-execution-operations.v1')).toBe('{}')
+  })
+})
