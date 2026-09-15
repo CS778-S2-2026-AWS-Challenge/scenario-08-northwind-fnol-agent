@@ -453,6 +453,11 @@ Evidence record or protected object.
   profile, executable prompt identifier, provider-reported model identifier, and provider request
   identifier when supplied.
   These provider references are internal-only and never enter claimant projections.
+- A successful multimodal Runtime trace may retain the exact selected Evidence ID, media type,
+  and `submitted` outcome. It never retains raw bytes, object URLs, storage keys, or provider
+  payloads. Any proposed form field or contents item derived from that attachment retains the
+  Evidence ID as its source reference and remains unconfirmed until the ordinary fact-confirmation
+  path accepts it.
 - Model-authored customer prose and model-proposed internal signals are not persistence
   authority. Claimant-visible response fields are server-rendered after deterministic
   validation, and any non-empty model signal proposal rejects the complete turn before write.

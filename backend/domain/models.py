@@ -518,6 +518,7 @@ class ProposedContentsItem(ContractModel):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     relation: AssertionRelation | None = None
     reported_text: str | None = Field(default=None, max_length=5000)
+    source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ContentsItemAssertion(ContractModel):
@@ -877,6 +878,7 @@ class ProposedFormChange(ContractModel):
     precision: FactPrecision = FactPrecision.EXACT
     relation: AssertionRelation | None = None
     reported_text: str | None = Field(default=None, max_length=5000)
+    source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class AgentAuthority(ContractModel):
@@ -905,6 +907,14 @@ class RuntimeInvocationTrace(ContractModel):
     latency_ms: float = Field(ge=0)
 
 
+class RuntimeEvidenceTrace(ContractModel):
+    """Bounded Evidence identity recorded for one successful model turn."""
+
+    evidence_id: str = Field(min_length=1, max_length=100)
+    media_type: str = Field(min_length=1, max_length=100)
+    outcome: Literal['submitted'] = 'submitted'
+
+
 class RuntimeTraceRecord(ContractModel):
     """Provider trace retained alongside the applied Runtime turn records."""
 
@@ -913,6 +923,7 @@ class RuntimeTraceRecord(ContractModel):
     session_id: str
     model_profile_id: str
     trigger_message_id: str
+    evidence: list[RuntimeEvidenceTrace] = Field(default_factory=list, max_length=20)
     invocations: list[RuntimeInvocationTrace] = Field(min_length=1, max_length=2)
     tool_call_id: str
     tool_name: Literal['claim.read']

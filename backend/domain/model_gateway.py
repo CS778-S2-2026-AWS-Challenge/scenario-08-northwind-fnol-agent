@@ -248,6 +248,7 @@ class ModelTurnContext(ModelContract):
     claim: ModelClaimContext
     message_text: str | None = None
     evidence_reference_count: int = Field(ge=0)
+    attached_evidence: list[ModelAttachedEvidenceContext] = Field(default_factory=list)
     professional_review_required: bool = False
     provenance_messages: list[ModelProvenanceMessage] = Field(default_factory=list)
     conversation_history: list[ModelProvenanceMessage] = Field(default_factory=list)
@@ -280,6 +281,11 @@ class ModelProvenanceMessage(ModelContract):
     content: str
 
 
+class ModelAttachedEvidenceContext(ModelContract):
+    evidence_id: str = Field(min_length=1, max_length=100)
+    media_type: str = Field(min_length=1, max_length=100)
+
+
 class ModelProposedFormChange(ModelContract):
     field_code: str = Field(min_length=1, max_length=100)
     value: Any
@@ -288,6 +294,7 @@ class ModelProposedFormChange(ModelContract):
     precision: FactPrecision = FactPrecision.EXACT
     relation: AssertionRelation | None = None
     reported_text: str | None = Field(default=None, max_length=5000)
+    source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ModelProposedContentsItem(ModelContract):
@@ -301,6 +308,7 @@ class ModelProposedContentsItem(ModelContract):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     relation: AssertionRelation | None = None
     reported_text: str | None = Field(default=None, max_length=5000)
+    source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ModelAgentProposal(ModelContract):
