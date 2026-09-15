@@ -34,7 +34,9 @@ describe('Conversation', () => {
       onSend: vi.fn(),
     })
 
+    expect(screen.getByText('Staff messaging not available yet')).toBeVisible()
     expect(screen.getByText('Accept the handoff before replying.')).toBeVisible()
+    expect(screen.getByPlaceholderText('Write a message…')).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
   })
 
@@ -54,8 +56,45 @@ describe('Conversation', () => {
       onSend: vi.fn(),
     })
 
-    expect(screen.getByText(/no claimant-message action is projected/i)).toBeVisible()
+    expect(screen.getByText('Staff messaging not available yet')).toBeVisible()
+    expect(screen.getByText('Messaging is not available for this claim yet.')).toBeVisible()
+    expect(screen.queryByText(/accepted staff handoff is required/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/action|projected/i)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+  })
+
+  it.each([
+    {
+      name: 'queued handoff assigned to another staff member',
+      allowedActions: [{
+        action_code: 'human.accept_handoff',
+        target_ref: 'hnd_1',
+        availability: 'blocked',
+        blocked_reason: 'This work is assigned to another staff member.',
+      }],
+    },
+    {
+      name: 'terminal Claim with no active handoff',
+      allowedActions: [{
+        action_code: 'claim.reopen',
+        target_ref: 'clm_1',
+        availability: 'blocked',
+        blocked_reason: 'A created external Claim cannot be reopened from FNOL intake.',
+      }],
+    },
+  ])('uses a neutral unavailable explanation for a $name', ({ allowedActions }) => {
+    renderConversation({
+      detail: { ...detail, allowed_actions: allowedActions },
+      resource: { items: [], resolved_session_id: 'ses_1' },
+      draft: '',
+      onDraft: vi.fn(),
+      onSend: vi.fn(),
+    })
+
+    expect(screen.getByText('Staff messaging not available yet')).toBeVisible()
+    expect(screen.getByText('Messaging is not available for this claim yet.')).toBeVisible()
+    expect(screen.queryByText(/accepted staff handoff is required/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(allowedActions[0].blocked_reason)).not.toBeInTheDocument()
   })
 
   it('submits an available exact-target message action with the displayed session', async () => {
@@ -75,6 +114,14 @@ describe('Conversation', () => {
       onDraft: vi.fn(),
       onSend,
     })
+
+    expect(screen.queryByRole('heading', { name: 'Claimant conversation' })).not.toBeInTheDocument()
+    expect(screen.getByRole('log', { name: 'Claimant conversation messages' })).toHaveTextContent('No messages yet')
+    expect(screen.getByRole('log', { name: 'Claimant conversation messages' })).toHaveTextContent(
+      'Messages with the claimant will appear here.',
+    )
+    expect(screen.getByLabelText('Message to claimant')).toHaveAttribute('placeholder', 'Write a message…')
+    expect(screen.queryByText(/shared claim context|0 messages|visible to the claimant/i)).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Send message' }))
     expect(onSend).toHaveBeenCalledWith({
@@ -109,9 +156,10 @@ describe('Conversation', () => {
       onSend,
     }, '/workbench/claims/clm_1/conversation?session=ses_old')
 
-    expect(screen.getByLabelText('Reply to claimant')).toBeDisabled()
+    expect(screen.getByLabelText('Message to claimant')).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
-    expect(screen.getByText(/saved session is read-only/i)).toBeInTheDocument()
+    expect(screen.getByText('Read-only conversation')).toBeInTheDocument()
+    expect(screen.getByText('Open the active claimant conversation to send a message.')).toBeInTheDocument()
     expect(onSend).not.toHaveBeenCalled()
   })
 
@@ -146,7 +194,7 @@ describe('Conversation', () => {
       'The Claim changed after this page was loaded.',
     )
     expect(onDraft).not.toHaveBeenCalled()
-    expect(screen.getByLabelText('Reply to claimant')).toHaveValue(
+    expect(screen.getByLabelText('Message to claimant')).toHaveValue(
       'Preserve this draft',
     )
   })
@@ -176,7 +224,7 @@ describe('Conversation', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('could not be reached')
     expect(onDraft).not.toHaveBeenCalled()
-    expect(screen.getByLabelText('Reply to claimant')).toHaveValue('Retry this safely')
+    expect(screen.getByLabelText('Message to claimant')).toHaveValue('Retry this safely')
   })
 
   it('uses the actually loaded session instead of the URL as send authority', () => {
@@ -208,7 +256,7 @@ describe('Conversation', () => {
     }, '/workbench/claims/clm_1/conversation?session=ses_active')
 
     expect(screen.getByText('Old session message.')).toBeVisible()
-    expect(screen.getByLabelText('Reply to claimant')).toBeDisabled()
+    expect(screen.getByLabelText('Message to claimant')).toBeDisabled()
     expect(onSend).not.toHaveBeenCalled()
   })
 
@@ -232,7 +280,7 @@ describe('Conversation', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       'The requested claimant session is not available',
     )
-    expect(screen.queryByLabelText('Reply to claimant')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Message to claimant')).not.toBeInTheDocument()
   })
 
 })

@@ -30,7 +30,7 @@ export default function ClaimWorkspace({ detail, resources = {}, loading, error,
   return (
     <main className="claim-workspace">
       {(loading || stale || error) && <ClaimSyncNotice loading={loading} error={error} onRetry={onRetry} />}
-      <ClaimHeader detail={detail} />
+      {section !== 'conversation' && <ClaimHeader detail={detail} />}
       <nav className="section-tabs" aria-label="Claim sections" role="tablist">
         {SECTIONS.map(([value, label], index) => <button className={section === value ? 'is-active' : ''} type="button" role="tab" id={`claim-tab-${value}`} aria-controls={`claim-panel-${value}`} aria-selected={section === value} tabIndex={section === value ? 0 : -1} key={value} onClick={() => onSection(value)} onKeyDown={(event) => moveTabFocus(event, index, onSection)}>{label}</button>)}
       </nav>
