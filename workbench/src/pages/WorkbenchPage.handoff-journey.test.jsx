@@ -686,7 +686,8 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Open conversation' }))
     expect(await screen.findByText('Please help me continue this claim.')).toBeVisible()
-    expect(screen.getByLabelText('Reply to claimant')).toHaveValue(
+    expect(screen.queryByRole('heading', { name: 'Journey Claimant' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Message to claimant')).toHaveValue(
       'We have accepted your handoff and are continuing the review.',
     )
 
@@ -708,9 +709,10 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
     expect(await screen.findByText(
       'We have accepted your handoff and are continuing the review.',
     )).toBeVisible()
-    await waitFor(() => expect(screen.getByText('Revision 3')).toBeVisible())
+    expect(screen.queryByText('Revision 3')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: 'Overview' }))
+    await waitFor(() => expect(screen.getByText('Revision 3')).toBeVisible())
     await user.click(await screen.findByRole('button', { name: 'Open work activity' }))
     await user.click(await screen.findByRole('button', { name: 'Record resolution' }))
 

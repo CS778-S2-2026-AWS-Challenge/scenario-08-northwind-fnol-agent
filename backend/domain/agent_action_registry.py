@@ -262,6 +262,19 @@ def _input_schema_for(action_code: str) -> ActionInputSchema:
             _field('authorised_decision_ref', ActionInputType.STRING),
             _field('idempotency_key', ActionInputType.STRING),
         )
+    if action_code == 'claim.propose_evidence_reuse':
+        return _schema(
+            _field('claim_id', ActionInputType.STRING),
+            _field('evidence_id', ActionInputType.STRING),
+            _field('source_claim_id', ActionInputType.STRING),
+        )
+    if action_code == 'claim.propose_evidence_remove':
+        return _schema(
+            _field('claim_id', ActionInputType.STRING),
+            _field('evidence_id', ActionInputType.STRING),
+            _field('removal_scope', ActionInputType.STRING),
+        )
+
     if action_code.startswith('claim.'):
         return _schema(
             _field('claim_id', ActionInputType.STRING),
@@ -574,6 +587,60 @@ def _human_specs() -> list[AgentActionContract]:
     return specs
 
 
+def _evidence_specs() -> list[AgentActionContract]:
+    return [
+        _spec(
+            'claim.propose_evidence_reuse',
+            'Propose reusing an eligible claimant-owned Evidence item on this Claim.',
+            actor_roles=_MODEL_RUNTIME_ROLES,
+            authority=ExecutionAuthority.RUNTIME_VALIDATION,
+            lifecycle_states=_MUTABLE_WORKFLOW_STATES,
+            preconditions=(
+                'authorised_claim_scope',
+                'evidence_history_result_present',
+                'evidence_ownership_verified',
+                'reusable_processing_state',
+            ),
+            tools=('evidence.history',),
+            state_effect=ActionStateEffect.CLAIM_PROPOSAL,
+            visibility=(ActionVisibility.CLAIMANT,),
+            response_obligations=(
+                'Identify the source Claim and Evidence item, explain that the original file '
+                'will be reused without copying it, and ask for explicit confirmation before '
+                'the Evidence API attaches it.',
+            ),
+            prohibited_outcomes=(
+                'Do not attach Evidence, copy a file, widen Claim scope, or treat history '
+                'visibility as permission to reuse.',
+            ),
+        ),
+        _spec(
+            'claim.propose_evidence_remove',
+            'Propose removing a draft or persisted Evidence item through the governed API.',
+            actor_roles=_MODEL_RUNTIME_ROLES,
+            authority=ExecutionAuthority.RUNTIME_VALIDATION,
+            lifecycle_states=_MUTABLE_WORKFLOW_STATES,
+            preconditions=(
+                'authorised_claim_scope',
+                'evidence_history_result_present',
+                'evidence_ownership_verified',
+                'retention_policy_checked',
+            ),
+            tools=('evidence.history',),
+            state_effect=ActionStateEffect.CLAIM_PROPOSAL,
+            visibility=(ActionVisibility.CLAIMANT,),
+            response_obligations=(
+                'State whether this is a draft removal or a persisted Evidence request, and '
+                'tell the claimant when retention or an unavailable handler prevents removal.',
+            ),
+            prohibited_outcomes=(
+                'Do not delete an object-storage key, erase provenance, or report a persisted '
+                'item as removed unless the Evidence API confirms it.',
+            ),
+        ),
+    ]
+
+
 def _external_specs() -> list[AgentActionContract]:
     actions = (
         ('external.discover_capability', 'Discover eligible participant capabilities.'),
@@ -684,6 +751,7 @@ def _build_registry() -> dict[str, AgentActionContract]:
         *_conversation_specs(),
         *_claim_specs(),
         *_human_specs(),
+        *_evidence_specs(),
         *_external_specs(),
         *_runtime_specs(),
     )

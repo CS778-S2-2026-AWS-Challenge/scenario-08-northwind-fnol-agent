@@ -154,16 +154,72 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
             <span className="queue-item__summary">
               {claim.work_summary?.current_work_item?.requested_outcome || claim.incident?.summary}
             </span>
+            <QueueAttention claim={claim} />
             <TagList tags={claim.tags} limit={3} />
             <span className="queue-item__meta">
               <span>{ownershipLabel(claim.ownership)}</span>
-              <time dateTime={claim.updated_at}>{formatDateTime(claim.updated_at)}</time>
+              <time dateTime={claim.updated_at}>Claim updated {formatDateTime(claim.updated_at)}</time>
             </span>
           </button>
         ))}
         {!loading && !error && nextCursor && <button className="queue-load-more" type="button" onClick={onLoadMore}>Load more Claims</button>}
       </div>
     </aside>
+  )
+}
+
+function QueueAttention({ claim }) {
+  const priorityReason = claim.priority_projection?.reasons?.[0]?.summary
+  const workSummary = claim.work_summary || {}
+  const incomplete = workSummary.incomplete_context
+  const externalWaitCount = workSummary.external_wait_count || 0
+  const claimantActivity = workSummary.last_claimant_activity_at
+  const hasAttentionItems = Boolean(
+    workSummary.primary_blocker
+    || incomplete
+    || externalWaitCount
+    || claimantActivity,
+  )
+
+  if (!priorityReason && !hasAttentionItems) return null
+
+  return (
+    <span className="queue-item__attention-group">
+      {priorityReason && (
+        <span className="queue-item__reason">
+          <strong>Why now</strong>
+          <span>{priorityReason}</span>
+        </span>
+      )}
+      {hasAttentionItems && (
+        <span className="queue-item__attention">
+          {workSummary.primary_blocker && (
+            <span>
+              <strong>Needs attention</strong>
+              <span>{workSummary.primary_blocker}</span>
+            </span>
+          )}
+          {incomplete && (
+            <span>
+              <strong>Incomplete</strong>
+              {incomplete.resume_point && <span>Resume {words(incomplete.resume_point)}</span>}
+            </span>
+          )}
+          {externalWaitCount > 0 && (
+            <span>
+              <strong>External wait</strong>
+              <span>{externalWaitCount} service{externalWaitCount === 1 ? '' : 's'} waiting</span>
+            </span>
+          )}
+          {claimantActivity && (
+            <span>
+              <strong>Claimant activity</strong>
+              <time dateTime={claimantActivity}>{formatDateTime(claimantActivity)}</time>
+            </span>
+          )}
+        </span>
+      )}
+    </span>
   )
 }
 
