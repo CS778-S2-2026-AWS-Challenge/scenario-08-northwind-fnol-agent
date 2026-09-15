@@ -2260,6 +2260,10 @@ function App() {
               />
             )}
 
+            {claim.external_capabilities?.length > 0 && (
+              <ExternalCapabilityCatalogue capabilities={claim.external_capabilities} />
+            )}
+
             {evidenceSyncNotice && (
               <p className="backend-status" role="status">
                 <span className="status-dot" />
@@ -2486,6 +2490,28 @@ function App() {
         </main>
       )}
     </div>
+  )
+}
+
+function ExternalCapabilityCatalogue({ capabilities }) {
+  return (
+    <section className="external-service" aria-labelledby="external-capabilities-title">
+      <p className="transfer-label">Available support</p>
+      <h2 id="external-capabilities-title">Third-party services</h2>
+      <div className="service-capability-list">
+        {capabilities.map((capability) => (
+          <article className="service-capability" key={capability.service_identity}>
+            <h3>{capability.service_name}</h3>
+            <p>{capability.purpose}</p>
+            <p className="service-limitation">{capability.result_semantics}</p>
+            <div className="service-capability-actions">
+              {capability.official_url && <a href={capability.official_url} target="_blank" rel="noreferrer">Official information</a>}
+              {capability.official_phone && <a href={`tel:${capability.official_phone}`}>Call {capability.official_phone}</a>}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   )
 }
 export default App

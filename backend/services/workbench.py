@@ -8,6 +8,7 @@ from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.evidence import is_in_conflict, unresolved_conflicts
 from backend.domain.external_service_registry import (
+    capability_catalogue,
     ExternalCapabilityProvenance,
     ExternalLifecycleStatus,
     InvalidExternalLifecycleTransition,
@@ -1912,6 +1913,7 @@ def _build_projection(
             ),
         ),
         customer_next_step=claim.customer_next_step,
+        external_capabilities=list(capability_catalogue(claim.incident_type)),
     )
 
 

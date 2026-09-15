@@ -8,6 +8,7 @@ from backend.domain.branch_registry import (
     validate_registered_field_value,
 )
 from backend.domain.evidence import evidence_summary_for
+from backend.domain.external_service_registry import capability_catalogue
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
 from backend.domain.intake import next_requirement_step
@@ -310,6 +311,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         evidence_summary=evidence_summary_for(claimant_evidence),
         external_claim=claim.external_claim,
         external_service_action=external_service_action,
+        external_capabilities=list(capability_catalogue(claim.incident_type)),
         dynamic_form=claimant_dynamic_form_projection(repository, claim),
         customer_next_step=claimant_next_step(repository, claim, external_service_action),
         incomplete_context=_claimant_incomplete_context(repository, claim),

@@ -615,7 +615,7 @@ class AssessorRoutingResult(ContractModel):
 
 class ClaimantExternalServiceAction(ContractModel):
     service_identity: str
-    registry_version: str = Field(min_length=1, max_length=100)
+    registry_version: str = Field(default='external-service-lifecycle.v1', min_length=1, max_length=100)
     lifecycle_status: str = Field(min_length=1, max_length=100)
     catalogue_reference: str | None = None
     capability_provenance: str = Field(min_length=1, max_length=100)
@@ -634,6 +634,28 @@ class ClaimantExternalServiceAction(ContractModel):
     routing: AssessorRoutingResult | None = None
     failure_code: AssessorRoutingFailureCode | None = None
     can_request: bool
+
+
+class ExternalCapabilityProjection(ContractModel):
+    """Server-owned third-party capability row shared by claimant and staff."""
+
+    registry_version: str = Field(default='external-service-lifecycle.v1', min_length=1, max_length=100)
+    service_identity: str
+    catalogue_reference: str | None = None
+    service_name: str
+    provider_name: str
+    product_families: tuple[str, ...]
+    purpose: str
+    access_form: str
+    adapter_kind: str
+    provenance: str
+    uses_external_task: bool
+    required_fields: tuple[str, ...] = ()
+    disclosure_fields: tuple[str, ...] = ()
+    official_url: str | None = None
+    official_phone: str | None = None
+    result_semantics: str
+    limitation: str
 
 
 class AssessorRoutingOperation(ContractModel):
@@ -1787,6 +1809,7 @@ class ClaimantClaim(ContractModel):
     evidence_summary: EvidenceSummary
     external_claim: ExternalClaimResult | None = None
     external_service_action: ClaimantExternalServiceAction | None = None
+    external_capabilities: list[ExternalCapabilityProjection] = Field(default_factory=list)
     dynamic_form: 'DynamicFormProjection | None' = None
     customer_next_step: CustomerNextStep
     incomplete_context: ClaimantIncompleteContext | None = None
