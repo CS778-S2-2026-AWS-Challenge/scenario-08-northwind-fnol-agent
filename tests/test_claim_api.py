@@ -12,7 +12,9 @@ from httpx import Response
 from backend.adapters.evidence_storage import MockEvidenceStorage
 from backend.adapters.policy_history import MockPolicyHistoryAdapter, ProviderLookupEnvelope
 from backend.app import create_app
+from backend.core.auth import Principal
 from backend.core.config import IdentityMode, Settings
+from backend.core.errors import ApiError
 from backend.domain.models import (
     AgentAction,
     ClaimCreationStatus,
@@ -40,8 +42,9 @@ from backend.domain.models import (
 from backend.domain.retrieval import ClaimHistoryRetrievalRecord, ClaimHistorySearchRequest
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
+from backend.repositories.protocols import IdempotencyRecord
 from backend.services.agent import AgentProposal, AgentTurnContext
-from backend.services.messages import _TurnEvidenceResolver
+from backend.services.messages import _restore_idempotent_message_turn, _TurnEvidenceResolver
 
 
 class HighImpactAgent:
@@ -67,6 +70,26 @@ class HighImpactAgent:
             proposed_signals=[],
             required_tools=[{'tool': 'claim_creation', 'status': 'requested'}],
             next_action_requirements=[],
+        )
+
+
+def test_idempotent_turn_without_linked_records_fails_closed(
+    repository: FixtureRepository,
+) -> None:
+    record = IdempotencyRecord(
+        actor_id='cus_demo',
+        route='/api/v1/claims/clm_missing/sessions/ses_missing/messages',
+        key='missing-linked-records',
+        request_fingerprint='fingerprint',
+        claim_id='clm_missing',
+        session_id='ses_missing',
+    )
+
+    with pytest.raises(ApiError, match='could not be restored'):
+        _restore_idempotent_message_turn(
+            repository,
+            Principal(subject='cus_demo', actor_type='claimant'),
+            record,
         )
 
 

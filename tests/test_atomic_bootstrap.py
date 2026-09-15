@@ -1,9 +1,12 @@
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from threading import Barrier
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.core.config import AgentRuntimeProfile
 from backend.core.errors import ApiError
 from backend.domain.models import ActorType
 from backend.repositories.fixture import FixtureRepository
@@ -128,3 +131,49 @@ def test_concurrent_initial_bootstrap_replays_one_committed_claim(
     assert [response.status_code for response in responses] == [201, 201]
     assert responses[0].json() == responses[1].json()
     assert len(repository.list_claims_internal()) == 1
+
+
+def test_initial_bootstrap_resolves_explicit_and_gateway_default_profiles(
+    app: FastAPI,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected: list[str | None] = []
+
+    def select_profile(_request: object, profile_id: str | None) -> str:
+        selected.append(profile_id)
+        return profile_id or 'qwen-local'
+
+    monkeypatch.setattr('backend.api.claims.select_model_profile', select_profile)
+    explicit = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'profile-explicit'},
+        json={
+            'model_profile_id': 'qwen-local',
+            'initial_message': {
+                'client_message_id': 'profile-explicit-message',
+                'content': {'type': 'text', 'text': 'A parked car was damaged.'},
+            },
+        },
+    )
+    assert explicit.status_code == 201, explicit.text
+
+    app.state.settings = replace(
+        app.state.settings,
+        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_base_url='https://model.example.test/v1',
+        model_identifier='test-model',
+    )
+    defaulted = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'profile-default'},
+        json={
+            'initial_message': {
+                'client_message_id': 'profile-default-message',
+                'content': {'type': 'text', 'text': 'A pipe burst in my kitchen.'},
+            },
+        },
+    )
+    assert defaulted.status_code == 201, defaulted.text
+    assert selected == ['qwen-local', 'qwen-local', None, 'qwen-local']
