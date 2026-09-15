@@ -40,6 +40,34 @@ vi.mock('./api.js', () => api)
 
 import App from './App.jsx'
 
+function primaryAction({
+  actionCode = 'claimant.continue_conversation',
+  actionType = 'conversation',
+  available = false,
+  requiredInputs = [],
+  revision = 1,
+  targetRef = 'clm_ui_vp',
+} = {}) {
+  return {
+    action_type: actionType,
+    action_code: actionCode,
+    action_id: `${actionCode}:${targetRef}`,
+    target_ref: targetRef,
+    available,
+    required_inputs: requiredInputs,
+    claim_revision: revision,
+    registry_version: '1.0.0',
+    visibility: 'claimant',
+    execution_boundary:
+      actionType === 'claim_creation'
+        ? 'claimant_api'
+        : actionType === 'external_service'
+          ? 'external_service'
+          : 'conversation',
+    projection_version: 'v1',
+  }
+}
+
 const initialClaim = {
   claim_id: 'clm_ui_vp',
   revision: 1,
@@ -52,6 +80,7 @@ const initialClaim = {
     summary: 'Describe what happened',
     required_items: [],
   },
+  primary_action: primaryAction(),
   created_at: '2026-09-14T01:00:00Z',
   updated_at: '2026-09-14T01:00:00Z',
   external_claim: null,
@@ -100,6 +129,7 @@ function initialTurn() {
     dynamic_form: null,
     claim_revision: 2,
     decision: { customer_next_step: initialClaim.customer_next_step },
+    primary_action: primaryAction({ revision: 2 }),
   }
 }
 
@@ -834,6 +864,12 @@ describe('claimant intake projection', () => {
           required_items: [],
         },
       },
+      primary_action: primaryAction({
+        actionCode: 'claimant.create_claim',
+        actionType: 'claim_creation',
+        available: true,
+        revision: 2,
+      }),
     })
     api.createExternalClaim.mockResolvedValue({
       revision: 3,
@@ -861,6 +897,14 @@ describe('claimant intake projection', () => {
         summary: 'Claims intake review',
         required_items: [],
       },
+      primary_action: primaryAction({
+        actionCode: 'claimant.request_assessment',
+        actionType: 'external_service',
+        available: true,
+        requiredInputs: ['claimant_consent'],
+        revision: 3,
+        targetRef: 'vehicle_damage_assessment_routing',
+      }),
     })
 
     render(<App />)
@@ -896,7 +940,7 @@ describe('claimant intake projection', () => {
     }))
   })
 
-  it('fails closed when backend projections expose conflicting primary actions', async () => {
+  it('uses the backend primary action when supporting projections could imply another action', async () => {
     const user = userEvent.setup()
     const externalServiceAction = {
       service_identity: 'vehicle_damage_assessment_routing',
@@ -908,7 +952,17 @@ describe('claimant intake projection', () => {
       can_request: true,
     }
     api.createClaim.mockResolvedValue({
-      claim: { ...initialClaim, external_service_action: externalServiceAction },
+      claim: {
+        ...initialClaim,
+        external_service_action: externalServiceAction,
+        primary_action: primaryAction({
+          actionCode: 'claimant.request_assessment',
+          actionType: 'external_service',
+          available: true,
+          requiredInputs: ['claimant_consent'],
+          targetRef: 'vehicle_damage_assessment_routing',
+        }),
+      },
       session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
     })
     api.submitClaimMessage.mockResolvedValue({
@@ -921,6 +975,12 @@ describe('claimant intake projection', () => {
           required_items: [],
         },
       },
+      primary_action: primaryAction({
+        actionCode: 'claimant.create_claim',
+        actionType: 'claim_creation',
+        available: true,
+        revision: 2,
+      }),
     })
 
     render(<App />)
@@ -928,7 +988,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
 
-    expect(screen.queryByRole('button', { name: /Create your claim/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Create your claim/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', {
       name: /Request a vehicle damage assessment/i,
     })).not.toBeInTheDocument()
@@ -953,6 +1013,12 @@ describe('claimant intake projection', () => {
           required_items: ['incident.occurred_at', 'incident.location'],
         },
       },
+      primary_action: primaryAction({
+        actionCode: 'claimant.review_details',
+        available: true,
+        requiredInputs: ['incident.occurred_at', 'incident.location'],
+        revision: 2,
+      }),
     })
 
     render(<App />)
