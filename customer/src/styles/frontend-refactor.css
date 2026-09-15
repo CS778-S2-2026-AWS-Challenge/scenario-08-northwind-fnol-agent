@@ -566,7 +566,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 .conversation-panel .message-list { padding: var(--space-6) 0; }
 .msg-user { display: flex; justify-content: flex-end; }
 .msg-user > div { max-width: min(70ch, 85%); }
-.user-bubble { max-width: 100%; padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); color: var(--color-text-primary); background: var(--color-panel); line-height: 1.55; text-align: center; }
+.user-bubble { max-width: 100%; padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); color: var(--color-text-primary); background: var(--color-panel); line-height: 1.55; text-align: left; }
 .msg-agent { display: flex; gap: var(--space-3); max-width: 75ch; }
 .agent-bar { width: 3px; flex: 0 0 3px; border-radius: var(--radius-sm); background: var(--color-accent); }
 .agent-label { margin-bottom: var(--space-1); color: var(--color-accent-strong); font-size: var(--font-size-caption); font-weight: var(--font-weight-semibold); }

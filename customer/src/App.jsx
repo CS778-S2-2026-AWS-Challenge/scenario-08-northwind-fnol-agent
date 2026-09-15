@@ -136,82 +136,35 @@ function assistancePresentation({ handoff, nextStep, requesting, reviewingReply,
   }
   if (handoff && reviewingReply) {
     return {
-      key: 'reviewing_reply',
-      title: 'Staff is reviewing your reply',
-      description: 'No action needed from you right now.',
+      key: 'reply_sent',
+      title: 'Your reply was sent',
+      description: 'Waiting for the next claim update.',
     }
   }
-  if (['accepted', 'in_progress'].includes(handoff?.status)) {
+  if (handoff?.status === 'accepted') {
     return {
-      key: 'staff_helping',
-      title: 'Staff is helping you',
-      description: 'A Northwind staff member is reviewing your information.',
+      key: 'staff_assistance_accepted',
+      title: 'Staff assistance accepted',
+      description: 'Northwind has accepted your assistance request.',
+    }
+  }
+  if (handoff?.status === 'in_progress') {
+    return {
+      key: 'staff_assistance_in_progress',
+      title: 'Staff assistance in progress',
+      description: 'Northwind reports that your assistance request is in progress.',
     }
   }
   return null
 }
 
-function buildConversationTimeline(messages, handoff, completedAssistance, resumeContext) {
+function buildConversationTimeline(messages, resumeContext) {
   const timeline = messages.map((message) => ({
     key: message.message_id,
     kind: 'message',
     message,
   }))
-  const recordedSystemText = messages
-    .filter((message) => message.actor === 'system')
-    .map((message) => messageText(message).toLowerCase())
-  const hasRecordedEvent = (eventText) => recordedSystemText.some((text) => (
-    text.includes(eventText.toLowerCase())
-  ))
-
-  if (handoff) {
-    const handoffStartedAt = Date.parse(handoff.created_at || '')
-    if (!hasRecordedEvent('staff assistance requested')) {
-      const firstMessageAfterRequest = Number.isFinite(handoffStartedAt)
-        ? timeline.findIndex((item) => (
-            Date.parse(item.message?.created_at || '') >= handoffStartedAt
-          ))
-        : -1
-      const requestInsertAt = firstMessageAfterRequest >= 0
-        ? firstMessageAfterRequest
-        : timeline.length
-      timeline.splice(requestInsertAt, 0, {
-        key: `assistance-requested-${handoff.handoff_id}`,
-        kind: 'system-event',
-        text: 'Staff assistance requested',
-      })
-    }
-    if (
-      ['accepted', 'in_progress'].includes(handoff.status)
-      && !hasRecordedEvent('joined the conversation')
-    ) {
-      const firstCurrentStaffMessage = timeline.findIndex((item) => (
-        item.message?.actor === 'staff'
-        && (!Number.isFinite(handoffStartedAt)
-          || Date.parse(item.message.created_at || '') >= handoffStartedAt)
-      ))
-      const joinedInsertAt = firstCurrentStaffMessage >= 0
-        ? firstCurrentStaffMessage
-        : timeline.length
-      timeline.splice(joinedInsertAt, 0, {
-        key: `assistance-joined-${handoff.handoff_id}`,
-        kind: 'system-event',
-        text: 'Northwind staff joined the conversation',
-      })
-    }
-  }
-
-  if (
-    completedAssistance
-    && !hasRecordedEvent('staff assistance completed')
-  ) {
-    timeline.push({
-      key: `assistance-completed-${completedAssistance.handoff_id}`,
-      kind: 'system-event',
-      text: 'Staff assistance completed',
-    })
-  }
-  if (resumeContext && !hasRecordedEvent('claim resumed')) {
+  if (resumeContext) {
     const boundaryMessageIndex = resumeContext.resumed_after_message_id
       ? timeline.findIndex((item) => item.message?.message_id === resumeContext.resumed_after_message_id)
       : -1
@@ -236,6 +189,37 @@ function buildConversationTimeline(messages, handoff, completedAssistance, resum
     })
   }
   return timeline
+}
+
+function resolveConversationActionProjection(claim, nextStep) {
+  const candidates = []
+  const requiredItems = Array.isArray(nextStep?.required_items)
+    ? nextStep.required_items
+    : []
+
+  if (nextStep?.status === 'confirmation_required' && requiredItems.length > 0) {
+    candidates.push({
+      kind: 'review-details',
+      identity: `customer-next-step:${nextStep.status}`,
+      requiredItems,
+    })
+  }
+  if (nextStep?.status === 'ready_to_create' && !claim?.external_claim) {
+    candidates.push({
+      kind: 'create-claim',
+      identity: `customer-next-step:${nextStep.status}`,
+      requiredItems,
+    })
+  }
+  if (claim?.external_service_action?.service_identity) {
+    candidates.push({
+      kind: 'external-service',
+      identity: `external-service:${claim.external_service_action.service_identity}`,
+      requiredItems: [],
+    })
+  }
+
+  return candidates.length === 1 ? candidates[0] : null
 }
 
 function evidenceFileStatusLabel(fileStatus, status) {
@@ -597,8 +581,8 @@ function App() {
     status,
   ])
   const conversationTimeline = useMemo(
-    () => buildConversationTimeline(messages, handoff, completedAssistance, resumeContext),
-    [completedAssistance, handoff, messages, resumeContext],
+    () => buildConversationTimeline(messages, resumeContext),
+    [messages, resumeContext],
   )
   const lastAgentMessageId = useMemo(() => (
     [...conversationTimeline]
@@ -606,14 +590,11 @@ function App() {
       .find((item) => item.kind === 'message' && item.message.actor === 'agent')
       ?.message.message_id || null
   ), [conversationTimeline])
-  const reviewItemCount = proposedFields.length + proposedContentsItems.length
-  const conversationActionKind = claim?.external_service_action
-    ? 'external-service'
-    : reviewItemCount > 0
-      ? 'review-details'
-      : nextStep?.status === 'ready_to_create' && !claim?.external_claim
-        ? 'create-claim'
-        : null
+  const conversationAction = useMemo(
+    () => resolveConversationActionProjection(claim, nextStep),
+    [claim, nextStep],
+  )
+  const conversationActionKind = conversationAction?.kind || null
 
   useEffect(() => {
     followLatestMessages.current = true
@@ -932,62 +913,32 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claim?.claim_id, evidencePollingKey])
 
-  async function handleFileSelected(
+  async function uploadAttachment(
     file,
-    existingAttempt = null,
-    requestedKind = null,
-    requestedEvidenceId = null,
+    attempt,
+    activeClaim,
+    {
+      existingAttachment = false,
+      checkExistingEvidence = false,
+      settleStatus = true,
+    } = {},
   ) {
-    if (isBusy) return
-    if (!hasClaimantAccessToken()) {
-      setError('Sign in before uploading a file. Your anonymous conversation is still available, and you can resume it after signing in.')
-      setStatus('error')
-      return
-    }
-    setError('')
-    const attempt = existingAttempt || {
-      localId: requestId('file'),
-      claimKey: requestId('claim'),
-      uploadKey: requestId('evidence-upload'),
-      completeKey: requestId('evidence-complete'),
-      kind: requestedKind || (file.type.startsWith('image/') ? 'incident_photo' : 'other_document'),
-      evidenceId: requestedEvidenceId,
-    }
     const localId = attempt.localId
     evidenceUploadControllers.current.get(localId)?.abort()
     const uploadController = new AbortController()
     evidenceUploadControllers.current.set(localId, uploadController)
-    setAttachments((current) => existingAttempt
+    setAttachments((current) => existingAttachment
       ? current.map((item) => item.id === localId
         ? { ...item, status: 'uploading', statusLabel: 'Uploading…', retry: null }
         : item)
       : [...current, { id: localId, name: file.name, status: 'uploading', statusLabel: 'Uploading…' }])
+    let uploadRevision = activeClaim.revision
     try {
-      let activeClaim = isWorkspaceActive ? claim : null
-      if (!activeClaim) {
-        const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType, modelProfileId: selectedModel })
-        activeClaim = created.claim
-        rememberClaimInHistory(created.claim)
-        setClaim(activeClaim)
-        setSessionId(created.session.session_id)
-        if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
-        setForm(activeClaim.form)
-        setContentsItems(activeClaim.contents_items || [])
-        setDynamicForm(activeClaim.dynamic_form || null)
-        setNextStep(activeClaim.customer_next_step)
-        setMessages([])
-        setHandoff(null)
-        setEvidenceItems([])
-        setResumeContext(null)
-        setExpandedConversationPanels({})
-        setWorkspaceView('chat')
-        setMobileView('chat')
-        setWorkspaceActive(true)
-      }
-      if (existingAttempt) {
+      if (checkExistingEvidence) {
         const authoritative = await getClaimEvidence(activeClaim.claim_id)
         syncEvidenceProjection(authoritative)
         setEvidenceSyncNotice('')
+        uploadRevision = Math.max(uploadRevision, Number(authoritative.revision || 0))
         const observed = (authoritative.items || []).find(
           (item) => item.evidence_id === attempt.evidenceId,
         )
@@ -1004,13 +955,13 @@ function App() {
               retryLabel: observed.file_status === 'failed' ? 'Check status' : null,
             })
             : item))
-          setStatus('idle')
-          return
+          if (settleStatus) setStatus('idle')
+          return { revision: uploadRevision, succeeded: true }
         }
       }
       const requested = await requestEvidenceUpload({
         claimId: activeClaim.claim_id,
-        revision: activeClaim.revision,
+        revision: uploadRevision,
         file,
         kind: attempt.kind,
         evidenceId: attempt.evidenceId,
@@ -1022,7 +973,7 @@ function App() {
       attempt.evidenceId = requested.evidence_id
       dismissedComposerEvidenceIds.current.delete(requested.evidence_id)
       setAttachments((current) => current.map((item) => item.id === localId
-        ? { ...item, evidenceId: requested.evidence_id, uploadAttempt: attempt }
+        ? { ...item, evidenceId: requested.evidence_id, stagedFile: null, uploadAttempt: attempt }
         : item))
       setClaimRevision(requested.revision)
       await uploadEvidenceContent({ upload: requested.upload, file, signal: uploadController.signal })
@@ -1046,22 +997,72 @@ function App() {
       setAttachments((current) => current.map((item) => item.id === localId
         ? attachmentForEvidence(completed.evidence, {
           ...item,
+          stagedFile: null,
           retryFile: file,
           retryAttempt: attempt,
         })
         : item))
-      setStatus('idle')
+      if (settleStatus) setStatus('idle')
+      return { revision: completed.revision, succeeded: true }
     } catch (requestError) {
-      if (requestError?.name === 'AbortError') return
+      if (requestError?.name === 'AbortError') {
+        return { revision: uploadRevision, succeeded: false }
+      }
       setAttachments((current) => current.map((item) => item.id === localId
         ? { ...item, status: 'failed', statusLabel: requestError.message || 'Upload failed', retry: () => handleFileSelected(file, attempt) }
         : item))
       showError(requestError)
+      return {
+        revision: Math.max(uploadRevision, latestEvidenceRevision.current),
+        succeeded: false,
+      }
     } finally {
       if (evidenceUploadControllers.current.get(localId) === uploadController) {
         evidenceUploadControllers.current.delete(localId)
       }
     }
+  }
+
+  async function handleFileSelected(
+    file,
+    existingAttempt = null,
+    requestedKind = null,
+    requestedEvidenceId = null,
+  ) {
+    if (isBusy) return
+    if (!hasClaimantAccessToken()) {
+      setError('Sign in before uploading a file. Your anonymous conversation is still available, and you can resume it after signing in.')
+      setStatus('error')
+      return
+    }
+    setError('')
+    const attempt = existingAttempt || {
+      localId: requestId('file'),
+      uploadKey: requestId('evidence-upload'),
+      completeKey: requestId('evidence-complete'),
+      kind: requestedKind || (file.type.startsWith('image/') ? 'incident_photo' : 'other_document'),
+      evidenceId: requestedEvidenceId,
+    }
+
+    if (!isWorkspaceActive || !claim) {
+      setAttachments((current) => [
+        ...current,
+        {
+          id: attempt.localId,
+          name: file.name,
+          status: 'staged',
+          statusLabel: 'Ready to upload after your first message is sent',
+          stagedFile: file,
+          uploadAttempt: attempt,
+        },
+      ])
+      return
+    }
+
+    await uploadAttachment(file, attempt, claim, {
+      existingAttachment: Boolean(existingAttempt),
+      checkExistingEvidence: Boolean(existingAttempt),
+    })
   }
 
   function removeComposerAttachment(attachment) {
@@ -1083,7 +1084,9 @@ function App() {
     for (const controller of evidenceUploadControllers.current.values()) controller.abort()
     evidenceUploadControllers.current.clear()
     setAttachments((current) => current.filter((item) => {
-      const isDraft = item.status === 'uploading' || (item.status === 'failed' && !item.evidenceId)
+      const isDraft = item.status === 'staged'
+        || item.status === 'uploading'
+        || (item.status === 'failed' && !item.evidenceId)
       if (isDraft && item.evidenceId) dismissedComposerEvidenceIds.current.add(item.evidenceId)
       return !isDraft
     }))
@@ -1113,6 +1116,11 @@ function App() {
     event.preventDefault()
     const text = draft.trim()
     if (!text || isBusy) return
+    const stagedAttachments = attachments.filter((attachment) => (
+      attachment.status === 'staged'
+      && attachment.stagedFile
+      && attachment.uploadAttempt
+    ))
     const isAssistanceReply = assistanceState?.key === 'response_needed'
 
     forceLatestMessages.current = true
@@ -1198,7 +1206,22 @@ function App() {
       pendingSubmission.current = null
       setPendingMessage(null)
       setFailedMessage(null)
-      setStatus('idle')
+      let attachmentClaim = { ...activeClaim, revision: turn.claim_revision }
+      let stagedUploadsSucceeded = true
+      for (const attachment of stagedAttachments) {
+        const upload = await uploadAttachment(
+          attachment.stagedFile,
+          attachment.uploadAttempt,
+          attachmentClaim,
+          { existingAttachment: true, settleStatus: false },
+        )
+        attachmentClaim = { ...attachmentClaim, revision: upload.revision }
+        if (!upload.succeeded) {
+          stagedUploadsSucceeded = false
+          break
+        }
+      }
+      if (stagedUploadsSucceeded) setStatus('idle')
     } catch (requestError) {
       if (isAssistanceReply) setAssistanceReplyReview(null)
       setPendingMessage(null)
@@ -1226,47 +1249,52 @@ function App() {
     }
   }
 
-  async function startNewChat() {
+  function startNewChat() {
     if (isBusy) return
-    const hasConversationContent = messages.length > 0
-      || Object.keys(form).length > 0
-      || attachments.length > 0
-      || Boolean(handoff)
-    if (claim && !hasConversationContent) {
-      setDraft('')
-      setError('')
-      setFailedMessage(null)
-      setResumeContext(null)
-      setWorkspaceView('chat')
-      setMobileView('chat')
-      return
-    }
+    clearComposerAttachments()
+    pendingSubmission.current = null
+    pendingConfirmation.current = null
+    pendingSupportRequest.current = null
+    pendingClaimCreation.current = null
+    pendingExternalService.current = null
+    latestEvidenceRevision.current = 0
+    latestEvidenceItems.current = []
+    evidenceHasLocalMutation.current = false
+    evidenceClaimId.current = null
+    setClaim(null)
+    setSessionId(null)
+    setMessages([])
+    setForm({})
+    setContentsItems([])
+    setDynamicForm(null)
+    setNextStep(null)
+    setHandoff(null)
+    setAssistanceReplyReview(null)
+    setEvidenceItems([])
+    setEvidenceLoadStatus('idle')
+    setEvidenceSyncNotice('')
+    setResumeContext(null)
+    setExpandedConversationPanels({})
+    setExternalServiceInteraction({
+      claimId: null,
+      consentChecked: false,
+      error: null,
+    })
+    setSelectedHistoryClaimId(null)
+    setDetailsOpen(true)
+    setDetailsTab('summary')
+    setWorkspaceView('chat')
+    setMobileView('chat')
+    setWorkspaceActive(false)
+    setDraft('')
+    setClaimType('')
     setError('')
     setFailedMessage(null)
-    cancelComposerDraftAttachments()
-    setStatus('starting')
-    try {
-      const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null, modelProfileId: selectedModel })
-      clearComposerAttachments()
-      rememberClaimInHistory(created.claim)
-      setClaim(created.claim)
-      setSessionId(created.session.session_id)
-      if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
-      setMessages([])
-      setForm(created.claim.form)
-      setContentsItems(created.claim.contents_items || [])
-      setDynamicForm(created.claim.dynamic_form || null)
-      setNextStep(created.claim.customer_next_step)
-      setHandoff(null)
-      setEvidenceItems([])
-      setResumeContext(null)
-      setWorkspaceView('chat')
-      setMobileView('chat')
-      setWorkspaceActive(true)
-      setDraft('')
-      setStatus('idle')
-    } catch (requestError) {
-      showError(requestError)
+    setPendingMessage(null)
+    setStatus('idle')
+    setPageState('home')
+    if (globalThis.location?.pathname !== '/') {
+      globalThis.history?.pushState({ northwindRoute: 'home' }, '', '/')
     }
   }
 
@@ -1805,6 +1833,7 @@ function App() {
     if (conversationActionKind === 'external-service') {
       return (
         <ExternalServiceAction
+          key={conversationAction.identity}
           action={claim.external_service_action}
           consentChecked={serviceConsentChecked}
           setConsentChecked={setServiceConsentChecked}
@@ -1817,8 +1846,10 @@ function App() {
       )
     }
     if (conversationActionKind === 'review-details') {
+      const reviewItemCount = conversationAction.requiredItems.length
       return (
         <ConversationActionCard
+          key={conversationAction.identity}
           icon="≡"
           title="Review claim details"
           description={`${reviewItemCount} ${reviewItemCount === 1 ? 'detail needs' : 'details need'} your confirmation before we continue.`}
@@ -1830,6 +1861,7 @@ function App() {
     if (conversationActionKind === 'create-claim') {
       return (
         <ConversationActionCard
+          key={conversationAction.identity}
           icon="✓"
           title="Create your claim"
           description="Your required details are complete and ready to send to Northwind."
@@ -2511,8 +2543,8 @@ function App() {
               onSubmit={sendMessage}
               inputLabel={assistanceState?.key === 'response_needed' ? 'Reply to Northwind staff' : inputLabel}
               busy={isBusy}
-              hint={assistanceState?.key === 'reviewing_reply'
-                ? 'No action needed from you right now. You can still add information if needed.'
+              hint={assistanceState?.key === 'reply_sent'
+                ? 'Your reply is recorded. You can still add information if needed.'
                 : proposedFields.length > 0 || proposedContentsItems.length > 0
                   ? 'You can keep describing the incident or correct a detail while these suggestions are waiting for review.'
                   : null}
