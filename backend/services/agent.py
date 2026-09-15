@@ -34,8 +34,8 @@ from backend.domain.support_intent import (
 )
 
 if TYPE_CHECKING:
-    from backend.domain.model_gateway import ModelEvidenceContentResolver
     from backend.domain.external_service_registry import ExternalServiceLifecycleProjection
+    from backend.domain.model_gateway import ModelEvidenceContentResolver
     from backend.services.runtime_agent_policy import RuntimeAgentPolicySnapshot
     from backend.services.runtime_configuration import RuntimeConfigurationSnapshot
 
