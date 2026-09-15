@@ -424,6 +424,8 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
         provenance=ExternalCapabilityProvenance.SIMULATED,
         access_form='controlled assessor simulation',
         projectable_statuses=(
+            ExternalLifecycleStatus.CONSENT_REQUIRED,
+            ExternalLifecycleStatus.AUTHORISED,
             ExternalLifecycleStatus.PREPARED,
             ExternalLifecycleStatus.ACCEPTED,
             ExternalLifecycleStatus.QUEUED,
@@ -622,6 +624,20 @@ class ExternalProjectionMetadata(ContractModel):
 
 _PROJECTION_METADATA: Final = MappingProxyType(
     {
+        ExternalLifecycleStatus.CONSENT_REQUIRED: ExternalProjectionMetadata(
+            label='Permission needed',
+            detail='Claimant permission is required before any information is shared.',
+            verification_state='not_started',
+            pending_owner='claimant',
+            next_action='Review and grant the task-specific permission before submission.',
+        ),
+        ExternalLifecycleStatus.AUTHORISED: ExternalProjectionMetadata(
+            label='Ready to request',
+            detail='Permission and Northwind authority are recorded; the request is not sent.',
+            verification_state='not_started',
+            pending_owner='claimant',
+            next_action='Submit the authorised assessment request when ready.',
+        ),
         ExternalLifecycleStatus.PREPARED: ExternalProjectionMetadata(
             label='Pending',
             detail='The request is prepared and has not been submitted.',
@@ -803,6 +819,35 @@ def assert_projection_provenance(*, service_identity: str, request_provenance: s
             f'{service_identity} has registry provenance {entry.provenance.value} but request '
             f'provenance is {request_provenance}.'
         )
+
+
+def assert_external_task_registry_compatible(
+    *,
+    service_identity: str,
+    operation_status: ExternalLifecycleStatus | str,
+    request_provenance: str,
+) -> None:
+    """Reject a new task write that contradicts the canonical service registry."""
+
+    try:
+        entry = service_registry_entry(service_identity)
+    except KeyError as exc:
+        raise InvalidExternalLifecycleTransition(
+            f'{service_identity} is not registered for ExternalTask writes.'
+        ) from exc
+    status = lifecycle_definition(operation_status).status
+    if not entry.uses_external_task:
+        raise InvalidExternalLifecycleTransition(
+            f'{service_identity} is a manual or guidance path and cannot create an ExternalTask.'
+        )
+    if status not in entry.projectable_statuses or status not in PERSISTED_OPERATION_STATUS_IDS:
+        raise InvalidExternalLifecycleTransition(
+            f'{status.value} is not a persisted ExternalTask status for {service_identity}.'
+        )
+    assert_projection_provenance(
+        service_identity=service_identity,
+        request_provenance=request_provenance,
+    )
 
 
 def build_lifecycle_projection(

@@ -1281,10 +1281,14 @@ The `form` contains claimant-visible structured field records. `external_claim`,
 `external_service_action` is omitted as `null` until an external participant action is a
 relevant next step. The controlled assessor action appears only after a motor claim has been
 created on the fixture route, its location is confirmed, and no open handoff or professional
-review blocks the action. It contains the service and provider labels, purpose, claimant-safe
-summary of the minimum data to be shared, consent state, progress/result state, and the
-provider-neutral routing result when accepted. It never exposes the raw consent record,
-authorisation decision, internal signals, or complete claim context.
+review blocks the action. It contains the compatibility `status` plus the canonical lifecycle
+registry version, lifecycle status, catalogue reference, capability provenance, access form,
+label, detail, pending owner, next action, and limitation. These canonical fields are derived by
+the backend from the same registry used by Agent and Workbench consumers. It also contains the
+service and provider labels, purpose, claimant-safe summary of the minimum data to be shared,
+consent state, progress/result state, and the provider-neutral routing result when accepted. It
+never exposes the raw consent record, authorisation decision, internal signals, or complete claim
+context.
 
 `dynamic_form` is the claimant-safe Dynamic Form projection applicable to the returned Claim
 snapshot. It is built from the newest applied branch evaluation valid at or before the current
@@ -1622,6 +1626,16 @@ Response `201`:
   },
   "external_service_action": {
     "service_identity": "vehicle_damage_assessment_routing",
+    "registry_version": "external-service-lifecycle.v1",
+    "lifecycle_status": "consent_required",
+    "catalogue_reference": "P3-ASSESSOR",
+    "capability_provenance": "simulated",
+    "access_form": "controlled assessor simulation",
+    "status_label": "Permission needed",
+    "status_detail": "Claimant permission is required before any information is shared.",
+    "pending_owner": "claimant",
+    "next_action": "Review and grant the task-specific permission before submission.",
+    "limitation": "Simulation-only; it must not be described as a production provider.",
     "service_name": "Vehicle damage assessment",
     "provider": "Controlled assessment fixture",
     "purpose": "Request an assessor for the vehicle damage recorded in this claim. This does not decide coverage or approve repairs.",
@@ -2458,8 +2472,9 @@ returns `404 RESOURCE_NOT_FOUND` through the existing staff-safe boundary.
 ### `GET /api/v1/workbench/claims/{claim_id}/external-requests`
 
 Returns each raw external task/request together with a backend-projected `lifecycle`. The lifecycle
-contains stakeholder and service labels, the catalogue reference and request provenance, request
-type, authority, consent, delivery and verification
+contains stakeholder and service labels, the lifecycle registry version and canonical lifecycle
+status, the catalogue reference, capability provenance, access form, and actual request provenance,
+request type, authority, consent, delivery and verification
 states, pending owner, status label/detail, provider reference, returned-result summary and
 provenance, result verification and checked Claim revision, linked evidence identifiers, limitation,
 next action, and attention flag. `provider_reference` is the provider's routing or acknowledgement
@@ -2475,6 +2490,11 @@ staff without exposing storage keys or provider payloads.
 `catalogue_reference` names the merged third-party service catalogue row that authorises this
 service identity, so a persisted task can be traced to the entry permitting it. It is null for a
 service the catalogue does not name.
+
+`registry_version`, `lifecycle_status`, `capability_provenance`, and `access_form` are populated
+from the canonical registry for registered records. Historical records that predate a registry
+identity remain readable with a bounded legacy limitation; their registry version, lifecycle
+status, and access form are null, and capability provenance is `unavailable`.
 
 `provenance` says what the request actually reached, which is not the same question as what was
 configured for it:
@@ -2844,9 +2864,9 @@ Prototype metrics validate observability, not Northwind production performance. 
 The canonical machine-readable registry is `external-service-lifecycle.v1` in
 `backend/domain/external_service_registry.py`. Existing `ExternalTaskRecord`
 operation statuses are validated against it; consumers must not define a second
-status vocabulary. The Python backend is the current producer. Browser-facing
-consumers must use a later API projection and must not import Python modules
-directly.
+status vocabulary. The Python backend is the producer. Claimant and Workbench API
+responses carry the applicable registry version and registry-derived presentation
+coordinates so browser consumers do not import Python modules or recreate mappings.
 
 `unknown_outcome` requires reconciliation before another side effect. `accepted`
 and `assigned` do not mean completed or verified. Result receipt, verification,

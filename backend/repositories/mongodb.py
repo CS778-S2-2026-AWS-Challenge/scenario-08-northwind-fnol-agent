@@ -26,6 +26,7 @@ from backend.domain.external_services import (
     ExternalTaskResult,
     ExternalTaskResultVerification,
     assert_disclosure_within_consent,
+    assert_external_task_registry_compatible,
     assert_request_matches_task,
     assert_result_advance_is_permitted,
     assert_result_evidence_is_linked,
@@ -1617,6 +1618,7 @@ class MongoDBRepository:
         }
         stored = self._collection.find_one({'_id': record_id, 'record_type': 'external_task'})
         if stored is None:
+            assert_external_task_registry_compatible(task)
             try:
                 self._collection.insert_one(document)
                 return
@@ -1643,6 +1645,7 @@ class MongoDBRepository:
             return
         if any(getattr(existing, name) != getattr(task, name) for name in immutable_identity):
             raise IdempotencyConflict(task.task_id)
+        assert_external_task_registry_compatible(task)
         if task.updated_at <= existing.updated_at:
             raise IdempotencyConflict(task.task_id)
         result = self._collection.replace_one(

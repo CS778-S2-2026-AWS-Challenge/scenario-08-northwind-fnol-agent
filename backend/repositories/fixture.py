@@ -13,6 +13,7 @@ from backend.domain.external_services import (
     ExternalTaskResult,
     ExternalTaskResultVerification,
     assert_disclosure_within_consent,
+    assert_external_task_registry_compatible,
     assert_request_matches_task,
     assert_result_advance_is_permitted,
     assert_result_evidence_is_linked,
@@ -1789,6 +1790,8 @@ class FixtureRepository(PersistenceRepository):
         existing = self._external_tasks.get(task.task_id)
         if existing is not None and existing.claim_id != task.claim_id:
             raise IdempotencyConflict(task.task_id)
+        if existing == task:
+            return
         immutable_identity = (
             'claim_id',
             'service_identity',
@@ -1802,6 +1805,7 @@ class FixtureRepository(PersistenceRepository):
             )
             if changed_identity or task.updated_at <= existing.updated_at:
                 raise IdempotencyConflict(task.task_id)
+        assert_external_task_registry_compatible(task)
         self._external_tasks[task.task_id] = deepcopy(task)
 
     def reserve_external_dispatch(

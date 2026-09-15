@@ -2719,9 +2719,32 @@
       "ClaimantExternalServiceAction": {
         "additionalProperties": false,
         "properties": {
+          "access_form": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Access Form",
+            "type": "string"
+          },
           "can_request": {
             "title": "Can Request",
             "type": "boolean"
+          },
+          "capability_provenance": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Capability Provenance",
+            "type": "string"
+          },
+          "catalogue_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalogue Reference"
           },
           "consent_status": {
             "anyOf": [
@@ -2743,12 +2766,42 @@
               }
             ]
           },
+          "lifecycle_status": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Lifecycle Status",
+            "type": "string"
+          },
+          "limitation": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Limitation",
+            "type": "string"
+          },
+          "next_action": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Next Action",
+            "type": "string"
+          },
+          "pending_owner": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Pending Owner",
+            "type": "string"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
           },
           "purpose": {
             "title": "Purpose",
+            "type": "string"
+          },
+          "registry_version": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Registry Version",
             "type": "string"
           },
           "routing": {
@@ -2778,10 +2831,31 @@
           },
           "status": {
             "$ref": "#/components/schemas/ClaimantExternalServiceStatus"
+          },
+          "status_detail": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Status Detail",
+            "type": "string"
+          },
+          "status_label": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Status Label",
+            "type": "string"
           }
         },
         "required": [
           "service_identity",
+          "registry_version",
+          "lifecycle_status",
+          "capability_provenance",
+          "access_form",
+          "status_label",
+          "status_detail",
+          "pending_owner",
+          "next_action",
+          "limitation",
           "service_name",
           "provider",
           "purpose",
@@ -5633,6 +5707,16 @@
         "title": "ExecuteStaffAgentDraftRequest",
         "type": "object"
       },
+      "ExternalCapabilityProvenance": {
+        "enum": [
+          "configured",
+          "simulated",
+          "manual",
+          "unavailable"
+        ],
+        "title": "ExternalCapabilityProvenance",
+        "type": "string"
+      },
       "ExternalClaimResult": {
         "additionalProperties": false,
         "properties": {
@@ -5699,6 +5783,26 @@
         ],
         "title": "ExternalClaimResult",
         "type": "object"
+      },
+      "ExternalLifecycleStatus": {
+        "description": "Canonical status IDs, including operation and result stages.",
+        "enum": [
+          "consent_required",
+          "authorised",
+          "prepared",
+          "submitting",
+          "accepted",
+          "queued",
+          "assigned",
+          "retryable_failure",
+          "terminal_failure",
+          "unknown_outcome",
+          "result_received",
+          "result_verified",
+          "written_back"
+        ],
+        "title": "ExternalLifecycleStatus",
+        "type": "string"
       },
       "ExternalRequestProvenance": {
         "description": "What a request actually reached, as distinct from what was configured.\n\nThe three classes are **derived** from `IntegrationSource` and the delivery the task\nalready records, not stored as a fourth thing that could disagree with them:\n\n- `simulated` \u2014 a fixture source. No production provider is involved, whatever the\n  request looks like.\n- `configured` \u2014 a configured service that has not been sent. Configuration is not\n  contact, and a demonstration that reads it as contact would claim a provider\n  relationship nobody has.\n- `live_attempted` \u2014 a configured service whose request was submitted with delivery\n  evidence. It says an attempt reached a provider; it says nothing about the result,\n  which is `ExternalTaskResultVerification`'s question.\n\nDeriving rather than storing matters here. `docs/third-party-service-consent-and-\nshared-data-contract.md` records the only implemented service identity as a\ncontrolled fixture and `P3-ASSESSOR` as simulation-only, so `live_attempted` is\ncurrently unreachable. Stored as an enum member on a persisted record it would be a\nvalue nothing can produce and a projection could still assert; derived, it simply\nnever occurs until a configured service actually sends something.",
@@ -12422,9 +12526,25 @@
       "WorkbenchExternalLifecycle": {
         "additionalProperties": false,
         "properties": {
+          "access_form": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Form"
+          },
           "authority_state": {
             "title": "Authority State",
             "type": "string"
+          },
+          "capability_provenance": {
+            "$ref": "#/components/schemas/ExternalCapabilityProvenance"
           },
           "catalogue_reference": {
             "anyOf": [
@@ -12444,6 +12564,16 @@
           "delivery_state": {
             "title": "Delivery State",
             "type": "string"
+          },
+          "lifecycle_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalLifecycleStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "limitation": {
             "anyOf": [
@@ -12481,6 +12611,19 @@
               }
             ],
             "title": "Provider Reference"
+          },
+          "registry_version": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registry Version"
           },
           "request_type": {
             "title": "Request Type",
@@ -12591,6 +12734,7 @@
         "required": [
           "stakeholder",
           "service",
+          "capability_provenance",
           "provenance",
           "request_type",
           "authority_state",

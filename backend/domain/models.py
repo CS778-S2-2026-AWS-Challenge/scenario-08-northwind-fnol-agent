@@ -615,6 +615,16 @@ class AssessorRoutingResult(ContractModel):
 
 class ClaimantExternalServiceAction(ContractModel):
     service_identity: str
+    registry_version: str = Field(min_length=1, max_length=100)
+    lifecycle_status: str = Field(min_length=1, max_length=100)
+    catalogue_reference: str | None = None
+    capability_provenance: str = Field(min_length=1, max_length=100)
+    access_form: str = Field(min_length=1, max_length=200)
+    status_label: str = Field(min_length=1, max_length=120)
+    status_detail: str = Field(min_length=1, max_length=500)
+    pending_owner: str = Field(min_length=1, max_length=80)
+    next_action: str = Field(min_length=1, max_length=500)
+    limitation: str = Field(min_length=1, max_length=500)
     service_name: str
     provider: str
     purpose: str
