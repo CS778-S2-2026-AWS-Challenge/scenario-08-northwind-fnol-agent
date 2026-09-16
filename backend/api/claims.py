@@ -10,7 +10,7 @@ from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.api.realtime import realtime_stream
 from backend.core.auth import Principal, require_claimant
-from backend.core.errors import ApiError
+from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.external_service_registry import capability_catalogue
 from backend.domain.models import (
     ClaimantClaim,
@@ -520,13 +520,51 @@ def read_claim_events(
             retryable=True,
             current_revision=current_revision,
         )
+    legacy_cursor_revision = after_revision
+    if last_event_id is not None:
+        try:
+            legacy_cursor_revision = int(last_event_id)
+        except ValueError as error:
+            raise ApiError(
+                status_code=409,
+                code='INVALID_EVENT_CURSOR',
+                message='The legacy Claim event revision is invalid.',
+                retryable=True,
+                details=[
+                    ErrorDetail(
+                        field='Last-Event-ID',
+                        reason='Expected a Claim revision.',
+                    )
+                ],
+            ) from error
+        if legacy_cursor_revision < 0:
+            raise ApiError(
+                status_code=409,
+                code='INVALID_EVENT_CURSOR',
+                message='The legacy Claim event revision is invalid.',
+                retryable=True,
+                details=[
+                    ErrorDetail(
+                        field='Last-Event-ID',
+                        reason='Expected a non-negative revision.',
+                    )
+                ],
+            )
+    if legacy_cursor_revision > current_revision:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_EVENT_CURSOR',
+            message='The live-update revision is newer than the current claim.',
+            retryable=True,
+            current_revision=current_revision,
+        )
     return realtime_stream(
         request,
         principal,
-        cursor=last_event_id,
+        cursor=None,
         claim_id=claim_id,
         legacy_session_id=session_id,
-        legacy_after_revision=after_revision,
+        legacy_after_revision=legacy_cursor_revision,
         legacy_current_revision=current_revision,
     )
 

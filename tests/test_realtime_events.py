@@ -12,6 +12,7 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from backend.api import claims as claims_api
 from backend.api.realtime import realtime_stream
 from backend.core.auth import Principal
 from backend.domain.realtime import (
@@ -21,10 +22,16 @@ from backend.domain.realtime import (
     RealtimeEvent,
     RealtimeResource,
     cursor_for,
+    cursor_is_after,
     new_realtime_event,
 )
 from backend.repositories.fixture import FixtureRepository
-from backend.services.realtime import RealtimeDispatcher, RealtimeScope, RealtimeSubscription
+from backend.services.realtime import (
+    RealtimeDispatcher,
+    RealtimeScope,
+    RealtimeSubscription,
+    delivery_for,
+)
 
 NOW = datetime(2026, 9, 16, 10, 0, tzinfo=UTC)
 
@@ -55,6 +62,29 @@ def test_cursor_round_trip_preserves_stable_ordering_coordinates() -> None:
     assert cursor.occurred_at == event.occurred_at
 
 
+def test_cursor_round_trip_preserves_mongo_commit_sequence() -> None:
+    event = new_realtime_event(
+        claim_id='clm_one',
+        customer_id='cus_one',
+        occurred_at=NOW,
+        claim_revision=2,
+        sequence=7,
+        resources=(RealtimeResource.CLAIM,),
+    )
+
+    cursor = RealtimeCursor.decode(cursor_for(event))
+
+    assert cursor.sequence == 7
+    assert (
+        cursor.ordering_key
+        < RealtimeCursor(
+            occurred_at=NOW,
+            event_id='rte_ffffffffffffffffffff',
+            sequence=8,
+        ).ordering_key
+    )
+
+
 @pytest.mark.parametrize(
     ('overrides', 'message'),
     [
@@ -67,6 +97,13 @@ def test_cursor_round_trip_preserves_stable_ordering_coordinates() -> None:
         (
             {'claimant_resources': [], 'audiences': ['claimant', 'staff']},
             'Claimant audience and resources must be declared together',
+        ),
+        (
+            {
+                'resources': ['claim', 'queue'],
+                'claimant_resources': ['claim', 'queue'],
+            },
+            'staff-only resource hints',
         ),
     ],
 )
@@ -120,6 +157,42 @@ def test_claimant_scope_filters_customer_and_internal_message_resources() -> Non
     assert len(deliveries) == 1
     assert deliveries[0].data['claim_id'] == 'clm_one'
     assert deliveries[0].data['resources'] == ['claim']
+
+
+def test_claimant_delivery_filters_staff_resources_and_correlation() -> None:
+    event = new_realtime_event(
+        claim_id='clm_one',
+        customer_id='cus_one',
+        occurred_at=NOW,
+        resources=(
+            RealtimeResource.CLAIM,
+            RealtimeResource.QUEUE,
+            RealtimeResource.WORK_ITEMS,
+        ),
+        operation_correlation='staff-idempotency-key',
+    )
+
+    claimant = delivery_for(event, RealtimeAudience.CLAIMANT)
+    staff = delivery_for(event, RealtimeAudience.STAFF)
+
+    assert claimant.data['resources'] == ['claim']
+    assert 'operation_correlation' not in claimant.data
+    assert staff.data['resources'] == ['claim', 'queue', 'work_items']
+    assert staff.data['operation_correlation'] == 'staff-idempotency-key'
+
+
+def test_sequence_cursor_advances_after_legacy_cursor() -> None:
+    legacy = _event(1)
+    sequenced = new_realtime_event(
+        claim_id='clm_one',
+        customer_id='cus_one',
+        occurred_at=legacy.occurred_at - timedelta(seconds=10),
+        sequence=1,
+        resources=(RealtimeResource.CLAIM,),
+    )
+
+    assert cursor_is_after(cursor_for(sequenced), cursor_for(legacy)) is True
+    assert cursor_is_after(cursor_for(legacy), cursor_for(sequenced)) is False
 
 
 def test_subscription_ignores_duplicate_and_out_of_order_events() -> None:
@@ -341,6 +414,39 @@ def test_realtime_stream_preserves_legacy_claim_updated_shape() -> None:
     assert 'id: 2' in body
     assert '"session_id":"ses_one"' in body
     assert '"resources":["claim","messages"]' in body
+
+
+def test_legacy_claim_route_treats_last_event_id_as_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(claims_api, 'repository_for', lambda request: object())
+    monkeypatch.setattr(
+        claims_api,
+        'claimant_event_revision',
+        lambda repository, principal, claim_id, session_id: 4,
+    )
+
+    def capture_stream(request: object, principal: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(claims_api, 'realtime_stream', capture_stream)
+
+    result = claims_api.read_claim_events(
+        'clm_one',
+        'ses_one',
+        cast(Request, SimpleNamespace()),
+        Principal(subject='cus_one', actor_type='claimant'),
+        after_revision=0,
+        last_event_id='4',
+    )
+
+    assert result is not None
+    assert captured['cursor'] is None
+    assert captured['legacy_after_revision'] == 4
+    assert captured['legacy_current_revision'] == 4
 
 
 class _LiveSubscription:

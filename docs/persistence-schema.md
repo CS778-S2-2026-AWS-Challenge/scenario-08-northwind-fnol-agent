@@ -143,11 +143,18 @@ Fixture stores events in process state and wakes one condition-backed watcher. M
 uses one collection Change Stream per application process. The process dispatcher performs
 role/customer/optional-Claim filtering and fans out to bounded transient subscriber queues. A
 subscriber queue is delivery state only and is never a persistence or authorization boundary.
-MongoDB derives a fixed-width UTC `realtime_order` index value from `occurred_at` and `event_id`;
-this adapter-owned physical key is never returned by the repository or API.
+MongoDB allocates a transaction-local monotonic `sequence` from the durable realtime counter
+inside the same transaction that writes the event. The adapter derives a fixed-width
+`realtime_order` from that sequence and `event_id`; legacy records without a sequence retain the
+timestamp/event-id fallback. The sequence is included only inside the opaque cursor, while the
+adapter-owned physical key is never returned by the repository or API. This keeps replay order
+consistent with committed Mongo visibility instead of relying on a pre-commit wall-clock time.
+An acknowledged pre-sequence cursor remains valid when its durable event ID and timestamp still
+match; replay resolves that anchor to its stored sequence before selecting later events.
 
-Replay requires the exact durable cursor anchor and returns records ordered by `occurred_at` then
-`event_id`. A missing anchor, replay-window overflow, slow-subscriber overflow, or source failure
+Replay requires the exact durable cursor anchor and returns sequenced records in durable sequence
+order; pre-sequence records retain their timestamp/event-ID order. A missing anchor, replay-window
+overflow, slow-subscriber overflow, or source failure
 requires an authoritative full resynchronization. Delivery may repeat or arrive out of order;
 consumers compare opaque cursor coordinates and apply only strictly newer hints. Retention or purge
 of realtime records must preserve a detectable gap and must not silently reinterpret an expired

@@ -1594,6 +1594,8 @@ Opens one claimant-scoped, multiplexed `text/event-stream` for all Claims owned 
 authenticated customer. `GET /api/v1/workbench/realtime/events` provides the corresponding staff
 stream. Both accept the last acknowledged opaque cursor in `Last-Event-ID` or the `cursor` query
 parameter; the header takes precedence. A connection without a cursor receives future events only.
+The legacy Claim stream above is separate: its `Last-Event-ID` is the emitted non-negative Claim
+revision, not this multiplexed opaque cursor.
 
 The normal delivery is `resources.changed`:
 
@@ -1607,7 +1609,8 @@ The payload is invalidation metadata only. It never contains Claim fields, messa
 Evidence bytes, handoff packets, external-provider payloads, model context, or secrets. A client
 refetches only the named resources through existing authoritative, visibility-filtered APIs. Staff
 receive all permitted resource hints. Claimants receive only their own customer events, and an
-`internal_only` message never appears in their `resources` list.
+`internal_only` message, queue/WorkItem hint, or operation correlation never appears in their
+delivery.
 
 Reconnect replays events strictly after the acknowledged cursor. Duplicate or older deliveries are
 discarded. An invalid or unavailable cursor returns `409 INVALID_EVENT_CURSOR`; a replay window

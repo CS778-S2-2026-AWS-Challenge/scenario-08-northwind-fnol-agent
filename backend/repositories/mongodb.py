@@ -369,7 +369,32 @@ class MongoDBRepository:
         self._client.close()
 
     def append_realtime_event(self, event: RealtimeEvent) -> None:
-        self._put('realtime_event', event.event_id, event, customer_id=event.customer_id)
+        self._atomic(
+            lambda mongo_session: self._put(
+                'realtime_event',
+                event.event_id,
+                event,
+                customer_id=event.customer_id,
+                claim_id=event.claim_id,
+                session=mongo_session,
+            )
+        )
+
+    def _next_realtime_sequence(self, session: Any = None) -> int:
+        counter = self._collection.find_one_and_update(
+            {'_id': 'realtime_sequence:global', 'record_type': 'realtime_sequence'},
+            {
+                '$inc': {'sequence': 1},
+                '$setOnInsert': {'record_type': 'realtime_sequence'},
+            },
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+            session=session,
+        )
+        sequence = counter.get('sequence') if counter is not None else None
+        if not isinstance(sequence, int) or sequence < 1:
+            raise RuntimeError('MongoDB did not return a realtime sequence.')
+        return sequence
 
     def _append_realtime_event(
         self,
@@ -386,6 +411,7 @@ class MongoDBRepository:
             customer_id=claim.customer_id,
             occurred_at=datetime.now(UTC),
             claim_revision=claim.revision,
+            sequence=self._next_realtime_sequence(mongo_session),
             operation_correlation=operation_correlation,
             resources=tuple(dict.fromkeys(resources)),
             claimant_visible=claimant_visible,
@@ -417,10 +443,18 @@ class MongoDBRepository:
                 },
             )
             anchor_event = self._model_from_document(anchor, RealtimeEvent)
-            if anchor_event is None or anchor_event.occurred_at != after.occurred_at:
+            if (
+                anchor_event is None
+                or anchor_event.occurred_at != after.occurred_at
+                or (after.sequence is not None and anchor_event.sequence != after.sequence)
+            ):
                 raise ValueError('The realtime cursor is outside the available replay window.')
             query['realtime_order'] = {
-                '$gt': self._realtime_order(after.occurred_at, after.event_id)
+                '$gt': self._realtime_order(
+                    anchor_event.occurred_at,
+                    anchor_event.event_id,
+                    anchor_event.sequence,
+                )
             }
         cursor = self._collection.find(query).sort([('realtime_order', 1)]).limit(limit)
         return [
@@ -456,7 +490,13 @@ class MongoDBRepository:
         return f'{kind}:{identifier}'
 
     @staticmethod
-    def _realtime_order(occurred_at: datetime, event_id: str) -> str:
+    def _realtime_order(
+        occurred_at: datetime,
+        event_id: str,
+        sequence: int | None = None,
+    ) -> str:
+        if sequence is not None:
+            return f'z|{sequence:020d}|{event_id}'
         timestamp = occurred_at.astimezone(UTC).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
         return f'{timestamp}|{event_id}'
 
@@ -559,9 +599,13 @@ class MongoDBRepository:
         if kind == 'realtime_event':
             if not isinstance(model, RealtimeEvent):
                 raise TypeError('Realtime event records require RealtimeEvent.')
+            if model.sequence is None:
+                model = model.model_copy(update={'sequence': self._next_realtime_sequence(session)})
+                document = model.model_dump(mode='json')
             document['realtime_order'] = self._realtime_order(
                 model.occurred_at,
                 model.event_id,
+                model.sequence,
             )
         if kind == 'claim':
             if not isinstance(model, WorkingClaim):
@@ -1973,6 +2017,23 @@ class MongoDBRepository:
             ):
                 raise IdempotencyConflict(evidence.evidence_id)
             self._validate_branch_evaluation(claim, branch_evaluation)
+
+            self._append_realtime_event(
+                claim,
+                (
+                    RealtimeResource.CLAIM,
+                    RealtimeResource.EXTERNAL_TASKS,
+                    RealtimeResource.EVIDENCE,
+                    RealtimeResource.QUEUE,
+                ),
+                mongo_session=mongo_session,
+                operation_correlation=(idempotency.key if idempotency is not None else None),
+                claimant_resources=(
+                    RealtimeResource.CLAIM,
+                    RealtimeResource.EXTERNAL_TASKS,
+                    RealtimeResource.EVIDENCE,
+                ),
+            )
 
             if (
                 self._replace_claim_revision(claim, expected_revision, mongo_session=mongo_session)

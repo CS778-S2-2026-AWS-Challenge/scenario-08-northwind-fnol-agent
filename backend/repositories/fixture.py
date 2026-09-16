@@ -1508,6 +1508,25 @@ class FixtureRepository(PersistenceRepository):
             if held_request is None or held_request.claim_id != claim.claim_id:
                 raise KeyError(request.request_id)
 
+            realtime_event = new_realtime_event(
+                claim_id=claim.claim_id,
+                customer_id=claim.customer_id,
+                occurred_at=datetime.now(UTC),
+                claim_revision=claim.revision,
+                operation_correlation=(idempotency.key if idempotency is not None else None),
+                resources=(
+                    RealtimeResource.CLAIM,
+                    RealtimeResource.EXTERNAL_TASKS,
+                    RealtimeResource.EVIDENCE,
+                    RealtimeResource.QUEUE,
+                ),
+                claimant_resources=(
+                    RealtimeResource.CLAIM,
+                    RealtimeResource.EXTERNAL_TASKS,
+                    RealtimeResource.EVIDENCE,
+                ),
+            )
+
             self._claims[claim.claim_id] = deepcopy(claim)
             self._external_tasks[task.task_id] = deepcopy(task)
             self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
@@ -1524,6 +1543,8 @@ class FixtureRepository(PersistenceRepository):
                     self._staff_presence[required_staff_id or ''] = deepcopy(
                         presence.model_copy(update={'revision': presence.revision + 1})
                     )
+            self._realtime_events[realtime_event.event_id] = realtime_event
+            self._realtime_condition.notify_all()
 
     def save_assessor_routing_preparation(
         self,

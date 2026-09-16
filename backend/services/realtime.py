@@ -104,18 +104,16 @@ def delivery_for(event: RealtimeEvent, audience: RealtimeAudience) -> RealtimeDe
     resources = (
         event.claimant_resources if audience is RealtimeAudience.CLAIMANT else event.resources
     )
-    return RealtimeDelivery(
-        event='resources.changed',
-        cursor=cursor_for(event),
-        data={
-            'event_id': event.event_id,
-            'claim_id': event.claim_id,
-            'claim_revision': event.claim_revision,
-            'operation_correlation': event.operation_correlation,
-            'resources': [resource.value for resource in resources],
-            'occurred_at': event.occurred_at.isoformat(),
-        },
-    )
+    data: dict[str, object] = {
+        'event_id': event.event_id,
+        'claim_id': event.claim_id,
+        'claim_revision': event.claim_revision,
+        'resources': [resource.value for resource in resources],
+        'occurred_at': event.occurred_at.isoformat(),
+    }
+    if audience is RealtimeAudience.STAFF:
+        data['operation_correlation'] = event.operation_correlation
+    return RealtimeDelivery(event='resources.changed', cursor=cursor_for(event), data=data)
 
 
 class RealtimeDispatcher:
