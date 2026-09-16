@@ -34,12 +34,15 @@ function updateAction(revision) {
     label: 'Update assigned work',
     purpose: 'Progress or complete this exact assigned WorkItem.',
     availability: 'confirmation_required',
+    blocked_reason: null,
     confirmation: {
       level: 'explicit',
       message: 'The selected status and any completion result will be audited.',
     },
     expected_effects: ['work_item.update', 'claim.revision.advance'],
     claimant_visible_effects: ['customer_next_step.update', 'customer_update.append'],
+    failure_codes: ['ACCESS_DENIED', 'REVISION_CONFLICT', 'VALIDATION_ERROR'],
+    audit_requirements: ['action_code', 'target_ref', 'actor_id', 'resulting_revision'],
     source_refs: ['pol_fixture'],
     inputs: [
       {
@@ -82,6 +85,7 @@ function updateAction(revision) {
       ],
       customer_update: { responsible_party: 'claimant', related_refs: ['act_review'] },
     },
+    result_state: 'awaiting_input',
     based_on_revision: revision,
   }
 }
@@ -95,11 +99,46 @@ function workItem(state) {
     assigned_to: 'stf_demo',
     source_refs: ['pol_fixture'],
     created_at: '2026-09-14T02:20:00Z',
-    started_at: state.phase === 'open' ? null : '2026-09-14T02:21:00Z',
     completed_at: state.phase === 'completed' ? '2026-09-14T02:22:00Z' : null,
     completed_by: state.phase === 'completed' ? 'stf_demo' : null,
     result: state.result,
   }
+}
+function activityEvents(state) {
+  const action = workItem(state)
+  const events = [
+    {
+      event_id: 'clm_work_item:created',
+      event_type: 'claim.created',
+      actor_id: null,
+      summary: 'Claim context created.',
+      source_refs: ['clm_work_item'],
+      created_at: '2026-09-14T02:19:00Z',
+      resulting_revision: 1,
+    },
+    {
+      event_id: action.action_id,
+      event_type: `work_item.${action.status}`,
+      actor_id: action.completed_by || action.assigned_to,
+      summary: action.requested_outcome,
+      source_refs: [action.action_id, ...action.source_refs],
+      created_at: action.completed_at || action.created_at,
+      resulting_revision: null,
+    },
+    ...state.customerUpdates.map((update) => ({
+      event_id: update.update_id,
+      event_type: 'customer_update.recorded',
+      actor_id: update.created_by,
+      summary: update.summary,
+      source_refs: [update.update_id, ...update.related_refs],
+      created_at: update.created_at,
+      resulting_revision: null,
+    })),
+  ]
+  return events.sort((left, right) => (
+    right.created_at.localeCompare(left.created_at)
+    || right.event_id.localeCompare(left.event_id)
+  ))
 }
 function claimProjection(state) {
   const completed = state.phase === 'completed'
@@ -118,10 +157,10 @@ function claimProjection(state) {
     active_session_id: null,
     claim_state: {
       severity: 'unassessed',
-      coverage: completed ? 'clear' : 'requires_review',
+      coverage: completed ? 'clear' : 'review_required',
       evidence: 'not_started',
       fraud_signal: 'none',
-      customer_support: 'none',
+      customer_support: 'guided',
       urgency: 'normal',
       workflow_state: workflow,
       next_action: 'PROCEED',
@@ -155,7 +194,7 @@ function claimProjection(state) {
     source_summary: { status: 'empty', items: [], limitation: null },
     section_summaries: {
       fields: { status: 'available', total: 0, needs_attention: 0 }, conversation: { status: 'available', total: 0, needs_attention: 0 }, evidence: { status: 'available', total: 0, needs_attention: 0 },
-      reference_checks: { status: 'available', total: 0, needs_attention: 0 }, external_services: { status: 'available', total: 0, needs_attention: 0 }, activity: { status: 'available', total: 1 + state.events.length, needs_attention: 0 },
+      reference_checks: { status: 'available', total: 0, needs_attention: 0 }, external_services: { status: 'available', total: 0, needs_attention: 0 }, activity: { status: 'available', total: activityEvents(state).length, needs_attention: 0 },
     },
     tags: [],
   }
@@ -182,7 +221,7 @@ function queueProjection(state) {
 }
 function createService() {
   const state = {
-    revision: 2, phase: 'open', result: null, customerUpdates: [], events: [],
+    revision: 2, phase: 'open', result: null, customerUpdates: [],
     mutations: [], workItemReads: [], customerUpdateReads: [], eventReads: [],
   }
   const page = (items) => ({ items, page: { next_cursor: null } })
@@ -219,11 +258,15 @@ function createService() {
       return jsonResponse(200, page(state.customerUpdates.map((item) => ({ ...item }))))
     }
     if (method === 'GET' && path.startsWith('/api/v1/workbench/claims/clm_work_item/events?')) {
+      const events = activityEvents(state)
       state.eventReads.push({
         revision: state.revision,
-        summaries: state.events.map((item) => item.summary),
+        items: events.map((item) => ({
+          event_type: item.event_type,
+          source_refs: item.source_refs,
+        })),
       })
-      return jsonResponse(200, page(state.events.map((item) => ({ ...item }))))
+      return jsonResponse(200, page(events))
     }
     if (method === 'PATCH' && path === '/api/v1/workbench/claims/clm_work_item/staff-actions/act_review') {
       const request = {
@@ -241,15 +284,6 @@ function createService() {
       if (request.payload.status === 'in_progress' && state.phase === 'open') {
         state.phase = 'in_progress'
         state.revision = 3
-        state.events.push({
-          event_id: 'evt_work_started',
-          event_type: 'work_item.updated',
-          actor_id: 'stf_demo',
-          summary: 'Coverage review moved to in progress.',
-          source_refs: ['act_review'],
-          created_at: '2026-09-14T02:21:00Z',
-          resulting_revision: 3,
-        })
         return jsonResponse(200, { action: workItem(state), revision: state.revision })
       }
       if (request.payload.status === 'completed' && state.phase === 'in_progress') {
@@ -264,15 +298,6 @@ function createService() {
           summary: request.payload.customer_update.summary,
           related_refs: ['act_review'],
           created_at: '2026-09-14T02:22:00Z',
-        })
-        state.events.push({
-          event_id: 'evt_work_complete',
-          event_type: 'work_item.completed',
-          actor_id: 'stf_demo',
-          summary: 'Coverage review completed and the Claim returned to ready for next.',
-          source_refs: ['act_review', 'upd_work_complete'],
-          created_at: '2026-09-14T02:22:00Z',
-          resulting_revision: 4,
         })
         return jsonResponse(200, {
           action: workItem(state),
@@ -331,9 +356,12 @@ describe('WorkbenchPage WorkItem browser/API journey', () => {
     await user.click(screen.getByRole('button', { name: 'Update action' }))
     await waitFor(() => {
       expect(state.mutations).toHaveLength(1)
-      expect(state.mutations[0]).toMatchObject({
-        revision: '2',
-        payload: { status: 'in_progress', result: null, state_changes: [], customer_update: null },
+      expect(state.mutations[0].revision).toBe('2')
+      expect(state.mutations[0].payload).toEqual({
+        status: 'in_progress',
+        result: null,
+        state_changes: [],
+        customer_update: null,
       })
       expect(screen.getByText('Revision 3')).toBeVisible()
       expect(screen.getByText('In Progress')).toBeVisible()
@@ -349,25 +377,23 @@ describe('WorkbenchPage WorkItem browser/API journey', () => {
     await user.click(screen.getByRole('button', { name: 'Update action' }))
     await waitFor(() => {
       expect(state.mutations).toHaveLength(2)
-      expect(state.mutations[1]).toMatchObject({
-        revision: '3',
-        payload: {
-          status: 'completed',
-          result: {
-            outcome: 'professional_review_completed',
-            reason_codes: ['POLICY_SECTION_CONFIRMED'],
-            source_refs: ['pol_fixture'],
-            summary: 'The applicable policy wording was reviewed.',
-          },
-          state_changes: [
-            { path: 'claim_state.coverage', to: 'clear' },
-            { path: 'claim_state.workflow_state', to: 'ready_for_next' },
-          ],
-          customer_update: {
-            responsible_party: 'claimant',
-            related_refs: ['act_review'],
-            summary: 'The policy review is complete and your report can continue.',
-          },
+      expect(state.mutations[1].revision).toBe('3')
+      expect(state.mutations[1].payload).toEqual({
+        status: 'completed',
+        result: {
+          outcome: 'professional_review_completed',
+          reason_codes: ['POLICY_SECTION_CONFIRMED'],
+          source_refs: ['pol_fixture'],
+          summary: 'The applicable policy wording was reviewed.',
+        },
+        state_changes: [
+          { path: 'claim_state.coverage', to: 'clear' },
+          { path: 'claim_state.workflow_state', to: 'ready_for_next' },
+        ],
+        customer_update: {
+          responsible_party: 'claimant',
+          related_refs: ['act_review'],
+          summary: 'The policy review is complete and your report can continue.',
         },
       })
       expect(screen.getByText('Revision 4')).toBeVisible()
@@ -377,17 +403,23 @@ describe('WorkbenchPage WorkItem browser/API journey', () => {
     expect(await screen.findByText(
       'The policy review is complete and your report can continue.',
     )).toBeVisible()
-    expect(await screen.findByText(
-      'Coverage review completed and the Claim returned to ready for next.',
-    )).toBeVisible()
     await waitFor(() => {
       expect(state.workItemReads.at(-1)).toEqual({ revision: 4, status: 'completed' })
       expect(state.customerUpdateReads.at(-1).summaries).toContain(
         'The policy review is complete and your report can continue.',
       )
-      expect(state.eventReads.at(-1).summaries).toContain(
-        'Coverage review completed and the Claim returned to ready for next.',
-      )
+      const activityItems = state.eventReads.at(-1).items
+      expect(activityItems).toContainEqual({
+        event_type: 'work_item.completed',
+        source_refs: ['act_review', 'pol_fixture'],
+      })
+      expect(activityItems).toContainEqual({
+        event_type: 'customer_update.recorded',
+        source_refs: ['upd_work_complete', 'act_review'],
+      })
+      expect(activityItems).not.toContainEqual(expect.objectContaining({
+        event_type: 'work_item.in_progress',
+      }))
     })
   })
 })
