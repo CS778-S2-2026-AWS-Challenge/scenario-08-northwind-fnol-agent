@@ -33,6 +33,7 @@ from backend.domain.models import (
     BranchEvaluationStatus,
     ClaimantContentsItem,
     ClaimantDecision,
+    ClaimantExternalServiceAction,
     ClaimantMessage,
     ContentsItem,
     Coverage,
@@ -342,7 +343,7 @@ def _session_not_found() -> ApiError:
 
 def _claimant_message(
     message: MessageRecord,
-    message_actions: list | None = None,
+    message_actions: list[ClaimantExternalServiceAction] | None = None,
 ) -> ClaimantMessage:
     return ClaimantMessage(
         message_id=message.message_id,
