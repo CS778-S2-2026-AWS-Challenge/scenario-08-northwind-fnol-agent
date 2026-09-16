@@ -257,6 +257,8 @@ class OpenAICompatibleModelGateway:
             'model': self._config.model,
             'messages': messages,
         }
+        if request.max_output_tokens is not None:
+            payload['max_tokens'] = request.max_output_tokens
         if request.response_schema is not None:
             payload['response_format'] = {
                 'type': 'json_schema',
@@ -528,6 +530,8 @@ class BedrockConverseModelGateway:
 
         system, messages = self._request_messages(request)
         payload: dict[str, object] = {'messages': messages}
+        if request.max_output_tokens is not None:
+            payload['inferenceConfig'] = {'maxTokens': request.max_output_tokens}
         if system:
             payload['system'] = [{'text': system}]
         if request.response_schema is not None:

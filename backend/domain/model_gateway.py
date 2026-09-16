@@ -155,6 +155,7 @@ class ModelRequest(ModelContract):
     response_schema: dict[str, object] | None = None
     tools: list[ModelTool] = Field(default_factory=list)
     required_tool_name: str | None = Field(default=None, min_length=1, max_length=100)
+    max_output_tokens: int | None = Field(default=None, ge=1, le=16_384)
     purpose: str = Field(default=CLAIMANT_AGENT_PURPOSE, min_length=1, max_length=100)
     prompt_version: str = Field(default='current', min_length=1, max_length=100)
     privacy_class: str = Field(
