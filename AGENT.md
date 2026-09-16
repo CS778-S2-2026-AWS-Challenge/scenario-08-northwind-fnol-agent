@@ -116,8 +116,10 @@ real I/O must be explicitly marked `@pytest.mark.integration` and kept out of th
 Preserve explicit coverage for permission boundaries, claimant visibility, idempotency, revision
 conflicts, append-only audit events, and external-service authorization. When test volume grows
 far beyond the changed production code, review the cases for duplicated behaviour before adding
-more. Ordinary PR CI is impact-scoped; changes to shared core files or unmapped backend paths
-fall back to the full suite. A newer commit for the same PR supersedes older CI runs.
+more. Ordinary PR CI is impact-scoped. Shared core files, unmapped backend paths, and CI tooling
+select the backend selector contract sentinel; changed executable backend lines must still meet
+the diff-coverage threshold. Remote CI never falls back to the full backend suite. A newer commit
+for the same PR supersedes older CI runs.
 
 The former governance documents (`docs/repo_rule.md`, `docs/development-conventions.md`) are
 archived under [docs/archive/governance/](docs/archive/governance/) and are historical

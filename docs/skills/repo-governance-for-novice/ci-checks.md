@@ -56,32 +56,28 @@ one:
   changed paths. Pull requests compare their merge base with `HEAD`; `main`
   compares the current commit with its first parent so a merge validates only
   the behavior it introduces. Documentation- and frontend-only changes may
-  skip backend pytest. Shared
-  domain models, repository protocols, runtime composition, dependency
-  manifests, CI tooling, and unmapped backend changes select the complete
-  suite. Known Workbench, Agent, Model Gateway, Evidence, identity, Claim, and
-  external-service paths select their declared consumer suites. Scoped runs
-  also scope Ruff and Mypy to changed Python files, while OpenAPI and AuditEvent
-  snapshot checks run only when their contract can be affected. Scoped pytest
-  runs intentionally omit the global coverage threshold; full runs retain it.
-  The complete suite remains available through explicit `--full` execution.
-  The selector is itself covered by tests and must never return an empty
-  selection for a backend behavior change.
+  skip backend pytest. Known Workbench, Agent, Model Gateway, Evidence,
+  identity, Claim, and external-service paths select their declared consumer
+  suites. Shared or unmapped backend paths and CI/test tooling select the
+  selector contract sentinel instead of the complete suite. Changed backend
+  behavior must add or change a focused test so changed-line coverage can
+  execute the affected lines. Ruff and Mypy receive only changed Python files,
+  while OpenAPI and AuditEvent snapshot checks run only when their contract can
+  be affected. The selector has no automatic or explicit full-suite mode and
+  must never return an empty selection for a backend behavior change.
 
-- **Two-signal backend coverage**: the existing total coverage floor and changed-line
-  coverage answer different questions and are both required:
-  1. Full backend runs keep `fail_under = 90` in `pyproject.toml`; this prevents the
-     repository-wide signal from silently falling.
-  2. Full and scoped backend runs also emit `coverage.json` and run
+- **Changed-line backend coverage**: diff coverage is the remote backend coverage gate:
+  1. Scoped backend runs emit `coverage.json` and run
      `python scripts/check_diff_coverage.py --base origin/main --min 85`.
-  3. Diff coverage measures only added executable Python lines under `backend/` in the
+  2. Diff coverage measures only added executable Python lines under `backend/` in the
      exact PR diff. Deleted lines, non-Python changes, and lines omitted from coverage.py's
      executable-line report are excluded.
-  4. The check is implemented inside the existing GitHub/CircleCI backend quality profiles;
+  3. The check is implemented inside the existing GitHub/CircleCI backend quality profiles;
      Codecov, Coveralls, and a second remote quality provider are not required.
-  5. A passing diff check does not replace the total floor, and a passing total report does
-     not prove that new behavior has focused tests. Both results must be recorded against the
-     exact PR head.
+  4. Remote CI does not run a repository-wide total-coverage gate. This avoids unrelated
+     historical code blocking a focused change, but it also means the quality profile does not
+     detect coverage loss outside the changed executable lines. A full suite remains a manual
+     diagnostic command, not required merge evidence.
 
 - Markdown lint: `DavidAnson/markdownlint-cli2-action`, linting only the
   markdown files changed in the current PR (no back-scan of existing
