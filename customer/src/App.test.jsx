@@ -835,11 +835,13 @@ describe('claimant intake projection', () => {
     expect(api.createClaim).toHaveBeenCalledTimes(2)
     expect(await screen.findByText('clm_ui_second')).toBeInTheDocument()
     expect(screen.getByText('Conversation history')).toBeInTheDocument()
-    await waitFor(() => expect(api.streamClaimUpdates).toHaveBeenCalledWith(expect.objectContaining({
-      claimId: 'clm_ui_second',
-      sessionId: 'ses_ui_second',
-      afterRevision: 2,
-    })))
+    await waitFor(() => expect(api.streamRealtimeEvents).toHaveBeenCalled())
+    expect(api.streamClaimUpdates).not.toHaveBeenCalled()
+    expect(api.streamRealtimeEvents.mock.calls.at(-1)[0]).toEqual(expect.objectContaining({
+      cursor: null,
+      signal: expect.any(AbortSignal),
+      onEvent: expect.any(Function),
+    }))
   })
 
   it('uses the homepage rail to return to the existing empty conversation workspace', async () => {
