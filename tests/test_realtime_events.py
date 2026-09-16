@@ -1,16 +1,22 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from threading import Event
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
+from backend.api.realtime import realtime_stream
 from backend.core.auth import Principal
 from backend.domain.realtime import (
     RealtimeAudience,
     RealtimeCursor,
+    RealtimeDelivery,
     RealtimeEvent,
     RealtimeResource,
     cursor_for,
@@ -225,3 +231,125 @@ def test_workbench_realtime_endpoint_requires_staff_identity(
     )
 
     assert response.status_code == 403
+
+
+class _StreamRequest:
+    def __init__(self, dispatcher: object, *, disconnect_after: int = 100) -> None:
+        self.app = SimpleNamespace(state=SimpleNamespace(realtime_dispatcher=dispatcher))
+        self._disconnect_after = disconnect_after
+        self._checks = 0
+
+    async def is_disconnected(self) -> bool:
+        self._checks += 1
+        return self._checks > self._disconnect_after
+
+
+async def _stream_body(response: object) -> str:
+    chunks: list[str] = []
+    async for chunk in response.body_iterator:  # type: ignore[attr-defined]
+        chunks.append(chunk.decode() if isinstance(chunk, bytes) else chunk)
+    return ''.join(chunks)
+
+
+def test_realtime_stream_replays_changes_then_requires_resync() -> None:
+    repository = FixtureRepository()
+    anchor = _event(0)
+    first = _event(1)
+    second = _event(2)
+    for event in (anchor, first, second):
+        repository.append_realtime_event(event)
+    dispatcher = RealtimeDispatcher(repository, replay_limit=1)
+    request = _StreamRequest(dispatcher)
+
+    response = realtime_stream(
+        cast(Request, request),
+        Principal(subject='cus_one', actor_type='claimant'),
+        cursor=cursor_for(anchor),
+    )
+    body = asyncio.run(_stream_body(response))
+
+    assert body.startswith('retry: 1500\n: connected\n\n')
+    assert f'id: {cursor_for(first)}' in body
+    assert 'event: resources.changed' in body
+    assert '"resources":["claim"]' in body
+    assert 'event: resync_required' in body
+    assert '"reason":"replay_window_exceeded"' in body
+    assert dispatcher._subscriptions == set()
+
+
+def test_realtime_stream_preserves_legacy_claim_updated_shape() -> None:
+    repository = FixtureRepository()
+    anchor = _event(0)
+    changed = _event(1)
+    repository.append_realtime_event(anchor)
+    repository.append_realtime_event(changed)
+    dispatcher = RealtimeDispatcher(repository)
+    request = _StreamRequest(dispatcher, disconnect_after=0)
+
+    response = realtime_stream(
+        cast(Request, request),
+        Principal(subject='cus_one', actor_type='claimant'),
+        cursor=cursor_for(anchor),
+        claim_id='clm_one',
+        legacy_session_id='ses_one',
+        legacy_after_revision=1,
+        legacy_current_revision=2,
+    )
+    body = asyncio.run(_stream_body(response))
+
+    assert body.count('event: claim.updated') == 2
+    assert 'id: 2' in body
+    assert '"session_id":"ses_one"' in body
+    assert '"resources":["claim","messages"]' in body
+
+
+class _LiveSubscription:
+    def __init__(self, deliveries: list[RealtimeDelivery | None]) -> None:
+        self._deliveries = iter(deliveries)
+        self.closed = False
+
+    def next(self, timeout: float) -> RealtimeDelivery | None:
+        assert timeout == 15.0
+        return next(self._deliveries)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _LiveDispatcher:
+    def __init__(self, deliveries: list[RealtimeDelivery | None]) -> None:
+        self.subscription = _LiveSubscription(deliveries)
+
+    def subscribe(self, scope: RealtimeScope) -> _LiveSubscription:
+        assert scope == RealtimeScope(RealtimeAudience.STAFF, 'stf_one')
+        return self.subscription
+
+    def replay(self, scope: RealtimeScope, cursor: str | None) -> list[RealtimeDelivery]:
+        assert cursor is None
+        return []
+
+    def unsubscribe(self, subscription: _LiveSubscription) -> None:
+        assert subscription is self.subscription
+        subscription.close()
+
+
+def test_realtime_stream_heartbeats_and_stops_after_live_resync() -> None:
+    dispatcher = _LiveDispatcher(
+        [
+            None,
+            RealtimeDelivery(event='resync_required', data={'reason': 'event_source_unavailable'}),
+        ]
+    )
+    request = _StreamRequest(dispatcher)
+
+    response = realtime_stream(
+        cast(Request, request),
+        Principal(subject='stf_one', actor_type='staff'),
+        cursor=None,
+    )
+    body = asyncio.run(_stream_body(response))
+
+    assert ': keep-alive\n\n' in body
+    assert 'event: resync_required' in body
+    assert '"reason":"event_source_unavailable"' in body
+    assert dispatcher.subscription.closed is True
