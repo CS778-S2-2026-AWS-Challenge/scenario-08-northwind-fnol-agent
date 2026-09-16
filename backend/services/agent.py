@@ -187,12 +187,16 @@ HOME_EXPOSURE_NEGATION_PATTERNS = (
     re.compile(r'\b(?:no|without\s+(?:an?|any))\s+exposure\b', re.IGNORECASE),
     re.compile(
         r'\bno\s+(?:(?:ongoing|current|immediate)\s+)?(?:risk|danger)\s+'
-        r'(?:from|of)\s+[^,;.!?]{0,40}\bexpos(?:ure|ed)\b',
+        r'(?:from|of)\s+(?:(?!\b(?:but|however|yet)\b)[^,;.!?]){0,40}'
+        r'\bexpos(?:ure|ed)\b',
         re.IGNORECASE,
     ),
     re.compile(
-        r'\b(?:nothing|no\s+part|the\s+property)\b[^.!?]{0,30}'
-        r'\b(?:is|was)?\s*(?:not\s+)?exposed\b',
+        r'\b(?:nothing|no\s+part)\b[^.!?]{0,30}\b(?:is|was)?\s*(?:not\s+)?exposed\b',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r'\bthe\s+property\b[^.!?]{0,30}\b(?:is|was)\s+not\s+exposed\b',
         re.IGNORECASE,
     ),
     re.compile(r'\b(?:is|are|was|were)\s+not\s+exposed\b', re.IGNORECASE),
