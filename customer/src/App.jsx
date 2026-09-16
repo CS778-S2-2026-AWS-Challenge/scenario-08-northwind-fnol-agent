@@ -191,35 +191,34 @@ function buildConversationTimeline(messages, resumeContext) {
   return timeline
 }
 
-function resolveConversationActionProjection(claim, nextStep) {
-  const candidates = []
-  const requiredItems = Array.isArray(nextStep?.required_items)
-    ? nextStep.required_items
-    : []
+const CLAIMANT_ACTION_KINDS = Object.freeze({
+  'claimant.create_claim': 'create-claim',
+  'claimant.review_details': 'review-details',
+  'claimant.request_assessment': 'external-service',
+  'claimant.retry_assessment': 'external-service',
+  'claimant.track_assessment': 'external-service',
+  'claimant.await_staff_review': 'external-service',
+  'claimant.await_reconciliation': 'external-service',
+})
+const REQUESTABLE_EXTERNAL_ACTIONS = new Set([
+  'claimant.request_assessment',
+  'claimant.retry_assessment',
+])
 
-  if (nextStep?.status === 'confirmation_required' && requiredItems.length > 0) {
-    candidates.push({
-      kind: 'review-details',
-      identity: `customer-next-step:${nextStep.status}`,
-      requiredItems,
-    })
-  }
-  if (nextStep?.status === 'ready_to_create' && !claim?.external_claim) {
-    candidates.push({
-      kind: 'create-claim',
-      identity: `customer-next-step:${nextStep.status}`,
-      requiredItems,
-    })
-  }
-  if (claim?.external_service_action?.service_identity) {
-    candidates.push({
-      kind: 'external-service',
-      identity: `external-service:${claim.external_service_action.service_identity}`,
-      requiredItems: [],
-    })
-  }
+function conversationActionFromProjection(claim) {
+  const projection = claim?.primary_action
+  if (!projection || Number(projection.claim_revision) !== Number(claim?.revision)) return null
 
-  return candidates.length === 1 ? candidates[0] : null
+  const kind = CLAIMANT_ACTION_KINDS[projection.action_code]
+  if (!kind || (kind !== 'external-service' && !projection.available)) return null
+
+  return {
+    kind,
+    identity: projection.action_id,
+    requiredItems: Array.isArray(projection.required_inputs)
+      ? projection.required_inputs
+      : [],
+  }
 }
 
 function evidenceFileStatusLabel(fileStatus, status) {
@@ -597,8 +596,8 @@ function App() {
       ?.message.message_id || null
   ), [conversationTimeline])
   const conversationAction = useMemo(
-    () => resolveConversationActionProjection(claim, nextStep),
-    [claim, nextStep],
+    () => conversationActionFromProjection(claim),
+    [claim],
   )
   const conversationActionKind = conversationAction?.kind || null
   const externalCapabilityKey = claim?.external_capabilities?.length > 0
@@ -631,7 +630,13 @@ function App() {
     }
     if (restoreCapabilityTriggerFocus.current) {
       restoreCapabilityTriggerFocus.current = false
-      globalThis.requestAnimationFrame(() => externalCapabilitiesTriggerRef.current?.focus())
+      globalThis.requestAnimationFrame(() => {
+        const trigger = externalCapabilitiesTriggerRef.current
+        const focusTarget = trigger && !trigger.closest('[hidden]')
+          ? trigger
+          : detailsTabRefs.current.documents
+        focusTarget?.focus()
+      })
     }
   }, [externalCapabilitiesOpen])
 
@@ -682,10 +687,16 @@ function App() {
     return numericRevision
   }
 
-  function setClaimRevision(revision) {
+  function setClaimRevision(revision, primaryAction = null) {
     const numericRevision = rememberClaimRevision(revision)
     setClaim((current) => current
-      ? { ...current, revision: Math.max(Number(current.revision || 0), numericRevision) }
+      ? {
+        ...current,
+        revision: Math.max(Number(current.revision || 0), numericRevision),
+        ...(Number(primaryAction?.claim_revision) === numericRevision
+          ? { primary_action: primaryAction }
+          : {}),
+      }
       : current)
   }
 
@@ -1231,7 +1242,7 @@ function App() {
       setForm((current) => mergeFields(current, turn.form_changes))
       setContentsItems((current) => mergeContentsItems(current, turn.contents_item_changes || []))
       setDynamicForm(turn.dynamic_form || null)
-      setClaimRevision(turn.claim_revision)
+      setClaimRevision(turn.claim_revision, turn.primary_action)
       if (turn.decision) setNextStep(turn.decision.customer_next_step)
       if (turn.handoff) setHandoff(turn.handoff)
       setDraft('')
@@ -1362,7 +1373,7 @@ function App() {
       setForm((current) => ({ ...current, ...response.confirmed_fields }))
       setContentsItems(response.confirmed_contents_items || contentsItems)
       setDynamicForm(response.dynamic_form || null)
-      setClaimRevision(response.revision)
+      setClaimRevision(response.revision, response.primary_action)
       setNextStep(response.customer_next_step)
       pendingConfirmation.current = null
       setStatus('idle')
@@ -1400,6 +1411,7 @@ function App() {
       let updatedForm = { ...form, ...update.updated_fields }
       let updatedNextStep = update.customer_next_step
       let updatedDynamicForm = update.dynamic_form || null
+      let updatedPrimaryAction = update.primary_action
 
       if (field.status === 'proposed') {
         const confirmation = await confirmClaimFields({
@@ -1411,10 +1423,11 @@ function App() {
         updatedForm = { ...updatedForm, ...confirmation.confirmed_fields }
         updatedNextStep = confirmation.customer_next_step
         updatedDynamicForm = confirmation.dynamic_form || null
+        updatedPrimaryAction = confirmation.primary_action
       }
 
       setForm(updatedForm)
-      setClaimRevision(revision)
+      setClaimRevision(revision, updatedPrimaryAction)
       setNextStep(updatedNextStep)
       setDynamicForm(updatedDynamicForm)
       setEditingField(null)
@@ -1438,7 +1451,7 @@ function App() {
         revision: claim.revision,
         idempotencyKey: pendingSupportRequest.current.idempotencyKey,
       })
-      setClaimRevision(response.revision)
+      setClaimRevision(response.revision, response.primary_action)
       setNextStep(response.customer_next_step)
       setHandoff(response.handoff)
       pendingSupportRequest.current = null
@@ -1449,7 +1462,13 @@ function App() {
   }
 
   async function createConfirmedClaim() {
-    if (!claim || isBusy || nextStep?.status !== 'ready_to_create') return
+    if (
+      !claim
+      || isBusy
+      || claim.primary_action?.action_code !== 'claimant.create_claim'
+      || !claim.primary_action.available
+      || Number(claim.primary_action.claim_revision) !== Number(claim.revision)
+    ) return
     setError('')
     setStatus('creating-claim')
     try {
@@ -1466,6 +1485,7 @@ function App() {
         revision: response.revision,
         external_claim: response.external_claim,
         external_service_action: response.external_service_action,
+        primary_action: response.primary_action,
       }))
       setNextStep(response.customer_next_step)
       pendingClaimCreation.current = null
@@ -1477,8 +1497,19 @@ function App() {
 
   async function requestVehicleAssessment() {
     const action = claim?.external_service_action
-    if (!claim || !action?.can_request || isBusy) return
-    if (action.status === 'consent_required' && !serviceConsentChecked) return
+    const primaryAction = claim?.primary_action
+    const needsConsent = primaryAction?.required_inputs?.includes('claimant_consent')
+    if (
+      !claim
+      || !action
+      || primaryAction?.action_type !== 'external_service'
+      || !REQUESTABLE_EXTERNAL_ACTIONS.has(primaryAction.action_code)
+      || !primaryAction.available
+      || primaryAction.target_ref !== action.service_identity
+      || Number(primaryAction.claim_revision) !== Number(claim.revision)
+      || isBusy
+    ) return
+    if (needsConsent && !serviceConsentChecked) return
 
     setServiceError(null)
     if (pendingExternalService.current?.claimId !== claim.claim_id) {
@@ -1491,7 +1522,7 @@ function App() {
     const operation = pendingExternalService.current
     let revision = claim.revision
     try {
-      if (action.status === 'consent_required') {
+      if (needsConsent) {
         setStatus('granting-service-consent')
         const consent = await grantAssessorConsent({
           claimId: claim.claim_id,
@@ -1504,6 +1535,7 @@ function App() {
           ...current,
           revision,
           external_service_action: consent.action,
+          primary_action: consent.primary_action,
         }))
         setNextStep(consent.customer_next_step)
       }
@@ -1519,6 +1551,7 @@ function App() {
         ...current,
         revision: routed.revision,
         external_service_action: routed.action,
+        primary_action: routed.primary_action,
       }))
       setNextStep(routed.customer_next_step)
       pendingExternalService.current = null
@@ -2553,30 +2586,6 @@ function App() {
               )}
             </div>
 
-            {claim.external_capabilities?.length > 0 && (
-              <>
-                <button
-                  ref={externalCapabilitiesTriggerRef}
-                  className="external-capabilities-trigger"
-                  type="button"
-                  aria-haspopup="dialog"
-                  onClick={() => setExternalCapabilitiesOpen(true)}
-                >
-                  <span>
-                    <strong>Third-party support</strong>
-                    <small>{claim.external_capabilities.length} services available</small>
-                  </span>
-                  <span aria-hidden="true">View</span>
-                </button>
-                <ExternalCapabilityCatalogue
-                  capabilities={claim.external_capabilities}
-                  dialogRef={externalCapabilitiesDialogRef}
-                  headingRef={externalCapabilitiesHeadingRef}
-                  onClose={closeExternalCapabilities}
-                />
-              </>
-            )}
-
             <MessageComposer
               draft={draft}
               setDraft={setDraft}
@@ -2758,6 +2767,21 @@ function App() {
               tabIndex="0"
               hidden={detailsTab !== 'documents'}
             >
+              {claim.external_capabilities?.length > 0 && (
+                <button
+                  ref={externalCapabilitiesTriggerRef}
+                  className="external-capabilities-trigger"
+                  type="button"
+                  aria-haspopup="dialog"
+                  onClick={() => setExternalCapabilitiesOpen(true)}
+                >
+                  <span>
+                    <strong>Third-party support</strong>
+                    <small>{claim.external_capabilities.length} services available</small>
+                  </span>
+                  <span aria-hidden="true">View</span>
+                </button>
+              )}
               {detailsTab === 'documents' && workspaceView === 'chat' && (
                 <ClaimDocuments
                   items={evidenceItems}
@@ -2775,6 +2799,14 @@ function App() {
             </div>
             </div>
           </aside>
+          {claim.external_capabilities?.length > 0 && (
+            <ExternalCapabilityCatalogue
+              capabilities={claim.external_capabilities}
+              dialogRef={externalCapabilitiesDialogRef}
+              headingRef={externalCapabilitiesHeadingRef}
+              onClose={closeExternalCapabilities}
+            />
+          )}
         </main>
       )}
     </div>
