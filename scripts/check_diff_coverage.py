@@ -55,9 +55,14 @@ def diff_coverage(
     covered = 0
     executable = 0
     missing_by_file: dict[str, list[int]] = {}
-    files = coverage.get('files', {})
+    raw_files = coverage.get('files', {})
+    files = (
+        {str(path).replace('\\', '/'): report for path, report in raw_files.items()}
+        if isinstance(raw_files, dict)
+        else {}
+    )
     for path, lines in changed.items():
-        report = files.get(path) or files.get(path.replace('\\', '/'))
+        report = files.get(path.replace('\\', '/'))
         if not isinstance(report, dict):
             continue
         executed = set(report.get('executed_lines', []))
