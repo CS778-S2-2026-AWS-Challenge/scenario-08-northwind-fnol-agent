@@ -40,6 +40,7 @@
       "description": "Initial bounded event vocabulary for the Week 5 audit contract.",
       "enum": [
         "consent.granted",
+        "consent.declined",
         "consent.withdrawn",
         "permission.authorised",
         "permission.rejected",
