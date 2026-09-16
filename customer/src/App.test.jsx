@@ -309,7 +309,7 @@ describe('claimant intake projection', () => {
     expect(screen.getByRole('button', { name: 'Retry message' })).toBeInTheDocument()
   })
 
-  it('shows third-party support in a dismissible dialog with a compact reopen control', async () => {
+  it('keeps third-party support out of chat and reopens it from What to provide', async () => {
     const user = userEvent.setup()
     api.createClaim.mockResolvedValue({
       claim: {
@@ -341,12 +341,17 @@ describe('claimant intake projection', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Third-party services' })
     expect(dialog).toBeVisible()
     expect(container.querySelector('.message-list .service-capability-list')).not.toBeInTheDocument()
+    expect(container.querySelector('.message-list .external-capabilities-trigger')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Close third-party services' }))
     expect(screen.queryByRole('dialog', { name: 'Third-party services' })).not.toBeInTheDocument()
 
+    const documentsTab = screen.getByRole('tab', { name: 'What to provide' })
+    await waitFor(() => expect(documentsTab).toHaveFocus())
+    await user.click(documentsTab)
     const trigger = screen.getByRole('button', { name: /Third-party support/ })
-    await waitFor(() => expect(trigger).toHaveFocus())
+    expect(trigger.closest('[role="tabpanel"]')).toHaveAccessibleName('What to provide')
+    expect(trigger).toHaveTextContent('2 services available')
     await user.click(trigger)
     expect(await screen.findByRole('dialog', { name: 'Third-party services' })).toBeVisible()
   })
