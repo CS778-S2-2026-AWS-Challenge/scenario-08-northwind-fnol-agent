@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
@@ -192,6 +192,8 @@ function createCrossClaimService() {
     postRequests: [],
     messageReads: [],
     aPendingReads: 0,
+    aPendingReadResolvers: [],
+    holdAReadbacks: true,
     bCaughtUp: false,
   }
 
@@ -220,9 +222,15 @@ function createCrossClaimService() {
     if (messageMatch) {
       const [, claimId, sessionId] = messageMatch
       state.messageReads.push({ claimId, sessionId, path })
-      if (claimId === 'clm_a' && state.messages.clm_a.length) {
+      if (
+        claimId === 'clm_a'
+        && state.messages.clm_a.length
+        && state.holdAReadbacks
+      ) {
         state.aPendingReads += 1
-        return new Promise(() => {})
+        return new Promise((resolve) => {
+          state.aPendingReadResolvers.push(resolve)
+        })
       }
       return jsonResponse(200, {
         items: claimId === 'clm_b' && !state.bCaughtUp
@@ -289,6 +297,16 @@ function createCrossClaimService() {
 
     throw new Error(`Unexpected Workbench request: ${method} ${path}`)
   })
+
+  state.resolveAPendingReads = (items = []) => {
+    const resolvers = state.aPendingReadResolvers.splice(0)
+    for (const resolve of resolvers) {
+      resolve(jsonResponse(200, {
+        items: items.map((message) => ({ ...message })),
+        page: { next_cursor: null },
+      }))
+    }
+  }
 
   return { fetchMock, state }
 }
@@ -566,7 +584,7 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     expect(state.postRequests).toHaveLength(1)
   })
 
-  it('reconciles Claim B while an exact Claim A delivery readback is still in flight', async () => {
+  it('reconciles each Claim after leaving a hung delivery readback and ignores its late response', async () => {
     tabs.tabs = [
       {
         claimId: 'clm_a',
@@ -620,6 +638,33 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     expect(state.aPendingReads).toBeGreaterThan(0)
     expect(state.postRequests.filter(({ claimId }) => claimId === 'clm_b')).toHaveLength(1)
     expect(screen.queryAllByText(/does not include it yet/i)).toHaveLength(0)
+
+    const aReadsBeforeReturn = state.messageReads.filter(({ claimId }) => claimId === 'clm_a').length
+    state.holdAReadbacks = false
+    await user.click(screen.getByRole('button', { name: 'Open Claim A' }))
+
+    await waitFor(() => {
+      expect(
+        state.messageReads.filter(({ claimId }) => claimId === 'clm_a').length,
+      ).toBeGreaterThan(aReadsBeforeReturn)
+      expect(screen.getByRole('log', { name: 'Claimant conversation messages' })).toHaveTextContent(
+        'Reply for Claim A',
+      )
+      expect(screen.getByLabelText('Message to claimant')).toHaveValue('')
+    })
+    expect(state.aPendingReadResolvers.length).toBeGreaterThan(0)
+
+    await act(async () => {
+      state.resolveAPendingReads([])
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole('log', { name: 'Claimant conversation messages' })).toHaveTextContent(
+        'Reply for Claim A',
+      )
+      expect(screen.getByLabelText('Message to claimant')).toHaveValue('')
+      expect(screen.queryAllByText(/does not include it yet/i)).toHaveLength(0)
+    })
   })
 
   it('keeps a displayed historical session read only and never posts from it', async () => {

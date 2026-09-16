@@ -54,7 +54,8 @@ export default function WorkbenchPage() {
   const backgroundRefreshId = useRef(0)
   const resourceRequestIds = useRef({})
   const conversationRequestId = useRef(0)
-  const deliveryReadbacksRef = useRef(new Set())
+  const deliveryReadbacksRef = useRef(new Map())
+  const deliveryReadbackScopeRef = useRef({ key: null, generation: 0 })
   const selectedConversationSessionIdRef = useRef(null)
   const [resources, setResources] = useState({})
   const [detailLoading, setDetailLoading] = useState(false)
@@ -72,6 +73,14 @@ export default function WorkbenchPage() {
   const currentSection = CLAIM_SECTIONS.has(routeSection)
     ? routeSection
     : currentTab?.section || 'summary'
+  const deliveryReadbackScope = currentSection === 'conversation' && claimId
+    ? JSON.stringify([
+        claimId,
+        selectedSessionId
+          || (detail?.claim_id === claimId ? detail.active_session_id : null)
+          || null,
+      ])
+    : null
   const queueFilters = useMemo(
     () => readQueueFilters(searchParams, filterMetadata),
     [filterMetadata, searchParams],
@@ -458,9 +467,11 @@ export default function WorkbenchPage() {
     const targetDelivery = expectedDelivery
       || workbenchApi.pendingMessageDelivery(id, session.session_id)
     const targetDeliveryIdentity = deliveryIdentity(targetDelivery)
+    const targetDeliveryLease = deliveryReadbacksRef.current.get(targetDeliveryIdentity)
     const mayReconcileDelivery = Boolean(expectedDelivery)
       || !targetDeliveryIdentity
-      || !deliveryReadbacksRef.current.has(targetDeliveryIdentity)
+      || !targetDeliveryLease
+      || targetDeliveryLease.generation !== deliveryReadbackScopeRef.current.generation
     const messagesResult = await loadResource(
       'messages',
       id,
@@ -742,6 +753,22 @@ export default function WorkbenchPage() {
     }
   }, [isAgentRoute, routeAgentSessionId])
   useEffect(() => {
+    const currentScope = deliveryReadbackScopeRef.current
+    if (currentScope.key === deliveryReadbackScope) return
+    deliveryReadbacksRef.current.clear()
+    deliveryReadbackScopeRef.current = {
+      key: deliveryReadbackScope,
+      generation: currentScope.generation + 1,
+    }
+  }, [deliveryReadbackScope])
+  useEffect(() => () => {
+    deliveryReadbacksRef.current.clear()
+    deliveryReadbackScopeRef.current = {
+      key: null,
+      generation: deliveryReadbackScopeRef.current.generation + 1,
+    }
+  }, [])
+  useEffect(() => {
     if (claimId) {
       loadDetail(claimId)
     } else if (!isConversations) {
@@ -982,6 +1009,17 @@ export default function WorkbenchPage() {
   async function sendMessage(operation) {
     const sendingClaimId = detailRef.current?.claim_id || null
     let expectedDelivery = null
+    let deliveryReadbackLease = null
+    const releaseDeliveryReadback = () => {
+      if (!deliveryReadbackLease) return
+      if (
+        deliveryReadbacksRef.current.get(deliveryReadbackLease.identity)
+        === deliveryReadbackLease
+      ) {
+        deliveryReadbacksRef.current.delete(deliveryReadbackLease.identity)
+      }
+      deliveryReadbackLease = null
+    }
     try {
       await runClaimMutation('Sending the claimant message', async (current) => {
         const response = await workbenchApi.sendMessage(
@@ -996,7 +1034,14 @@ export default function WorkbenchPage() {
           operation.sessionId,
           operation.draft ?? operation.message,
         )
-        deliveryReadbacksRef.current.add(deliveryIdentity(expectedDelivery))
+        const identity = deliveryIdentity(expectedDelivery)
+        if (identity) {
+          deliveryReadbackLease = {
+            identity,
+            generation: deliveryReadbackScopeRef.current.generation,
+          }
+          deliveryReadbacksRef.current.set(identity, deliveryReadbackLease)
+        }
         return response
       }, { backgroundDetailRefresh: true })
     } catch (error) {
@@ -1018,7 +1063,7 @@ export default function WorkbenchPage() {
         }
       }
 
-      deliveryReadbacksRef.current.delete(deliveryIdentity(expectedDelivery))
+      releaseDeliveryReadback()
       throw error
     }
 
@@ -1048,11 +1093,11 @@ export default function WorkbenchPage() {
         }
         throw messageReadbackError({ ...readback, delivery: expectedDelivery })
       } finally {
-        deliveryReadbacksRef.current.delete(deliveryIdentity(expectedDelivery))
+        releaseDeliveryReadback()
       }
     }
 
-    deliveryReadbacksRef.current.delete(deliveryIdentity(expectedDelivery))
+    releaseDeliveryReadback()
     throw messageReadbackError({ status: 'superseded', delivery: expectedDelivery })
   }
 
