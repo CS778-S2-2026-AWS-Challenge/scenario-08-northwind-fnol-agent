@@ -16,6 +16,9 @@ const api = vi.hoisted(() => ({
   handoffs: vi.fn(),
   collaborationRequests: vi.fn(),
   externalRequests: vi.fn(),
+  evidence: vi.fn(),
+  workItems: vi.fn(),
+  realtimeEvents: vi.fn(),
   acceptHandoff: vi.fn(),
   acceptExternalTaskReview: vi.fn(),
   reconcileExternalTaskResponse: vi.fn(),
@@ -219,6 +222,13 @@ describe('WorkbenchPage queue routing', () => {
     api.handoffs.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.collaborationRequests.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.externalRequests.mockResolvedValue({ items: [], page: { next_cursor: null }, status: 'available' })
+    api.evidence.mockResolvedValue({ items: [], page: { next_cursor: null }, status: 'available' })
+    api.workItems.mockResolvedValue({ items: [], page: { next_cursor: null }, status: 'available' })
+    api.realtimeEvents.mockImplementation((_token, { signal }) => (
+      new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+      })
+    ))
   })
 
   it('restores the persisted active Claim section and claimant session from the Workbench root', async () => {
@@ -1195,13 +1205,18 @@ describe('WorkbenchPage queue routing', () => {
     expect(api.reconcileExternalTaskResponse).toHaveBeenCalledTimes(1)
   })
 
-  it('discards a late background refresh after a controlled action loads a newer revision', async () => {
+  it('discards a late realtime Claim refresh after a controlled action loads a newer revision', async () => {
     const user = userEvent.setup()
-    const interval = vi.spyOn(window, 'setInterval').mockReturnValue(20)
-    const clearInterval = vi.spyOn(window, 'clearInterval').mockImplementation(() => {})
-    let resolveBackgroundRefresh
-    const delayedBackgroundRefresh = new Promise((resolve) => {
-      resolveBackgroundRefresh = resolve
+    let pushRealtime
+    let resolveRealtimeRefresh
+    const delayedRealtimeRefresh = new Promise((resolve) => {
+      resolveRealtimeRefresh = resolve
+    })
+    api.realtimeEvents.mockImplementation((_token, { onEvent, signal }) => {
+      pushRealtime = onEvent
+      return new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+      })
     })
     const acceptAction = {
       action_code: 'human.accept_handoff', target_type: 'handoff', target_ref: 'hnd_1', availability: 'confirmation_required', based_on_revision: 1,
@@ -1219,17 +1234,26 @@ describe('WorkbenchPage queue routing', () => {
     }
     api.claim
       .mockResolvedValueOnce(actionable)
-      .mockReturnValueOnce(delayedBackgroundRefresh)
+      .mockReturnValueOnce(delayedRealtimeRefresh)
       .mockResolvedValueOnce(latest)
     api.acceptHandoff.mockResolvedValue({})
 
     renderPage('/workbench/claims/clm_route_1')
     await screen.findByRole('button', { name: 'Test projected accept' })
-    await waitFor(() => expect(interval).toHaveBeenCalledWith(expect.any(Function), 20000))
-    const runBackgroundRefresh = interval.mock.calls.find(([, delay]) => delay === 20000)[0]
-    let backgroundRequest
+    await waitFor(() => expect(pushRealtime).toBeTypeOf('function'))
+
+    let realtimeRefresh
     await act(async () => {
-      backgroundRequest = runBackgroundRefresh()
+      realtimeRefresh = pushRealtime({
+        type: 'resources.changed',
+        cursor: 'evt-late-claim',
+        data: {
+          event_id: 'evt-late-claim',
+          claim_id: 'clm_route_1',
+          claim_revision: 1,
+          resources: ['claim'],
+        },
+      })
       await Promise.resolve()
     })
     await waitFor(() => expect(api.claim).toHaveBeenCalledTimes(2))
@@ -1239,20 +1263,23 @@ describe('WorkbenchPage queue routing', () => {
     expect(screen.queryByRole('button', { name: 'Test projected accept' })).not.toBeInTheDocument()
 
     await act(async () => {
-      resolveBackgroundRefresh(actionable)
-      await backgroundRequest
+      resolveRealtimeRefresh(actionable)
+      await realtimeRefresh
     })
 
     expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 2')
     expect(screen.queryByRole('button', { name: 'Test projected accept' })).not.toBeInTheDocument()
-    interval.mockRestore()
-    clearInterval.mockRestore()
   })
 
-  it('discards a late action-failure recovery projection after a newer background refresh', async () => {
+  it('discards a late action-failure recovery projection after a newer realtime refresh', async () => {
     const user = userEvent.setup()
-    const interval = vi.spyOn(window, 'setInterval').mockReturnValue(20)
-    const clearInterval = vi.spyOn(window, 'clearInterval').mockImplementation(() => {})
+    let pushRealtime
+    api.realtimeEvents.mockImplementation((_token, { onEvent, signal }) => {
+      pushRealtime = onEvent
+      return new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+      })
+    })
     let resolveRecovery
     const delayedRecovery = new Promise((resolve) => {
       resolveRecovery = resolve
@@ -1288,14 +1315,22 @@ describe('WorkbenchPage queue routing', () => {
 
     renderPage('/workbench/claims/clm_route_1')
     await screen.findByRole('button', { name: 'Test projected accept' })
-    await waitFor(() => expect(interval).toHaveBeenCalledWith(expect.any(Function), 20000))
-    const runBackgroundRefresh = interval.mock.calls.find(([, delay]) => delay === 20000)[0]
+    await waitFor(() => expect(pushRealtime).toBeTypeOf('function'))
 
     await user.click(screen.getByRole('button', { name: 'Test projected accept' }))
     await waitFor(() => expect(api.claim).toHaveBeenCalledTimes(2))
 
     await act(async () => {
-      await runBackgroundRefresh()
+      await pushRealtime({
+        type: 'resources.changed',
+        cursor: 'evt-newest-claim',
+        data: {
+          event_id: 'evt-newest-claim',
+          claim_id: 'clm_route_1',
+          claim_revision: 3,
+          resources: ['claim'],
+        },
+      })
     })
     await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 3'))
     expect(screen.queryByRole('button', { name: 'Test projected accept' })).not.toBeInTheDocument()
@@ -1308,8 +1343,100 @@ describe('WorkbenchPage queue routing', () => {
 
     expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 3')
     expect(screen.queryByRole('button', { name: 'Test projected accept' })).not.toBeInTheDocument()
-    interval.mockRestore()
-    clearInterval.mockRestore()
+  })
+
+  it('keeps one multiplexed Workbench stream while navigating between Claims', async () => {
+    const user = userEvent.setup()
+    api.claim.mockImplementation((_token, id) => Promise.resolve({
+      ...claim,
+      claim_id: id,
+      display_reference: id === 'clm_route_1' ? 'NW-900' : 'NW-901',
+    }))
+
+    renderPage('/workbench/claims/clm_route_1')
+    await waitFor(() => expect(api.realtimeEvents).toHaveBeenCalledTimes(1))
+    await user.click(screen.getByRole('button', { name: 'Navigate Claim B' }))
+    await waitFor(() => expect(api.claim).toHaveBeenCalledWith('staff-token', 'clm_route_2'))
+
+    expect(api.realtimeEvents).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes only the named Evidence resource for an active Claim event', async () => {
+    let pushRealtime
+    api.realtimeEvents.mockImplementation((_token, { onEvent, signal }) => {
+      pushRealtime = onEvent
+      return new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+      })
+    })
+
+    renderPage('/workbench/claims/clm_route_1/evidence')
+    await waitFor(() => expect(api.evidence).toHaveBeenCalled())
+    await waitFor(() => expect(pushRealtime).toBeTypeOf('function'))
+
+    const evidenceCalls = api.evidence.mock.calls.length
+    const claimCalls = api.claim.mock.calls.length
+    const handoffCalls = api.handoffs.mock.calls.length
+
+    await act(async () => {
+      await pushRealtime({
+        type: 'resources.changed',
+        cursor: 'evt-evidence',
+        data: {
+          event_id: 'evt-evidence',
+          claim_id: 'clm_route_1',
+          claim_revision: 2,
+          resources: ['evidence'],
+        },
+      })
+    })
+
+    expect(api.evidence).toHaveBeenCalledTimes(evidenceCalls + 1)
+    expect(api.claim).toHaveBeenCalledTimes(claimCalls)
+    expect(api.handoffs).toHaveBeenCalledTimes(handoffCalls)
+  })
+
+  it('uses one visible authoritative snapshot as degraded fallback when the stream fails', async () => {
+    let rejectStream
+    api.realtimeEvents
+      .mockImplementationOnce((_token, { signal }) => new Promise((resolve, reject) => {
+        rejectStream = reject
+        signal.addEventListener('abort', resolve, { once: true })
+      }))
+      .mockImplementation((_token, { signal }) => new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+      }))
+
+    const view = renderPage('/workbench/claims/clm_route_1')
+    await waitFor(() => expect(api.claims).toHaveBeenCalled())
+    await waitFor(() => expect(api.claim).toHaveBeenCalled())
+    await waitFor(() => expect(rejectStream).toBeTypeOf('function'))
+    const queueCalls = api.claims.mock.calls.length
+    const claimCalls = api.claim.mock.calls.length
+
+    await act(async () => {
+      rejectStream(Object.assign(new Error('stream unavailable'), { code: 'NETWORK_ERROR' }))
+    })
+
+    await waitFor(() => expect(api.claims.mock.calls.length).toBeGreaterThan(queueCalls))
+    await waitFor(() => expect(api.claim.mock.calls.length).toBeGreaterThan(claimCalls))
+    view.unmount()
+  })
+
+  it('aborts the Workbench realtime stream when the page unmounts', async () => {
+    let streamSignal
+    api.realtimeEvents.mockImplementation((_token, { signal }) => {
+      streamSignal = signal
+      return new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+      })
+    })
+
+    const view = renderPage('/workbench')
+    await waitFor(() => expect(streamSignal).toBeInstanceOf(AbortSignal))
+    view.unmount()
+
+    expect(streamSignal.aborted).toBe(true)
   })
 
   it('propagates failed queue and open-Claim refreshes after an executed Staff Agent action', async () => {
