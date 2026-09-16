@@ -24,7 +24,7 @@ import {
   uploadEvidenceContent,
   completeEvidenceUpload,
   resumeClaimSession,
-  streamClaimUpdates,
+  streamRealtimeEvents,
   submitClaimMessage,
   setClaimantAccessToken,
   updateAccountPreferences,
@@ -384,7 +384,6 @@ function App() {
   const [evidenceItems, setEvidenceItems] = useState([])
   const [evidenceLoadStatus, setEvidenceLoadStatus] = useState('idle')
   const [evidenceSyncNotice, setEvidenceSyncNotice] = useState('')
-  const [evidencePollingKey, setEvidencePollingKey] = useState(0)
   const [resumeContext, setResumeContext] = useState(null)
   const [expandedConversationPanels, setExpandedConversationPanels] = useState({})
   const [externalCapabilitiesOpen, setExternalCapabilitiesOpen] = useState(false)
@@ -404,6 +403,11 @@ function App() {
   const pendingExternalService = useRef(null)
   const latestRevision = useRef(0)
   const latestRevisionClaimId = useRef(null)
+  const activeClaimRef = useRef(claim)
+  const activeSessionIdRef = useRef(sessionId)
+  const accountRef = useRef(account)
+  const realtimeCursor = useRef(null)
+  const realtimeSeenEventIds = useRef(new Set())
   const latestEvidenceRevision = useRef(0)
   const latestEvidenceItems = useRef([])
   const evidenceHasLocalMutation = useRef(false)
@@ -421,6 +425,10 @@ function App() {
   const followLatestMessages = useRef(true)
   const forceLatestMessages = useRef(false)
   const confirmedClaimProjections = useRef(new Map())
+  activeClaimRef.current = claim
+  activeSessionIdRef.current = sessionId
+  accountRef.current = account
+  const realtimePrincipal = account ? 'authenticated' : claim?.claim_id ? 'anonymous' : 'none'
   const hasStarted = claim !== null
   const isWorkspaceActive = hasStarted && workspaceActive
   const savedReports = claimHistory === null
@@ -750,6 +758,17 @@ function App() {
       : current)
   }
 
+  function applyClaimSnapshot(currentClaim) {
+    rememberClaimRevision(currentClaim.revision)
+    activeClaimRef.current = currentClaim
+    setClaim(currentClaim)
+    setForm(currentClaim.form)
+    setContentsItems(currentClaim.contents_items || [])
+    setDynamicForm(currentClaim.dynamic_form || null)
+    setNextStep(currentClaim.customer_next_step)
+    setHandoff(currentClaim.handoff || null)
+  }
+
   function attachmentForEvidence(evidence, current = {}) {
     const fileStatus = evidence.file_status || evidence.status
     const status = fileStatus === 'awaiting_upload'
@@ -781,7 +800,7 @@ function App() {
 
   function syncEvidenceProjection(response) {
     const responseRevision = Number(response.revision || 0)
-    const currentClaimRevision = Math.max(Number(claim?.revision || 0), latestRevision.current)
+    const currentClaimRevision = Math.max(Number(activeClaimRef.current?.revision || 0), latestRevision.current)
     const minimumRevision = Math.max(latestEvidenceRevision.current, currentClaimRevision)
     if (responseRevision < minimumRevision) return false
     if (!response.items?.length && (latestEvidenceItems.current.length || evidenceHasLocalMutation.current)) return false
@@ -841,47 +860,155 @@ function App() {
   }, [claim?.claim_id, claim?.revision])
 
   useEffect(() => {
-    if (!claim?.claim_id || !sessionId) return undefined
+    if (realtimePrincipal === 'none') {
+      realtimeCursor.current = null
+      realtimeSeenEventIds.current.clear()
+      return undefined
+    }
+
     const controller = new AbortController()
     let active = true
     let reconnectDelay = 1000
 
-    async function applyLiveUpdate(event) {
-      if (!active || event.claim_revision <= latestRevision.current) return
-      const [currentClaim, conversation] = await Promise.all([
-        getClaim(claim.claim_id),
-        getClaimMessages(claim.claim_id, sessionId),
-      ])
+    function rememberEvent(eventId) {
+      if (!eventId) return
+      realtimeSeenEventIds.current.add(eventId)
+      while (realtimeSeenEventIds.current.size > 100) {
+        const oldest = realtimeSeenEventIds.current.values().next().value
+        realtimeSeenEventIds.current.delete(oldest)
+      }
+    }
+
+    async function refreshFullSnapshot() {
+      const activeClaim = activeClaimRef.current
+      const activeSessionId = activeSessionIdRef.current
+      const refreshes = []
+
+      if (activeClaim?.claim_id) {
+        const claimId = activeClaim.claim_id
+        refreshes.push((async () => {
+          const [currentClaim, conversation, evidence] = await Promise.all([
+            getClaim(claimId),
+            activeSessionId ? getClaimMessages(claimId, activeSessionId) : Promise.resolve(null),
+            getClaimEvidence(claimId),
+          ])
+          if (!active || activeClaimRef.current?.claim_id !== claimId) return
+          applyClaimSnapshot(currentClaim)
+          if (conversation) setMessages(conversation.items)
+          if (syncEvidenceProjection(evidence)) setEvidenceSyncNotice('')
+          setEvidenceLoadStatus('ready')
+        })())
+      }
+
+      if (accountRef.current) {
+        refreshes.push(fetchClaimHistory({ signal: controller.signal }).then((items) => {
+          if (!active) return
+          replaceClaimHistory(items)
+          setClaimHistoryError('')
+        }))
+      }
+
+      await Promise.all(refreshes)
+    }
+
+    async function applyRealtimeEvent(delivery) {
       if (!active) return
-      latestRevision.current = currentClaim.revision
-      setClaim(currentClaim)
-      setForm(currentClaim.form)
-      setContentsItems(currentClaim.contents_items || [])
-      setDynamicForm(currentClaim.dynamic_form || null)
-      setNextStep(currentClaim.customer_next_step)
-      setHandoff(currentClaim.handoff || null)
-      setMessages(conversation.items)
+      if (delivery.type === 'resync_required') {
+        await refreshFullSnapshot()
+        realtimeCursor.current = null
+        realtimeSeenEventIds.current.clear()
+        reconnectDelay = 1000
+        return
+      }
+      if (delivery.type !== 'resources.changed') return
+
+      const eventId = delivery.data?.event_id
+      if (eventId && realtimeSeenEventIds.current.has(eventId)) {
+        if (delivery.cursor) realtimeCursor.current = delivery.cursor
+        return
+      }
+
+      const resources = new Set(delivery.data?.resources || [])
+      const activeClaim = activeClaimRef.current
+      const claimId = delivery.data?.claim_id
+      const refreshes = []
+
+      if (activeClaim?.claim_id === claimId) {
+        const activeSessionId = activeSessionIdRef.current
+        if (
+          resources.has('claim')
+          || resources.has('handoffs')
+          || resources.has('work_items')
+          || resources.has('external_tasks')
+        ) {
+          refreshes.push(getClaim(claimId).then((currentClaim) => {
+            if (active && activeClaimRef.current?.claim_id === claimId) {
+              applyClaimSnapshot(currentClaim)
+            }
+          }))
+        }
+        if (resources.has('messages') && activeSessionId) {
+          refreshes.push(getClaimMessages(claimId, activeSessionId).then((conversation) => {
+            if (
+              active
+              && activeClaimRef.current?.claim_id === claimId
+              && activeSessionIdRef.current === activeSessionId
+            ) {
+              setMessages(conversation.items)
+            }
+          }))
+        }
+        if (resources.has('evidence')) {
+          refreshes.push(getClaimEvidence(claimId).then((evidence) => {
+            if (active && activeClaimRef.current?.claim_id === claimId) {
+              if (syncEvidenceProjection(evidence)) setEvidenceSyncNotice('')
+              setEvidenceLoadStatus('ready')
+            }
+          }))
+        }
+      }
+
+      if (accountRef.current && (resources.has('claim') || resources.has('queue'))) {
+        refreshes.push(fetchClaimHistory({ signal: controller.signal }).then((items) => {
+          if (!active) return
+          replaceClaimHistory(items)
+          setClaimHistoryError('')
+        }))
+      }
+
+      await Promise.all(refreshes)
+      if (!active) return
+      rememberEvent(eventId)
+      if (delivery.cursor) realtimeCursor.current = delivery.cursor
       reconnectDelay = 1000
     }
 
     async function connect() {
       while (active && !controller.signal.aborted) {
         try {
-          await streamClaimUpdates({
-            claimId: claim.claim_id,
-            sessionId,
-            afterRevision: latestRevision.current,
+          await streamRealtimeEvents({
+            cursor: realtimeCursor.current,
             signal: controller.signal,
-            onEvent: applyLiveUpdate,
+            onEvent: applyRealtimeEvent,
           })
         } catch (streamFailure) {
           if (!active || controller.signal.aborted) return
           if (
             streamFailure instanceof ApiRequestError
             && streamFailure.code === 'INVALID_EVENT_CURSOR'
-            && streamFailure.currentRevision
           ) {
-            latestRevision.current = streamFailure.currentRevision
+            try {
+              await refreshFullSnapshot()
+              realtimeCursor.current = null
+              realtimeSeenEventIds.current.clear()
+            } catch {
+              // The reconnect loop retries the authoritative resync.
+            }
+          }
+          if (latestEvidenceItems.current.some((item) => item.file_status === 'processing')) {
+            setEvidenceSyncNotice(
+              'Live file status updates are temporarily disconnected. We are reconnecting; use Check status if you need to verify the file now.',
+            )
           }
         }
         if (!active || controller.signal.aborted) return
@@ -895,7 +1022,10 @@ function App() {
       active = false
       controller.abort()
     }
-  }, [claim?.claim_id, sessionId])
+  // Realtime callbacks read the current Claim, session, and account from refs so one
+  // browser-scoped stream survives ordinary navigation without reconnect churn.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [realtimePrincipal])
 
   useEffect(() => {
     if (!account) return undefined
@@ -945,7 +1075,6 @@ function App() {
       setEvidenceItems([])
       setEvidenceLoadStatus('idle')
       setAttachments([])
-      setEvidencePollingKey(0)
       return undefined
     }
     if (evidenceClaimId.current !== claim.claim_id) {
@@ -964,9 +1093,6 @@ function App() {
         if (active) {
           if (syncEvidenceProjection(response)) setEvidenceSyncNotice('')
           setEvidenceLoadStatus('ready')
-          if ((response.items || []).some((item) => item.file_status === 'processing')) {
-            setEvidencePollingKey((current) => current + 1)
-          }
         }
       })
       .catch(() => {
@@ -976,42 +1102,6 @@ function App() {
   // The projection updater only uses stable React setters and is intentionally local to this view.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claim?.claim_id])
-
-  useEffect(() => {
-    if (!claim?.claim_id || !evidencePollingKey) {
-      return undefined
-    }
-    let active = true
-    let timer
-    let delay = 1500
-    const maxDelay = 12000
-    const schedule = () => {
-      timer = globalThis.setTimeout(sync, delay)
-    }
-    async function sync() {
-      try {
-        const response = await getClaimEvidence(claim.claim_id)
-        if (!active) return
-        const applied = syncEvidenceProjection(response)
-        if (applied) setEvidenceSyncNotice('')
-        setEvidenceLoadStatus('ready')
-        delay = 1500
-        if (!applied || (response.items || []).some((item) => item.file_status === 'processing')) schedule()
-      } catch {
-        if (!active) return
-        setEvidenceSyncNotice('We could not check the latest file status because the connection was interrupted. We will keep trying to reconnect.')
-        delay = Math.min(delay * 2, maxDelay)
-        schedule()
-      }
-    }
-    schedule()
-    return () => {
-      active = false
-      globalThis.clearTimeout(timer)
-    }
-  // The projection updater only uses stable React setters and is intentionally local to this view.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [claim?.claim_id, evidencePollingKey])
 
   async function uploadAttachment(
     file,
@@ -1043,9 +1133,6 @@ function App() {
           (item) => item.evidence_id === attempt.evidenceId,
         )
         if (observed && observed.file_status !== 'awaiting_upload') {
-          if (observed.file_status === 'processing') {
-            setEvidencePollingKey((current) => current + 1)
-          }
           setAttachments((current) => current.map((item) => item.id === localId
             ? attachmentForEvidence(observed, {
               ...item,
@@ -1091,7 +1178,6 @@ function App() {
       latestEvidenceRevision.current = completed.revision
       attempt.evidenceId = completed.evidence.evidence_id
       latestEvidenceItems.current = [completed.evidence]
-      setEvidencePollingKey((current) => current + 1)
       setClaimRevision(completed.revision)
       setEvidenceItems((current) => [...current.filter((item) => item.evidence_id !== completed.evidence.evidence_id), completed.evidence])
       setAttachments((current) => current.map((item) => item.id === localId
