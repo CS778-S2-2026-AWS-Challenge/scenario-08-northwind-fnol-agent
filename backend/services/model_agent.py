@@ -447,6 +447,7 @@ def _agent_proposal(
             prompt_id=prompt_id,
         ),
         action_code=action_code,
+        external_service_intents=[],
     )
 
 
@@ -734,6 +735,10 @@ class GatewayAgent:
                     evidence_id=runtime_proposal.evidence_id,
                     source_claim_id=runtime_proposal.source_claim_id,
                     removal_scope=runtime_proposal.removal_scope,
+                    external_service_intents=[
+                        item.model_dump(mode='json')
+                        for item in runtime_proposal.external_service_intents
+                    ],
                     # Model output is advisory. Deterministic support/safety interrupts are
                     # evaluated before this provider and are the only source of handoff authority.
                     controlled_rule_authorised=False,

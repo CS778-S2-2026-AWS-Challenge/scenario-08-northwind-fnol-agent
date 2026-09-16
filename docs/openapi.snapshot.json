@@ -1115,6 +1115,11 @@
         "additionalProperties": false,
         "description": "Non-safety Agent capabilities that a published release may disable.",
         "properties": {
+          "external_service_offers": {
+            "default": true,
+            "title": "External Service Offers",
+            "type": "boolean"
+          },
           "feature_version": {
             "maxLength": 100,
             "minLength": 1,
@@ -2851,8 +2856,26 @@
             "title": "Access Form",
             "type": "string"
           },
+          "agent_message_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Message Id"
+          },
           "can_request": {
             "title": "Can Request",
+            "type": "boolean"
+          },
+          "can_withdraw": {
+            "default": false,
+            "title": "Can Withdraw",
             "type": "boolean"
           },
           "capability_provenance": {
@@ -2882,6 +2905,33 @@
               }
             ]
           },
+          "disclosure_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Disclosure Fields",
+            "type": "array"
+          },
+          "disclosure_fingerprint": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disclosure Fingerprint"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
           "failure_code": {
             "anyOf": [
               {
@@ -2910,6 +2960,41 @@
             "title": "Next Action",
             "type": "string"
           },
+          "offer_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Id"
+          },
+          "official_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official Phone"
+          },
+          "official_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official Url"
+          },
           "pending_owner": {
             "maxLength": 80,
             "minLength": 1,
@@ -2929,6 +3014,13 @@
             "maxLength": 100,
             "minLength": 1,
             "title": "Registry Version",
+            "type": "string"
+          },
+          "requested_action": {
+            "default": "submit_request",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Requested Action",
             "type": "string"
           },
           "routing": {
@@ -2970,6 +3062,11 @@
             "minLength": 1,
             "title": "Status Label",
             "type": "string"
+          },
+          "uses_external_task": {
+            "default": true,
+            "title": "Uses External Task",
+            "type": "boolean"
           }
         },
         "required": [
@@ -3028,6 +3125,10 @@
         "description": "Claimant-facing lifecycle of one external-service action.\n\nThe values are the claimant-visible states named by the AT-10 controlled\nassessor scenario in `tests/fixtures/journeys/`. A failed attempt is one of\nthem: that scenario requires the claimant to receive an honest state and next\nstep, and a failure that showed nothing would read as an offer to request a\nservice whose last attempt had just failed.",
         "enum": [
           "consent_required",
+          "consent_declined",
+          "consent_withdrawn",
+          "pending_input",
+          "manual_available",
           "ready_to_request",
           "queued",
           "assigned",
@@ -3146,6 +3247,13 @@
               }
             ],
             "title": "In Reply To"
+          },
+          "message_actions": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimantExternalServiceAction"
+            },
+            "title": "Message Actions",
+            "type": "array"
           },
           "message_id": {
             "title": "Message Id",
@@ -6059,6 +6167,10 @@
             "title": "Registry Version",
             "type": "string"
           },
+          "requested_action": {
+            "title": "Requested Action",
+            "type": "string"
+          },
           "required_fields": {
             "default": [],
             "items": {
@@ -6090,6 +6202,7 @@
           "provider_name",
           "product_families",
           "purpose",
+          "requested_action",
           "access_form",
           "adapter_kind",
           "uses_external_task",
@@ -6209,10 +6322,30 @@
       "ExternalServiceConsentStatus": {
         "enum": [
           "granted",
+          "declined",
           "withdrawn"
         ],
         "title": "ExternalServiceConsentStatus",
         "type": "string"
+      },
+      "ExternalServiceOfferDecisionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "grant",
+              "decline",
+              "withdraw"
+            ],
+            "title": "Decision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ExternalServiceOfferDecisionRequest",
+        "type": "object"
       },
       "ExternalTaskAuthorisation": {
         "additionalProperties": false,
@@ -17286,6 +17419,131 @@
           }
         },
         "summary": "Read External Capabilities",
+        "tags": [
+          "claimant"
+        ]
+      }
+    },
+    "/api/v1/claims/{claim_id}/external-service-offers/{offer_id}/decision": {
+      "post": {
+        "operationId": "decide_external_offer_api_v1_claims__claim_id__external_service_offers__offer_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "offer_id",
+            "required": true,
+            "schema": {
+              "title": "Offer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Northwind-Anonymous-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Northwind-Anonymous-Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalServiceOfferDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimantExternalServiceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide External Offer",
         "tags": [
           "claimant"
         ]

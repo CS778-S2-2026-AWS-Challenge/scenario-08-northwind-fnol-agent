@@ -1,16 +1,14 @@
 # Third-party service consent and shared-data contract
 
-This reference defines the final Validation Prototype consent and shared-data
-boundary for Issues #592 through #595. It combines the accepted third-party service
-catalogue with the claimant-facing P5.1 copy and defines record permission,
+This reference defines the current consent and shared-data boundary for Runtime v6. It combines
+the accepted third-party service catalogue with the claimant-facing P5.1 copy and defines record permission,
 external-send permission, Northwind authority, claimant consent, refusal,
 withdrawal, retention, expiry, and audit requirements.
 
-This document does not create a provider integration, production legal basis,
-new consent state, new Runtime service identity, new Claim State field, or new
-external-task lifecycle. Current product specifications and implemented API and
-domain contracts remain authoritative where this reference maps to Runtime
-behaviour.
+This document does not create production legal basis, a new Claim State field, or a second
+external-task lifecycle. Runtime v6 implements registered, message-bound offers and controlled
+provider-shaped adapters; current product specifications and implemented API and domain contracts
+remain authoritative.
 
 ## Apply the authority model
 
@@ -71,7 +69,7 @@ Withdrawal after a request may have reached a recipient is recorded, but
 Northwind must not promise cancellation, recall, or recipient-side deletion
 without separately verified provider capability.
 
-The current consent model defines `granted` and `withdrawn`; it does not define
+The current consent model defines `granted`, `declined`, and `withdrawn`; it does not define
 a general production time-based consent-expiry policy. This contract therefore
 does not invent an expiry duration. A service that requires a time-based expiry
 rule remains unavailable for production use until an authoritative contract
@@ -236,16 +234,19 @@ actor.
 
 ## Preserve implementation boundaries
 
-This contract introduces no API, Runtime, persistence, frontend, fixture,
-provider, or continuous-integration change.
+Runtime v6 implements versioned offers for vehicle assessment, vehicle recovery, repair booking,
+home emergency repair, contents specialist assessment, repairer information, Police 105 guidance,
+and Traffic Crash Report guidance. Task-backed services use the existing consent, authority,
+ExternalTask, request, idempotency, audit, and reconciliation boundaries. Manual link and phone
+services never create an ExternalTask. These controlled adapters reproduce provider-shaped
+contracts for the product journey; they do not establish commercial provider access or production
+legal authority.
 
-The only current implemented external-service identity recognised by this P5
-mapping is `vehicle_damage_assessment_routing`, with requested action
-`vehicle_damage_assessment` and the six disclosure fields listed above. That
-path is a controlled fixture, not proof of a production assessor integration.
-
-All other P3 service and platform identifiers remain research coordinates.
-They do not reserve Runtime service identities or imply future implementation.
+An offer may appear before formal Claim creation and is persisted on the originating Agent
+message. The `primary_action` remains the normal Claim journey action. Consent binds to the exact
+offer, registry version, disclosure fields, selected Evidence IDs, and fingerprint. A later turn
+may continue an already granted offer when missing registered inputs become confirmed; it does not
+ask for permission again or allow the model or frontend to widen scope.
 
 ## Complete cross-review
 
@@ -267,7 +268,7 @@ states or new contract identifiers.
 | --- | --- | --- |
 | Claim-participant purpose and minimum-data copy | Resolved | All 12 P3 claim-participant rows provide claimant-readable service, purpose, and shared-data wording before the raw contract mapping. |
 | Enabling-platform processing scope | Resolved | All eight `P3-EN-*` rows state the bounded processing purpose and candidate data while prohibiting a standalone consent card. |
-| Service and Runtime identifier alignment | Resolved | All 20 accepted P3 identifiers retain their P3 provenance. Only `vehicle_damage_assessment_routing`, action `vehicle_damage_assessment`, and its six permitted fields are executable. |
+| Service and Runtime identifier alignment | Resolved | All accepted P3 identifiers retain their P3 provenance. Runtime v6 publishes the eight registered claimant-service identities listed above; each maps a generic model submit intent to one fixed service action and disclosure scope. |
 | Consent-state copy | Resolved | The nine `P5-COPY-*` fragments cover record/send separation, consent, refusal, both withdrawal moments, blocked retention, manual contact, manual retention, and unavailable service handling. |
 | Production privacy and access conditions | Explicitly blocked | Each unresolved Northwind recipient, authority, retention, expiry, access, or data-use condition results in a manual, `unavailable`, or `simulation-only` rule. It never defaults to permission or a live capability. |
 

@@ -180,7 +180,7 @@ def _grant_consent(
     return cast(dict[str, Any], response.json())
 
 
-def test_claimant_assessor_action_appears_only_after_a_relevant_created_motor_claim(
+def test_legacy_claim_projection_does_not_create_a_new_assessor_offer(
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
@@ -202,21 +202,7 @@ def test_claimant_assessor_action_appears_only_after_a_relevant_created_motor_cl
     assert draft.status_code == 200
     assert draft.json()['external_service_action'] is None
     assert created.status_code == 200
-    action = created.json()['external_service_action']
-    assert action['status'] == 'consent_required'
-    assert action['registry_version'] == 'external-service-lifecycle.v1'
-    assert action['lifecycle_status'] == 'consent_required'
-    assert action['catalogue_reference'] == 'P3-ASSESSOR'
-    assert action['capability_provenance'] == 'simulated'
-    assert action['access_form'] == 'controlled assessor simulation'
-    assert action['status_label'] == 'Permission needed'
-    assert action['pending_owner'] == 'claimant'
-    assert action['next_action']
-    assert 'Simulation-only' in action['limitation']
-    assert action['provider'] == 'Controlled assessment fixture'
-    assert action['purpose'].endswith('This does not decide coverage or approve repairs.')
-    assert len(action['shared_data_summary']) == 4
-    assert action['routing'] is None
+    assert created.json()['external_service_action'] is None
 
 
 def test_claimant_consent_is_bounded_persisted_and_idempotent(
@@ -309,7 +295,7 @@ def test_claimant_consent_is_bounded_persisted_and_idempotent(
     assert consent_event.visibility is AuditVisibility.AUDIT_ONLY
     claimant = client.get(f'/api/v1/claims/{claim_id}', headers=AUTH).json()
     assert 'external_service_consents' not in claimant
-    assert 'consent_ref' not in str(claimant)
+    assert consent.consent_ref not in str(claimant)
 
 
 def test_claimant_consent_failure_leaves_claim_and_retry_state_unchanged() -> None:

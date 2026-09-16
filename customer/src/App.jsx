@@ -4,6 +4,7 @@ import {
   confirmClaimFields,
   createClaim,
   createExternalClaim,
+  decideExternalServiceOffer,
   grantAssessorConsent,
   getAuthenticatedAccount,
   hasClaimantAccessToken,
@@ -368,6 +369,8 @@ function App() {
     consentChecked: false,
     error: null,
   })
+  const [offerConsentChecks, setOfferConsentChecks] = useState({})
+  const [offerErrors, setOfferErrors] = useState({})
   const [failedMessage, setFailedMessage] = useState(null)
   const [pendingMessage, setPendingMessage] = useState(null)
   const pendingSubmission = useRef(null)
@@ -1589,6 +1592,43 @@ function App() {
     }
   }
 
+  async function decideMessageExternalService(action, decision) {
+    if (!claim || !action?.offer_id || isBusy) return
+    if (decision === 'grant' && !offerConsentChecks[action.offer_id]) return
+    setOfferErrors((current) => ({ ...current, [action.offer_id]: null }))
+    setStatus('granting-service-consent')
+    try {
+      const response = await decideExternalServiceOffer({
+        claimId: claim.claim_id,
+        offerId: action.offer_id,
+        revision: claim.revision,
+        decision,
+      })
+      latestRevision.current = response.revision
+      setClaim((current) => ({
+        ...current,
+        revision: response.revision,
+        primary_action: response.primary_action,
+      }))
+      setMessages((current) => current.map((message) => (
+        message.message_id === action.agent_message_id
+          ? {
+              ...message,
+              message_actions: (message.message_actions || []).map((candidate) => (
+                candidate.offer_id === action.offer_id ? response.action : candidate
+              )),
+            }
+          : message
+      )))
+      setNextStep(response.customer_next_step)
+      setOfferConsentChecks((current) => ({ ...current, [action.offer_id]: false }))
+      setStatus('idle')
+    } catch (requestError) {
+      setOfferErrors((current) => ({ ...current, [action.offer_id]: requestError }))
+      setStatus('idle')
+    }
+  }
+
   async function loadSavedReports() {
     if (isBusy) return
     setError('')
@@ -2498,6 +2538,25 @@ function App() {
                     <div className="agent-body">
                       <div className="agent-label">Claims assistant</div>
                       <div className="agent-text"><p>{messageText(message)}</p><button className="listen-message" type="button" onClick={() => { if (globalThis.speechSynthesis) { globalThis.speechSynthesis.cancel(); globalThis.speechSynthesis.speak(new SpeechSynthesisUtterance(messageText(message))) } }}>Listen</button></div>
+                      {(message.message_actions || []).map((action) => (
+                        <div className="conversation-agent-action" key={action.offer_id || action.service_identity}>
+                          <ExternalServiceAction
+                            action={action}
+                            consentChecked={Boolean(offerConsentChecks[action.offer_id])}
+                            setConsentChecked={(checked) => setOfferConsentChecks((current) => ({
+                              ...current,
+                              [action.offer_id]: checked,
+                            }))}
+                            onRequest={() => decideMessageExternalService(action, 'grant')}
+                            onDecline={() => decideMessageExternalService(action, 'decline')}
+                            onWithdraw={() => decideMessageExternalService(action, 'withdraw')}
+                            status={status}
+                            error={offerErrors[action.offer_id] || null}
+                            expanded={conversationPanelExpanded(action.offer_id)}
+                            onToggle={() => toggleConversationPanel(action.offer_id)}
+                          />
+                        </div>
+                      ))}
                       {item.key === lastAgentMessageId && conversationActionKind && (
                         <div className="conversation-agent-action">
                           {renderConversationAction()}
