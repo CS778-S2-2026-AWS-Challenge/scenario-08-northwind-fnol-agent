@@ -274,6 +274,125 @@ describe('ClaimWorkspace navigation', () => {
     expect(onRetryExternalActionContext).toHaveBeenCalledWith('tsk_assessor_1')
   })
 
+  it('scopes external recovery guards to the exact task without replacing the backend primary action', async () => {
+    const user = userEvent.setup()
+    const taskAAction = {
+      action_code: 'external.reconcile_response',
+      target_type: 'external_task',
+      target_ref: 'tsk_assessor_a',
+      label: 'Reconcile task A',
+      purpose: 'Check task A without resubmitting it.',
+      availability: 'confirmation_required',
+      confirmation: { message: 'Check task A?' },
+      inputs: [],
+      based_on_revision: 4,
+    }
+    const taskBAction = {
+      ...taskAAction,
+      target_ref: 'tsk_assessor_b',
+      label: 'Reconcile task B',
+      purpose: 'Check task B without resubmitting it.',
+      confirmation: { message: 'Check task B?' },
+    }
+    const externalRecord = (taskId, service) => ({
+      task: {
+        task_id: taskId,
+        claim_id: 'clm_1',
+        service_identity: service,
+        requested_action: 'assessment',
+        integration_source: 'fixture',
+        status: 'unknown_outcome',
+        failure_code: null,
+        updated_at: '2026-09-16T01:00:00Z',
+      },
+      request: null,
+      lifecycle: {
+        stakeholder: 'external_party',
+        service,
+        request_type: 'assessment',
+        authority_state: 'recorded',
+        consent_state: 'recorded',
+        delivery_state: 'submitted',
+        verification_state: 'reconciliation_required',
+        pending_owner: 'claims_professional',
+        status_label: 'Outcome not confirmed',
+        status_detail: 'The provider outcome is not confirmed.',
+        provider_reference: null,
+        result: null,
+        result_source: null,
+        result_verification_state: null,
+        result_received_at: null,
+        result_verified_at: null,
+        result_verified_against_revision: null,
+        result_evidence: [],
+        limitation: null,
+        next_action: 'Reconcile the existing operation before any retry.',
+        needs_attention: true,
+      },
+    })
+    const actionDetail = {
+      ...detail,
+      work_summary: {
+        ...detail.work_summary,
+        primary_action_code: taskAAction.action_code,
+        primary_action_target_ref: taskAAction.target_ref,
+      },
+      allowed_actions: [taskAAction, taskBAction],
+    }
+    const externalRequests = {
+      status: 'available',
+      items: [
+        externalRecord('tsk_assessor_a', 'vehicle damage assessor'),
+        externalRecord('tsk_assessor_b', 'repair assessor'),
+      ],
+    }
+    const taskANotice = {
+      claimId: 'clm_1',
+      taskId: 'tsk_assessor_a',
+      recovering: false,
+      message: 'Task A may have completed. Its outcome is not confirmed. Do not submit it again until authoritative state has been refreshed.',
+    }
+    const { rerender } = render(<ClaimWorkspace
+      {...props}
+      detail={actionDetail}
+      resources={{ handoffs: { items: [] }, externalRequests }}
+      externalActionNotices={[taskANotice]}
+      onRetryExternalActionContext={vi.fn()}
+    />)
+
+    expect(screen.getByRole('heading', { name: 'No staff action is currently authorised' })).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Reconcile task B' })).not.toBeInTheDocument()
+
+    rerender(<ClaimWorkspace
+      {...props}
+      detail={actionDetail}
+      section="external-services"
+      resources={{ handoffs: { items: [] }, externalRequests }}
+      externalActionNotices={[taskANotice]}
+      onRetryExternalActionContext={vi.fn()}
+      onExternalTaskAction={vi.fn()}
+    />)
+
+    await user.click(screen.getByText('Vehicle Damage Assessor'))
+    await user.click(screen.getByText('Repair Assessor'))
+    expect(screen.queryByRole('heading', { name: 'Reconcile task A' })).not.toBeInTheDocument()
+    const taskBPanel = screen.getByRole('heading', { name: 'Reconcile task B' }).closest('section')
+    expect(within(taskBPanel).getByRole('button', { name: 'Review Reconcile task B' })).toBeEnabled()
+
+    rerender(<ClaimWorkspace
+      {...props}
+      detail={actionDetail}
+      section="external-services"
+      resources={{ handoffs: { items: [] }, externalRequests }}
+      externalActionNotices={[]}
+      onRetryExternalActionContext={vi.fn()}
+      onExternalTaskAction={vi.fn()}
+    />)
+
+    expect(screen.getByRole('heading', { name: 'Reconcile task A' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Reconcile task B' })).toBeInTheDocument()
+  })
+
   it('does not present a blocked or inexact backend pair as the staff next action', () => {
     const blocked = {
       action_code: 'human.accept_handoff',
