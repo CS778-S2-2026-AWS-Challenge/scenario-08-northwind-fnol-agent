@@ -869,6 +869,8 @@ function App() {
     const controller = new AbortController()
     let active = true
     let reconnectDelay = 1000
+    let degradedRefreshes = 0
+    const maxDegradedRefreshes = 5
 
     function rememberEvent(eventId) {
       if (!eventId) return
@@ -918,6 +920,7 @@ function App() {
         realtimeCursor.current = null
         realtimeSeenEventIds.current.clear()
         reconnectDelay = 1000
+        degradedRefreshes = 0
         return
       }
       if (delivery.type !== 'resources.changed') return
@@ -981,6 +984,18 @@ function App() {
       rememberEvent(eventId)
       if (delivery.cursor) realtimeCursor.current = delivery.cursor
       reconnectDelay = 1000
+      degradedRefreshes = 0
+    }
+
+    async function runDegradedRefresh() {
+      if (degradedRefreshes >= maxDegradedRefreshes) return
+      if (globalThis.document?.visibilityState === 'hidden') return
+      degradedRefreshes += 1
+      try {
+        await refreshFullSnapshot()
+      } catch {
+        // A later bounded fallback attempt can recover once projections are reachable.
+      }
     }
 
     async function connect() {
@@ -1001,9 +1016,12 @@ function App() {
               await refreshFullSnapshot()
               realtimeCursor.current = null
               realtimeSeenEventIds.current.clear()
+              degradedRefreshes = 0
             } catch {
               // The reconnect loop retries the authoritative resync.
             }
+          } else {
+            await runDegradedRefresh()
           }
           if (latestEvidenceItems.current.some((item) => item.file_status === 'processing')) {
             setEvidenceSyncNotice(
@@ -1012,7 +1030,8 @@ function App() {
           }
         }
         if (!active || controller.signal.aborted) return
-        await new Promise((resolve) => globalThis.setTimeout(resolve, reconnectDelay))
+        const jitter = Math.floor(Math.random() * Math.min(250, reconnectDelay / 4))
+        await new Promise((resolve) => globalThis.setTimeout(resolve, reconnectDelay + jitter))
         reconnectDelay = Math.min(reconnectDelay * 2, 8000)
       }
     }
