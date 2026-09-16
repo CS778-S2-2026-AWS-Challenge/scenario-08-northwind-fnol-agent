@@ -11,6 +11,7 @@ complete than it was.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from datetime import datetime
 from enum import StrEnum
@@ -59,7 +60,22 @@ class Arrival(StrEnum):
 
 _UNDELIVERED = {Arrival.NO_ROUTE, Arrival.NOT_DELIVERED}
 _ARRIVED_BY_NO_STEP = _UNDELIVERED | {Arrival.NOT_APPLICABLE}
-_AUTHORITY_ROOTS = ('docs/', 'SPEC/')
+_CITED_DOCUMENT = re.compile(r'((?:docs|SPEC)(?:/[\w-][\w.-]*)+\.[A-Za-z]+)\b[^"]*"')
+_QUOTED_PASSAGE = re.compile(r'"([^"]{12,})"')
+
+
+def cited_authority(authority: str | None) -> tuple[str, list[str]] | None:
+    """The document path an authority starts with and the passages it quotes from it.
+
+    None unless the authority begins with a file path below `docs/` or `SPEC/` and quotes at
+    least one passage, so a directory name or a stray path fragment is not a citation.
+    """
+
+    document = _CITED_DOCUMENT.match(authority or '')
+    passages = _QUOTED_PASSAGE.findall(authority or '')
+    if document is None or not passages:
+        return None
+    return document.group(1), passages
 
 
 class SeamVerdict(StrEnum):
@@ -143,10 +159,10 @@ class InputMaterial(_Record):
                     'not_applicable_authority'
                 )
             return self
-        if not authority or not any(root in authority for root in _AUTHORITY_ROOTS):
+        if cited_authority(authority) is None:
             raise ValueError(
-                f'{self.path}: a not_applicable material must cite the repository document '
-                '(under docs/ or SPEC/) that makes it not applicable'
+                f'{self.path}: a not_applicable authority must start with a repository document '
+                'path under docs/ or SPEC/ and quote the passage that makes it not applicable'
             )
         if self.evidence_id is not None:
             raise ValueError(f'{self.path}: a not_applicable material cannot name evidence')

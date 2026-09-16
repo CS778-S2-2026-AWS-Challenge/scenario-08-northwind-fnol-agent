@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from journey_runs import motor_collision
 from journey_runs.__main__ import main as journey_main
+from journey_runs.engine import REPOSITORY_ROOT, PackMaterial
 from journey_runs.household import (
     CONTENTS,
     CONTENTS_CONFLICTING_OWNERSHIP,
@@ -44,6 +45,7 @@ from journey_runs.record import (
     StepOutcome,
     UnavailableCapability,
     VisibilityCheck,
+    cited_authority,
 )
 from pydantic import ValidationError
 
@@ -107,13 +109,16 @@ def test_the_contents_consent_record_is_not_applicable_under_its_selected_form()
     assert record.result_class is ResultClass.UNAVAILABLE
 
 
+def _every_pack_material() -> list[PackMaterial]:
+    packs = [MOTOR_COLLISION_PACK, *MOTOR_PACKS.values()]
+    packs += [scenario.pack for scenario in SCENARIOS.values()]
+    return [material for pack in packs for material in pack]
+
+
 def test_only_the_manual_form_consent_records_are_not_applicable() -> None:
-    packs = {'motor/base': MOTOR_COLLISION_PACK, **MOTOR_PACKS}
-    packs |= {f'household/{scenario_id}': s.pack for scenario_id, s in SCENARIOS.items()}
     not_applicable = {
         material.path
-        for pack in packs.values()
-        for material in pack
+        for material in _every_pack_material()
         if material.route is Arrival.NOT_APPLICABLE
     }
 
@@ -128,6 +133,19 @@ def test_only_the_manual_form_consent_records_are_not_applicable() -> None:
         for material in pack
         if material.path == 'motor/motor-consent-record.pdf'
     } == {Arrival.CONSENT_ROUTE}
+
+
+def test_every_not_applicable_authority_quotes_a_real_document() -> None:
+    authorities = {m.authority for m in _every_pack_material() if m.authority is not None}
+
+    assert authorities
+    for authority in authorities:
+        cited = cited_authority(authority)
+        assert cited is not None, authority
+        document, passages = cited
+        text = ' '.join((REPOSITORY_ROOT / document).read_text(encoding='utf-8').split())
+        for passage in passages:
+            assert ' '.join(passage.split()) in text, (document, passage)
 
 
 def _assert_household_run(run: HouseholdRun, scenario: HouseholdScenario) -> None:
@@ -382,10 +400,29 @@ def test_a_material_is_delivered_only_by_a_step_that_succeeded(
 
 
 @pytest.mark.parametrize(
+    'authority',
+    [
+        None,
+        'Northwind sends nothing.',
+        'docs/',
+        'SPEC/',
+        'see docs/research/forms.md: "Northwind sends nothing."',
+        'docs/research/forms.md',
+        'docs/research/forms.md: "too short"',
+    ],
+    ids=['missing', 'no-path', 'docs-dir', 'spec-dir', 'embedded', 'no-quote', 'short-quote'],
+)
+def test_a_not_applicable_authority_must_start_with_a_document_and_quote_it(
+    authority: str | None,
+) -> None:
+    material = _NOT_APPLICABLE[0].model_dump() | {'not_applicable_authority': authority}
+    with pytest.raises(ValidationError, match='must start with a repository document path'):
+        JourneyRunRecord.model_validate(_record(materials=[material], result_class='completed'))
+
+
+@pytest.mark.parametrize(
     ('changes', 'message'),
     [
-        ({'not_applicable_authority': None}, 'must cite the repository document'),
-        ({'not_applicable_authority': 'Northwind sends nothing.'}, 'must cite the repository'),
         ({'delivered_at_step': 'step'}, 'cannot name the step'),
         ({'evidence_id': 'evd_1'}, 'cannot name evidence'),
         (

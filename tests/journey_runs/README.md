@@ -40,8 +40,10 @@ The record rejects evidence that contradicts itself:
   is judged by its own outcome.
 - A delivered material must name the step that delivered it, and that step must have succeeded; an
   undelivered one names no step.
-- A `not_applicable` material names no step and no evidence, and must quote a repository document
-  under `docs/` or `SPEC/` in `not_applicable_authority`. No other material may carry one.
+- A `not_applicable` material names no step and no evidence. Its `not_applicable_authority` must
+  start with a document path under `docs/` or `SPEC/` and quote at least one passage from it; a
+  directory name or a path fragment inside other text is rejected, and the suite checks that every
+  cited document exists and contains each quoted passage. No other material may carry one.
 
 ## Result classes
 
