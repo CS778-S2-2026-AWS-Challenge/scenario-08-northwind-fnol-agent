@@ -34,11 +34,18 @@ import {
 import './App.css'
 import './styles/frontend-refactor.css'
 import MessageComposer from './components/MessageComposer.jsx'
+import GuidedMotorClaim from './GuidedMotorClaim.jsx'
 import ExternalServiceAction, { ExternalServiceOverview } from './components/ExternalServiceAction.jsx'
 import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
 import ClaimDocuments from './components/ClaimDocuments.jsx'
+import ConversationHistorySidebar from './components/ConversationHistorySidebar.jsx'
 import { documentAttentionCount } from './claimDocumentProjection.js'
+import {
+  forgetAnonymousConversation,
+  readAnonymousConversationHistory,
+  rememberAnonymousConversation,
+} from './anonymousConversationHistory.js'
 import {
   ClaimProgressDisclosure,
   ConversationActionCard,
@@ -318,6 +325,7 @@ function App() {
     if (path === '/account/claims') return 'claim-history'
     if (path === '/files') return 'files'
     if (path === '/how-it-works') return 'how-it-works'
+    if (path === '/claim-form') return 'traditional-form'
     return 'home'
   })()
   const [page, setPageState] = useState(initialPage)
@@ -339,8 +347,11 @@ function App() {
   const [editValue, setEditValue] = useState('')
   const [handoff, setHandoff] = useState(null)
   const [assistanceReplyReview, setAssistanceReplyReview] = useState(null)
-  const [claimHistory, setClaimHistory] = useState(null)
+  const [claimHistory, setClaimHistory] = useState(() => (
+    hasClaimantAccessToken() ? null : readAnonymousConversationHistory()
+  ))
   const [claimHistoryError, setClaimHistoryError] = useState('')
+  const [conversationHistoryOpen, setConversationHistoryOpen] = useState(false)
   const [selectedHistoryClaimId, setSelectedHistoryClaimId] = useState(() => {
     const match = globalThis.location?.pathname?.match(/^\/account\/claims\/([^/]+)/)
     return match ? decodeURIComponent(match[1]) : null
@@ -409,6 +420,7 @@ function App() {
           .filter((item) => item.claim_id === claim.claim_id || item.can_resume)
       : [claim, ...(savedReports || [])]
     : []
+  const homepageConversationReports = claim ? conversationReports : (savedReports || [])
   const selectedHistoryClaim = claimHistory?.find((item) => item.claim_id === selectedHistoryClaimId)
     || (claim?.claim_id === selectedHistoryClaimId ? claim : null)
   const documentOutstandingCount = evidenceLoadStatus === 'ready'
@@ -416,7 +428,11 @@ function App() {
     : null
 
   function rememberClaimInHistory(createdClaim) {
-    if (!hasClaimantAccessToken()) return
+    if (!hasClaimantAccessToken()) {
+      setClaimHistory(rememberAnonymousConversation(createdClaim))
+      setClaimHistoryError('')
+      return
+    }
     confirmedClaimProjections.current.set(createdClaim.claim_id, createdClaim)
     setClaimHistory((current) => [
       createdClaim,
@@ -439,6 +455,7 @@ function App() {
       .then((currentAccount) => setAccount(currentAccount))
       .catch(() => {
         setClaimantAccessToken(null)
+        setClaimHistory(readAnonymousConversationHistory())
         if (globalThis.location?.pathname === '/files' || globalThis.location?.pathname?.startsWith('/account/claims')) {
           setPageState('login')
           globalThis.history?.replaceState({ northwindRoute: 'login' }, '', '/auth/login')
@@ -455,6 +472,23 @@ function App() {
   }, [account, page])
 
   useEffect(() => {
+    if (isWorkspaceActive || page !== 'home') setConversationHistoryOpen(false)
+  }, [isWorkspaceActive, page])
+
+  useEffect(() => {
+    if (
+      !conversationHistoryOpen
+      || !account
+      || claimHistory !== null
+      || claimHistoryError
+      || status === 'loading-reports'
+    ) return
+    loadSavedReports().catch(() => {})
+  // loadSavedReports is a local command; this effect reacts only to sidebar/data state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account, claimHistory, claimHistoryError, conversationHistoryOpen, status])
+
+  useEffect(() => {
     if (conversationPanelRef.current) conversationPanelRef.current.scrollTop = 0
   }, [workspaceView])
 
@@ -467,6 +501,7 @@ function App() {
     if (nextPage === 'claim-evidence' && selectedHistoryClaimId) return `/account/claims/${encodeURIComponent(selectedHistoryClaimId)}/evidence`
     if (nextPage === 'files') return '/files'
     if (nextPage === 'how-it-works') return '/how-it-works'
+    if (nextPage === 'traditional-form') return '/claim-form'
     if (isWorkspaceActive && claim?.claim_id) return `/claims/${claim.claim_id}`
     return '/'
   }
@@ -488,6 +523,7 @@ function App() {
     if (/^\/account\/claims\/[^/]+$/.test(pathname)) return account ? 'claim-features' : 'login'
     if (pathname === '/files') return account ? 'files' : 'login'
     if (pathname === '/how-it-works') return 'how-it-works'
+    if (pathname === '/claim-form') return 'traditional-form'
     if (pathname.startsWith('/claims/')) return claim?.claim_id ? 'home' : 'home'
     return 'home'
   }
@@ -532,6 +568,8 @@ function App() {
                   ? '/files'
                   : page === 'how-it-works'
                     ? '/how-it-works'
+                    : page === 'traditional-form'
+                      ? '/claim-form'
                     : isWorkspaceActive && claim?.claim_id ? `/claims/${claim.claim_id}` : '/'
     if (globalThis.location?.pathname !== expectedPath) {
       globalThis.history?.replaceState({ northwindRoute: page }, '', expectedPath)
@@ -1248,6 +1286,12 @@ function App() {
       setClaimRevision(turn.claim_revision, turn.primary_action)
       if (turn.decision) setNextStep(turn.decision.customer_next_step)
       if (turn.handoff) setHandoff(turn.handoff)
+      rememberClaimInHistory({
+        ...activeClaim,
+        revision: turn.claim_revision,
+        customer_next_step: turn.decision?.customer_next_step || activeClaim.customer_next_step,
+        updated_at: turn.claimant_message?.created_at || activeClaim.updated_at,
+      })
       setDraft('')
       if (isAssistanceReply) {
         setAssistanceReplyReview({
@@ -1677,6 +1721,24 @@ function App() {
     }
   }
 
+  function openConversationHistorySidebar() {
+    setConversationHistoryOpen(true)
+  }
+
+  function closeConversationHistorySidebar() {
+    setConversationHistoryOpen(false)
+  }
+
+  function startHomepageConversation() {
+    closeConversationHistorySidebar()
+    startNewChat()
+  }
+
+  function resumeHomepageConversation(claimId) {
+    closeConversationHistorySidebar()
+    resumeSavedReport(claimId)
+  }
+
   async function signIn(event) {
     event.preventDefault()
     const formData = new FormData(event.currentTarget)
@@ -1695,11 +1757,13 @@ function App() {
           setContentsItems(promoted.contents_items || [])
           setDynamicForm(promoted.dynamic_form || null)
           setNextStep(promoted.customer_next_step)
+          forgetAnonymousConversation(claim.claim_id)
         } catch (promotionError) {
           if (!(promotionError instanceof ApiRequestError && promotionError.status === 404)) throw promotionError
         }
       }
       setAccount(await getAuthenticatedAccount())
+      setClaimHistory(null)
       setWorkspaceActive(true)
       setWorkspaceView('chat'); setPage('home'); setAuthStatus('idle')
     } catch (requestError) {
@@ -1734,11 +1798,13 @@ function App() {
           setContentsItems(promoted.contents_items || [])
           setDynamicForm(promoted.dynamic_form || null)
           setNextStep(promoted.customer_next_step)
+          forgetAnonymousConversation(claim.claim_id)
         } catch (promotionError) {
           if (!(promotionError instanceof ApiRequestError && promotionError.status === 404)) throw promotionError
         }
       }
       setAccount(await getAuthenticatedAccount())
+      setClaimHistory(null)
       setWorkspaceActive(true)
       setWorkspaceView('chat'); setPage('home'); setAuthStatus('idle')
     } catch (requestError) {
@@ -1752,7 +1818,7 @@ function App() {
     setAuthStatus('loading'); setAuthError('')
     try { await logoutClaimant() } catch (requestError) { setAuthError(requestError.message) }
     setAccount(null)
-    setClaimHistory(null)
+    setClaimHistory(readAnonymousConversationHistory())
     setClaimHistoryError('')
     setSelectedHistoryClaimId(null)
     confirmedClaimProjections.current.clear()
@@ -1992,6 +2058,18 @@ function App() {
             </button>
           )}
         </div>
+        {!isWorkspaceActive && page === 'home' && (
+          <nav className="entry-header-actions" aria-label="Account">
+            <button className="entry-header-link" type="button" onClick={() => setPage(account ? 'account' : 'login')}>
+              {account ? 'My account' : 'Log in'}
+            </button>
+            {!account && (
+              <button className="entry-header-account" type="button" onClick={() => setPage('register')}>
+                Sign up
+              </button>
+            )}
+          </nav>
+        )}
         {!isWorkspaceActive && page !== 'home' && page !== 'how-it-works' && (
           <button className="login-button" type="button" onClick={() => setPage(account ? 'account' : 'login')}>
             {account ? 'My account' : 'Log in'}
@@ -2014,7 +2092,33 @@ function App() {
         )}
       </header>
 
-      {!isWorkspaceActive && page === 'how-it-works' ? (
+      {!isWorkspaceActive && page === 'home' && (
+        <ConversationHistorySidebar
+          account={account}
+          activeClaimId={claim?.claim_id || null}
+          busy={isBusy}
+          conversations={homepageConversationReports}
+          error={claimHistoryError}
+          isOpen={conversationHistoryOpen}
+          loading={status === 'loading-reports'}
+          onClose={closeConversationHistorySidebar}
+          onLogin={() => setPage('login')}
+          onNewConversation={startHomepageConversation}
+          onOpen={openConversationHistorySidebar}
+          onRetry={loadSavedReports}
+          onSelect={resumeHomepageConversation}
+        />
+      )}
+
+      {!isWorkspaceActive && page === 'traditional-form' ? (
+        <GuidedMotorClaim
+          initialDescription={draft}
+          onExit={(description) => {
+            setDraft(description)
+            setPage('home')
+          }}
+        />
+      ) : !isWorkspaceActive && page === 'how-it-works' ? (
         <main className="how-it-works-page">
           <section className="how-it-works-card" aria-labelledby="how-it-works-title">
             <button className="back-link" type="button" onClick={() => setPage('home')}>← Back</button>
@@ -2195,10 +2299,13 @@ function App() {
         <main className="entry-page">
           <section className="entry-hero" aria-labelledby="entry-title">
             <div className="entry-content">
-              <p className="entry-brand-line" id="entry-title">Understand insurance. Understand you better.</p>
-              <p className="entry-intro">Tell us what happened — we&apos;ll take it from there.</p>
-              <section id="claims" className="claim-starter" aria-labelledby="claim-starter-title">
-                <h1 id="claim-starter-title">Tell us what happened</h1>
+              <h1 className="entry-brand-line" id="entry-title">
+                <span>Understand insurance.</span>
+                {' '}
+                <span>Understand you better.</span>
+              </h1>
+              <p className="entry-intro">Tell us what happened — we&apos;ll guide you through the next steps.</p>
+              <section id="claims" className="claim-starter" aria-label="Start a claim">
                 <MessageComposer
                   draft={draft}
                   setDraft={setDraft}
@@ -2221,10 +2328,6 @@ function App() {
                   onFileSelected={handleFileSelected}
                   onRemoveAttachment={removeComposerAttachment}
                 />
-                <div className="entry-hint-row">
-                  <span>Press Enter to start, or ask anything about a claim</span>
-                  <button className="text-link" type="button" onClick={() => setPage('how-it-works')}>How it works</button>
-                </div>
                 {failedMessage && (
                   <article className="message message-claimant is-failed">
                     <p className="message-author">{failedMessage.sender}</p>
@@ -2233,37 +2336,17 @@ function App() {
                   </article>
                 )}
               </section>
-              <div className="entry-secondary-actions">
-                <button className="text-link entry-login-link" type="button" onClick={() => setPage(account ? 'account' : 'login')}>
-                  {account ? 'My account' : 'Log in'}
+              <div className="entry-tertiary-links">
+                <button className="text-link entry-process-link" type="button" onClick={() => setPage('how-it-works')}>
+                  How does the claim process work?
                 </button>
-                {!account && <button className="text-link" type="button" onClick={() => setPage('register')}>Create an account</button>}
-                {account && savedReports?.length > 0 && <button className="text-link" type="button" onClick={() => loadSavedReports()} disabled={isBusy}>
-                  {status === 'loading-reports' ? 'Loading claims...' : 'Resume a claim'}
-                </button>}
+                <p className="entry-form-fallback">
+                  Prefer a form?{' '}
+                  <button className="text-link" type="button" onClick={() => setPage('traditional-form')}>
+                    Use the traditional web form
+                  </button>
+                </p>
               </div>
-              {savedReports !== null && (
-                <section className="saved-reports" aria-labelledby="saved-reports-title">
-                  <h2 id="saved-reports-title">Claims in progress</h2>
-                  {savedReports.length === 0 ? (
-                    <p>No claims in progress need your attention.</p>
-                  ) : (
-                    <ul>
-                      {savedReports.map((report) => (
-                        <li key={report.claim_id}>
-                          <div>
-                            <strong>{report.incident_type || 'Incident report'}</strong>
-                            <span>{report.customer_next_step.summary}</span>
-                          </div>
-                          <button className="secondary-button" type="button" onClick={() => resumeSavedReport(report.claim_id)} disabled={isBusy}>
-                            {status === 'resuming' ? 'Resuming...' : 'Resume claim'}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-              )}
             </div>
           </section>
         </main>

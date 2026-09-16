@@ -224,7 +224,7 @@ export default function MessageComposer({
 
   const modelDisplayName = (model) => model?.label || model?.id
   const selectedModelOption = models.find((model) => model.id === selectedModel)
-  const modelLabel = modelDisplayName(selectedModelOption) || selectedModel || modelDisplayName(models[0]) || 'Model unavailable'
+  const modelLabel = modelDisplayName(selectedModelOption) || selectedModel || modelDisplayName(models[0]) || 'Choose model'
   const modelSelectionDisabled = busy || disabled || models.length === 0
   const claimTypeOptions = [
     {
@@ -241,17 +241,19 @@ export default function MessageComposer({
   const modelOptions = models.map((model) => ({
     value: model.id,
     label: modelDisplayName(model),
-    meta: [
-      model.label !== model.id ? model.id : null,
-      model.availability === 'unavailable' ? 'Unavailable' : null,
-    ].filter(Boolean).join(' · ') || undefined,
+    meta: isWorkspace
+      ? [
+          model.label !== model.id ? model.id : null,
+          model.availability === 'unavailable' ? 'Unavailable' : null,
+        ].filter(Boolean).join(' · ') || undefined
+      : undefined,
     disabled: model.availability === 'unavailable',
   }))
 
   return (
     <form className={`composer ${isWorkspace ? 'workspace-composer' : ''}`} onSubmit={onSubmit}>
       <label className="sr-only" htmlFor={isWorkspace ? 'workspace-incident-input' : 'incident-input'}>{inputLabel}</label>
-      <div className={isWorkspace ? 'composer-input-surface' : undefined}>
+      <div className={isWorkspace ? 'composer-input-surface' : 'entry-composer-surface'}>
         {attachments.length > 0 && (
           <div className="composer-attachments" aria-label="Attached files">
             {attachments.map((attachment) => {

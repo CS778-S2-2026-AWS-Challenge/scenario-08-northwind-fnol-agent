@@ -79,6 +79,7 @@ const initialClaim = {
     status: 'describe_incident',
     summary: 'Describe what happened',
     required_items: [],
+    can_resume: true,
   },
   primary_action: primaryAction(),
   created_at: '2026-09-14T01:00:00Z',
@@ -195,6 +196,9 @@ function readyDynamicForm() {
 describe('claimant intake projection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    globalThis.localStorage.clear()
+    globalThis.sessionStorage.clear()
+    globalThis.sessionStorage.setItem('northwind.anonymousSession', 'anonymous-session-test')
     globalThis.history.replaceState({}, '', '/')
     api.hasClaimantAccessToken.mockReturnValue(false)
     api.getRuntimeCapabilities.mockResolvedValue({
@@ -225,13 +229,13 @@ describe('claimant intake projection', () => {
 
     await user.click(model)
     expect(screen.getByRole('listbox', { name: 'Model' })).toBeInTheDocument()
-    await user.click(screen.getByRole('option', { name: /gpt-5\.5.*nowcoding-gpt55/ }))
+    await user.click(screen.getByRole('option', { name: 'gpt-5.5' }))
     expect(model).toHaveTextContent('gpt-5.5')
 
     await waitFor(() => expect(model).toHaveFocus())
     await user.keyboard('{ArrowDown}')
     const selectedGpt = screen.getByRole('option', {
-      name: /gpt-5\.5.*nowcoding-gpt55/,
+      name: 'gpt-5.5',
     })
     await waitFor(() => expect(selectedGpt).toHaveFocus())
     await user.keyboard('{Home}{Enter}')
@@ -270,7 +274,7 @@ describe('claimant intake projection', () => {
     api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
 
     render(<App />)
-    await user.click(screen.getByRole('button', { name: 'Create an account' }))
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
     await user.type(screen.getByLabelText('Your name'), 'Test claimant')
     await user.type(screen.getByLabelText('Email address'), 'test@example.test')
     await user.type(screen.getByLabelText('Password'), 'correct-horse')
@@ -281,6 +285,33 @@ describe('claimant intake projection', () => {
     expect(api.createClaim).not.toHaveBeenCalled()
     expect(api.promoteAnonymousClaim).not.toHaveBeenCalled()
     expect(screen.queryByText(initialClaim.claim_id)).not.toBeInTheDocument()
+  })
+
+  it('keeps account actions in the header and opens the traditional form below the composer', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<App />)
+
+    const header = container.querySelector('.product-header')
+    expect(header).toContainElement(screen.getByRole('button', { name: 'Log in' }))
+    expect(header).toContainElement(screen.getByRole('button', { name: 'Sign up' }))
+
+    const composer = container.querySelector('.claim-starter')
+    const composerInput = screen.getByPlaceholderText('Tell us what happened…')
+    expect(composer).toHaveAttribute('aria-label', 'Start a claim')
+    expect(composer.querySelector('h2')).not.toBeInTheDocument()
+    expect(composer).toContainElement(composerInput)
+    const processLink = screen.getByRole('button', { name: 'How does the claim process work?' })
+    const formLink = screen.getByRole('button', { name: 'Use the traditional web form' })
+    expect(composer.compareDocumentPosition(processLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(processLink.compareDocumentPosition(formLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    await user.click(formLink)
+    expect(await screen.findByRole('heading', { name: 'Your details and incident' })).toBeVisible()
+    expect(globalThis.location.pathname).toBe('/claim-form')
+
+    await user.click(screen.getByRole('button', { name: /Back to claim options/ }))
+    expect(await screen.findByRole('heading', { name: /Understand insurance/ })).toBeVisible()
+    expect(globalThis.location.pathname).toBe('/')
   })
 
   it('shows one server-confirmed delivery failure with retry guidance', async () => {
@@ -389,7 +420,7 @@ describe('claimant intake projection', () => {
 
     await user.click(backButton)
 
-    expect(screen.getByText('Understand insurance. Understand you better.')).toBeVisible()
+    expect(screen.getByRole('heading', { name: /Understand insurance/ })).toBeVisible()
     expect(globalThis.location.pathname).toBe('/')
     expect(screen.queryByText(agentMessage.content.text)).not.toBeInTheDocument()
 
@@ -667,7 +698,8 @@ describe('claimant intake projection', () => {
       .mockResolvedValueOnce({ items: [claimantMessage, agentMessage, postResumeMessage] })
 
     render(<App />)
-    await user.click(await screen.findByRole('button', { name: 'Resume claim' }))
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
 
     expect(await screen.findByRole('status', { name: /Staff assistance completed/ })).toBeVisible()
     expect(screen.queryByRole('button', { name: /Where you left off/ })).not.toBeInTheDocument()
@@ -724,7 +756,8 @@ describe('claimant intake projection', () => {
     api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
 
     render(<App />)
-    await user.click(await screen.findByRole('button', { name: 'Resume claim' }))
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
 
     expect(await screen.findByRole('button', { name: 'Staff assistance' })).toBeEnabled()
     expect(screen.queryByRole('status', { name: /Staff assistance completed/ })).not.toBeInTheDocument()
@@ -796,6 +829,56 @@ describe('claimant intake projection', () => {
     })))
   })
 
+  it('uses the homepage rail to return to the existing empty conversation workspace', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const input = screen.getByPlaceholderText('Tell us what happened…')
+    await user.type(input, 'A draft that has not been sent.')
+    await user.click(screen.getByRole('button', { name: 'New conversation' }))
+
+    expect(input).toHaveValue('')
+    expect(api.createClaim).not.toHaveBeenCalled()
+    expect(globalThis.location.pathname).toBe('/')
+  })
+
+  it('restores anonymous session-local history through the existing Claim APIs after reload', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_ui_vp',
+      model_profile_id: 'qwen-local',
+      started_at: '2026-09-16T01:06:00Z',
+      resume: {
+        summary: 'A pipe burst in the kitchen.',
+        unresolved_questions: [],
+        pending_items: [],
+        prior_commitments: [],
+        customer_next_step: initialClaim.customer_next_step,
+      },
+    })
+    api.getClaim.mockResolvedValue(initialClaim)
+    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+    const { unmount } = render(<App />)
+
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    unmount()
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+
+    expect(screen.queryByText('Sign in to view saved conversations')).not.toBeInTheDocument()
+    expect(screen.getByText('Saved in this browser session.')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: /Open Home claim/ }))
+
+    expect(api.listClaims).not.toHaveBeenCalled()
+    expect(api.resumeClaimSession).toHaveBeenCalledWith({ claimId: initialClaim.claim_id })
+    expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
+  })
+
   it('keeps conversation history rows stable when switching the active Claim', async () => {
     const user = userEvent.setup()
     const reportA = {
@@ -834,7 +917,8 @@ describe('claimant intake projection', () => {
     api.getClaimMessages.mockResolvedValue({ items: [] })
 
     render(<App />)
-    await user.click((await screen.findAllByRole('button', { name: 'Resume claim' }))[0])
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
     expect(await screen.findByText(reportA.claim_id)).toBeInTheDocument()
 
     const historyCards = () => [...document.querySelectorAll('.intake-history-item')]
