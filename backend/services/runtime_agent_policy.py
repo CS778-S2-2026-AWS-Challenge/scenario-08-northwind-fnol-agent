@@ -21,7 +21,10 @@ from backend.domain.models import (
     KnowledgeRevisionReference,
     RuntimeConfigurationProvenance,
 )
+from backend.domain.prompt_pack import PromptPackManifest
 from backend.services.agent import AgentProposal
+from backend.services.prompt_composer import estimate_tokens
+from backend.services.request_profile_registry import registered_request_profiles
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationResolver,
@@ -219,6 +222,15 @@ class RuntimeAgentPolicyResolver:
         assert isinstance(controlled_rules, ControlledRulesConfiguration)
         assert isinstance(features, AgentFeatureSettingsConfiguration)
 
+        if instruction.prompt_version == 'northwind-fnol-claimant-v7':
+            self._validate_complete_v7_release(
+                snapshot,
+                instruction,
+                tool_policy,
+                controlled_rules,
+                features,
+            )
+
         model_record = snapshot.model()
         if model_record is not None:
             model_prompt_version = model_record.values.get('prompt_version')
@@ -233,6 +245,75 @@ class RuntimeAgentPolicyResolver:
             controlled_rules=controlled_rules,
             features=features,
         )
+
+    @staticmethod
+    def _validate_complete_v7_release(
+        snapshot: RuntimeConfigurationSnapshot,
+        instruction: AgentInstructionConfiguration,
+        tool_policy: AgentToolPolicyConfiguration,
+        controlled_rules: ControlledRulesConfiguration,
+        features: AgentFeatureSettingsConfiguration,
+    ) -> None:
+        if instruction.composition_mode != 'fragmented' or instruction.manifest_version is None:
+            raise RuntimeConfigurationResolutionError('The v7 Prompt Pack is incomplete.')
+        PromptPackManifest(
+            prompt_pack_version=instruction.manifest_version,
+            fragments=list(instruction.fragments),
+        )
+        if any(estimate_tokens(item.content) > item.max_tokens for item in instruction.fragments):
+            raise RuntimeConfigurationResolutionError(
+                'A published v7 Prompt fragment exceeds budget.'
+            )
+
+        expected_profiles = {item.profile_id for item in registered_request_profiles()}
+        actual_profiles = {item.profile_id for item in tool_policy.request_profiles}
+        if actual_profiles != expected_profiles:
+            raise RuntimeConfigurationResolutionError(
+                'The v7 Request Profile registry is incomplete.'
+            )
+        required_schemas = {item.schema_id for item in tool_policy.request_profiles}
+        if not required_schemas.issubset(tool_policy.schema_registry):
+            raise RuntimeConfigurationResolutionError('The v7 schema registry is incomplete.')
+
+        model_records = {
+            key.removeprefix('model:'): record
+            for key, record in snapshot.configurations.items()
+            if key.startswith('model:')
+        }
+        if set(tool_policy.provider_capabilities) != set(model_records):
+            raise RuntimeConfigurationResolutionError(
+                'The v7 provider capability registry does not match the model catalogue.'
+            )
+        for profile_id, record in model_records.items():
+            capability = tool_policy.provider_capabilities[profile_id]
+            if (
+                record.values.get('prompt_version') != instruction.prompt_version
+                or record.values.get('protocol') != capability.protocol
+            ):
+                raise RuntimeConfigurationResolutionError(
+                    'A v7 model binding is incompatible with the atomic Agent release.'
+                )
+
+        if (
+            controlled_rules.route_policy_version is None
+            or controlled_rules.context_catalogue_version is None
+            or controlled_rules.context_budget_policy is None
+            or not controlled_rules.deterministic_responses
+        ):
+            raise RuntimeConfigurationResolutionError(
+                'The v7 route or budget policy is incomplete.'
+            )
+        if not all(
+            (
+                features.fragmented_prompt,
+                features.budgeted_context,
+                features.narrow_schema,
+                features.verified_rolling_summary,
+                features.isolated_execution,
+                bool(features.cache_layout_version),
+            )
+        ):
+            raise RuntimeConfigurationResolutionError('The v7 feature and cache set is incomplete.')
 
 
 def required_action_codes(proposal: AgentProposal) -> frozenset[str]:

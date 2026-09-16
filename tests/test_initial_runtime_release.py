@@ -1,5 +1,7 @@
 import json
-from datetime import UTC, datetime
+from copy import deepcopy
+from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,11 +13,16 @@ from backend.core.config import (
     Settings,
 )
 from backend.domain.configuration import ModelRuntimeBinding
-from backend.domain.release import ReleaseSetRecord, ReleaseSetState
+from backend.domain.release import ConfigurationReference, ReleaseSetRecord, ReleaseSetState
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.knowledge_admin import KnowledgeAdminRepository
 from backend.repositories.release_set import ReleaseSetRepository
 from backend.services.initial_runtime_release import install_initial_runtime_release
+from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
+from backend.services.runtime_configuration import (
+    RuntimeConfigurationResolutionError,
+    RuntimeConfigurationResolver,
+)
 
 
 def _binding(profile_id: str) -> ModelRuntimeBinding:
@@ -29,7 +36,7 @@ def _binding(profile_id: str) -> ModelRuntimeBinding:
         credential_environment_variable=None if is_qwen else 'NORTHWIND_MODEL_API_KEY',
         purpose='agent_turn',
         privacy_class='synthetic_fnol',
-        prompt_version='northwind-fnol-claimant-v6',
+        prompt_version='northwind-fnol-claimant-v7',
         structured_output=True,
         tools=True,
         image_input=False,
@@ -79,6 +86,26 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
     )
     assert 'NORTHWIND_MODEL_API_KEY' in serialized
     assert 'provider-secret' not in serialized
+    policy = RuntimeAgentPolicyResolver(
+        RuntimeConfigurationResolver(
+            configurations,
+            releases,
+            environment='test',
+            runtime_profile='fixture',
+        )
+    ).resolve_for_turn()
+    assert policy is not None
+    assert policy.instruction.prompt_version == 'northwind-fnol-claimant-v7'
+    assert policy.instruction.composition_mode == 'fragmented'
+    assert len(policy.instruction.fragments) == 23
+    assert len(policy.tool_policy.request_profiles) == 9
+    assert set(policy.tool_policy.provider_capabilities) == {
+        'qwen-local',
+        'nowcoding-gpt55',
+    }
+    assert policy.controlled_rules.context_budget_policy is not None
+    assert policy.features.verified_rolling_summary is True
+    assert policy.features.isolated_execution is True
 
 
 def test_existing_release_history_is_never_repaired_or_overwritten() -> None:
@@ -106,6 +133,59 @@ def test_existing_release_history_is_never_repaired_or_overwritten() -> None:
     assert [item.release_set_id for item in releases.list_release_sets()] == [
         'rel_operator_withdrawn'
     ]
+
+
+def test_incomplete_v7_release_set_is_rejected_at_runtime_resolution() -> None:
+    configurations = ConfigurationRepository()
+    releases = ReleaseSetRepository()
+    knowledge = KnowledgeAdminRepository()
+    valid = install_initial_runtime_release(_settings(), configurations, releases, knowledge)
+    assert valid is not None
+    tool_reference = valid.configuration_refs['agent_tool_policy']
+    tool_record = configurations.get(tool_reference.configuration_id, tool_reference.revision)
+    assert tool_record is not None
+    values = deepcopy(tool_record.values)
+    schema_registry = dict(cast(dict[str, object], values['schema_registry']))
+    schema_registry.pop('claimant.sourced-summary.v1')
+    values['schema_registry'] = schema_registry
+    incomplete = tool_record.model_copy(
+        update={
+            'configuration_id': 'cfg_agent_tool_policy_incomplete_v7',
+            'revision': 1,
+            'values': values,
+            'updated_at': valid.updated_at + timedelta(seconds=1),
+        }
+    )
+    configurations.create(incomplete)
+    references = dict(valid.configuration_refs)
+    references['agent_tool_policy'] = ConfigurationReference(
+        configuration_id=incomplete.configuration_id,
+        revision=incomplete.revision,
+    )
+    releases.create(
+        ReleaseSetRecord(
+            release_set_id='rel_incomplete_v7',
+            environment='test',
+            runtime_profile='fixture',
+            revision=1,
+            state=ReleaseSetState.PUBLISHED,
+            configuration_refs=references,
+            author='test',
+            reason='Prove incomplete v7 publication fails closed.',
+            updated_at=valid.updated_at + timedelta(seconds=1),
+        )
+    )
+    resolver = RuntimeAgentPolicyResolver(
+        RuntimeConfigurationResolver(
+            configurations,
+            releases,
+            environment='test',
+            runtime_profile='fixture',
+        )
+    )
+
+    with pytest.raises(RuntimeConfigurationResolutionError, match='schema registry'):
+        resolver.resolve_for_turn()
 
 
 def test_capabilities_expose_the_repository_published_dual_model_catalogue() -> None:

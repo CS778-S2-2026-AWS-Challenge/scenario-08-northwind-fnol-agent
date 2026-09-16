@@ -103,6 +103,7 @@ from backend.services.agent import (
 )
 from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 from backend.services.model_operations import ModelOperationsRecorder
+from backend.services.prompt_composer import load_response_schemas
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationResolver,
@@ -527,6 +528,100 @@ def test_openai_compatible_translates_optional_fields_to_strict_schema() -> None
     assert forbidden_items['properties'] == {}
     assert forbidden_items['required'] == []
     assert forbidden_items['additionalProperties'] is False
+
+
+def test_every_v7_schema_materializes_for_openai_and_bedrock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('TEST_V7_BEDROCK_TOKEN', 'synthetic-token')
+    schemas = load_response_schemas()
+    assert len(schemas) == 7
+
+    for schema_id, schema in schemas.items():
+        openai_payload: dict[str, object] = {}
+
+        def openai_handler(
+            request: httpx.Request,
+            target: dict[str, object] = openai_payload,
+        ) -> httpx.Response:
+            target.update(cast(dict[str, object], json.loads(request.content)))
+            return httpx.Response(
+                200,
+                json={
+                    'choices': [
+                        {'finish_reason': 'stop', 'message': {'content': '{}'}}
+                    ]
+                },
+            )
+
+        OpenAICompatibleModelGateway(
+            gateway_config(),
+            transport=httpx.MockTransport(openai_handler),
+        ).complete(
+            ModelRequest(
+                messages=[ModelMessage(role=ModelRole.USER, content=schema_id)],
+                response_schema=schema,
+                max_output_tokens=287,
+            )
+        )
+        response_format = cast(dict[str, object], openai_payload['response_format'])
+        strict_wrapper = cast(dict[str, object], response_format['json_schema'])
+        strict_schema = cast(dict[str, object], strict_wrapper['schema'])
+        assert strict_schema['additionalProperties'] is False
+        assert strict_schema['required'] == list(
+            cast(dict[str, object], strict_schema['properties'])
+        )
+        assert openai_payload['max_tokens'] == 287
+
+        bedrock_payload: dict[str, object] = {}
+
+        def bedrock_handler(
+            request: httpx.Request,
+            target: dict[str, object] = bedrock_payload,
+            current_schema_id: str = schema_id,
+        ) -> httpx.Response:
+            target.update(cast(dict[str, object], json.loads(request.content)))
+            return httpx.Response(
+                200,
+                json={
+                    'output': {
+                        'message': {
+                            'content': [
+                                {
+                                    'toolUse': {
+                                        'toolUseId': f'out-{current_schema_id}',
+                                        'name': 'northwind_agent_proposal',
+                                        'input': {},
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    'stopReason': 'tool_use',
+                },
+            )
+
+        BedrockConverseModelGateway(
+            gateway_config(
+                protocol='bedrock_converse',
+                credential_environment_variable='TEST_V7_BEDROCK_TOKEN',
+                tools=False,
+            ),
+            transport=httpx.MockTransport(bedrock_handler),
+        ).complete(
+            ModelRequest(
+                messages=[ModelMessage(role=ModelRole.USER, content=schema_id)],
+                response_schema=schema,
+                max_output_tokens=287,
+            )
+        )
+        tool_config = cast(dict[str, object], bedrock_payload['toolConfig'])
+        tool_spec = cast(
+            dict[str, object],
+            cast(list[dict[str, object]], tool_config['tools'])[0]['toolSpec'],
+        )
+        assert tool_spec['inputSchema'] == {'json': schema}
+        assert bedrock_payload['inferenceConfig'] == {'maxTokens': 287}
 
 
 def test_bedrock_converse_normalises_structured_response_and_usage(

@@ -27,18 +27,20 @@ normalise:
   unavailable usage fields remain explicitly unknown rather than being reported as zero; and
 - optional first-token latency when a transport can report it.
 
-For the target model-backed claimant path, `GatewayAgent` performs a bounded two-stage
-turn: it advertises the read-only `claim.read` tool, validates and executes that tool against
-the authenticated `WorkingClaim`, then sends the assistant tool call and typed tool result back
-to the same model for a namespaced final response. The model never executes a tool, writes Claim
-State, creates a claim, or authorises a handoff by itself; the Runtime performs those checks.
+The v7 claimant path selects a published Request Profile before transport. Ordinary intake,
+answer, correction, confirmation, claim creation, and third-party offers make one tool-free model
+call over a server-built Claim projection. A lookup profile may resolve one turn-scoped
+`context.resolve` reference and make one continuation call. PDF, multi-Evidence, and cross-Claim
+review run in a mutation-incapable isolated request. The model never executes a tool, writes Claim
+State, grants consent, creates a claim, or authorises a handoff by itself; Runtime performs those
+checks.
 
 When a claimant message explicitly carries `evidence_refs`, the message boundary resolves only
 claimant-visible records on that claimant's Claim whose lifecycle and media type permit model
 input. Staff and external-system Evidence remains internal-only even when it belongs to the same
 Claim. The boundary binds eligible IDs and media types to a resolver that exists for that turn
-only. The adapter must use that same resolver for the initial `claim.read` request and its
-continuation; it re-checks the allow-list, claimant visibility, current record, media type,
+only. The adapter uses that same resolver for the selected v7 request; it re-checks the allow-list,
+claimant visibility, current record, media type,
 lifecycle state, and immutable storage key before reading bytes. Arbitrary URLs, storage keys,
 unselected Evidence, internal-only Evidence, and cross-Claim records never enter the model
 request. Missing content or a profile without the required image/document capability fails before
@@ -47,8 +49,8 @@ a text fallback can be attempted.
 The applied claimant Runtime persists the claimant and agent messages, the Claim revision and
 validated form changes, the compatibility decision projection, a bounded `RuntimeTraceRecord`,
 the TurnPlan/AgentProposal/ExecutionPlan/ActionEnvelope/ToolResult/TurnResult/WorkItem family,
-Session activity, and the idempotency response atomically. `claim.read` is observational, but it
-is followed by the validated Claim mutation path rather than a read-only turn. A model may
+Session activity, and the idempotency response atomically. The current Claim projection is built
+at the authenticated message boundary and is followed by the validated Claim mutation path. A model may
 propose `human.create_handoff`, but model output never authorises that action. A server-owned
 support or safety interrupt runs before the provider and is the only Runtime path that authorises
 the handoff builder.
@@ -111,18 +113,17 @@ sizes are observation fields rather than a public API contract. A successful mul
 trace additionally records only the selected Evidence ID, media type, and `submitted` outcome; raw
 bytes and storage metadata are excluded.
 
-The model-facing schema does not contain the server-only `controlled_rule_authorised`
-marker, and rejects a response that tries to provide it. The target request exposes only the
-`claim.read` manifest; unknown, multiple, or malformed tool calls fail closed before any
-persistence. A model response using the deprecated eight-action schema is rejected with
+The model-facing schemas do not contain the server-only `controlled_rule_authorised`
+marker. v7 publishes separate answer, intake patch, external offer, Evidence action, handoff,
+claim-creation, and sourced-summary schemas. Tool-free profiles expose no tool manifest. Lookup
+profiles expose only `context.resolve`; unknown, multiple, recursive, stale, cross-scope, or
+malformed resolutions fail closed before persistence. A model response using the deprecated eight-action schema is rejected with
 `LEGACY_AGENT_ACTION_DEPRECATED` and cannot fall back to the controlled Agent. The compatibility
 path still permits structured `required_tools` proposals for the bounded context operations
 published by Branch Evaluation and Runtime policy; it validates arguments, executes at most one
-context lookup, and permits one typed re-plan. The target model-backed path uses the provider
-tool-call side channel for `claim.read` and never mixes it with the legacy eight-action response.
-The first request names `claim.read` as the required tool; compatible adapters force that exact
-tool choice and disable parallel tool calls rather than relying on prompt compliance. The
-continuation is constrained to registered `action_code` and `runtime_action_code` pairs. Ordinary
+context lookup, and permits one typed re-plan. The v7 continuation removes tools after the first
+bounded resolution, so recursive tool chains are impossible. Provider adapters materialize the
+selected stable schema and output limit without changing Runtime authority. Ordinary
 intake uses `conversation.answer` with `runtime.wait_for_user` or `runtime.continue`; human support
 uses `human.create_handoff` with `runtime.pause_for_review`. Claim preparation, creation, and
 prior-Evidence proposals use only their explicitly registered directives. The proposal remains
@@ -273,13 +274,13 @@ reason, usage, configured model identity, and AWS request identity into `ModelRe
 authentication, rate-limit, provider, timeout, and malformed-output failures use the same
 provider-neutral errors as other adapters.
 
-The executable claimant prompt is `northwind-fnol-claimant-v6`, stored under
-`backend/prompts/`. It defines the bounded motor, home, and contents VP behaviour, natural-language
-correction, current-action questioning, context lookup, and handoff proposals. Runtime injects the
-Branch Evaluation, minimum Claim projection, bounded knowledge citations, typed tool results, and
-response schema; the adapter does not own FNOL authority. Earlier prompt versions remain immutable
-historical artifacts. Changing executable prompt content requires another prompt identifier and
-regression evidence.
+The executable claimant Prompt Pack is `northwind-fnol-claimant-v7`, authored under
+`backend/prompts/v7/` and embedded immutably in the published `agent_instruction` configuration.
+Runtime deterministically composes core, one family, one task, and matching capability fragments;
+it then injects a budgeted Claim projection, bounded references, and the selected narrow schema.
+The versioned v6 binding remains an explicit rollback artifact and never activates automatically
+after a v7 failure. Changing executable fragment content requires a new fragment or pack version
+and a complete atomic Release Set.
 
 The repository includes configuration and transport tests, but a deployment is live only after an
 authorised model invocation succeeds in its selected AWS account and region. Model listing or
@@ -340,9 +341,9 @@ idempotency records unchanged.
   Converse; streaming is not implemented.
 - Capability support is declared by configuration and verified by tests; there is no
   remote capability negotiation.
-- Only `claim.read` is currently wired into the target tool loop. Other registered tools and
-  namespaced actions remain unavailable until their handlers, authority checks, and persistence
-  contracts are implemented.
+- v7 lookup profiles wire only the read-only `context.resolve` tool. Policy and approved guidance,
+  claimant-owned Claim history, claimant-scoped Evidence history, and older message ranges are
+  exposed through turn-scoped references; mutation tools remain separate Runtime handlers.
 - Runtime trace and the claimant `TurnPlan`/`AgentProposal`/`ExecutionPlan`/`ActionEnvelope`/
   `ToolResult`/`TurnResult` record family are implemented for Fixture and MongoDB repositories.
   Admin trace projection and broader external action records remain open.
@@ -379,9 +380,9 @@ deliberately explicit:
 - the current configuration declares endpoint capabilities; the target Model Profile
   Registry also governs allowed purposes, privacy terms, evaluation evidence, lifecycle,
   and qualified fallback groups; and
-- the current Gateway executes the published `claim.read` Tool Registry capability on the target
-  path, while compatibility context tools remain bounded by a per-turn allow-list and one
-  re-plan; additional action tools require published Tool Registry entries, authority checks,
+- the current Gateway executes only the published v7 Request Profile: ordinary calls are tool-free,
+  bounded lookup allows one `context.resolve` and one re-plan, and isolated execution has no
+  mutation capability; additional action tools require published Tool Registry entries, authority checks,
   typed results, idempotency, and trajectory tests before execution is enabled.
 
 These are incremental extensions, not reasons to replace the implemented provider-neutral
