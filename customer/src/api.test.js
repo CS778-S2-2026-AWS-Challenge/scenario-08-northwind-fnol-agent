@@ -8,6 +8,7 @@ import {
   requestEvidenceUpload,
   setClaimantAccessToken,
   streamClaimUpdates,
+  streamRealtimeEvents,
 } from './api.js'
 
 
@@ -120,6 +121,100 @@ describe('claim creation contract', () => {
     )
   })
 })
+
+describe('claimant multiplexed realtime stream', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken(null)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('parses resource and resync frames from one claimant-scoped stream', async () => {
+    fetch.mockResolvedValue(eventStreamResponse([
+      ': connected\n\n',
+      'id: cursor-2\nevent: resources.changed\ndata: {"event_id":"evt_2","claim_id":"clm_1","claim_revision":2,"resources":["messages"]}\n\n',
+      'event: resync_required\ndata: {"reason":"replay_window_exceeded"}\n\n',
+    ]))
+    const received = []
+
+    await streamRealtimeEvents({
+      cursor: 'cursor-1',
+      signal: new AbortController().signal,
+      onEvent: async (event) => received.push(event),
+    })
+
+    expect(received).toEqual([
+      {
+        type: 'resources.changed',
+        cursor: 'cursor-2',
+        data: expect.objectContaining({
+          event_id: 'evt_2',
+          claim_id: 'clm_1',
+          resources: ['messages'],
+        }),
+      },
+      {
+        type: 'resync_required',
+        cursor: null,
+        data: { reason: 'replay_window_exceeded' },
+      },
+    ])
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/realtime/events?cursor=cursor-1',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Accept: 'text/event-stream',
+          'X-Northwind-Anonymous-Session': expect.any(String),
+        }),
+      }),
+    )
+  })
+
+  it('keeps claimant bearer credentials out of the realtime URL', async () => {
+    setClaimantAccessToken('claimant-realtime-token')
+    fetch.mockResolvedValue(eventStreamResponse([': connected\n\n']))
+
+    await streamRealtimeEvents({
+      cursor: null,
+      signal: new AbortController().signal,
+      onEvent: vi.fn(),
+    })
+
+    const [url, request] = fetch.mock.calls[0]
+    expect(url).toBe('/api/v1/realtime/events')
+    expect(url).not.toContain('claimant-realtime-token')
+    expect(request.headers.Authorization).toBe('Bearer claimant-realtime-token')
+    expect(request.headers['X-Northwind-Anonymous-Session']).toBeUndefined()
+  })
+
+  it('surfaces an unavailable replay cursor for authoritative resync', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({
+      error: {
+        code: 'INVALID_EVENT_CURSOR',
+        message: 'The realtime cursor is no longer available.',
+        retryable: true,
+      },
+    }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    await expect(streamRealtimeEvents({
+      cursor: 'expired-cursor',
+      signal: new AbortController().signal,
+      onEvent: vi.fn(),
+    })).rejects.toMatchObject({
+      status: 409,
+      code: 'INVALID_EVENT_CURSOR',
+      retryable: true,
+    })
+  })
+})
+
 
 describe('Evidence history contract', () => {
   beforeEach(() => {
