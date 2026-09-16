@@ -1939,7 +1939,9 @@ function claimConfirmsExternalSettlement(claim, settlement) {
 
 function externalReadbackConfirmsSettlement(readbacks, settlement) {
   if (!settlement || !Array.isArray(readbacks) || readbacks.length !== 1) return false
-  const response = readbacks[0]
+  const readback = readbacks[0]
+  if (readback?.status !== 'applied') return false
+  const response = readback.response
   if (!response || (response.status && response.status !== 'available')) return false
   const record = (response.items || []).find((item) => (
     item?.task?.claim_id === settlement.claimId
