@@ -287,8 +287,8 @@ describe('claimant intake projection', () => {
     expect(screen.queryByText(initialClaim.claim_id)).not.toBeInTheDocument()
   })
 
-  it('keeps account actions in the header and opens the traditional form below the composer', async () => {
-    const user = userEvent.setup()
+  it('keeps account actions and the composer without exposing the legacy form route', async () => {
+    globalThis.history.replaceState({}, '', '/claim-form')
     const { container } = render(<App />)
 
     const header = container.querySelector('.product-header')
@@ -301,17 +301,9 @@ describe('claimant intake projection', () => {
     expect(composer.querySelector('h2')).not.toBeInTheDocument()
     expect(composer).toContainElement(composerInput)
     const processLink = screen.getByRole('button', { name: 'How does the claim process work?' })
-    const formLink = screen.getByRole('button', { name: 'Use the traditional web form' })
     expect(composer.compareDocumentPosition(processLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(processLink.compareDocumentPosition(formLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-
-    await user.click(formLink)
-    expect(await screen.findByRole('heading', { name: 'Your details and incident' })).toBeVisible()
-    expect(globalThis.location.pathname).toBe('/claim-form')
-
-    await user.click(screen.getByRole('button', { name: /Back to claim options/ }))
-    expect(await screen.findByRole('heading', { name: /Understand insurance/ })).toBeVisible()
-    expect(globalThis.location.pathname).toBe('/')
+    expect(screen.queryByRole('button', { name: 'Use the traditional web form' })).not.toBeInTheDocument()
+    await waitFor(() => expect(globalThis.location.pathname).toBe('/'))
   })
 
   it('shows one server-confirmed delivery failure with retry guidance', async () => {
@@ -424,11 +416,15 @@ describe('claimant intake projection', () => {
     expect(globalThis.location.pathname).toBe('/')
     expect(screen.queryByText(agentMessage.content.text)).not.toBeInTheDocument()
 
-    act(() => {
-      globalThis.history.replaceState({}, '', `/claims/${initialClaim.claim_id}`)
-      globalThis.dispatchEvent(new PopStateEvent('popstate'))
-    })
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    const activeConversation = screen.getByRole('button', { name: /Open Home claim/ })
+    expect(activeConversation).toHaveAttribute('aria-current', 'page')
+    await user.click(activeConversation)
+
     expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
+    expect(globalThis.location.pathname).toBe(`/claims/${initialClaim.claim_id}`)
+    expect(api.createClaim).toHaveBeenCalledTimes(1)
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
   })
 
   it('scrolls to the latest messages after the claimant sends from earlier in the conversation', async () => {
@@ -877,6 +873,51 @@ describe('claimant intake projection', () => {
     expect(api.listClaims).not.toHaveBeenCalled()
     expect(api.resumeClaimSession).toHaveBeenCalledWith({ claimId: initialClaim.claim_id })
     expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
+  })
+
+  it('removes an anonymous history reference after a permanent resume failure', async () => {
+    const user = userEvent.setup()
+    const historyKey = 'northwind.anonymousConversationHistory.v1.anonymous-session-test'
+    globalThis.sessionStorage.setItem(historyKey, JSON.stringify([{ ...initialClaim, can_resume: true }]))
+    api.getClaim.mockRejectedValue(Object.assign(
+      new api.ApiRequestError('The claim was not found.'),
+      { code: 'RESOURCE_NOT_FOUND', status: 404, retryable: false },
+    ))
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(screen.getByRole('button', { name: /Open Home claim/ }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This conversation is no longer available in this browser session, so it was removed from history.',
+    )
+    expect(JSON.parse(globalThis.sessionStorage.getItem(historyKey))).toEqual([])
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    expect(screen.queryByRole('button', { name: /Open Home claim/ })).not.toBeInTheDocument()
+  })
+
+  it('retains an anonymous history reference after a transient resume failure', async () => {
+    const user = userEvent.setup()
+    const historyKey = 'northwind.anonymousConversationHistory.v1.anonymous-session-test'
+    globalThis.sessionStorage.setItem(historyKey, JSON.stringify([{ ...initialClaim, can_resume: true }]))
+    api.getClaim.mockRejectedValue(Object.assign(
+      new api.ApiRequestError('We could not reach the claim service.'),
+      { code: 'NETWORK_ERROR', retryable: true },
+    ))
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(screen.getByRole('button', { name: /Open Home claim/ }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The conversation is still saved in history. Try opening it again.',
+    )
+    expect(JSON.parse(globalThis.sessionStorage.getItem(historyKey))).toHaveLength(1)
+
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    expect(screen.getByRole('button', { name: /Open Home claim/ })).toBeVisible()
   })
 
   it('keeps conversation history rows stable when switching the active Claim', async () => {

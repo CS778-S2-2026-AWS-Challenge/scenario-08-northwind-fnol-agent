@@ -85,6 +85,7 @@ describe('ConversationHistorySidebar', () => {
 
   it('groups real conversations, filters by title, and marks the active item', async () => {
     const user = userEvent.setup()
+    const onSelect = vi.fn()
     const now = Date.now()
     const conversations = [
       conversation({
@@ -103,14 +104,17 @@ describe('ConversationHistorySidebar', () => {
         updatedAt: new Date(now - 10 * 86_400_000).toISOString(),
       }),
     ]
-    render(<SidebarHarness conversations={conversations} activeClaimId="clm_today" />)
+    render(<SidebarHarness conversations={conversations} activeClaimId="clm_today" onSelect={onSelect} />)
 
     await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
 
     expect(screen.getByRole('heading', { name: 'TODAY' })).toBeVisible()
     expect(screen.getByRole('heading', { name: 'PREVIOUS 7 DAYS' })).toBeVisible()
     expect(screen.getByRole('heading', { name: 'OLDER' })).toBeVisible()
-    expect(screen.getByRole('button', { name: /Open Home claim/ })).toHaveAttribute('aria-current', 'page')
+    const activeItem = screen.getByRole('button', { name: /Open Home claim/ })
+    expect(activeItem).toHaveAttribute('aria-current', 'page')
+    await user.click(activeItem)
+    expect(onSelect).toHaveBeenCalledWith('clm_today')
     expect(screen.queryByText('clm_today')).not.toBeInTheDocument()
 
     await user.type(screen.getByRole('searchbox', { name: 'Search conversations' }), 'contents')

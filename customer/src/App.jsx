@@ -34,7 +34,6 @@ import {
 import './App.css'
 import './styles/frontend-refactor.css'
 import MessageComposer from './components/MessageComposer.jsx'
-import GuidedMotorClaim from './GuidedMotorClaim.jsx'
 import ExternalServiceAction, { ExternalServiceOverview } from './components/ExternalServiceAction.jsx'
 import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
@@ -68,6 +67,21 @@ const FIELD_LABELS = {
   'property.ongoing_risk': 'Ongoing property risk',
   'property.habitable': 'Property safe to live in',
   'contents.items': 'Damaged, lost, or stolen items',
+}
+
+const PERMANENT_ANONYMOUS_RESUME_FAILURES = new Set([
+  'AUTHENTICATION_REQUIRED',
+  'ACCESS_DENIED',
+  'RESOURCE_NOT_FOUND',
+  'INVALID_STATE_TRANSITION',
+])
+
+function isPermanentAnonymousResumeFailure(requestError) {
+  return requestError instanceof ApiRequestError
+    && (
+      PERMANENT_ANONYMOUS_RESUME_FAILURES.has(requestError.code)
+      || [401, 403, 404].includes(requestError.status)
+    )
 }
 
 const INPUT_LABELS = {
@@ -325,7 +339,6 @@ function App() {
     if (path === '/account/claims') return 'claim-history'
     if (path === '/files') return 'files'
     if (path === '/how-it-works') return 'how-it-works'
-    if (path === '/claim-form') return 'traditional-form'
     return 'home'
   })()
   const [page, setPageState] = useState(initialPage)
@@ -501,7 +514,6 @@ function App() {
     if (nextPage === 'claim-evidence' && selectedHistoryClaimId) return `/account/claims/${encodeURIComponent(selectedHistoryClaimId)}/evidence`
     if (nextPage === 'files') return '/files'
     if (nextPage === 'how-it-works') return '/how-it-works'
-    if (nextPage === 'traditional-form') return '/claim-form'
     if (isWorkspaceActive && claim?.claim_id) return `/claims/${claim.claim_id}`
     return '/'
   }
@@ -523,7 +535,6 @@ function App() {
     if (/^\/account\/claims\/[^/]+$/.test(pathname)) return account ? 'claim-features' : 'login'
     if (pathname === '/files') return account ? 'files' : 'login'
     if (pathname === '/how-it-works') return 'how-it-works'
-    if (pathname === '/claim-form') return 'traditional-form'
     if (pathname.startsWith('/claims/')) return claim?.claim_id ? 'home' : 'home'
     return 'home'
   }
@@ -568,8 +579,6 @@ function App() {
                   ? '/files'
                   : page === 'how-it-works'
                     ? '/how-it-works'
-                    : page === 'traditional-form'
-                      ? '/claim-form'
                     : isWorkspaceActive && claim?.claim_id ? `/claims/${claim.claim_id}` : '/'
     if (globalThis.location?.pathname !== expectedPath) {
       globalThis.history?.replaceState({ northwindRoute: page }, '', expectedPath)
@@ -1693,8 +1702,19 @@ function App() {
     cancelComposerDraftAttachments()
     setStatus('resuming')
     try {
-      const session = await resumeClaimSession({ claimId })
       const current = await getClaim(claimId)
+      const canResume = current.can_resume ?? current.customer_next_step?.can_resume
+      if (canResume === false) {
+        if (hasClaimantAccessToken()) {
+          setClaimHistory((history) => history?.filter((item) => item.claim_id !== claimId) || history)
+        } else {
+          setClaimHistory(forgetAnonymousConversation(claimId))
+        }
+        setError('This conversation can no longer be resumed, so it was removed from history.')
+        setStatus('error')
+        return
+      }
+      const session = await resumeClaimSession({ claimId })
       const conversation = await getClaimMessages(claimId, session.session_id)
       clearComposerAttachments()
       latestRevision.current = current.revision
@@ -1717,7 +1737,16 @@ function App() {
       setPageState('home')
       setStatus('idle')
     } catch (requestError) {
-      showError(requestError)
+      if (!hasClaimantAccessToken() && isPermanentAnonymousResumeFailure(requestError)) {
+        setClaimHistory(forgetAnonymousConversation(claimId))
+        setError('This conversation is no longer available in this browser session, so it was removed from history.')
+        setStatus('error')
+      } else if (!hasClaimantAccessToken()) {
+        setError(`${requestError.message || 'We could not reopen this conversation.'} The conversation is still saved in history. Try opening it again.`)
+        setStatus('error')
+      } else {
+        showError(requestError)
+      }
     }
   }
 
@@ -1736,6 +1765,16 @@ function App() {
 
   function resumeHomepageConversation(claimId) {
     closeConversationHistorySidebar()
+    if (claimId === claim?.claim_id && sessionId) {
+      setError('')
+      setWorkspaceActive(true)
+      setPageState('home')
+      const claimPath = `/claims/${claim.claim_id}`
+      if (globalThis.location?.pathname !== claimPath) {
+        globalThis.history?.pushState({ northwindRoute: 'home' }, '', claimPath)
+      }
+      return
+    }
     resumeSavedReport(claimId)
   }
 
@@ -2077,7 +2116,6 @@ function App() {
         )}
         {isWorkspaceActive && !['login', 'register'].includes(page) && (
           <div className="header-actions">
-            <button className="aux-link" type="button" onClick={() => setPage('home')}>Use the traditional web form</button>
             {status === 'requesting-support' || handoff ? (
               <span className="header-assistance-chip">
                 <span aria-hidden="true">●</span>
@@ -2110,15 +2148,7 @@ function App() {
         />
       )}
 
-      {!isWorkspaceActive && page === 'traditional-form' ? (
-        <GuidedMotorClaim
-          initialDescription={draft}
-          onExit={(description) => {
-            setDraft(description)
-            setPage('home')
-          }}
-        />
-      ) : !isWorkspaceActive && page === 'how-it-works' ? (
+      {!isWorkspaceActive && page === 'how-it-works' ? (
         <main className="how-it-works-page">
           <section className="how-it-works-card" aria-labelledby="how-it-works-title">
             <button className="back-link" type="button" onClick={() => setPage('home')}>← Back</button>
@@ -2340,12 +2370,6 @@ function App() {
                 <button className="text-link entry-process-link" type="button" onClick={() => setPage('how-it-works')}>
                   How does the claim process work?
                 </button>
-                <p className="entry-form-fallback">
-                  Prefer a form?{' '}
-                  <button className="text-link" type="button" onClick={() => setPage('traditional-form')}>
-                    Use the traditional web form
-                  </button>
-                </p>
               </div>
             </div>
           </section>

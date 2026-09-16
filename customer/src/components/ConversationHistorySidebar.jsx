@@ -236,7 +236,7 @@ export default function ConversationHistorySidebar({
                           type="button"
                           aria-current={isActive ? 'page' : undefined}
                           aria-label={`Open ${title}, ${dateLabel}`}
-                          onClick={isActive ? undefined : () => onSelect(conversation.claim_id)}
+                          onClick={() => onSelect(conversation.claim_id)}
                           disabled={busy}
                         >
                           <span>{title}</span>
