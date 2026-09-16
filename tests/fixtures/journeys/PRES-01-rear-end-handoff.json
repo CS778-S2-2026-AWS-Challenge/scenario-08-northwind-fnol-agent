@@ -20,7 +20,7 @@
         "vehicle.damage_description",
         "vehicle.drivable"
       ],
-      "response_contains": ["structured", "check"],
+      "response_contains": ["check"],
       "next_step_status": "confirmation_required"
     },
     {

@@ -3,18 +3,34 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
+from journey_runs import motor_collision
+from journey_runs.__main__ import main as journey_main
 from journey_runs.household import (
     CONTENTS,
+    CONTENTS_CONFLICTING_OWNERSHIP,
+    CONTENTS_EXPIRED_VALUATION,
+    CONTENTS_ILLEGIBLE_RECEIPT,
+    CONTENTS_NOT_HELD,
+    CONTENTS_THEFT,
     HOME,
+    HOME_ILLEGIBLE,
     KNOWN_STOPS,
     HouseholdRun,
     HouseholdScenario,
+    household_run_cases,
     run_household,
 )
-from journey_runs.motor_collision import MOTOR_COLLISION_PACK, run_motor_collision
+from journey_runs.motor_collision import (
+    MOTOR_COLLISION_PACK,
+    MOTOR_PACKS,
+    motor_run_cases,
+    run_motor_collision,
+    run_motor_journey,
+)
 from journey_runs.record import (
     AgentTurn,
     Arrival,
@@ -317,3 +333,161 @@ def test_a_capability_is_unavailable_only_for_a_step_the_run_did_not_attempt() -
         JourneyRunRecord.model_validate(
             _record(unavailable_capabilities=attempted, result_class='unavailable')
         )
+
+
+# --- Multi-turn motor journey fixtures (PRES-01 / PRES-02) -------------------------------
+
+
+@pytest.mark.parametrize(
+    ('fixture_name', 'expected_messages'),
+    [('PRES-01', 3), ('PRES-02', 4)],
+    ids=['pres01', 'pres02'],
+)
+def test_a_multi_turn_motor_journey_runs_end_to_end_and_records_honestly(
+    fixture_name: str, expected_messages: int
+) -> None:
+    record = run_motor_journey(fixture_name, head='test')
+
+    assert JourneyRunRecord.model_validate_json(record.model_dump_json()) == record
+    # Every step the runner attempted must succeed; a failure would be a new defect to report.
+    assert {step.outcome for step in record.steps} == {StepOutcome.SUCCEEDED}
+    # Multi-turn journeys replay more than one claimant message.
+    assert len(record.agent_turns) >= 3
+    assert record.effort.messages == expected_messages == len(record.agent_turns)
+    # The handoff / review fixtures do not reach consent or assessor routing, so those
+    # pack materials are honestly recorded as not delivered and the run is `partial`.
+    assert record.result_class is ResultClass.PARTIAL
+    not_delivered = [m.path for m in record.materials if m.arrival is Arrival.NOT_DELIVERED]
+    assert 'motor/motor-consent-record.pdf' in not_delivered
+    assert 'motor/motor-assessment-v2.pdf' in not_delivered
+    # No untracked disagreement.
+    assert [check.seam for check in record.seam_checks if check.defect_ref == 'untracked'] == []
+    assert all(check.holds for check in record.visibility_checks)
+    oracle_steps = [step for step in record.steps if step.detail]
+    assert oracle_steps
+    assert all(
+        step.detail is not None and step.detail.startswith('Fixture oracle passed:')
+        for step in oracle_steps
+    )
+    if fixture_name == 'PRES-02':
+        assert record.steps[-2].name == 'staff accept review'
+        assert record.steps[-1].name == 'staff resolve review'
+
+
+def test_the_at01_motor_journey_is_unchanged_after_multi_turn_support() -> None:
+    record = run_motor_journey('AT-01', head='test')
+    assert len(record.steps) == 14
+    assert record.final_state.claim_number is not None
+    assert record.result_class is not ResultClass.COMPLETED
+
+
+def test_the_sprint4_baseline_contains_100_independent_input_pack_pairs() -> None:
+    motor = motor_run_cases()
+    home = household_run_cases('home')
+    contents = household_run_cases('contents')
+
+    assert (len(motor), len(home), len(contents)) == (50, 30, 20)
+    assert len({(case.input_payload, case.pack) for case in motor}) == 50
+    assert len({case.input_payload for case in motor}) == 50
+    assert {case.fixture_name for case in motor} == {'AT-01', 'PRES-01', 'PRES-02'}
+    assert {case.input_variant for case in motor} == set(range(50))
+    assert {case.pack_id for case in motor} == set(MOTOR_PACKS)
+    assert len({(case.scenario_id, case.pack_id) for case in home}) == 30
+    assert len({(case.scenario_id, case.pack_id) for case in contents}) == 20
+
+
+def test_an_oracle_mismatch_returns_a_serializable_failed_record(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    original = motor_collision._motor_input
+
+    def mismatching_input(fixture_name: str, variant: int) -> dict[str, Any]:
+        journey_input = original(fixture_name, variant)
+        first_turn = journey_input['turns'][0]
+        first_turn['expected_action'] = 'HANDOFF'
+        return journey_input
+
+    monkeypatch.setattr(motor_collision, '_motor_input', mismatching_input)
+
+    result = journey_main(['--scenario', 'motor:PRES-01', '--runs', '1', '--out', str(tmp_path)])
+    record_paths = list(tmp_path.glob('*.json'))
+
+    assert result == 0
+    assert len(record_paths) == 1
+    record = JourneyRunRecord.model_validate_json(record_paths[0].read_text(encoding='utf-8'))
+    assert record.result_class is ResultClass.FAILED
+    assert 'defect_ref=untracked' in record.result_reason
+    assert len(record.steps) == 2
+    assert record.steps[-1].outcome is StepOutcome.SUCCEEDED
+    assert record.steps[-1].detail is not None
+    assert record.steps[-1].detail.startswith('Fixture oracle failed')
+
+
+@pytest.mark.parametrize(
+    ('pack_id', 'condition'),
+    [
+        ('motor-collision-unreadable-v1', 'invalid'),
+        ('motor-collision-conflicting-v1', 'disputed'),
+        ('motor-collision-superseded-v1', 'superseded'),
+        ('motor-collision-unavailable-v1', 'unavailable'),
+    ],
+)
+def test_motor_material_variants_keep_their_typed_conditions_in_the_record(
+    pack_id: str, condition: str
+) -> None:
+    record = run_motor_journey('AT-01', head='test', pack=MOTOR_PACKS[pack_id], pack_id=pack_id)
+
+    assert condition in {material.pack_condition for material in record.materials}
+
+
+# --- Household material-variant scenarios ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'scenario',
+    [
+        HOME_ILLEGIBLE,
+        CONTENTS_THEFT,
+        CONTENTS_ILLEGIBLE_RECEIPT,
+        CONTENTS_EXPIRED_VALUATION,
+        CONTENTS_CONFLICTING_OWNERSHIP,
+        CONTENTS_NOT_HELD,
+    ],
+    ids=[
+        'home_illegible',
+        'contents_theft',
+        'contents_illegible_receipt',
+        'contents_expired_valuation',
+        'contents_conflicting_ownership',
+        'contents_not_held',
+    ],
+)
+def test_a_household_material_variant_runs_and_records_its_pack(
+    scenario: HouseholdScenario,
+) -> None:
+    run = run_household(scenario, head='test')
+    record = run.record
+
+    assert JourneyRunRecord.model_validate_json(record.model_dump_json()) == record
+    assert all(check.holds for check in record.visibility_checks)
+    assert [check.seam for check in record.seam_checks if check.defect_ref == 'untracked'] == []
+    assert record.result_class is not ResultClass.COMPLETED
+    # The variant pack must be reflected in the record's materials.
+    pack_paths = {m.path for m in scenario.pack}
+    record_paths = {m.path for m in record.materials}
+    assert pack_paths == record_paths
+    assert {m.path: m.pack_condition for m in record.materials} == {
+        m.path: m.condition for m in scenario.pack
+    }
+    # A variant that adds a NO_ROUTE material must record it as such.
+    if scenario.scenario_id == 'contents-damaged-item-authority-not-held':
+        assert any(
+            m.path == 'contents/contents-authority-outcome-not-held'
+            and m.arrival is Arrival.NO_ROUTE
+            for m in record.materials
+        )
+    # A variant that replaces a material must not carry the original.
+    if scenario.scenario_id == 'home-water-ingress-illegible-note':
+        assert not any(m.path == 'home/home-repair-assessment.pdf' for m in record.materials)
+        assert any(m.path == 'home/home-attendance-note-illegible.pdf' for m in record.materials)
