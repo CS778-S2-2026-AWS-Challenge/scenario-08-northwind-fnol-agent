@@ -10,6 +10,7 @@ from typing import cast
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from backend.api.realtime import realtime_stream
 from backend.core.auth import Principal
@@ -52,6 +53,32 @@ def test_cursor_round_trip_preserves_stable_ordering_coordinates() -> None:
 
     assert cursor.event_id == event.event_id
     assert cursor.occurred_at == event.occurred_at
+
+
+@pytest.mark.parametrize(
+    ('overrides', 'message'),
+    [
+        ({'resources': ['claim', 'claim']}, 'resources must be unique'),
+        ({'audiences': ['staff', 'staff']}, 'audiences must be unique'),
+        (
+            {'claimant_resources': ['evidence']},
+            'Claimant resources must be a subset',
+        ),
+        (
+            {'claimant_resources': [], 'audiences': ['claimant', 'staff']},
+            'Claimant audience and resources must be declared together',
+        ),
+    ],
+)
+def test_realtime_event_rejects_inconsistent_visibility_sets(
+    overrides: dict[str, object],
+    message: str,
+) -> None:
+    payload = _event(1).model_dump(mode='json')
+    payload.update(overrides)
+
+    with pytest.raises(ValidationError, match=message):
+        RealtimeEvent.model_validate(payload)
 
 
 def test_fixture_replay_requires_a_durable_anchor() -> None:
@@ -108,6 +135,19 @@ def test_subscription_ignores_duplicate_and_out_of_order_events() -> None:
     subscription.offer(older)
 
     assert subscription.next(0.01).cursor == cursor_for(newer)  # type: ignore[union-attr]
+    assert subscription.next(0.01) is None
+
+
+def test_closed_subscription_rejects_events_and_resync_signals() -> None:
+    subscription = RealtimeSubscription(
+        RealtimeScope(RealtimeAudience.STAFF, 'stf_one'),
+        capacity=1,
+    )
+
+    subscription.close()
+    subscription.offer(_event(1))
+    subscription.require_resync('source_failed')
+
     assert subscription.next(0.01) is None
 
 
