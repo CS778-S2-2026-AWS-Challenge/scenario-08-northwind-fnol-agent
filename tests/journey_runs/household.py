@@ -216,6 +216,7 @@ HOME_ILLEGIBLE = replace(
             'incident_image',
             'application/pdf',
             'Unreadable attendance note supplied by the claimant (invalid material condition).',
+            condition='invalid',
         )
         if material.path == 'home/home-repair-assessment.pdf'
         else material
@@ -265,6 +266,7 @@ CONTENTS_ILLEGIBLE_RECEIPT = replace(
             'proof_of_ownership',
             'application/pdf',
             'Illegible purchase receipt supplied by the claimant (invalid material condition).',
+            condition='invalid',
         )
         if material.path == 'contents/contents-purchase-receipt.pdf'
         else material
@@ -286,6 +288,7 @@ CONTENTS_EXPIRED_VALUATION = replace(
             'proof_of_ownership',
             'application/pdf',
             'Expired valuation certificate supplied by the claimant (expired material condition).',
+            condition='expired',
         ),
     ),
 )
@@ -304,6 +307,7 @@ CONTENTS_CONFLICTING_OWNERSHIP = replace(
             'proof_of_ownership',
             'application/pdf',
             'Conflicting ownership record supplied by the claimant (disputed material condition).',
+            condition='disputed',
         ),
     ),
 )
@@ -321,6 +325,7 @@ CONTENTS_NOT_HELD = replace(
             Arrival.NO_ROUTE,
             note='The investigation outcome report is not held by any party (unavailable material '
             f'condition; P3-NZP-REPORT, manual, {FORMS}).',
+            condition='unavailable',
         ),
     ),
 )
@@ -341,6 +346,117 @@ SCENARIOS = {
 # Backwards-compatible family aliases for the original CLI (`--scenario home` / `contents`).
 SCENARIOS['home'] = HOME
 SCENARIOS['contents'] = CONTENTS
+
+_VARIANT_ADDRESSES = (
+    '12 Queen Street, Auckland 1010',
+    '8 Lake Road, Takapuna 0622',
+    '41 Dominion Road, Mount Eden 1024',
+    '17 Lincoln Road, Henderson 0610',
+    '26 Ti Rakau Drive, Pakuranga 2010',
+)
+_VARIANT_TIMES = ('yesterday morning', 'this morning', 'last night')
+_HOME_AREAS = (
+    'the lounge ceiling and the wall of the room next door',
+    'the kitchen ceiling and the adjoining dining-room wall',
+    'the hallway ceiling and the bedroom wall beside it',
+)
+_CONTENTS_ITEMS = (
+    ('Dell XPS 13 laptop', '2400'),
+    ('Lenovo ThinkPad laptop', '2100'),
+    ('HP Spectre laptop', '2250'),
+    ('Apple MacBook Air laptop', '1999'),
+)
+
+
+def household_run_cases(family: Literal['home', 'contents']) -> tuple[HouseholdScenario, ...]:
+    """Build the Sprint 4 household baseline without duplicate input/pack pairs.
+
+    Args:
+        family: Household family whose bounded baseline should be returned.
+
+    Returns:
+        Thirty stable home cases or twenty stable contents cases.
+
+    Raises:
+        ValueError: If the family is not `home` or `contents`.
+    """
+
+    bases: tuple[tuple[HouseholdScenario, int], ...]
+    if family == 'home':
+        bases = ((HOME, 15), (HOME_ILLEGIBLE, 15))
+    elif family == 'contents':
+        bases = (
+            (CONTENTS, 3),
+            (CONTENTS_THEFT, 4),
+            (CONTENTS_ILLEGIBLE_RECEIPT, 3),
+            (CONTENTS_EXPIRED_VALUATION, 3),
+            (CONTENTS_CONFLICTING_OWNERSHIP, 3),
+            (CONTENTS_NOT_HELD, 4),
+        )
+    else:
+        raise ValueError(f'Unsupported household family: {family!r}')
+    return tuple(
+        _with_input_variant(scenario, variant_index)
+        for scenario, count in bases
+        for variant_index in range(count)
+    )
+
+
+def household_scenario_cases(scenario: HouseholdScenario) -> tuple[HouseholdScenario, ...]:
+    """Build the fifteen unique inputs available for one household material pack.
+
+    Args:
+        scenario: Base household scenario and material pack.
+
+    Returns:
+        Fifteen stable input variants for that pack.
+
+    Raises:
+        ValueError: Never raised; present for the public-function contract.
+    """
+
+    return tuple(_with_input_variant(scenario, index) for index in range(15))
+
+
+def _with_input_variant(scenario: HouseholdScenario, variant_index: int) -> HouseholdScenario:
+    address = _VARIANT_ADDRESSES[variant_index % len(_VARIANT_ADDRESSES)]
+    occurred_at = _VARIANT_TIMES[(variant_index // len(_VARIANT_ADDRESSES)) % len(_VARIANT_TIMES)]
+    answers = dict(scenario.answers)
+    answers['incident.occurred_at'] = f'It happened {occurred_at}.'
+    answers['incident.location'] = f'It happened at {address}.'
+
+    if scenario.family == 'home':
+        affected = _HOME_AREAS[variant_index % len(_HOME_AREAS)]
+        opening = (
+            f'Rain came in through the roof valley {occurred_at} at {address} and water '
+            f'damaged {affected}.'
+        )
+        answers['incident.description'] = opening
+        answers['loss.description'] = f'Water damaged {affected}.'
+        answers['property.address'] = f'The property address is {address}.'
+        answers['property.affected_areas'] = affected.capitalize() + '.'
+    else:
+        item, value = _CONTENTS_ITEMS[variant_index % len(_CONTENTS_ITEMS)]
+        theft = scenario is CONTENTS_THEFT
+        action = 'was stolen from the lounge' if theft else 'fell from a desk and was damaged'
+        opening = f'My {item} {action} at {address} {occurred_at}.'
+        answers['incident.description'] = opening
+        answers['loss.description'] = (
+            f'The {item} was stolen from the lounge.'
+            if theft
+            else f'The {item} casing is cracked and the screen is broken.'
+        )
+        answers['contents.items'] = (
+            f'The {"stolen" if theft else "damaged"} item is a {item} bought in 2024 '
+            f'for {value} dollars.'
+        )
+
+    return replace(
+        scenario,
+        scenario_id=f'{scenario.scenario_id}-input-{variant_index + 1:02d}',
+        opening=opening,
+        answers=answers,
+    )
 
 
 def run_household(scenario: HouseholdScenario, *, head: str) -> HouseholdRun:

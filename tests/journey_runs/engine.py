@@ -9,7 +9,8 @@ journey. This module owns what every runner does the same way:
 - reading back the claimant and staff projections both ends share;
 - assembling the record.
 
-Nothing is asserted here. `record.classify` decides the class.
+Route outcomes are classified by `record.classify`. Scenario runners may additionally attach
+fixture-oracle comparisons to successful steps and stop when an observable contradicts its fixture.
 """
 
 from __future__ import annotations
@@ -68,6 +69,10 @@ class PackMaterial(NamedTuple):
 
     `delivered_by` names the step whose success delivers a material that is not a claimant
     upload; an upload is delivered by its own completion step.
+
+    `condition` is the declared material condition (received, invalid, expired, disputed,
+    unavailable, superseded). It survives into the record's `pack_condition` so variant
+    coverage is distinguishable from ordinary uploads.
     """
 
     path: str
@@ -78,6 +83,9 @@ class PackMaterial(NamedTuple):
     media_type: str | None = None
     note: str | None = None
     delivered_by: str | None = None
+    condition: Literal[
+        'received', 'invalid', 'expired', 'disputed', 'unavailable', 'superseded'
+    ] = 'received'
 
 
 class Journey:
@@ -144,6 +152,39 @@ class Journey:
     def succeeded(self, name: str) -> bool:
         return any(s.name == name and s.outcome is StepOutcome.SUCCEEDED for s in self.steps)
 
+    def record_oracle(
+        self, step_name: str, expected: Mapping[str, object], actual: Mapping[str, object]
+    ) -> None:
+        """Attach a fixture-oracle comparison to a completed route step.
+
+        Args:
+            step_name: Name of the route step whose response was checked.
+            expected: Observable values declared by the fixture.
+            actual: Values read from the route response or subsequent API readback.
+
+        Returns:
+            None.
+
+        Raises:
+            AssertionError: If the expected and actual observable values differ.
+        """
+
+        matched = expected == actual
+        detail = (
+            f'Fixture oracle {"passed" if matched else "failed"}: '
+            f'expected={dict(expected)!r}; actual={dict(actual)!r}'
+        )
+        for index in range(len(self.steps) - 1, -1, -1):
+            if self.steps[index].name == step_name:
+                previous = self.steps[index].detail
+                combined = f'{previous}\n{detail}' if previous else detail
+                self.steps[index] = self.steps[index].model_copy(update={'detail': combined})
+                break
+        else:
+            raise AssertionError(f'Fixture oracle references missing step {step_name!r}.')
+        if not matched:
+            raise AssertionError(detail)
+
     def revision(self) -> int:
         return cast(int, self.read(f'/api/v1/claims/{self.claim_id}', 'claimant')['revision'])
 
@@ -153,8 +194,10 @@ class Journey:
     def items(self, path: str, actor: str) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], self.read(path, actor).get('items', []))
 
-    def create_working_claim(self, family: str) -> str | None:
-        body = {'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': family}
+    def create_working_claim(self, family: str | None) -> str | None:
+        body = {'channel': 'web_agent', 'locale': 'en-NZ'}
+        if family is not None:
+            body['incident_type'] = family
         created = self.step('create working claim', 'POST', '/api/v1/claims', 201, 'claimant', body)
         if created is None:
             return None
@@ -271,7 +314,7 @@ def delivered_materials(
             InputMaterial(
                 path=material.path,
                 material_class=material.material_class,
-                pack_condition='received',
+                pack_condition=material.condition,
                 provided_by=material.provided_by,
                 arrival=arrival,
                 delivered_at_step=step if delivered else None,

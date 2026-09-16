@@ -69,25 +69,32 @@ classification rules are shared, so runs from different runners and families can
 together.
 
 ```bash
-python -m tests.journey_runs --scenario motor --runs 10 --out ../journey-runs
-python -m tests.journey_runs --scenario home --runs 10 --out ../journey-runs
-python -m tests.journey_runs --scenario contents --runs 10 --out ../journey-runs
+python -m tests.journey_runs --scenario motor --runs 50 --out ../journey-runs
+python -m tests.journey_runs --scenario home --runs 30 --out ../journey-runs
+python -m tests.journey_runs --scenario contents --runs 20 --out ../journey-runs
 python -m tests.journey_runs --schema
 ```
 
 Each run starts a fresh fixture runtime and writes one `<run_id>.json`; `--schema` prints the
-record's JSON Schema. `tests/test_journey_runs.py` runs each journey once in the ordinary suite. It
-fails on any `untracked` disagreement, and on a home or contents stop that is neither in
+record's JSON Schema. `--runs` selects from a bounded matrix of distinct input/material pairs and
+rejects a number larger than the matrix instead of silently repeating an identical input. For
+motor, the matrix interleaves AT-01, PRES-01, and PRES-02 with five input variants and the five
+material packs. The successful route step's `detail` records each fixture-oracle comparison;
+action, proposed fields, next step, response text, pending evidence, and handoff mismatches fail
+the run. PRES-02 also executes and verifies the fixture's declared staff resolution.
+
+`tests/test_journey_runs.py` exercises the matrix contract and representative journeys in the
+ordinary suite. It fails on any `untracked` disagreement, and on a home or contents stop that is neither in
 `household.KNOWN_STOPS` nor a documented unavailable capability: report it to its owner, then
 record it there.
 
 | Runner | Journey | Evidence level |
 |---|---|---|
-| `motor_collision.py` | Create, describe (`AT-01-clear-motor-creation` input), upload the claimant's pack, confirm, create, consent, route the assessor, receive the assessment | API projections on the fixture runtime; not browser; no provider contacted |
+| `motor_collision.py` | Run AT-01 creation/assessor routing, PRES-01 human handoff, or PRES-02 guided professional review and staff resolution; upload the selected claimant pack and validate the fixture oracle | API projections on the fixture runtime; not browser; no provider contacted |
 | `household.py` (`home`, `contents`) | Create, describe, upload the claimant's pack, then answer each `dynamic_form.requirements.next_required_item` from a scripted claimant answer and confirm the proposals, until the requirements are `ready` and the claim is created | The same |
 
-The motor pack (`motor-collision-provisional-2`) is provisional until an owner freezes the rubric
-anchors. It uses the `received` motor materials in `backend/demo_data/materials/`:
+The default motor pack (`motor-collision-provisional-2`) uses the `received` motor materials in
+`backend/demo_data/materials/`:
 
 - the two incident photos and the police event report are uploaded by the claimant. The Police
   form is claimant-supplied material (`P3-NZP-REPORT`,
@@ -95,8 +102,10 @@ anchors. It uses the `received` motor materials in `backend/demo_data/materials/
 - the consent record is Northwind's record of the consent route;
 - the assessment arrives as the fixture assessor's own result.
 
-The deliberately defective variants (unreadable, conflicting, superseded, not obtainable) belong to
-failure-path runs.
+Four additional packs explicitly record the condition of the affected material: unreadable
+(`invalid`), conflicting (`disputed`), assessment v1 (`superseded`), and an assessment that cannot
+be obtained (`unavailable`). Conditions survive into each record's `materials.pack_condition`;
+they are not hidden in a note string.
 
 The home and contents runners stop when a step fails or is refused, when the next required item
 is one this runtime is documented not to capture (recorded as an unavailable capability after one

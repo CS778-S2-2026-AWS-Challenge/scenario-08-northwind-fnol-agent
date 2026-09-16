@@ -18,10 +18,13 @@ from journey_runs.household import (
     KNOWN_STOPS,
     HouseholdRun,
     HouseholdScenario,
+    household_run_cases,
     run_household,
 )
 from journey_runs.motor_collision import (
     MOTOR_COLLISION_PACK,
+    MOTOR_PACKS,
+    motor_run_cases,
     run_motor_collision,
     run_motor_journey,
 )
@@ -350,6 +353,15 @@ def test_a_multi_turn_motor_journey_runs_end_to_end_and_records_honestly(fixture
     # No untracked disagreement.
     assert [check.seam for check in record.seam_checks if check.defect_ref == 'untracked'] == []
     assert all(check.holds for check in record.visibility_checks)
+    oracle_steps = [step for step in record.steps if step.detail]
+    assert oracle_steps
+    assert all(
+        step.detail is not None and step.detail.startswith('Fixture oracle passed:')
+        for step in oracle_steps
+    )
+    if fixture_name == 'PRES-02':
+        assert record.steps[-2].name == 'staff accept review'
+        assert record.steps[-1].name == 'staff resolve review'
 
 
 def test_the_at01_motor_journey_is_unchanged_after_multi_turn_support() -> None:
@@ -357,6 +369,37 @@ def test_the_at01_motor_journey_is_unchanged_after_multi_turn_support() -> None:
     assert len(record.steps) == 14
     assert record.final_state.claim_number is not None
     assert record.result_class is not ResultClass.COMPLETED
+
+
+def test_the_sprint4_baseline_contains_100_independent_input_pack_pairs() -> None:
+    motor = motor_run_cases()
+    home = household_run_cases('home')
+    contents = household_run_cases('contents')
+
+    assert (len(motor), len(home), len(contents)) == (50, 30, 20)
+    assert len({(case.fixture_name, case.input_variant, case.pack_id) for case in motor}) == 50
+    assert {case.fixture_name for case in motor} == {'AT-01', 'PRES-01', 'PRES-02'}
+    assert {case.input_variant for case in motor} == set(range(5))
+    assert {case.pack_id for case in motor} == set(MOTOR_PACKS)
+    assert len({(case.scenario_id, case.pack_id) for case in home}) == 30
+    assert len({(case.scenario_id, case.pack_id) for case in contents}) == 20
+
+
+@pytest.mark.parametrize(
+    ('pack_id', 'condition'),
+    [
+        ('motor-collision-unreadable-v1', 'invalid'),
+        ('motor-collision-conflicting-v1', 'disputed'),
+        ('motor-collision-superseded-v1', 'superseded'),
+        ('motor-collision-unavailable-v1', 'unavailable'),
+    ],
+)
+def test_motor_material_variants_keep_their_typed_conditions_in_the_record(
+    pack_id: str, condition: str
+) -> None:
+    record = run_motor_journey('AT-01', head='test', pack=MOTOR_PACKS[pack_id], pack_id=pack_id)
+
+    assert condition in {material.pack_condition for material in record.materials}
 
 
 # --- Household material-variant scenarios ---------------------------------------------------
@@ -395,6 +438,9 @@ def test_a_household_material_variant_runs_and_records_its_pack(
     pack_paths = {m.path for m in scenario.pack}
     record_paths = {m.path for m in record.materials}
     assert pack_paths == record_paths
+    assert {m.path: m.pack_condition for m in record.materials} == {
+        m.path: m.condition for m in scenario.pack
+    }
     # A variant that adds a NO_ROUTE material must record it as such.
     if scenario.scenario_id == 'contents-damaged-item-authority-not-held':
         assert any(
