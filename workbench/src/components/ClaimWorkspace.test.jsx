@@ -83,9 +83,15 @@ describe('ClaimWorkspace navigation', () => {
     const { rerender } = render(<ClaimWorkspace
       {...props}
       section="conversation"
+      conversationSessionId="ses_1"
       resources={{
         handoffs: { status: 'available', items: [] },
-        messages: { status: 'available', items: [], resolved_session_id: null },
+        messages: {
+          status: 'available',
+          items: [],
+          requested_session_id: 'ses_1',
+          resolved_session_id: 'ses_1',
+        },
       }}
     />)
 

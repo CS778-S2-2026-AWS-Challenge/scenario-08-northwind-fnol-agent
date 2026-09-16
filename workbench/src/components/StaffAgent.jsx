@@ -291,7 +291,7 @@ export default function StaffAgent({
   return (
     <div ref={widgetRef} className={`staff-agent${open ? ' is-open' : ''}`} style={position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto' } : undefined}>
       {!open && (
-        <button className="staff-agent__bubble" type="button" onClick={openAgent} onPointerDown={beginDrag} onPointerMove={drag} onPointerUp={endDrag} onPointerCancel={cancelDrag} aria-label="Open Staff Agent">
+        <button className="staff-agent__bubble" type="button" onClick={openAgent} onPointerDown={beginDrag} onPointerMove={drag} onPointerUp={endDrag} onPointerCancel={cancelDrag} aria-label="Open Staff Agent" title="Draft with AI">
           <Bot size={23} />
         </button>
       )}

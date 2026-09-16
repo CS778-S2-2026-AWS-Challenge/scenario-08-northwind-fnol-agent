@@ -16,6 +16,7 @@ export function HandoffResolution({
   actionLabel = 'Record resolution',
   submitLabel = 'Resolve handoff',
   compact = false,
+  inline = false,
 }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -42,16 +43,10 @@ export function HandoffResolution({
     }
   }
 
-  return (
-    <section className={`action-panel${compact ? ' action-panel--compact' : ''}`} aria-labelledby="handoff-resolution-title">
-      <div className="action-panel__heading">
-        <div><p className="eyebrow">{eyebrow}</p><h2 id="handoff-resolution-title">{title}</h2></div>
-        {allowedAction && <span className="assigned-chip">{allowedAction.label}</span>}
-      </div>
-      <p>{handoff.requested_action}</p>
-      {!compact && <HandoffContext handoff={handoff} />}
+  const controls = (
+    <>
       <ProjectedActionState action={allowedAction} absentMessage="No handoff-resolution action is projected for this handoff." />
-      {!open && executable && <button className="button button--secondary" type="button" onClick={() => setOpen(true)}>{actionLabel}</button>}
+      {!open && executable && <button className={`button ${inline ? 'button--quiet' : 'button--secondary'}`} type="button" onClick={() => setOpen(true)}>{actionLabel}</button>}
       {open && executable && (
         <form className="action-form" onSubmit={submit}>
           {allowedAction.inputs.map((input) => <ProjectedActionInput input={input} key={input.field_code} />)}
@@ -60,6 +55,20 @@ export function HandoffResolution({
           {error && <p className="form-error" role="alert">{error}</p>}
         </form>
       )}
+    </>
+  )
+
+  if (inline) return <div className="handoff-resolution-inline">{controls}</div>
+
+  return (
+    <section className={`action-panel${compact ? ' action-panel--compact' : ''}`} aria-labelledby="handoff-resolution-title">
+      <div className="action-panel__heading">
+        <div><p className="eyebrow">{eyebrow}</p><h2 id="handoff-resolution-title">{title}</h2></div>
+        {allowedAction && <span className="assigned-chip">{allowedAction.label}</span>}
+      </div>
+      <p>{handoff.requested_action}</p>
+      {!compact && <HandoffContext handoff={handoff} />}
+      {controls}
     </section>
   )
 }

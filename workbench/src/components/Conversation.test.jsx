@@ -1,11 +1,13 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../api.js'
+import { formatDate, formatTime } from '../format.js'
 import Conversation from './Conversation.jsx'
 
-const detail = { active_session_id: 'ses_1', revision: 1, allowed_actions: [] }
+const detail = { claim_id: 'clm_1', active_session_id: 'ses_1', revision: 1, allowed_actions: [] }
 
 function assistanceHandoff(status, overrides = {}) {
   return {
@@ -43,6 +45,27 @@ function renderConversation(props, route = '/workbench/claims/clm_1/conversation
   )
 }
 
+function DraftConversation({ onSend }) {
+  const [draft, setDraft] = useState('First staff message')
+  return (
+    <Conversation
+      detail={{
+        ...detail,
+        allowed_actions: [{
+          action_code: 'conversation.send_claimant_message',
+          target_ref: 'ses_1',
+          based_on_revision: 1,
+          availability: 'available',
+        }],
+      }}
+      resource={{ items: [], resolved_session_id: 'ses_1' }}
+      draft={draft}
+      onDraft={setDraft}
+      onSend={onSend}
+    />
+  )
+}
+
 describe('Conversation', () => {
   it('keeps review read-only until take-over and renders the shared actor history with request event', async () => {
     const user = userEvent.setup()
@@ -73,21 +96,41 @@ describe('Conversation', () => {
       onSend: vi.fn(),
     })
 
-    expect(screen.getByText('Waiting request')).toBeVisible()
+    expect(screen.queryByText('Waiting request')).not.toBeInTheDocument()
+    expect(screen.getByText('Customer requested staff assistance')).toBeVisible()
+    expect(screen.queryByText('Review the conversation without taking ownership, or take over to reply.')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Message to claimant').closest('form')).toContainElement(
+      screen.getByText('Customer requested staff assistance'),
+    )
     expect(screen.getByText('Staff assistance requested')).toBeVisible()
     expect(screen.getByText('Customer')).toBeVisible()
     expect(screen.getByText('AI Agent')).toBeVisible()
     expect(screen.getByText('Northwind staff')).toBeVisible()
     expect(screen.getByText('System')).toBeVisible()
+    expect(screen.getAllByText(formatDate('2026-09-14T10:00:00Z'))).toHaveLength(1)
+    expect(screen.getByText(formatTime('2026-09-14T10:01:00Z'))).toBeVisible()
     expect(screen.getByLabelText('Message to claimant')).toBeDisabled()
 
     await user.click(screen.getByRole('button', { name: 'Take over conversation' }))
     expect(onAccept).not.toHaveBeenCalled()
+    const confirmationMessage = screen.getByText('Confirm this action.')
+    expect(confirmationMessage.closest('.assistance-status__copy')).not.toBeNull()
+    expect(screen.queryByText('Waiting request')).not.toBeInTheDocument()
+    expect(screen.queryByText('Customer requested staff assistance')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Message to claimant').closest('form')).toContainElement(confirmationMessage)
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByText('Waiting request')).not.toBeInTheDocument()
+    expect(screen.getByText('Customer requested staff assistance')).toBeVisible()
+    expect(screen.queryByText('Confirm this action.')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Take over conversation' }))
     await user.click(screen.getByRole('button', { name: 'Confirm take over' }))
     expect(onAccept).toHaveBeenCalledWith(handoff)
   })
 
-  it('shows the current assignee, joined event, reply controls, and assistance-only completion action', () => {
+  it('keeps the assignee and completion workflow in the compact status bar', async () => {
+    const user = userEvent.setup()
+    const onResolve = vi.fn().mockResolvedValue(undefined)
     const handoff = assistanceHandoff('accepted')
     renderConversation({
       detail: {
@@ -112,6 +155,75 @@ describe('Conversation', () => {
       },
       handoffs: [handoff],
       profile: { staff_id: 'stf_demo', display_name: 'Demo Staff' },
+      resource: { items: [], resolved_session_id: 'ses_1', loading: true },
+      draft: '',
+      onDraft: vi.fn(),
+      onAccept: vi.fn(),
+      onResolve,
+      onSend: vi.fn(),
+    })
+
+    const completeButton = screen.getByRole('button', { name: 'Complete assistance' })
+    const statusBar = completeButton.closest('.assistance-status')
+    expect(statusBar).toHaveTextContent('Staff assistance')
+    expect(statusBar).toHaveTextContent('Assigned to you')
+    expect(statusBar).toHaveTextContent('Demo Staff')
+    expect(statusBar).not.toHaveTextContent('Expected to act')
+    expect(statusBar).not.toHaveTextContent('Claims professional')
+    expect(screen.getByText('Demo Staff joined')).toBeVisible()
+    expect(screen.getByText('Refreshing this section')).toBeVisible()
+    expect(screen.queryByText('Loading current records...')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Message to claimant')).toBeEnabled()
+    expect(completeButton).toBeEnabled()
+    expect(screen.queryByText('Assistance session')).not.toBeInTheDocument()
+    expect(screen.queryByText('Claim completed')).not.toBeInTheDocument()
+
+    await user.click(completeButton)
+    await user.type(screen.getByLabelText('Internal result summary'), 'Customer received the requested support.')
+    await user.type(screen.getByLabelText('Claimant update'), 'We have completed this assistance session.')
+    await user.click(screen.getByRole('button', { name: 'Confirm completion' }))
+
+    expect(onResolve).toHaveBeenCalledWith(handoff, {
+      result: {
+        outcome: 'support_completed',
+        reason_codes: ['SUPPORT_NEED_MET'],
+        source_refs: ['hnd_1'],
+        summary: 'Customer received the requested support.',
+      },
+      state_changes: [],
+      customer_update: {
+        responsible_party: 'claims_professional',
+        related_refs: ['hnd_1'],
+        summary: 'We have completed this assistance session.',
+      },
+    })
+  })
+
+  it.each([
+    {
+      access: 'coworker',
+      primaryAssignee: { staff_id: 'stf_owner', display_name: 'Owner Staff' },
+      expectedAssignment: 'Assigned to Owner Staff',
+    },
+    {
+      access: 'read_only',
+      primaryAssignee: { staff_id: 'stf_owner' },
+      expectedAssignment: 'Assigned to another staff member',
+    },
+  ])('uses the projected handoff assignee for a $access viewer', ({ access, primaryAssignee, expectedAssignment }) => {
+    renderConversation({
+      detail: {
+        ...detail,
+        ownership: {
+          state: 'assigned',
+          current_staff_access: access,
+          primary_assignee: primaryAssignee,
+        },
+        work_summary: { unread_claimant_messages: 0 },
+        customer_next_step: { responsible_party: 'claims_professional' },
+      },
+      handoffs: [assistanceHandoff('accepted', { assigned_to: 'stf_owner' })],
+      profile: { staff_id: 'stf_viewer', display_name: 'Viewing Staff' },
       resource: { items: [], resolved_session_id: 'ses_1' },
       draft: '',
       onDraft: vi.fn(),
@@ -120,12 +232,10 @@ describe('Conversation', () => {
       onSend: vi.fn(),
     })
 
-    expect(screen.getByText('Assigned to me')).toBeVisible()
-    expect(screen.getByText('Demo Staff joined the conversation')).toBeVisible()
-    expect(screen.getByText('Assigned staff: Demo Staff · Claims professional')).toBeVisible()
-    expect(screen.getByLabelText('Message to claimant')).toBeEnabled()
-    expect(screen.getByRole('button', { name: 'Complete assistance' })).toBeEnabled()
-    expect(screen.queryByText('Claim completed')).not.toBeInTheDocument()
+    const statusBar = screen.getByText('Staff assistance').closest('.assistance-status')
+    expect(statusBar).toHaveTextContent(expectedAssignment)
+    expect(statusBar).not.toHaveTextContent('Assigned to you')
+    expect(statusBar).not.toHaveTextContent('Viewing Staff')
   })
 
   it.each([
@@ -134,7 +244,6 @@ describe('Conversation', () => {
       handoff: assistanceHandoff('in_progress'),
       workSummary: { unread_claimant_messages: 1 },
       nextStep: { responsible_party: 'claims_professional' },
-      label: 'Action needed',
       title: 'Customer replied',
       placeholder: 'Reply to customer...',
     },
@@ -143,7 +252,6 @@ describe('Conversation', () => {
       handoff: assistanceHandoff('in_progress'),
       workSummary: { unread_claimant_messages: 0 },
       nextStep: { responsible_party: 'claimant' },
-      label: 'Waiting for customer',
       title: 'Waiting for customer',
       placeholder: 'Waiting for the customer — send an update if needed',
     },
@@ -152,11 +260,10 @@ describe('Conversation', () => {
       handoff: assistanceHandoff('resolved'),
       workSummary: { unread_claimant_messages: 0 },
       nextStep: { responsible_party: 'claims_professional' },
-      label: 'Completed',
       title: 'Staff assistance completed',
       placeholder: 'Staff assistance is complete',
     },
-  ])('renders the $name composer and assistance state from server projections', ({ handoff, workSummary, nextStep, label, title, placeholder }) => {
+  ])('renders the $name composer and assistance state from server projections', ({ handoff, workSummary, nextStep, title, placeholder }) => {
     renderConversation({
       detail: {
         ...detail,
@@ -177,8 +284,14 @@ describe('Conversation', () => {
       onSend: vi.fn(),
     })
 
-    expect(screen.getAllByText(label).length).toBeGreaterThan(0)
-    expect(screen.getAllByText(title).length).toBeGreaterThan(0)
+    const statusBar = screen.getByText('Staff assistance').closest('.assistance-status')
+    expect(statusBar).toHaveTextContent(title)
+    if (handoff.status === 'resolved') {
+      expect(statusBar).not.toHaveTextContent('Completed by')
+      expect(statusBar).not.toHaveTextContent('Demo Staff')
+    } else {
+      expect(statusBar).toHaveTextContent('Assigned to you · Demo Staff')
+    }
     expect(screen.getByLabelText('Message to claimant')).toHaveAttribute('placeholder', placeholder)
   })
 
@@ -266,7 +379,8 @@ describe('Conversation', () => {
   })
 
   it('submits an available exact-target message action with the displayed session', async () => {
-    const onSend = vi.fn().mockResolvedValue(undefined)
+    let finishSend
+    const onSend = vi.fn(() => new Promise((resolve) => { finishSend = resolve }))
     const user = userEvent.setup()
     renderConversation({
       detail: {
@@ -278,24 +392,62 @@ describe('Conversation', () => {
           availability: 'available',
         }],
       },
-      resource: { items: [], resolved_session_id: 'ses_1' },
+      resource: { items: [], resolved_session_id: 'ses_1', loading: true },
       draft: 'A claimant-safe update',
       onDraft: vi.fn(),
       onSend,
     })
 
     expect(screen.queryByRole('heading', { name: 'Claimant conversation' })).not.toBeInTheDocument()
-    expect(screen.getByRole('log', { name: 'Claimant conversation messages' })).toHaveTextContent('No messages yet')
-    expect(screen.getByRole('log', { name: 'Claimant conversation messages' })).toHaveTextContent(
+    const messageList = screen.getByRole('log', { name: 'Claimant conversation messages' })
+    Object.defineProperty(messageList, 'scrollHeight', { configurable: true, value: 600 })
+    messageList.scrollTop = 0
+    expect(messageList).toHaveTextContent('No messages yet')
+    expect(messageList).toHaveTextContent(
       'Messages with the claimant will appear here.',
     )
     expect(screen.getByLabelText('Message to claimant')).toHaveAttribute('placeholder', 'Write a message…')
     expect(screen.queryByText(/shared claim context|0 messages|visible to the claimant/i)).not.toBeInTheDocument()
+    expect(screen.getByText('Refreshing this section')).toBeVisible()
 
-    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    const click = user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce())
+    expect(screen.queryByText('Refreshing this section')).not.toBeInTheDocument()
+    finishSend()
+    await click
     expect(onSend).toHaveBeenCalledWith({
+      draft: 'A claimant-safe update',
       message: 'A claimant-safe update',
       sessionId: 'ses_1',
+    })
+    await waitFor(() => expect(messageList.scrollTop).toBe(600))
+  })
+
+  it('preserves a follow-up draft typed while the first message is sending', async () => {
+    let finishSend
+    const onSend = vi.fn(() => new Promise((resolve) => {
+      finishSend = () => resolve({ delivery: { message_id: 'msg_first_staff' } })
+    }))
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/workbench/claims/clm_1/conversation?session=ses_1']}>
+        <DraftConversation onSend={onSend} />
+      </MemoryRouter>,
+    )
+
+    const textarea = screen.getByLabelText('Message to claimant')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce())
+
+    await user.clear(textarea)
+    await user.type(textarea, 'Follow-up draft written while sending')
+    expect(textarea).toHaveValue('Follow-up draft written while sending')
+
+    finishSend()
+
+    await waitFor(() => {
+      expect(textarea).toHaveValue('Follow-up draft written while sending')
+      expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled()
     })
   })
 
@@ -310,7 +462,7 @@ describe('Conversation', () => {
       handoff: assistanceHandoff('accepted'),
       actionCode: 'human.resolve_handoff',
       actionLabel: 'Complete assistance',
-      statusLabel: 'Assigned to me',
+      statusLabel: 'Assigned to you',
     },
   ])('keeps a displayed historical session read only when the current handoff is $handoff.status', ({ handoff, actionCode, actionLabel, statusLabel }) => {
     const onSend = vi.fn()
@@ -331,6 +483,8 @@ describe('Conversation', () => {
       handoffs: [handoff],
       profile: { staff_id: 'stf_demo', display_name: 'Demo Staff' },
       resource: {
+        requested_session_id: 'ses_old',
+        resolved_session_id: 'ses_old',
         items: [{
           message_id: 'msg_old',
           session_id: 'ses_old',
@@ -339,6 +493,7 @@ describe('Conversation', () => {
           created_at: '2026-09-08T10:00:00Z',
         }],
       },
+      requestedSessionId: 'ses_old',
       draft: 'A staff reply',
       onDraft: vi.fn(),
       onAccept: vi.fn(),
@@ -422,7 +577,7 @@ describe('Conversation', () => {
     expect(screen.getByLabelText('Message to claimant')).toHaveValue('Retry this safely')
   })
 
-  it('uses the actually loaded session instead of the URL as send authority', () => {
+  it('never renders a resolved session under a different requested session', () => {
     const onSend = vi.fn()
 
     renderConversation({
@@ -437,6 +592,7 @@ describe('Conversation', () => {
         }],
       },
       resource: {
+        requested_session_id: 'ses_active',
         resolved_session_id: 'ses_old',
         items: [{
           message_id: 'msg_old',
@@ -446,13 +602,15 @@ describe('Conversation', () => {
           created_at: '2026-09-10T05:00:00Z',
         }],
       },
+      requestedSessionId: 'ses_active',
       draft: 'Must not send',
       onDraft: vi.fn(),
       onSend,
     }, '/workbench/claims/clm_1/conversation?session=ses_active')
 
-    expect(screen.getByText('Old session message.')).toBeVisible()
-    expect(screen.getByLabelText('Message to claimant')).toBeDisabled()
+    expect(screen.queryByText('Old session message.')).not.toBeInTheDocument()
+    expect(screen.getByText('Loading current records...')).toBeVisible()
+    expect(screen.queryByLabelText('Message to claimant')).not.toBeInTheDocument()
     expect(onSend).not.toHaveBeenCalled()
   })
 
@@ -464,10 +622,12 @@ describe('Conversation', () => {
       },
       resource: {
         items: [],
+        requested_session_id: 'ses_missing',
         resolved_session_id: null,
         status: 'unavailable',
         error: 'The requested claimant session is not available. Return to the Claim and open an available conversation.',
       },
+      requestedSessionId: 'ses_missing',
       draft: '',
       onDraft: vi.fn(),
       onSend: vi.fn(),
