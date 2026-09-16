@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from contextlib import suppress
-from datetime import datetime
+from datetime import datetime, timedelta
 from hashlib import sha256
 from typing import Any
 
@@ -812,6 +812,8 @@ def _dispatch_generic_offer(
         repository.release_external_dispatch(claim.claim_id, request_id, claim.customer_id)
         return
     sent_at = now_utc()
+    if sent_at <= task.updated_at:
+        sent_at = task.updated_at + timedelta(microseconds=1)
     repository.save_external_task_request(
         reserved.model_copy(update={'sent_at': sent_at}),
         claim.customer_id,
