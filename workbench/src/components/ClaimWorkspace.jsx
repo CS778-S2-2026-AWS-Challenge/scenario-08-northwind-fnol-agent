@@ -21,7 +21,7 @@ const SECTIONS = [
   ['activity', 'Activity'],
 ]
 
-export default function ClaimWorkspace({ detail, resources = {}, loading, error, stale, externalActionNotices = [], section, draft, profile, onSection, onDraft, onAccept, onResolve, onSignalDecision, onUpdateAction, onLoadEvidence, onSend, onOwnershipAction, onReopen, onExternalTaskAction, onRetry, onRetrySection, onRetryExternalActionContext }) {
+export default function ClaimWorkspace({ detail, resources = {}, loading, error, stale, externalActionNotices = [], section, conversationSessionId, draft, profile, onSection, onDraft, onAccept, onResolve, onSignalDecision, onUpdateAction, onLoadEvidence, onSend, onOwnershipAction, onReopen, onExternalTaskAction, onRetry, onRetrySection, onRetryExternalActionContext }) {
   if (loading && !detail) return <main className="claim-state" role="status"><span className="loading-mark" /><p>Loading Claim...</p></main>
   if (error && !detail) return <ClaimUnavailable error={error} onRetry={onRetry} />
   if (!detail) return <EmptyWorkspace />
@@ -68,7 +68,7 @@ export default function ClaimWorkspace({ detail, resources = {}, loading, error,
       </nav>
       <div role="tabpanel" id={`claim-panel-${section}`} aria-labelledby={`claim-tab-${section}`}>
         {section === 'summary' && <Overview key={detail.claim_id} detail={interactionDetail} handoffs={resources.handoffs?.items || []} collaborationRequests={resources.collaborationRequests?.items || []} supportingState={[resources.handoffs, resources.collaborationRequests]} profile={profile} onAccept={onAccept} onResolve={onResolve} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onSection={onSection} onRetry={onRetry} />}
-        {section === 'conversation' && <Conversation key={detail.claim_id} detail={interactionDetail} handoffs={resources.handoffs?.items || []} profile={profile} resource={resources.messages} draft={draft} onDraft={onDraft} onAccept={onAccept} onResolve={onResolve} onSend={onSend} onRetry={onRetrySection} />}
+        {section === 'conversation' && <Conversation key={detail.claim_id} detail={interactionDetail} handoffs={resources.handoffs?.items || []} profile={profile} resource={resources.messages} requestedSessionId={conversationSessionId} draft={draft} onDraft={onDraft} onAccept={onAccept} onResolve={onResolve} onSend={onSend} onRetry={onRetrySection} />}
         {section === 'fields' && <ClaimFields resource={resources.fields} onRetry={onRetrySection} />}
         {section === 'evidence' && <ResourceBoundary resource={resources.evidence} onRetry={onRetrySection}><EvidenceRecords claimId={detail.claim_id} records={resources.evidence?.items || []} onLoadEvidence={onLoadEvidence} /></ResourceBoundary>}
         {section === 'references' && <ResourceBoundary resource={resources.retrievals} onRetry={onRetrySection}><ReferenceRecords records={resources.retrievals?.items || []} /></ResourceBoundary>}

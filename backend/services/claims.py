@@ -249,6 +249,11 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
     # Derived once and passed to both fields: the next step is corrected against the
     # action, so reading the action twice could let the two disagree again.
     external_service_action = claimant_assessor_action(repository, claim)
+    legacy_external_service_action = (
+        external_service_action
+        if external_service_action is None or external_service_action.offer_id is None
+        else None
+    )
     handoff: ClaimantHandoff | None = None
     resolved_support_handoff: ClaimantResolvedSupportHandoff | None = None
     if claim.active_session_id is not None:
@@ -302,7 +307,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
                     if customer_update is not None
                     else None,
                 )
-    next_step = claimant_next_step(repository, claim, external_service_action)
+    next_step = claimant_next_step(repository, claim, legacy_external_service_action)
     return ClaimantClaim(
         claim_id=claim.claim_id,
         revision=claim.revision,
@@ -312,7 +317,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         contents_items=_claimant_contents_items(repository, claim),
         evidence_summary=evidence_summary_for(claimant_evidence),
         external_claim=claim.external_claim,
-        external_service_action=external_service_action,
+        external_service_action=legacy_external_service_action,
         external_capabilities=list(capability_catalogue(claim.incident_type)),
         dynamic_form=claimant_dynamic_form_projection(repository, claim),
         customer_next_step=next_step,
@@ -320,7 +325,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
             claim_id=claim.claim_id,
             claim_revision=claim.revision,
             next_step=next_step,
-            external_service_action=external_service_action,
+            external_service_action=legacy_external_service_action,
         ),
         incomplete_context=_claimant_incomplete_context(repository, claim),
         handoff=handoff,

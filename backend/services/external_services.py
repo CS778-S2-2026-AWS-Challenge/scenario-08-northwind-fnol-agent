@@ -132,6 +132,25 @@ def _has_open_handoff(repository: PersistenceRepository, claim: WorkingClaim) ->
     )
 
 
+def _legacy_assessor_consent_eligible(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+) -> bool:
+    """Keep the explicit legacy consent route valid without making it an offer source."""
+
+    created_claim = claim.external_claim
+    return (
+        claim.incident_type == 'motor'
+        and claim.claim_state.workflow_state is WorkflowState.CREATED
+        and created_claim is not None
+        and created_claim.creation_status is ClaimCreationStatus.CREATED
+        and created_claim.external_claim_id is not None
+        and created_claim.route == 'standard_motor_intake'
+        and claim.customer_next_step.status in _ELIGIBLE_NEXT_STEPS
+        and not _has_open_handoff(repository, claim)
+    )
+
+
 # The provider-neutral failure vocabulary is wider than the claimant one:
 # `ExternalTaskFailureCode` also carries `conflicting`, which the recovery matrix
 # settles as a terminal failure, and `partial`, which it settles as an unresolved
@@ -210,18 +229,8 @@ def claimant_assessor_action(
     continuation: ExternalTaskContinuationOutcome | None = None
     if routing is None:
         failed_task = _latest_failed_assessor_task(repository, claim)
-        created_claim = claim.external_claim
-        eligible = (
-            claim.incident_type == 'motor'
-            and claim.claim_state.workflow_state is WorkflowState.CREATED
-            and created_claim is not None
-            and created_claim.creation_status is ClaimCreationStatus.CREATED
-            and created_claim.external_claim_id is not None
-            and created_claim.route == 'standard_motor_intake'
-            and claim.customer_next_step.status in _ELIGIBLE_NEXT_STEPS
-            and not _has_open_handoff(repository, claim)
-        )
-        if not eligible:
+        consent = _active_assessor_consent(claim)
+        if failed_task is None and consent is None:
             return None
 
     consent = _active_assessor_consent(claim)
@@ -259,6 +268,7 @@ def claimant_assessor_action(
     )
 
     return ClaimantExternalServiceAction(
+        offer_id=consent.offer_ref if consent is not None else None,
         service_identity=ASSESSOR_SERVICE_IDENTITY,
         registry_version=canonical_projection.registry_version,
         lifecycle_status=canonical_projection.operation_status.value,
@@ -505,8 +515,7 @@ def grant_assessor_consent(
             retryable=True,
             current_revision=claim.revision,
         )
-    action = claimant_assessor_action(repository, claim)
-    if action is None or not action.can_request:
+    if not _legacy_assessor_consent_eligible(repository, claim):
         raise _invalid_state('A vehicle damage assessment is not available for this claim.')
 
     active_consent = _active_assessor_consent(claim)
@@ -628,11 +637,14 @@ def _assessor_route_request(
     consent: ExternalServiceConsent,
     decision_id: str,
 ) -> RouteAssessorRequest:
-    if claim.external_claim is None or claim.external_claim.external_claim_id is None:
-        raise _invalid_state('Create the external claim before requesting an assessor.')
+    external_claim_id = (
+        claim.external_claim.external_claim_id
+        if claim.external_claim is not None and claim.external_claim.external_claim_id is not None
+        else claim.claim_id
+    )
     return RouteAssessorRequest(
         claim_id=claim.claim_id,
-        external_claim_id=claim.external_claim.external_claim_id,
+        external_claim_id=external_claim_id,
         authorisation_ref=decision_id,
         claimant_consent_ref=consent.consent_ref,
         requested_action=ASSESSOR_REQUESTED_ACTION,
@@ -739,7 +751,6 @@ def request_assessor_routing(
             decision_id=decision_id,
         )
         return response, True
-    action = claimant_assessor_action(repository, claim)
     consent = _active_assessor_consent(claim)
     # An unresolved outcome also fails the `can_request` gate below, but it would fail
     # it as a missing permission, which is both untrue and the wrong instruction. This
@@ -751,8 +762,11 @@ def request_assessor_routing(
     # request now. It admits a retryable failure, which AT-10 permits to be retried
     # with the same unchanged operation, and refuses a terminal one, which that
     # scenario requires Northwind to review first.
-    if action is None or not action.can_request or consent is None:
+    if consent is None:
         raise _invalid_state('Record claimant permission before requesting an assessor.')
+    action = claimant_assessor_action(repository, claim)
+    if action is None or not action.can_request:
+        raise _invalid_state('The assessment request cannot be sent in its current state.')
     if claim.active_session_id is None:
         raise _invalid_state('An active claim session is required for assessor routing.')
     claimant_messages = [
@@ -776,8 +790,8 @@ def request_assessor_routing(
         action=AgentAction.PROCEED,
         reason_codes=['ASSESSOR_RULE_AUTHORISED'],
         customer_reason=(
-            'The controlled motor claim is created, the location is confirmed, and '
-            'task-specific claimant permission is active.'
+            'The working motor Claim has a confirmed location, current Northwind authority, '
+            'and task-specific claimant permission.'
         ),
         customer_response='Northwind is sending the vehicle assessment request.',
         state_changes=[],

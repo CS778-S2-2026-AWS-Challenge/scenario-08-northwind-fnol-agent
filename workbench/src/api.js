@@ -385,12 +385,13 @@ export const workbenchApi = {
     )
   },
   async sendMessage(token, claimId, operation, revision) {
-    const { message, sessionId } = operation
+    const { message, sessionId, draft = message } = operation
     const pendingOperation = pendingStaffMessageOperation(
       claimId,
       sessionId,
       message,
       revision,
+      draft,
     )
 
     try {
@@ -406,7 +407,7 @@ export const workbenchApi = {
           body: JSON.stringify({ content: { type: 'text', text: message } }),
         },
       )
-      clearPendingStaffMessageOperation(claimId)
+      rememberPendingStaffMessageResponse(claimId, pendingOperation, response)
       return response
     } catch (error) {
       if (!ambiguousStaffMessageFailure(error)) {
@@ -414,6 +415,12 @@ export const workbenchApi = {
       }
       throw error
     }
+  },
+  pendingMessageDelivery(claimId, sessionId = null) {
+    return pendingStaffMessageDelivery(claimId, sessionId)
+  },
+  confirmMessageDelivery(claimId, sessionId, messageId) {
+    return confirmPendingStaffMessageDelivery(claimId, sessionId, messageId)
   },
 }
 
@@ -615,6 +622,7 @@ function pendingStaffMessageOperation(
   sessionId,
   message,
   revision,
+  draft,
 ) {
   const operations = readStaffMessageOperations()
   const existing = operations[claimId]
@@ -636,6 +644,7 @@ function pendingStaffMessageOperation(
   const operation = {
     sessionId,
     message,
+    draft,
     revision,
     key: crypto.randomUUID(),
   }
@@ -643,6 +652,55 @@ function pendingStaffMessageOperation(
   operations[claimId] = operation
   writeStaffMessageOperations(operations)
   return operation
+}
+
+function rememberPendingStaffMessageResponse(claimId, operation, response) {
+  const message = response?.message
+  if (
+    response?.claim_id !== claimId
+    || response?.session_id !== operation.sessionId
+    || !message?.message_id
+    || message.claim_id !== claimId
+    || message.session_id !== operation.sessionId
+  ) {
+    throw new ApiError(
+      'The Workbench saved the request but did not return a valid persisted message identity. Retry the unchanged message so delivery can be reconciled safely.',
+      { code: 'INVALID_RESPONSE', retryable: true },
+    )
+  }
+
+  const operations = readStaffMessageOperations()
+  const current = operations[claimId]
+  if (!current || current.key !== operation.key) return
+
+  operations[claimId] = {
+    ...current,
+    messageId: message.message_id,
+  }
+  writeStaffMessageOperations(operations)
+}
+
+function pendingStaffMessageDelivery(claimId, sessionId = null) {
+  const operation = readStaffMessageOperations()[claimId]
+  if (
+    !operation?.messageId
+    || (sessionId && operation.sessionId !== sessionId)
+  ) return null
+
+  return {
+    claim_id: claimId,
+    session_id: operation.sessionId,
+    message_id: operation.messageId,
+    sent_draft: operation.draft ?? operation.message,
+  }
+}
+
+function confirmPendingStaffMessageDelivery(claimId, sessionId, messageId) {
+  const delivery = pendingStaffMessageDelivery(claimId, sessionId)
+  if (!delivery || delivery.message_id !== messageId) return null
+
+  clearPendingStaffMessageOperation(claimId)
+  return delivery
 }
 
 function clearPendingStaffMessageOperation(claimId) {

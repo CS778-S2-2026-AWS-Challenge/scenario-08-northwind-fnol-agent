@@ -127,6 +127,7 @@ class ExternalServiceRegistryEntry(ContractModel):
     service_name: str = Field(default='', max_length=160)
     provider_name: str = Field(default='', max_length=160)
     purpose: str = Field(default='', max_length=500)
+    requested_action: str = Field(default='submit_request', min_length=1, max_length=100)
     product_families: tuple[str, ...] = ('motor', 'home', 'contents')
     required_fields: tuple[str, ...] = ()
     disclosure_fields: tuple[str, ...] = ()
@@ -170,6 +171,15 @@ class ExternalServiceLifecycleProjection(ContractModel):
     provenance: ExternalCapabilityProvenance
     access_form: str = Field(min_length=1, max_length=200)
     limitation: str = Field(min_length=1, max_length=500)
+    service_name: str = Field(default='', max_length=160)
+    provider_name: str = Field(default='', max_length=160)
+    purpose: str = Field(default='', max_length=500)
+    requested_action: str = Field(default='submit_request', min_length=1, max_length=100)
+    product_families: tuple[str, ...] = ()
+    disclosure_fields: tuple[str, ...] = ()
+    official_url: str | None = None
+    official_phone: str | None = None
+    uses_external_task: bool = True
     operation_status: ExternalLifecycleStatus
     result_status: ExternalLifecycleStatus | None = None
     result_verification: ExternalTaskResultVerification | None = None
@@ -470,20 +480,20 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
             ExternalLifecycleStatus.UNKNOWN_OUTCOME,
         ),
         transient_statuses=(ExternalLifecycleStatus.SUBMITTING,),
-        limitation='Simulation-only; it must not be described as a production provider.',
+        limitation='Assignment confirms service ownership, not completion of the assessment.',
         service_name='Vehicle damage assessment',
         provider_name='Approved assessor adapter',
         product_families=('motor',),
         purpose='Request an external assessment of vehicle damage and repairability.',
-        required_fields=(
-            'claim.vehicle.registration',
-            'claim.incident.location',
-            'evidence.damage_photos',
-        ),
+        requested_action='vehicle_damage_assessment',
+        required_fields=('incident.location',),
         disclosure_fields=(
-            'claim.vehicle.registration',
-            'claim.incident.summary',
-            'evidence.damage_photos',
+            'claim_id',
+            'external_claim_id',
+            'authorisation_ref',
+            'claimant_consent_ref',
+            'requested_action',
+            'location.region',
         ),
         adapter_kind='assessor_task_adapter',
         result_semantics='Assessment result is external evidence and requires verification.',
@@ -491,26 +501,22 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
     ExternalServiceRegistryEntry(
         service_identity='vehicle_recovery_request',
         catalogue_reference='P3-RECOVERY',
-        provenance=ExternalCapabilityProvenance.CONFIGURED,
+        provenance=ExternalCapabilityProvenance.SIMULATED,
         access_form='controlled recovery request',
-        limitation=(
-            'The adapter must return an operation identity; no completion is inferred '
-            'from acceptance.'
-        ),
+        limitation='Acceptance records a request, not completed vehicle recovery.',
         service_name='Vehicle recovery',
         provider_name='Registered recovery adapter',
         product_families=('motor',),
         purpose='Arrange recovery when the vehicle is unsafe or not drivable.',
+        requested_action='request_vehicle_recovery',
         required_fields=(
-            'claim.vehicle.registration',
-            'claim.incident.location',
-            'claimant.contact.phone',
+            'vehicle.drivable',
+            'incident.location',
         ),
         disclosure_fields=(
-            'claim.vehicle.registration',
-            'claim.incident.location',
-            'claimant.contact.phone',
-            'claim.incident.summary',
+            'vehicle.drivable',
+            'incident.location',
+            'incident.description',
         ),
         adapter_kind='recovery_request_adapter',
         result_semantics=(
@@ -520,22 +526,21 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
     ExternalServiceRegistryEntry(
         service_identity='vehicle_repairer_booking',
         catalogue_reference='P3-REPAIR',
-        provenance=ExternalCapabilityProvenance.CONFIGURED,
+        provenance=ExternalCapabilityProvenance.SIMULATED,
         access_form='repair booking request',
         limitation='A booking is not confirmed until a provider result is received and verified.',
         service_name='Vehicle repair booking',
         provider_name='Registered repairer adapter',
         product_families=('motor',),
         purpose='Send an authorised repair request with the minimum necessary claim context.',
+        requested_action='book_vehicle_repair',
         required_fields=(
-            'claim.vehicle.registration',
-            'claim.vehicle.damage_summary',
-            'claimant.contact.phone',
+            'vehicle.damage_description',
+            'incident.location',
         ),
         disclosure_fields=(
-            'claim.vehicle.registration',
-            'claim.vehicle.damage_summary',
-            'claimant.contact.phone',
+            'vehicle.damage_description',
+            'incident.location',
         ),
         adapter_kind='repair_request_adapter',
         result_semantics='Repairer response may be accepted, queued, assigned or unavailable.',
@@ -543,22 +548,23 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
     ExternalServiceRegistryEntry(
         service_identity='home_emergency_repair_request',
         catalogue_reference='P3-HOME-REPAIR',
-        provenance=ExternalCapabilityProvenance.CONFIGURED,
+        provenance=ExternalCapabilityProvenance.SIMULATED,
         access_form='controlled emergency repair request',
         limitation='Urgency and property access must be confirmed before dispatch.',
         service_name='Home emergency repair',
         provider_name='Registered home-services adapter',
         product_families=('home',),
         purpose='Request emergency mitigation for insured home damage.',
+        requested_action='request_emergency_home_repair',
         required_fields=(
-            'claim.property.address',
-            'claim.damage.summary',
-            'claimant.contact.phone',
+            'property.address',
+            'loss.description',
+            'property.ongoing_risk',
         ),
         disclosure_fields=(
-            'claim.property.address',
-            'claim.damage.summary',
-            'claimant.contact.phone',
+            'property.address',
+            'loss.description',
+            'property.ongoing_risk',
         ),
         adapter_kind='home_repair_request_adapter',
         result_semantics=(
@@ -568,7 +574,7 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
     ExternalServiceRegistryEntry(
         service_identity='contents_specialist_assessment',
         catalogue_reference='P3-CONTENTS-ASSESSOR',
-        provenance=ExternalCapabilityProvenance.CONFIGURED,
+        provenance=ExternalCapabilityProvenance.SIMULATED,
         access_form='contents assessment request',
         limitation=(
             'A specialist opinion remains evidence until the Claim decision path verifies it.'
@@ -577,15 +583,14 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
         provider_name='Registered contents assessor adapter',
         product_families=('contents',),
         purpose='Request specialist assessment for high-value or complex contents loss.',
+        requested_action='request_contents_assessment',
         required_fields=(
-            'claim.contents.items',
-            'evidence.contents_photos',
-            'claim.incident.location',
+            'contents.items',
+            'incident.location',
         ),
         disclosure_fields=(
-            'claim.contents.items',
-            'evidence.contents_photos',
-            'claim.incident.location',
+            'contents.items',
+            'incident.location',
         ),
         adapter_kind='contents_assessment_adapter',
         result_semantics=(
@@ -604,6 +609,7 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
         provider_name='Registered repairer directory',
         product_families=('motor',),
         purpose='Help the claimant find an appropriate repairer.',
+        requested_action='open_repairer_information',
         adapter_kind='official_link',
         official_url='https://www.aa.co.nz/cars/repair-and-maintenance/',
         result_semantics=(
@@ -622,6 +628,7 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
         provider_name='New Zealand Police',
         product_families=('motor', 'home', 'contents'),
         purpose='Provide the official non-emergency reporting channel.',
+        requested_action='open_police_105_guidance',
         adapter_kind='official_link_or_phone',
         official_url='https://105.police.govt.nz/',
         official_phone='105',
@@ -639,6 +646,7 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
         provider_name='New Zealand Police',
         product_families=('motor',),
         purpose='Provide the official traffic crash reporting guidance.',
+        requested_action='open_traffic_crash_guidance',
         adapter_kind='official_link_or_phone',
         official_url=(
             'https://www.police.govt.nz/advice/driving-and-road-safety/traffic-crash-reporting'
@@ -675,6 +683,7 @@ def capability_catalogue(
                 provider_name=entry.provider_name,
                 product_families=entry.product_families,
                 purpose=entry.purpose,
+                requested_action=entry.requested_action,
                 access_form=entry.access_form,
                 adapter_kind=entry.adapter_kind,
                 uses_external_task=entry.uses_external_task,
@@ -684,6 +693,52 @@ def capability_catalogue(
                 official_phone=entry.official_phone,
                 result_semantics=entry.result_semantics,
                 limitation=entry.limitation,
+            )
+        )
+    return tuple(rows)
+
+
+def capability_context(
+    product_family: str | None = None,
+) -> tuple[ExternalServiceLifecycleProjection, ...]:
+    """Return registered capabilities as non-executing Agent context."""
+
+    family = product_family.strip().lower() if isinstance(product_family, str) else None
+    definition = lifecycle_definition(ExternalLifecycleStatus.CONSENT_REQUIRED)
+    metadata = projection_metadata(ExternalLifecycleStatus.CONSENT_REQUIRED)
+    rows: list[ExternalServiceLifecycleProjection] = []
+    for entry in REGISTRY_ENTRIES:
+        if family is not None and family not in entry.product_families:
+            continue
+        rows.append(
+            ExternalServiceLifecycleProjection(
+                service_identity=entry.service_identity,
+                catalogue_reference=entry.catalogue_reference,
+                provenance=entry.provenance,
+                access_form=entry.access_form,
+                limitation=entry.limitation,
+                service_name=entry.service_name,
+                provider_name=entry.provider_name,
+                purpose=entry.purpose,
+                requested_action=entry.requested_action,
+                product_families=entry.product_families,
+                disclosure_fields=entry.disclosure_fields,
+                official_url=entry.official_url,
+                official_phone=entry.official_phone,
+                uses_external_task=entry.uses_external_task,
+                operation_status=ExternalLifecycleStatus.CONSENT_REQUIRED,
+                status_label=metadata.label,
+                status_detail=metadata.detail,
+                verification_state=metadata.verification_state,
+                claimant_meaning=definition.claimant_meaning,
+                agent_meaning=definition.agent_meaning,
+                state_invariants=definition.state_invariants,
+                transition_preconditions=definition.transition_preconditions,
+                pending_owner=metadata.pending_owner,
+                next_action=metadata.next_action,
+                needs_attention=metadata.needs_attention,
+                requires_reconciliation=False,
+                allowed_next=definition.allowed_next,
             )
         )
     return tuple(rows)
@@ -1168,6 +1223,15 @@ def build_lifecycle_projection(
         provenance=entry.provenance,
         access_form=entry.access_form,
         limitation=entry.limitation,
+        service_name=entry.service_name,
+        provider_name=entry.provider_name,
+        purpose=entry.purpose,
+        requested_action=entry.requested_action,
+        product_families=entry.product_families,
+        disclosure_fields=entry.disclosure_fields,
+        official_url=entry.official_url,
+        official_phone=entry.official_phone,
+        uses_external_task=entry.uses_external_task,
         operation_status=operation.status,
         result_status=result,
         result_verification=verification,

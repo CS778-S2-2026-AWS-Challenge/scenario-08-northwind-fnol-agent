@@ -38,4 +38,16 @@ describe('ResourceBoundary', () => {
     expect(screen.getByText('Archive lookup unavailable.')).toBeInTheDocument()
     expect(screen.queryByText('No records')).not.toBeInTheDocument()
   })
+
+  it('keeps content stable during an explicitly quiet refresh', () => {
+    render(
+      <ResourceBoundary resource={{ items: [], loading: true }} contentAvailable quietRefresh>
+        <p>Existing conversation</p>
+      </ResourceBoundary>,
+    )
+
+    expect(screen.getByText('Existing conversation')).toBeVisible()
+    expect(screen.queryByText('Refreshing this section')).not.toBeInTheDocument()
+    expect(screen.queryByText('Loading current records...')).not.toBeInTheDocument()
+  })
 })

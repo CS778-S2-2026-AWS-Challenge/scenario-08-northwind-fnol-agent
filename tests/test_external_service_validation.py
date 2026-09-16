@@ -94,8 +94,7 @@ def _create_assessor_ready_claim(client: TestClient, *, key: str) -> tuple[str, 
     assert external.status_code == 201
     body = external.json()
     assert body['external_claim']['creation_status'] == 'created'
-    assert body['external_service_action']['status'] == 'consent_required'
-    assert body['external_service_action']['can_request'] is True
+    assert body['external_service_action'] is None
     return claim_id, int(body['revision'])
 
 
@@ -211,7 +210,7 @@ def test_declined_consent_preserves_the_claim_and_never_calls_the_adapter() -> N
     assert route_without_consent.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
     assert claimant.status_code == 200
     assert claimant.json()['workflow_state'] == 'created'
-    assert claimant.json()['external_service_action']['status'] == 'consent_required'
+    assert claimant.json()['external_service_action'] is None
     after = repository.get_claim_internal(claim_id)
     assert after is not None
     assert after.model_dump(mode='json') == before.model_dump(mode='json')

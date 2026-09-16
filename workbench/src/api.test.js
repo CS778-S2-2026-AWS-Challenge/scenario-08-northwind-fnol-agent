@@ -13,6 +13,23 @@ function jsonResponse(status, payload) {
   }
 }
 
+function staffMessageResponse(claimId, sessionId, claimRevision, messageId) {
+  return {
+    claim_id: claimId,
+    session_id: sessionId,
+    claim_revision: claimRevision,
+    message: {
+      message_id: messageId,
+      claim_id: claimId,
+      session_id: sessionId,
+      actor: 'staff',
+      visibility: 'shared',
+      content: { type: 'text', text: 'Synthetic staff reply' },
+      created_at: '2026-09-16T00:00:00Z',
+    },
+  }
+}
+
 
 describe('Workbench API failures', () => {
   beforeEach(() => {
@@ -253,8 +270,12 @@ describe('workbenchApi staff message retries', () => {
   it('reuses one idempotency key after an ambiguous network failure', async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError('network unavailable'))
-      .mockResolvedValueOnce(jsonResponse(200, { claim_revision: 5 }))
-      .mockResolvedValueOnce(jsonResponse(200, { claim_revision: 6 }))
+      .mockResolvedValueOnce(jsonResponse(200, staffMessageResponse(
+        'clm_retry', 'ses_retry', 5, 'msg_retry',
+      )))
+      .mockResolvedValueOnce(jsonResponse(200, staffMessageResponse(
+        'clm_retry', 'ses_retry', 6, 'msg_next',
+      )))
     vi.stubGlobal('fetch', fetchMock)
     const operation = { message: 'Same staff reply', sessionId: 'ses_retry' }
 
@@ -273,6 +294,18 @@ describe('workbenchApi staff message retries', () => {
     expect(retryKey).toBe(firstKey)
     expect(fetchMock.mock.calls[0][1].headers['If-Match']).toBe('4')
     expect(fetchMock.mock.calls[1][1].headers['If-Match']).toBe('4')
+
+    expect(workbenchApi.pendingMessageDelivery('clm_retry', 'ses_retry')).toMatchObject({
+      message_id: 'msg_retry',
+    })
+    expect(
+      workbenchApi.confirmMessageDelivery('clm_retry', 'ses_retry', 'msg_other'),
+    ).toBeNull()
+    expect(workbenchApi.pendingMessageDelivery('clm_retry', 'ses_retry')).toMatchObject({
+      message_id: 'msg_retry',
+    })
+    workbenchApi.confirmMessageDelivery('clm_retry', 'ses_retry', 'msg_retry')
+    expect(workbenchApi.pendingMessageDelivery('clm_retry', 'ses_retry')).toBeNull()
 
     await workbenchApi.sendMessage('staff-token', 'clm_retry', operation, 5)
 
@@ -342,7 +375,9 @@ describe('workbenchApi staff message retries', () => {
           details: [],
         },
       }))
-      .mockResolvedValueOnce(jsonResponse(200, { claim_revision: 8 }))
+      .mockResolvedValueOnce(jsonResponse(200, staffMessageResponse(
+        'clm_stale', 'ses_stale', 8, 'msg_stale_retry',
+      )))
     vi.stubGlobal('fetch', fetchMock)
     const operation = { message: 'Review update', sessionId: 'ses_stale' }
 
@@ -360,7 +395,9 @@ describe('workbenchApi staff message retries', () => {
   it('clears an ambiguous operation across logout', async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError('network unavailable'))
-      .mockResolvedValueOnce(jsonResponse(200, { claim_revision: 5 }))
+      .mockResolvedValueOnce(jsonResponse(200, staffMessageResponse(
+        'clm_identity', 'ses_identity', 5, 'msg_identity',
+      )))
     vi.stubGlobal('fetch', fetchMock)
 
     const operation = {
@@ -398,7 +435,9 @@ describe('workbenchApi staff message retries', () => {
   it('clears an ambiguous operation when the staff session is replaced', async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError('network unavailable'))
-      .mockResolvedValueOnce(jsonResponse(200, { claim_revision: 9 }))
+      .mockResolvedValueOnce(jsonResponse(200, staffMessageResponse(
+        'clm_replace', 'ses_replace', 9, 'msg_replace',
+      )))
     vi.stubGlobal('fetch', fetchMock)
 
     const operation = {

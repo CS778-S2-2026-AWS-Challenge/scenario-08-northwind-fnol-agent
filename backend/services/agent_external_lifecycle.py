@@ -14,6 +14,7 @@ from backend.domain.external_service_registry import (
     InvalidExternalLifecycleTransition,
     assert_projection_provenance,
     build_lifecycle_projection,
+    capability_context,
     service_registry_entry,
 )
 from backend.domain.external_services import (
@@ -53,6 +54,7 @@ def build_agent_external_lifecycle_context(
     repository: PersistenceRepository,
     claim_id: str,
     assessor_routing: AssessorRoutingResult | None = None,
+    product_family: str | None = None,
 ) -> tuple[ExternalServiceLifecycleProjection, ...]:
     """Return the complete bounded lifecycle context for one Claim.
 
@@ -156,4 +158,17 @@ def build_agent_external_lifecycle_context(
             raise ExternalLifecycleContextError(
                 f'{task.task_id}: the canonical lifecycle projection is invalid.'
             ) from error
-    return tuple(projections)
+    active_identities = {item.service_identity for item in projections}
+    available = (
+        [
+            item
+            for item in capability_context(product_family)
+            if item.service_identity not in active_identities
+        ]
+        if product_family is not None
+        else []
+    )
+    combined = [*projections, *available]
+    if len(combined) > MAX_EXTERNAL_LIFECYCLE_PROJECTIONS:
+        combined = combined[:MAX_EXTERNAL_LIFECYCLE_PROJECTIONS]
+    return tuple(combined)

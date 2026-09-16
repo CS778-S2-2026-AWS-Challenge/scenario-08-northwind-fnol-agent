@@ -6,6 +6,20 @@ export function formatDateTime(value) {
   }).format(new Date(value))
 }
 
+export function formatDate(value) {
+  if (!value) return 'Not recorded'
+  return new Intl.DateTimeFormat('en-NZ', {
+    dateStyle: 'medium',
+  }).format(new Date(value))
+}
+
+export function formatTime(value) {
+  if (!value) return 'Not recorded'
+  return new Intl.DateTimeFormat('en-NZ', {
+    timeStyle: 'short',
+  }).format(new Date(value))
+}
+
 export function words(value) {
   if (!value) return 'Not confirmed'
   return String(value)

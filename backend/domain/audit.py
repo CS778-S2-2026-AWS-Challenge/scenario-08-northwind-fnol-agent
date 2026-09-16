@@ -17,6 +17,7 @@ class AuditEventType(str, Enum):
     """Initial bounded event vocabulary for the Week 5 audit contract."""
 
     CONSENT_GRANTED = 'consent.granted'
+    CONSENT_DECLINED = 'consent.declined'
     CONSENT_WITHDRAWN = 'consent.withdrawn'
     PERMISSION_AUTHORISED = 'permission.authorised'
     PERMISSION_REJECTED = 'permission.rejected'
@@ -141,6 +142,7 @@ class AuditEventEnvelope(ContractModel):
             raise ValueError('Permission events require a permission decision.')
         if self.event_type in {
             AuditEventType.CONSENT_GRANTED,
+            AuditEventType.CONSENT_DECLINED,
             AuditEventType.CONSENT_WITHDRAWN,
         } and (self.consent_ref is None or self.consent_state is None):
             raise ValueError('Consent events require a consent reference and state.')
