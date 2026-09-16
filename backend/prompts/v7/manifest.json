@@ -1,0 +1,31 @@
+{
+  "prompt_pack_version": "northwind-fnol-claimant-v7",
+  "fragments": [
+    {"fragment_id":"core.authority","version":"v1","path":"core/authority.md","kind":"core","load_mode":"always","applies_when":{},"requires":[],"conflicts_with":[],"priority":400,"max_tokens":240},
+    {"fragment_id":"core.safety","version":"v1","path":"core/safety.md","kind":"core","load_mode":"always","applies_when":{},"requires":["core.authority"],"conflicts_with":[],"priority":390,"max_tokens":180},
+    {"fragment_id":"core.response-style","version":"v1","path":"core/response-style.md","kind":"core","load_mode":"always","applies_when":{},"requires":["core.authority"],"conflicts_with":[],"priority":380,"max_tokens":140},
+    {"fragment_id":"core.provenance","version":"v1","path":"core/provenance.md","kind":"core","load_mode":"always","applies_when":{},"requires":["core.authority"],"conflicts_with":[],"priority":370,"max_tokens":180},
+
+    {"fragment_id":"family.motor","version":"v1","path":"family/motor.md","kind":"family","load_mode":"route_match","applies_when":{"product_family":["motor"]},"requires":["core.authority","core.provenance"],"conflicts_with":["family.home","family.contents","family.unresolved-family"],"priority":300,"max_tokens":220},
+    {"fragment_id":"family.home","version":"v1","path":"family/home.md","kind":"family","load_mode":"route_match","applies_when":{"product_family":["home"]},"requires":["core.authority","core.provenance"],"conflicts_with":["family.motor","family.contents","family.unresolved-family"],"priority":300,"max_tokens":220},
+    {"fragment_id":"family.contents","version":"v1","path":"family/contents.md","kind":"family","load_mode":"route_match","applies_when":{"product_family":["contents"]},"requires":["core.authority","core.provenance"],"conflicts_with":["family.motor","family.home","family.unresolved-family"],"priority":300,"max_tokens":240},
+    {"fragment_id":"family.unresolved-family","version":"v1","path":"family/unresolved-family.md","kind":"family","load_mode":"route_match","applies_when":{},"requires":["core.authority"],"conflicts_with":["family.motor","family.home","family.contents"],"priority":300,"max_tokens":100},
+
+    {"fragment_id":"task.intake","version":"v1","path":"task/intake.md","kind":"task","load_mode":"route_match","applies_when":{"tasks":["intake"]},"requires":["core.response-style"],"conflicts_with":[],"priority":200,"max_tokens":220},
+    {"fragment_id":"task.correction","version":"v1","path":"task/correction.md","kind":"task","load_mode":"route_match","applies_when":{"tasks":["correction"]},"requires":["core.provenance"],"conflicts_with":[],"priority":200,"max_tokens":180},
+    {"fragment_id":"task.confirmation","version":"v1","path":"task/confirmation.md","kind":"task","load_mode":"route_match","applies_when":{"tasks":["confirmation"]},"requires":["core.provenance"],"conflicts_with":[],"priority":200,"max_tokens":160},
+    {"fragment_id":"task.status-question","version":"v1","path":"task/status-question.md","kind":"task","load_mode":"route_match","applies_when":{"tasks":["status_question"]},"requires":["core.authority"],"conflicts_with":[],"priority":200,"max_tokens":140},
+    {"fragment_id":"task.claim-creation","version":"v1","path":"task/claim-creation.md","kind":"task","load_mode":"route_match","applies_when":{"tasks":["claim_creation"]},"requires":["core.authority"],"conflicts_with":[],"priority":200,"max_tokens":140},
+    {"fragment_id":"task.evidence-current","version":"v1","path":"task/evidence-current.md","kind":"task","load_mode":"route_match","applies_when":{"tasks":["evidence_current"]},"requires":["core.provenance"],"conflicts_with":[],"priority":200,"max_tokens":180},
+    {"fragment_id":"task.evidence-history","version":"v1","path":"task/evidence-history.md","kind":"task","load_mode":"route_match","applies_when":{"tasks":["evidence_history"]},"requires":["core.provenance"],"conflicts_with":[],"priority":200,"max_tokens":180},
+    {"fragment_id":"task.external-support","version":"v1","path":"task/external-support.md","kind":"task","load_mode":"route_match","applies_when":{"tasks":["external_support"]},"requires":["core.authority"],"conflicts_with":[],"priority":200,"max_tokens":200},
+    {"fragment_id":"task.human-handoff","version":"v1","path":"task/human-handoff.md","kind":"task","load_mode":"route_match","applies_when":{"tasks":["human_handoff"]},"requires":["core.authority"],"conflicts_with":[],"priority":200,"max_tokens":120},
+
+    {"fragment_id":"capability.assessor","version":"v1","path":"capability/assessor.md","kind":"capability","load_mode":"auto_candidate","applies_when":{"capability_ids":["assessor"]},"requires":["task.external-support"],"conflicts_with":[],"priority":100,"max_tokens":120},
+    {"fragment_id":"capability.repair","version":"v1","path":"capability/repair.md","kind":"capability","load_mode":"auto_candidate","applies_when":{"capability_ids":["repair"]},"requires":["task.external-support"],"conflicts_with":[],"priority":100,"max_tokens":120},
+    {"fragment_id":"capability.emergency","version":"v1","path":"capability/emergency.md","kind":"capability","load_mode":"auto_candidate","applies_when":{"capability_ids":["emergency"]},"requires":["core.safety"],"conflicts_with":[],"priority":100,"max_tokens":100},
+    {"fragment_id":"capability.police","version":"v1","path":"capability/police.md","kind":"capability","load_mode":"auto_candidate","applies_when":{"capability_ids":["police"]},"requires":["task.external-support"],"conflicts_with":[],"priority":100,"max_tokens":100},
+    {"fragment_id":"capability.policy-search","version":"v1","path":"capability/policy-search.md","kind":"capability","load_mode":"reference","applies_when":{"capability_ids":["policy-search"]},"requires":["core.provenance"],"conflicts_with":[],"priority":100,"max_tokens":100},
+    {"fragment_id":"capability.claim-history","version":"v1","path":"capability/claim-history.md","kind":"capability","load_mode":"reference","applies_when":{"capability_ids":["claim-history"]},"requires":["core.provenance"],"conflicts_with":[],"priority":100,"max_tokens":100}
+  ]
+}

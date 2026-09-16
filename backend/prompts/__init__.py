@@ -1,6 +1,7 @@
 from importlib.resources import files
 
 MOTOR_CLAIMANT_PROMPT_ID = 'northwind-fnol-claimant-v6'
+CLAIMANT_V7_PROMPT_ID = 'northwind-fnol-claimant-v7'
 STAFF_ASSISTANT_PROMPT_ID = 'northwind-fnol-staff-assistant-v1'
 
 
