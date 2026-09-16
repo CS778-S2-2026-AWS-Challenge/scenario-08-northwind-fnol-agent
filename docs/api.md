@@ -1655,6 +1655,15 @@ durable-anchor gap emits `resync_required` with a bounded reason and closes that
 then reloads its authoritative snapshots before reconnecting without the stale cursor. A 15-second
 comment heartbeat keeps an otherwise idle transport open and carries no state.
 
+Claimant and Workbench browsers keep one multiplexed stream for the current authentication context;
+ordinary Claim navigation does not create a stream per Claim or session. Browser polling is not part
+of the normal synchronization path. If stream startup or transport fails, the clients may perform at
+most five visibility-aware authoritative snapshot refreshes while reconnecting with bounded
+exponential backoff and jitter; hidden tabs skip those degraded refreshes, and receipt of a realtime
+event resets the fallback budget. This degraded recovery never resubmits a business command or
+external side effect. Existing post-mutation authoritative readback remains a separate correctness
+check and is not replaced by realtime delivery.
+
 ### `PATCH /api/v1/claims/{claim_id}/form`
 
 Corrects or supplies structured fields. It does not accept server-owned provenance or audit timestamps.
