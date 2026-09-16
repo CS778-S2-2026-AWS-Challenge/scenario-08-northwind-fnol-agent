@@ -13,6 +13,10 @@ from backend.domain.audit import (
     AuditSubjectType,
     AuditVisibility,
 )
+from backend.domain.external_service_registry import (
+    ExternalLifecycleStatus,
+    build_lifecycle_projection,
+)
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
     ASSESSOR_REQUESTED_ACTION,
@@ -54,6 +58,7 @@ from backend.repositories.protocols import (
     RevisionConflict,
 )
 from backend.services.branching import build_applied_branch_evaluation
+from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.external_service_entry import ExternalServiceEntryDecision
 from backend.services.integrations import (
     assessor_operation_id,
@@ -235,8 +240,36 @@ def claimant_assessor_action(
     else:
         status = ClaimantExternalServiceStatus.CONSENT_REQUIRED
 
+    lifecycle_status = {
+        ClaimantExternalServiceStatus.CONSENT_REQUIRED: ExternalLifecycleStatus.CONSENT_REQUIRED,
+        ClaimantExternalServiceStatus.READY_TO_REQUEST: ExternalLifecycleStatus.AUTHORISED,
+        ClaimantExternalServiceStatus.ASSIGNED: ExternalLifecycleStatus.ASSIGNED,
+        ClaimantExternalServiceStatus.QUEUED: ExternalLifecycleStatus.QUEUED,
+        ClaimantExternalServiceStatus.RETRYABLE_FAILURE: (
+            ExternalLifecycleStatus.RETRYABLE_FAILURE
+        ),
+        ClaimantExternalServiceStatus.TERMINAL_FAILURE: ExternalLifecycleStatus.TERMINAL_FAILURE,
+        ClaimantExternalServiceStatus.AWAITING_RECONCILIATION: (
+            ExternalLifecycleStatus.UNKNOWN_OUTCOME
+        ),
+    }[status]
+    canonical_projection = build_lifecycle_projection(
+        service_identity=ASSESSOR_SERVICE_IDENTITY,
+        operation_status=lifecycle_status,
+    )
+
     return ClaimantExternalServiceAction(
         service_identity=ASSESSOR_SERVICE_IDENTITY,
+        registry_version=canonical_projection.registry_version,
+        lifecycle_status=canonical_projection.operation_status.value,
+        catalogue_reference=canonical_projection.catalogue_reference,
+        capability_provenance=canonical_projection.provenance.value,
+        access_form=canonical_projection.access_form,
+        status_label=canonical_projection.status_label,
+        status_detail=canonical_projection.status_detail,
+        pending_owner=canonical_projection.pending_owner,
+        next_action=canonical_projection.next_action,
+        limitation=canonical_projection.limitation,
         service_name=_ACTION_SERVICE_NAME,
         provider=_ACTION_PROVIDER,
         purpose=_ACTION_PURPOSE,
@@ -387,11 +420,18 @@ def _response(
     action = claimant_assessor_action(repository, claim)
     if action is None:
         raise _invalid_state('A vehicle damage assessment is not a relevant next step.')
+    next_step = claimant_next_step(repository, claim, action)
     return ClaimantExternalServiceResponse(
         claim_id=claim.claim_id,
         revision=claim.revision,
         action=action,
-        customer_next_step=claimant_next_step(repository, claim, action),
+        customer_next_step=next_step,
+        primary_action=project_claimant_primary_action(
+            claim_id=claim.claim_id,
+            claim_revision=claim.revision,
+            next_step=next_step,
+            external_service_action=action,
+        ),
     )
 
 

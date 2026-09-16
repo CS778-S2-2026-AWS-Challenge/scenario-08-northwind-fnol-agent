@@ -61,6 +61,7 @@ them:
   audit, and account projections.
 - [Shared Claim State Transaction Boundary](claim-state-transaction-boundary.md)
 - [Staff Agent Draft Execution](staff-agent-draft-execution.md)
+- [Staff Agent Tool Registry](staff-agent-tool-registry.md)
 - [Data Architecture](data-architecture.md)
 - [Demonstration Material Catalogue](demonstration-material-catalogue.md)
 - [Fixtures and Test Conventions](fixtures_convention.md)
@@ -81,6 +82,7 @@ them:
 - [Self-hosted Runner Deployment](../deploy/self-hosted-runner.md)
 - [Staff Tag Registry](staff-tag-registry.md)
 - [Third-party Service Consent and Shared-data Contract](third-party-service-consent-and-shared-data-contract.md)
+- [External Service Lifecycle Registry](external-service-lifecycle-registry.md)
 - [Repository layout, start commands, and verification](../README.md#repository-layout)
 
 Task-specific implementation and decision records belong in the relevant Issue, Discussion, or
@@ -131,6 +133,7 @@ superseded when the implementation state changes.
 - [Third-party Stakeholder and Service Research](research/third-party-stakeholder-service-research.md)
 - [Third-party Stakeholder and Service Independent Challenge Review](research/third-party-stakeholder-service-independent-challenge-review.md)
 - [Unified Third-party Service Catalogue and Implementation Brief](research/third-party-stakeholder-unified-service-catalogue-and-implementation-brief.md)
+- [Sprint 4 Third-party Integration Forms](research/sprint4-third-party-integration-forms.md) — implementation-facing selection of motor, home, and contents third-party access forms, authority boundaries, collision journey, and #777 handoff requirements.
 - [Third-party Service Claimant Consent Copy Draft](research/third-party-service-claimant-consent-copy-draft.md)
 - [Insurance Industry Interview and User Observation](research/insurance-industry-interview-and-user-observation.md)
 - [Participant Information and Consent](research/participant-information-and-consent.md)

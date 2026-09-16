@@ -121,6 +121,35 @@ def test_environment_contract_parses_bucket_and_expiry(monkeypatch: pytest.Monke
     assert settings.presign_expiry_seconds == 600
 
 
+def test_environment_contract_parses_a_separate_browser_presign_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ENDPOINT', 'http://minio:9000')
+    monkeypatch.setenv(
+        'NORTHWIND_OBJECT_STORAGE_PRESIGN_ENDPOINT',
+        'https://uploads.example.invalid',
+    )
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'runtime-access')
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY', 'runtime-secret')
+
+    settings = S3CompatibleObjectStorageConfig.from_environment()
+
+    assert settings.endpoint_url == 'http://minio:9000'
+    assert settings.presign_endpoint_url == 'https://uploads.example.invalid'
+
+
+def test_environment_contract_rejects_a_container_only_endpoint_without_browser_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ENDPOINT', 'http://minio:9000')
+    monkeypatch.delenv('NORTHWIND_OBJECT_STORAGE_PRESIGN_ENDPOINT', raising=False)
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'runtime-access')
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY', 'runtime-secret')
+
+    with pytest.raises(ValueError, match='PRESIGN_ENDPOINT is required'):
+        S3CompatibleObjectStorageConfig.from_environment()
+
+
 def test_environment_contract_hides_credentials_from_representation() -> None:
     settings = S3CompatibleObjectStorageConfig(
         endpoint_url='http://localhost:9000',
@@ -154,6 +183,7 @@ def test_environment_contract_rejects_endpoint_credentials_without_echoing_them(
     ('field', 'value'),
     [
         ('endpoint_url', 'localhost:9000'),
+        ('presign_endpoint_url', 'uploads.example.invalid'),
         ('bucket', 'Northwind Evidence'),
         ('presign_expiry_seconds', 0),
     ],
@@ -191,6 +221,33 @@ def test_create_target_signs_provider_metadata_and_constraints() -> None:
     assert target.headers['x-amz-meta-claim-id'] == 'clm_001'
     assert client.presign_calls[0]['Params']['Metadata']['expected-size'] == '2048'
     assert client.presign_calls[0]['ExpiresIn'] == 900
+
+
+def test_create_target_uses_the_browser_endpoint_client_without_rewriting_the_signature() -> None:
+    internal_client = FakeS3Client()
+    browser_client = FakeS3Client()
+    settings = S3CompatibleObjectStorageConfig(
+        endpoint_url='http://minio:9000',
+        presign_endpoint_url='https://uploads.example.invalid',
+        access_key_id='runtime-access',
+        secret_access_key='runtime-secret',
+        bucket='northwind-evidence',
+    )
+    storage = MinioEvidenceStorage(
+        settings,
+        client=internal_client,
+        presign_client=browser_client,
+    )
+
+    storage.create_upload_target(
+        claim_id='clm_001',
+        evidence_id='evd_001',
+        media_type='image/jpeg',
+        size_bytes=2048,
+    )
+
+    assert internal_client.presign_calls == []
+    assert len(browser_client.presign_calls) == 1
 
 
 @pytest.mark.parametrize(

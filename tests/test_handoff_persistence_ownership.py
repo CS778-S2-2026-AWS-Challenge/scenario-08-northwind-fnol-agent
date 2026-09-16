@@ -135,6 +135,8 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
     assert in_progress.status is HandoffStatus.IN_PROGRESS
     assert in_progress.assigned_to == 'stf_demo'
     assert in_progress.accepted_at is not None
+    assert in_progress.resume_workflow_state is not None
+    assert in_progress.resume_next_action is not None
 
     resolved = client.post(
         f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/resolve',
@@ -150,7 +152,13 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
                 'reason_codes': ['SUPPORT_NEED_MET'],
                 'source_refs': in_progress.packet.source_refs,
             },
-            'state_changes': [],
+            'state_changes': [
+                {
+                    'path': 'claim_state.workflow_state',
+                    'to': in_progress.resume_workflow_state.value,
+                },
+                {'path': 'claim_state.next_action', 'to': in_progress.resume_next_action.value},
+            ],
             'customer_update': {
                 'summary': 'A staff member completed the support step and your claim can continue.',
                 'responsible_party': 'claims_professional',
@@ -158,7 +166,7 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
             },
         },
     )
-    assert resolved.status_code == 200
+    assert resolved.status_code == 200, resolved.text
     body = resolved.json()
     assert body['revision'] == 5
     assert body['handoff']['status'] == 'resolved'
@@ -175,6 +183,78 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
     assert stored_handoff.status is HandoffStatus.RESOLVED
     assert stored_handoff.assigned_to == 'stf_demo'
     assert stored_handoff.resolved_at is not None
+    assert stored_claim.claim_state.workflow_state.value == 'collecting'
+    assert stored_claim.claim_state.next_action.value == 'ASK'
+
+
+def test_legacy_support_resolution_without_continuation_preserves_claim_state(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, handoff_id = create_claim_and_handoff(
+        client,
+        auth_headers,
+        key_prefix='legacy-handoff-continuation',
+    )
+    accepted = accept_handoff(
+        client,
+        staff_auth_headers,
+        claim_id,
+        handoff_id,
+        key='legacy-handoff-continuation-accept',
+    )
+    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    claim_before = repository.get_claim_internal(claim_id)
+    assert handoff is not None
+    assert claim_before is not None
+    repository.save_handoff(
+        handoff.model_copy(
+            update={
+                'resume_workflow_state': None,
+                'resume_next_action': None,
+            }
+        ),
+        'cus_demo',
+    )
+
+    detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers)
+    assert detail.status_code == 200
+    resolve_action = next(
+        item
+        for item in detail.json()['allowed_actions']
+        if item['action_code'] == 'human.resolve_handoff' and item['target_ref'] == handoff_id
+    )
+    assert resolve_action['payload_defaults']['state_changes'] == []
+
+    resolved = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/resolve',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'legacy-handoff-continuation-resolve',
+            'If-Match': str(accepted['revision']),
+        },
+        json={
+            'result': {
+                'outcome': 'support_completed',
+                'summary': 'The legacy support request was completed.',
+                'reason_codes': ['SUPPORT_NEED_MET'],
+                'source_refs': handoff.packet.source_refs,
+            },
+            'state_changes': [],
+            'customer_update': {
+                'summary': 'A staff member completed the support request.',
+                'responsible_party': 'claims_professional',
+                'related_refs': [handoff_id],
+            },
+        },
+    )
+    assert resolved.status_code == 200, resolved.text
+    claim_after = repository.get_claim_internal(claim_id)
+    assert claim_after is not None
+    assert claim_after.claim_state.workflow_state is claim_before.claim_state.workflow_state
+    assert claim_after.claim_state.next_action is claim_before.claim_state.next_action
 
 
 def test_handoff_mutations_require_the_exact_current_projected_action(
@@ -224,6 +304,8 @@ def test_handoff_mutations_require_the_exact_current_projected_action(
     accepted_handoff = repository.get_handoff(claim_id, handoff_id, queued_claim.customer_id)
     accepted_claim = repository.get_claim_internal(claim_id)
     assert accepted_handoff is not None
+    assert accepted_handoff.resume_workflow_state is not None
+    assert accepted_handoff.resume_next_action is not None
     assert accepted_claim is not None
     repository.save_handoff(
         accepted_handoff.model_copy(update={'assigned_to': None}), accepted_claim.customer_id
@@ -244,7 +326,16 @@ def test_handoff_mutations_require_the_exact_current_projected_action(
                 'reason_codes': ['SUPPORT_NEED_MET'],
                 'source_refs': accepted_handoff.packet.source_refs,
             },
-            'state_changes': [],
+            'state_changes': [
+                {
+                    'path': 'claim_state.workflow_state',
+                    'to': accepted_handoff.resume_workflow_state.value,
+                },
+                {
+                    'path': 'claim_state.next_action',
+                    'to': accepted_handoff.resume_next_action.value,
+                },
+            ],
             'customer_update': {
                 'summary': 'This update must not be persisted.',
                 'responsible_party': 'claims_professional',
@@ -706,6 +797,8 @@ def test_guard_rejects_invalid_payload_and_terminal_rewrite(
     )
     accepted_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
     assert accepted_handoff is not None
+    assert accepted_handoff.resume_workflow_state is not None
+    assert accepted_handoff.resume_next_action is not None
     resolved = client.post(
         f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/resolve',
         headers={
@@ -720,7 +813,16 @@ def test_guard_rejects_invalid_payload_and_terminal_rewrite(
                 'reason_codes': ['SUPPORT_NEED_MET'],
                 'source_refs': accepted_handoff.packet.source_refs,
             },
-            'state_changes': [],
+            'state_changes': [
+                {
+                    'path': 'claim_state.workflow_state',
+                    'to': accepted_handoff.resume_workflow_state.value,
+                },
+                {
+                    'path': 'claim_state.next_action',
+                    'to': accepted_handoff.resume_next_action.value,
+                },
+            ],
             'customer_update': {
                 'summary': 'The support step is complete.',
                 'responsible_party': 'claims_professional',

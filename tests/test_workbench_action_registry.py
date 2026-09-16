@@ -1,4 +1,5 @@
 from backend.domain.models import (
+    AgentAction,
     HandoffPacket,
     HandoffPriority,
     HandoffRecord,
@@ -7,6 +8,8 @@ from backend.domain.models import (
     HandoffType,
     StaffActionRecord,
     StaffActionStatus,
+    SupportNeed,
+    WorkflowState,
 )
 from backend.domain.workbench_action_registry import (
     WORK_ITEM_TYPE_REGISTRY,
@@ -19,10 +22,12 @@ from backend.services.support import now_utc
 
 
 def test_action_registry_owns_every_projected_action_contract_dimension() -> None:
-    assert WORKBENCH_ACTION_REGISTRY_VERSION == '2026-09-11.1'
+    assert WORKBENCH_ACTION_REGISTRY_VERSION == '2026-09-15.1'
     assert set(WORKBENCH_ACTION_REGISTRY) == {
         'claim.reopen',
         'conversation.send_claimant_message',
+        'external.accept_review',
+        'external.reconcile_response',
         'human.accept_handoff',
         'human.resolve_handoff',
         'ownership.decide_cowork',
@@ -110,6 +115,21 @@ def test_registered_target_variants_own_fixed_completion_effects() -> None:
     assert handoff_defaults['state_changes'] == [
         {'path': 'claim_state.coverage', 'to': 'clear'},
         {'path': 'claim_state.workflow_state', 'to': 'ready_for_next'},
+    ]
+
+    support_defaults = handoff_resolution_defaults(
+        handoff.model_copy(
+            update={
+                'type': HandoffType.HUMAN_SUPPORT,
+                'support_need': SupportNeed.HUMAN_REQUESTED,
+                'resume_workflow_state': WorkflowState.READY_FOR_NEXT,
+                'resume_next_action': AgentAction.CREATE_CLAIM,
+            }
+        )
+    )
+    assert support_defaults['state_changes'] == [
+        {'path': 'claim_state.workflow_state', 'to': WorkflowState.READY_FOR_NEXT.value},
+        {'path': 'claim_state.next_action', 'to': AgentAction.CREATE_CLAIM.value},
     ]
 
     work_item = StaffActionRecord(

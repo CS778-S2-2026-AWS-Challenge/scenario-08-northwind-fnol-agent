@@ -6,6 +6,10 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import Field
 
+from backend.domain.external_service_registry import (
+    ExternalCapabilityProvenance,
+    ExternalLifecycleStatus,
+)
 from backend.domain.external_services import (
     ExternalRequestProvenance,
     ExternalTaskRecord,
@@ -23,6 +27,7 @@ from backend.domain.models import (
     EvidenceFileStatus,
     EvidenceRecord,
     EvidenceStatus,
+    ExternalCapabilityProjection,
     MessageRecord,
     PageInfo,
     StaffActionRecord,
@@ -359,6 +364,11 @@ class WorkbenchIntegrationSummary(ContractModel):
     waiting_external_services: list[WorkbenchWaitingExternalService] = Field(default_factory=list)
 
 
+class WorkbenchClaimDetailIntegrationSummary(WorkbenchIntegrationSummary):
+    claim_number: str | None = None
+    expected_by: datetime | None = None
+
+
 class WorkbenchActionConfirmation(ContractModel):
     level: ConfirmationLevel
     message: str | None = None
@@ -489,6 +499,7 @@ class WorkbenchClaimFilterMetadata(ContractModel):
 
 
 class WorkbenchClaimDetail(WorkbenchClaimListItem):
+    integration_summary: WorkbenchClaimDetailIntegrationSummary
     active_session_id: str | None = None
     claim_state: ClaimState
     contents_items: list[ContentsItem] = Field(default_factory=list)
@@ -496,6 +507,7 @@ class WorkbenchClaimDetail(WorkbenchClaimListItem):
     allowed_actions: list[WorkbenchAllowedAction] = Field(default_factory=list)
     section_summaries: WorkbenchSectionSummaries
     customer_next_step: CustomerNextStep
+    external_capabilities: list[ExternalCapabilityProjection] = Field(default_factory=list)
 
 
 class WorkbenchFieldItem(ContractModel):
@@ -519,7 +531,11 @@ class WorkbenchExternalResultEvidence(ContractModel):
 class WorkbenchExternalLifecycle(ContractModel):
     stakeholder: str
     service: str
+    registry_version: str | None = Field(default=None, min_length=1, max_length=100)
+    lifecycle_status: ExternalLifecycleStatus | None = None
     catalogue_reference: str | None = None
+    capability_provenance: ExternalCapabilityProvenance
+    access_form: str | None = Field(default=None, min_length=1, max_length=200)
     provenance: ExternalRequestProvenance
     request_type: str
     authority_state: str

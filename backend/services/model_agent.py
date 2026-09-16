@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from pydantic import TypeAdapter, ValidationError
 
+from backend.domain.agent_action_registry import action_contract
 from backend.domain.agent_tool_registry import tool_contract
 from backend.domain.branch_registry import build_default_registry
 from backend.domain.ids import new_id
@@ -21,12 +22,14 @@ from backend.domain.model_gateway import (
     CLAIMANT_AGENT_PRIVACY_CLASS,
     CLAIMANT_AGENT_PURPOSE,
     ModelAgentProposal,
+    ModelAttachedEvidenceContext,
     ModelBranchContext,
     ModelCapabilities,
     ModelClaimContext,
     ModelClaimStateContext,
     ModelCompletionStatus,
     ModelContentsItemContext,
+    ModelEvidenceContent,
     ModelFieldSelectionContext,
     ModelFormFieldContext,
     ModelGateway,
@@ -34,12 +37,14 @@ from backend.domain.model_gateway import (
     ModelGatewayErrorCode,
     ModelKnowledgeCitation,
     ModelMessage,
+    ModelProposedContentsItem,
     ModelProposedFormChange,
     ModelProvenanceMessage,
     ModelRequest,
     ModelResponse,
     ModelRole,
     ModelRuntimeProposal,
+    ModelTextContent,
     ModelTool,
     ModelTurnContext,
 )
@@ -57,19 +62,25 @@ from backend.domain.models import (
 )
 from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID, load_motor_claimant_prompt
 from backend.repositories.knowledge_admin import KnowledgeAdminRepository
-from backend.services.agent import AgentProposal, AgentTurnContext, AgentTurnProvider
+from backend.services.agent import (
+    AgentEvidenceReference,
+    AgentProposal,
+    AgentTurnContext,
+    AgentTurnProvider,
+)
 from backend.services.agent_tools import read_claim_for_runtime
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationResolver,
-    RuntimeConfigurationSnapshot,
 )
 
 _PROPOSAL_ADAPTER = TypeAdapter(ModelAgentProposal)
 _RUNTIME_PROPOSAL_ADAPTER = TypeAdapter(ModelRuntimeProposal)
 _SYSTEM_INSTRUCTION = load_motor_claimant_prompt()
-_CONTEXT_TOOL_NAMES = frozenset({'knowledge_search', 'policy_history', 'claim_history'})
+_CONTEXT_TOOL_NAMES = frozenset(
+    {'knowledge_search', 'policy_history', 'claim_history', 'evidence.history'}
+)
 
 _FIELD_DEFINITIONS = build_default_registry().field_by_code
 
@@ -217,6 +228,13 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
         ),
         message_text=context.message_text,
         evidence_reference_count=len(context.evidence_refs),
+        attached_evidence=[
+            ModelAttachedEvidenceContext(
+                evidence_id=item.evidence_id,
+                media_type=item.media_type,
+            )
+            for item in context.evidence
+        ],
         professional_review_required=context.professional_review_required,
         branch=(
             ModelBranchContext(
@@ -254,6 +272,7 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
             else None
         ),
         knowledge_status=context.knowledge_status,
+        external_services=list(context.external_services),
         knowledge_citations=[
             ModelKnowledgeCitation(
                 document_id=chunk.document_id,
@@ -294,92 +313,125 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
     )
 
 
+def _claimant_supports_model_change(
+    change: ModelProposedFormChange,
+    normalized_message: str,
+) -> bool:
+    if not change.reported_text:
+        return False
+    quote = ' '.join(change.reported_text.split()).casefold()
+    if not quote or quote not in normalized_message:
+        return False
+    value: Any = _normalise_model_field_value(change.field_code, change.value)
+    if isinstance(value, str):
+        normalised_value = ' '.join(value.split()).casefold()
+        if normalised_value in quote:
+            return True
+        return (
+            change.field_code == 'claim.product_family'
+            and infer_controlled_product_family(change.reported_text) == normalised_value
+        )
+    if isinstance(value, list):
+        return all(
+            isinstance(item, str) and ' '.join(item.split()).casefold() in quote for item in value
+        )
+    if not isinstance(value, bool):
+        return False
+    negative = bool(
+        re.search(r"\b(?:no|none|nobody|not|never|cannot|can't|isn't|wasn't|without)\b", quote)
+    )
+    markers = {
+        'incident.injury_or_danger': r'\b(?:injur(?:y|ed)|hurt|danger|unsafe|emergency)\b',
+        'parties.other_parties': r'\b(?:another|other|second|person|people|vehicle|party)\b',
+        'vehicle.drivable': r'\b(?:driv(?:e|en|able)|roadworthy|safe|unsafe)\b',
+        'property.ongoing_risk': r'\b(?:risk|leak|fire|flood|exposed|unsafe|danger)\b',
+        'property.habitable': r'\b(?:habitable|live|lived|safe|unsafe|uninhabitable)\b',
+    }
+    marker = markers.get(change.field_code)
+    return marker is not None and re.search(marker, quote) is not None and value is not negative
+
+
+def _model_form_change(
+    change: ModelProposedFormChange,
+    *,
+    message_text: str | None,
+    evidence: tuple[AgentEvidenceReference, ...],
+) -> ProposedFormChange:
+    evidence_by_id = {item.evidence_id: item for item in evidence}
+    source = FormSource.INFERENCE
+    if change.source_evidence_id is not None:
+        attached = evidence_by_id.get(change.source_evidence_id)
+        if attached is None:
+            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+        source = (
+            FormSource.IMAGE if attached.media_type.startswith('image/') else FormSource.DOCUMENT
+        )
+    elif _claimant_supports_model_change(
+        change,
+        ' '.join((message_text or '').split()).casefold(),
+    ):
+        source = FormSource.CLAIMANT
+    return ProposedFormChange(
+        field_code=change.field_code,
+        value=_normalise_model_field_value(change.field_code, change.value),
+        source=source,
+        status=(FormStatus.CONFIRMED if source is FormSource.CLAIMANT else FormStatus.PROPOSED),
+        needed_for=change.needed_for,
+        confidence=change.confidence,
+        precision=change.precision,
+        relation=change.relation,
+        reported_text=change.reported_text,
+        source_evidence_id=change.source_evidence_id,
+    )
+
+
+def _model_contents_item_change(
+    item: ModelProposedContentsItem,
+    *,
+    evidence: tuple[AgentEvidenceReference, ...],
+) -> ProposedContentsItem:
+    if item.source_evidence_id is not None and item.source_evidence_id not in {
+        record.evidence_id for record in evidence
+    }:
+        raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+    return ProposedContentsItem(
+        item_id=item.item_id,
+        description=item.description,
+        category=item.category,
+        quantity=item.quantity,
+        loss_type=item.loss_type,
+        ownership=item.ownership,
+        estimated_value=item.estimated_value,
+        confidence=item.confidence,
+        relation=item.relation,
+        reported_text=item.reported_text,
+        source_evidence_id=item.source_evidence_id,
+    )
+
+
 def _agent_proposal(
     proposal: ModelAgentProposal,
     *,
     message_text: str | None,
+    evidence: tuple[AgentEvidenceReference, ...],
     provider_model: str | None,
     provider_request_id: str | None,
     prompt_id: str,
     action_code: str | None = None,
     runtime_action_code: str | None = None,
 ) -> AgentProposal:
-    normalized_message = ' '.join((message_text or '').split()).casefold()
-
-    def claimant_supports(change: ModelProposedFormChange) -> bool:
-        if not change.reported_text:
-            return False
-        quote = ' '.join(change.reported_text.split()).casefold()
-        if not quote or quote not in normalized_message:
-            return False
-        value: Any = _normalise_model_field_value(change.field_code, change.value)
-        if isinstance(value, str):
-            normalised_value = ' '.join(value.split()).casefold()
-            if normalised_value in quote:
-                return True
-            return (
-                change.field_code == 'claim.product_family'
-                and infer_controlled_product_family(change.reported_text) == normalised_value
-            )
-        if isinstance(value, list):
-            return all(
-                isinstance(item, str) and ' '.join(item.split()).casefold() in quote
-                for item in value
-            )
-        if not isinstance(value, bool):
-            return False
-        negative = bool(
-            re.search(r"\b(?:no|none|nobody|not|never|cannot|can't|isn't|wasn't|without)\b", quote)
-        )
-        markers = {
-            'incident.injury_or_danger': r'\b(?:injur(?:y|ed)|hurt|danger|unsafe|emergency)\b',
-            'parties.other_parties': r'\b(?:another|other|second|person|people|vehicle|party)\b',
-            'vehicle.drivable': r'\b(?:driv(?:e|en|able)|roadworthy|safe|unsafe)\b',
-            'property.ongoing_risk': r'\b(?:risk|leak|fire|flood|exposed|unsafe|danger)\b',
-            'property.habitable': r'\b(?:habitable|live|lived|safe|unsafe|uninhabitable)\b',
-        }
-        marker = markers.get(change.field_code)
-        return marker is not None and re.search(marker, quote) is not None and value is not negative
-
-    def source_for(change: ModelProposedFormChange) -> FormSource:
-        if claimant_supports(change):
-            return FormSource.CLAIMANT
-        return FormSource.INFERENCE
-
-    def form_change(change: ModelProposedFormChange) -> ProposedFormChange:
-        source = source_for(change)
-        return ProposedFormChange(
-            field_code=change.field_code,
-            value=_normalise_model_field_value(change.field_code, change.value),
-            source=source,
-            status=(FormStatus.CONFIRMED if source is FormSource.CLAIMANT else FormStatus.PROPOSED),
-            needed_for=change.needed_for,
-            confidence=change.confidence,
-            precision=change.precision,
-            relation=change.relation,
-            reported_text=change.reported_text,
-        )
-
     return AgentProposal(
         action=proposal.action,
         reason_codes=proposal.reason_codes,
         customer_reason=proposal.customer_reason,
         customer_response=proposal.customer_response,
         customer_next_step=proposal.customer_next_step,
-        form_changes=[form_change(change) for change in proposal.form_changes],
+        form_changes=[
+            _model_form_change(change, message_text=message_text, evidence=evidence)
+            for change in proposal.form_changes
+        ],
         contents_item_changes=[
-            ProposedContentsItem(
-                item_id=item.item_id,
-                description=item.description,
-                category=item.category,
-                quantity=item.quantity,
-                loss_type=item.loss_type,
-                ownership=item.ownership,
-                estimated_value=item.estimated_value,
-                confidence=item.confidence,
-                relation=item.relation,
-                reported_text=item.reported_text,
-            )
+            _model_contents_item_change(item, evidence=evidence)
             for item in proposal.contents_item_changes
         ],
         state_changes=proposal.state_changes,
@@ -409,7 +461,33 @@ class GatewayAgent:
         self._instruction_provider = instruction_provider
         self._operations = operations
 
+    def _complete(self, request: ModelRequest, context: AgentTurnContext) -> ModelResponse:
+        snapshot = context.runtime_configuration_snapshot
+        if context.evidence:
+            resolver = context.evidence_resolver
+            if resolver is None:
+                raise ModelGatewayError(ModelGatewayErrorCode.EVIDENCE_UNAVAILABLE)
+            if snapshot is not None:
+                completion = getattr(
+                    self._gateway,
+                    'complete_for_snapshot_with_evidence',
+                    None,
+                )
+                if not callable(completion):
+                    raise ModelGatewayError(ModelGatewayErrorCode.EVIDENCE_UNAVAILABLE)
+                return cast(ModelResponse, cast(Any, completion)(request, snapshot, resolver))
+            completion = getattr(self._gateway, 'complete_with_evidence', None)
+            if not callable(completion):
+                raise ModelGatewayError(ModelGatewayErrorCode.EVIDENCE_UNAVAILABLE)
+            return cast(ModelResponse, cast(Any, completion)(request, resolver))
+        complete_for_snapshot = getattr(self._gateway, 'complete_for_snapshot', None)
+        if snapshot is not None and callable(complete_for_snapshot):
+            return cast(ModelResponse, cast(Any, complete_for_snapshot)(request, snapshot))
+        return self._gateway.complete(request)
+
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        if context.evidence_refs != [item.evidence_id for item in context.evidence]:
+            raise ModelGatewayError(ModelGatewayErrorCode.EVIDENCE_UNAVAILABLE)
         instruction = (
             context.runtime_policy.instruction.system_prompt
             if context.runtime_policy is not None
@@ -420,32 +498,66 @@ class GatewayAgent:
             f'{instruction}\n\n'
             'Runtime contract: first call the read-only claim.read tool with an empty object. '
             'After its result, return JSON with action_code="conversation.answer" for ordinary '
-            'intake, or action_code="human.create_handoff" only when the claimant explicitly '
-            'requests human help or a deterministic safety/support rule requires it. '
+            'intake. When customer_next_step.status is "ready_to_create", use '
+            'action_code="claim.prepare_creation" to ask for the final creation choice; do not '
+            'use claim.create because the authenticated creation boundary dispatches that action '
+            'only after the claimant submits the explicit choice. Use '
+            'action_code="human.create_handoff" only when the claimant explicitly '
+            'requests human help or a deterministic safety/support rule requires it. When the '
+            'claimant asks to find, reuse, or remove prior Evidence, use '
+            'action_code="claim.propose_evidence_reuse" or '
+            'action_code="claim.propose_evidence_remove" with the Evidence identifiers. The '
+            'Runtime will load authorised Evidence history and ask you to re-plan before it '
+            'accepts either proposal. A reuse proposal must ask for explicit claimant '
+            'confirmation before any Evidence API attach operation. If an Evidence history '
+            'result contains page.next_cursor, do not describe the page as an exhaustive '
+            'not-found result; a later bounded lookup may continue from that cursor. '
             'runtime_action_code, reason_codes, customer_reason, customer_response, '
             'customer_next_step, and only registered form_changes or contents_item_changes '
             'grounded in the claimant message. Preserve approximate values and reported_text. '
             'Do not claim that a formal Claim was created, an external provider was contacted, '
             'or a staff member accepted the handoff unless the Runtime returns that result. '
+            'Treat external_services as read-only Runtime facts. Follow their claimant meaning, '
+            'limitation, pending owner, and next action; never infer provider completion, advance '
+            'a lifecycle status, or retry an unknown outcome from model judgement. '
             'Use conversation_history only as context; Claim State and registered facts are '
             'authoritative, and do not repeat a question already answered by a confirmed fact. '
             'Every form change value must match field_value_contracts exactly: use JSON booleans '
-            'for boolean fields and only a listed string for enum fields.'
+            'for boolean fields and only a listed string for enum fields. For a fact read from an '
+            'attached Evidence block, including a contents item, set source_evidence_id to the '
+            'exact matching ID in attached_evidence and leave reported_text empty. Never use an '
+            'Evidence ID that is not listed there. Attachment-derived facts remain proposals for '
+            'claimant confirmation. Do not derive contents ownership or value from an attachment.'
         )
         prompt_version = (
             context.runtime_policy.instruction.prompt_version
             if context.runtime_policy is not None
             else MOTOR_CLAIMANT_PROMPT_ID
         )
-        messages = [
-            ModelMessage(role=ModelRole.SYSTEM, content=instruction),
+        context_json = json.dumps(
+            _model_turn_context(context).model_dump(mode='json'),
+            separators=(',', ':'),
+        )
+        user_message = (
             ModelMessage(
                 role=ModelRole.USER,
-                content=json.dumps(
-                    _model_turn_context(context).model_dump(mode='json'),
-                    separators=(',', ':'),
-                ),
-            ),
+                content_blocks=[
+                    ModelTextContent(text=context_json),
+                    *[
+                        ModelEvidenceContent(
+                            evidence_id=item.evidence_id,
+                            media_type=item.media_type,
+                        )
+                        for item in context.evidence
+                    ],
+                ],
+            )
+            if context.evidence
+            else ModelMessage(role=ModelRole.USER, content=context_json)
+        )
+        messages = [
+            ModelMessage(role=ModelRole.SYSTEM, content=instruction),
+            user_message,
         ]
         claim_read = tool_contract('claim.read')
         tool = ModelTool(
@@ -461,6 +573,10 @@ class GatewayAgent:
             required_capabilities=ModelCapabilities(
                 structured_output=True,
                 tools=bool(self._gateway.capabilities.tools),
+                image_input=any(item.media_type.startswith('image/') for item in context.evidence),
+                document_input=any(
+                    item.media_type == 'application/pdf' for item in context.evidence
+                ),
             ),
             messages=messages,
             # The staged tool request intentionally omits the final schema. The
@@ -480,17 +596,7 @@ class GatewayAgent:
         tool_arguments: dict[str, object] = {}
         tool_output: dict[str, object] = {}
         try:
-            complete_for_snapshot = getattr(self._gateway, 'complete_for_snapshot', None)
-            if context.runtime_configuration_snapshot is not None and callable(
-                complete_for_snapshot
-            ):
-                snapshot_completion = cast(
-                    Callable[[ModelRequest, RuntimeConfigurationSnapshot], ModelResponse],
-                    complete_for_snapshot,
-                )
-                response = snapshot_completion(request, context.runtime_configuration_snapshot)
-            else:
-                response = self._gateway.complete(request)
+            response = self._complete(request, context)
             invocations.append(
                 _runtime_invocation_trace(
                     1,
@@ -539,19 +645,17 @@ class GatewayAgent:
                     required_capabilities=ModelCapabilities(
                         structured_output=True,
                         tools=True,
+                        image_input=any(
+                            item.media_type.startswith('image/') for item in context.evidence
+                        ),
+                        document_input=any(
+                            item.media_type == 'application/pdf' for item in context.evidence
+                        ),
                     ),
                     messages=continuation_messages,
                     response_schema=_RUNTIME_PROPOSAL_ADAPTER.json_schema(),
                 )
-                if context.runtime_configuration_snapshot is not None and callable(
-                    complete_for_snapshot
-                ):
-                    response = snapshot_completion(
-                        continuation,
-                        context.runtime_configuration_snapshot,
-                    )
-                else:
-                    response = self._gateway.complete(continuation)
+                response = self._complete(continuation, context)
                 invocations.append(
                     _runtime_invocation_trace(
                         2,
@@ -574,70 +678,62 @@ class GatewayAgent:
                     )
                 except ValidationError:
                     raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
-                if runtime_proposal.runtime_action_code not in {
-                    'runtime.continue',
-                    'runtime.wait_for_user',
-                    'runtime.pause_for_review',
-                }:
-                    raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+                # ModelRuntimeProposal validates registry membership.  Keep the
+                # explicit lookup here as a second boundary so a malformed or
+                # stale provider response can never introduce a private action.
+                try:
+                    action_contract(runtime_proposal.action_code)
+                    action_contract(runtime_proposal.runtime_action_code)
+                except ValueError:
+                    raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY) from None
+                evidence_action_requested = runtime_proposal.action_code in {
+                    'claim.propose_evidence_reuse',
+                    'claim.propose_evidence_remove',
+                }
+                evidence_history_loaded = any(
+                    item.get('tool') == 'evidence.history' for item in context.tool_results
+                )
+                effective_action_code = (
+                    'conversation.answer'
+                    if evidence_action_requested and not evidence_history_loaded
+                    else runtime_proposal.action_code
+                )
                 result = AgentProposal(
                     action=(
                         AgentAction.HANDOFF
                         if runtime_proposal.action_code == 'human.create_handoff'
                         else AgentAction.UPDATE
                     ),
-                    action_code=runtime_proposal.action_code,
+                    action_code=effective_action_code,
                     reason_codes=runtime_proposal.reason_codes,
                     customer_reason=runtime_proposal.customer_reason,
                     customer_response=runtime_proposal.customer_response,
                     customer_next_step=runtime_proposal.customer_next_step,
                     form_changes=[
-                        ProposedFormChange(
-                            field_code=change.field_code,
-                            value=_normalise_model_field_value(change.field_code, change.value),
-                            source=(
-                                FormSource.CLAIMANT
-                                if change.reported_text
-                                and ' '.join(change.reported_text.split()).casefold()
-                                in ' '.join((context.message_text or '').split()).casefold()
-                                else FormSource.INFERENCE
-                            ),
-                            status=(
-                                FormStatus.CONFIRMED
-                                if change.reported_text
-                                and ' '.join(change.reported_text.split()).casefold()
-                                in ' '.join((context.message_text or '').split()).casefold()
-                                else FormStatus.PROPOSED
-                            ),
-                            needed_for=change.needed_for,
-                            confidence=change.confidence,
-                            precision=change.precision,
-                            relation=change.relation,
-                            reported_text=change.reported_text,
+                        _model_form_change(
+                            change,
+                            message_text=context.message_text,
+                            evidence=context.evidence,
                         )
                         for change in runtime_proposal.form_changes
                     ],
                     contents_item_changes=[
-                        ProposedContentsItem(
-                            item_id=item.item_id,
-                            description=item.description,
-                            category=item.category,
-                            quantity=item.quantity,
-                            loss_type=item.loss_type,
-                            ownership=item.ownership,
-                            estimated_value=item.estimated_value,
-                            confidence=item.confidence,
-                            relation=item.relation,
-                            reported_text=item.reported_text,
-                        )
+                        _model_contents_item_change(item, evidence=context.evidence)
                         for item in runtime_proposal.contents_item_changes
                     ],
                     state_changes=[],
                     proposed_signals=[],
-                    required_tools=[],
+                    required_tools=(
+                        [{'tool': 'evidence.history', 'operation': 'list'}]
+                        if evidence_action_requested and not evidence_history_loaded
+                        else []
+                    ),
                     next_action_requirements=[],
                     proposal_source=AgentProposalSource.MODEL_GATEWAY,
                     handoff_priority=runtime_proposal.handoff_priority,
+                    evidence_id=runtime_proposal.evidence_id,
+                    source_claim_id=runtime_proposal.source_claim_id,
+                    removal_scope=runtime_proposal.removal_scope,
                     # Model output is advisory. Deterministic support/safety interrupts are
                     # evaluated before this provider and are the only source of handoff authority.
                     controlled_rule_authorised=False,
@@ -652,13 +748,21 @@ class GatewayAgent:
                         session_id=context.session_id,
                         model_profile_id=context.model_profile_id,
                         trigger_message_id=context.trigger_message_id,
+                        evidence=[
+                            {
+                                'evidence_id': item.evidence_id,
+                                'media_type': item.media_type,
+                                'outcome': 'submitted',
+                            }
+                            for item in context.evidence
+                        ],
                         invocations=invocations,
                         tool_call_id=tool_call_id or 'unknown',
                         tool_name=claim_read.name,
                         tool_arguments=tool_arguments,
                         tool_output=tool_output,
                         tool_result_status='succeeded',
-                        action_code=runtime_proposal.action_code,
+                        action_code=effective_action_code,
                         runtime_action_code=runtime_proposal.runtime_action_code,
                         reason_codes=runtime_proposal.reason_codes,
                         status='succeeded',
@@ -674,6 +778,7 @@ class GatewayAgent:
                 result = _agent_proposal(
                     proposal,
                     message_text=context.message_text,
+                    evidence=context.evidence,
                     provider_model=response.provider_model,
                     provider_request_id=response.provider_request_id,
                     prompt_id=prompt_version,

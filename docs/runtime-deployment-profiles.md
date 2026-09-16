@@ -28,6 +28,25 @@ The local credentials in the MinIO examples are published development defaults, 
 secrets. Atlas, cloud, and production credentials must be supplied through protected process
 configuration and must never be committed in an environment file.
 
+The `vp` profile in `docker-compose.yml` is the deployable single-host form of `local_mvp`. It
+uses normal identity mode, mounts the three SQLite identity and Control Plane repositories under
+`/var/lib/northwind`, and waits for idempotent MongoDB, MinIO, and governed-knowledge initialisation
+before starting the Backend. It remains a controlled Validation Prototype, not an AWS or production
+profile.
+
+The Backend contains the versioned initial Agent Runtime Release. When the selected Control Plane
+scope has no Release Set history, application composition installs the complete Agent policy and
+the `qwen-local` plus `nowcoding-gpt55` model configurations as one active published Release Set.
+This is backend initialization, not a deployment-script repair step. Once any Release Set history
+exists, that history is authoritative and startup never republishes or restores a model that an
+operator removed.
+
+Before starting this profile, inject `NORTHWIND_OBJECT_STORAGE_PRESIGN_ENDPOINT` as the public
+HTTP(S) origin through which claimant browsers reach MinIO. Inject the staff bootstrap email and
+password and, when `AGENT_RUNTIME_PROFILE=model_gateway`, the model endpoint, identifier, and
+`NORTHWIND_MODEL_API_KEY` through the deployment secret mechanism. Do not add those values to a
+committed environment file.
+
 ## Startup preflight
 
 The preflight is the provider-selection gate: invalid or mixed profile/adapter combinations are
@@ -55,6 +74,18 @@ application instance. The example explicitly selects `NORTHWIND_IDENTITY_MODE=de
 enables only the synthetic local claimant, staff, and integration identities and cannot start in a
 non-development environment.
 
+Start or repeat the single-host bootstrap and Backend composition with:
+
+```powershell
+docker compose --profile vp up -d --build
+docker compose ps
+```
+
+The knowledge bootstrap verifies the approved source checksums before uploading and regenerates
+the registered motor, home, and contents indexes. Repeating it does not clear either MinIO bucket.
+The Backend refuses startup when its internal `minio` endpoint has no separately configured
+browser signing origin.
+
 ## Container image
 
 Build the same backend image for every profile:
@@ -68,6 +99,11 @@ docker run --rm --env-file deploy/runtime/fixture.env.example -p 8000:8000 `
 There are no provider-specific build arguments or images. Selecting an incomplete MongoDB,
 Cloudflare, or AWS profile fails while importing the application, before Uvicorn serves a request.
 No candidate profile falls through to fixture services.
+
+The image creates `/var/lib/northwind` for the non-root `northwind` user but does not bake identity
+or Control Plane data into the image. The Compose `vp` profile mounts that path from the
+`northwind-backend-state` volume so a container replacement preserves the three SQLite stores;
+MongoDB and MinIO continue to use their separate durable volumes.
 
 ## Verification boundary
 

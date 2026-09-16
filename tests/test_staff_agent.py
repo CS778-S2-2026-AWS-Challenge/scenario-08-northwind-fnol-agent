@@ -142,21 +142,29 @@ def _create_session(client: TestClient, model_profile_id: str | None = None) -> 
     return str(response.json()['session_id'])
 
 
-def test_staff_agent_session_persists_selected_model_profile() -> None:
+def test_staff_agent_reuses_empty_session_until_first_turn_is_persisted() -> None:
     repository = FixtureRepository()
     provider = RecordingStaffAgent()
     with _client(repository, provider) as client:
         response = client.post(
             '/api/v1/workbench/agent/sessions',
             headers=STAFF_HEADERS,
-            json={'title': 'GPT review', 'model_profile_id': 'nowcoding-gpt56terra'},
+            json={'title': 'GPT review', 'model_profile_id': 'nowcoding-gpt55'},
         )
         assert response.status_code == 201
         session_id = response.json()['session_id']
-        assert response.json()['model_profile_id'] == 'nowcoding-gpt56terra'
+        assert response.json()['model_profile_id'] == 'nowcoding-gpt55'
+        repeated = client.post(
+            '/api/v1/workbench/agent/sessions',
+            headers=STAFF_HEADERS,
+            json={'title': 'GPT review', 'model_profile_id': 'nowcoding-gpt55'},
+        )
+        assert repeated.status_code == 201
+        assert repeated.json()['session_id'] == session_id
+        assert len(repository.list_staff_agent_sessions('stf_demo')) == 1
+
         listed = client.get('/api/v1/workbench/agent/sessions', headers=STAFF_HEADERS)
-        assert listed.status_code == 200
-        assert listed.json()['items'][0]['model_profile_id'] == 'nowcoding-gpt56terra'
+        assert listed.json()['items'] == []
 
         message = client.post(
             f'/api/v1/workbench/agent/sessions/{session_id}/messages',
@@ -167,10 +175,38 @@ def test_staff_agent_session_persists_selected_model_profile() -> None:
                 'claim_ids': [],
             },
         )
+        listed = client.get('/api/v1/workbench/agent/sessions', headers=STAFF_HEADERS)
+        next_session = client.post(
+            '/api/v1/workbench/agent/sessions',
+            headers=STAFF_HEADERS,
+            json={'title': 'GPT review', 'model_profile_id': 'nowcoding-gpt55'},
+        )
+        different_model = client.post(
+            '/api/v1/workbench/agent/sessions',
+            headers=STAFF_HEADERS,
+            json={'title': 'GPT review', 'model_profile_id': 'qwen-local'},
+        )
+        different_title = client.post(
+            '/api/v1/workbench/agent/sessions',
+            headers=STAFF_HEADERS,
+            json={'title': 'Separate review', 'model_profile_id': 'nowcoding-gpt55'},
+        )
 
     assert message.status_code == 201
-    assert provider.contexts[0].model_profile_id == 'nowcoding-gpt56terra'
-    assert message.json()['session']['model_profile_id'] == 'nowcoding-gpt56terra'
+    assert listed.status_code == 200
+    assert listed.json()['items'][0]['model_profile_id'] == 'nowcoding-gpt55'
+    assert next_session.json()['session_id'] != session_id
+    assert different_model.json()['session_id'] not in {
+        session_id,
+        next_session.json()['session_id'],
+    }
+    assert different_title.json()['session_id'] not in {
+        session_id,
+        next_session.json()['session_id'],
+        different_model.json()['session_id'],
+    }
+    assert provider.contexts[0].model_profile_id == 'nowcoding-gpt55'
+    assert message.json()['session']['model_profile_id'] == 'nowcoding-gpt55'
 
 
 def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
@@ -186,7 +222,7 @@ def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
     records: dict[str, ConfigurationRecord] = {}
     for profile_id, model_identifier, base_url in (
         ('qwen-local', 'qwen3.8-27b', 'http://model.example.test/v1'),
-        ('nowcoding-gpt56terra', 'gpt-5.6-terra', 'https://nowcoding.ai/v1'),
+        ('nowcoding-gpt55', 'gpt-5.5', 'https://nowcoding.ai/v1'),
     ):
         record = ConfigurationRecord(
             configuration_id=f'cfg_{profile_id}',
@@ -209,6 +245,8 @@ def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
                 'timeout_seconds': 30,
                 'structured_output': True,
                 'tools': False,
+                'image_input': profile_id == 'qwen-local',
+                'document_input': profile_id == 'qwen-local',
             },
             author='test-admin',
             reason='Publish a Staff Agent model catalog.',
@@ -254,8 +292,10 @@ def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
     assert body['default_model_profile_id'] == 'qwen-local'
     assert [item['id'] for item in body['models']] == [
         'qwen-local',
-        'nowcoding-gpt56terra',
+        'nowcoding-gpt55',
     ]
+    assert [item['image_input'] for item in body['models']] == [True, False]
+    assert [item['document_input'] for item in body['models']] == [True, False]
 
 
 def test_staff_agent_capabilities_is_empty_for_controlled_runtime() -> None:
@@ -379,7 +419,7 @@ def test_staff_agent_rejects_model_override_in_message_request() -> None:
     repository = FixtureRepository()
     provider = RecordingStaffAgent()
     with _client(repository, provider) as client:
-        session_id = _create_session(client, 'nowcoding-gpt56terra')
+        session_id = _create_session(client, 'nowcoding-gpt55')
         response = client.post(
             f'/api/v1/workbench/agent/sessions/{session_id}/messages',
             headers=STAFF_HEADERS,
@@ -401,6 +441,9 @@ def test_staff_agent_persists_explicit_multi_claim_scope_and_lists_conversation(
         first_claim = _create_claim(client, 'staff-agent-first')
         second_claim = _create_claim(client, 'staff-agent-second')
         session_id = _create_session(client)
+        empty_conversations = client.get('/api/v1/workbench/conversations', headers=STAFF_HEADERS)
+
+        assert all(item['kind'] != 'staff_agent' for item in empty_conversations.json()['items'])
 
         response = client.post(
             f'/api/v1/workbench/agent/sessions/{session_id}/messages',
@@ -674,9 +717,16 @@ def test_staff_agent_fails_closed_when_no_model_profile_is_configured() -> None:
                 'claim_ids': [],
             },
         )
+        listed = client.get('/api/v1/workbench/agent/sessions', headers=STAFF_HEADERS)
+        conversations = client.get('/api/v1/workbench/conversations', headers=STAFF_HEADERS)
+        retried_session = _create_session(client)
 
     assert response.status_code == 503
     assert response.json()['error']['code'] == 'DEPENDENCY_UNAVAILABLE'
+    assert listed.json()['items'] == []
+    assert all(item['kind'] != 'staff_agent' for item in conversations.json()['items'])
+    assert retried_session == session_id
+    assert len(repository.list_staff_agent_sessions('stf_demo')) == 1
 
 
 def test_staff_agent_rejects_informational_draft_without_mutating_claim() -> None:

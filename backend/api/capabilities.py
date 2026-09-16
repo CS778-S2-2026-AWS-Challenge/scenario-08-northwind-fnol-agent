@@ -15,6 +15,8 @@ class ModelCapability(BaseModel):
     protocol: str = Field(min_length=1)
     structured_output: bool
     tools: bool
+    image_input: bool
+    document_input: bool
     availability: str = Field(default='available', pattern=r'^(available|unavailable)$')
 
 
@@ -48,6 +50,8 @@ def capabilities(
                     protocol=configuration.protocol,
                     structured_output=configuration.structured_output,
                     tools=configuration.tools,
+                    image_input=configuration.image_input,
+                    document_input=configuration.document_input,
                     availability=(
                         'available'
                         if configuration.evaluation_status == 'configured'

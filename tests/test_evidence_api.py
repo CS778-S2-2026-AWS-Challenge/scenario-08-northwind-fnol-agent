@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Any, cast
 
@@ -12,7 +12,23 @@ from backend.adapters.evidence_storage import (
     MockEvidenceStorage,
     StoredUpload,
 )
-from backend.domain.models import EvidenceFileStatus
+from backend.domain.models import (
+    ActorType,
+    AgentProposalSource,
+    EvidenceFileStatus,
+    EvidenceRecord,
+    EvidenceSource,
+    EvidenceStatus,
+    MessageRecord,
+    MessageVisibility,
+)
+from backend.domain.runtime import (
+    AgentProposalRecord,
+    ExecutionPlanRecord,
+    RuntimeTurnRecords,
+    TurnPlanRecord,
+    TurnResultRecord,
+)
 from backend.repositories.fixture import FixtureRepository
 
 
@@ -92,6 +108,599 @@ def test_pending_evidence_is_saved_visible_and_does_not_block_current_work(
     assert response.json()['evidence']['evidence_id'] in {
         source_ref for result in evaluation.branch_results for source_ref in result.source_refs
     }
+
+
+def test_claimant_can_read_evidence_history_across_owned_claims(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    first = create_claim(client, auth_headers, 'history-first-claim')
+    second = create_claim(client, auth_headers, 'history-second-claim')
+    first_id = str(cast(dict[str, object], first['claim'])['claim_id'])
+    second_id = str(cast(dict[str, object], second['claim'])['claim_id'])
+
+    evidence_ids = []
+    for claim_id, key in (
+        (first_id, 'history-first-evidence'),
+        (second_id, 'history-second-evidence'),
+    ):
+        response = client.post(
+            f'/api/v1/claims/{claim_id}/evidence/uploads',
+            headers={**auth_headers, 'Idempotency-Key': key, 'If-Match': '1'},
+            json={
+                'kind': 'other_document',
+                'original_filename': 'history.jpg',
+                'media_type': 'image/jpeg',
+                'size_bytes': 7,
+            },
+        )
+        assert response.status_code == 201
+        evidence_id = str(response.json()['evidence_id'])
+        evidence_ids.append(evidence_id)
+        checksum = put_fixture_upload(client, claim_id, evidence_id, 7)
+        complete = client.post(
+            f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
+            headers={**auth_headers, 'Idempotency-Key': f'{key}-complete', 'If-Match': '2'},
+            json={'upload_checksum': checksum},
+        )
+        assert complete.status_code == 202
+
+    response = client.get('/api/v1/evidence?limit=1', headers=auth_headers)
+    assert response.status_code == 200
+    assert len(response.json()['items']) == 1
+    assert response.json()['items'][0]['source_claim_id'] == first_id
+    assert response.json()['items'][0]['evidence_id'] == evidence_ids[0]
+    assert 'storage_key' not in response.json()['items'][0]
+    assert response.json()['page']['next_cursor'] is not None
+
+    second_page = client.get(
+        f'/api/v1/evidence?cursor={response.json()["page"]["next_cursor"]}',
+        headers=auth_headers,
+    )
+    assert second_page.status_code == 200
+    assert second_page.json()['items'][0]['source_claim_id'] == second_id
+
+
+def _make_ready_evidence(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    claim_id: str,
+    case: str,
+    revision: int = 1,
+) -> tuple[str, int]:
+    evidence_id = upload_evidence(client, auth_headers, claim_id, case, revision)
+    complete_upload(client, auth_headers, claim_id, evidence_id, case, revision + 1)
+    processed = client.post(
+        f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing',
+        headers=integration_headers(f'{case}-processing', revision + 2),
+        json={
+            'facts': [
+                {
+                    'field_code': 'incident.description',
+                    'value': 'Ready Evidence for governed account-history actions.',
+                    'confidence': 0.9,
+                }
+            ]
+        },
+    )
+    assert processed.status_code == 200
+    return evidence_id, revision + 3
+
+
+def _seed_persisted_evidence_authority(
+    repository: FixtureRepository,
+    *,
+    claim_id: str,
+    customer_id: str,
+    evidence_id: str,
+    action: str,
+    expected_revision: int,
+    case: str,
+    source_claim_id: str,
+) -> tuple[str, str]:
+    """Create the persisted Runtime proposal and claimant confirmation used by the API."""
+
+    session = repository.get_active_session(claim_id, customer_id)
+    assert session is not None
+    claim = repository.get_claim(claim_id, customer_id)
+    assert claim is not None
+    base_time = datetime.now(UTC)
+    trigger = MessageRecord(
+        message_id=f'msg_{case}_trigger',
+        claim_id=claim_id,
+        session_id=session.session_id,
+        actor=ActorType.CLAIMANT,
+        visibility=MessageVisibility.CLAIMANT_VISIBLE,
+        content={'type': 'text', 'text': f'Please {action} this Evidence.'},
+        created_at=base_time,
+    )
+    repository.save_message(trigger, customer_id)
+    proposal_id = f'apr_{case}'
+    proposal = AgentProposalRecord(
+        proposal_id=proposal_id,
+        turn_id=f'turn_{case}',
+        claim_id=claim_id,
+        session_id=session.session_id,
+        action_code=f'claim.propose_evidence_{action}',
+        runtime_directive='runtime.wait_for_user',
+        reason_codes=['EVIDENCE_ACTION_REQUIRES_CONFIRMATION'],
+        customer_reason=f'Please confirm that Northwind should {action} this Evidence.',
+        customer_response=f'Please confirm that Northwind should {action} this Evidence.',
+        customer_next_step=claim.customer_next_step,
+        evidence_id=evidence_id,
+        source_claim_id=source_claim_id,
+        removal_scope='source_claim_history' if action == 'remove' else None,
+        proposal_source=AgentProposalSource.CONTROLLED_AGENT,
+        model_profile_id=session.model_profile_id,
+        created_at=base_time + timedelta(seconds=1),
+    )
+    confirmation_id = f'msg_{case}_confirmation'
+    confirmation = MessageRecord(
+        message_id=confirmation_id,
+        claim_id=claim_id,
+        session_id=session.session_id,
+        actor=ActorType.CLAIMANT,
+        visibility=MessageVisibility.CLAIMANT_VISIBLE,
+        content={'type': 'text', 'text': 'Yes, please do that.'},
+        in_reply_to=proposal_id,
+        created_at=base_time + timedelta(seconds=2),
+    )
+    repository.save_message(confirmation, customer_id)
+    agent_message_id = f'msg_{case}_agent'
+    repository.save_message(
+        MessageRecord(
+            message_id=agent_message_id,
+            claim_id=claim_id,
+            session_id=session.session_id,
+            actor=ActorType.AGENT,
+            visibility=MessageVisibility.CLAIMANT_VISIBLE,
+            content={'type': 'text', 'text': 'The requested Evidence action is ready.'},
+            in_reply_to=trigger.message_id,
+            created_at=base_time + timedelta(seconds=3),
+        ),
+        customer_id,
+    )
+    runtime_records = RuntimeTurnRecords(
+        turn_plan=TurnPlanRecord(
+            turn_id=proposal.turn_id,
+            claim_id=claim_id,
+            session_id=session.session_id,
+            trigger_message_id=trigger.message_id,
+            model_profile_id=session.model_profile_id,
+            runtime_directive='runtime.wait_for_user',
+            created_at=proposal.created_at,
+        ),
+        proposal=proposal,
+        execution_plan=ExecutionPlanRecord(
+            execution_plan_id=f'exec_{case}',
+            turn_id=proposal.turn_id,
+            claim_id=claim_id,
+            expected_revision=expected_revision,
+            status='prepared',
+            created_at=proposal.created_at,
+        ),
+        result=TurnResultRecord(
+            result_id=f'result_{case}',
+            turn_id=proposal.turn_id,
+            claim_id=claim_id,
+            session_id=session.session_id,
+            trigger_message_id=trigger.message_id,
+            agent_message_id=agent_message_id,
+            execution_plan_id=f'exec_{case}',
+            status='blocked',
+            resulting_claim_revision=expected_revision,
+            customer_response=proposal.customer_response,
+            created_at=proposal.created_at,
+        ),
+    )
+    repository._runtime_turns[proposal.turn_id] = runtime_records
+    return proposal_id, confirmation_id
+
+
+def test_claimant_can_reuse_then_detach_existing_evidence_without_copying_it(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    source = create_claim(client, auth_headers, 'reuse-source-claim')
+    target = create_claim(client, auth_headers, 'reuse-target-claim')
+    source_id = str(cast(dict[str, object], source['claim'])['claim_id'])
+    target_id = str(cast(dict[str, object], target['claim'])['claim_id'])
+    evidence_id, source_revision = _make_ready_evidence(
+        client, auth_headers, source_id, 'reuse-source-evidence'
+    )
+    proposal_ref, confirmation_ref = _seed_persisted_evidence_authority(
+        repository,
+        claim_id=target_id,
+        customer_id='cus_demo',
+        evidence_id=evidence_id,
+        action='reuse',
+        expected_revision=1,
+        case='reuse-target',
+        source_claim_id=source_id,
+    )
+
+    reuse = client.post(
+        f'/api/v1/claims/{target_id}/evidence/{evidence_id}/reuse',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'reuse-evidence-action',
+            'If-Match': '1',
+        },
+        json={
+            'source_claim_id': source_id,
+            'proposal_ref': proposal_ref,
+            'confirmation_ref': confirmation_ref,
+        },
+    )
+    target_evidence = client.get(f'/api/v1/claims/{target_id}/evidence', headers=auth_headers)
+    history = client.get('/api/v1/evidence', headers=auth_headers)
+
+    assert source_revision == 4
+    assert reuse.status_code == 200
+    assert reuse.json()['status'] == 'succeeded'
+    assert reuse.json()['revision'] == 2
+    assert [item['evidence_id'] for item in target_evidence.json()['items']] == [evidence_id]
+    assert target_evidence.json()['items'][0]['source_claim_id'] == source_id
+    history_item = next(
+        item for item in history.json()['items'] if item['evidence_id'] == evidence_id
+    )
+    assert history_item['linked_claim_ids'] == [target_id]
+    assert repository.get_evidence_claim_link(target_id, evidence_id, 'cus_demo') is not None
+    assert repository.get_evidence(source_id, evidence_id, 'cus_demo') is not None
+
+    detach_proposal_ref, detach_confirmation_ref = _seed_persisted_evidence_authority(
+        repository,
+        claim_id=target_id,
+        customer_id='cus_demo',
+        evidence_id=evidence_id,
+        action='remove',
+        expected_revision=2,
+        case='detach-target',
+        source_claim_id=source_id,
+    )
+
+    detach = client.post(
+        f'/api/v1/claims/{target_id}/evidence/{evidence_id}/remove',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'detach-evidence-action',
+            'If-Match': '2',
+        },
+        json={
+            'source_claim_id': source_id,
+            'proposal_ref': detach_proposal_ref,
+            'confirmation_ref': detach_confirmation_ref,
+        },
+    )
+    target_after = client.get(f'/api/v1/claims/{target_id}/evidence', headers=auth_headers)
+    history_after = client.get('/api/v1/evidence', headers=auth_headers)
+
+    assert detach.status_code == 200
+    assert detach.json()['reason_code'] == 'EVIDENCE_DETACHED'
+    assert target_after.json()['items'] == []
+    history_item = next(
+        item for item in history_after.json()['items'] if item['evidence_id'] == evidence_id
+    )
+    assert history_item['linked_claim_ids'] == []
+    link = repository.get_evidence_claim_link(target_id, evidence_id, 'cus_demo')
+    assert link is not None
+    assert link.state.value == 'detached'
+
+
+def test_removing_source_evidence_marks_history_removed_and_replays_idempotently(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, 'remove-source-claim')
+    claim_id = str(cast(dict[str, object], created['claim'])['claim_id'])
+    evidence_id, revision = _make_ready_evidence(
+        client, auth_headers, claim_id, 'remove-source-evidence'
+    )
+    proposal_ref, confirmation_ref = _seed_persisted_evidence_authority(
+        repository,
+        claim_id=claim_id,
+        customer_id='cus_demo',
+        evidence_id=evidence_id,
+        action='remove',
+        expected_revision=revision,
+        case='remove-source',
+        source_claim_id=claim_id,
+    )
+    payload = {
+        'source_claim_id': claim_id,
+        'proposal_ref': proposal_ref,
+        'confirmation_ref': confirmation_ref,
+    }
+    headers = {
+        **auth_headers,
+        'Idempotency-Key': 'remove-source-action',
+        'If-Match': str(revision),
+    }
+
+    removed = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/remove',
+        headers=headers,
+        json=payload,
+    )
+    replay = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/remove',
+        headers=headers,
+        json=payload,
+    )
+    history = client.get('/api/v1/evidence', headers=auth_headers)
+
+    assert removed.status_code == 200
+    assert removed.json()['reason_code'] == 'EVIDENCE_HISTORY_REMOVED_CONTENT_RETAINED'
+    assert replay.json() == removed.json()
+    assert evidence_id not in {item['evidence_id'] for item in history.json()['items']}
+
+
+@pytest.mark.parametrize(
+    ('file_status', 'status', 'reason'),
+    [
+        ('processing', 'received', 'EVIDENCE_PROCESSING'),
+        ('failed', 'received', 'EVIDENCE_NOT_REMOVABLE'),
+        ('ready', 'invalid', 'EVIDENCE_RETENTION_BLOCKED'),
+    ],
+)
+def test_evidence_action_rejects_ineligible_source_without_changing_claim(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    file_status: str,
+    status: str,
+    reason: str,
+) -> None:
+    created = create_claim(client, auth_headers, f'action-rejected-{file_status}-{status}')
+    claim_id = str(cast(dict[str, object], created['claim'])['claim_id'])
+    evidence_id = upload_evidence(client, auth_headers, claim_id, f'action-{file_status}', 1)
+    complete_upload(client, auth_headers, claim_id, evidence_id, f'action-{file_status}', 2)
+    evidence = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    assert evidence is not None
+    repository.save_evidence(
+        evidence.model_copy(
+            update={
+                'file_status': EvidenceFileStatus(file_status),
+                'status': EvidenceStatus(status),
+            }
+        ),
+        'cus_demo',
+    )
+    before = repository.get_claim(claim_id, 'cus_demo')
+    assert before is not None
+    proposal_ref, confirmation_ref = _seed_persisted_evidence_authority(
+        repository,
+        claim_id=claim_id,
+        customer_id='cus_demo',
+        evidence_id=evidence_id,
+        action='remove',
+        expected_revision=3,
+        case=f'rejected-{file_status}',
+        source_claim_id=claim_id,
+    )
+
+    response = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/remove',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': f'rejected-{file_status}-{status}',
+            'If-Match': '3',
+        },
+        json={
+            'source_claim_id': claim_id,
+            'proposal_ref': proposal_ref,
+            'confirmation_ref': confirmation_ref,
+        },
+    )
+    after = repository.get_claim(claim_id, 'cus_demo')
+
+    assert response.status_code == 200
+    assert response.json()['status'] == 'rejected'
+    assert response.json()['reason_code'] == reason
+    assert after is not None
+    assert after.revision == before.revision
+
+
+def test_evidence_actions_reject_fabricated_refs_before_repository_mutation(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    source = create_claim(client, auth_headers, 'fabricated-reuse-source')
+    target = create_claim(client, auth_headers, 'fabricated-reuse-target')
+    source_id = str(cast(dict[str, object], source['claim'])['claim_id'])
+    target_id = str(cast(dict[str, object], target['claim'])['claim_id'])
+    evidence_id, _ = _make_ready_evidence(
+        client, auth_headers, source_id, 'fabricated-reuse-evidence'
+    )
+    before_target = repository.get_claim(target_id, 'cus_demo')
+    assert before_target is not None
+
+    reuse = client.post(
+        f'/api/v1/claims/{target_id}/evidence/{evidence_id}/reuse',
+        headers={**auth_headers, 'Idempotency-Key': 'fabricated-reuse', 'If-Match': '1'},
+        json={
+            'source_claim_id': source_id,
+            'proposal_ref': 'known-evidence-id-but-not-a-proposal',
+            'confirmation_ref': 'known-evidence-id-but-not-a-message',
+        },
+    )
+
+    assert reuse.status_code == 422
+    assert reuse.json()['error']['code'] == 'VALIDATION_ERROR'
+    after_target = repository.get_claim(target_id, 'cus_demo')
+    assert after_target is not None
+    assert after_target.revision == before_target.revision == 1
+    assert repository.get_evidence_claim_link(target_id, evidence_id, 'cus_demo') is None
+
+    remove = client.post(
+        f'/api/v1/claims/{source_id}/evidence/{evidence_id}/remove',
+        headers={**auth_headers, 'Idempotency-Key': 'fabricated-remove', 'If-Match': '4'},
+        json={
+            'source_claim_id': source_id,
+            'proposal_ref': 'fabricated-proposal',
+            'confirmation_ref': 'fabricated-confirmation',
+        },
+    )
+
+    assert remove.status_code == 422
+    assert remove.json()['error']['code'] == 'VALIDATION_ERROR'
+    after_source = repository.get_claim(source_id, 'cus_demo')
+    assert after_source is not None
+    assert after_source.revision == 4
+    stored_evidence = repository.get_evidence(source_id, evidence_id, 'cus_demo')
+    assert stored_evidence is not None
+    assert stored_evidence.claimant_history_state.value != 'removed'
+
+
+def _seed_history_evidence(
+    repository: FixtureRepository,
+    *,
+    claim_id: str,
+    customer_id: str,
+    evidence_id: str,
+    file_status: EvidenceFileStatus,
+    source: EvidenceSource = EvidenceSource.CLAIMANT,
+    status: EvidenceStatus = EvidenceStatus.RECEIVED,
+) -> None:
+    timestamp = datetime.now(UTC)
+    repository.save_evidence(
+        EvidenceRecord(
+            evidence_id=evidence_id,
+            claim_id=claim_id,
+            kind='other_document',
+            status=status,
+            file_status=file_status,
+            original_filename=f'{evidence_id}.jpg',
+            media_type='image/jpeg',
+            size_bytes=128,
+            source=source,
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+        customer_id,
+    )
+
+
+def test_evidence_history_is_account_scoped_and_filters_non_claimant_file_states(
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    first = client.post(
+        '/api/v1/auth/sessions',
+        json={'email': 'claimant.one@example.invalid', 'password': 'northwind-demo-one'},
+    )
+    second = client.post(
+        '/api/v1/auth/sessions',
+        json={'email': 'claimant.two@example.invalid', 'password': 'northwind-demo-two'},
+    )
+    assert first.status_code == 201
+    assert second.status_code == 201
+    first_headers = {'Authorization': f'Bearer {first.json()["access_token"]}'}
+    second_headers = {'Authorization': f'Bearer {second.json()["access_token"]}'}
+    first_claim = create_claim(client, first_headers, 'history-boundary-first-claim')
+    second_claim = create_claim(client, second_headers, 'history-boundary-second-claim')
+    first_claim_id = str(cast(dict[str, object], first_claim['claim'])['claim_id'])
+    second_claim_id = str(cast(dict[str, object], second_claim['claim'])['claim_id'])
+
+    for index, file_status in enumerate(
+        (
+            EvidenceFileStatus.UPLOADED,
+            EvidenceFileStatus.PROCESSING,
+            EvidenceFileStatus.READY,
+            EvidenceFileStatus.FAILED,
+        )
+    ):
+        _seed_history_evidence(
+            repository,
+            claim_id=first_claim_id,
+            customer_id='cus_demo',
+            evidence_id=f'evd-history-{file_status.value}',
+            file_status=file_status,
+            status=EvidenceStatus.PENDING if index == 0 else EvidenceStatus.RECEIVED,
+        )
+    _seed_history_evidence(
+        repository,
+        claim_id=first_claim_id,
+        customer_id='cus_demo',
+        evidence_id='evd-awaiting-upload',
+        file_status=EvidenceFileStatus.AWAITING_UPLOAD,
+    )
+    _seed_history_evidence(
+        repository,
+        claim_id=first_claim_id,
+        customer_id='cus_demo',
+        evidence_id='evd-non-claimant-source',
+        file_status=EvidenceFileStatus.READY,
+        source=EvidenceSource.EXTERNAL_SYSTEM,
+    )
+    _seed_history_evidence(
+        repository,
+        claim_id=second_claim_id,
+        customer_id='cus_other',
+        evidence_id='evd-other-claimant',
+        file_status=EvidenceFileStatus.READY,
+    )
+
+    response = client.get('/api/v1/evidence', headers=first_headers)
+
+    assert response.status_code == 200
+    items = response.json()['items']
+    assert {item['file_status'] for item in items} == {
+        'uploaded',
+        'processing',
+        'ready',
+        'failed',
+    }
+    assert all(item['source_claim_id'] == first_claim_id for item in items)
+    assert 'evd-awaiting-upload' not in {item['evidence_id'] for item in items}
+    assert 'evd-non-claimant-source' not in {item['evidence_id'] for item in items}
+    assert 'evd-other-claimant' not in {item['evidence_id'] for item in items}
+
+    other_claimant_response = client.get('/api/v1/evidence', headers=second_headers)
+    assert other_claimant_response.status_code == 200
+    assert [item['evidence_id'] for item in other_claimant_response.json()['items']] == [
+        'evd-other-claimant'
+    ]
+
+
+@pytest.mark.parametrize(
+    'headers',
+    [
+        {'Authorization': 'Bearer synthetic-staff'},
+        {'Authorization': 'Bearer synthetic-integration'},
+        {'Authorization': 'Bearer synthetic-admin'},
+    ],
+)
+def test_account_evidence_history_rejects_non_claimant_credentials(
+    client: TestClient,
+    headers: dict[str, str],
+) -> None:
+    response = client.get('/api/v1/evidence', headers=headers)
+
+    assert response.status_code == 403
+    assert response.json()['error']['code'] == 'ACCESS_DENIED'
+
+
+def test_account_evidence_history_rejects_anonymous_sessions_and_invalid_cursors(
+    client: TestClient,
+) -> None:
+    anonymous = client.get(
+        '/api/v1/evidence',
+        headers={'X-Northwind-Anonymous-Session': '4c7f9f6e-0f31-4ce3-a5cc-5e3a4d8e4b10'},
+    )
+    invalid_cursor = client.get(
+        '/api/v1/evidence?cursor=not-a-valid-cursor',
+        headers={'Authorization': 'Bearer synthetic-claimant'},
+    )
+
+    assert anonymous.status_code == 401
+    assert anonymous.json()['error']['code'] == 'AUTHENTICATION_REQUIRED'
+    assert invalid_cursor.status_code == 422
+    assert invalid_cursor.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert invalid_cursor.json()['error']['details'][0]['field'] == 'cursor'
 
 
 @pytest.mark.parametrize(
@@ -480,7 +1089,10 @@ def test_processed_evidence_facts_stay_proposed_until_the_claimant_decides(
     assert processed.json()['file_status'] == 'ready'
     assert proposal['status'] == 'proposed'
     assert proposal['source'] == expected_source
-    assert proposal['source_refs'] == [evidence_id]
+    assert proposal['source_refs'] == [
+        evidence_id,
+        f'evidence:{evidence_id}:material:1',
+    ]
 
     before_decision = client.get(
         f'/api/v1/claims/{claim_id}',
@@ -516,7 +1128,10 @@ def test_processed_evidence_facts_stay_proposed_until_the_claimant_decides(
     assert decided.json()['revision'] == 5
     assert updated['status'] == expected_status
     assert updated['source'] == expected_source
-    assert updated['source_refs'] == [evidence_id]
+    assert updated['source_refs'] == [
+        evidence_id,
+        f'evidence:{evidence_id}:material:1',
+    ]
     assert updated['updated_at'] >= proposal['updated_at']
 
     repeated_decision = client.post(
@@ -1229,4 +1844,7 @@ def test_processing_cannot_replace_an_unresolved_field_from_an_earlier_source(
     assert after is not None
     field_after = after.form['incident.description']
     assert field_after.model_dump(mode='json') == field_before.model_dump(mode='json')
-    assert field_after.source_refs == [first_evidence_id]
+    assert field_after.source_refs == [
+        first_evidence_id,
+        f'evidence:{first_evidence_id}:material:1',
+    ]

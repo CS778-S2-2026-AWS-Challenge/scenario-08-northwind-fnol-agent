@@ -113,6 +113,8 @@ class ModelRuntimeConfiguration(BaseModel):
     timeout_seconds: float = Field(gt=0)
     structured_output: bool = False
     tools: bool = False
+    image_input: bool = False
+    document_input: bool = False
 
 
 class ModelRuntimeBinding(BaseModel):
@@ -120,7 +122,10 @@ class ModelRuntimeBinding(BaseModel):
 
     model_config = ConfigDict(extra='forbid')
 
+    profile_id: str = Field(min_length=1, max_length=100)
     protocol: str = Field(min_length=1, max_length=50)
+    provider: str = Field(min_length=1, max_length=100)
+    model_identifier: str = Field(min_length=1, max_length=300)
     base_url: str = Field(max_length=500)
     credential_environment_variable: str | None = Field(default=None, max_length=200)
     purpose: str = Field(min_length=1, max_length=100)
@@ -128,6 +133,8 @@ class ModelRuntimeBinding(BaseModel):
     prompt_version: str = Field(min_length=1, max_length=100)
     structured_output: bool
     tools: bool = False
+    image_input: bool = False
+    document_input: bool = False
 
 
 class ModelCostRate(BaseModel):

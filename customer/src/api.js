@@ -57,7 +57,8 @@ async function apiRequest(path, options = {}) {
         ...options.headers,
       },
     })
-  } catch {
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error
     throw new ApiRequestError(
       'We could not reach the claim service. Check your connection and try again.',
       { code: 'NETWORK_ERROR', retryable: true },
@@ -252,27 +253,36 @@ export function updateClaimFields({ claimId, revision, updates }) {
   })
 }
 
-export function requestEvidenceUpload({ claimId, revision, file, kind = 'other_document', idempotencyKey = requestId('evidence-upload') }) {
+export function requestEvidenceUpload({ claimId, revision, file, kind = 'other_document', evidenceId = null, idempotencyKey = requestId('evidence-upload'), signal }) {
   return apiRequest(`/api/v1/claims/${claimId}/evidence/uploads`, {
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(revision) },
-    body: JSON.stringify({ kind, original_filename: file.name, media_type: file.type, size_bytes: file.size }),
+    body: JSON.stringify({
+      ...(evidenceId ? { evidence_id: evidenceId } : {}),
+      kind,
+      original_filename: file.name,
+      media_type: file.type,
+      size_bytes: file.size,
+    }),
+    signal,
   })
 }
 
-export function completeEvidenceUpload({ claimId, evidenceId, revision, checksum, idempotencyKey = requestId('evidence-complete') }) {
+export function completeEvidenceUpload({ claimId, evidenceId, revision, checksum, idempotencyKey = requestId('evidence-complete'), signal }) {
   return apiRequest(`/api/v1/claims/${claimId}/evidence/${evidenceId}/complete`, {
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(revision) },
     body: JSON.stringify({ upload_checksum: checksum }),
+    signal,
   })
 }
 
-export function uploadEvidenceContent({ upload, file }) {
+export function uploadEvidenceContent({ upload, file, signal }) {
   return apiRequest(upload.url, {
     method: upload.method,
     headers: upload.headers,
     body: file,
+    signal,
   })
 }
 
@@ -284,18 +294,46 @@ export function registerPendingEvidence({ claimId, revision, kind, note, idempot
   })
 }
 
-export function getClaimEvidence(claimId) {
-  return apiRequest(`/api/v1/claims/${claimId}/evidence`)
+export function getClaimEvidence(claimId, { signal } = {}) {
+  return apiRequest(`/api/v1/claims/${claimId}/evidence`, { signal })
+}
+
+export function listEvidenceHistory({ cursor, limit = 25, signal } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return apiRequest(`/api/v1/evidence?${params}`, { signal })
+}
+
+export function applyEvidenceHistoryAction({
+  claimId,
+  evidenceId,
+  action,
+  sourceClaimId,
+  revision,
+  proposalRef,
+  confirmationRef,
+  idempotencyKey = requestId(`evidence-${action}`),
+  signal,
+}) {
+  return apiRequest(`/api/v1/claims/${claimId}/evidence/${evidenceId}/${action}`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+    body: JSON.stringify({ source_claim_id: sourceClaimId, proposal_ref: proposalRef, confirmation_ref: confirmationRef }),
+    signal,
+  })
 }
 
 export function getClaim(claimId) {
   return apiRequest(`/api/v1/claims/${claimId}`)
 }
 
-export function listClaims({ cursor, limit = 25 } = {}) {
+export function listClaims({ cursor, limit = 25, signal } = {}) {
   const params = new URLSearchParams({ limit: String(limit) })
   if (cursor) params.set('cursor', cursor)
-  return apiRequest(`/api/v1/claims?${params}`)
+  return apiRequest(`/api/v1/claims?${params}`, { signal })
 }
 
 export function resumeClaimSession({

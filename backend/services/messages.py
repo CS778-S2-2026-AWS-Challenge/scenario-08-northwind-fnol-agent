@@ -1,10 +1,17 @@
 import re
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 
+from backend.adapters.evidence_storage import EvidenceStorage, EvidenceStorageError
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.agent_action_commands import ClaimContextCommand, build_claim_context_command
+from backend.domain.agent_action_registry import (
+    ActionActorRole,
+    ExecutionAuthority,
+    action_contract,
+)
 from backend.domain.branch_registry import (
     BranchRuleEvaluator,
     validate_registered_field_value,
@@ -66,6 +73,7 @@ from backend.domain.runtime import (
     ActionEnvelopeRecord,
     AgentProposalRecord,
     ExecutionPlanRecord,
+    ExternalLifecycleContextCoordinate,
     RuntimeTurnRecords,
     RuntimeWorkItemRecord,
     ToolResultRecord,
@@ -80,17 +88,34 @@ from backend.repositories.protocols import (
     RevisionConflict,
 )
 from backend.services.agent import (
+    AgentEvidenceReference,
     AgentProposal,
     AgentTurnContext,
     AgentTurnProvider,
     authorised_state_changes,
     validate_proposal,
 )
+from backend.services.agent_action_execution import (
+    ClaimantRuntimeActionDispatcher,
+    ClaimContextHandlerOutcome,
+)
+from backend.services.agent_action_mapping import map_claim_context_execution_to_api
+from backend.services.agent_external_lifecycle import (
+    ExternalLifecycleContextError,
+    build_agent_external_lifecycle_context,
+)
+from backend.services.agent_tools import (
+    read_evidence_history_for_runtime,
+    validate_evidence_proposal,
+)
 from backend.services.branching import (
     claimant_dynamic_form_projection,
     latest_applied_branch_evaluation,
 )
+from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.claimant_form_projection import project_claimant_form_fields
+from backend.services.evidence_visibility import default_evidence_visibility
+from backend.services.external_services import claimant_assessor_action, claimant_next_step
 from backend.services.fact_resolution import (
     provenance_messages_for_fields,
     resolve_contents_item_change,
@@ -105,6 +130,7 @@ from backend.services.professional_reviews import build_policy_review_handoff
 from backend.services.retrieval import search_claim_history, search_policy
 from backend.services.runtime_agent_policy import (
     RuntimeAgentPolicyResolver,
+    RuntimeAgentPolicySnapshot,
     enforce_agent_proposal,
 )
 from backend.services.runtime_configuration import RuntimeConfigurationResolutionError
@@ -130,11 +156,65 @@ INTERNAL_ONLY_REASON_CODES = frozenset(
 _CONTEXT_TOOL_OPERATIONS = {
     'policy_history': frozenset({'search_policy'}),
     'claim_history': frozenset({'search_claim_history', 'lookup'}),
+    'evidence.history': frozenset({'list'}),
 }
 _ACTION_TOOL_OPERATIONS = {
     'evidence_registry': frozenset({'record_pending_generation'}),
     'professional_review': frozenset({'create_policy_review'}),
 }
+
+_MODEL_EVIDENCE_FILE_STATES = frozenset(
+    {
+        EvidenceFileStatus.UPLOADED,
+        EvidenceFileStatus.PROCESSING,
+        EvidenceFileStatus.READY,
+    }
+)
+_MODEL_EVIDENCE_MEDIA_TYPES = frozenset({'image/jpeg', 'image/png', 'application/pdf'})
+
+
+@dataclass(frozen=True, slots=True)
+class _TurnEvidenceResolver:
+    repository: PersistenceRepository
+    storage: EvidenceStorage
+    claim_id: str
+    customer_id: str
+    allowed_media_types: dict[str, str]
+
+    def resolve(self, evidence_id: str, media_type: str) -> bytes | None:
+        if self.allowed_media_types.get(evidence_id) != media_type:
+            return None
+        evidence = self.repository.get_evidence(
+            self.claim_id,
+            evidence_id,
+            self.customer_id,
+        )
+        if (
+            evidence is None
+            or evidence.file_status not in _MODEL_EVIDENCE_FILE_STATES
+            or evidence.media_type != media_type
+            or default_evidence_visibility(evidence.source) is MessageVisibility.INTERNAL_ONLY
+            or evidence.status
+            in {
+                EvidenceStatus.INVALID,
+                EvidenceStatus.EXPIRED,
+                EvidenceStatus.SUPERSEDED,
+                EvidenceStatus.UNAVAILABLE,
+                EvidenceStatus.MISSING,
+            }
+        ):
+            return None
+        storage_key = evidence.provenance.get('storage_key')
+        if not isinstance(storage_key, str) or not storage_key:
+            return None
+        try:
+            return self.storage.read_upload(
+                claim_id=self.claim_id,
+                evidence_id=evidence_id,
+                storage_key=storage_key,
+            )
+        except EvidenceStorageError:
+            return None
 
 
 def _validate_tool_requests(
@@ -212,6 +292,28 @@ def _validate_tool_requests(
                     code='AGENT_TOOL_NOT_PERMITTED',
                     message='The Agent supplied an invalid claim-history result limit.',
                 )
+        if tool == 'evidence.history' and operation == 'list':
+            unexpected = set(request) - {'tool', 'operation', 'limit', 'cursor'}
+            if unexpected:
+                raise ApiError(
+                    status_code=503,
+                    code='AGENT_TOOL_NOT_PERMITTED',
+                    message='The Agent supplied an invalid Evidence history request.',
+                )
+            limit = request.get('limit', 25)
+            if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50:
+                raise ApiError(
+                    status_code=503,
+                    code='AGENT_TOOL_NOT_PERMITTED',
+                    message='The Agent supplied an invalid Evidence history limit.',
+                )
+            cursor = request.get('cursor')
+            if cursor is not None and (not isinstance(cursor, str) or not cursor.strip()):
+                raise ApiError(
+                    status_code=503,
+                    code='AGENT_TOOL_NOT_PERMITTED',
+                    message='The Agent supplied an invalid Evidence history cursor.',
+                )
         if tool == 'evidence_registry' and request.get('kind') != 'police_report':
             raise ApiError(
                 status_code=503,
@@ -239,7 +341,11 @@ def _claimant_message(message: MessageRecord) -> ClaimantMessage:
     )
 
 
-def _claimant_decision(decision: AgentDecisionRecord) -> ClaimantDecision:
+def _claimant_decision(
+    decision: AgentDecisionRecord,
+    *,
+    customer_next_step: CustomerNextStep | None = None,
+) -> ClaimantDecision:
     return ClaimantDecision(
         decision_id=decision.decision_id,
         action=decision.action,
@@ -250,7 +356,7 @@ def _claimant_decision(decision: AgentDecisionRecord) -> ClaimantDecision:
             else [code for code in decision.reason_codes if code not in INTERNAL_ONLY_REASON_CODES]
         ),
         customer_reason=decision.customer_reason,
-        customer_next_step=decision.customer_next_step,
+        customer_next_step=customer_next_step or decision.customer_next_step,
     )
 
 
@@ -300,10 +406,17 @@ def _message_turn_response(
         if claim is not None
         else decision.form_changes
     )
+    external_service_action = claimant_assessor_action(repository, claim) if claim else None
+    next_step = (
+        claimant_next_step(repository, claim, external_service_action)
+        if claim is not None
+        else decision.customer_next_step
+    )
+    response_revision = claim.revision if claim is not None else decision.resulting_revision
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=claimant_message.session_id,
-        claim_revision=decision.resulting_revision,
+        claim_revision=response_revision,
         claimant_message=_claimant_message(claimant_message),
         agent_message=_claimant_message(agent_message),
         form_changes=[
@@ -313,7 +426,7 @@ def _message_turn_response(
         contents_item_changes=[
             _claimant_contents_item(item) for item in decision.contents_item_changes
         ],
-        decision=_claimant_decision(decision),
+        decision=_claimant_decision(decision, customer_next_step=next_step),
         handoff=(
             claimant_handoff(handoff)
             if handoff is not None
@@ -322,15 +435,34 @@ def _message_turn_response(
             else None
         ),
         dynamic_form=dynamic_form,
+        primary_action=(
+            project_claimant_primary_action(
+                claim_id=claim_id,
+                claim_revision=response_revision,
+                next_step=next_step,
+                external_service_action=external_service_action,
+            )
+            if claim is not None
+            else None
+        ),
     )
 
 
 def _message_only_response(
+    repository: PersistenceRepository,
+    principal: Principal,
     claim_id: str,
     session_id: str,
     revision: int,
     message: MessageRecord,
+    *,
+    claim: WorkingClaim | None = None,
 ) -> MessageTurnResponse:
+    claim = claim or repository.get_claim(claim_id, principal.subject)
+    if claim is None:
+        raise _session_not_found()
+    external_service_action = claimant_assessor_action(repository, claim)
+    next_step = claimant_next_step(repository, claim, external_service_action)
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=session_id,
@@ -338,6 +470,13 @@ def _message_only_response(
         claimant_message=_claimant_message(message),
         form_changes=[],
         handoff=None,
+        decision=None,
+        primary_action=project_claimant_primary_action(
+            claim_id=claim_id,
+            claim_revision=revision,
+            next_step=next_step,
+            external_service_action=external_service_action,
+        ),
     )
 
 
@@ -353,6 +492,8 @@ def _namespaced_turn_response(
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _session_not_found()
+    external_service_action = claimant_assessor_action(repository, claim)
+    next_step = claimant_next_step(repository, claim, external_service_action)
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=claimant_message.session_id,
@@ -363,6 +504,12 @@ def _namespaced_turn_response(
         decision=None,
         handoff=None,
         dynamic_form=claimant_dynamic_form_projection(repository, claim),
+        primary_action=project_claimant_primary_action(
+            claim_id=claim_id,
+            claim_revision=claim_revision,
+            next_step=next_step,
+            external_service_action=external_service_action,
+        ),
     )
 
 
@@ -541,6 +688,7 @@ def _build_form_changes(
     proposal_source: AgentProposalSource,
     branch_evaluation: BranchEvaluationResult | None = None,
     grounding_source_refs: set[str] | None = None,
+    evidence_media_types: dict[str, str] | None = None,
 ) -> dict[str, StructuredFormField]:
     form_changes: dict[str, StructuredFormField] = {}
     normalised_proposals = list(proposals)
@@ -570,6 +718,27 @@ def _build_form_changes(
                 status_code=500,
                 code='INTERNAL_ERROR',
                 message='The Agent proposed an unregistered field.',
+            )
+        if proposal.source_evidence_id is not None:
+            media_type = (evidence_media_types or {}).get(proposal.source_evidence_id)
+            expected_source = (
+                FormSource.IMAGE
+                if media_type is not None and media_type.startswith('image/')
+                else FormSource.DOCUMENT
+                if media_type == 'application/pdf'
+                else None
+            )
+            if expected_source is None or proposal.source is not expected_source:
+                raise ApiError(
+                    status_code=500,
+                    code='INTERNAL_ERROR',
+                    message='The Agent proposed an invalid Evidence source.',
+                )
+        elif proposal.source in {FormSource.IMAGE, FormSource.DOCUMENT}:
+            raise ApiError(
+                status_code=500,
+                code='INTERNAL_ERROR',
+                message='The Agent proposed Evidence-derived data without a source.',
             )
         try:
             validate_registered_field_value(
@@ -620,7 +789,7 @@ def _build_form_changes(
             field_code=proposal.field_code,
             existing=existing_field,
             proposal=proposal,
-            source_ref=claimant_message.message_id,
+            source_ref=proposal.source_evidence_id or claimant_message.message_id,
             message_text=str(claimant_message.content.get('text', '')) or None,
             timestamp=timestamp,
             accepted_status=accepted_status,
@@ -660,6 +829,7 @@ def _build_contents_item_changes(
     timestamp: datetime,
     authority_outcome: AuthorityOutcome,
     branch_evaluation: BranchEvaluationResult,
+    evidence_media_types: dict[str, str] | None = None,
 ) -> list[ContentsItem]:
     if not proposal.contents_item_changes or authority_outcome is not AuthorityOutcome.AUTHORISED:
         return []
@@ -678,6 +848,22 @@ def _build_contents_item_changes(
     }
     changes: list[ContentsItem] = []
     for item in proposal.contents_item_changes:
+        evidence_source: FormSource | None = None
+        if item.source_evidence_id is not None:
+            media_type = (evidence_media_types or {}).get(item.source_evidence_id)
+            evidence_source = (
+                FormSource.IMAGE
+                if media_type is not None and media_type.startswith('image/')
+                else FormSource.DOCUMENT
+                if media_type == 'application/pdf'
+                else None
+            )
+            if evidence_source is None:
+                raise ApiError(
+                    status_code=500,
+                    code='INTERNAL_ERROR',
+                    message='The Agent proposed an invalid contents Evidence source.',
+                )
         existing = existing_by_id.get(item.item_id or '')
         if item.item_id is not None and existing is None:
             raise ApiError(
@@ -696,8 +882,12 @@ def _build_contents_item_changes(
             existing=existing,
             proposal=item,
             item_id=existing.item_id if existing is not None else new_id('itm'),
-            source_ref=claimant_message.message_id,
-            message_text=str(claimant_message.content.get('text', '')) or None,
+            source_ref=item.source_evidence_id or claimant_message.message_id,
+            message_text=(
+                None
+                if item.source_evidence_id is not None
+                else str(claimant_message.content.get('text', '')) or None
+            ),
             timestamp=timestamp,
             accepted_status=FormStatus.PROPOSED,
             updated_by=ActorReference(
@@ -705,7 +895,11 @@ def _build_contents_item_changes(
                 actor_id=proposal.proposal_source.value,
             ),
         )
-        if not claimant_supplied:
+        if evidence_source is not None:
+            contents_item = contents_item.model_copy(
+                update={'source': evidence_source, 'status': FormStatus.PROPOSED}
+            )
+        elif not claimant_supplied:
             contents_item = contents_item.model_copy(update={'source': FormSource.INFERENCE})
         changes.append(contents_item)
     return changes
@@ -806,6 +1000,136 @@ def _validate_failed_retrieval_changes(
             message='The Agent used an unavailable context result as a new Claim fact.',
             retryable=False,
         )
+
+
+def _validate_evidence_history_action(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    proposal: AgentProposal,
+) -> AgentProposal:
+    """Do not turn an unavailable history lookup into an Evidence action."""
+
+    history_results = [
+        result for result in proposal.tool_results if result.get('tool') == 'evidence.history'
+    ]
+    if proposal.action_code not in {
+        'claim.propose_evidence_reuse',
+        'claim.propose_evidence_remove',
+    }:
+        latest_history = history_results[-1] if history_results else None
+        page = latest_history.get('page') if isinstance(latest_history, dict) else None
+        if (
+            isinstance(page, dict)
+            and isinstance(page.get('next_cursor'), str)
+            and page['next_cursor']
+        ):
+            return replace(
+                proposal,
+                customer_response=(
+                    f'{proposal.customer_response} I checked one page of your Evidence history; '
+                    'more records are available, so this is not a complete not-found result.'
+                ),
+            )
+        return proposal
+    if not history_results or history_results[-1].get('status') != 'succeeded':
+        raise ApiError(
+            status_code=503,
+            code='AGENT_TOOL_NOT_PERMITTED',
+            message=(
+                'The Agent cannot propose an Evidence action without a successful history lookup.'
+            ),
+            retryable=False,
+        )
+    history_items = history_results[-1].get('items', [])
+    visible_evidence_ids = (
+        {
+            item.get('evidence_id')
+            for item in history_items
+            if isinstance(item, dict) and isinstance(item.get('evidence_id'), str)
+        }
+        if isinstance(history_items, list)
+        else set()
+    )
+    if proposal.evidence_id not in visible_evidence_ids:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The proposed Evidence item was not present in the authorised history result.',
+            retryable=False,
+        )
+    result = validate_evidence_proposal(
+        repository,
+        claim,
+        action_code=proposal.action_code,
+        evidence_id=proposal.evidence_id or '',
+        source_claim_id=proposal.source_claim_id,
+        removal_scope=proposal.removal_scope,
+    )
+    if result.get('status') == 'rejected':
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message=(
+                'The proposed Evidence action did not satisfy its ownership, state, or input '
+                'contract.'
+            ),
+            retryable=False,
+        )
+    if result.get('status') == 'unavailable':
+        is_draft = result.get('reason') == 'DRAFT_REMOVAL_IS_FRONTEND_OWNED'
+        return replace(
+            proposal,
+            customer_reason=(
+                'Draft Evidence removal is controlled by the current upload composer.'
+                if is_draft
+                else 'Persisted Evidence removal is unavailable under the current retention API.'
+            ),
+            customer_response=(
+                'Select the draft file in the upload composer and remove it before submitting.'
+                if is_draft
+                else 'I can show this Evidence in your history, but I cannot remove the persisted '
+                'record because the governed retention and audit operation is not available.'
+            ),
+        )
+    is_removal = proposal.action_code == 'claim.propose_evidence_remove'
+    return replace(
+        proposal,
+        source_claim_id=(
+            str(result['source_claim_id'])
+            if isinstance(result.get('source_claim_id'), str)
+            else proposal.source_claim_id
+        ),
+        customer_reason=(
+            'The selected Evidence is eligible for a governed removal proposal.'
+            if is_removal
+            else 'The selected Evidence is eligible for a reuse proposal.'
+        ),
+        customer_response=(
+            (
+                f'I found Evidence {proposal.evidence_id} from Claim {proposal.source_claim_id}. '
+                'No change has been made. Please confirm whether you want Northwind to remove '
+                'it from your Evidence history.'
+            )
+            if is_removal
+            else (
+                f'I found Evidence {proposal.evidence_id} from Claim {proposal.source_claim_id}. '
+                'It has not been attached or copied. Please confirm whether you want Northwind '
+                'to reuse the original Evidence for this Claim.'
+            )
+        ),
+        customer_next_step=CustomerNextStep(
+            status='confirm_evidence_remove' if is_removal else 'confirm_evidence_reuse',
+            summary=(
+                'Confirm whether Northwind may remove the Evidence from your history.'
+                if is_removal
+                else 'Confirm whether Northwind may reuse the original Evidence for this Claim.'
+            ),
+            responsible_party=ResponsibleParty.CLAIMANT,
+            required_items=[
+                'evidence_remove_confirmation' if is_removal else 'evidence_reuse_confirmation'
+            ],
+        ),
+    )
 
 
 def _apply_question_accounting(
@@ -1026,6 +1350,38 @@ def _execute_claim_history_search(
     )
 
 
+def _execute_evidence_history_search(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    proposal: AgentProposal,
+) -> tuple[None, dict[str, object]] | None:
+    tool = next(
+        (
+            item
+            for item in proposal.required_tools
+            if item.get('tool') == 'evidence.history' and item.get('operation') == 'list'
+        ),
+        None,
+    )
+    if tool is None:
+        return None
+    limit = tool.get('limit', 25)
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50:
+        return None
+    cursor = tool.get('cursor')
+    if cursor is not None and (not isinstance(cursor, str) or not cursor.strip()):
+        return None
+    try:
+        result = read_evidence_history_for_runtime(
+            repository,
+            claim,
+            {'limit': limit, **({'cursor': cursor} if cursor is not None else {})},
+        )
+    except (TypeError, ValueError):
+        return None
+    return None, result
+
+
 def _professional_review_requested(proposal: AgentProposal) -> bool:
     return any(
         tool.get('tool') == 'professional_review'
@@ -1166,6 +1522,80 @@ def _submit_namespaced_runtime_turn(
     return response
 
 
+def _live_mutation_command(
+    *,
+    claim: WorkingClaim,
+    claimant_message: MessageRecord,
+    idempotency_key: str,
+    form_changes: dict[str, StructuredFormField],
+    contents_item_changes: list[ContentsItem],
+    handoff: HandoffRecord | None,
+    pending_evidence: EvidenceRecord | None,
+    runtime_policy: RuntimeAgentPolicySnapshot | None,
+) -> ClaimContextCommand | None:
+    action_code: str | None = None
+    payload: dict[str, object]
+    if handoff is not None:
+        action_code = 'human.create_handoff'
+        payload = {
+            'claim_id': claim.claim_id,
+            'reason_codes': list(handoff.reason_codes),
+            'handoff_packet': handoff.model_dump(mode='json'),
+            'expected_revision': claim.revision,
+        }
+    elif pending_evidence is not None:
+        action_code = 'claim.register_evidence'
+        payload = {
+            'claim_id': claim.claim_id,
+            'evidence': pending_evidence.model_dump(mode='json'),
+            'expected_revision': claim.revision,
+        }
+    elif form_changes or contents_item_changes:
+        action_code = 'claim.apply_fact_patch'
+        payload = {
+            'claim_id': claim.claim_id,
+            'fact_patches': [
+                *(
+                    {
+                        'field_code': field_code,
+                        'field': field.model_dump(mode='json'),
+                    }
+                    for field_code, field in sorted(form_changes.items())
+                ),
+                *(
+                    {
+                        'field_code': 'contents.items',
+                        'item': item.model_dump(mode='json'),
+                    }
+                    for item in contents_item_changes
+                ),
+            ],
+            'expected_revision': claim.revision,
+        }
+    else:
+        return None
+
+    contract = action_contract(action_code)
+    tool_policy = runtime_policy.tool_policy if runtime_policy is not None else None
+    allowed_action_codes = tool_policy.allowed_action_codes if tool_policy is not None else None
+    allowed_tool_names = tool_policy.allowed_tool_names if tool_policy is not None else None
+    authority_reference = f'claimant-message:{claimant_message.message_id}'
+    if handoff is not None and 'EXPLICIT_SAFETY_SIGNAL' in handoff.reason_codes:
+        authority_reference = 'published-rule:BR-SAFETY-001'
+    return build_claim_context_command(
+        action_code,
+        payload,
+        proposer_role=ActionActorRole.RUNTIME,
+        approved_authority=contract.authority_requirement,
+        authority_reference=authority_reference,
+        workflow_state=claim.claim_state.workflow_state,
+        expected_revision=claim.revision,
+        idempotency_key=idempotency_key,
+        allowed_action_codes=allowed_action_codes,
+        allowed_tools=allowed_tool_names,
+    )
+
+
 def submit_message(
     repository: PersistenceRepository,
     agent: AgentTurnProvider,
@@ -1177,7 +1607,10 @@ def submit_message(
     idempotency_key: str | None,
     if_match: str | None,
     runtime_agent_policy_resolver: RuntimeAgentPolicyResolver | None = None,
+    action_dispatcher: ClaimantRuntimeActionDispatcher | None = None,
+    evidence_storage: EvidenceStorage | None = None,
 ) -> MessageTurnResponse:
+    live_dispatcher = action_dispatcher or ClaimantRuntimeActionDispatcher()
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
     route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
@@ -1286,7 +1719,12 @@ def submit_message(
                 claim = repository.get_claim(claim_id, principal.subject)
                 if claim is not None:
                     return _message_only_response(
-                        claim_id, session_id, claim.revision, existing_client_message
+                        repository,
+                        principal,
+                        claim_id,
+                        session_id,
+                        claim.revision,
+                        existing_client_message,
                     )
                 raise _session_not_found()
             return _message_turn_response(
@@ -1368,7 +1806,13 @@ def submit_message(
             message_id=claimant_message.message_id,
         )
         response = _message_only_response(
-            claim_id, session_id, updated_claim.revision, claimant_message
+            repository,
+            principal,
+            claim_id,
+            session_id,
+            updated_claim.revision,
+            claimant_message,
+            claim=updated_claim,
         )
         idempotency = IdempotencyRecord(
             **{
@@ -1397,21 +1841,69 @@ def submit_message(
             retryable=True,
             current_revision=claim.revision,
         )
-    missing_evidence_refs = [
-        evidence_id
-        for evidence_id in payload.evidence_refs
-        if repository.get_evidence(claim_id, evidence_id, principal.subject) is None
-    ]
-    if missing_evidence_refs:
+    selected_evidence: list[EvidenceRecord] = []
+    invalid_evidence_refs: list[ErrorDetail] = []
+    seen_evidence_refs: set[str] = set()
+    for evidence_id in payload.evidence_refs:
+        if evidence_id in seen_evidence_refs:
+            invalid_evidence_refs.append(
+                ErrorDetail(field='evidence_refs', reason=f'Duplicate evidence: {evidence_id}.')
+            )
+            continue
+        seen_evidence_refs.add(evidence_id)
+        evidence = repository.get_evidence(claim_id, evidence_id, principal.subject)
+        if evidence is None:
+            invalid_evidence_refs.append(
+                ErrorDetail(field='evidence_refs', reason=f'Unknown evidence: {evidence_id}.')
+            )
+            continue
+        if (
+            evidence.file_status not in _MODEL_EVIDENCE_FILE_STATES
+            or evidence.media_type not in _MODEL_EVIDENCE_MEDIA_TYPES
+            or default_evidence_visibility(evidence.source) is MessageVisibility.INTERNAL_ONLY
+            or evidence.status
+            in {
+                EvidenceStatus.INVALID,
+                EvidenceStatus.EXPIRED,
+                EvidenceStatus.SUPERSEDED,
+                EvidenceStatus.UNAVAILABLE,
+                EvidenceStatus.MISSING,
+            }
+        ):
+            invalid_evidence_refs.append(
+                ErrorDetail(
+                    field='evidence_refs',
+                    reason=f'Evidence is not available for model processing: {evidence_id}.',
+                )
+            )
+            continue
+        selected_evidence.append(evidence)
+    if invalid_evidence_refs:
         raise ApiError(
             status_code=422,
             code='VALIDATION_ERROR',
             message='One or more evidence references are invalid.',
-            details=[
-                ErrorDetail(field='evidence_refs', reason=f'Unknown evidence: {evidence_id}.')
-                for evidence_id in missing_evidence_refs
-            ],
+            details=invalid_evidence_refs,
         )
+
+    turn_evidence = tuple(
+        AgentEvidenceReference(
+            evidence_id=evidence.evidence_id,
+            media_type=evidence.media_type or '',
+        )
+        for evidence in selected_evidence
+    )
+    evidence_resolver = (
+        _TurnEvidenceResolver(
+            repository=repository,
+            storage=evidence_storage,
+            claim_id=claim_id,
+            customer_id=principal.subject,
+            allowed_media_types={item.evidence_id: item.media_type for item in turn_evidence},
+        )
+        if turn_evidence and evidence_storage is not None
+        else None
+    )
 
     timestamp = now_utc()
     claimant_message = MessageRecord(
@@ -1463,6 +1955,19 @@ def submit_message(
         if message.visibility is not MessageVisibility.INTERNAL_ONLY
     )[-12:]
     persisted_review_signals = repository.list_review_signals(claim_id, principal.subject)
+    try:
+        external_services = build_agent_external_lifecycle_context(
+            repository,
+            claim_id,
+            claim.assessor_routing,
+        )
+    except ExternalLifecycleContextError as error:
+        raise ApiError(
+            status_code=503,
+            code='EXTERNAL_LIFECYCLE_CONTEXT_UNAVAILABLE',
+            message='The external-service lifecycle context cannot be represented safely.',
+            retryable=error.retryable,
+        ) from error
     agent_context = AgentTurnContext(
         claim=claim,
         session_id=session_id,
@@ -1470,6 +1975,8 @@ def submit_message(
         trigger_message_id=claimant_message.message_id,
         message_text=payload.content.text if payload.content is not None else None,
         evidence_refs=payload.evidence_refs,
+        evidence=turn_evidence,
+        evidence_resolver=evidence_resolver,
         professional_review_required=any(
             signal.code == 'POLICY_RETRIEVAL_UNCERTAINTY' for signal in persisted_review_signals
         ),
@@ -1487,6 +1994,7 @@ def submit_message(
             )
         ),
         conversation_messages=conversation_messages,
+        external_services=external_services,
     )
     proposal = agent.propose_turn(agent_context)
     if runtime_policy is not None:
@@ -1504,7 +2012,8 @@ def submit_message(
     }
     if requested_context_tools:
         if any(
-            result.get('tool') in {'knowledge_search', 'policy_history', 'claim_history'}
+            result.get('tool')
+            in {'knowledge_search', 'policy_history', 'claim_history', 'evidence.history'}
             for result in context_tool_results
         ):
             raise ApiError(
@@ -1526,9 +2035,15 @@ def submit_message(
             principal.subject,
             proposal,
         )
+        evidence_history_outcome = _execute_evidence_history_search(
+            repository,
+            claim,
+            proposal,
+        )
         for tool, outcome in (
             ('policy_history', policy_outcome),
             ('claim_history', history_outcome),
+            ('evidence.history', evidence_history_outcome),
         ):
             if tool not in requested_context_tools:
                 continue
@@ -1564,9 +2079,52 @@ def submit_message(
             )
         else:
             proposal = replace(proposal, tool_results=context_tool_results)
+    proposal = _validate_evidence_history_action(repository, claim, proposal)
     _validate_failed_retrieval_changes(proposal, message_text)
     authority = validate_proposal(proposal)
     runtime_trace = proposal.runtime_trace
+    prepared_action_code: str | None = None
+    if (
+        runtime_trace is not None
+        and runtime_trace.action_code == 'claim.prepare_creation'
+        and authority.outcome is AuthorityOutcome.AUTHORISED
+    ):
+        tool_policy = runtime_policy.tool_policy if runtime_policy is not None else None
+        preparation = build_claim_context_command(
+            'claim.prepare_creation',
+            {'claim_id': claim_id, 'expected_revision': expected_revision},
+            proposer_role=ActionActorRole.RUNTIME,
+            approved_authority=ExecutionAuthority.RUNTIME_VALIDATION,
+            authority_reference=f'runtime-turn:{claimant_message.message_id}',
+            workflow_state=claim.claim_state.workflow_state,
+            expected_revision=expected_revision,
+            allowed_action_codes=(
+                tool_policy.allowed_action_codes if tool_policy is not None else None
+            ),
+            allowed_tools=(tool_policy.allowed_tool_names if tool_policy is not None else None),
+        )
+
+        def prepare_creation(_command: ClaimContextCommand) -> ClaimContextHandlerOutcome:
+            if not branch_evaluation.requirements.ready:
+                raise ApiError(
+                    status_code=409,
+                    code='INVALID_STATE_TRANSITION',
+                    message='The current Claim is not ready for formal creation.',
+                )
+            return ClaimContextHandlerOutcome(
+                claim_id=claim_id,
+                resulting_revision=claim.revision,
+            )
+
+        preparation_result = live_dispatcher.execute(
+            repository,
+            preparation,
+            prepare_creation,
+        )
+        preparation_error = map_claim_context_execution_to_api(preparation_result)
+        if preparation_error is not None:
+            raise preparation_error
+        prepared_action_code = preparation.action_code
     if proposal.action_code is not None:
         # The namespaced model contract is now executed by the same validated,
         # revision-checked mutation path as controlled turns. The action code is
@@ -1614,6 +2172,7 @@ def submit_message(
         proposal.proposal_source,
         branch_evaluation,
         _grounding_source_refs(proposal.tool_results),
+        {item.evidence_id: item.media_type for item in turn_evidence},
     )
     contents_item_changes = _build_contents_item_changes(
         claim,
@@ -1622,6 +2181,7 @@ def submit_message(
         timestamp,
         authority.outcome,
         branch_evaluation,
+        {item.evidence_id: item.media_type for item in turn_evidence},
     )
     conflicting_fields = [
         field_code
@@ -1882,6 +2442,41 @@ def submit_message(
     )
     if updated_claim.customer_next_step != effective_next_step:
         updated_claim = updated_claim.model_copy(update={'customer_next_step': effective_next_step})
+    applied_evaluation = branch_evaluator.evaluate(
+        updated_claim,
+        latest_message=(payload.content.text if payload.content is not None else None),
+        trigger_source_refs=[claimant_message.message_id],
+        current_action=updated_claim.claim_state.next_action,
+        recomputation_reason='agent_turn_applied',
+        previous_evaluation=previous_evaluation,
+    )
+    if updated_claim.claim_state.workflow_state in {
+        WorkflowState.COLLECTING,
+        WorkflowState.READY_FOR_NEXT,
+    }:
+        updated_claim = updated_claim.model_copy(
+            update={
+                'claim_state': updated_claim.claim_state.model_copy(
+                    update={
+                        'workflow_state': (
+                            WorkflowState.READY_FOR_NEXT
+                            if applied_evaluation.requirements.ready
+                            else WorkflowState.COLLECTING
+                        )
+                    }
+                )
+            }
+        )
+    live_mutation_command = _live_mutation_command(
+        claim=claim,
+        claimant_message=claimant_message,
+        idempotency_key=key,
+        form_changes=form_changes,
+        contents_item_changes=contents_item_changes,
+        handoff=handoff,
+        pending_evidence=pending_evidence,
+        runtime_policy=runtime_policy,
+    )
     resulting_revision = updated_claim.revision
     updated_session = session_after_questions.model_copy(
         update={
@@ -1937,14 +2532,19 @@ def submit_message(
         agent_message_id=agent_message.message_id,
         decision_id=decision.decision_id,
         handoff_id=handoff.handoff_id if handoff is not None else None,
-    )
-    applied_evaluation = branch_evaluator.evaluate(
-        updated_claim,
-        latest_message=(payload.content.text if payload.content is not None else None),
-        trigger_source_refs=[claimant_message.message_id],
-        current_action=updated_claim.claim_state.next_action,
-        recomputation_reason='agent_turn_applied',
-        previous_evaluation=previous_evaluation,
+        action_registry_version=(
+            live_mutation_command.contract_version if live_mutation_command is not None else None
+        ),
+        action_code=(
+            live_mutation_command.action_code
+            if live_mutation_command is not None
+            else prepared_action_code
+        ),
+        target_ref=(
+            claim_id
+            if live_mutation_command is not None or prepared_action_code is not None
+            else None
+        ),
     )
     evaluation_record = BranchEvaluationRecord(
         evaluation_id=new_id('brn'),
@@ -1989,6 +2589,9 @@ def submit_message(
         customer_reason=effective_customer_reason,
         customer_response=effective_customer_response,
         customer_next_step=effective_next_step,
+        evidence_id=proposal.evidence_id,
+        source_claim_id=proposal.source_claim_id,
+        removal_scope=proposal.removal_scope,
         form_changes=list(proposal.form_changes),
         contents_item_changes=list(proposal.contents_item_changes),
         source_refs=sorted(_tool_source_refs(proposal.tool_results)),
@@ -2007,6 +2610,21 @@ def submit_message(
         conversation_moves=['acknowledge', 'collect_or_confirm_facts'],
         candidate_fields=sorted({change.field_code for change in proposal.form_changes}),
         tool_requests=list(proposal.required_tools),
+        registry_versions=(
+            {'external_service_lifecycle': agent_context.external_services[0].registry_version}
+            if agent_context.external_services
+            else {}
+        ),
+        external_lifecycle_context=[
+            ExternalLifecycleContextCoordinate(
+                registry_version=item.registry_version,
+                service_identity=item.service_identity,
+                operation_status=item.operation_status,
+                result_status=item.result_status,
+                result_verification=item.result_verification,
+            )
+            for item in agent_context.external_services
+        ],
         runtime_directive=runtime_directive,
         limitations=list(
             dict.fromkeys(
@@ -2039,28 +2657,33 @@ def submit_message(
             expected_revision=expected_revision,
             source_refs=[claimant_message.message_id],
             authority=authority,
-            status='approved' if authority.outcome is AuthorityOutcome.AUTHORISED else 'rejected',
+            status='executed' if authority.outcome is AuthorityOutcome.AUTHORISED else 'rejected',
             idempotency_key=key,
             created_at=timestamp,
         )
     ]
-    envelope_records.extend(
-        ActionEnvelopeRecord(
-            envelope_id=new_id('env'),
-            turn_id=runtime_turn_id,
-            claim_id=claim_id,
-            namespace='claim',
-            action_code='claim.propose_fact_patch',
-            target_ref=change.field_code,
-            expected_revision=expected_revision,
-            source_refs=[claimant_message.message_id],
-            authority=authority,
-            status='executed' if change.field_code in form_changes else 'rejected',
-            idempotency_key=key,
-            created_at=timestamp,
-        )
-        for change in proposal.form_changes
+    executed_action_code = (
+        live_mutation_command.action_code
+        if live_mutation_command is not None
+        else prepared_action_code
     )
+    if executed_action_code is not None and executed_action_code != primary_action_code:
+        envelope_records.append(
+            ActionEnvelopeRecord(
+                envelope_id=new_id('env'),
+                turn_id=runtime_turn_id,
+                claim_id=claim_id,
+                namespace=executed_action_code.split('.', 1)[0],
+                action_code=executed_action_code,
+                target_ref=claim_id,
+                expected_revision=expected_revision,
+                source_refs=[claimant_message.message_id],
+                authority=authority,
+                status='executed',
+                idempotency_key=key,
+                created_at=timestamp,
+            )
+        )
     tool_records: list[ToolResultRecord] = []
     if runtime_trace is not None:
         tool_records.append(
@@ -2074,6 +2697,37 @@ def submit_message(
                 output=dict(runtime_trace.tool_output),
                 source_refs=[f'claim:{claim_id}:revision:{expected_revision}'],
                 limitations=[],
+                created_at=timestamp,
+            )
+        )
+    for index, context_result in enumerate(
+        result for result in proposal.tool_results if result.get('tool') == 'evidence.history'
+    ):
+        raw_status = context_result.get('status')
+        status = (
+            raw_status
+            if raw_status in {'succeeded', 'unavailable', 'failed', 'unknown'}
+            else 'failed'
+        )
+        raw_refs = context_result.get('source_refs', [])
+        source_refs = [str(ref) for ref in raw_refs] if isinstance(raw_refs, list) else []
+        raw_limitations = context_result.get('limitations', [])
+        limitations = (
+            [str(item) for item in raw_limitations]
+            if isinstance(raw_limitations, list)
+            else ['The Evidence history result did not contain valid limitations.']
+        )
+        tool_records.append(
+            ToolResultRecord(
+                result_id=new_id('toolres'),
+                turn_id=runtime_turn_id,
+                claim_id=claim_id,
+                tool_call_id=f'context:{claimant_message.message_id}:evidence_history:{index}',
+                tool_name='evidence.history',
+                status=status,
+                output=dict(context_result),
+                source_refs=source_refs,
+                limitations=limitations,
                 created_at=timestamp,
             )
         )
@@ -2139,7 +2793,8 @@ def submit_message(
         result=turn_result,
         work_items=work_items,
     )
-    try:
+
+    def persist_agent_turn(_command: ClaimContextCommand) -> ClaimContextHandlerOutcome:
         repository.save_agent_turn(
             updated_claim,
             expected_revision,
@@ -2154,18 +2809,48 @@ def submit_message(
             runtime_trace,
             runtime_records,
         )
-    except RevisionConflict as conflict:
-        raise ApiError(
-            status_code=409,
-            code='REVISION_CONFLICT',
-            message='The claim changed after this page was loaded.',
-            retryable=True,
-            current_revision=conflict.current_revision,
-        ) from conflict
-    except IdempotencyConflict as conflict:
-        raise ApiError(
-            status_code=409,
-            code='IDEMPOTENCY_CONFLICT',
-            message='The message turn was already accepted with different retry data.',
-        ) from conflict
+        return ClaimContextHandlerOutcome(
+            claim_id=claim_id,
+            resulting_revision=updated_claim.revision,
+        )
+
+    if live_mutation_command is not None:
+        live_result = live_dispatcher.execute(
+            repository,
+            live_mutation_command,
+            persist_agent_turn,
+        )
+        live_error = map_claim_context_execution_to_api(live_result)
+        if live_error is not None:
+            raise live_error
+    else:
+        try:
+            repository.save_agent_turn(
+                updated_claim,
+                expected_revision,
+                updated_session,
+                claimant_message,
+                agent_message,
+                decision,
+                idempotency,
+                handoff,
+                pending_evidence,
+                evaluation_record,
+                runtime_trace,
+                runtime_records,
+            )
+        except RevisionConflict as conflict:
+            raise ApiError(
+                status_code=409,
+                code='REVISION_CONFLICT',
+                message='The claim changed after this page was loaded.',
+                retryable=True,
+                current_revision=conflict.current_revision,
+            ) from conflict
+        except IdempotencyConflict as conflict:
+            raise ApiError(
+                status_code=409,
+                code='IDEMPOTENCY_CONFLICT',
+                message='The message turn was already accepted with different retry data.',
+            ) from conflict
     return _message_turn_response(repository, principal, claim_id, claimant_message, decision)

@@ -40,6 +40,8 @@ def _settings_configuration(settings: Settings) -> ConfigurationRecord | None:
             'timeout_seconds': settings.model_timeout_seconds,
             'structured_output': settings.model_supports_structured_output,
             'tools': settings.model_supports_tools,
+            'image_input': settings.model_supports_image_input,
+            'document_input': settings.model_supports_document_input,
         },
         author='runtime-bootstrap',
         reason='Deployment-owned bootstrap profile.',

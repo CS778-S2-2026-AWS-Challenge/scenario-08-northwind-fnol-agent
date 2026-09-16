@@ -106,6 +106,8 @@ def test_claim_capabilities_exposes_configured_model_profile() -> None:
     assert response.json()['models'][0]['id'] == 'qwen-local'
     assert response.json()['models'][0]['label'] == 'gpt54-mini'
     assert response.json()['default_model_profile_id'] == 'qwen-local'
+    assert response.json()['models'][0]['image_input'] is False
+    assert response.json()['models'][0]['document_input'] is False
 
 
 def test_fixed_compatibility_token_cannot_bypass_account_session_lifecycle(

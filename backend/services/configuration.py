@@ -211,7 +211,7 @@ def validate(
     payload: ValidationRequest,
     actor: str,
     expected_revision: int,
-    model_runtime_binding: ModelRuntimeBinding | None = None,
+    model_runtime_bindings: Sequence[ModelRuntimeBinding] = (),
 ) -> ConfigurationRecord:
     current = read(repo, configuration_id)
     if current.revision != expected_revision:
@@ -229,7 +229,7 @@ def validate(
             current.domain,
             current.values,
             for_validation=True,
-            model_runtime_binding=model_runtime_binding,
+            model_runtime_bindings=model_runtime_bindings,
         )
     except ApiError as error:
         _audit(repo, current, actor, 'validate', error.message, 'rejected')
@@ -758,7 +758,7 @@ def _validate_configuration_values(
     values: dict[str, object],
     *,
     for_validation: bool,
-    model_runtime_binding: ModelRuntimeBinding | None = None,
+    model_runtime_bindings: Sequence[ModelRuntimeBinding] = (),
 ) -> None:
     """Validate the structured provider configuration consumed by the runtime boundary."""
     if domain in AGENT_CONFIGURATION_DOMAINS:
@@ -782,18 +782,22 @@ def _validate_configuration_values(
             ) from error
         if not for_validation:
             return
-        binding_matches = (
-            model_runtime_binding is not None
-            and configuration.protocol.strip().lower()
-            == model_runtime_binding.protocol.strip().lower()
-            and configuration.base_url.rstrip('/') == model_runtime_binding.base_url.rstrip('/')
+        binding_matches = any(
+            configuration.profile_id == binding.profile_id
+            and configuration.protocol.strip().lower() == binding.protocol.strip().lower()
+            and configuration.provider == binding.provider
+            and configuration.model_identifier == binding.model_identifier
+            and configuration.base_url.rstrip('/') == binding.base_url.rstrip('/')
             and configuration.credential_environment_variable
-            == model_runtime_binding.credential_environment_variable
-            and configuration.purpose == model_runtime_binding.purpose
-            and configuration.privacy_class == model_runtime_binding.privacy_class
-            and configuration.prompt_version == model_runtime_binding.prompt_version
-            and configuration.structured_output is model_runtime_binding.structured_output
-            and configuration.tools is model_runtime_binding.tools
+            == binding.credential_environment_variable
+            and configuration.purpose == binding.purpose
+            and configuration.privacy_class == binding.privacy_class
+            and configuration.prompt_version == binding.prompt_version
+            and configuration.structured_output is binding.structured_output
+            and configuration.tools is binding.tools
+            and configuration.image_input is binding.image_input
+            and configuration.document_input is binding.document_input
+            for binding in model_runtime_bindings
         )
         if configuration.evaluation_status != 'configured' or not binding_matches:
             raise _error(

@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from backend.core.auth import Principal, require_administrator
+from backend.core.config import Settings
 from backend.domain.configuration import (
     AdminConfigurationPage,
     AdminConfigurationProjection,
@@ -43,17 +44,28 @@ def repo(request: Request) -> ConfigurationRepository:
     return cast(ConfigurationRepository, request.app.state.configuration_repository)
 
 
-def _model_runtime_binding(request: Request) -> ModelRuntimeBinding:
-    settings = request.app.state.settings
-    return ModelRuntimeBinding(
-        protocol=settings.model_protocol_adapter,
-        base_url=settings.model_base_url,
-        credential_environment_variable=settings.model_api_key_env,
-        purpose=CLAIMANT_AGENT_PURPOSE,
-        privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
-        prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
-        structured_output=True,
-        tools=settings.model_supports_tools,
+def _model_runtime_bindings(request: Request) -> tuple[ModelRuntimeBinding, ...]:
+    settings = cast(Settings, request.app.state.settings)
+    if settings.model_runtime_bindings:
+        return settings.model_runtime_bindings
+    if not settings.model_base_url or not settings.model_identifier:
+        return ()
+    return (
+        ModelRuntimeBinding(
+            profile_id=settings.model_profile_id,
+            protocol=settings.model_protocol_adapter,
+            provider=settings.model_provider,
+            model_identifier=settings.model_identifier,
+            base_url=settings.model_base_url,
+            credential_environment_variable=settings.model_api_key_env,
+            purpose=CLAIMANT_AGENT_PURPOSE,
+            privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
+            prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
+            structured_output=True,
+            tools=settings.model_supports_tools,
+            image_input=settings.model_supports_image_input,
+            document_input=settings.model_supports_document_input,
+        ),
     )
 
 
@@ -192,7 +204,7 @@ def validate_configuration(
             payload,
             principal.subject,
             expected,
-            _model_runtime_binding(request),
+            _model_runtime_bindings(request),
         ),
     )
 

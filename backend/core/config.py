@@ -1,6 +1,13 @@
+import json
 import os
+import re
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
+
+from pydantic import TypeAdapter
+
+from backend.domain.configuration import ModelRuntimeBinding
 
 
 class DataRuntimeProfile(str, Enum):
@@ -58,6 +65,67 @@ def _float_setting(name: str, default: float) -> float:
         raise ValueError(f'{name} must be a number.') from error
 
 
+_ENVIRONMENT_REFERENCE = re.compile(r'^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$')
+
+
+def load_model_runtime_bindings(
+    path: Path,
+    *,
+    require_endpoints: bool = False,
+) -> tuple[ModelRuntimeBinding, ...]:
+    """Load deployment model bindings and resolve endpoint references.
+
+    Args:
+        path: JSON manifest whose private endpoints may use ``${VARIABLE}`` references.
+        require_endpoints: Whether unresolved endpoint references fail immediately.
+
+    Returns:
+        Validated bindings containing the process-resolved endpoint values.
+
+    Raises:
+        ValueError: The manifest is invalid, duplicated, or references a missing endpoint.
+    """
+    try:
+        payload = json.loads(path.read_text(encoding='utf-8'))
+        if not isinstance(payload, list):
+            raise ValueError('the binding manifest must contain a list')
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            base_url = item.get('base_url')
+            if not isinstance(base_url, str):
+                continue
+            reference = _ENVIRONMENT_REFERENCE.fullmatch(base_url)
+            if reference is None:
+                continue
+            environment_variable = reference.group(1)
+            resolved = os.getenv(environment_variable, '').strip()
+            if not resolved and require_endpoints:
+                raise ValueError(
+                    f'{environment_variable} referenced by {path} must contain a model endpoint.'
+                )
+            item['base_url'] = resolved
+        bindings = TypeAdapter(list[ModelRuntimeBinding]).validate_python(payload)
+    except (OSError, ValueError) as error:
+        raise ValueError(f'Invalid model binding manifest: {path}') from error
+    profile_ids = [item.profile_id for item in bindings]
+    if len(profile_ids) != len(set(profile_ids)):
+        raise ValueError(f'{path} must not contain duplicate model profile IDs.')
+    return tuple(bindings)
+
+
+def _model_runtime_bindings_setting(name: str) -> tuple[ModelRuntimeBinding, ...]:
+    raw_path = os.getenv(name, '').strip()
+    if not raw_path:
+        return ()
+    try:
+        return load_model_runtime_bindings(Path(raw_path))
+    except ValueError as error:
+        raise ValueError(
+            f'{name} must point to a valid model binding JSON file: {error}'
+        ) from error
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     environment: str = 'development'
@@ -85,7 +153,7 @@ class Settings:
     model_provider: str = 'qwen-local'
     model_purpose: str = 'agent_turn'
     model_privacy_class: str = 'synthetic_fnol'
-    model_prompt_version: str = 'northwind-fnol-claimant-v5'
+    model_prompt_version: str = 'northwind-fnol-claimant-v6'
     model_evaluation_status: str = 'configured'
     model_base_url: str = ''
     model_identifier: str = ''
@@ -93,6 +161,9 @@ class Settings:
     model_timeout_seconds: float = 30.0
     model_supports_structured_output: bool = True
     model_supports_tools: bool = False
+    model_supports_image_input: bool = False
+    model_supports_document_input: bool = False
+    model_runtime_bindings: tuple[ModelRuntimeBinding, ...] = ()
     object_storage_adapter: ObjectStorageAdapter = ObjectStorageAdapter.FIXTURE
 
     def __post_init__(self) -> None:
@@ -186,7 +257,19 @@ class Settings:
         except ValueError as error:
             allowed = ', '.join(profile.value for profile in AgentRuntimeProfile)
             raise ValueError(f'AGENT_RUNTIME_PROFILE must be exactly one of: {allowed}.') from error
-        credential_environment_variable = os.getenv('MODEL_API_KEY_ENV', '').strip() or None
+        model_runtime_bindings = _model_runtime_bindings_setting('MODEL_RUNTIME_BINDINGS_PATH')
+        model_profile_id = os.getenv('MODEL_PROFILE_ID', 'qwen-local').strip()
+        selected_binding = next(
+            (item for item in model_runtime_bindings if item.profile_id == model_profile_id),
+            None,
+        )
+        if model_runtime_bindings and selected_binding is None:
+            raise ValueError('MODEL_PROFILE_ID must identify a configured deployment binding.')
+        credential_environment_variable = (
+            selected_binding.credential_environment_variable
+            if selected_binding
+            else os.getenv('MODEL_API_KEY_ENV', '').strip() or None
+        )
         raw_object_storage = os.getenv(
             'NORTHWIND_OBJECT_STORAGE_ADAPTER',
             ObjectStorageAdapter.FIXTURE.value,
@@ -250,26 +333,68 @@ class Settings:
             ).strip(),
             data_runtime_profile=data_runtime_profile,
             agent_runtime_profile=agent_runtime_profile,
-            model_protocol_adapter=os.getenv('MODEL_PROTOCOL_ADAPTER', 'openai_compatible').strip(),
-            model_profile_id=os.getenv('MODEL_PROFILE_ID', 'qwen-local').strip(),
-            model_provider=os.getenv('MODEL_PROVIDER', 'qwen-local').strip(),
-            model_purpose=os.getenv('MODEL_PURPOSE', 'agent_turn').strip(),
-            model_privacy_class=os.getenv('MODEL_PRIVACY_CLASS', 'synthetic_fnol').strip(),
-            model_prompt_version=os.getenv(
-                'MODEL_PROMPT_VERSION',
-                'northwind-fnol-claimant-v5',
-            ).strip(),
+            model_protocol_adapter=(
+                selected_binding.protocol
+                if selected_binding
+                else os.getenv('MODEL_PROTOCOL_ADAPTER', 'openai_compatible').strip()
+            ),
+            model_profile_id=model_profile_id,
+            model_provider=(
+                selected_binding.provider
+                if selected_binding
+                else os.getenv('MODEL_PROVIDER', 'qwen-local').strip()
+            ),
+            model_purpose=(
+                selected_binding.purpose
+                if selected_binding
+                else os.getenv('MODEL_PURPOSE', 'agent_turn').strip()
+            ),
+            model_privacy_class=(
+                selected_binding.privacy_class
+                if selected_binding
+                else os.getenv('MODEL_PRIVACY_CLASS', 'synthetic_fnol').strip()
+            ),
+            model_prompt_version=(
+                selected_binding.prompt_version
+                if selected_binding
+                else os.getenv('MODEL_PROMPT_VERSION', 'northwind-fnol-claimant-v6').strip()
+            ),
             model_evaluation_status=os.getenv(
                 'MODEL_EVALUATION_STATUS',
                 'configured',
             ).strip(),
-            model_base_url=os.getenv('MODEL_BASE_URL', '').strip(),
-            model_identifier=os.getenv('MODEL_IDENTIFIER', '').strip(),
+            model_base_url=(
+                selected_binding.base_url
+                if selected_binding
+                else os.getenv('MODEL_BASE_URL', '').strip()
+            ),
+            model_identifier=(
+                selected_binding.model_identifier
+                if selected_binding
+                else os.getenv('MODEL_IDENTIFIER', '').strip()
+            ),
             model_api_key_env=credential_environment_variable,
             model_timeout_seconds=_float_setting('MODEL_TIMEOUT_SECONDS', 30.0),
-            model_supports_structured_output=_boolean_setting(
-                'MODEL_SUPPORTS_STRUCTURED_OUTPUT', True
+            model_supports_structured_output=(
+                selected_binding.structured_output
+                if selected_binding
+                else _boolean_setting('MODEL_SUPPORTS_STRUCTURED_OUTPUT', True)
             ),
-            model_supports_tools=_boolean_setting('MODEL_SUPPORTS_TOOLS', False),
+            model_supports_tools=(
+                selected_binding.tools
+                if selected_binding
+                else _boolean_setting('MODEL_SUPPORTS_TOOLS', False)
+            ),
+            model_supports_image_input=(
+                selected_binding.image_input
+                if selected_binding
+                else _boolean_setting('MODEL_SUPPORTS_IMAGE_INPUT', False)
+            ),
+            model_supports_document_input=(
+                selected_binding.document_input
+                if selected_binding
+                else _boolean_setting('MODEL_SUPPORTS_DOCUMENT_INPUT', False)
+            ),
+            model_runtime_bindings=model_runtime_bindings,
             object_storage_adapter=object_storage_adapter,
         )

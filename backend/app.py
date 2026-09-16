@@ -33,6 +33,7 @@ from backend.api.admin_release_sets import router as admin_release_sets_router
 from backend.api.capabilities import router as capabilities_router
 from backend.api.claims import router as claims_router
 from backend.api.demo import router as demo_router
+from backend.api.evidence import account_router as evidence_account_router
 from backend.api.evidence import router as evidence_router
 from backend.api.handoffs import router as handoffs_router
 from backend.api.health import router as health_router
@@ -99,10 +100,12 @@ from backend.services.agent import (
     InvariantGuardedAgent,
     UnavailableAgent,
 )
+from backend.services.agent_action_execution import ClaimantRuntimeActionDispatcher
 from backend.services.external_service_entry import (
     assert_adapter_matches_entry,
     resolve_external_service_entry,
 )
+from backend.services.initial_runtime_release import install_initial_runtime_release
 from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.model_profiles import model_configuration
@@ -158,6 +161,16 @@ def create_app(
         if resolved_settings.developer_mode
         else SQLiteKnowledgeAdminRepository(resolved_settings.control_plane_db_path)
     )
+    if (
+        resolved_settings.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY
+        and resolved_settings.model_runtime_bindings
+    ):
+        install_initial_runtime_release(
+            resolved_settings,
+            resolved_configuration_repository,
+            resolved_release_set_repository,
+            resolved_knowledge_admin_repository,
+        )
     runtime_configuration_resolver = RuntimeConfigurationResolver(
         resolved_configuration_repository,
         resolved_release_set_repository,
@@ -287,6 +300,7 @@ def create_app(
     # than by individual routers.  No router, service, seed path, or adapter
     # can reach an unguarded handoff write.
     app.state.claim_repository = guarded_handoff_repository(bundle.repository)
+    app.state.claimant_runtime_action_dispatcher = ClaimantRuntimeActionDispatcher()
     if resolved_settings.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
         if agent_turn_provider is not None:
             raise ValueError(
@@ -403,7 +417,8 @@ def create_app(
             and assessor_configuration.source is IntegrationSourceValue.FIXTURE
         ) or (
             assessor_configuration is None
-            and resolved_settings.data_runtime_profile is DataRuntimeProfile.FIXTURE
+            and resolved_settings.data_runtime_profile
+            in {DataRuntimeProfile.FIXTURE, DataRuntimeProfile.LOCAL_MVP}
         )
         assessor_status = (
             RuntimeCapabilityStatus.USING_FIXTURE
@@ -438,6 +453,7 @@ def create_app(
     app.include_router(claims_router)
     app.include_router(integrations_router)
     app.include_router(evidence_router)
+    app.include_router(evidence_account_router)
     app.include_router(workbench_router)
     app.include_router(workbench_conversation_router)
     app.include_router(demo_router)

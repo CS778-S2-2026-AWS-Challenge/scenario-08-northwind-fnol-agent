@@ -69,11 +69,11 @@ records remain target contracts.
 | Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
 | Staff Agent interaction | staff-owned persistent sessions, session-bound published model profile, explicitly scoped questions, source-aware answers, and drafts with stable identity; executable drafts carry a registered action proposal but remain non-executing until staff confirmation | `staff_id`, `session_id`, `message_id`, and `draft_id`; Claim IDs are per-message scope only |
 | Staff Agent execution | immutable readback evidence for one explicitly confirmed draft and its registered Workbench handler result | `execution_id = sax_{draft_id}`; linked to the owned assistant message, exact draft, Claim, action, target, expected/resulting revision, and idempotency record |
-| Agent turn | Target TurnPlan/AgentProposal/ExecutionPlan/ActionEnvelopes plus the implemented bounded Runtime Trace, ToolRequests and results, TurnResult, policy and Registry versions, usage, latency, limitations | `turn_id`/`trace_id`, linked to session and optional Claim |
+| Agent turn | Target TurnPlan/AgentProposal/ExecutionPlan/ActionEnvelopes plus the implemented bounded Runtime Trace, ToolRequests and results, TurnResult, policy and Registry versions, selected external-service lifecycle coordinates, usage, latency, limitations | `turn_id`/`trace_id`, linked to session and optional Claim |
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
 | Retrieval | structured policy/history results, knowledge citations, limitations, source versions | `claim_id` and retrieval identity |
 | Review | internal signals, source references, professional decisions, staff actions | `claim_id` and work identity |
-| Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps | `claim_id` and `handoff_id` |
+| Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps, and support continuation target (`resume_workflow_state`, `resume_next_action`) | `claim_id` and `handoff_id` |
 | Follow-up | due time, responsible party, attempt count, channel, outcome, status | `claim_id` and `follow_up_id` |
 | Integration | published provider configuration references, adapter capability/health projection, external-service consent, claim-creation result, durable routing operation intent/outcome, routing result, external participant task, returned task result and verification, idempotency result | integration identity, `claim_id`, task, result, or consent/operation identity |
 | External request | implemented purpose, disclosed field names, consent and authority, preparation and first send identity, controlled assessor result and verification; target capability/requirement versions, attempts, and reconciliation | `claim_id`, `request_id`, linked to `task_id` |
@@ -137,63 +137,74 @@ the append-only audit collection through a bounded, filterable projection.
    newer revision; a non-claim session may exist without a `claim_id`.
 5. Append and page messages while filtering visibility before projection.
 6. Register, update, and list evidence metadata while preserving object provenance.
-7. Save structured retrieval results and source-linked review signals atomically.
-8. Read staff queues by priority, state, owner, next action, and service timing.
-9. Accept and resolve handoffs and staff work through the same claim revision boundary.
-10. Record idempotency results by actor, operation, client key, and request fingerprint.
-11. Persist an applied namespaced Runtime turn atomically with its claimant/agent messages,
+7. List uploaded Evidence across a customer's Claims through a claimant-scoped,
+   visibility-filtered history query without exposing adapter-owned storage keys.
+8. Save structured retrieval results and source-linked review signals atomically.
+9. Read staff queues by priority, state, owner, next action, and service timing.
+10. Accept and resolve handoffs and staff work through the same claim revision boundary.
+11. Record idempotency results by actor, operation, client key, and request fingerprint.
+12. Persist an applied namespaced Runtime turn atomically with its claimant/agent messages,
     Claim revision, Session activity, Runtime trace, target turn records, WorkItems, and
     idempotency response.
-12. Resolve a current task-specific claimant consent before invoking an external participant.
-13. Reserve an immutable external-operation identity and fingerprint before invocation, then
+13. Resolve a current task-specific claimant consent before invoking an external participant.
+14. Reserve an immutable external-operation identity and fingerprint before invocation, then
     recover its accepted result independently of a later Claim State compare-and-set.
-14. Resolve the active configuration version and read its immutable publication record.
-15. List administration audit events by bounded actor, subject, event type, and time filters without
+15. Resolve the active configuration version and read its immutable publication record.
+16. List administration audit events by bounded actor, subject, event type, and time filters without
     exposing unrestricted claimant or provider payloads.
-16. Read customer memory only through a purpose-limited, visibility-filtered access path.
-17. Create and process follow-up tasks by due time, responsibility, priority, and status.
-18. Append audit events and query them by authorised subject and time range.
-19. Read one complete turn by `turn_id` and distinguish proposal, approval, execution,
+17. Read customer memory only through a purpose-limited, visibility-filtered access path.
+18. Create and process follow-up tasks by due time, responsibility, priority, and status.
+19. Append audit events and query them by authorised subject and time range.
+20. Read one complete turn by `turn_id` and distinguish proposal, approval, execution,
     state effect, and final role projection without exposing hidden or restricted data.
-20. List open WorkItems by Claim, owner, type, status, blocked action, due time, and
+21. List open WorkItems by Claim, owner, type, status, blocked action, due time, and
     priority without treating Claim lifecycle as the only work status.
-21. Reconcile an external request by Northwind operation identity, idempotency key, or
+22. Reconcile an external request by Northwind operation identity, idempotency key, or
     provider reference before any retry after an unknown outcome.
-22. Resolve one active, evaluated Model Profile by purpose and privacy class without
+23. Resolve one active, evaluated Model Profile by purpose and privacy class without
     returning endpoint credentials to Runtime or a browser.
-23. Resolve an unexpired and unrevoked claimant session by token hash without allowing a
+24. Resolve an unexpired and unrevoked claimant session by token hash without allowing a
     browser-supplied customer identifier to alter the authenticated principal.
-24. Read and update the authenticated claimant's approved profile and communication
+25. Read and update the authenticated claimant's approved profile and communication
     preferences by `customer_id` without exposing another Customer record.
-25. List external tasks for one authorised Claim in stable `(created_at, task_id)` order and map
+26. List external tasks for one authorised Claim in stable `(created_at, task_id)` order and map
     each task to its single request and single-origin evidence links without exposing another
     Claim.
-26. Append an immutable branch evaluation for a Claim revision and list evaluations in creation
+27. Read active Evidence reuse links by target Claim and Evidence identity, and list all links for
+    one claimant without crossing customer scope.
+28. Atomically apply one claimant Evidence reuse or removal with the target Claim revision,
+    idempotency record, Branch Evaluation, and append-only audit event.
+29. Append an immutable branch evaluation for a Claim revision and list evaluations in creation
     order without allowing an evaluation to overwrite Claim State.
-27. Resolve an unexpired and unrevoked staff session from the independent staff identity store
+30. Resolve an unexpired and unrevoked staff session from the independent staff identity store
     without accepting claimant credentials or browser-supplied roles.
-28. Create, list, and resume Staff Agent sessions by authenticated `staff_id` without exposing
+31. Create, list, and resume Staff Agent sessions by authenticated `staff_id` without exposing
     another staff member's sessions.
-29. Append one Staff Agent question and answer atomically, resolve retries by
+32. Append one Staff Agent question and answer atomically, resolve retries by
     `(staff_id, session_id, client_message_id)`, and preserve the explicit zero-to-five Claim scope
     used for that turn. Persist stable draft identities and route an explicitly confirmed draft
     through the existing revision-checked Workbench action handler; do not grant the model direct
     mutation authority.
-30. Create a unique Customer or Staff account through its identity repository without exposing the
+33. Create a unique Customer or Staff account through its identity repository without exposing the
     password hash or allowing an administration retry to create a duplicate account.
-31. Conditionally update approved Customer or Staff account fields by account revision; a stale
+34. Conditionally update approved Customer or Staff account fields by account revision; a stale
     write returns the current revision without changing the record.
-32. List identity sessions for exactly one Customer or Staff account in stable newest-first order
+35. List identity sessions for exactly one Customer or Staff account in stable newest-first order
     without returning bearer values or token hashes.
-33. Resolve and revoke one active identity session by opaque `ias_` ID and expected revision; a
+36. Resolve and revoke one active identity session by opaque `ias_` ID and expected revision; a
     session under another account is not exposed and a retry cannot reactivate it.
-34. Receive one accepted assessor task's returned report through the installed adapter, store its
+37. Receive one accepted assessor task's returned report through the installed adapter, store its
     bytes under the task-linked Evidence identity, recover an interrupted unchanged retry, and
     verify the immutable result against the current Claim revision without promoting Claim facts.
-35. List authorised Claims by the server-projected completed, abandoned, or closed disposition
+38. List authorised Claims by the server-projected completed, abandoned, or closed disposition
     without scanning action history or inferring terminal state from a missing Session.
-36. Resolve and atomically reopen one eligible abandoned/closed Claim by staff actor, exact action,
+39. Resolve and atomically reopen one eligible abandoned/closed Claim by staff actor, exact action,
     target, expected revision, and idempotency key while preserving the active-session pointer.
+40. Search Sessions within one authorised Claim by registered Session and message filters while
+    examining at most 100 Sessions and 200 messages per Session, stopping once the requested result
+    limit is satisfied, and returning unavailable when the examined-set bound cannot prove a
+    complete result (`SEARCH_SCOPE_EXCEEDED`). Read at most the requested newest 50 messages for
+    one explicit Session.
 
 ## Development/Test Identity Invariants
 
@@ -366,6 +377,27 @@ the append-only audit collection through a bounded, filterable projection.
   message, a cross-session reference, or a changed draft contract rejects the complete mutation.
 - A successful execution response is built from repository readback of the persisted execution
   record. Claimant routes never expose Staff Agent execution evidence or its internal source links.
+- The Staff Claim search boundary derives lifecycle, active queue, and effective assignee from the
+  Working Claim plus its current Evidence and handoff records. The MongoDB adapter stores that
+  derived state in an adapter-owned `staff_search` projection on the Claim document. It contains
+  only `claim_id`, customer/external references, created/incident dates, product family, lifecycle,
+  effective assignee, queue, and `updated_at`; it is not part of `WorkingClaim` or any API response.
+  Claim, Evidence, and handoff writes refresh the projection in the same transaction or write
+  boundary, and repository initialisation backfills pre-contract Claim documents before serving
+  searches. MongoDB indexes every registered derived search field and applies all filters plus a
+  database-side limit without per-Claim Evidence or handoff reads. Fixture and MongoDB behavior
+  remains equivalent. The dispatcher receives only the bounded lightweight candidates and never
+  enumerates or constructs full Workbench Claim projections.
+- Staff Session search is Claim/customer scoped before any Session or Message read. Repository
+  adapters apply exact Session ID, start date, and status predicates at their indexed Session
+  boundary, evaluate actor and closed typed text only within a maximum of 100 candidate Sessions
+  and 200 messages per Session, and stop as soon as the requested result limit is satisfied. Exceeding
+  either examined-set limit fails closed as unavailable with `SEARCH_SCOPE_EXCEEDED`; it cannot be
+  reported as no result.
+  Session read queries only the requested newest message window. Its Staff Agent projection
+  contains allow-listed Session identity/status/timestamps and closed `{type: text, text: ...}`
+  content; customer identity, model/session internals, and undeclared nested Message fields remain
+  persistence-only.
 
 ## Claim Lifecycle, Follow-up, and Retention Invariants
 
@@ -415,10 +447,49 @@ the append-only audit collection through a bounded, filterable projection.
 - Extraction produces source-linked proposals; it does not confirm a claim fact.
 - Evidence lifecycle writes preserve ownership, checksum, provenance, and permitted
   visibility.
+- Uploading a registered requirement, or replacing failed or invalid claimant material, updates
+  the original claimant-owned Evidence record. The mutation preserves `evidence_id`, `created_at`,
+  `needed_for`, `related_fields`, `claimant_note`, ownership, and visibility; it does not create a
+  second record that leaves the requirement outstanding.
+- `material_version` identifies the current file generation beneath that stable requirement. A
+  replacement advances it by exactly one and appends the prior generation to typed
+  `material_history`, including its condition, file state and metadata, references, complete
+  provenance, processing and extraction decisions, and any proposed Claim fields sourced only by
+  that generation. Fixture and MongoDB persistence reject a shortened or rewritten history.
+- A replacement starts the new generation without the prior file's references, checksum,
+  processing state, extraction state, fact decisions, or lifecycle transition history.
+  Requirement-origin provenance such as `reported_in_message_id` and `captured_at` remains on the
+  current stable requirement. A current Claim field is withdrawn only when it is still `proposed`,
+  has an image or document source, and all of its source references identify the replaced
+  generation. Confirmed, disputed, and multi-source fields remain current.
+- An extracted field names both the stable `evidence_id` and
+  `evidence:{evidence_id}:material:{material_version}`. Fact decisions require the current
+  generation reference so an older material cannot be mistaken for the replacement.
 - A `processing` or `failed` file remains pending or attention-required in the
   authoritative Claim aggregation; only a `ready` file can contribute received
   Evidence. Retry reuses the same Evidence identity and revision-checked
   mutation rather than creating a duplicate record.
+- Account history actions preserve the original Evidence identity. Reuse stores an
+  `EvidenceClaimLink` containing source Claim, target Claim, customer, lifecycle,
+  and timestamps; it never duplicates the object or its metadata as a new source
+  record. The target Claim projection includes only active links and recomputes
+  its evidence summary from the linked source records.
+- Removing source Evidence marks its claimant-history state removed while keeping
+  the immutable record, material history, provenance, and audit trail. Removing a
+  reused item writes a detached link and leaves the source Claim unchanged. Both
+  operations advance only the target Claim revision and are persisted atomically
+  with idempotency, Branch Evaluation, and audit data.
+ - Evidence action writes require the authenticated claimant to own both Claims and
+   the source Evidence. The compare-and-set revision check occurs in the same
+   transaction as the relation or history-state change; retries with the same key
+   replay the stored typed result, while a different request under that key is a
+   conflict.
+ - Evidence action authorization is grounded in immutable Runtime records: the persisted
+   `AgentProposalRecord` stores the target Evidence and source Claim for the exact action, and
+   the claimant confirmation is a later claimant-visible `MessageRecord` in the same active
+   session. Public Evidence mutations reject references that exist only in the request body;
+   fabricated or cross-session references fail before the Claim, link, history, audit, or
+   idempotency mutation begins.
 - Pending, invalid, unofficial, and not-yet-generated evidence remain distinct states.
   `EvidenceStatus` carries the business condition of the material and
   `EvidenceFileStatus` the upload and processing lifecycle alone, so the two
@@ -451,6 +522,11 @@ Evidence record or protected object.
   profile, executable prompt identifier, provider-reported model identifier, and provider request
   identifier when supplied.
   These provider references are internal-only and never enter claimant projections.
+- A successful multimodal Runtime trace may retain the exact selected Evidence ID, media type,
+  and `submitted` outcome. It never retains raw bytes, object URLs, storage keys, or provider
+  payloads. Any proposed form field or contents item derived from that attachment retains the
+  Evidence ID as its source reference and remains unconfirmed until the ordinary fact-confirmation
+  path accepts it.
 - Model-authored customer prose and model-proposed internal signals are not persistence
   authority. Claimant-visible response fields are server-rendered after deterministic
   validation, and any non-empty model signal proposal rejects the complete turn before write.
@@ -512,6 +588,13 @@ Evidence record or protected object.
   a proposal appear executed.
 - One turn may contain several conversation moves and command proposals but exactly one
   primary Runtime control directive.
+- A claimant TurnPlan records every external-service lifecycle input selected for that turn as a
+  bounded coordinate: registry version, service identity, operation status, optional result stage,
+  and optional result-verification outcome. These immutable coordinates describe the model input
+  and do not replace the external task, result, or assessor-routing records. When an accepted
+  assessor task and `WorkingClaim.assessor_routing` share the same provider reference, the stored
+  operation coordinate is the registry-projected `queued` or `assigned` value actually supplied to
+  the model; a non-matching routing record leaves the coordinate at `accepted`.
 - Every ActionEnvelope retains stable identity, namespace, registered action name,
   target, proposer, reasons, sources, inputs, preconditions, authority, expected effects,
   visibility, idempotency where applicable, and actual status.
@@ -547,6 +630,11 @@ Evidence record or protected object.
   writes none of those records. An unchanged replay reads the settled records and does not repeat
   the status check. `unknown_outcome` cannot become `retryable_failure`; a confirmed non-submission
   requires a separate durable reconciliation record before it can permit another attempt.
+- When an authenticated Workbench staff mutation performs that reconciliation, the same Fixture
+  lock or MongoDB transaction also checks the staff presence revision, assigns an unowned Claim to
+  that staff member, stores one completed task-linked `external_reconciliation` StaffAction, and
+  stores the exact action-code/target idempotency response. Failure of any presence, ownership,
+  revision, identity, lifecycle, or idempotency guard writes none of the settlement bundle.
 - One prepared `erq_` request carries a dispatch reservation. Runtime must hold it before any
   provider call, and the reservation is taken by an atomic compare-and-set on the stored request
   rather than by a check made before the write, so exactly one of two concurrent callers may
@@ -566,7 +654,12 @@ Evidence record or protected object.
 - An external task uses an opaque `tsk_` identifier and remains separate from Claim State. Its
   integration source, status, and timestamps are stored with the claim association. A
   task keeps its original claim, service, action, source class, and creation time across status
-  updates, and a changed state must advance `updated_at` so a stale concurrent write fails. A
+  updates, and a changed state must advance `updated_at` so a stale concurrent write fails. Before
+  Fixture or MongoDB accepts a new or changed task, its service identity must exist in the
+  canonical External Service Lifecycle Registry, permit `ExternalTask` persistence, allow the
+  persisted status, and agree with the request provenance derived from integration source and
+  delivery. Historical unknown records remain readable as legacy/unavailable projections, but
+  cannot be created or advanced through the repository write contract. A
   task-to-evidence link is accepted only when the named Evidence record exists under the same
   claim and customer. It is immutable for `(claim_id, evidence_id)` and cannot name a task on
   another claim; repeated material cannot acquire a second external origin.
@@ -679,9 +772,13 @@ components use the existing independent approval record and publication guard; n
 write production Claim State.
 
 Model records use `domain=model` and `configuration_key=profile_id`, so one published Release
-Set can bind both `qwen-local` and `nowcoding-gpt56terra` without overwriting either profile.
+Set can bind both `qwen-local` and `nowcoding-gpt55` without overwriting either profile.
 Claimant profiles must declare `structured_output=true` and `tools=true`; a Session stores the
 selected profile ID and Runtime resolves that exact key for every turn.
+The deployment binding manifest is not persisted catalogue state. It contains only non-secret
+connection metadata and credential environment-variable names used to reject unapproved model
+configurations before publication. The active Release Set remains the authority for which matched
+profiles are selectable.
 
 An `AgentDecisionRecord` may retain a `runtime_configuration` provenance projection for the exact
 turn. It contains the Release Set ID, environment, runtime profile, each selected configuration ID
@@ -844,6 +941,14 @@ Successful Claim creation writes `completed` in the same Claim compare-and-set a
 Claim result. Workbench reads the persisted record directly and never derives terminal placement
 from workflow text, session absence, or action history. `purged_or_anonymised` is not represented
 by this field and remains outside listable Workbench data.
+
+MongoDB deployments upgraded from a version before this contract use
+`scripts/backfill_terminal_dispositions.py` to repair only legacy created Claims whose persisted
+external result, source revision, stable external reference, and unique authorised creation
+decision prove the missing disposition. The command is read-only unless `--apply` is supplied,
+uses a revision-checked conditional update, and refuses incomplete or contradictory provenance.
+This schema repair preserves the Claim revision and update time because it records the terminal
+fact at the original creation revision rather than introducing a new Claim mutation.
 
 The `claim.reopen` mutation is staff-scoped and stores, in one Fixture lock or MongoDB transaction:
 

@@ -99,6 +99,17 @@ py -3.12 -m uvicorn backend.main:app --env-file .env --reload --host 127.0.0.1 -
 Deployment environments inject the same variable names through their secret and configuration
 mechanisms; they must not package the local `.env` file.
 
+Multimodal model input is opt-in through `MODEL_SUPPORTS_IMAGE_INPUT` and
+`MODEL_SUPPORTS_DOCUMENT_INPUT`. These declarations only enable image or PDF Evidence blocks
+for a provider profile that has repeatable adapter evidence; they do not grant access to object
+storage or bypass the Evidence authorization boundary.
+
+The governed multi-model deployment allow-list is selected with
+`MODEL_RUNTIME_BINDINGS_PATH`. Private model endpoints remain environment-owned; the current
+Qwen binding resolves `NORTHWIND_QWEN_BASE_URL` at process startup rather than storing that
+address in source control. For the complete model publication contract, see
+[Provider-Neutral Model Gateway](docs/model-gateway.md).
+
 The default object store remains the deterministic fixture adapter. To run the same
 FastAPI evidence flow against local MinIO, start the packaged service and configure the
 `s3_compatible` adapter as described in
@@ -115,6 +126,18 @@ accepted-turn provenance, restart recovery, replay without a second model call, 
 and atomic timeout, malformed, incomplete, and unauthorised-output failures. This deterministic
 transport is repeatable contract evidence, not a live-provider claim; a live run additionally
 requires an approved endpoint and secret supplied through the documented model environment.
+
+For a single-host Validation Prototype handoff, set the browser-reachable object-storage origin,
+staff bootstrap credentials, and optional model configuration through the process environment,
+then start the explicit Compose profile:
+
+```powershell
+docker compose --profile vp up -d --build
+```
+
+This profile uses normal claimant and staff authentication, durable MongoDB, MinIO, and SQLite
+volumes, and an idempotent governed-knowledge bootstrap. It still labels policy/history and the
+controlled assessor honestly as synthetic; it is not an AWS or production deployment claim.
 
 To check changed backend lines locally after a coverage run, use:
 
