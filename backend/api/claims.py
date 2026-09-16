@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import cast
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from backend.adapters.claims_service import AssessorServiceAdapter, ClaimsServiceAdapter
@@ -52,6 +52,7 @@ from backend.services.claims import (
     start_claim,
     update_form,
 )
+from backend.services.conversation_compaction import compact_conversation_after_response
 from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
 from backend.services.external_service_entry import ExternalServiceEntryDecision
 from backend.services.external_service_offers import (
@@ -461,6 +462,7 @@ def create_message(
     session_id: str,
     request: Request,
     payload: CreateMessageRequest,
+    background_tasks: BackgroundTasks,
     principal: Principal = Depends(require_claimant),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
@@ -469,7 +471,7 @@ def create_message(
         payload = payload.model_copy(
             update={'model_profile_id': select_model_profile(request, payload.model_profile_id)}
         )
-    return submit_message(
+    result = submit_message(
         repository=repository_for(request),
         agent=agent_for(request),
         policy_history_adapter=policy_history_adapter_for(request),
@@ -486,6 +488,14 @@ def create_message(
         assessor_entry=_assessor_entry_for(request),
         external_capability_dispatcher=external_capability_dispatcher_for(request),
     )
+    background_tasks.add_task(
+        compact_conversation_after_response,
+        repository_for(request),
+        principal.subject,
+        claim_id,
+        session_id,
+    )
+    return result
 
 
 @router.get(

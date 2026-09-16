@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from threading import RLock
 from typing import Any
 
+from backend.domain.agent_context_runtime import VerifiedConversationSummary
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
 from backend.domain.evidence import assert_material_history_is_append_only
 from backend.domain.external_services import (
@@ -93,6 +94,7 @@ class FixtureRepository(PersistenceRepository):
         self._message_ids_by_session: dict[str, list[str]] = {}
         self._follow_ups: dict[str, FollowUpRecord] = {}
         self._messages: dict[str, MessageRecord] = {}
+        self._conversation_summaries: dict[str, VerifiedConversationSummary] = {}
         self._runtime_traces: dict[str, RuntimeTraceRecord] = {}
         self._runtime_turns: dict[str, RuntimeTurnRecords] = {}
         self._staff_agent_sessions: dict[str, StaffAgentSession] = {}
@@ -142,6 +144,7 @@ class FixtureRepository(PersistenceRepository):
             'sessions': len(self._sessions),
             'follow_ups': len(self._follow_ups),
             'messages': len(self._messages),
+            'conversation_summaries': len(self._conversation_summaries),
             'runtime_traces': len(self._runtime_traces),
             'staff_agent_sessions': len(self._staff_agent_sessions),
             'staff_agent_messages': len(self._staff_agent_messages),
@@ -173,6 +176,7 @@ class FixtureRepository(PersistenceRepository):
         self._message_ids_by_session.clear()
         self._follow_ups.clear()
         self._messages.clear()
+        self._conversation_summaries.clear()
         self._runtime_traces.clear()
         self._staff_agent_sessions.clear()
         self._staff_agent_messages.clear()
@@ -1176,6 +1180,35 @@ class FixtureRepository(PersistenceRepository):
             return []
         message_ids = self._message_ids_by_session.get(session_id, [])[-limit:]
         return [deepcopy(self._messages[message_id]) for message_id in message_ids]
+
+    def save_conversation_summary(
+        self,
+        summary: VerifiedConversationSummary,
+        customer_id: str,
+    ) -> None:
+        if self.get_session(summary.claim_id, summary.session_id, customer_id) is None:
+            raise KeyError(summary.session_id)
+        existing = self._conversation_summaries.get(summary.summary_id)
+        if existing is not None and existing != summary:
+            raise IdempotencyConflict(summary.summary_id)
+        self._conversation_summaries[summary.summary_id] = deepcopy(summary)
+
+    def get_latest_conversation_summary(
+        self,
+        claim_id: str,
+        session_id: str,
+        customer_id: str,
+    ) -> VerifiedConversationSummary | None:
+        if self.get_session(claim_id, session_id, customer_id) is None:
+            return None
+        matches = [
+            item
+            for item in self._conversation_summaries.values()
+            if item.claim_id == claim_id and item.session_id == session_id
+        ]
+        if not matches:
+            return None
+        return deepcopy(max(matches, key=lambda item: (item.created_at, item.summary_id)))
 
     def save_agent_decision(self, decision: AgentDecisionRecord, customer_id: str) -> None:
         if (
