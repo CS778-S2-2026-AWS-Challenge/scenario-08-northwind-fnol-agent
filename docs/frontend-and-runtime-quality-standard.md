@@ -622,6 +622,7 @@ frontend/shared/design-tokens.js
 | `--font-size-section` | `20px` | section/panel 标题 |
 | `--font-size-page` | `24px` | 页面标题 |
 | `--font-size-hero` | `28px` | 只有有信息价值时使用的入口标题 |
+| `--font-size-display` | `40px` | Short brand or landing-page display heading |
 
 | Token | 值 | 用途 |
 |---|---:|---|

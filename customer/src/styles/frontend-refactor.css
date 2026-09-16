@@ -365,7 +365,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 .entry-brand-line {
   max-width: var(--entry-composer-measure-max);
   margin: 0 auto;
-  font-size: var(--font-size-hero);
+  font-size: var(--font-size-display);
   font-weight: var(--font-weight-semibold);
   letter-spacing: -.02em;
   line-height: var(--line-height-heading);
@@ -649,7 +649,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 }
 .conversation-sidebar-header h2 {
   margin: 0;
-  font-size: var(--font-size-section);
+  font-size: var(--font-size-page);
   font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-heading);
 }
