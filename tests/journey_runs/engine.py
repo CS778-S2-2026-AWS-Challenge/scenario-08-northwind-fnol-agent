@@ -9,7 +9,8 @@ journey. This module owns what every runner does the same way:
 - reading back the claimant and staff projections both ends share;
 - assembling the record.
 
-Nothing is asserted here. `record.classify` decides the class.
+Route outcomes are classified by `record.classify`. Scenario runners may additionally attach
+fixture-oracle comparisons to successful steps and stop when an observable contradicts its fixture.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from backend.adapters.evidence_storage import MockEvidenceStorage
 from backend.core.config import Settings
 
 from .record import (
+    ORACLE_FAILURE,
     AgentTurn,
     Arrival,
     ClaimantEffort,
@@ -68,6 +70,10 @@ class PackMaterial(NamedTuple):
 
     `delivered_by` names the step whose success delivers a material that is not a claimant
     upload; an upload is delivered by its own completion step.
+
+    `condition` is the declared material condition (received, invalid, expired, disputed,
+    unavailable, superseded). It survives into the record's `pack_condition` so variant
+    coverage is distinguishable from ordinary uploads.
     """
 
     path: str
@@ -78,10 +84,13 @@ class PackMaterial(NamedTuple):
     media_type: str | None = None
     note: str | None = None
     delivered_by: str | None = None
+    condition: Literal[
+        'received', 'invalid', 'expired', 'disputed', 'unavailable', 'superseded'
+    ] = 'received'
 
 
 class Journey:
-    """Issues each step once, records it, and stops at the first step that does not succeed."""
+    """Issue and record each step, stopping on route failure or oracle disagreement."""
 
     def __init__(self, client: TestClient) -> None:
         self.client = client
@@ -91,7 +100,11 @@ class Journey:
 
     @property
     def stopped(self) -> bool:
-        return any(step.outcome is not StepOutcome.SUCCEEDED for step in self.steps)
+        return any(
+            step.outcome is not StepOutcome.SUCCEEDED
+            or (step.detail is not None and ORACLE_FAILURE in step.detail)
+            for step in self.steps
+        )
 
     def name(self, identifier: str, placeholder: str) -> str:
         self._placeholders[identifier] = placeholder
@@ -144,6 +157,46 @@ class Journey:
     def succeeded(self, name: str) -> bool:
         return any(s.name == name and s.outcome is StepOutcome.SUCCEEDED for s in self.steps)
 
+    def record_oracle(
+        self,
+        step_name: str,
+        expected: Mapping[str, object],
+        actual: Mapping[str, object],
+        *,
+        defect_ref: str = 'untracked',
+    ) -> None:
+        """Attach a fixture-oracle comparison to a completed route step.
+
+        Args:
+            step_name: Name of the route step whose response was checked.
+            expected: Observable values declared by the fixture.
+            actual: Values read from the route response or subsequent API readback.
+            defect_ref: Issue reference for a mismatch, or `untracked` until one is assigned.
+
+        Returns:
+            None.
+
+        Raises:
+            AssertionError: If the named route step does not exist.
+        """
+
+        matched = expected == actual
+        if matched:
+            detail = f'Fixture oracle passed: expected={dict(expected)!r}; actual={dict(actual)!r}'
+        else:
+            detail = (
+                f'{ORACLE_FAILURE} (defect_ref={defect_ref}): '
+                f'expected={dict(expected)!r}; actual={dict(actual)!r}'
+            )
+        for index in range(len(self.steps) - 1, -1, -1):
+            if self.steps[index].name == step_name:
+                previous = self.steps[index].detail
+                combined = f'{previous}\n{detail}' if previous else detail
+                self.steps[index] = self.steps[index].model_copy(update={'detail': combined})
+                break
+        else:
+            raise AssertionError(f'Fixture oracle references missing step {step_name!r}.')
+
     def revision(self) -> int:
         return cast(int, self.read(f'/api/v1/claims/{self.claim_id}', 'claimant')['revision'])
 
@@ -153,8 +206,10 @@ class Journey:
     def items(self, path: str, actor: str) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], self.read(path, actor).get('items', []))
 
-    def create_working_claim(self, family: str) -> str | None:
-        body = {'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': family}
+    def create_working_claim(self, family: str | None) -> str | None:
+        body = {'channel': 'web_agent', 'locale': 'en-NZ'}
+        if family is not None:
+            body['incident_type'] = family
         created = self.step('create working claim', 'POST', '/api/v1/claims', 201, 'claimant', body)
         if created is None:
             return None
@@ -271,7 +326,7 @@ def delivered_materials(
             InputMaterial(
                 path=material.path,
                 material_class=material.material_class,
-                pack_condition='received',
+                pack_condition=material.condition,
                 provided_by=material.provided_by,
                 arrival=arrival,
                 delivered_at_step=step if delivered else None,
@@ -433,7 +488,7 @@ def build_record(
         unavailable_capabilities=capabilities,
         final_state=state,
         effort=ClaimantEffort(
-            messages=sum(name.startswith(('describe', 'answer')) for name in succeeded),
+            messages=len(turns),
             confirmations=sum(name.startswith('confirm') for name in succeeded),
             uploads=sum(name.startswith('complete upload') for name in succeeded),
             consents=sum(name.startswith('consent') for name in succeeded),
@@ -460,6 +515,11 @@ def _reason(
     capabilities: list[UnavailableCapability],
     stop_note: str | None,
 ) -> str:
+    oracle_failure = next(
+        (step for step in steps if step.detail is not None and ORACLE_FAILURE in step.detail), None
+    )
+    if oracle_failure is not None:
+        return f'Fixture oracle mismatch at "{oracle_failure.name}" ({oracle_failure.detail}).'
     stopped = next((step for step in steps if step.outcome is not StepOutcome.SUCCEEDED), None)
     if stopped is not None:
         reason = f'Stopped at "{stopped.name}" ({stopped.http_status} {stopped.detail}).'
