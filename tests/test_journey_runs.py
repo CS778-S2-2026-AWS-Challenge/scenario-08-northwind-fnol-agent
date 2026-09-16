@@ -338,8 +338,14 @@ def test_a_capability_is_unavailable_only_for_a_step_the_run_did_not_attempt() -
 # --- Multi-turn motor journey fixtures (PRES-01 / PRES-02) -------------------------------
 
 
-@pytest.mark.parametrize('fixture_name', ['PRES-01', 'PRES-02'], ids=['pres01', 'pres02'])
-def test_a_multi_turn_motor_journey_runs_end_to_end_and_records_honestly(fixture_name: str) -> None:
+@pytest.mark.parametrize(
+    ('fixture_name', 'expected_messages'),
+    [('PRES-01', 3), ('PRES-02', 4)],
+    ids=['pres01', 'pres02'],
+)
+def test_a_multi_turn_motor_journey_runs_end_to_end_and_records_honestly(
+    fixture_name: str, expected_messages: int
+) -> None:
     record = run_motor_journey(fixture_name, head='test')
 
     assert JourneyRunRecord.model_validate_json(record.model_dump_json()) == record
@@ -347,6 +353,7 @@ def test_a_multi_turn_motor_journey_runs_end_to_end_and_records_honestly(fixture
     assert {step.outcome for step in record.steps} == {StepOutcome.SUCCEEDED}
     # Multi-turn journeys replay more than one claimant message.
     assert len(record.agent_turns) >= 3
+    assert record.effort.messages == expected_messages == len(record.agent_turns)
     # The handoff / review fixtures do not reach consent or assessor routing, so those
     # pack materials are honestly recorded as not delivered and the run is `partial`.
     assert record.result_class is ResultClass.PARTIAL

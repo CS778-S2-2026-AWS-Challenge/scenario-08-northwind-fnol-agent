@@ -488,7 +488,7 @@ def build_record(
         unavailable_capabilities=capabilities,
         final_state=state,
         effort=ClaimantEffort(
-            messages=sum(name.startswith(('describe', 'answer')) for name in succeeded),
+            messages=len(turns),
             confirmations=sum(name.startswith('confirm') for name in succeeded),
             uploads=sum(name.startswith('complete upload') for name in succeeded),
             consents=sum(name.startswith('consent') for name in succeeded),
