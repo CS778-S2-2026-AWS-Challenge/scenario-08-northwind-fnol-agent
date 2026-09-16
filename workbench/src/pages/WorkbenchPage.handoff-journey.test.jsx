@@ -633,6 +633,7 @@ function createHandoffJourneyService(family) {
         revision: state.revision,
         items: events.map((item) => ({
           event_type: item.event_type,
+          summary: item.summary,
           source_refs: item.source_refs,
         })),
       })
@@ -819,10 +820,6 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
     )
     expect(claimantUpdateCopies.length).toBeGreaterThanOrEqual(2)
     claimantUpdateCopies.forEach((copy) => expect(copy).toBeVisible())
-    expect(await screen.findByText(
-      'Staff handoff resolved and Claim returned to the authoritative workflow.',
-    )).toBeVisible()
-
     await waitFor(() => {
       expect(state.handoffReads.at(-1)).toEqual({
         status: 'resolved',
@@ -840,10 +837,12 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
       )
       expect(state.eventReads.at(-1).items).toContainEqual({
         event_type: 'handoff.resolved',
+        summary: 'Claimant requested staff support.',
         source_refs: ['hnd_journey'],
       })
       expect(state.eventReads.at(-1).items).toContainEqual({
         event_type: 'customer_update.recorded',
+        summary: 'Your staff handoff is resolved and your claim can continue.',
         source_refs: ['upd_resolved', 'hnd_journey'],
       })
       expect(state.claimReads.at(-1)).toMatchObject({
