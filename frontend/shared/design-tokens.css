@@ -1,25 +1,18 @@
 :root {
   --font-family-base: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-size-meta: 12px;
   --font-size-caption: 14px;
   --font-size-body: 16px;
   --font-size-message: 18px;
   --font-size-control: 16px;
   --font-size-section: 20px;
-  --font-size-sidebar-title: 22px;
   --font-size-page: 24px;
   --font-size-hero: 28px;
-  --font-size-entry-hero-min: 40px;
-  --font-size-entry-hero-fluid: 2.6vw;
-  --font-size-entry-hero-max: 44px;
   --font-weight-regular: 400;
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
   --font-weight-bold: 700;
-  --line-height-compact: 1.3;
   --line-height-body: 1.5;
   --line-height-heading: 1.2;
-  --line-height-entry-hero: 1.1;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -36,8 +29,6 @@
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-xl: 10px;
-  --radius-entry-popover: 12px;
-  --radius-entry-composer: 16px;
   --radius-round: 999px;
 
   --color-page: #F7F4EF;
@@ -68,39 +59,16 @@
   --color-risk-review-soft: #F4E1DC;
   --color-info: #536670;
   --color-info-soft: #E5EBED;
-  --color-entry-sidebar: hsl(40 22% 90% / .82);
-  --color-entry-sidebar-panel: hsl(40 43% 95% / .6);
-  --color-entry-sidebar-border: hsl(40 7% 76% / .56);
-  --color-entry-sidebar-control: hsl(40 100% 99% / .54);
-  --color-entry-sidebar-hover: hsl(40 100% 99% / .46);
-  --color-entry-sidebar-active: hsl(150 20% 92% / .78);
-  --color-entry-sidebar-danger: hsl(11 52% 94% / .76);
-  --color-entry-sidebar-scrim: hsl(40 13% 10% / .06);
-  --color-entry-composer: hsl(38 100% 98% / .88);
-  --color-entry-composer-border: hsl(37 18% 73% / .52);
-  --color-entry-composer-control: hsl(38 100% 99% / .56);
-  --color-entry-composer-control-hover: hsl(38 100% 99% / .86);
-  --color-entry-composer-placeholder: hsl(36 7% 38% / .68);
-  --color-entry-select-hover: hsl(150 20% 94% / .58);
-  --color-entry-select-selected: hsl(150 20% 92% / .82);
-
   --border-region: 2px solid var(--color-divider);
   --border-component: 1.5px solid var(--color-divider);
   --border-focus: 1.5px solid var(--color-accent);
   --border-action: 1.5px solid var(--color-accent-light);
   --border-danger: 1.5px solid var(--color-danger);
-  --border-entry-composer: 1px solid var(--color-entry-composer-border);
   --shadow-none: none;
   --shadow-subtle: 0 1px 3px rgba(26, 24, 20, .08);
   --shadow-popover: 0 8px 24px rgba(26, 24, 20, .14);
   --shadow-modal: 0 16px 40px rgba(26, 24, 20, .18);
-  --shadow-entry-sidebar-panel: 0 12px 32px hsl(40 13% 10% / .1);
-  --shadow-entry-composer: 0 12px 32px hsl(36 14% 18% / .09);
-  --shadow-entry-control: 0 1px 2px hsl(36 14% 18% / .05);
-  --shadow-entry-focus-ring: 0 0 0 3px hsl(150 20% 84% / .5);
   --opacity-disabled: .55;
-  --opacity-entry-overlay: .44;
-  --opacity-entry-center-wash: .64;
 
   /* Workbench density tokens: the staff client may be denser, but component spacing
      remains semantic and shared instead of being tuned with local magic numbers. */
@@ -121,34 +89,13 @@
   --density-workbench-record-label-width: 160px;
   --density-workbench-list-max-height: 70vh;
   --measure-reading: 75ch;
-  --measure-short: 45ch;
-  --measure-entry-headline: 1040px;
-  --measure-entry-subtitle: 720px;
-  --measure-entry-composer-min: 760px;
-  --measure-entry-composer-fluid: 64vw;
-  --measure-entry-composer-max: 1040px;
-  --measure-entry-select-menu: 224px;
   --viewport-min-width: 320px;
   --size-control-touch: 44px;
   --size-header-compact: 52px;
-  --size-entry-composer-default: 224px;
-  --size-entry-composer-large: 256px;
-  --size-entry-primary-action: 48px;
-  --size-entry-sidebar-rail: 56px;
-  --size-entry-sidebar-panel: 312px;
-  --blur-entry-composer: 12px;
-  --blur-entry-popover: 16px;
-  --blur-entry-sidebar: 16px;
-  --blur-entry-sidebar-panel: 20px;
-  --saturation-entry-popover: 1.1;
-  --duration-entry-control: 160ms;
   --duration-standard: 200ms;
   --size-select-menu-min: 248px;
   --size-select-menu-max: 320px;
   --size-model-trigger-max: 200px;
-  --entry-visual-lift: -3vh;
-  --entry-background-wash-edge: 78%;
   --layer-popover: 20;
-  --layer-entry-sidebar: 30;
   --size-popover-viewport-max: 80vw;
 }
