@@ -17,7 +17,11 @@ from backend.domain.models import (
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
 from backend.repositories.protocols import IdempotencyConflict, PersistenceRepository
-from backend.services.conversation_compaction import compact_conversation
+from backend.services import conversation_compaction
+from backend.services.conversation_compaction import (
+    compact_conversation,
+    compact_conversation_after_response,
+)
 
 
 def _mongo_repository() -> PersistenceRepository:
@@ -154,3 +158,44 @@ def test_compaction_below_token_threshold_preserves_full_history_without_summary
         is None
     )
     assert len(repository.list_messages(claim.claim_id, session.session_id, claim.customer_id)) == 6
+
+
+def test_background_compaction_failure_preserves_durable_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = FixtureRepository()
+    claim, session = _claim_and_session()
+    repository.create_claim(claim, session)
+    repository.save_message(
+        MessageRecord(
+            message_id='msg_before_compaction_failure',
+            claim_id=claim.claim_id,
+            session_id=session.session_id,
+            actor=ActorType.CLAIMANT,
+            visibility=MessageVisibility.CLAIMANT_VISIBLE,
+            content={'type': 'text', 'text': 'Keep this durable message.'},
+            created_at=claim.created_at,
+        ),
+        claim.customer_id,
+    )
+
+    def fail_compaction(*_args: object, **_kwargs: object) -> None:
+        raise ValueError('synthetic compaction failure')
+
+    monkeypatch.setattr(conversation_compaction, 'compact_conversation', fail_compaction)
+    compact_conversation_after_response(
+        repository,
+        claim.customer_id,
+        claim.claim_id,
+        session.session_id,
+    )
+    messages = repository.list_messages(claim.claim_id, session.session_id, claim.customer_id)
+    assert [item.message_id for item in messages] == ['msg_before_compaction_failure']
+    assert (
+        repository.get_latest_conversation_summary(
+            claim.claim_id,
+            session.session_id,
+            claim.customer_id,
+        )
+        is None
+    )

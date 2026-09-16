@@ -1,5 +1,6 @@
 import json
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
@@ -139,6 +140,33 @@ def test_existing_release_history_is_never_repaired_or_overwritten() -> None:
     ]
 
 
+def test_initial_release_rejects_missing_or_mixed_model_catalogues() -> None:
+    base = _settings()
+    missing_model = replace(base, model_runtime_bindings=(_binding('qwen-local'),))
+    with pytest.raises(ValueError, match='missing required models'):
+        install_initial_runtime_release(
+            missing_model,
+            ConfigurationRepository(),
+            ReleaseSetRepository(),
+            KnowledgeAdminRepository(),
+        )
+
+    mixed_versions = replace(
+        base,
+        model_runtime_bindings=(
+            _binding('qwen-local'),
+            _binding('nowcoding-gpt55', prompt_version='northwind-fnol-claimant-v6'),
+        ),
+    )
+    with pytest.raises(ValueError, match='cannot mix Prompt versions'):
+        install_initial_runtime_release(
+            mixed_versions,
+            ConfigurationRepository(),
+            ReleaseSetRepository(),
+            KnowledgeAdminRepository(),
+        )
+
+
 def test_incomplete_v7_release_set_is_rejected_at_runtime_resolution() -> None:
     configurations = ConfigurationRepository()
     releases = ReleaseSetRepository()
@@ -259,6 +287,73 @@ def test_v7_release_rejects_versioned_registry_drift(
 
     with pytest.raises(RuntimeConfigurationResolutionError, match=expected_error):
         resolver.resolve_for_turn()
+
+
+def test_published_prompt_content_is_runtime_authority_not_a_container_file_mirror() -> None:
+    configurations = ConfigurationRepository()
+    releases = ReleaseSetRepository()
+    valid = install_initial_runtime_release(
+        _settings(),
+        configurations,
+        releases,
+        KnowledgeAdminRepository(),
+    )
+    assert valid is not None
+    instruction_reference = valid.configuration_refs['agent_instruction']
+    instruction = configurations.get(
+        instruction_reference.configuration_id,
+        instruction_reference.revision,
+    )
+    assert instruction is not None
+    values = deepcopy(instruction.values)
+    fragments = deepcopy(cast(list[dict[str, object]], values['fragments']))
+    response_style = next(
+        item for item in fragments if item['fragment_id'] == 'core.response-style'
+    )
+    response_style['content'] = 'Use concise claimant-facing language from this published release.'
+    values['fragments'] = fragments
+    published_instruction = instruction.model_copy(
+        update={
+            'configuration_id': 'cfg_published_prompt_authority',
+            'revision': 1,
+            'values': values,
+            'updated_at': valid.updated_at + timedelta(seconds=1),
+        }
+    )
+    configurations.create(published_instruction)
+    references = dict(valid.configuration_refs)
+    references['agent_instruction'] = ConfigurationReference(
+        configuration_id=published_instruction.configuration_id,
+        revision=published_instruction.revision,
+    )
+    releases.create(
+        ReleaseSetRecord(
+            release_set_id='rel_published_prompt_authority',
+            environment='test',
+            runtime_profile='fixture',
+            revision=1,
+            state=ReleaseSetState.PUBLISHED,
+            configuration_refs=references,
+            author='test',
+            reason='Prove immutable published Prompt content is the Runtime authority.',
+            updated_at=valid.updated_at + timedelta(seconds=1),
+        )
+    )
+
+    policy = RuntimeAgentPolicyResolver(
+        RuntimeConfigurationResolver(
+            configurations,
+            releases,
+            environment='test',
+            runtime_profile='fixture',
+        )
+    ).resolve_for_turn()
+
+    assert policy is not None
+    assert any(
+        item.fragment_id == 'core.response-style' and item.content == response_style['content']
+        for item in policy.instruction.fragments
+    )
 
 
 def test_capabilities_expose_the_repository_published_dual_model_catalogue() -> None:

@@ -116,6 +116,9 @@ def test_publication_preserves_release_context_and_never_serializes_the_provider
     assert client is not None
     assert [item[0] for item in client.published_configurations] == [
         'agent_instruction',
+        'agent_tool_policy',
+        'agent_rule',
+        'feature',
         'model',
         'model',
     ]

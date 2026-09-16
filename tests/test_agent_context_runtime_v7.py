@@ -9,7 +9,10 @@ import pytest
 from backend.domain.agent_action_registry import registered_actions
 from backend.domain.agent_context_runtime import (
     ContextBudgetPolicy,
+    ContextLoadMode,
     ContextReference,
+    ModelRequestBudget,
+    RequestProfile,
     TurnTask,
     VerifiedConversationSummary,
 )
@@ -52,7 +55,11 @@ from backend.domain.models import (
     StructuredFormField,
     WorkingClaim,
 )
-from backend.domain.prompt_pack import PromptApplicability
+from backend.domain.prompt_pack import (
+    PromptApplicability,
+    PromptFragmentDefinition,
+    PromptPackManifest,
+)
 from backend.services.agent import AgentEvidenceReference, AgentTurnContext, InvariantGuardedAgent
 from backend.services.context_budget import estimate_json_tokens
 from backend.services.context_planner import ContextBudgetExceeded, plan_context
@@ -283,6 +290,23 @@ def _intake_output() -> dict[str, object]:
     }
 
 
+def _fragment(
+    fragment_id: str,
+    *,
+    requires: list[str] | None = None,
+) -> PromptFragmentDefinition:
+    return PromptFragmentDefinition(
+        fragment_id=fragment_id,
+        version='v1',
+        path=f'{fragment_id}.md',
+        kind='core',
+        load_mode=ContextLoadMode.ALWAYS,
+        requires=requires or [],
+        priority=100,
+        max_tokens=100,
+    )
+
+
 def test_router_keeps_authoritative_family_and_resolves_ambiguous_new_claims() -> None:
     authoritative = route_turn(
         _context(
@@ -327,6 +351,143 @@ def test_prompt_composer_rejects_a_selected_fragment_outside_its_applicability()
 
     with pytest.raises(ValueError, match='does not apply to product family'):
         compose_prompt(route, manifest.model_copy(update={'fragments': fragments}))
+
+
+def test_prompt_composer_rejects_missing_conflicting_and_over_budget_fragments() -> None:
+    route = route_turn(_context('My car was damaged.'))
+    manifest = load_prompt_manifest()
+
+    without_family = manifest.model_copy(
+        update={
+            'fragments': [item for item in manifest.fragments if item.fragment_id != 'family.motor']
+        }
+    )
+    with pytest.raises(ValueError, match='unknown fragments'):
+        compose_prompt(route, without_family)
+
+    conflicting = manifest.model_copy(
+        update={
+            'fragments': [
+                item.model_copy(update={'conflicts_with': ['task.intake']})
+                if item.fragment_id == 'family.motor'
+                else item
+                for item in manifest.fragments
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match='conflict'):
+        compose_prompt(route, conflicting)
+
+    over_budget = manifest.model_copy(
+        update={
+            'fragments': [
+                item.model_copy(update={'max_tokens': 1})
+                if item.fragment_id == 'core.authority'
+                else item
+                for item in manifest.fragments
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match='token limit'):
+        compose_prompt(route, over_budget)
+
+
+@pytest.mark.parametrize(
+    ('fragments', 'expected_error'),
+    [
+        ([_fragment('core.a'), _fragment('core.a')], 'unique'),
+        ([_fragment('core.a', requires=['core.missing'])], 'unknown ID'),
+        (
+            [
+                _fragment('core.a', requires=['core.b']),
+                _fragment('core.b', requires=['core.a']),
+            ],
+            'cycle',
+        ),
+    ],
+)
+def test_prompt_manifest_rejects_ambiguous_dependency_graphs(
+    fragments: list[PromptFragmentDefinition],
+    expected_error: str,
+) -> None:
+    with pytest.raises(ValueError, match=expected_error):
+        PromptPackManifest(prompt_pack_version='test-v1', fragments=fragments)
+
+
+@pytest.mark.parametrize(
+    ('values', 'expected_error'),
+    [
+        (
+            {
+                'tool_names': ['context.resolve'],
+                'max_model_invocations': 2,
+                'max_model_selected_tools': 0,
+            },
+            'permit one selected tool',
+        ),
+        (
+            {
+                'tool_names': ['context.resolve'],
+                'max_model_invocations': 1,
+                'max_model_selected_tools': 1,
+                'requires_tool_continuation': True,
+            },
+            'second model invocation',
+        ),
+        (
+            {
+                'tool_names': [],
+                'max_model_invocations': 1,
+                'max_model_selected_tools': 1,
+            },
+            'tool-free profile',
+        ),
+    ],
+)
+def test_request_profile_rejects_incoherent_invocation_contracts(
+    values: dict[str, object],
+    expected_error: str,
+) -> None:
+    with pytest.raises(ValueError, match=expected_error):
+        RequestProfile(
+            profile_id='test.profile.v1',
+            version='v1',
+            schema_id='test.schema.v1',
+            input_hard_limit=3000,
+            output_limit=180,
+            **values,
+        )
+
+
+@pytest.mark.parametrize(
+    ('raw_input_tokens', 'turn_cumulative_tokens', 'expected_error'),
+    [
+        (301, 301, 'request exceeds'),
+        (200, 301, 'turn exceeds'),
+    ],
+)
+def test_request_budget_rejects_single_and_cumulative_overflow(
+    raw_input_tokens: int,
+    turn_cumulative_tokens: int,
+    expected_error: str,
+) -> None:
+    with pytest.raises(ValueError, match=expected_error):
+        ModelRequestBudget(
+            policy_version='test-v1',
+            raw_input_tokens=raw_input_tokens,
+            uncached_input_tokens=raw_input_tokens,
+            cache_eligible_tokens=0,
+            turn_cumulative_tokens=turn_cumulative_tokens,
+            reserved_output_tokens=10,
+            prompt_tokens=0,
+            schema_tokens=0,
+            context_tokens=raw_input_tokens,
+            tool_definition_tokens=0,
+            recent_history_tokens=0,
+            retrieved_context_tokens=0,
+            hard_limit=300,
+            estimate_method='conservative_chars',
+        )
 
 
 @pytest.mark.parametrize(
@@ -400,6 +561,62 @@ def test_request_profiles_fail_closed_against_provider_capabilities() -> None:
     false_cache_contract = capability.model_copy(update={'prompt_cache_type': 'explicit'})
     with pytest.raises(ValueError, match='model binding'):
         validate_capability_binding(configuration, false_cache_contract)
+
+    bedrock = provider_capability(configuration.model_copy(update={'protocol': 'bedrock_converse'}))
+    assert bedrock.structured_output_method == 'forced_tool'
+    assert bedrock.prompt_cache_type == 'none'
+    with pytest.raises(ValueError, match='continuation'):
+        validate_profile_compatibility(request_profile('claimant.lookup.v1'), bedrock)
+
+    text_only = capability.model_copy(update={'supported_media_types': ['text/plain']})
+    with pytest.raises(ValueError, match='media contract'):
+        validate_profile_compatibility(request_profile('claimant.media.v1'), text_only)
+
+
+def test_model_turn_planning_fails_before_transport_when_release_inputs_are_incomplete() -> None:
+    context = _context('My car was damaged.')
+    with pytest.raises(ValueError, match='configuration snapshot'):
+        plan_model_turn(replace(context, runtime_configuration_snapshot=None))
+
+    empty_snapshot = RuntimeConfigurationSnapshot(
+        environment='test',
+        runtime_profile='fixture',
+        release_set_id=None,
+        configurations=MappingProxyType({}),
+        integrations=MappingProxyType({}),
+        knowledge=MappingProxyType({}),
+    )
+    with pytest.raises(ValueError, match='absent'):
+        plan_model_turn(replace(context, runtime_configuration_snapshot=empty_snapshot))
+
+    policy = context.runtime_policy
+    assert policy is not None
+    missing_schema = replace(
+        policy,
+        tool_policy=policy.tool_policy.model_copy(update={'schema_registry': {}}),
+    )
+    with pytest.raises(ValueError, match='schema is absent'):
+        plan_model_turn(replace(context, runtime_policy=missing_schema))
+
+    text_only_record = _model_record(image_input=False, document_input=False)
+    text_only_snapshot = RuntimeConfigurationSnapshot(
+        environment='test',
+        runtime_profile='fixture',
+        release_set_id='rel_text_only',
+        configurations=MappingProxyType({'model:qwen-local': text_only_record}),
+        integrations=MappingProxyType({}),
+        knowledge=MappingProxyType({}),
+    )
+    media_context = replace(
+        _context(
+            'Review this photo.',
+            evidence=(AgentEvidenceReference(evidence_id='ev_photo', media_type='image/jpeg'),),
+        ),
+        runtime_configuration_snapshot=text_only_snapshot,
+        runtime_policy=_runtime_policy(text_only_snapshot),
+    )
+    with pytest.raises(ValueError, match='media contract'):
+        plan_model_turn(media_context)
 
 
 def test_ordinary_model_plan_is_single_call_tool_free_and_budgeted() -> None:
@@ -723,6 +940,27 @@ def test_context_planner_refuses_to_truncate_authority_context() -> None:
         plan_context(context, route, budget_limit=200, reserved_tokens=100)
 
 
+def test_context_planner_omits_oversized_optional_history_but_keeps_authority() -> None:
+    messages = tuple(
+        item.model_copy(update={'content': {'type': 'text', 'text': 'history ' * 1000}})
+        for item in _messages(4)
+    )
+    context = _context('Continue my motor claim.', conversation_messages=messages)
+
+    plan = plan_context(
+        context,
+        route_turn(context),
+        budget_limit=1400,
+        reserved_tokens=200,
+    )
+
+    assert 'claim.current' in plan.inline_context
+    assert 'message.latest' in plan.inline_context
+    assert 'conversation.recent' not in plan.inline_context
+    assert plan.omitted_sections == ['conversation.recent']
+    assert plan.estimated_tokens == estimate_json_tokens(plan.inline_context)
+
+
 def test_context_reference_resolver_enforces_manifest_selector_and_limit() -> None:
     reference = ContextReference(
         ref='ctxref:ses_v7:conversation.older',
@@ -741,6 +979,15 @@ def test_context_reference_resolver_enforces_manifest_selector_and_limit() -> No
     assert result.actual_tokens <= 8
     with pytest.raises(ValueError, match='not permitted'):
         resolver.resolve(reference.ref, 'all', 8)
+    with pytest.raises(ValueError, match='not permitted'):
+        resolver.resolve('ctxref:ses_v7:unknown', 'page', 8)
+
+    structured = TurnContextResolver(
+        [reference],
+        {(reference.ref, 'page'): {'messages': ['large value ' * 100]}},
+    )
+    with pytest.raises(ValueError, match='exceeds'):
+        structured.resolve(reference.ref, 'page', 8)
 
     stale = TurnContextResolver(
         [reference],
