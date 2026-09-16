@@ -169,14 +169,20 @@ Receipt updates only the Claim's Evidence lifecycle projection; it cannot change
 workflow, coverage, repair authority, or claimant-visible routing state. This path does not contact
 or claim the existence of a production assessor provider.
 
-The claimant experience uses two versioned public mutations. The first records a fixed,
-task-specific consent scope; the second derives the current decision, consent, external claim,
-requested action, and confirmed region from the shared Working Claim before invoking this
-adapter. The action is projected only for a created controlled motor claim when no open handoff
-or professional review has priority. The claimant client shows the participant, controlled
-fixture provider label, purpose, shared-data summary, submission progress, assigned or queued
-result, and bounded failure. It does not construct an internal adapter command or expose the raw
-consent and authority references.
+Claim creation and third-party assistance are separate boundaries. Runtime may recognise a
+registered service request, persist a message-bound offer, and record exact scoped consent before
+formal external Claim creation. The normal safety or intake action remains primary. Claim state
+may still prevent the side effect until the service's registered inputs and authorities are ready;
+it must not suppress recognition, the offer, or consent.
+
+The generic offer-decision mutation reloads the immutable offer and records grant, decline, or
+pre-send withdrawal. Grant continues immediately when requirements are ready or is resumed by a
+later message turn without another consent click. The assessor adapter derives the current
+decision, consent, working Claim scope, requested action, and confirmed region before invocation.
+Manual phone or official-link capabilities create no ExternalTask. The claimant client renders
+the action beneath the Agent message that originated it and never constructs an adapter command or
+exposes raw consent and authority records. The former created-Claim assessor endpoints remain an
+explicit compatibility surface, not a new-offer source or fallback eligibility rule.
 
 The target external-request lifecycle expands this boundary further. External coordination
 separates capability discovery, request requirements,

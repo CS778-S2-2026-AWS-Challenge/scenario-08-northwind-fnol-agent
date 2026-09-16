@@ -28,6 +28,7 @@ from backend.domain.models import (
     CreateMessageRequest,
     CustomerNextStep,
     ExternalCapabilityProjection,
+    ExternalServiceOfferDecisionRequest,
     FormConfirmationRequest,
     FormConfirmationResponse,
     FormPatchRequest,
@@ -48,6 +49,7 @@ from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider
 from backend.services.agent_action_execution import ClaimantRuntimeActionDispatcher
 from backend.services.claim_creation import create_claim_from_confirmed_report
+from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.claimant_events import claimant_change_after, claimant_event_revision
 from backend.services.claims import (
     confirm_form_fields,
@@ -59,7 +61,13 @@ from backend.services.claims import (
     start_claim,
     update_form,
 )
+from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
 from backend.services.external_service_entry import ExternalServiceEntryDecision
+from backend.services.external_service_offers import (
+    continue_granted_service_offers,
+    decide_external_service_offer,
+    message_external_actions,
+)
 from backend.services.external_services import grant_assessor_consent, request_assessor_routing
 from backend.services.message_history import list_claim_messages
 from backend.services.messages import submit_message
@@ -116,6 +124,13 @@ def assessor_adapter_for(request: Request) -> AssessorServiceAdapter:
 
 def _assessor_entry_for(request: Request) -> ExternalServiceEntryDecision:
     return cast(ExternalServiceEntryDecision, request.app.state.assessor_service_entry)
+
+
+def external_capability_dispatcher_for(request: Request) -> ExternalCapabilityDispatcher:
+    return cast(
+        ExternalCapabilityDispatcher,
+        request.app.state.external_capability_dispatcher,
+    )
 
 
 def policy_history_adapter_for(request: Request) -> PolicyHistoryAdapter:
@@ -373,6 +388,65 @@ def create_assessor_routing(
 
 
 @router.post(
+    '/{claim_id}/external-service-offers/{offer_id}/decision',
+    response_model=ClaimantExternalServiceResponse,
+)
+def decide_external_offer(
+    claim_id: str,
+    offer_id: str,
+    payload: ExternalServiceOfferDecisionRequest,
+    request: Request,
+    response: Response,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> ClaimantExternalServiceResponse:
+    result, replayed = decide_external_service_offer(
+        repository_for(request),
+        principal,
+        claim_id,
+        offer_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )
+    current = repository_for(request).get_claim(claim_id, principal.subject)
+    if current is not None:
+        if not replayed and payload.decision == 'grant':
+            continue_granted_service_offers(
+                repository_for(request),
+                principal,
+                current,
+                assessor_adapter=assessor_adapter_for(request),
+                assessor_entry=_assessor_entry_for(request),
+                capability_dispatcher=external_capability_dispatcher_for(request),
+            )
+            current = repository_for(request).get_claim(claim_id, principal.subject) or current
+        actions = message_external_actions(
+            repository_for(request), current, result.action.agent_message_id or ''
+        )
+        action = next(
+            (candidate for candidate in actions if candidate.offer_id == offer_id),
+            result.action,
+        )
+        result = result.model_copy(
+            update={
+                'revision': current.revision,
+                'action': action,
+                'customer_next_step': current.customer_next_step,
+                'primary_action': project_claimant_primary_action(
+                    claim_id=claim_id,
+                    claim_revision=current.revision,
+                    next_step=current.customer_next_step,
+                    external_service_action=None,
+                ),
+            }
+        )
+    response.status_code = status.HTTP_200_OK if replayed else status.HTTP_201_CREATED
+    return result
+
+
+@router.post(
     '/{claim_id}/sessions',
     response_model=ClaimantSession,
     status_code=status.HTTP_201_CREATED,
@@ -513,6 +587,9 @@ def create_message(
         runtime_agent_policy_resolver=runtime_agent_policy_for(request),
         action_dispatcher=action_dispatcher_for(request),
         evidence_storage=evidence_storage_for(request),
+        assessor_adapter=assessor_adapter_for(request),
+        assessor_entry=_assessor_entry_for(request),
+        external_capability_dispatcher=external_capability_dispatcher_for(request),
     )
 
 

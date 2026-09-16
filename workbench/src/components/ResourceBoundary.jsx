@@ -1,8 +1,8 @@
 import { AlertTriangle, RefreshCw } from 'lucide-react'
 import { failureReason, failureReference } from '../failure.js'
 
-export default function ResourceBoundary({ resource, children, onRetry }) {
-  const hasRecords = Boolean(resource?.items?.length)
+export default function ResourceBoundary({ resource, children, onRetry, contentAvailable = false, quietRefresh = false }) {
+  const hasRecords = contentAvailable || Boolean(resource?.items?.length)
   if (!resource || (resource.loading && !hasRecords)) {
     return <div className="claim-state" role="status"><span className="loading-mark" /><p>Loading current records...</p></div>
   }
@@ -11,7 +11,7 @@ export default function ResourceBoundary({ resource, children, onRetry }) {
   }
   return (
     <>
-      {(resource.loading || resource.error || ['partial', 'unavailable'].includes(resource.status)) && (
+      {((resource.loading && !quietRefresh) || resource.error || ['partial', 'unavailable'].includes(resource.status)) && (
         <ResourceNotice resource={resource} onRetry={onRetry} stale={hasRecords} />
       )}
       {children}

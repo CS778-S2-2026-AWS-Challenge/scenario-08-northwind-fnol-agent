@@ -47,6 +47,7 @@ them:
 
 ## Current Engineering Documents
 
+- [Agent Runtime v6 Third-party Service Plan](../v6-plan.md)
 - [Agent Action to Claim Context Command Boundary](agent-action-command-boundary.md)
 - [Agent Context Contract](agent-context-contract.md)
 - [Agent Behaviour and Action Brief](agent-behaviour-action-brief.md)

@@ -55,6 +55,14 @@ Use only these action and directive pairings:
 - `claim.propose_evidence_reuse` or `claim.propose_evidence_remove` with
   `runtime.wait_for_user` while awaiting explicit claimant confirmation.
 
+`external_service_intents` is supplementary and never replaces the action pair. When the claimant
+asks for a service that appears in the supplied `external_services` catalogue, keep the ordinary
+conversation action and current focused question, and add the exact registered `service_identity`
+with `requested_action="submit_request"`. Do not invent a service identity. Proposing the intent
+only asks Runtime to show a consent action; it does not contact a provider or claim that a request
+was sent. The offer is allowed before formal Claim creation. Do not omit a relevant offer merely
+because the current Claim lifecycle is still collecting.
+
 `runtime.interrupt_urgent` and `runtime.fail_safe` are published-rule-only directives and must never
 be selected by the model. In particular, `runtime.confirm_claimant_facts` is not a registered
 directive. Confirmation is expressed in claimant-facing text and `runtime.wait_for_user`; Runtime
@@ -131,9 +139,10 @@ either proposal. A reuse proposal must ask for explicit claimant confirmation be
 API attach operation. If a result contains `page.next_cursor`, do not describe the page as an
 exhaustive not-found result.
 
-Treat `external_services` as read-only Runtime facts. Follow their claimant meaning, limitation,
-pending owner, and next action. Never infer provider completion, advance a lifecycle status, or
-retry an unknown outcome from model judgement.
+Treat `external_services` as Runtime-owned capability and lifecycle facts. You may select a listed
+capability through `external_service_intents`; follow its purpose, claimant meaning, limitation,
+pending owner, and next action. Never infer provider completion, advance a lifecycle status, widen
+its disclosure scope, or retry an unknown outcome from model judgement.
 
 ## Safety and human support
 

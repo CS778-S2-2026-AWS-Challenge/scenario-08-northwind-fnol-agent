@@ -304,6 +304,7 @@ class AgentProposal:
     evidence_id: str | None = None
     source_claim_id: str | None = None
     removal_scope: str | None = None
+    external_service_intents: list[dict[str, str]] = field(default_factory=list)
 
 
 def _contains_unnegated_signal(
@@ -462,7 +463,7 @@ def _is_guided_rear_end_claim(claim: WorkingClaim, message_text: str) -> bool:
     candidate = str(description.value) if description is not None else message_text
     inferred_family = claim.form.get('claim.product_family')
     if description is None:
-        is_motor = (
+        is_motor = claim.incident_type == 'motor' or (
             claim.incident_type is None and infer_controlled_product_family(candidate) == 'motor'
         )
     else:
@@ -475,8 +476,11 @@ def _is_guided_rear_end_claim(claim: WorkingClaim, message_text: str) -> bool:
     return is_motor and rear_end
 
 
-def _guided_initial_form_changes(message_text: str) -> list[ProposedFormChange]:
-    changes = _initial_form_changes(message_text, None)
+def _guided_initial_form_changes(
+    message_text: str,
+    incident_type: str | None,
+) -> list[ProposedFormChange]:
+    changes = _initial_form_changes(message_text, incident_type)
     return [
         change.model_copy(update={'status': FormStatus.CONFIRMED})
         if change.field_code == 'incident.description'
@@ -573,7 +577,7 @@ def _guided_proposal(context: AgentTurnContext, message_text: str) -> AgentPropo
         return None
 
     if 'incident.description' not in claim.form:
-        changes = _guided_initial_form_changes(message_text)
+        changes = _guided_initial_form_changes(message_text, claim.incident_type)
         if any(change.field_code == 'incident.injury_or_danger' for change in changes):
             return AgentProposal(
                 action=AgentAction.CONFIRM,

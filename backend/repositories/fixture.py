@@ -1243,10 +1243,16 @@ class FixtureRepository(PersistenceRepository):
         operation: AssessorRoutingOperation,
     ) -> None:
         claim = self._claims.get(operation.claim_id)
+        external_claim_id = (
+            claim.external_claim.external_claim_id
+            if claim is not None
+            and claim.external_claim is not None
+            and claim.external_claim.external_claim_id is not None
+            else operation.claim_id
+        )
         if (
             claim is None
-            or claim.external_claim is None
-            or claim.external_claim.external_claim_id != operation.external_claim_id
+            or external_claim_id != operation.external_claim_id
             or operation.authorised_revision > claim.revision
         ):
             raise KeyError(operation.claim_id)
@@ -1452,6 +1458,13 @@ class FixtureRepository(PersistenceRepository):
     ) -> None:
         claim = self._claims.get(operation.claim_id)
         session = self._sessions.get(decision.session_id)
+        external_claim_id = (
+            claim.external_claim.external_claim_id
+            if claim is not None
+            and claim.external_claim is not None
+            and claim.external_claim.external_claim_id is not None
+            else operation.claim_id
+        )
         if (
             claim is None
             or claim.customer_id != customer_id
@@ -1459,8 +1472,7 @@ class FixtureRepository(PersistenceRepository):
             or session is None
             or session.claim_id != claim.claim_id
             or session.customer_id != customer_id
-            or claim.external_claim is None
-            or claim.external_claim.external_claim_id != operation.external_claim_id
+            or external_claim_id != operation.external_claim_id
             or operation.status is not AssessorRoutingOperationStatus.PREPARED
             or operation.authorised_revision != claim.revision
             or decision.claim_id != claim.claim_id

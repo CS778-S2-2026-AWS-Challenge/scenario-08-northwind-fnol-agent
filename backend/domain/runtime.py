@@ -79,6 +79,7 @@ class AgentProposalRecord(ContractModel):
     form_changes: list[ProposedFormChange] = Field(default_factory=list, max_length=100)
     contents_item_changes: list[ProposedContentsItem] = Field(default_factory=list, max_length=100)
     source_refs: list[str] = Field(default_factory=list, max_length=100)
+    external_service_intents: list[dict[str, str]] = Field(default_factory=list, max_length=8)
     proposal_source: AgentProposalSource
     model_profile_id: str = Field(min_length=1, max_length=100)
     runtime_configuration: RuntimeConfigurationProvenance | None = None
@@ -144,6 +145,21 @@ class TurnResultRecord(ContractModel):
     created_at: datetime
 
 
+class ExternalServiceOfferMetadata(ContractModel):
+    """Immutable message-bound proposal for one registered external capability."""
+
+    offer_id: str = Field(min_length=1, max_length=120)
+    agent_message_id: str = Field(min_length=1, max_length=120)
+    trigger_message_id: str = Field(min_length=1, max_length=120)
+    service_identity: str = Field(min_length=1, max_length=100)
+    registry_version: str = Field(min_length=1, max_length=100)
+    requested_action: str = Field(min_length=1, max_length=100)
+    disclosure_fields: list[str] = Field(default_factory=list, max_length=50)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=50)
+    disclosure_manifest: list[str] = Field(default_factory=list, max_length=50)
+    disclosure_fingerprint: str = Field(min_length=1, max_length=128)
+
+
 class RuntimeWorkItemRecord(ContractModel):
     work_item_id: str = Field(min_length=1, max_length=120)
     claim_id: str = Field(min_length=1, max_length=120)
@@ -159,6 +175,7 @@ class RuntimeWorkItemRecord(ContractModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
+    external_offer: ExternalServiceOfferMetadata | None = None
 
 
 class RuntimeTurnRecords(ContractModel):

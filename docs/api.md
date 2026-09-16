@@ -1185,6 +1185,7 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `POST` | `/claims/{claim_id}/creation` | Create an external claim after deterministic validation |
 | `POST` | `/claims/{claim_id}/assessor-routing/consent` | Record bounded claimant permission for the contextual assessor action |
 | `POST` | `/claims/{claim_id}/assessor-routing` | Send the authorised assessor request and return its claimant-safe state |
+| `POST` | `/claims/{claim_id}/external-service-offers/{offer_id}/decision` | Grant, decline, or withdraw permission for one persisted message-bound offer |
 | `GET` | `/claims/{claim_id}/external-capabilities` | Read the server-owned third-party capability catalogue for the Claim product family |
 | `GET` | `/claims/{claim_id}/evidence` | List claimant-visible evidence state |
 | `POST` | `/claims/{claim_id}/evidence` | Register expected, missing, or pending evidence |
@@ -1518,6 +1519,18 @@ Response `200`:
       "type": "text",
       "text": "I have recorded that you were stopped when another vehicle hit yours and that no one is injured. Please check the details shown."
     },
+    "message_actions": [
+      {
+        "offer_id": "offer_01J4YD82JA",
+        "agent_message_id": "msg_01J4YC22FP",
+        "service_identity": "vehicle_damage_assessment_routing",
+        "registry_version": "external-service-lifecycle.v1",
+        "service_name": "Vehicle damage assessment",
+        "status": "consent_required",
+        "can_request": true,
+        "can_withdraw": false
+      }
+    ],
     "created_at": "2026-08-10T03:42:12Z"
   },
   "form_changes": [
@@ -1563,6 +1576,12 @@ Response `200`:
 ```
 
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
+
+`agent_message.message_actions[]` is supplementary to `primary_action`. Runtime may attach a
+registered third-party offer while the normal safety, information, confirmation, or creation
+action remains primary. Each offer is bound to its originating Agent message and is restored by
+message history; formal external Claim creation is not a precondition for recognition, display,
+or consent. The client cannot construct an offer or widen its disclosure scope.
 
 `dynamic_form` is a claimant-safe projection of the applied branch evaluation after the turn. It
 exposes only active, claimant-visible fields; inactive and system-owned fields remain outside this
@@ -1722,33 +1741,7 @@ Response `201`:
     "expected_by": "2026-08-11T05:00:00Z",
     "created_at": "2026-08-10T03:55:00Z"
   },
-  "external_service_action": {
-    "service_identity": "vehicle_damage_assessment_routing",
-    "registry_version": "external-service-lifecycle.v1",
-    "lifecycle_status": "consent_required",
-    "catalogue_reference": "P3-ASSESSOR",
-    "capability_provenance": "simulated",
-    "access_form": "controlled assessor simulation",
-    "status_label": "Permission needed",
-    "status_detail": "Claimant permission is required before any information is shared.",
-    "pending_owner": "claimant",
-    "next_action": "Review and grant the task-specific permission before submission.",
-    "limitation": "Simulation-only; it must not be described as a production provider.",
-    "service_name": "Vehicle damage assessment",
-    "provider": "Controlled assessment fixture",
-    "purpose": "Request an assessor for the vehicle damage recorded in this claim. This does not decide coverage or approve repairs.",
-    "shared_data_summary": [
-      "Your Northwind claim and external claim references",
-      "Northwind routing authority and your permission reference",
-      "The vehicle damage assessment request",
-      "Your confirmed incident region"
-    ],
-    "status": "consent_required",
-    "consent_status": null,
-    "routing": null,
-    "failure_code": null,
-    "can_request": true
-  },
+  "external_service_action": null,
   "customer_next_step": {
     "status": "claim_created",
     "summary": "Claims intake review",
@@ -1760,9 +1753,39 @@ Response `201`:
 An idempotent replay restores the same response. The mock adapter supplies synthetic values only;
 this contract does not assert a Northwind provider schema or AWS implementation.
 
+Claim creation does not create a new third-party offer. New offers are message-bound actions
+created from a validated Runtime intent. Historical global `external_service_action` records may
+remain readable after an earlier operation, but that field is not a fallback offer source.
+
+### `POST /api/v1/claims/{claim_id}/external-service-offers/{offer_id}/decision`
+
+Records `grant`, `decline`, or `withdraw` for one immutable offer. The request requires
+`Idempotency-Key` and `If-Match` and contains only the decision:
+
+```json
+{"decision": "grant"}
+```
+
+The server reloads the offer's service identity, registry version, originating Agent message,
+requested action, disclosure fields, selected Evidence IDs, readable disclosure manifest, and
+fingerprint. A stale revision, another Claim's offer, registry drift, changed scope, or reused key
+with different input fails closed. Grant atomically stores the exact consent and its audit event
+before any provider side effect. Decline sends nothing. Withdrawal is accepted only while no
+matching external request has been prepared or sent; after that point the registered cancellation
+or reconciliation path is required.
+
+After grant, Runtime immediately continues a task-backed service when all registered inputs are
+confirmed. Otherwise the same permission remains `pending_input` and a later message turn
+continues it without a second consent click. Manual official-link and phone services become
+`manual_available` and never create an `ExternalTask`. The response is `201`, or `200` for an
+identical replay, and returns the updated revision plus the current projection of that same
+message-bound action.
+
 ### `POST /api/v1/claims/{claim_id}/assessor-routing/consent`
 
-Records claimant permission for the exact controlled vehicle-assessment scope. The request
+Compatibility endpoint for clients holding the former created-Claim assessor action. New
+conversation offers use the generic offer-decision endpoint above. This endpoint records claimant
+permission for the exact controlled vehicle-assessment scope. The request
 requires `Idempotency-Key` and `If-Match`:
 
 ```json
@@ -2672,8 +2695,9 @@ configured for it:
 | `live_attempted` | A configured service whose request was submitted with delivery evidence. It states that an attempt reached a provider; it states nothing about the result, which is `result_verification_state`'s question |
 
 It is derived from `integration_source` and `delivery` rather than stored, so it cannot disagree with
-them. `live_attempted` is currently unreachable: the only implemented service identity is a
-controlled fixture, and clients MUST NOT read `simulated` as evidence of a provider relationship.
+them. The current task-backed catalogue is implemented through controlled adapters rather than a
+commercial provider connection; clients MUST NOT read `simulated` as evidence of a provider
+relationship.
 
 The lifecycle's overall `verification_state`, `pending_owner`, `status_label`, `status_detail`, and
 `next_action` are one backend-owned effective projection. A received or checked result replaces

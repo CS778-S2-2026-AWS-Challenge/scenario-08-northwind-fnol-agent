@@ -266,7 +266,9 @@ the append-only audit collection through a bounded, filterable projection.
   different draft, reusing the key through a non-Agent entry point, or executing the same draft
   under another key is an idempotency conflict rather than a second execution or attribution.
 - External-service consent records are claim-scoped and retain service identity, requested
-  action, minimum permitted fields, grant or withdrawal state, actor, and timestamps. A
+  action, offer reference, registry version, exact permitted fields, claimant-readable disclosure
+  manifest, disclosure fingerprint, selected Evidence IDs, grant/decline/withdraw state, actor,
+  and timestamps. A
   consent change advances the Working Claim revision; an adapter result cannot invent or
   reactivate consent.
 - The claimant consent mutation atomically stores its idempotency result, applied Branch
@@ -598,6 +600,12 @@ Evidence record or protected object.
   a proposal appear executed.
 - One turn may contain several conversation moves and command proposals but exactly one
   primary Runtime control directive.
+- A message-bound external-service offer is an existing `RuntimeWorkItemRecord(kind="external")`,
+  not a second Claim or external-task state machine. Its typed metadata retains the offer ID,
+  originating Agent and claimant message IDs, service and requested action, registry version,
+  exact disclosure fields and selected Evidence IDs, readable disclosure manifest, and scope
+  fingerprint. Message history reconstructs supplementary actions from these immutable WorkItems
+  plus the authoritative Claim consent and ExternalTask records.
 - A claimant TurnPlan records every external-service lifecycle input selected for that turn as a
   bounded coordinate: registry version, service identity, operation status, optional result stage,
   and optional result-verification outcome. These immutable coordinates describe the model input

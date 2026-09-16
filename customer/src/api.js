@@ -418,6 +418,23 @@ export function requestAssessorRouting({
   })
 }
 
+export function decideExternalServiceOffer({
+  claimId,
+  offerId,
+  revision,
+  decision,
+  idempotencyKey = requestId(`external-offer-${decision}`),
+}) {
+  return apiRequest(`/api/v1/claims/${claimId}/external-service-offers/${offerId}/decision`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+    body: JSON.stringify({ decision }),
+  })
+}
+
 export function submitClaimMessage({
   claimId,
   sessionId,

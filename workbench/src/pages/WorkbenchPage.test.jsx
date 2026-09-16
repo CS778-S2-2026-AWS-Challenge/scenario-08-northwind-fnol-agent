@@ -10,6 +10,8 @@ const api = vi.hoisted(() => ({
   claim: vi.fn(),
   sessionsForTarget: vi.fn(),
   messages: vi.fn(),
+  pendingMessageDelivery: vi.fn(),
+  confirmMessageDelivery: vi.fn(),
   conversations: vi.fn(),
   handoffs: vi.fn(),
   collaborationRequests: vi.fn(),
@@ -149,6 +151,8 @@ describe('WorkbenchPage queue routing', () => {
       resolved_session: { session_id: 'ses_saved' },
     })
     api.messages.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.pendingMessageDelivery.mockReturnValue(null)
+    api.confirmMessageDelivery.mockReturnValue(null)
     api.conversations.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.sessionsForTarget.mockResolvedValue({
       items: [],

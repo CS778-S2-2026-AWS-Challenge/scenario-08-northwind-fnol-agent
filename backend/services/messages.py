@@ -2,6 +2,7 @@ import re
 from dataclasses import dataclass, replace
 from datetime import datetime
 
+from backend.adapters.claims_service import AssessorServiceAdapter
 from backend.adapters.evidence_storage import EvidenceStorage, EvidenceStorageError
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal
@@ -115,6 +116,15 @@ from backend.services.branching import (
 from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.claimant_form_projection import project_claimant_form_fields
 from backend.services.evidence_visibility import default_evidence_visibility
+from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
+from backend.services.external_service_entry import ExternalServiceEntryDecision
+from backend.services.external_service_offers import (
+    build_offer_metadata,
+    continue_granted_service_offers,
+    detected_service_intents,
+    message_external_actions,
+    offer_work_item,
+)
 from backend.services.external_services import claimant_assessor_action, claimant_next_step
 from backend.services.fact_resolution import (
     provenance_messages_for_fields,
@@ -330,13 +340,17 @@ def _session_not_found() -> ApiError:
     )
 
 
-def _claimant_message(message: MessageRecord) -> ClaimantMessage:
+def _claimant_message(
+    message: MessageRecord,
+    message_actions: list | None = None,
+) -> ClaimantMessage:
     return ClaimantMessage(
         message_id=message.message_id,
         actor=message.actor,
         content=message.content,
         evidence_refs=message.evidence_refs,
         in_reply_to=message.in_reply_to,
+        message_actions=message_actions or [],
         created_at=message.created_at,
     )
 
@@ -418,7 +432,12 @@ def _message_turn_response(
         session_id=claimant_message.session_id,
         claim_revision=response_revision,
         claimant_message=_claimant_message(claimant_message),
-        agent_message=_claimant_message(agent_message),
+        agent_message=_claimant_message(
+            agent_message,
+            message_external_actions(repository, claim, agent_message.message_id)
+            if claim is not None
+            else [],
+        ),
         form_changes=[
             FormChange(field_code=field_code, field=field)
             for field_code, field in projected_form_changes.items()
@@ -499,7 +518,10 @@ def _namespaced_turn_response(
         session_id=claimant_message.session_id,
         claim_revision=claim_revision,
         claimant_message=_claimant_message(claimant_message),
-        agent_message=_claimant_message(agent_message),
+        agent_message=_claimant_message(
+            agent_message,
+            message_external_actions(repository, claim, agent_message.message_id),
+        ),
         form_changes=[],
         decision=None,
         handoff=None,
@@ -1613,6 +1635,9 @@ def submit_message(
     action_dispatcher: ClaimantRuntimeActionDispatcher | None = None,
     evidence_storage: EvidenceStorage | None = None,
     bootstrap_fingerprint: str | None = None,
+    assessor_adapter: AssessorServiceAdapter | None = None,
+    assessor_entry: ExternalServiceEntryDecision | None = None,
+    external_capability_dispatcher: ExternalCapabilityDispatcher | None = None,
 ) -> MessageTurnResponse:
     live_dispatcher = action_dispatcher or ClaimantRuntimeActionDispatcher()
     key = require_idempotency_key(idempotency_key)
@@ -1937,6 +1962,7 @@ def submit_message(
             repository,
             claim_id,
             claim.assessor_routing,
+            claim.incident_type,
         )
     except ExternalLifecycleContextError as error:
         raise ApiError(
@@ -2550,6 +2576,11 @@ def submit_message(
         created_at=timestamp,
     )
     runtime_turn_id = new_id('turn')
+    external_service_intents = detected_service_intents(
+        payload.content.text if payload.content is not None else None,
+        proposal.external_service_intents,
+        product_family=updated_claim.incident_type,
+    )
     runtime_directive = (
         runtime_trace.runtime_action_code if runtime_trace is not None else 'runtime.continue'
     )
@@ -2572,6 +2603,7 @@ def submit_message(
         form_changes=list(proposal.form_changes),
         contents_item_changes=list(proposal.contents_item_changes),
         source_refs=sorted(_tool_source_refs(proposal.tool_results)),
+        external_service_intents=external_service_intents,
         proposal_source=proposal.proposal_source,
         model_profile_id=session.model_profile_id,
         runtime_configuration=(runtime_policy.provenance() if runtime_policy else None),
@@ -2728,6 +2760,22 @@ def submit_message(
         )
         for item in effective_next_step.required_items
     ]
+    for intent in external_service_intents:
+        offer = build_offer_metadata(
+            claim=updated_claim,
+            agent_message_id=agent_message.message_id,
+            trigger_message_id=claimant_message.message_id,
+            intent=intent,
+            dispatcher=external_capability_dispatcher,
+        )
+        work_items.append(
+            offer_work_item(
+                claim=updated_claim,
+                turn_id=runtime_turn_id,
+                offer=offer,
+                timestamp=timestamp,
+            )
+        )
     execution_plan = ExecutionPlanRecord(
         execution_plan_id=new_id('xpl'),
         turn_id=runtime_turn_id,
@@ -2839,6 +2887,16 @@ def submit_message(
                 code='IDEMPOTENCY_CONFLICT',
                 message='The message turn was already accepted with different retry data.',
             ) from conflict
+    current_claim = repository.get_claim(claim_id, principal.subject)
+    if current_claim is not None:
+        continue_granted_service_offers(
+            repository,
+            principal,
+            current_claim,
+            assessor_adapter=assessor_adapter,
+            assessor_entry=assessor_entry,
+            capability_dispatcher=external_capability_dispatcher,
+        )
     return _message_turn_response(repository, principal, claim_id, claimant_message, decision)
 
 

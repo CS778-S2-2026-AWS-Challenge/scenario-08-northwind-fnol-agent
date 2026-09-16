@@ -1218,8 +1218,15 @@ def reconcile_assessor_routing(
             task.delivery is ExternalTaskDelivery.SUBMITTED
             or task.status is ExternalTaskOperationStatus.PREPARED
         )
-        and claim.external_claim is not None
-        and claim.external_claim.external_claim_id == operation.external_claim_id
+        and (
+            (
+                claim.external_claim.external_claim_id
+                if claim.external_claim is not None
+                and claim.external_claim.external_claim_id is not None
+                else claim.claim_id
+            )
+            == operation.external_claim_id
+        )
         and consent is not None
         and consent.service_identity == task.service_identity
         and consent.requested_action == task.requested_action
@@ -1667,11 +1674,13 @@ def route_assessor(
     claim = repository.get_claim_internal(payload.claim_id)
     if claim is None:
         raise _claim_not_found()
-    if (
-        claim.external_claim is None
-        or claim.external_claim.external_claim_id != payload.external_claim_id
-    ):
-        raise _authorisation_error('Assessor routing requires the matching created claim.')
+    expected_external_claim_id = (
+        claim.external_claim.external_claim_id
+        if claim.external_claim is not None and claim.external_claim.external_claim_id is not None
+        else claim.claim_id
+    )
+    if expected_external_claim_id != payload.external_claim_id:
+        raise _authorisation_error('Assessor routing requires the matching working Claim scope.')
 
     if claim.assessor_routing is not None:
         if claim.assessor_routing_fingerprint != fingerprint:
