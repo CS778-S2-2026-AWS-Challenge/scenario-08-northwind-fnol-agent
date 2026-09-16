@@ -422,11 +422,7 @@ class MongoDBRepository:
             query['realtime_order'] = {
                 '$gt': self._realtime_order(after.occurred_at, after.event_id)
             }
-        cursor = (
-            self._collection.find(query)
-            .sort([('realtime_order', 1)])
-            .limit(limit)
-        )
+        cursor = self._collection.find(query).sort([('realtime_order', 1)]).limit(limit)
         return [
             event
             for document in cursor
@@ -1502,9 +1498,7 @@ class MongoDBRepository:
         )
 
     def save_message(self, message: MessageRecord, customer_id: str) -> None:
-        self._atomic(
-            lambda mongo_session: self._save_message(message, customer_id, mongo_session)
-        )
+        self._atomic(lambda mongo_session: self._save_message(message, customer_id, mongo_session))
 
     def _save_message(
         self,
@@ -1526,11 +1520,7 @@ class MongoDBRepository:
             customer_id=customer_id,
             session=mongo_session,
         )
-        if (
-            claim is None
-            or session is None
-            or session.claim_id != message.claim_id
-        ):
+        if claim is None or session is None or session.claim_id != message.claim_id:
             raise KeyError(message.claim_id)
         self._put(
             'message',
@@ -2879,9 +2869,7 @@ class MongoDBRepository:
         if replaced.matched_count == 0:
             # The stored verification moved between the read and the write. The same
             # question applies: an identical winner is this call's own outcome.
-            self._assert_race_winner_matches(
-                result, customer_id, None, mongo_session=mongo_session
-            )
+            self._assert_race_winner_matches(result, customer_id, None, mongo_session=mongo_session)
             return
         self._append_realtime_event(
             claim,
@@ -2989,9 +2977,7 @@ class MongoDBRepository:
         )
 
     def save_handoff(self, handoff: HandoffRecord, customer_id: str) -> None:
-        self._atomic(
-            lambda mongo_session: self._save_handoff(handoff, customer_id, mongo_session)
-        )
+        self._atomic(lambda mongo_session: self._save_handoff(handoff, customer_id, mongo_session))
 
     def _save_handoff(
         self,

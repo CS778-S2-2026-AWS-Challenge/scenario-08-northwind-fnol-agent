@@ -112,9 +112,7 @@ def realtime_stream(
                 if live_delivery is None:
                     yield ': keep-alive\n\n'
                     continue
-                if live_delivery.cursor and not cursor_is_after(
-                    live_delivery.cursor, last_cursor
-                ):
+                if live_delivery.cursor and not cursor_is_after(live_delivery.cursor, last_cursor):
                     continue
                 if live_delivery.cursor:
                     last_cursor = live_delivery.cursor

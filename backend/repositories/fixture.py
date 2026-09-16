@@ -432,8 +432,7 @@ class FixtureRepository(PersistenceRepository):
         snapshot = {
             key: deepcopy(value)
             for key, value in self.__dict__.items()
-            if key
-            not in {'_validation_seed_lock', '_claim_mutation_lock', '_realtime_condition'}
+            if key not in {'_validation_seed_lock', '_claim_mutation_lock', '_realtime_condition'}
         }
         try:
             existing = self.find_idempotency(

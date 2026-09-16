@@ -102,9 +102,7 @@ def scope_for(principal: Principal, *, claim_id: str | None = None) -> RealtimeS
 
 def delivery_for(event: RealtimeEvent, audience: RealtimeAudience) -> RealtimeDelivery:
     resources = (
-        event.claimant_resources
-        if audience is RealtimeAudience.CLAIMANT
-        else event.resources
+        event.claimant_resources if audience is RealtimeAudience.CLAIMANT else event.resources
     )
     return RealtimeDelivery(
         event='resources.changed',
