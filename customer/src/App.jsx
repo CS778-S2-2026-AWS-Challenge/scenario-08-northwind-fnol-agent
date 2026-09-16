@@ -630,7 +630,13 @@ function App() {
     }
     if (restoreCapabilityTriggerFocus.current) {
       restoreCapabilityTriggerFocus.current = false
-      globalThis.requestAnimationFrame(() => externalCapabilitiesTriggerRef.current?.focus())
+      globalThis.requestAnimationFrame(() => {
+        const trigger = externalCapabilitiesTriggerRef.current
+        const focusTarget = trigger && !trigger.closest('[hidden]')
+          ? trigger
+          : detailsTabRefs.current.documents
+        focusTarget?.focus()
+      })
     }
   }, [externalCapabilitiesOpen])
 
@@ -2580,30 +2586,6 @@ function App() {
               )}
             </div>
 
-            {claim.external_capabilities?.length > 0 && (
-              <>
-                <button
-                  ref={externalCapabilitiesTriggerRef}
-                  className="external-capabilities-trigger"
-                  type="button"
-                  aria-haspopup="dialog"
-                  onClick={() => setExternalCapabilitiesOpen(true)}
-                >
-                  <span>
-                    <strong>Third-party support</strong>
-                    <small>{claim.external_capabilities.length} services available</small>
-                  </span>
-                  <span aria-hidden="true">View</span>
-                </button>
-                <ExternalCapabilityCatalogue
-                  capabilities={claim.external_capabilities}
-                  dialogRef={externalCapabilitiesDialogRef}
-                  headingRef={externalCapabilitiesHeadingRef}
-                  onClose={closeExternalCapabilities}
-                />
-              </>
-            )}
-
             <MessageComposer
               draft={draft}
               setDraft={setDraft}
@@ -2785,6 +2767,21 @@ function App() {
               tabIndex="0"
               hidden={detailsTab !== 'documents'}
             >
+              {claim.external_capabilities?.length > 0 && (
+                <button
+                  ref={externalCapabilitiesTriggerRef}
+                  className="external-capabilities-trigger"
+                  type="button"
+                  aria-haspopup="dialog"
+                  onClick={() => setExternalCapabilitiesOpen(true)}
+                >
+                  <span>
+                    <strong>Third-party support</strong>
+                    <small>{claim.external_capabilities.length} services available</small>
+                  </span>
+                  <span aria-hidden="true">View</span>
+                </button>
+              )}
               {detailsTab === 'documents' && workspaceView === 'chat' && (
                 <ClaimDocuments
                   items={evidenceItems}
@@ -2802,6 +2799,14 @@ function App() {
             </div>
             </div>
           </aside>
+          {claim.external_capabilities?.length > 0 && (
+            <ExternalCapabilityCatalogue
+              capabilities={claim.external_capabilities}
+              dialogRef={externalCapabilitiesDialogRef}
+              headingRef={externalCapabilitiesHeadingRef}
+              onClose={closeExternalCapabilities}
+            />
+          )}
         </main>
       )}
     </div>
