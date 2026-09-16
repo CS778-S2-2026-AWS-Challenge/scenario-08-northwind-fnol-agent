@@ -255,6 +255,31 @@ export const workbenchApi = {
   externalRequests(token, claimId, cursor) {
     return pagedClaimResource(token, claimId, 'external-requests', cursor)
   },
+  acceptExternalTaskReview(token, claimId, taskId, revision, payload = {}) {
+    return mutationRequest(
+      `/api/v1/workbench/claims/${encodeURIComponent(claimId)}/external-tasks/${encodeURIComponent(taskId)}/accept-review`,
+      {
+        method: 'POST',
+        token,
+        headers: {
+          'If-Match': String(revision),
+        },
+        body: JSON.stringify(payload),
+      },
+    )
+  },
+  reconcileExternalTaskResponse(token, claimId, taskId, revision) {
+    return mutationRequest(
+      `/api/v1/workbench/claims/${encodeURIComponent(claimId)}/external-tasks/${encodeURIComponent(taskId)}/reconcile`,
+      {
+        method: 'POST',
+        token,
+        headers: {
+          'If-Match': String(revision),
+        },
+      },
+    )
+  },
   events(token, claimId, cursor) {
     return pagedClaimResource(token, claimId, 'events', cursor)
   },

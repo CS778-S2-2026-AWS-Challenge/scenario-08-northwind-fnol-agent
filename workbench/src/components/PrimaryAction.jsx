@@ -10,7 +10,7 @@ export default function PrimaryAction({ action, handoff, request, onAccept, onOw
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const executable = canSubmitProjectedAction(action)
-  const section = actionSection(action?.action_code)
+  const section = actionSection(action)
 
   async function accept() {
     if (busy) return
@@ -53,13 +53,16 @@ export default function PrimaryAction({ action, handoff, request, onAccept, onOw
   )
 }
 
-function actionSection(code) {
-  if (code === 'human.resolve_handoff' || code === 'work_item.update') return 'activity'
-  if (code === 'signal.record_decision') return 'signals'
-  if (code === 'conversation.send_claimant_message') return 'conversation'
+function actionSection(action) {
+  if (action?.target_type === 'external_task') return 'external-services'
+  if (action?.action_code === 'human.resolve_handoff' || action?.action_code === 'work_item.update') return 'activity'
+  if (action?.action_code === 'signal.record_decision') return 'signals'
+  if (action?.action_code === 'conversation.send_claimant_message') return 'conversation'
   return null
 }
 
 function sectionLabel(section) {
-  return section === 'activity' ? 'work activity' : section
+  if (section === 'activity') return 'work activity'
+  if (section === 'external-services') return 'external services'
+  return section
 }

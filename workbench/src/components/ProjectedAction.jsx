@@ -16,6 +16,7 @@ export function ProjectedActionInput({ input, required = input.required, onChang
       <label>
         {input.label}
         <select ref={inputRef} name={input.field_code} required={required} onChange={onChange} onKeyDown={onKeyDown} {...controlled}>
+          {required && <option value="" disabled>Select an option</option>}
           {input.choices.map((choice) => <option value={choice.value} key={choice.value}>{choice.label}</option>)}
         </select>
       </label>
