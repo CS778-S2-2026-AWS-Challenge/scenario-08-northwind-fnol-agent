@@ -92,6 +92,96 @@ async function request(path, { token, headers, ...options } = {}) {
   return payload
 }
 
+async function readEventStream(response, signal, onEvent) {
+  if (!response.body) {
+    throw new ApiError(
+      'This browser could not keep the Workbench connected for live updates.',
+      { code: 'STREAM_UNAVAILABLE', retryable: true },
+    )
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  try {
+    while (!signal?.aborted) {
+      const { done, value } = await reader.read()
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+      buffer = buffer.replaceAll('\r\n', '\n')
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary >= 0) {
+        const frame = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+        const lines = frame.split('\n')
+        const event = lines.find((line) => line.startsWith('event:'))?.slice(6).trim()
+        const cursor = lines.find((line) => line.startsWith('id:'))?.slice(3).trim() || null
+        const data = lines
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trimStart())
+          .join('\n')
+        if (event && data) {
+          try {
+            await onEvent({ event, cursor, data: JSON.parse(data) })
+          } catch (error) {
+            if (error instanceof SyntaxError) {
+              throw new ApiError(
+                'A live Workbench update could not be read. The connection will be retried.',
+                { code: 'INVALID_STREAM_EVENT', retryable: true },
+              )
+            }
+            throw error
+          }
+        }
+        boundary = buffer.indexOf('\n\n')
+      }
+      if (done) return
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+async function streamRealtimeEvents(token, { cursor, signal, onEvent }) {
+  const params = new URLSearchParams()
+  if (cursor) params.set('cursor', cursor)
+  const query = params.size ? `?${params}` : ''
+  let response
+  try {
+    response = await fetch(`/api/v1/workbench/realtime/events${query}`, {
+      headers: {
+        Accept: 'text/event-stream',
+        Authorization: `Bearer ${token}`,
+      },
+      signal,
+    })
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+    throw new ApiError(
+      'Live Workbench updates are temporarily disconnected. The connection will be retried.',
+      { code: 'NETWORK_ERROR', retryable: true },
+    )
+  }
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null)
+    const error = payload?.error || {}
+    throw new ApiError(error.message || 'Live Workbench updates could not be started.', {
+      status: response.status,
+      code: error.code || 'HTTP_ERROR',
+      details: error.details,
+      requestId: error.request_id,
+      retryable: error.retryable,
+      currentRevision: error.current_revision,
+    })
+  }
+
+  await readEventStream(response, signal, async ({ event, cursor: eventCursor, data }) => {
+    if (event === 'resources.changed' || event === 'resync_required') {
+      await onEvent({ type: event, cursor: eventCursor, data })
+    }
+  })
+}
+
 async function mutationRequest(path, { headers = {}, ...options }) {
   const fingerprint = JSON.stringify([
     options.method,
@@ -118,6 +208,9 @@ async function mutationRequest(path, { headers = {}, ...options }) {
 }
 
 export const workbenchApi = {
+  realtimeEvents(token, options) {
+    return streamRealtimeEvents(token, options)
+  },
   login(email, password) {
     return request('/api/v1/staff/auth/sessions', {
       method: 'POST',
