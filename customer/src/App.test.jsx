@@ -29,6 +29,7 @@ const api = vi.hoisted(() => ({
   resumeClaimSession: vi.fn(),
   startClaimSession: vi.fn(),
   streamClaimUpdates: vi.fn(() => new Promise(() => {})),
+  streamRealtimeEvents: vi.fn(() => new Promise(() => {})),
   submitClaimMessage: vi.fn(),
   setClaimantAccessToken: vi.fn(),
   updateAccountPreferences: vi.fn(),
@@ -134,6 +135,20 @@ function initialTurn() {
   }
 }
 
+function realtimeChange(revision, resources = ['claim', 'messages']) {
+  const eventId = `evt-${revision}-${resources.join('-')}`
+  return {
+    type: 'resources.changed',
+    cursor: eventId,
+    data: {
+      event_id: eventId,
+      claim_id: initialClaim.claim_id,
+      claim_revision: revision,
+      resources,
+    },
+  }
+}
+
 function dynamicForm({ value = '8pm', valueState = 'proposed' } = {}) {
   return {
     selected_family: 'home',
@@ -211,6 +226,7 @@ describe('claimant intake projection', () => {
     })
     api.getClaimEvidence.mockResolvedValue({ items: [], revision: 1 })
     api.listEvidenceHistory.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.streamRealtimeEvents.mockImplementation(() => new Promise(() => {}))
     api.createClaim.mockResolvedValue({
       claim: initialClaim,
       session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
@@ -537,7 +553,7 @@ describe('claimant intake projection', () => {
       content: { type: 'text', text: 'I can provide more details while I wait.' },
       created_at: '2026-09-14T01:02:00Z',
     }
-    api.streamClaimUpdates.mockImplementation(({ onEvent }) => {
+    api.streamRealtimeEvents.mockImplementation(({ onEvent }) => {
       pushLiveUpdate = onEvent
       return new Promise(() => {})
     })
@@ -577,7 +593,7 @@ describe('claimant intake projection', () => {
     api.getClaimMessages.mockResolvedValueOnce({
       items: [claimantMessage, agentMessage, queuedClaimantMessage],
     })
-    await act(async () => pushLiveUpdate({ claim_revision: 4 }))
+    await act(async () => pushLiveUpdate(realtimeChange(4)))
 
     expect(await screen.findByRole('status', { name: /Staff assistance accepted/ })).toBeInTheDocument()
     expect(screen.getByText(/Northwind has accepted your assistance request\./)).toBeInTheDocument()
@@ -598,7 +614,7 @@ describe('claimant intake projection', () => {
     api.getClaimMessages.mockResolvedValueOnce({
       items: [claimantMessage, agentMessage, queuedClaimantMessage, staffMessage],
     })
-    await act(async () => pushLiveUpdate({ claim_revision: 5 }))
+    await act(async () => pushLiveUpdate(realtimeChange(5)))
 
     expect(await screen.findByRole('status', { name: /Your response is needed/ })).toBeInTheDocument()
     expect(screen.getByText(staffMessage.content.text)).toBeInTheDocument()
@@ -636,7 +652,7 @@ describe('claimant intake projection', () => {
     api.getClaimMessages.mockResolvedValueOnce({
       items: [claimantMessage, agentMessage, staffMessage, claimantReply],
     })
-    await act(async () => pushLiveUpdate({ claim_revision: 7 }))
+    await act(async () => pushLiveUpdate(realtimeChange(7)))
 
     expect(await screen.findByRole('status', { name: /Staff assistance completed/ })).toBeInTheDocument()
     expect(screen.getByText(/You can continue your claim below\./)).toBeInTheDocument()
@@ -668,7 +684,7 @@ describe('claimant intake projection', () => {
       items: [{ ...resolvedClaim, can_resume: true }],
       page: { next_cursor: null },
     })
-    api.streamClaimUpdates.mockImplementation(({ onEvent }) => {
+    api.streamRealtimeEvents.mockImplementation(({ onEvent }) => {
       pushLiveUpdate = onEvent
       return new Promise(() => {})
     })
@@ -701,7 +717,7 @@ describe('claimant intake projection', () => {
     expect(await screen.findByRole('status', { name: /Staff assistance completed/ })).toBeVisible()
     expect(screen.queryByRole('button', { name: /Where you left off/ })).not.toBeInTheDocument()
     await waitFor(() => expect(pushLiveUpdate).toBeTypeOf('function'))
-    await act(async () => pushLiveUpdate({ claim_revision: 8 }))
+    await act(async () => pushLiveUpdate(realtimeChange(8)))
     const resumedEvent = screen.getByRole('status', { name: /Claim resumed/ })
     const messageAfterResume = await screen.findByText(postResumeMessage.content.text)
     expect(
@@ -1354,6 +1370,11 @@ describe('claimant intake projection', () => {
 
   it('shows what to provide from the Evidence projection and supports keyboard tab navigation', async () => {
     const user = userEvent.setup()
+    let pushEvidenceUpdate
+    api.streamRealtimeEvents.mockImplementation(({ onEvent }) => {
+      pushEvidenceUpdate = onEvent
+      return new Promise(() => {})
+    })
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue({
       profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
@@ -1448,10 +1469,9 @@ describe('claimant intake projection', () => {
         kind: requiredEvidence.kind,
       }),
     ))
-    await waitFor(
-      () => expect(api.getClaimEvidence).toHaveBeenCalledTimes(2),
-      { timeout: 2500 },
-    )
+    await waitFor(() => expect(pushEvidenceUpdate).toBeTypeOf('function'))
+    await act(async () => pushEvidenceUpdate(realtimeChange(5, ['evidence'])))
+    await waitFor(() => expect(api.getClaimEvidence).toHaveBeenCalledTimes(2))
     expect(await screen.findByText('Received')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'What to provide' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /What to provide, .* outstanding/ })).not.toBeInTheDocument()
