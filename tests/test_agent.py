@@ -82,6 +82,8 @@ def test_controlled_requirement_values_follow_the_field_registry(
         ('There is no danger from the leak, but part of the house is exposed.', 'exposure'),
         ('The property is exposed.', 'exposure'),
         ('There is no danger from the leak but the property is exposed.', 'exposure'),
+        ('There is no ongoing risk from water and the ceiling will collapse.', 'collapse'),
+        ('There is no danger from the leak and the property is exposed.', 'exposure'),
         ('There is no ongoing risk of collapse.', None),
         ('There is no current danger of exposure.', None),
         ('The leak is not active anymore.', None),

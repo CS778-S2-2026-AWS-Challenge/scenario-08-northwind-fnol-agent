@@ -976,6 +976,16 @@ def test_default_home_journey_creates_without_an_unapproved_external_service(
             'There is no danger from the leak but the property is exposed.',
             'exposure',
         ),
+        (
+            'mixed-collapse-and',
+            'There is no ongoing risk from water and the ceiling will collapse.',
+            'collapse',
+        ),
+        (
+            'mixed-exposure-and',
+            'There is no danger from the leak and the property is exposed.',
+            'exposure',
+        ),
         ('negated-leak', 'The leak is not active anymore.', None),
         ('negated-collapse', 'The ceiling is not collapsing.', None),
         ('negated-exposure', 'Nothing is exposed.', None),
