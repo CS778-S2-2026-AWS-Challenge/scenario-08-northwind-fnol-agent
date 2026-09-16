@@ -329,9 +329,9 @@ class MongoDBRepository:
             name='branch_evaluation_claim_created',
         )
         self._collection.create_index(
-            [('record_type', 1), ('occurred_at', 1), ('event_id', 1)],
+            [('record_type', 1), ('realtime_order', 1)],
             unique=True,
-            name='realtime_event_cursor_unique',
+            name='realtime_event_order_unique',
             partialFilterExpression={'record_type': 'realtime_event'},
         )
         # One task carries one canonical result. Without this, two concurrent first
@@ -410,24 +410,21 @@ class MongoDBRepository:
             raise ValueError('Realtime replay limit must be between 1 and 1000.')
         query: dict[str, Any] = {'record_type': 'realtime_event'}
         if after is not None:
-            timestamp = after.occurred_at.isoformat()
             anchor = self._collection.find_one(
                 {
                     'record_type': 'realtime_event',
                     'event_id': after.event_id,
-                    'occurred_at': timestamp,
                 },
-                projection={'_id': 1},
             )
-            if anchor is None:
+            anchor_event = self._model_from_document(anchor, RealtimeEvent)
+            if anchor_event is None or anchor_event.occurred_at != after.occurred_at:
                 raise ValueError('The realtime cursor is outside the available replay window.')
-            query['$or'] = [
-                {'occurred_at': {'$gt': timestamp}},
-                {'occurred_at': timestamp, 'event_id': {'$gt': after.event_id}},
-            ]
+            query['realtime_order'] = {
+                '$gt': self._realtime_order(after.occurred_at, after.event_id)
+            }
         cursor = (
             self._collection.find(query)
-            .sort([('occurred_at', 1), ('event_id', 1)])
+            .sort([('realtime_order', 1)])
             .limit(limit)
         )
         return [
@@ -461,6 +458,11 @@ class MongoDBRepository:
     @staticmethod
     def _record_id(kind: str, identifier: str) -> str:
         return f'{kind}:{identifier}'
+
+    @staticmethod
+    def _realtime_order(occurred_at: datetime, event_id: str) -> str:
+        timestamp = occurred_at.astimezone(UTC).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+        return f'{timestamp}|{event_id}'
 
     def _staff_search_projection(
         self,
@@ -558,6 +560,13 @@ class MongoDBRepository:
         session: Any = None,
     ) -> None:
         document = model.model_dump(mode='json')
+        if kind == 'realtime_event':
+            if not isinstance(model, RealtimeEvent):
+                raise TypeError('Realtime event records require RealtimeEvent.')
+            document['realtime_order'] = self._realtime_order(
+                model.occurred_at,
+                model.event_id,
+            )
         if kind == 'claim':
             if not isinstance(model, WorkingClaim):
                 raise TypeError('Claim records require WorkingClaim.')

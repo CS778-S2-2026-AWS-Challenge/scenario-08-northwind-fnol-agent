@@ -143,6 +143,8 @@ Fixture stores events in process state and wakes one condition-backed watcher. M
 uses one collection Change Stream per application process. The process dispatcher performs
 role/customer/optional-Claim filtering and fans out to bounded transient subscriber queues. A
 subscriber queue is delivery state only and is never a persistence or authorization boundary.
+MongoDB derives a fixed-width UTC `realtime_order` index value from `occurred_at` and `event_id`;
+this adapter-owned physical key is never returned by the repository or API.
 
 Replay requires the exact durable cursor anchor and returns records ordered by `occurred_at` then
 `event_id`. A missing anchor, replay-window overflow, slow-subscriber overflow, or source failure

@@ -61,6 +61,7 @@ from backend.domain.models import (
     StaffActionStatus,
     WorkingClaim,
 )
+from backend.domain.realtime import RealtimeAudience, RealtimeCursor, RealtimeResource
 from backend.domain.retrieval import (
     PolicyFacts,
     PolicyRetrievalRecord,
@@ -1031,6 +1032,38 @@ def test_claim_and_session_round_trip_enforces_customer_ownership(
     assert repository.get_session(claim.claim_id, session.session_id, claim.customer_id) == session
     assert repository.list_claims_for_customer(claim.customer_id) == [claim]
     assert repository.list_sessions_for_claim(claim.claim_id, claim.customer_id) == [session]
+
+
+def test_mongodb_realtime_replay_preserves_internal_message_visibility(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    created = repository.replay_realtime_events(None, limit=10)
+    assert len(created) == 1
+    assert created[0].resources == (RealtimeResource.CLAIM, RealtimeResource.QUEUE)
+
+    message = _message(claim, session).model_copy(
+        update={
+            'message_id': 'msg_mongo_internal_realtime',
+            'client_message_id': 'client-mongo-internal-realtime',
+            'visibility': MessageVisibility.INTERNAL_ONLY,
+        }
+    )
+    repository.save_message(message, claim.customer_id)
+    replay = repository.replay_realtime_events(
+        RealtimeCursor(
+            occurred_at=created[0].occurred_at,
+            event_id=created[0].event_id,
+        ),
+        limit=10,
+    )
+
+    assert len(replay) == 1
+    assert replay[0].resources == (RealtimeResource.MESSAGES,)
+    assert replay[0].claimant_resources == ()
+    assert replay[0].audiences == (RealtimeAudience.STAFF,)
 
 
 def test_claim_save_uses_optimistic_revision(repository: MongoDBRepository) -> None:
