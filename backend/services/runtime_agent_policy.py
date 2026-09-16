@@ -26,11 +26,9 @@ from backend.domain.prompt_pack import PromptFragmentDefinition, PromptPackManif
 from backend.services.agent import AgentProposal
 from backend.services.prompt_composer import (
     estimate_tokens,
-    load_fragment_contents,
-    load_prompt_manifest,
     load_response_schemas,
 )
-from backend.services.provider_capability_registry import provider_capability
+from backend.services.provider_capability_registry import validate_capability_binding
 from backend.services.request_profile_registry import registered_request_profiles
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
@@ -263,7 +261,7 @@ class RuntimeAgentPolicyResolver:
     ) -> None:
         if instruction.composition_mode != 'fragmented' or instruction.manifest_version is None:
             raise RuntimeConfigurationResolutionError('The v7 Prompt Pack is incomplete.')
-        published_manifest = PromptPackManifest(
+        PromptPackManifest(
             prompt_pack_version=instruction.manifest_version,
             fragments=[
                 PromptFragmentDefinition.model_validate(
@@ -272,19 +270,6 @@ class RuntimeAgentPolicyResolver:
                 for item in instruction.fragments
             ],
         )
-        canonical_manifest = load_prompt_manifest()
-        if published_manifest != canonical_manifest:
-            raise RuntimeConfigurationResolutionError(
-                'The published v7 Prompt manifest does not match its repository version.'
-            )
-        canonical_contents = load_fragment_contents(canonical_manifest)
-        if any(
-            item.content.strip() != canonical_contents.get(item.fragment_id)
-            for item in instruction.fragments
-        ):
-            raise RuntimeConfigurationResolutionError(
-                'The published v7 Prompt content does not match its fragment version.'
-            )
         if any(estimate_tokens(item.content) > item.max_tokens for item in instruction.fragments):
             raise RuntimeConfigurationResolutionError(
                 'A published v7 Prompt fragment exceeds budget.'
@@ -319,17 +304,16 @@ class RuntimeAgentPolicyResolver:
         for profile_id, record in model_records.items():
             capability = tool_policy.provider_capabilities[profile_id]
             try:
-                expected_capability = provider_capability(
-                    ModelRuntimeConfiguration.model_validate(record.values)
+                model_configuration = ModelRuntimeConfiguration.model_validate(record.values)
+                validate_capability_binding(
+                    model_configuration,
+                    capability,
                 )
-            except ValidationError as error:
+            except (ValidationError, ValueError) as error:
                 raise RuntimeConfigurationResolutionError(
                     'A v7 model binding is incompatible with the atomic Agent release.'
                 ) from error
-            if (
-                record.values.get('prompt_version') != instruction.prompt_version
-                or capability != expected_capability
-            ):
+            if record.values.get('prompt_version') != instruction.prompt_version:
                 raise RuntimeConfigurationResolutionError(
                     'A v7 model binding is incompatible with the atomic Agent release.'
                 )

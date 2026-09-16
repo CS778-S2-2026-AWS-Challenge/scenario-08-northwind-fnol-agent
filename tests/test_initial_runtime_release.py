@@ -215,7 +215,7 @@ def test_v7_release_rejects_versioned_registry_drift(
     if mutation == 'provider_capability':
         capabilities = deepcopy(cast(dict[str, object], values['provider_capabilities']))
         qwen = cast(dict[str, object], capabilities['qwen-local'])
-        qwen['prompt_cache_type'] = 'none'
+        qwen['tool_call_support'] = False
         values['provider_capabilities'] = capabilities
     else:
         profiles = deepcopy(cast(list[dict[str, object]], values['request_profiles']))

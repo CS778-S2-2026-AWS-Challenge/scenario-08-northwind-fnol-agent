@@ -74,7 +74,6 @@ class ContextCatalogueEntry(ContractModel):
     authority_scope: str = Field(min_length=1, max_length=200)
     cache_segment: str | None = Field(default=None, max_length=80)
     selectors: list[str] = Field(default_factory=list, max_length=20)
-    inline_value: dict[str, Any] | list[Any] | str | None = None
 
 
 class ContextReference(ContractModel):

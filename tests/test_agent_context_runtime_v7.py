@@ -54,6 +54,7 @@ from backend.domain.models import (
 )
 from backend.domain.prompt_pack import PromptApplicability
 from backend.services.agent import AgentEvidenceReference, AgentTurnContext, InvariantGuardedAgent
+from backend.services.context_budget import estimate_json_tokens
 from backend.services.context_planner import ContextBudgetExceeded, plan_context
 from backend.services.context_resolver import TurnContextResolver
 from backend.services.model_agent import GatewayAgent
@@ -66,6 +67,7 @@ from backend.services.prompt_composer import (
 )
 from backend.services.provider_capability_registry import (
     provider_capability,
+    validate_capability_binding,
     validate_profile_compatibility,
 )
 from backend.services.request_profile_registry import registered_request_profiles, request_profile
@@ -95,7 +97,11 @@ def _claim(*, incident_type: str | None = 'motor') -> WorkingClaim:
     )
 
 
-def _model_record() -> ConfigurationRecord:
+def _model_record(
+    *,
+    image_input: bool = True,
+    document_input: bool = True,
+) -> ConfigurationRecord:
     return ConfigurationRecord(
         configuration_id='cfg_model_v7',
         domain='model',
@@ -117,8 +123,8 @@ def _model_record() -> ConfigurationRecord:
             'timeout_seconds': 120.0,
             'structured_output': True,
             'tools': True,
-            'image_input': True,
-            'document_input': True,
+            'image_input': image_input,
+            'document_input': document_input,
         },
         author='test',
         reason='Test v7 model binding.',
@@ -129,7 +135,9 @@ def _model_record() -> ConfigurationRecord:
 def _runtime_policy(snapshot: RuntimeConfigurationSnapshot) -> RuntimeAgentPolicySnapshot:
     manifest = load_prompt_manifest()
     contents = load_fragment_contents(manifest)
-    model_configuration = ModelRuntimeConfiguration.model_validate(_model_record().values)
+    model_record = snapshot.model('qwen-local')
+    assert model_record is not None
+    model_configuration = ModelRuntimeConfiguration.model_validate(model_record.values)
     return RuntimeAgentPolicySnapshot(
         runtime_snapshot=snapshot,
         instruction=AgentInstructionConfiguration(
@@ -389,6 +397,10 @@ def test_request_profiles_fail_closed_against_provider_capabilities() -> None:
     with pytest.raises(ValueError, match='tool manifest'):
         validate_profile_compatibility(request_profile('claimant.lookup.v1'), no_tools)
 
+    false_cache_contract = capability.model_copy(update={'prompt_cache_type': 'explicit'})
+    with pytest.raises(ValueError, match='model binding'):
+        validate_capability_binding(configuration, false_cache_contract)
+
 
 def test_ordinary_model_plan_is_single_call_tool_free_and_budgeted() -> None:
     context = _context('My car was rear-ended this morning.')
@@ -400,6 +412,11 @@ def test_ordinary_model_plan_is_single_call_tool_free_and_budgeted() -> None:
     assert plan.request_budget.raw_input_tokens <= 3000
     assert plan.request_budget.reserved_output_tokens == 180
     assert plan.context_payload['message.latest'] == 'My car was rear-ended this morning.'
+    assert plan.context_plan.estimated_tokens == estimate_json_tokens(plan.context_payload)
+    assert all(
+        'inline_value' not in item.model_dump(mode='json')
+        for item in plan.context_plan.catalogue_entries
+    )
     assert plan.cache_plan.segments[0].checkpoint is True
     assert plan.cache_plan.layout_version == 'test-cache-v7'
     assert len(plan.cache_plan.prefix_fingerprint) == 64
@@ -438,6 +455,28 @@ def test_current_status_uses_one_tool_free_answer_profile_without_older_history(
     assert plan.request_profile.profile_id == 'claimant.answer.v1'
     assert plan.request_profile.tool_names == []
     assert plan.request_profile.max_model_invocations == 1
+
+
+def test_recent_history_does_not_repeat_the_trigger_message() -> None:
+    current = _messages(1)[0].model_copy(
+        update={'message_id': 'msg_v7', 'content': {'type': 'text', 'text': 'Current status?'}}
+    )
+    plan = plan_model_turn(
+        _context(
+            'Current status?',
+            conversation_messages=(*_messages(4), current),
+        )
+    )
+
+    assert plan is not None
+    recent = plan.context_payload['conversation.recent']
+    assert isinstance(recent, list)
+    assert [item['content']['text'] for item in recent] == [
+        'History message 0.',
+        'History message 1.',
+        'History message 2.',
+        'History message 3.',
+    ]
 
 
 def test_policy_and_rag_lookup_resolves_only_the_published_turn_reference() -> None:
@@ -747,6 +786,10 @@ def test_v7_ordinary_turn_makes_exactly_one_tool_free_bounded_call(
     assert proposal.runtime_trace.request_profile_id == 'claimant.intake.v1'
     assert proposal.runtime_trace.route == f'motor:{expected_task.value}'
     assert len(proposal.runtime_trace.invocations) == 1
+    assert all(
+        item.get('authority_scope') == 'claim:clm_v7:revision:1'
+        for item in proposal.runtime_trace.context_load_decisions
+    )
 
 
 def test_v7_human_handoff_interrupts_before_any_provider_invocation() -> None:
@@ -913,12 +956,23 @@ def test_v7_cross_claim_review_does_not_send_unrelated_current_evidence() -> Non
             'limitations': [],
         }
 
+    model_record = _model_record(image_input=False, document_input=False)
+    snapshot = RuntimeConfigurationSnapshot(
+        environment='test',
+        runtime_profile='fixture',
+        release_set_id='rel_v7',
+        configurations=MappingProxyType({'model:qwen-local': model_record}),
+        integrations=MappingProxyType({}),
+        knowledge=MappingProxyType({}),
+    )
     context = replace(
         _context(
             'Compare this with all previous claims.',
             evidence=(AgentEvidenceReference(evidence_id='ev_new', media_type='image/jpeg'),),
         ),
         claim_history_context_loader=load_claim_history,
+        runtime_configuration_snapshot=snapshot,
+        runtime_policy=_runtime_policy(snapshot),
     )
     gateway = _RecordingGateway(
         [

@@ -17,6 +17,7 @@ from backend.services.context_planner import plan_context
 from backend.services.prompt_composer import compose_prompt, load_response_schema
 from backend.services.provider_capability_registry import (
     provider_capability,
+    validate_capability_binding,
     validate_profile_compatibility,
 )
 from backend.services.request_profile_registry import request_profile_for_task
@@ -59,18 +60,18 @@ def plan_model_turn(
     if model_record is None:
         raise ValueError('The selected model profile is absent from the Runtime snapshot.')
     model_configuration = ModelRuntimeConfiguration.model_validate(model_record.values)
-    isolated_review = (
-        len(context.evidence) > 4
-        or any(item.media_type == 'application/pdf' for item in context.evidence)
-        or (
-            'claim-history' in route.capability_ids
-            and context.claim_history_context_loader is not None
-            and any(
-                term in (context.message_text or '').casefold()
-                for term in ('compare', 'across claims', 'all claims', 'multiple claims')
-            )
+    cross_claim_review = (
+        'claim-history' in route.capability_ids
+        and context.claim_history_context_loader is not None
+        and any(
+            term in (context.message_text or '').casefold()
+            for term in ('compare', 'across claims', 'all claims', 'multiple claims')
         )
     )
+    isolated_evidence_review = len(context.evidence) > 4 or any(
+        item.media_type == 'application/pdf' for item in context.evidence
+    )
+    isolated_review = isolated_evidence_review or cross_claim_review
     runtime_policy = context.runtime_policy
     published_profiles = (
         runtime_policy.tool_policy.request_profiles
@@ -106,10 +107,10 @@ def plan_model_turn(
         and runtime_policy.instruction.composition_mode == 'fragmented'
         else provider_capability(model_configuration)
     )
-    if capability != provider_capability(model_configuration):
-        raise ValueError('The published provider capability does not match the selected model.')
+    validate_capability_binding(model_configuration, capability)
     validate_profile_compatibility(profile, capability)
-    for evidence in context.evidence:
+    selected_media = () if cross_claim_review else context.evidence
+    for evidence in selected_media:
         required_type = (
             'image/*' if evidence.media_type.startswith('image/') else evidence.media_type
         )

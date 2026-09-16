@@ -2094,6 +2094,7 @@ def submit_message(
                 principal.subject,
             )
             if message.visibility is not MessageVisibility.INTERNAL_ONLY
+            and message.message_id != claimant_message.message_id
         ]
         return tuple(visible[:-4][-limit:])
 

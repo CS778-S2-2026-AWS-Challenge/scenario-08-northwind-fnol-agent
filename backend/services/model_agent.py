@@ -835,8 +835,7 @@ class GatewayAgent:
             route=f'{plan.route.product_family}:{plan.route.task.value}',
             context_sections=list(plan.context_plan.inline_context),
             context_load_decisions=[
-                item.model_dump(mode='json', exclude={'authority_scope'})
-                for item in plan.context_plan.load_decisions
+                item.model_dump(mode='json') for item in plan.context_plan.load_decisions
             ],
             request_budget={
                 'invocations': [item.model_dump(mode='json') for item in request_budgets],

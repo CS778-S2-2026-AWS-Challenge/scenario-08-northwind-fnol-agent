@@ -104,8 +104,12 @@ def _catalogue(
     context: AgentTurnContext,
     route: TurnRoute,
     summary: VerifiedConversationSummary | None,
-) -> tuple[list[ContextCatalogueEntry], bool]:
+) -> tuple[list[ContextCatalogueEntry], dict[str, object], bool]:
     claim_scope = f'claim:{context.claim.claim_id}:revision:{context.claim.revision}'
+    values: dict[str, object] = {
+        'claim.current': _claim_projection(context, route),
+        'message.latest': context.message_text or '',
+    }
     entries = [
         ContextCatalogueEntry(
             resource_id='claim.current',
@@ -115,7 +119,6 @@ def _catalogue(
             estimated_tokens=estimate_json_tokens(_claim_projection(context, route)),
             authority_scope=claim_scope,
             cache_segment='claim',
-            inline_value=_claim_projection(context, route),
         ),
         ContextCatalogueEntry(
             resource_id='message.latest',
@@ -124,26 +127,26 @@ def _catalogue(
             priority=0,
             estimated_tokens=estimate_json_tokens(context.message_text or ''),
             authority_scope=claim_scope,
-            inline_value=context.message_text or '',
         ),
     ]
     visible_messages = [
         item
         for item in context.conversation_messages
         if item.visibility is not MessageVisibility.INTERNAL_ONLY
+        and item.message_id != context.trigger_message_id
     ]
     recent = visible_messages[-4:]
     if recent:
         recent_value = [_message_projection(item) for item in recent]
+        values['conversation.recent'] = recent_value
         entries.append(
             ContextCatalogueEntry(
                 resource_id='conversation.recent',
                 resource_type='recent_messages',
-                load_mode=ContextLoadMode.AUTO_CANDIDATE,
+                load_mode=ContextLoadMode.ROUTE_MATCH,
                 priority=3,
                 estimated_tokens=estimate_json_tokens(recent_value),
                 authority_scope=claim_scope,
-                inline_value=recent_value,
             )
         )
     summary_state_mismatch = False
@@ -170,6 +173,11 @@ def _catalogue(
         if summary_state_mismatch:
             summary = None
     if summary is not None and summary.claim_revision_at_generation <= context.claim.revision:
+        values['conversation.summary'] = {
+            'summary_id': summary.summary_id,
+            'summary': summary.summary,
+            'claim_revision_at_generation': summary.claim_revision_at_generation,
+        }
         entries.append(
             ContextCatalogueEntry(
                 resource_id='conversation.summary',
@@ -178,15 +186,9 @@ def _catalogue(
                 priority=4,
                 estimated_tokens=estimate_json_tokens(summary.summary),
                 authority_scope=claim_scope,
-                inline_value={
-                    'summary_id': summary.summary_id,
-                    'summary': summary.summary,
-                    'claim_revision_at_generation': summary.claim_revision_at_generation,
-                },
             )
         )
     if len(visible_messages) > len(recent):
-        older = visible_messages[: -len(recent)] if recent else visible_messages
         entries.append(
             ContextCatalogueEntry(
                 resource_id='conversation.older',
@@ -196,10 +198,6 @@ def _catalogue(
                 estimated_tokens=0,
                 authority_scope=claim_scope,
                 selectors=['page'],
-                inline_value={
-                    'first_message_id': older[0].message_id,
-                    'last_message_id': older[-1].message_id,
-                },
             )
         )
     if context.evidence:
@@ -210,6 +208,7 @@ def _catalogue(
             {'evidence_id': item.evidence_id, 'media_type': item.media_type, 'status': 'submitted'}
             for item in context.evidence
         ]
+        values['evidence.current'] = evidence_value
         entries.append(
             ContextCatalogueEntry(
                 resource_id='evidence.current',
@@ -221,7 +220,6 @@ def _catalogue(
                 estimated_tokens=estimate_json_tokens(evidence_value),
                 authority_scope=claim_scope,
                 selectors=['metadata'] if isolated_evidence else [],
-                inline_value=evidence_value,
             )
         )
     if (
@@ -237,21 +235,20 @@ def _catalogue(
                 estimated_tokens=0,
                 authority_scope=f'customer:{context.claim.customer_id}',
                 selectors=['history'],
-                inline_value=None,
             )
         )
     services = _external_service_projection(context, route)
     if services:
+        values['external.services'] = services
         entries.append(
             ContextCatalogueEntry(
                 resource_id='external.services',
                 resource_type='external_service',
-                load_mode=ContextLoadMode.AUTO_CANDIDATE,
+                load_mode=ContextLoadMode.ROUTE_MATCH,
                 priority=2,
                 estimated_tokens=estimate_json_tokens(services),
                 authority_scope=claim_scope,
                 cache_segment='service-registry',
-                inline_value=services,
             )
         )
     if context.knowledge_results:
@@ -274,7 +271,6 @@ def _catalogue(
                 estimated_tokens=estimate_json_tokens(knowledge),
                 authority_scope=claim_scope,
                 selectors=['matching_chunks'],
-                inline_value=knowledge,
             )
         )
     if 'policy-search' in route.capability_ids and (
@@ -289,7 +285,6 @@ def _catalogue(
                 estimated_tokens=0,
                 authority_scope=claim_scope,
                 selectors=['matching_facts_and_guidance'],
-                inline_value=None,
             )
         )
     if 'claim-history' in route.capability_ids and (
@@ -308,10 +303,9 @@ def _catalogue(
                 estimated_tokens=0,
                 authority_scope=f'customer:{context.claim.customer_id}',
                 selectors=['relevant_claims'],
-                inline_value=None,
             )
         )
-    return entries, summary_state_mismatch
+    return entries, values, summary_state_mismatch
 
 
 def plan_context(
@@ -322,44 +316,75 @@ def plan_context(
     reserved_tokens: int,
     summary: VerifiedConversationSummary | None = None,
 ) -> ContextPlan:
-    catalogue, summary_state_mismatch = _catalogue(context, route, summary)
+    catalogue, resource_values, summary_state_mismatch = _catalogue(context, route, summary)
     available = max(0, budget_limit - reserved_tokens)
-    used = 0
-    inline: dict[str, Any] = {}
+    turn_focus = {
+        'claim_revision': context.claim.revision,
+        'route': f'{route.product_family or "unresolved"}:{route.task.value}',
+        'current_objective': route.task.value,
+        'next_required_item': (
+            context.branch_evaluation.requirements.next_required_item
+            if context.branch_evaluation is not None
+            else None
+        ),
+        'allowed_field_scope': sorted(
+            {
+                item.field_code
+                for item in (
+                    context.branch_evaluation.field_selection
+                    if context.branch_evaluation is not None
+                    else []
+                )
+                if item.selection_state.value not in {'inactive', 'system_owned'}
+            }
+        ),
+    }
+    inline: dict[str, Any] = {'turn_focus': turn_focus}
     selected: list[str] = []
     references: list[ContextReference] = []
     decisions: list[ContextLoadDecision] = []
     omitted: list[str] = []
     isolated_tasks: list[str] = []
 
+    if estimate_json_tokens(inline) > available:
+        raise ContextBudgetExceeded('The authority-critical Turn Focus exceeds the request budget.')
+
     for entry in sorted(catalogue, key=lambda item: (item.priority, item.resource_id)):
         required = entry.priority <= 2
-        fits = used + entry.estimated_tokens <= available
-        if entry.load_mode is ContextLoadMode.ISOLATED:
-            disposition = ContextDisposition.ISOLATED
-        elif entry.load_mode is ContextLoadMode.REFERENCE:
-            disposition = ContextDisposition.REFERENCED
-        elif entry.load_mode is ContextLoadMode.COMPACTED and fits:
-            disposition = ContextDisposition.COMPACTED
-            inline[entry.resource_id] = entry.inline_value
-            selected.append(entry.resource_id)
-            used += entry.estimated_tokens
-        elif fits:
-            disposition = ContextDisposition.INCLUDED
-            inline[entry.resource_id] = entry.inline_value
-            selected.append(entry.resource_id)
-            used += entry.estimated_tokens
-        elif required:
-            raise ContextBudgetExceeded(
-                f'Authority-critical context {entry.resource_id} exceeds the request budget.'
-            )
-        elif entry.selectors:
-            disposition = ContextDisposition.REFERENCED
-        else:
+        disposition: ContextDisposition
+        wants_reference = entry.load_mode in {
+            ContextLoadMode.REFERENCE,
+            ContextLoadMode.ISOLATED,
+        }
+        value = resource_values.get(entry.resource_id)
+        if not wants_reference and value is not None:
+            candidate_inline = {**inline, entry.resource_id: value}
+            if estimate_json_tokens(candidate_inline) <= available:
+                disposition = (
+                    ContextDisposition.COMPACTED
+                    if entry.load_mode is ContextLoadMode.COMPACTED
+                    else ContextDisposition.INCLUDED
+                )
+                inline = candidate_inline
+                selected.append(entry.resource_id)
+            elif entry.selectors:
+                wants_reference = True
+            elif required:
+                raise ContextBudgetExceeded(
+                    f'Authority-critical context {entry.resource_id} exceeds the request budget.'
+                )
+            else:
+                disposition = ContextDisposition.OMITTED
+                omitted.append(entry.resource_id)
+        elif not wants_reference:
+            if required:
+                raise ContextBudgetExceeded(
+                    f'Authority-critical context {entry.resource_id} is unavailable.'
+                )
             disposition = ContextDisposition.OMITTED
             omitted.append(entry.resource_id)
 
-        if disposition in {ContextDisposition.REFERENCED, ContextDisposition.ISOLATED}:
+        if wants_reference:
             resource_type = {
                 'recent_messages': 'message_range',
                 'knowledge': 'knowledge_chunk',
@@ -376,12 +401,36 @@ def plan_context(
                 version=f'claim-revision-{context.claim.revision}',
                 summary=f'Bounded {entry.resource_id} context is available on demand.',
                 available_selectors=entry.selectors or ['current'],
-                max_resolve_tokens=min(600, max(1, available - used)),
+                max_resolve_tokens=min(
+                    600,
+                    max(1, available - estimate_json_tokens(inline)),
+                ),
             )
-            references.append(reference)
-            selected.append(entry.resource_id)
-            if disposition is ContextDisposition.ISOLATED:
-                isolated_tasks.append(entry.resource_id)
+            candidate_references = [*references, reference]
+            candidate_inline = {
+                **inline,
+                'context_references': [
+                    item.model_dump(mode='json') for item in candidate_references
+                ],
+            }
+            if estimate_json_tokens(candidate_inline) <= available:
+                disposition = (
+                    ContextDisposition.ISOLATED
+                    if entry.load_mode is ContextLoadMode.ISOLATED
+                    else ContextDisposition.REFERENCED
+                )
+                references = candidate_references
+                inline = candidate_inline
+                selected.append(entry.resource_id)
+                if disposition is ContextDisposition.ISOLATED:
+                    isolated_tasks.append(entry.resource_id)
+            elif required:
+                raise ContextBudgetExceeded(
+                    f'Authority-critical reference {entry.resource_id} exceeds the request budget.'
+                )
+            else:
+                disposition = ContextDisposition.OMITTED
+                omitted.append(entry.resource_id)
         decisions.append(
             ContextLoadDecision(
                 resource_id=entry.resource_id,
@@ -405,29 +454,6 @@ def plan_context(
                 cache_segment=entry.cache_segment,
             )
         )
-    if references:
-        inline['context_references'] = [item.model_dump(mode='json') for item in references]
-    inline['turn_focus'] = {
-        'claim_revision': context.claim.revision,
-        'route': f'{route.product_family or "unresolved"}:{route.task.value}',
-        'current_objective': route.task.value,
-        'next_required_item': (
-            context.branch_evaluation.requirements.next_required_item
-            if context.branch_evaluation is not None
-            else None
-        ),
-        'allowed_field_scope': sorted(
-            {
-                item.field_code
-                for item in (
-                    context.branch_evaluation.field_selection
-                    if context.branch_evaluation is not None
-                    else []
-                )
-                if item.selection_state.value not in {'inactive', 'system_owned'}
-            }
-        ),
-    }
     return ContextPlan(
         catalogue_entries=catalogue,
         selected_resource_ids=selected,
@@ -437,7 +463,7 @@ def plan_context(
         isolated_tasks=isolated_tasks,
         load_decisions=decisions,
         omitted_sections=omitted,
-        estimated_tokens=used,
+        estimated_tokens=estimate_json_tokens(inline),
         budget_limit=budget_limit,
         summary_state_mismatch=summary_state_mismatch,
     )

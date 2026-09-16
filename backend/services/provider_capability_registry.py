@@ -55,3 +55,32 @@ def validate_profile_compatibility(
         capability.supported_media_types
     ):
         raise ValueError('The provider does not support the selected profile media contract.')
+
+
+def validate_capability_binding(
+    configuration: ModelRuntimeConfiguration,
+    capability: ProviderCapability,
+) -> None:
+    """Verify published fields that must match executable adapter capabilities.
+
+    Args:
+        configuration: The selected executable model binding.
+        capability: The capability record published in the active Release Set.
+
+    Raises:
+        ValueError: If the publication claims transport behavior the adapter cannot execute.
+    """
+
+    expected = provider_capability(configuration)
+    if any(
+        (
+            capability.protocol != expected.protocol,
+            capability.structured_output_method != expected.structured_output_method,
+            capability.tool_call_support is not expected.tool_call_support,
+            capability.tool_result_continuation != expected.tool_result_continuation,
+            capability.supported_media_types != expected.supported_media_types,
+            capability.prompt_cache_type != expected.prompt_cache_type,
+            capability.continuation_mechanism != expected.continuation_mechanism,
+        )
+    ):
+        raise ValueError('The published provider capability does not match the model binding.')
