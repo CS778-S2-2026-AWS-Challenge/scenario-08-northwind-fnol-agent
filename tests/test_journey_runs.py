@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from journey_runs import motor_collision
 from journey_runs.__main__ import main as journey_main
+from journey_runs.engine import REPOSITORY_ROOT, PackMaterial
 from journey_runs.household import (
     CONTENTS,
     CONTENTS_CONFLICTING_OWNERSHIP,
@@ -19,6 +20,7 @@ from journey_runs.household import (
     HOME,
     HOME_ILLEGIBLE,
     KNOWN_STOPS,
+    SCENARIOS,
     HouseholdRun,
     HouseholdScenario,
     household_run_cases,
@@ -43,6 +45,7 @@ from journey_runs.record import (
     StepOutcome,
     UnavailableCapability,
     VisibilityCheck,
+    cited_authority,
 )
 from pydantic import ValidationError
 
@@ -81,12 +84,68 @@ def test_a_home_household_journey_reaches_creation() -> None:
     assert (record.steps[-1].name, record.steps[-1].http_status) == ('create the claim', 201)
     assert record.final_state.claim_number is not None
     assert record.unavailable_capabilities == []
-    # Reaching creation is not completion: the consent record still has no route in, and a
-    # fixture run is at most fixture-only.
-    assert record.result_class is ResultClass.PARTIAL
-    assert [m.path for m in record.materials if m.arrival is Arrival.NO_ROUTE] == [
-        'home/home-consent-record.pdf'
-    ]
+    # The selected repair form discloses nothing, so the disclosure authorisation is not
+    # applicable rather than missing; a fixture run is still at most fixture-only.
+    assert [
+        m.path for m in record.materials if m.arrival in {Arrival.NO_ROUTE, Arrival.NOT_DELIVERED}
+    ] == []
+    assert [
+        (m.path, 'P3-REPAIRER' in (m.not_applicable_authority or ''))
+        for m in record.materials
+        if m.arrival is Arrival.NOT_APPLICABLE
+    ] == [('home/home-consent-record.pdf', True)]
+    assert record.result_class is ResultClass.FIXTURE_ONLY
+
+
+def test_the_contents_consent_record_is_not_applicable_under_its_selected_form() -> None:
+    record = run_household(CONTENTS, head='test').record
+
+    assert [
+        (m.path, 'P3-CONTENTS-EVIDENCE' in (m.not_applicable_authority or ''))
+        for m in record.materials
+        if m.arrival is Arrival.NOT_APPLICABLE
+    ] == [('contents/contents-consent-record.pdf', True)]
+    # Contents still stops where item capture is missing; the consent change does not move it.
+    assert record.result_class is ResultClass.UNAVAILABLE
+
+
+def _every_pack_material() -> list[PackMaterial]:
+    packs = [MOTOR_COLLISION_PACK, *MOTOR_PACKS.values()]
+    packs += [scenario.pack for scenario in SCENARIOS.values()]
+    return [material for pack in packs for material in pack]
+
+
+def test_only_the_manual_form_consent_records_are_not_applicable() -> None:
+    not_applicable = {
+        material.path
+        for material in _every_pack_material()
+        if material.route is Arrival.NOT_APPLICABLE
+    }
+
+    assert not_applicable == {
+        'home/home-consent-record.pdf',
+        'contents/contents-consent-record.pdf',
+    }
+    # The motor assessor path does disclose fields, so its authorisation still has to arrive.
+    assert {
+        material.route
+        for pack in (MOTOR_COLLISION_PACK, *MOTOR_PACKS.values())
+        for material in pack
+        if material.path == 'motor/motor-consent-record.pdf'
+    } == {Arrival.CONSENT_ROUTE}
+
+
+def test_every_not_applicable_authority_quotes_a_real_document() -> None:
+    authorities = {m.authority for m in _every_pack_material() if m.authority is not None}
+
+    assert authorities
+    for authority in authorities:
+        cited = cited_authority(authority)
+        assert cited is not None, authority
+        document, passages = cited
+        text = ' '.join((REPOSITORY_ROOT / document).read_text(encoding='utf-8').split())
+        for passage in passages:
+            assert ' '.join(passage.split()) in text, (document, passage)
 
 
 def _assert_household_run(run: HouseholdRun, scenario: HouseholdScenario) -> None:
@@ -201,6 +260,16 @@ _NO_ROUTE = [
         arrival=Arrival.NO_ROUTE,
     )
 ]
+_NOT_APPLICABLE = [
+    InputMaterial(
+        path='consent.pdf',
+        material_class='Consent record',
+        pack_condition='received',
+        provided_by='northwind_staff',
+        arrival=Arrival.NOT_APPLICABLE,
+        not_applicable_authority='docs/research/forms.md: "Northwind sends nothing."',
+    )
+]
 _DISAGREEING = [
     SeamCheck(
         seam='assessor.staff_has_an_action',
@@ -231,6 +300,9 @@ _NO_ITEM_CAPTURE = [
         ({}, ResultClass.COMPLETED),
         ({'configuration': _FIXTURE}, ResultClass.FIXTURE_ONLY),
         ({'materials': _NO_ROUTE}, ResultClass.PARTIAL),
+        ({'materials': _NOT_APPLICABLE}, ResultClass.COMPLETED),
+        ({'materials': _NOT_APPLICABLE, 'configuration': _FIXTURE}, ResultClass.FIXTURE_ONLY),
+        ({'materials': [*_NOT_APPLICABLE, *_NO_ROUTE]}, ResultClass.PARTIAL),
         ({'seam_checks': _DISAGREEING, 'configuration': _FIXTURE}, ResultClass.PARTIAL),
         ({'steps': [_step(409, 'blocked')], 'seam_checks': _DISAGREEING}, ResultClass.BLOCKED),
         ({'visibility_checks': _LEAK}, ResultClass.FAILED),
@@ -325,6 +397,46 @@ def test_a_material_is_delivered_only_by_a_step_that_succeeded(
         JourneyRunRecord.model_validate(
             _record(materials=[material], steps=steps, result_class='failed')
         )
+
+
+@pytest.mark.parametrize(
+    'authority',
+    [
+        None,
+        'Northwind sends nothing.',
+        'docs/',
+        'SPEC/',
+        'see docs/research/forms.md: "Northwind sends nothing."',
+        'docs/research/forms.md',
+        'docs/research/forms.md: "too short"',
+    ],
+    ids=['missing', 'no-path', 'docs-dir', 'spec-dir', 'embedded', 'no-quote', 'short-quote'],
+)
+def test_a_not_applicable_authority_must_start_with_a_document_and_quote_it(
+    authority: str | None,
+) -> None:
+    material = _NOT_APPLICABLE[0].model_dump() | {'not_applicable_authority': authority}
+    with pytest.raises(ValidationError, match='must start with a repository document path'):
+        JourneyRunRecord.model_validate(_record(materials=[material], result_class='completed'))
+
+
+@pytest.mark.parametrize(
+    ('changes', 'message'),
+    [
+        ({'delivered_at_step': 'step'}, 'cannot name the step'),
+        ({'evidence_id': 'evd_1'}, 'cannot name evidence'),
+        (
+            {'arrival': 'no_route', 'not_applicable_authority': 'docs/x.md'},
+            'only a not_applicable material',
+        ),
+    ],
+)
+def test_a_material_is_not_applicable_only_with_a_cited_document_and_no_delivery(
+    changes: dict[str, Any], message: str
+) -> None:
+    material = _NOT_APPLICABLE[0].model_dump() | changes
+    with pytest.raises(ValidationError, match=message):
+        JourneyRunRecord.model_validate(_record(materials=[material], result_class='completed'))
 
 
 def test_a_capability_is_unavailable_only_for_a_step_the_run_did_not_attempt() -> None:

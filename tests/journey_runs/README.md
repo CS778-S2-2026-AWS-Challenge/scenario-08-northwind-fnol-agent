@@ -9,13 +9,13 @@ written outside the repository and summarised on the delivery issue. They are ne
 
 ## The record
 
-`record.JourneyRunRecord`, schema `northwind-journey-run/3`:
+`record.JourneyRunRecord`, schema `northwind-journey-run/4`:
 
 | Field | Holds |
 |---|---|
 | `scenario_id`, `family`, `pack_id`, `rubric_refs` | What was run and which rubric items it evidences |
 | `configuration` | Exact head, start and finish time, runtime (`fixture`/`deployed`), provider mode (`simulated`/`live`), Agent runtime and model profile, evidence level |
-| `materials` | Every pack material: class, the condition the pack declares, who provides it, how the run actually got it in (`claimant_upload`, `consent_route`, `simulated_provider_result`), or why not (`no_route`: nothing can deliver it; `not_delivered`: its step failed or was never reached), and the step that delivered it |
+| `materials` | Every pack material: class, the condition the pack declares, who provides it, how the run actually got it in (`claimant_upload`, `consent_route`, `simulated_provider_result`), or why not (`no_route`: the journey needs it but nothing can deliver it; `not_delivered`: its step failed or was never reached; `not_applicable`: the selected operating form never calls for it, with `not_applicable_authority` quoting the document that says so), and the step that delivered it |
 | `steps` | Every route called, in order: actor (`claimant`/`staff`/`integration`), expected and actual HTTP status, outcome, resulting Claim revision, error detail |
 | `agent_turns` | Each claimant input with the Agent's reply, proposed action, reason codes, and next step, plus tool calls and Runtime decisions, or the reason they could not be observed |
 | `consents` | Each permission given or refused: purpose, step, Claim revision, disclosed fields where observable |
@@ -40,6 +40,10 @@ The record rejects evidence that contradicts itself:
   is judged by its own outcome.
 - A delivered material must name the step that delivered it, and that step must have succeeded; an
   undelivered one names no step.
+- A `not_applicable` material names no step and no evidence. Its `not_applicable_authority` must
+  start with a document path under `docs/` or `SPEC/` and quote at least one passage from it; a
+  directory name or a path fragment inside other text is rejected, and the suite checks that every
+  cited document exists and contains each quoted passage. No other material may carry one.
 
 ## Result classes
 
@@ -51,8 +55,9 @@ rejected. The first rule that matches wins:
 2. `blocked`: a step was refused.
 3. `unavailable`: a step the journey needs has no capability, or the run records a capability
    this runtime does not provide.
-4. `partial`: every step succeeded, but a pack material had no route in or was not delivered, or
-   claimant and staff disagree.
+4. `partial`: every step succeeded, but a pack material the journey needs had no route in or was
+   not delivered, or claimant and staff disagree. A `not_applicable` material is not needed, so it
+   never makes a run partial.
 5. `fixture-only`: everything was exercised and agrees, but on the fixture runtime, a simulated
    provider, or a simulated provider result.
 6. `completed`: the same, on a deployed runtime with live providers.
@@ -120,11 +125,14 @@ refusal is the evidence), or after 12 turns.
 
 - **Home (`home-water-ingress-provisional-1`):** roof-valley ingress into the lounge ceiling and an
   adjacent room. The two incident photos and the repair assessment are claimant uploads (the
-  assessment as claimant-supplied material under `P3-REPAIRER`, manual); the disclosure consent
-  record has no home route. The controlled runtime completes the registered
-  home intake fields and reaches Claim creation.
+  assessment as claimant-supplied material under `P3-REPAIRER`, manual). The disclosure consent
+  record is `not_applicable`: in that selected form Northwind discloses nothing to the repairer
+  (`docs/research/sprint4-third-party-integration-forms.md`, `P3-REPAIRER`), and the record only
+  applies before a disclosure. The controlled runtime completes the registered home intake fields
+  and reaches Claim creation.
 - **Contents (`contents-damaged-item-provisional-1`):** one damaged laptop. The two item photos,
   the purchase receipt, and the replacement assessment (`P3-CONTENTS-EVIDENCE`, manual) are
-  claimant uploads; the consent record has no contents route. The theft-path Police report is
-  excluded. On the controlled runtime `contents.items` is not captured, so the run is
+  claimant uploads. The consent record is `not_applicable` for the same reason: the selected form
+  states that external-send consent is not applicable because Northwind sends nothing
+  (`P3-CONTENTS-EVIDENCE`). The theft-path Police report is excluded. On the controlled runtime `contents.items` is not captured, so the run is
   `unavailable` (`docs/model-gateway.md`; Discussion #847).

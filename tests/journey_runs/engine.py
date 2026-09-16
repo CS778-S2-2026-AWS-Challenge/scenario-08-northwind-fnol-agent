@@ -74,6 +74,9 @@ class PackMaterial(NamedTuple):
     `condition` is the declared material condition (received, invalid, expired, disputed,
     unavailable, superseded). It survives into the record's `pack_condition` so variant
     coverage is distinguishable from ordinary uploads.
+
+    `authority` is required for a `not_applicable` route: the document, quoted, under which the
+    selected operating form never calls for this material.
     """
 
     path: str
@@ -87,6 +90,7 @@ class PackMaterial(NamedTuple):
     condition: Literal[
         'received', 'invalid', 'expired', 'disputed', 'unavailable', 'superseded'
     ] = 'received'
+    authority: str | None = None
 
 
 class Journey:
@@ -317,7 +321,7 @@ def delivered_materials(
             else material.delivered_by
         )
         delivered = step is not None and journey.succeeded(step)
-        if delivered or material.route is Arrival.NO_ROUTE:
+        if delivered or material.route in {Arrival.NO_ROUTE, Arrival.NOT_APPLICABLE}:
             arrival, note = material.route, material.note
         else:
             arrival = Arrival.NOT_DELIVERED
@@ -333,6 +337,7 @@ def delivered_materials(
                 evidence_kind=material.kind,
                 evidence_id=evidence.get(material.path),
                 note=note,
+                not_applicable_authority=material.authority,
             )
         )
     return materials

@@ -128,9 +128,13 @@ HOME = HouseholdScenario(
             'home/home-consent-record.pdf',
             'Consent record',
             'northwind_staff',
-            Arrival.NO_ROUTE,
-            note='No home external request route records a disclosure authorisation '
-            f'(P3-REPAIRER, manual, {FORMS}).',
+            Arrival.NOT_APPLICABLE,
+            note='The claimant contacts the repairer and supplies the assessment, so Northwind '
+            'discloses nothing and this authorisation, which applies before a disclosure, is '
+            'never called for.',
+            authority=f'{FORMS}, P3-REPAIRER: "No Northwind send occurs in the selected manual '
+            'form." and "Northwind sends no claim data to a repairer in the selected manual '
+            'form."',
         ),
     ),
     unavailable={},
@@ -189,9 +193,12 @@ CONTENTS = HouseholdScenario(
             'contents/contents-consent-record.pdf',
             'Consent record',
             'northwind_staff',
-            Arrival.NO_ROUTE,
-            note='No contents external request route records a disclosure authorisation '
-            f'(P3-CONTENTS-EVIDENCE, manual, {FORMS}).',
+            Arrival.NOT_APPLICABLE,
+            note='The claimant retrieves and supplies the replacement assessment, so Northwind '
+            'discloses nothing and this authorisation, which applies before a disclosure, is '
+            'never called for.',
+            authority=f'{FORMS}, P3-CONTENTS-EVIDENCE: "Northwind external-send consent is not '
+            'applicable because Northwind sends nothing."',
         ),
     ),
     unavailable={'contents.items': 'contents item capture'},
