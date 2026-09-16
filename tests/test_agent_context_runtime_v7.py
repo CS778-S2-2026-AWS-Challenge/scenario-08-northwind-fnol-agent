@@ -29,6 +29,8 @@ from backend.domain.configuration import (
     ModelRuntimeConfiguration,
 )
 from backend.domain.external_service_registry import capability_context
+from backend.domain.knowledge import KnowledgeChunk, KnowledgeRetrievalUnavailable, KnowledgeSearch
+from backend.domain.knowledge_admin import KnowledgeSourceRecord, KnowledgeVersionState
 from backend.domain.model_gateway import (
     ModelCapabilities,
     ModelCompletionStatus,
@@ -44,6 +46,7 @@ from backend.domain.models import (
     ActorReference,
     ActorType,
     AgentAction,
+    BranchEvaluationResult,
     Channel,
     CustomerNextStep,
     FormSource,
@@ -51,6 +54,7 @@ from backend.domain.models import (
     MessageRecord,
     MessageVisibility,
     NeededFor,
+    RequirementResolution,
     ResponsibleParty,
     StructuredFormField,
     WorkingClaim,
@@ -64,7 +68,7 @@ from backend.services.agent import AgentEvidenceReference, AgentTurnContext, Inv
 from backend.services.context_budget import estimate_json_tokens
 from backend.services.context_planner import ContextBudgetExceeded, plan_context
 from backend.services.context_resolver import TurnContextResolver
-from backend.services.model_agent import GatewayAgent
+from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 from backend.services.model_request_planner import plan_model_turn
 from backend.services.prompt_composer import (
     compose_prompt,
@@ -273,6 +277,21 @@ class _EvidenceResolver:
         return f'{evidence_id}:{media_type}'.encode()
 
 
+class _KnowledgeRetriever:
+    def __init__(self, outcome: str) -> None:
+        self.outcome = outcome
+        self.requests: list[KnowledgeSearch] = []
+
+    def connection_status(self) -> str:
+        return 'fixture'
+
+    def search(self, request: KnowledgeSearch) -> list[KnowledgeChunk]:
+        self.requests.append(request)
+        if self.outcome == 'unavailable':
+            raise KnowledgeRetrievalUnavailable('temporary outage')
+        return [_knowledge_chunk()] if self.outcome == 'evidence_found' else []
+
+
 def _answer_output() -> dict[str, object]:
     return {
         'reply': 'Your current claim remains in progress.',
@@ -288,6 +307,51 @@ def _intake_output() -> dict[str, object]:
         'contents_item_changes': [],
         'service_offer_ids': [],
     }
+
+
+def _knowledge_chunk() -> KnowledgeChunk:
+    return KnowledgeChunk(
+        document_id='doc_motor_policy',
+        chunk_id='chk_motor_policy',
+        title='Motor policy guidance',
+        document_type='policy',
+        version='v1',
+        section_path='claims.damage',
+        page=1,
+        source_uri='https://example.test/motor-policy',
+        jurisdiction='NZ',
+        insurer='Northwind Insurance',
+        product='motor',
+        effective_from=None,
+        effective_to=None,
+        authority='northwind_synthetic_demo',
+        visibility='customer_and_staff',
+        checksum='0' * 64,
+        ingested_at=datetime.now(UTC),
+        text='Damage assessment guidance for a motor Claim.',
+    )
+
+
+def _knowledge_source() -> KnowledgeSourceRecord:
+    return KnowledgeSourceRecord(
+        knowledge_id='knw_motor_policy',
+        document_id='doc_motor_policy',
+        version='v1',
+        source_key='knowledge/motor-policy.md',
+        title='Motor policy guidance',
+        document_type='policy',
+        source_uri='https://example.test/motor-policy',
+        jurisdiction='NZ',
+        insurer='Northwind Insurance',
+        product='motor',
+        authority='northwind_synthetic_demo',
+        visibility='customer_and_staff',
+        state=KnowledgeVersionState.PUBLISHED,
+        revision=1,
+        author='test',
+        chunk_count=1,
+        updated_at=datetime.now(UTC),
+    )
 
 
 def _fragment(
@@ -749,6 +813,66 @@ def test_policy_and_rag_lookup_resolves_only_the_published_turn_reference() -> N
     assert proposal.runtime_trace.tool_calls == 1
 
 
+@pytest.mark.parametrize(
+    ('outcome', 'published', 'expected_status'),
+    [
+        ('evidence_found', True, 'evidence_found'),
+        ('empty', True, 'no_evidence'),
+        ('unavailable', True, 'unavailable'),
+        ('evidence_found', False, 'unavailable'),
+    ],
+)
+def test_v7_knowledge_lookup_uses_only_the_release_selected_source(
+    outcome: str,
+    published: bool,
+    expected_status: str,
+) -> None:
+    context = _context('Does my policy cover this collision?')
+    snapshot = context.runtime_configuration_snapshot
+    assert snapshot is not None
+    if published:
+        context = replace(
+            context,
+            runtime_configuration_snapshot=replace(
+                snapshot,
+                knowledge=MappingProxyType({'motor': _knowledge_source()}),
+            ),
+        )
+    reference = 'ctxref:ses_v7:policy.current'
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='call_release_knowledge',
+                        name='context.resolve',
+                        arguments={
+                            'ref': reference,
+                            'selector': 'matching_facts_and_guidance',
+                            'max_tokens': 300,
+                        },
+                    )
+                ],
+                completion_status=ModelCompletionStatus.COMPLETE,
+            ),
+            ModelResponse(
+                structured_output=_answer_output(),
+                completion_status=ModelCompletionStatus.COMPLETE,
+            ),
+        ]
+    )
+    retriever = _KnowledgeRetriever(outcome)
+
+    proposal = KnowledgeGroundedAgent(GatewayAgent(gateway), retriever).propose_turn(context)
+
+    tool_message = gateway.requests[1].messages[-1]
+    assert tool_message.content is not None
+    resolved = json.loads(tool_message.content)
+    assert resolved['content']['approved_guidance']['status'] == expected_status
+    assert proposal.runtime_trace is not None
+    assert len(retriever.requests) == (1 if published else 0)
+
+
 def test_evidence_history_uses_claimant_scoped_lazy_source_and_narrow_proposal() -> None:
     calls: list[int] = []
 
@@ -933,6 +1057,37 @@ def test_summary_fact_removed_from_claim_state_is_not_reintroduced() -> None:
     assert 'conversation.summary' not in plan.context_payload
 
 
+def test_verified_summary_and_knowledge_stay_separate_bounded_context_resources() -> None:
+    timestamp = datetime.now(UTC)
+    summary = VerifiedConversationSummary(
+        summary_id='sum_current',
+        claim_id='clm_v7',
+        session_id='ses_v7',
+        source_message_ids=['msg_old'],
+        covered_message_range='msg_old..msg_old',
+        generator_profile_and_version='deterministic-verified-compactor@v1',
+        claim_revision_at_generation=1,
+        summary=json.dumps({'confirmed_claim_facts': {}}),
+        verified_against_claim_revision=1,
+        created_at=timestamp.isoformat(),
+    )
+    context = replace(
+        _context('Does my policy cover this collision?'),
+        rolling_summary=summary,
+        knowledge_results=(_knowledge_chunk(),),
+    )
+
+    plan = plan_model_turn(context)
+
+    assert plan is not None
+    assert plan.context_payload['conversation.summary']['summary_id'] == 'sum_current'
+    knowledge_reference = next(
+        item for item in plan.context_plan.references if item.resource_type == 'knowledge_chunk'
+    )
+    assert knowledge_reference.available_selectors == ['matching_chunks']
+    assert 'knowledge.results' not in plan.context_payload
+
+
 def test_context_planner_refuses_to_truncate_authority_context() -> None:
     context = _context('A' * 3000)
     route = route_turn(context)
@@ -1037,6 +1192,121 @@ def test_v7_ordinary_turn_makes_exactly_one_tool_free_bounded_call(
         item.get('authority_scope') == 'claim:clm_v7:revision:1'
         for item in proposal.runtime_trace.context_load_decisions
     )
+
+
+@pytest.mark.parametrize(
+    ('ready', 'expected_action', 'expected_status'),
+    [
+        (True, 'claim.prepare_creation', 'ready_to_create'),
+        (False, 'conversation.answer', 'more_information_required'),
+    ],
+)
+def test_v7_claim_creation_route_keeps_readiness_under_runtime_control(
+    ready: bool,
+    expected_action: str,
+    expected_status: str,
+) -> None:
+    branch_evaluation = BranchEvaluationResult(
+        claim_id='clm_v7',
+        evaluated_against_claim_revision=1,
+        field_registry_version='test-fields-v1',
+        branch_rules_version='test-branches-v1',
+        selected_family='motor',
+        requirements=RequirementResolution(ready=True),
+        recomputation_reason='test',
+    )
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                structured_output={**_answer_output(), 'ready': ready},
+                completion_status=ModelCompletionStatus.COMPLETE,
+            )
+        ]
+    )
+
+    proposal = GatewayAgent(gateway).propose_turn(
+        replace(_context('Proceed with this report.'), branch_evaluation=branch_evaluation)
+    )
+
+    assert proposal.action_code == expected_action
+    assert proposal.customer_next_step.status == expected_status
+    assert proposal.state_changes == []
+
+
+@pytest.mark.parametrize(
+    ('case', 'expected_code'),
+    [
+        ('unknown_service', ModelGatewayErrorCode.MALFORMED_RESPONSE),
+        ('unsupported_tool', ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY),
+        ('invalid_resolver_limit', ModelGatewayErrorCode.MALFORMED_RESPONSE),
+        ('incomplete', ModelGatewayErrorCode.INCOMPLETE_RESPONSE),
+        ('refused', ModelGatewayErrorCode.REFUSED_RESPONSE),
+        ('unknown_completion', ModelGatewayErrorCode.MALFORMED_RESPONSE),
+        ('missing_output', ModelGatewayErrorCode.MALFORMED_RESPONSE),
+        ('invalid_output', ModelGatewayErrorCode.MALFORMED_RESPONSE),
+    ],
+)
+def test_v7_provider_failures_do_not_escape_the_published_turn_contract(
+    case: str,
+    expected_code: ModelGatewayErrorCode,
+) -> None:
+    context = _context('My car was rear-ended this morning.')
+    response = ModelResponse(
+        structured_output=_intake_output(),
+        completion_status=ModelCompletionStatus.COMPLETE,
+    )
+    if case == 'unknown_service':
+        context = replace(
+            _context('Please arrange a damage assessment.'),
+            external_services=capability_context('motor'),
+        )
+        response = ModelResponse(
+            structured_output={**_answer_output(), 'service_offer_ids': ['not_registered']},
+            completion_status=ModelCompletionStatus.COMPLETE,
+        )
+    elif case == 'unsupported_tool':
+        response = ModelResponse(
+            tool_calls=[ModelToolCall(call_id='call_wrong', name='claim.read', arguments={})],
+            completion_status=ModelCompletionStatus.COMPLETE,
+        )
+    elif case == 'invalid_resolver_limit':
+        context = _context(
+            'What is the status of my claim?',
+            conversation_messages=_messages(6),
+        )
+        response = ModelResponse(
+            tool_calls=[
+                ModelToolCall(
+                    call_id='call_invalid_limit',
+                    name='context.resolve',
+                    arguments={
+                        'ref': 'ctxref:ses_v7:conversation.older',
+                        'selector': 'page',
+                        'max_tokens': True,
+                    },
+                )
+            ],
+            completion_status=ModelCompletionStatus.COMPLETE,
+        )
+    elif case in {'incomplete', 'refused', 'unknown_completion'}:
+        status = {
+            'incomplete': ModelCompletionStatus.INCOMPLETE,
+            'refused': ModelCompletionStatus.REFUSED,
+            'unknown_completion': ModelCompletionStatus.UNKNOWN,
+        }[case]
+        response = response.model_copy(update={'completion_status': status})
+    elif case == 'missing_output':
+        response = ModelResponse(completion_status=ModelCompletionStatus.COMPLETE)
+    elif case == 'invalid_output':
+        response = ModelResponse(
+            structured_output={'reply': ''},
+            completion_status=ModelCompletionStatus.COMPLETE,
+        )
+
+    with pytest.raises(ModelGatewayError) as error:
+        GatewayAgent(_RecordingGateway([response])).propose_turn(context)
+
+    assert error.value.code is expected_code
 
 
 def test_v7_human_handoff_interrupts_before_any_provider_invocation() -> None:
@@ -1273,6 +1543,52 @@ def test_v7_isolated_review_rejects_an_unscoped_source_reference() -> None:
             _context('Compare these damage photos.', evidence=evidence)
         )
     assert error.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+
+
+@pytest.mark.parametrize(
+    ('response', 'expected_code'),
+    [
+        (
+            ModelResponse(
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='isolated_tool',
+                        name='context.resolve',
+                        arguments={},
+                    )
+                ],
+                completion_status=ModelCompletionStatus.COMPLETE,
+            ),
+            ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+        ),
+        (
+            ModelResponse(completion_status=ModelCompletionStatus.INCOMPLETE),
+            ModelGatewayErrorCode.INCOMPLETE_RESPONSE,
+        ),
+        (
+            ModelResponse(
+                structured_output={'summary': 'Missing required source references.'},
+                completion_status=ModelCompletionStatus.COMPLETE,
+            ),
+            ModelGatewayErrorCode.MALFORMED_RESPONSE,
+        ),
+    ],
+)
+def test_v7_isolated_review_rejects_tools_incomplete_and_unsourced_results(
+    response: ModelResponse,
+    expected_code: ModelGatewayErrorCode,
+) -> None:
+    evidence = tuple(
+        AgentEvidenceReference(evidence_id=f'ev_{index}', media_type='image/jpeg')
+        for index in range(5)
+    )
+
+    with pytest.raises(ModelGatewayError) as error:
+        GatewayAgent(_RecordingGateway([response])).propose_turn(
+            _context('Compare these damage photos.', evidence=evidence)
+        )
+
+    assert error.value.code is expected_code
 
 
 def test_v7_authority_budget_overflow_returns_model_free_safe_clarification() -> None:

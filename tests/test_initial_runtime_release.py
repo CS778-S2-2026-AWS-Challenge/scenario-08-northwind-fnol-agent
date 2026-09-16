@@ -289,6 +289,80 @@ def test_v7_release_rejects_versioned_registry_drift(
         resolver.resolve_for_turn()
 
 
+@pytest.mark.parametrize(
+    ('mutation', 'expected_error'),
+    [
+        ('prompt_mode', 'Prompt Pack'),
+        ('fragment_budget', 'exceeds budget'),
+        ('schema_contract', 'schema registry'),
+        ('provider_catalogue', 'model catalogue'),
+        ('model_prompt_version', 'model binding'),
+        ('route_policy', 'route or budget policy'),
+        ('feature_set', 'feature and cache set'),
+    ],
+)
+def test_v7_atomic_release_rejects_each_incomplete_published_component(
+    mutation: str,
+    expected_error: str,
+) -> None:
+    configurations = ConfigurationRepository()
+    releases = ReleaseSetRepository()
+    valid = install_initial_runtime_release(
+        _settings(),
+        configurations,
+        releases,
+        KnowledgeAdminRepository(),
+    )
+    assert valid is not None
+    policy = RuntimeAgentPolicyResolver(
+        RuntimeConfigurationResolver(
+            configurations,
+            releases,
+            environment='test',
+            runtime_profile='fixture',
+        )
+    ).resolve_for_turn()
+    assert policy is not None
+    snapshot = policy.runtime_snapshot
+    instruction = policy.instruction
+    tool_policy = policy.tool_policy
+    controlled_rules = policy.controlled_rules
+    features = policy.features
+
+    if mutation == 'prompt_mode':
+        instruction = instruction.model_copy(update={'composition_mode': 'single'})
+    elif mutation == 'fragment_budget':
+        fragments = list(instruction.fragments)
+        fragments[0] = fragments[0].model_copy(update={'content': 'oversized ' * 1000})
+        instruction = instruction.model_copy(update={'fragments': fragments})
+    elif mutation == 'schema_contract':
+        schemas = deepcopy(tool_policy.schema_registry)
+        schemas['claimant.answer.v1'] = {'type': 'object'}
+        tool_policy = tool_policy.model_copy(update={'schema_registry': schemas})
+    elif mutation == 'provider_catalogue':
+        tool_policy = tool_policy.model_copy(update={'provider_capabilities': {}})
+    elif mutation == 'model_prompt_version':
+        configurations_by_slot = dict(snapshot.configurations)
+        model = configurations_by_slot['model:qwen-local']
+        configurations_by_slot['model:qwen-local'] = model.model_copy(
+            update={'values': {**model.values, 'prompt_version': 'northwind-fnol-claimant-v6'}}
+        )
+        snapshot = replace(snapshot, configurations=configurations_by_slot)
+    elif mutation == 'route_policy':
+        controlled_rules = controlled_rules.model_copy(update={'route_policy_version': None})
+    else:
+        features = features.model_copy(update={'fragmented_prompt': False})
+
+    with pytest.raises(RuntimeConfigurationResolutionError, match=expected_error):
+        RuntimeAgentPolicyResolver._validate_complete_v7_release(
+            snapshot,
+            instruction,
+            tool_policy,
+            controlled_rules,
+            features,
+        )
+
+
 def test_published_prompt_content_is_runtime_authority_not_a_container_file_mirror() -> None:
     configurations = ConfigurationRepository()
     releases = ReleaseSetRepository()
