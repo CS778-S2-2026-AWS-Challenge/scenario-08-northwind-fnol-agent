@@ -8,13 +8,19 @@ from typing import Any
 import pytest
 from journey_runs.household import (
     CONTENTS,
+    CONTENTS_CONFLICTING_OWNERSHIP,
+    CONTENTS_EXPIRED_VALUATION,
+    CONTENTS_ILLEGIBLE_RECEIPT,
+    CONTENTS_NOT_HELD,
+    CONTENTS_THEFT,
     HOME,
+    HOME_ILLEGIBLE,
     KNOWN_STOPS,
     HouseholdRun,
     HouseholdScenario,
     run_household,
 )
-from journey_runs.motor_collision import MOTOR_COLLISION_PACK, run_motor_collision
+from journey_runs.motor_collision import MOTOR_COLLISION_PACK, run_motor_collision, run_motor_journey
 from journey_runs.record import (
     AgentTurn,
     Arrival,
@@ -317,3 +323,67 @@ def test_a_capability_is_unavailable_only_for_a_step_the_run_did_not_attempt() -
         JourneyRunRecord.model_validate(
             _record(unavailable_capabilities=attempted, result_class='unavailable')
         )
+
+
+# --- Multi-turn motor journey fixtures (PRES-01 / PRES-02) -------------------------------
+
+
+@pytest.mark.parametrize('fixture_name', ['PRES-01', 'PRES-02'], ids=['pres01', 'pres02'])
+def test_a_multi_turn_motor_journey_runs_end_to_end_and_records_honestly(fixture_name: str) -> None:
+    record = run_motor_journey(fixture_name, head='test')
+
+    assert JourneyRunRecord.model_validate_json(record.model_dump_json()) == record
+    # Every step the runner attempted must succeed; a failure would be a new defect to report.
+    assert {step.outcome for step in record.steps} == {StepOutcome.SUCCEEDED}
+    # Multi-turn journeys replay more than one claimant message.
+    assert len(record.agent_turns) >= 3
+    # The handoff / review fixtures do not reach consent or assessor routing, so those
+    # pack materials are honestly recorded as not delivered and the run is `partial`.
+    assert record.result_class is ResultClass.PARTIAL
+    not_delivered = [m.path for m in record.materials if m.arrival is Arrival.NOT_DELIVERED]
+    assert 'motor/motor-consent-record.pdf' in not_delivered
+    assert 'motor/motor-assessment-v2.pdf' in not_delivered
+    # No untracked disagreement.
+    assert [check.seam for check in record.seam_checks if check.defect_ref == 'untracked'] == []
+    assert all(check.holds for check in record.visibility_checks)
+
+
+def test_the_at01_motor_journey_is_unchanged_after_multi_turn_support() -> None:
+    record = run_motor_journey('AT-01', head='test')
+    assert len(record.steps) == 14
+    assert record.final_state.claim_number is not None
+    assert record.result_class is not ResultClass.COMPLETED
+
+
+# --- Household material-variant scenarios ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'scenario',
+    [HOME_ILLEGIBLE, CONTENTS_THEFT, CONTENTS_ILLEGIBLE_RECEIPT, CONTENTS_EXPIRED_VALUATION,
+     CONTENTS_CONFLICTING_OWNERSHIP, CONTENTS_NOT_HELD],
+    ids=['home_illegible', 'contents_theft', 'contents_illegible_receipt',
+         'contents_expired_valuation', 'contents_conflicting_ownership', 'contents_not_held'],
+)
+def test_a_household_material_variant_runs_and_records_its_pack(scenario: HouseholdScenario) -> None:
+    run = run_household(scenario, head='test')
+    record = run.record
+
+    assert JourneyRunRecord.model_validate_json(record.model_dump_json()) == record
+    assert all(check.holds for check in record.visibility_checks)
+    assert [check.seam for check in record.seam_checks if check.defect_ref == 'untracked'] == []
+    assert record.result_class is not ResultClass.COMPLETED
+    # The variant pack must be reflected in the record's materials.
+    pack_paths = {m.path for m in scenario.pack}
+    record_paths = {m.path for m in record.materials}
+    assert pack_paths == record_paths
+    # A variant that adds a NO_ROUTE material must record it as such.
+    if scenario.scenario_id == 'contents-damaged-item-authority-not-held':
+        assert any(
+            m.path == 'contents/contents-authority-outcome-not-held' and m.arrival is Arrival.NO_ROUTE
+            for m in record.materials
+        )
+    # A variant that replaces a material must not carry the original.
+    if scenario.scenario_id == 'home-water-ingress-illegible-note':
+        assert not any(m.path == 'home/home-repair-assessment.pdf' for m in record.materials)
+        assert any(m.path == 'home/home-attendance-note-illegible.pdf' for m in record.materials)

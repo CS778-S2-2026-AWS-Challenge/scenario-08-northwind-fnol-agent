@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -197,7 +197,150 @@ CONTENTS = HouseholdScenario(
     unavailable={'contents.items': 'contents item capture'},
 )
 
-SCENARIOS = {scenario.family: scenario for scenario in (HOME, CONTENTS)}
+# --- Material-variant scenarios -----------------------------------------------------------
+# Each variant keeps the base opening/answers (the controlled Agent does not parse material
+# content) but carries a different pack, so the run records a genuinely different input
+# combination. The `not-obtainable` / `not-held` materials have no bytes and are recorded as
+# NO_ROUTE, matching their declared condition.
+
+HOME_ILLEGIBLE = replace(
+    HOME,
+    scenario_id='home-water-ingress-illegible-note',
+    pack_id='home-water-ingress-illegible-v1',
+    pack=tuple(
+        PackMaterial(
+            'home/home-attendance-note-illegible.pdf',
+            'Incident evidence',
+            'claimant',
+            Arrival.CLAIMANT_UPLOAD,
+            'incident_image',
+            'application/pdf',
+            'Unreadable attendance note supplied by the claimant (invalid material condition).',
+        )
+        if material.path == 'home/home-repair-assessment.pdf'
+        else material
+        for material in HOME.pack
+    ),
+)
+
+CONTENTS_THEFT = replace(
+    CONTENTS,
+    scenario_id='contents-theft-laptop',
+    pack_id='contents-theft-laptop-v1',
+    opening=(
+        'My laptop was stolen from my home yesterday morning. The front window was forced '
+        'and the laptop is gone.'
+    ),
+    answers={
+        **_SHARED_ANSWERS,
+        'loss.description': 'A Dell XPS 13 laptop was stolen from the lounge.',
+        'contents.items': (
+            'The stolen item is a Dell XPS 13 laptop I bought in 2024 for 2400 dollars.'
+        ),
+    },
+    pack=CONTENTS.pack
+    + (
+        PackMaterial(
+            'contents/contents-police-theft-report.pdf',
+            'Authority or official report',
+            'external_party',
+            Arrival.CLAIMANT_UPLOAD,
+            'police_report',
+            'application/pdf',
+            f'Police theft report supplied by the claimant (P3-NZP-REPORT, manual, {FORMS}).',
+        ),
+    ),
+)
+
+CONTENTS_ILLEGIBLE_RECEIPT = replace(
+    CONTENTS,
+    scenario_id='contents-damaged-item-illegible-receipt',
+    pack_id='contents-damaged-item-illegible-receipt-v1',
+    pack=tuple(
+        PackMaterial(
+            'contents/contents-receipt-illegible.pdf',
+            'Identity and ownership evidence',
+            'claimant',
+            Arrival.CLAIMANT_UPLOAD,
+            'proof_of_ownership',
+            'application/pdf',
+            'Illegible purchase receipt supplied by the claimant (invalid material condition).',
+        )
+        if material.path == 'contents/contents-purchase-receipt.pdf'
+        else material
+        for material in CONTENTS.pack
+    ),
+)
+
+CONTENTS_EXPIRED_VALUATION = replace(
+    CONTENTS,
+    scenario_id='contents-damaged-item-expired-valuation',
+    pack_id='contents-damaged-item-expired-valuation-v1',
+    pack=CONTENTS.pack
+    + (
+        PackMaterial(
+            'contents/contents-valuation-expired.pdf',
+            'Identity and ownership evidence',
+            'external_party',
+            Arrival.CLAIMANT_UPLOAD,
+            'proof_of_ownership',
+            'application/pdf',
+            'Expired valuation certificate supplied by the claimant (expired material condition).',
+        ),
+    ),
+)
+
+CONTENTS_CONFLICTING_OWNERSHIP = replace(
+    CONTENTS,
+    scenario_id='contents-damaged-item-conflicting-ownership',
+    pack_id='contents-damaged-item-conflicting-ownership-v1',
+    pack=CONTENTS.pack
+    + (
+        PackMaterial(
+            'contents/contents-ownership-conflicting.pdf',
+            'Identity and ownership evidence',
+            'external_party',
+            Arrival.CLAIMANT_UPLOAD,
+            'proof_of_ownership',
+            'application/pdf',
+            'Conflicting ownership record supplied by the claimant (disputed material condition).',
+        ),
+    ),
+)
+
+CONTENTS_NOT_HELD = replace(
+    CONTENTS,
+    scenario_id='contents-damaged-item-authority-not-held',
+    pack_id='contents-damaged-item-authority-not-held-v1',
+    pack=CONTENTS.pack
+    + (
+        PackMaterial(
+            'contents/contents-authority-outcome-not-held',
+            'Authority or official report',
+            'external_party',
+            Arrival.NO_ROUTE,
+            note='The investigation outcome report is not held by any party (unavailable material '
+            f'condition; P3-NZP-REPORT, manual, {FORMS}).',
+        ),
+    ),
+)
+
+SCENARIOS = {
+    scenario.scenario_id: scenario
+    for scenario in (
+        HOME,
+        HOME_ILLEGIBLE,
+        CONTENTS,
+        CONTENTS_THEFT,
+        CONTENTS_ILLEGIBLE_RECEIPT,
+        CONTENTS_EXPIRED_VALUATION,
+        CONTENTS_CONFLICTING_OWNERSHIP,
+        CONTENTS_NOT_HELD,
+    )
+}
+# Backwards-compatible family aliases for the original CLI (`--scenario home` / `contents`).
+SCENARIOS['home'] = HOME
+SCENARIOS['contents'] = CONTENTS
 
 
 def run_household(scenario: HouseholdScenario, *, head: str) -> HouseholdRun:

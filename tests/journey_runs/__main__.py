@@ -16,13 +16,15 @@ from pathlib import Path
 
 from .engine import current_head
 from .household import SCENARIOS, run_household
-from .motor_collision import run_motor_collision
+from .motor_collision import MOTOR_JOURNEY_FIXTURES, run_motor_journey
 from .record import JourneyRunRecord
+
+_MOTOR_CHOICES = ['motor', *[f'motor:{name}' for name in MOTOR_JOURNEY_FIXTURES]]
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--scenario', choices=['motor', *SCENARIOS], default='motor')
+    parser.add_argument('--scenario', choices=[*_MOTOR_CHOICES, *SCENARIOS], default='motor')
     parser.add_argument('--runs', type=int, default=1)
     parser.add_argument('--out', type=Path)
     parser.add_argument('--schema', action='store_true', help='print the record JSON Schema')
@@ -36,9 +38,14 @@ def main(argv: list[str] | None = None) -> int:
     head = current_head()
     classes: Counter[str] = Counter()
     reasons: Counter[str] = Counter()
+    scenario_label = arguments.scenario
     for _ in range(arguments.runs):
-        if arguments.scenario == 'motor':
-            record = run_motor_collision(head=head)
+        if arguments.scenario == 'motor' or arguments.scenario.startswith('motor:'):
+            fixture_name = (
+                arguments.scenario.split(':', 1)[1] if ':' in arguments.scenario else 'AT-01'
+            )
+            record = run_motor_journey(fixture_name, head=head)
+            scenario_label = f'motor:{fixture_name}'
         else:
             record = run_household(SCENARIOS[arguments.scenario], head=head).record
         (arguments.out / f'{record.run_id}.json').write_text(
@@ -46,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         classes[record.result_class.value] += 1
         reasons[record.result_reason] += 1
-    print(f'head {head}: {arguments.runs} {arguments.scenario} run(s) written to {arguments.out}')
+    print(f'head {head}: {arguments.runs} {scenario_label} run(s) written to {arguments.out}')
     for result_class, count in classes.most_common():
         print(f'  {result_class}: {count}')
     for reason, count in reasons.most_common():
