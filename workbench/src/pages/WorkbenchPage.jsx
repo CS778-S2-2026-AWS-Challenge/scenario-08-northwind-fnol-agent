@@ -53,6 +53,10 @@ export default function WorkbenchPage() {
   currentClaimIdRef.current = claimId
   const detailRequestId = useRef(0)
   const backgroundRefreshId = useRef(0)
+  const realtimeCursorRef = useRef(null)
+  const realtimeSeenEventIdsRef = useRef(new Set())
+  const currentSectionRef = useRef('summary')
+  const isConversationsRef = useRef(false)
   const resourceRequestIds = useRef({})
   const conversationRequestId = useRef(0)
   const deliveryReadbacksRef = useRef(new Map())
@@ -76,6 +80,8 @@ export default function WorkbenchPage() {
   const currentSection = CLAIM_SECTIONS.has(routeSection)
     ? routeSection
     : currentTab?.section || 'summary'
+  currentSectionRef.current = currentSection
+  isConversationsRef.current = isConversations
   const deliveryReadbackScope = currentSection === 'conversation' && claimId
     ? JSON.stringify([
         claimId,
@@ -831,10 +837,139 @@ export default function WorkbenchPage() {
     }
   }, [claimId, currentSection, detail?.claim_id, detail?.revision, loadSectionResources])
   useEffect(() => {
-    if (!claimId) return undefined
-    const timer = window.setInterval(() => refreshDetail(claimId), 20000)
-    return () => window.clearInterval(timer)
-  }, [claimId, refreshDetail])
+    const controller = new AbortController()
+    let active = true
+    let reconnectDelay = 1000
+
+    function rememberEvent(eventId) {
+      if (!eventId) return
+      realtimeSeenEventIdsRef.current.add(eventId)
+      while (realtimeSeenEventIdsRef.current.size > 100) {
+        const oldest = realtimeSeenEventIdsRef.current.values().next().value
+        realtimeSeenEventIdsRef.current.delete(oldest)
+      }
+    }
+
+    async function refreshFullSnapshot() {
+      await loadClaims({ propagateError: true })
+      if (!active) return
+
+      if (isConversationsRef.current) {
+        await loadConversations({ propagateError: true })
+      }
+
+      const id = currentClaimIdRef.current
+      if (!id) return
+      await loadDetail(id, { propagateError: true })
+      if (!active || currentClaimIdRef.current !== id) return
+      await loadSectionResources(id, currentSectionRef.current, { propagateError: true })
+    }
+
+    async function refreshConversation(id) {
+      const requestedSessionId = selectedConversationSessionIdRef.current
+        || detailRef.current?.active_session_id
+        || null
+      const result = await loadConversationResources(id, requestedSessionId)
+      if (result?.status === 'failed') throw result.error
+    }
+
+    async function applyRealtimeEvent(delivery) {
+      if (!active) return
+      if (delivery.type === 'resync_required') {
+        await refreshFullSnapshot()
+        realtimeCursorRef.current = null
+        realtimeSeenEventIdsRef.current.clear()
+        reconnectDelay = 1000
+        return
+      }
+      if (delivery.type !== 'resources.changed') return
+
+      const eventId = delivery.data?.event_id
+      if (eventId && realtimeSeenEventIdsRef.current.has(eventId)) {
+        if (delivery.cursor) realtimeCursorRef.current = delivery.cursor
+        return
+      }
+
+      const resources = new Set(delivery.data?.resources || [])
+      const eventClaimId = delivery.data?.claim_id
+      const openClaimId = currentClaimIdRef.current
+      const refreshes = []
+
+      if (resources.has('queue')) {
+        refreshes.push(loadClaims({ propagateError: true }))
+      }
+
+      if (
+        isConversationsRef.current
+        && ['claim', 'messages', 'handoffs', 'queue'].some((resource) => resources.has(resource))
+      ) {
+        refreshes.push(loadConversations({ propagateError: true }))
+      }
+
+      if (openClaimId && eventClaimId === openClaimId) {
+        if (resources.has('claim') || resources.has('handoffs')) {
+          refreshes.push(loadDetail(openClaimId, { propagateError: true }))
+        }
+
+        const section = currentSectionRef.current
+        if (resources.has('messages') && section === 'conversation') {
+          refreshes.push(refreshConversation(openClaimId))
+        }
+        if (
+          (resources.has('evidence') && section === 'evidence')
+          || (resources.has('work_items') && section === 'activity')
+          || (resources.has('external_tasks') && section === 'external-services')
+        ) {
+          refreshes.push(loadSectionResources(openClaimId, section, { propagateError: true }))
+        }
+      }
+
+      await Promise.all(refreshes)
+      if (!active) return
+      rememberEvent(eventId)
+      if (delivery.cursor) realtimeCursorRef.current = delivery.cursor
+      reconnectDelay = 1000
+    }
+
+    async function connect() {
+      while (active && !controller.signal.aborted) {
+        try {
+          await workbenchApi.realtimeEvents(token, {
+            cursor: realtimeCursorRef.current,
+            signal: controller.signal,
+            onEvent: applyRealtimeEvent,
+          })
+        } catch (streamFailure) {
+          if (!active || controller.signal.aborted) return
+          if (streamFailure?.code === 'INVALID_EVENT_CURSOR') {
+            try {
+              await refreshFullSnapshot()
+              realtimeCursorRef.current = null
+              realtimeSeenEventIdsRef.current.clear()
+            } catch {
+              // The bounded reconnect loop retries the authoritative resync.
+            }
+          }
+        }
+        if (!active || controller.signal.aborted) return
+        await new Promise((resolve) => globalThis.setTimeout(resolve, reconnectDelay))
+        reconnectDelay = Math.min(reconnectDelay * 2, 8000)
+      }
+    }
+
+    connect()
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [
+    loadClaims,
+    loadConversationResources,
+    loadConversations,
+    loadDetail,
+    loadSectionResources,
+    token,
+  ])
   useEffect(() => {
     if (filterMetadata && claimId && routeSection && !CLAIM_SECTIONS.has(routeSection)) {
       navigate(queueRoute(`/workbench/claims/${claimId}`, queueFilters), { replace: true })
