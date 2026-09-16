@@ -8,6 +8,8 @@ from backend.domain.agent_context_runtime import VerifiedConversationSummary
 from backend.domain.models import FormStatus, MessageRecord, MessageVisibility, WorkingClaim
 from backend.repositories.protocols import IdempotencyConflict, PersistenceRepository
 from backend.services.context_budget import estimate_json_tokens
+from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
+from backend.services.runtime_configuration import RuntimeConfigurationResolutionError
 
 logger = logging.getLogger(__name__)
 
@@ -116,3 +118,25 @@ def compact_conversation_after_response(
             'conversation_compaction.failed',
             extra={'claim_id': claim_id, 'session_id': session_id},
         )
+
+
+def compact_conversation_after_response_if_enabled(
+    repository: PersistenceRepository,
+    policy_resolver: RuntimeAgentPolicyResolver,
+    customer_id: str,
+    claim_id: str,
+    session_id: str,
+) -> None:
+    """Compact only for a release that explicitly enables verified summaries."""
+
+    try:
+        policy = policy_resolver.resolve_for_turn()
+    except RuntimeConfigurationResolutionError:
+        logger.exception(
+            'conversation_compaction.policy_unavailable',
+            extra={'claim_id': claim_id, 'session_id': session_id},
+        )
+        return
+    if policy is None or not policy.features.verified_rolling_summary:
+        return
+    compact_conversation_after_response(repository, customer_id, claim_id, session_id)

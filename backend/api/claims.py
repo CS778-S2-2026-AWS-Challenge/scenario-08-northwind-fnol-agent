@@ -52,7 +52,9 @@ from backend.services.claims import (
     start_claim,
     update_form,
 )
-from backend.services.conversation_compaction import compact_conversation_after_response
+from backend.services.conversation_compaction import (
+    compact_conversation_after_response_if_enabled,
+)
 from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
 from backend.services.external_service_entry import ExternalServiceEntryDecision
 from backend.services.external_service_offers import (
@@ -467,6 +469,7 @@ def create_message(
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> MessageTurnResponse:
+    runtime_policy_resolver = runtime_agent_policy_for(request)
     if payload.model_profile_id is not None:
         payload = payload.model_copy(
             update={'model_profile_id': select_model_profile(request, payload.model_profile_id)}
@@ -481,7 +484,7 @@ def create_message(
         payload=payload,
         idempotency_key=idempotency_key,
         if_match=if_match,
-        runtime_agent_policy_resolver=runtime_agent_policy_for(request),
+        runtime_agent_policy_resolver=runtime_policy_resolver,
         action_dispatcher=action_dispatcher_for(request),
         evidence_storage=evidence_storage_for(request),
         assessor_adapter=assessor_adapter_for(request),
@@ -489,8 +492,9 @@ def create_message(
         external_capability_dispatcher=external_capability_dispatcher_for(request),
     )
     background_tasks.add_task(
-        compact_conversation_after_response,
+        compact_conversation_after_response_if_enabled,
         repository_for(request),
+        runtime_policy_resolver,
         principal.subject,
         claim_id,
         session_id,

@@ -21,6 +21,8 @@ def build_cache_plan(
     bundle: PromptBundle,
     request_profile: RequestProfile,
     schema_id: str,
+    schema: dict[str, object],
+    tools: list[dict[str, object]],
     context_plan: ContextPlan,
     layout_version: str = 'northwind-cache-layout-v1',
 ) -> CachePlan:
@@ -30,18 +32,17 @@ def build_cache_plan(
         for item in bundle.fragment_refs
         if item.fragment_id.startswith(('family.', 'task.', 'capability.'))
     )
-    tool_manifest_id = (
-        f'{request_profile.profile_id}:{request_profile.version}:'
-        + (','.join(request_profile.tool_names) if request_profile.tool_names else 'none')
+    tool_manifest_id = f'{request_profile.profile_id}:{request_profile.version}:' + (
+        ','.join(request_profile.tool_names) if request_profile.tool_names else 'none'
     )
     fingerprint_payload = {
         'layout_version': layout_version,
         'prompt_pack_version': bundle.prompt_pack_version,
-        'fragment_refs': [
-            f'{item.fragment_id}@{item.version}' for item in bundle.fragment_refs
-        ],
+        'fragment_refs': [f'{item.fragment_id}@{item.version}' for item in bundle.fragment_refs],
         'schema_id': schema_id,
+        'schema': schema,
         'tool_manifest_id': tool_manifest_id,
+        'tools': tools,
     }
     prefix_fingerprint = hashlib.sha256(
         json.dumps(fingerprint_payload, separators=(',', ':'), sort_keys=True).encode('utf-8')

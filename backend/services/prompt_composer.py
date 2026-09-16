@@ -83,6 +83,28 @@ def _initial_fragment_ids(route: TurnRoute) -> set[str]:
     return fragment_ids
 
 
+def _validate_applicability(
+    definition: PromptFragmentDefinition,
+    route: TurnRoute,
+) -> None:
+    applicability = definition.applies_when
+    if applicability.product_family and route.product_family not in applicability.product_family:
+        raise ValueError(
+            f'Prompt fragment {definition.fragment_id} does not apply to product family '
+            f'{route.product_family!r}.'
+        )
+    if applicability.tasks and route.task.value not in applicability.tasks:
+        raise ValueError(
+            f'Prompt fragment {definition.fragment_id} does not apply to task {route.task.value!r}.'
+        )
+    if applicability.capability_ids and not set(applicability.capability_ids).intersection(
+        route.capability_ids
+    ):
+        raise ValueError(
+            f'Prompt fragment {definition.fragment_id} does not apply to the selected capabilities.'
+        )
+
+
 def compose_prompt(
     route: TurnRoute,
     manifest: PromptPackManifest | None = None,
@@ -105,6 +127,7 @@ def compose_prompt(
         include_requirements(by_id[fragment_id])
 
     for fragment_id in selected_ids:
+        _validate_applicability(by_id[fragment_id], route)
         conflicts = set(by_id[fragment_id].conflicts_with) & selected_ids
         if conflicts:
             raise ValueError(f'Prompt fragments conflict: {fragment_id} and {sorted(conflicts)}.')

@@ -278,9 +278,13 @@ The executable claimant Prompt Pack is `northwind-fnol-claimant-v7`, authored un
 `backend/prompts/v7/` and embedded immutably in the published `agent_instruction` configuration.
 Runtime deterministically composes core, one family, one task, and matching capability fragments;
 it then injects a budgeted Claim projection, bounded references, and the selected narrow schema.
-The versioned v6 binding remains an explicit rollback artifact and never activates automatically
-after a v7 failure. Changing executable fragment content requires a new fragment or pack version
-and a complete atomic Release Set.
+The versioned `config/model-runtime-bindings-v6.json` manifest remains an explicit rollback
+artifact. A never-initialised scope started with that manifest publishes the complete v6 Runtime
+rather than rewriting its bindings to v7. An existing scope requires an operator to select or
+publish the matching complete v6 Release Set as well as the v6 deployment allow-list; changing
+the manifest alone never mixes it into an active v7 release. A v7 failure never activates v6
+automatically. Changing executable fragment content requires a new fragment or pack version and a
+complete atomic Release Set.
 
 The repository includes configuration and transport tests, but a deployment is live only after an
 authorised model invocation succeeds in its selected AWS account and region. Model listing or

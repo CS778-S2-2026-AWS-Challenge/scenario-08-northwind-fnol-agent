@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -28,15 +29,18 @@ from backend.domain.external_service_registry import capability_context
 from backend.domain.model_gateway import (
     ModelCapabilities,
     ModelCompletionStatus,
+    ModelEvidenceContent,
     ModelGatewayError,
     ModelGatewayErrorCode,
     ModelRequest,
     ModelResponse,
+    ModelTextContent,
     ModelToolCall,
 )
 from backend.domain.models import (
     ActorReference,
     ActorType,
+    AgentAction,
     Channel,
     CustomerNextStep,
     FormSource,
@@ -48,7 +52,8 @@ from backend.domain.models import (
     StructuredFormField,
     WorkingClaim,
 )
-from backend.services.agent import AgentEvidenceReference, AgentTurnContext
+from backend.domain.prompt_pack import PromptApplicability
+from backend.services.agent import AgentEvidenceReference, AgentTurnContext, InvariantGuardedAgent
 from backend.services.context_planner import ContextBudgetExceeded, plan_context
 from backend.services.context_resolver import TurnContextResolver
 from backend.services.model_agent import GatewayAgent
@@ -238,6 +243,16 @@ class _RecordingGateway:
         return self.complete(request)
 
 
+class _FailingRecordingGateway(_RecordingGateway):
+    def __init__(self, error: ModelGatewayError) -> None:
+        super().__init__([])
+        self.error = error
+
+    def complete(self, request: ModelRequest) -> ModelResponse:
+        self.requests.append(request)
+        raise self.error
+
+
 class _EvidenceResolver:
     def resolve(self, evidence_id: str, media_type: str) -> bytes | None:
         return f'{evidence_id}:{media_type}'.encode()
@@ -290,6 +305,20 @@ def test_prompt_manifest_compiles_one_family_in_stable_order() -> None:
         < refs.index('family.motor')
         < refs.index('task.external-support')
     )
+
+
+def test_prompt_composer_rejects_a_selected_fragment_outside_its_applicability() -> None:
+    route = route_turn(_context('My car was damaged.'))
+    manifest = load_prompt_manifest()
+    fragments = [
+        item.model_copy(update={'applies_when': PromptApplicability(product_family=['home'])})
+        if item.fragment_id == 'family.motor'
+        else item
+        for item in manifest.fragments
+    ]
+
+    with pytest.raises(ValueError, match='does not apply to product family'):
+        compose_prompt(route, manifest.model_copy(update={'fragments': fragments}))
 
 
 @pytest.mark.parametrize(
@@ -362,7 +391,8 @@ def test_request_profiles_fail_closed_against_provider_capabilities() -> None:
 
 
 def test_ordinary_model_plan_is_single_call_tool_free_and_budgeted() -> None:
-    plan = plan_model_turn(_context('My car was rear-ended this morning.'))
+    context = _context('My car was rear-ended this morning.')
+    plan = plan_model_turn(context)
     assert plan is not None
     assert plan.request_profile.profile_id == 'claimant.intake.v1'
     assert plan.request_profile.max_model_invocations == 1
@@ -374,6 +404,31 @@ def test_ordinary_model_plan_is_single_call_tool_free_and_budgeted() -> None:
     assert plan.cache_plan.layout_version == 'test-cache-v7'
     assert len(plan.cache_plan.prefix_fingerprint) == 64
     assert plan.cache_plan.tool_manifest_id.endswith(':none')
+    repeated = plan_model_turn(context)
+    assert repeated is not None
+    assert plan.cache_plan == repeated.cache_plan
+
+
+def test_cache_prefix_fingerprint_tracks_actual_published_schema_content() -> None:
+    context = _context('My car was rear-ended this morning.')
+    original = plan_model_turn(context)
+    assert original is not None
+    policy = context.runtime_policy
+    assert policy is not None
+    schemas = deepcopy(policy.tool_policy.schema_registry)
+    schemas['claimant.intake-patch.v1'] = {
+        **schemas['claimant.intake-patch.v1'],
+        'description': 'A distinct published schema revision.',
+    }
+    changed_policy = replace(
+        policy,
+        tool_policy=policy.tool_policy.model_copy(update={'schema_registry': schemas}),
+    )
+
+    changed = plan_model_turn(replace(context, runtime_policy=changed_policy))
+
+    assert changed is not None
+    assert changed.cache_plan.prefix_fingerprint != original.cache_plan.prefix_fingerprint
 
 
 def test_current_status_uses_one_tool_free_answer_profile_without_older_history() -> None:
@@ -595,6 +650,33 @@ def test_conflicting_rolling_summary_is_omitted_in_favour_of_claim_state() -> No
     assert 'conversation.summary' not in plan.context_payload
 
 
+def test_summary_fact_removed_from_claim_state_is_not_reintroduced() -> None:
+    timestamp = datetime.now(UTC)
+    claim = _claim()
+    summary = VerifiedConversationSummary(
+        summary_id='sum_removed_fact',
+        claim_id=claim.claim_id,
+        session_id='ses_v7',
+        source_message_ids=['msg_old'],
+        covered_message_range='msg_old..msg_old',
+        generator_profile_and_version='deterministic-verified-compactor@v1',
+        claim_revision_at_generation=claim.revision,
+        summary=json.dumps(
+            {'confirmed_claim_facts': {'incident.location': 'An obsolete location'}}
+        ),
+        verified_against_claim_revision=claim.revision,
+        created_at=timestamp.isoformat(),
+    )
+
+    plan = plan_model_turn(
+        replace(_context('Continue my motor claim.'), claim=claim, rolling_summary=summary)
+    )
+
+    assert plan is not None
+    assert plan.context_plan.summary_state_mismatch is True
+    assert 'conversation.summary' not in plan.context_payload
+
+
 def test_context_planner_refuses_to_truncate_authority_context() -> None:
     context = _context('A' * 3000)
     route = route_turn(context)
@@ -635,7 +717,18 @@ def test_provider_gateway_capabilities_remain_separate_from_v7_profiles() -> Non
     assert request_profile('claimant.intake.v1').tool_names == []
 
 
-def test_v7_ordinary_turn_makes_exactly_one_tool_free_bounded_call() -> None:
+@pytest.mark.parametrize(
+    ('message', 'expected_task'),
+    [
+        ('My car was rear-ended this morning.', TurnTask.INTAKE),
+        ('Actually, change the location to Queen Street.', TurnTask.CORRECTION),
+        ('Yes, that is right.', TurnTask.CONFIRMATION),
+    ],
+)
+def test_v7_ordinary_turn_makes_exactly_one_tool_free_bounded_call(
+    message: str,
+    expected_task: TurnTask,
+) -> None:
     gateway = _RecordingGateway(
         [
             ModelResponse(
@@ -645,14 +738,39 @@ def test_v7_ordinary_turn_makes_exactly_one_tool_free_bounded_call() -> None:
         ]
     )
 
-    proposal = GatewayAgent(gateway).propose_turn(_context('My car was rear-ended this morning.'))
+    proposal = GatewayAgent(gateway).propose_turn(_context(message))
 
     assert len(gateway.requests) == 1
     assert gateway.requests[0].tools == []
     assert gateway.requests[0].max_output_tokens == 180
     assert proposal.runtime_trace is not None
     assert proposal.runtime_trace.request_profile_id == 'claimant.intake.v1'
+    assert proposal.runtime_trace.route == f'motor:{expected_task.value}'
     assert len(proposal.runtime_trace.invocations) == 1
+
+
+def test_v7_human_handoff_interrupts_before_any_provider_invocation() -> None:
+    gateway = _RecordingGateway([])
+
+    proposal = InvariantGuardedAgent(GatewayAgent(gateway)).propose_turn(
+        _context('I want to speak to a person.')
+    )
+
+    assert proposal.action is AgentAction.HANDOFF
+    assert proposal.reason_codes == ['HUMAN_SUPPORT_REQUESTED']
+    assert gateway.requests == []
+
+
+def test_v7_timeout_stops_after_one_request_and_returns_no_proposal() -> None:
+    gateway = _FailingRecordingGateway(
+        ModelGatewayError(ModelGatewayErrorCode.TIMEOUT, retryable=True)
+    )
+
+    with pytest.raises(ModelGatewayError) as error:
+        GatewayAgent(gateway).propose_turn(_context('My car was rear-ended this morning.'))
+
+    assert error.value.code is ModelGatewayErrorCode.TIMEOUT
+    assert len(gateway.requests) == 1
 
 
 def test_v7_lookup_allows_one_bounded_resolve_and_one_continuation() -> None:
@@ -746,6 +864,88 @@ def test_v7_multi_evidence_review_uses_one_isolated_read_only_request() -> None:
     assert proposal.external_service_intents == []
     assert proposal.runtime_trace is not None
     assert proposal.runtime_trace.request_profile_id == 'claimant.deep-review.v1'
+
+
+def test_v7_pdf_review_is_labelled_long_document() -> None:
+    reference = 'ctxref:ses_v7:evidence.current'
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                structured_output={
+                    'summary': 'The bounded PDF contains a repair estimate.',
+                    'source_refs': [reference],
+                    'truncated': False,
+                    'limitations': [],
+                },
+                completion_status=ModelCompletionStatus.COMPLETE,
+            )
+        ]
+    )
+
+    GatewayAgent(gateway).propose_turn(
+        _context(
+            'Review this document.',
+            evidence=(
+                AgentEvidenceReference(
+                    evidence_id='ev_pdf',
+                    media_type='application/pdf',
+                ),
+            ),
+        )
+    )
+
+    user_message = gateway.requests[0].messages[1]
+    text_block = user_message.content_blocks[0]
+    assert isinstance(text_block, ModelTextContent)
+    payload = json.loads(text_block.text)
+    assert payload['task']['task_type'] == 'long_document'
+    assert [item['ref'] for item in payload['task']['input_refs']] == [reference]
+
+
+def test_v7_cross_claim_review_does_not_send_unrelated_current_evidence() -> None:
+    reference = 'ctxref:ses_v7:claim-history.customer'
+
+    def load_claim_history(_limit: int) -> dict[str, object]:
+        return {
+            'status': 'evidence_found',
+            'claims': [{'claim_id': 'clm_old', 'revision': 3}],
+            'source_refs': ['claim:clm_old:revision:3'],
+            'limitations': [],
+        }
+
+    context = replace(
+        _context(
+            'Compare this with all previous claims.',
+            evidence=(AgentEvidenceReference(evidence_id='ev_new', media_type='image/jpeg'),),
+        ),
+        claim_history_context_loader=load_claim_history,
+    )
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                structured_output={
+                    'summary': 'One earlier Claim is available.',
+                    'source_refs': [reference],
+                    'truncated': False,
+                    'limitations': [],
+                },
+                completion_status=ModelCompletionStatus.COMPLETE,
+            )
+        ]
+    )
+
+    GatewayAgent(gateway).propose_turn(context)
+
+    request = gateway.requests[0]
+    text_block = request.messages[1].content_blocks[0]
+    assert isinstance(text_block, ModelTextContent)
+    payload = json.loads(text_block.text)
+    assert payload['task']['task_type'] == 'cross_claim'
+    assert [item['ref'] for item in payload['task']['input_refs']] == [reference]
+    assert not any(
+        isinstance(item, ModelEvidenceContent) for item in request.messages[1].content_blocks
+    )
+    assert request.required_capabilities.image_input is False
 
 
 def test_v7_isolated_review_rejects_an_unscoped_source_reference() -> None:

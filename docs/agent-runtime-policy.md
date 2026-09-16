@@ -92,7 +92,8 @@ result through the Action Registry and authority boundary. Model output cannot s
 Set, construct arbitrary context references, enlarge a token budget, or perform a side effect.
 Deprecated flat actions, invented directives, stale references, incompatible provider/profile
 combinations, and published-rule-only interrupts fail before Claim State mutation. v6 remains an
-immutable explicit rollback target and is never an automatic fallback.
+immutable explicit rollback target through its complete binding manifest and matching Release Set;
+an operator must select both, and Runtime never uses it as an automatic fallback.
 
 The configuration layer may restrict capabilities but cannot invent them. Action codes, tool
 names, and branch rule IDs must already exist in their server Registries. The policy must retain

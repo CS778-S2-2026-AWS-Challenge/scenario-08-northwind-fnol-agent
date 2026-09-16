@@ -1,11 +1,14 @@
 """Compose one fully validated v7 model turn before transport."""
 
+import json
+
 from backend.domain.agent_context_runtime import (
     ContextBudgetPolicy,
     PlannedModelTurn,
     VerifiedConversationSummary,
 )
 from backend.domain.configuration import ModelRuntimeConfiguration
+from backend.domain.model_gateway import ModelTool
 from backend.domain.prompt_pack import PromptPackManifest
 from backend.services.agent import AgentTurnContext
 from backend.services.cache_planner import build_cache_plan
@@ -19,10 +22,10 @@ from backend.services.provider_capability_registry import (
 from backend.services.request_profile_registry import request_profile_for_task
 from backend.services.turn_router import route_turn
 
-_CONTEXT_RESOLVE_TOOL: dict[str, object] = {
-    'name': 'context.resolve',
-    'description': 'Resolve one turn-scoped bounded Context Reference.',
-    'input_schema': {
+_CONTEXT_RESOLVE_TOOL = ModelTool(
+    name='context.resolve',
+    description='Resolve one turn-scoped bounded Context Reference.',
+    input_schema={
         'type': 'object',
         'additionalProperties': False,
         'required': ['ref', 'selector', 'max_tokens'],
@@ -32,7 +35,13 @@ _CONTEXT_RESOLVE_TOOL: dict[str, object] = {
             'max_tokens': {'type': 'integer', 'minimum': 1, 'maximum': 600},
         },
     },
-}
+)
+
+
+def context_resolve_tool() -> ModelTool:
+    """Return the single published lookup tool used for planning and transport."""
+
+    return _CONTEXT_RESOLVE_TOOL
 
 
 def plan_model_turn(
@@ -85,8 +94,7 @@ def plan_model_turn(
                     )
                 )
                 or (
-                    route.task.value == 'status_question'
-                    and len(context.conversation_messages) > 4
+                    route.task.value == 'status_question' and len(context.conversation_messages) > 4
                 )
             )
         ),
@@ -98,7 +106,7 @@ def plan_model_turn(
         and runtime_policy.instruction.composition_mode == 'fragmented'
         else provider_capability(model_configuration)
     )
-    if capability.protocol != model_configuration.protocol:
+    if capability != provider_capability(model_configuration):
         raise ValueError('The published provider capability does not match the selected model.')
     validate_profile_compatibility(profile, capability)
     for evidence in context.evidence:
@@ -129,7 +137,10 @@ def plan_model_turn(
     else:
         bundle = compose_prompt(route)
         schema = load_response_schema(profile.schema_id)
-    tools: list[dict[str, object]] = [_CONTEXT_RESOLVE_TOOL] if profile.tool_names else []
+    schema = json.loads(json.dumps(schema, separators=(',', ':'), sort_keys=True))
+    tools: list[dict[str, object]] = (
+        [context_resolve_tool().model_dump(mode='json')] if profile.tool_names else []
+    )
     policy = (
         budget_policy
         or (
@@ -190,6 +201,8 @@ def plan_model_turn(
         bundle=bundle,
         request_profile=profile,
         schema_id=profile.schema_id,
+        schema=schema,
+        tools=tools,
         context_plan=context_plan,
         layout_version=(
             runtime_policy.features.cache_layout_version

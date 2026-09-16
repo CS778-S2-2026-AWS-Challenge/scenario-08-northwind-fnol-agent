@@ -147,6 +147,14 @@ def _catalogue(
             )
         )
     summary_state_mismatch = False
+    if summary is not None and (
+        summary.claim_id != context.claim.claim_id
+        or summary.session_id != context.session_id
+        or summary.verified_against_claim_revision != summary.claim_revision_at_generation
+        or summary.verified_against_claim_revision > context.claim.revision
+    ):
+        summary_state_mismatch = True
+        summary = None
     if summary is not None and summary.claim_revision_at_generation <= context.claim.revision:
         try:
             summary_payload = json.loads(summary.summary)
@@ -156,7 +164,7 @@ def _catalogue(
             summary_facts = summary_payload.get('confirmed_claim_facts')
             if isinstance(summary_facts, dict):
                 summary_state_mismatch = any(
-                    code in context.claim.form and context.claim.form[code].value != value
+                    code not in context.claim.form or context.claim.form[code].value != value
                     for code, value in summary_facts.items()
                 )
         if summary_state_mismatch:
@@ -195,6 +203,9 @@ def _catalogue(
             )
         )
     if context.evidence:
+        isolated_evidence = len(context.evidence) > 4 or any(
+            item.media_type == 'application/pdf' for item in context.evidence
+        )
         evidence_value = [
             {'evidence_id': item.evidence_id, 'media_type': item.media_type, 'status': 'submitted'}
             for item in context.evidence
@@ -204,15 +215,12 @@ def _catalogue(
                 resource_id='evidence.current',
                 resource_type='evidence',
                 load_mode=(
-                    ContextLoadMode.ISOLATED
-                    if len(context.evidence) > 4
-                    or any(item.media_type == 'application/pdf' for item in context.evidence)
-                    else ContextLoadMode.EXPLICIT
+                    ContextLoadMode.ISOLATED if isolated_evidence else ContextLoadMode.EXPLICIT
                 ),
                 priority=3,
                 estimated_tokens=estimate_json_tokens(evidence_value),
                 authority_scope=claim_scope,
-                selectors=['metadata'] if len(context.evidence) > 4 else [],
+                selectors=['metadata'] if isolated_evidence else [],
                 inline_value=evidence_value,
             )
         )
@@ -270,8 +278,7 @@ def _catalogue(
             )
         )
     if 'policy-search' in route.capability_ids and (
-        context.policy_context_loader is not None
-        or context.knowledge_context_loader is not None
+        context.policy_context_loader is not None or context.knowledge_context_loader is not None
     ):
         entries.append(
             ContextCatalogueEntry(
@@ -296,9 +303,7 @@ def _catalogue(
             ContextCatalogueEntry(
                 resource_id='claim-history.customer',
                 resource_type='claim_history',
-                load_mode=(
-                    ContextLoadMode.ISOLATED if cross_claim else ContextLoadMode.REFERENCE
-                ),
+                load_mode=(ContextLoadMode.ISOLATED if cross_claim else ContextLoadMode.REFERENCE),
                 priority=2,
                 estimated_tokens=0,
                 authority_scope=f'customer:{context.claim.customer_id}',

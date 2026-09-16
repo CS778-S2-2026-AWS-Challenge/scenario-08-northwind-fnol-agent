@@ -94,7 +94,7 @@ from backend.services.context_planner import ContextBudgetExceeded
 from backend.services.context_resolver import resolver_for_turn
 from backend.services.isolated_context_executor import execute_isolated_context_plan
 from backend.services.model_operations import ModelOperationsRecorder
-from backend.services.model_request_planner import plan_model_turn
+from backend.services.model_request_planner import context_resolve_tool, plan_model_turn
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationResolver,
@@ -648,30 +648,7 @@ class GatewayAgent:
         *,
         include_tools: bool,
     ) -> ModelRequest:
-        tools = (
-            [
-                ModelTool(
-                    name='context.resolve',
-                    description='Resolve one turn-scoped bounded Context Reference.',
-                    input_schema={
-                        'type': 'object',
-                        'additionalProperties': False,
-                        'required': ['ref', 'selector', 'max_tokens'],
-                        'properties': {
-                            'ref': {'type': 'string'},
-                            'selector': {'type': 'string'},
-                            'max_tokens': {
-                                'type': 'integer',
-                                'minimum': 1,
-                                'maximum': 600,
-                            },
-                        },
-                    },
-                )
-            ]
-            if include_tools
-            else []
-        )
+        tools = [context_resolve_tool()] if include_tools else []
         return ModelRequest(
             model_profile_id=context.model_profile_id,
             purpose=CLAIMANT_AGENT_PURPOSE,
@@ -983,6 +960,13 @@ class GatewayAgent:
                     ),
                     context,
                     plan,
+                    (
+                        context.runtime_policy.controlled_rules.context_budget_policy
+                        if context.runtime_policy is not None
+                        and context.runtime_policy.controlled_rules.context_budget_policy
+                        is not None
+                        else ContextBudgetPolicy()
+                    ),
                 )
                 result = self._v7_proposal(
                     plan,
@@ -1099,7 +1083,13 @@ class GatewayAgent:
                     include_tools=False,
                 )
                 continuation_budget = build_request_budget(
-                    policy=ContextBudgetPolicy(),
+                    policy=(
+                        context.runtime_policy.controlled_rules.context_budget_policy
+                        if context.runtime_policy is not None
+                        and context.runtime_policy.controlled_rules.context_budget_policy
+                        is not None
+                        else ContextBudgetPolicy()
+                    ),
                     profile=plan.request_profile,
                     prompt='',
                     schema=plan.response_schema,
@@ -1486,12 +1476,8 @@ def _runtime_invocation_trace(
         input_tokens=usage.input_tokens if usage is not None else None,
         output_tokens=usage.output_tokens if usage is not None else None,
         total_tokens=usage.total_tokens if usage is not None else None,
-        cache_read_input_tokens=(
-            usage.cache_read_input_tokens if usage is not None else None
-        ),
-        cache_write_input_tokens=(
-            usage.cache_write_input_tokens if usage is not None else None
-        ),
+        cache_read_input_tokens=(usage.cache_read_input_tokens if usage is not None else None),
+        cache_write_input_tokens=(usage.cache_write_input_tokens if usage is not None else None),
         first_token_latency_ms=response.first_token_latency_ms,
         latency_ms=latency_ms,
     )

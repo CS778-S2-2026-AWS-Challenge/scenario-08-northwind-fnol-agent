@@ -55,12 +55,29 @@ class IsolatedExecutionOutcome:
 def _task_for_plan(context: AgentTurnContext, plan: PlannedModelTurn) -> IsolatedContextTask:
     if not plan.request_profile.isolated or not plan.context_plan.isolated_tasks:
         raise ValueError('The model plan does not contain an isolated context task.')
-    task_type = 'multi_evidence' if len(context.evidence) > 4 else 'cross_claim'
+    isolated_ids = set(plan.context_plan.isolated_tasks)
+    isolated_refs = [
+        reference
+        for reference in plan.context_plan.references
+        if any(reference.ref.endswith(f':{resource_id}') for resource_id in isolated_ids)
+    ]
+    if not isolated_refs:
+        raise ValueError('The isolated context task has no scoped Context Reference.')
+    if 'evidence.current' in isolated_ids and any(
+        item.media_type == 'application/pdf' for item in context.evidence
+    ):
+        task_type = 'long_document'
+    elif 'evidence.current' in isolated_ids and len(context.evidence) > 4:
+        task_type = 'multi_evidence'
+    elif 'claim-history.customer' in isolated_ids:
+        task_type = 'cross_claim'
+    else:
+        raise ValueError('The isolated context task type cannot be determined safely.')
     return IsolatedContextTask(
         task_id=new_id('ict'),
         task_type=task_type,
         authority_scope=f'claim:{context.claim.claim_id}:revision:{context.claim.revision}',
-        input_refs=plan.context_plan.references,
+        input_refs=isolated_refs,
         permitted_resolvers=['context.resolve'],
         max_input_tokens=plan.request_profile.input_hard_limit,
         max_output_tokens=plan.request_profile.output_limit,
@@ -71,6 +88,7 @@ def execute_isolated_context_plan(
     complete: Callable[[ModelRequest], ModelResponse],
     context: AgentTurnContext,
     plan: PlannedModelTurn,
+    budget_policy: ContextBudgetPolicy,
 ) -> IsolatedExecutionOutcome:
     """Resolve scoped inputs server-side and make one mutation-incapable model request."""
 
@@ -93,13 +111,16 @@ def execute_isolated_context_plan(
         'resolved_context': resolved,
         'latest_message': context.message_text,
     }
+    selected_evidence = (
+        context.evidence if task.task_type in {'long_document', 'multi_evidence'} else ()
+    )
     user_message = ModelMessage(
         role=ModelRole.USER,
         content_blocks=[
             ModelTextContent(text=json.dumps(payload, separators=(',', ':'), sort_keys=True)),
             *[
                 ModelEvidenceContent(evidence_id=item.evidence_id, media_type=item.media_type)
-                for item in context.evidence
+                for item in selected_evidence
             ],
         ],
     )
@@ -110,8 +131,8 @@ def execute_isolated_context_plan(
         privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
         required_capabilities=ModelCapabilities(
             structured_output=True,
-            image_input=any(item.media_type.startswith('image/') for item in context.evidence),
-            document_input=any(item.media_type == 'application/pdf' for item in context.evidence),
+            image_input=any(item.media_type.startswith('image/') for item in selected_evidence),
+            document_input=any(item.media_type == 'application/pdf' for item in selected_evidence),
         ),
         messages=[
             ModelMessage(
@@ -124,7 +145,7 @@ def execute_isolated_context_plan(
         max_output_tokens=task.max_output_tokens,
     )
     request_budget = build_request_budget(
-        policy=ContextBudgetPolicy(),
+        policy=budget_policy,
         profile=plan.request_profile,
         prompt=f'{plan.system_instruction}\n\n{_ISOLATED_INSTRUCTION}',
         schema=plan.response_schema,

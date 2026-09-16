@@ -24,7 +24,11 @@ from backend.domain.release import (
     ReleaseSetRecord,
     ReleaseSetValidationRequest,
 )
-from backend.prompts import CLAIMANT_V7_PROMPT_ID
+from backend.prompts import (
+    CLAIMANT_V7_PROMPT_ID,
+    MOTOR_CLAIMANT_PROMPT_ID,
+    load_motor_claimant_prompt,
+)
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.knowledge_admin import KnowledgeAdminRepository
 from backend.repositories.release_set import ReleaseSetRepository
@@ -47,24 +51,76 @@ _VALIDATION_EVIDENCE = (
 )
 
 
-def _model_values(binding: ModelRuntimeBinding) -> dict[str, object]:
+def _model_values(
+    binding: ModelRuntimeBinding,
+    *,
+    prompt_version: str,
+) -> dict[str, object]:
     values = binding.model_dump(mode='json')
     values.update(
         {
-            'prompt_version': CLAIMANT_V7_PROMPT_ID,
+            'prompt_version': prompt_version,
             'evaluation_status': 'configured',
-            'timeout_seconds': 120.0 if binding.profile_id == 'qwen-local' else 90.0,
+            'timeout_seconds': (
+                120.0
+                if prompt_version == CLAIMANT_V7_PROMPT_ID and binding.profile_id == 'qwen-local'
+                else 90.0
+                if prompt_version == CLAIMANT_V7_PROMPT_ID
+                else 30.0
+            ),
         }
     )
+    return values
+
+
+def repository_v6_values(
+    bindings: Sequence[ModelRuntimeBinding],
+) -> dict[str, dict[str, object]]:
+    if {binding.prompt_version for binding in bindings} != {MOTOR_CLAIMANT_PROMPT_ID}:
+        raise ValueError('A v6 Runtime release requires only v6 deployment bindings.')
+    values: dict[str, dict[str, object]] = {
+        'agent_instruction': {
+            'prompt_version': MOTOR_CLAIMANT_PROMPT_ID,
+            'purpose': 'claimant_agent',
+            'composition_mode': 'single',
+            'system_prompt': load_motor_claimant_prompt(),
+        },
+        'agent_tool_policy': {
+            'policy_version': 'northwind-fnol-agent-tools-v1',
+            'allowed_action_codes': list(registered_actions()),
+            'allowed_tool_names': list(registered_agent_tool_names()),
+        },
+        'agent_rule': {
+            'rules_version': 'northwind-fnol-controlled-rules-v1',
+            'disabled_rule_ids': [],
+            'observation_rule_ids': [],
+        },
+        'feature': {
+            'feature_version': 'northwind-fnol-agent-features-v1',
+            'model_assisted_turns': True,
+            'knowledge_retrieval': True,
+            'external_service_offers': True,
+        },
+    }
+    for binding in bindings:
+        values[f'model:{binding.profile_id}'] = _model_values(
+            binding,
+            prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
+        )
     return values
 
 
 def repository_v7_values(
     bindings: Sequence[ModelRuntimeBinding],
 ) -> dict[str, dict[str, object]]:
+    if {binding.prompt_version for binding in bindings} != {CLAIMANT_V7_PROMPT_ID}:
+        raise ValueError('A v7 Runtime release requires only v7 deployment bindings.')
     manifest = load_prompt_manifest()
     fragment_contents = load_fragment_contents(manifest)
-    model_values = {binding.profile_id: _model_values(binding) for binding in bindings}
+    model_values = {
+        binding.profile_id: _model_values(binding, prompt_version=CLAIMANT_V7_PROMPT_ID)
+        for binding in bindings
+    }
     values: dict[str, dict[str, object]] = {
         'agent_instruction': {
             'prompt_version': CLAIMANT_V7_PROMPT_ID,
@@ -233,8 +289,16 @@ def install_initial_runtime_release(
         missing = ', '.join(sorted(_REQUIRED_MODEL_PROFILES - profile_ids))
         raise ValueError(f'The initial Runtime release is missing required models: {missing}.')
 
+    prompt_versions = {binding.prompt_version for binding in bindings}
+    if prompt_versions == {CLAIMANT_V7_PROMPT_ID}:
+        release_values = repository_v7_values(bindings)
+    elif prompt_versions == {MOTOR_CLAIMANT_PROMPT_ID}:
+        release_values = repository_v6_values(bindings)
+    else:
+        raise ValueError('The initial Runtime release cannot mix Prompt versions.')
+
     records: dict[str, ConfigurationRecord] = {}
-    for slot, values in repository_v7_values(bindings).items():
+    for slot, values in release_values.items():
         domain = 'model' if slot.startswith('model:') else slot
         records[slot] = _publish_configuration(
             configurations,
