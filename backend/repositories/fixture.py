@@ -432,7 +432,8 @@ class FixtureRepository(PersistenceRepository):
         snapshot = {
             key: deepcopy(value)
             for key, value in self.__dict__.items()
-            if key not in {'_validation_seed_lock', '_claim_mutation_lock'}
+            if key
+            not in {'_validation_seed_lock', '_claim_mutation_lock', '_realtime_condition'}
         }
         try:
             existing = self.find_idempotency(
@@ -487,10 +488,12 @@ class FixtureRepository(PersistenceRepository):
         except Exception:
             validation_seed_lock = self._validation_seed_lock
             claim_mutation_lock = self._claim_mutation_lock
+            realtime_condition = self._realtime_condition
             self.__dict__.clear()
             self.__dict__.update(snapshot)
             self._validation_seed_lock = validation_seed_lock
             self._claim_mutation_lock = claim_mutation_lock
+            self._realtime_condition = realtime_condition
             raise
         return None
 
@@ -705,6 +708,18 @@ class FixtureRepository(PersistenceRepository):
         follow_up: FollowUpRecord,
         idempotency: IdempotencyRecord,
     ) -> None:
+        realtime_event = new_realtime_event(
+            claim_id=claim.claim_id,
+            customer_id=claim.customer_id,
+            occurred_at=datetime.now(UTC),
+            claim_revision=claim.revision,
+            operation_correlation=idempotency.key,
+            resources=(
+                RealtimeResource.CLAIM,
+                RealtimeResource.WORK_ITEMS,
+                RealtimeResource.QUEUE,
+            ),
+        )
         self._validate_claim_mutation(
             claim,
             expected_revision,
@@ -782,6 +797,8 @@ class FixtureRepository(PersistenceRepository):
             self._store_session(prepared_session)
             self._follow_ups[follow_up.follow_up_id] = prepared_follow_up
             self._idempotency[lookup] = prepared_idempotency
+            self._realtime_events[realtime_event.event_id] = realtime_event
+            self._realtime_condition.notify_all()
 
     def save_session_mutation(
         self,
@@ -2928,7 +2945,6 @@ for _method_name, _resources in {
     'save_claim_mutation': (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
     'save_claim_mutation_with_audit': (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
     'save_session_mutation': (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
-    'save_incomplete_checkpoint': (RealtimeResource.CLAIM, RealtimeResource.WORK_ITEMS),
     'save_message': (RealtimeResource.MESSAGES,),
     'save_message_mutation': (
         RealtimeResource.CLAIM,
