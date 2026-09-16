@@ -65,6 +65,7 @@ def _initial_values(bindings: Sequence[ModelRuntimeBinding]) -> dict[str, dict[s
             'feature_version': 'northwind-fnol-agent-features-v1',
             'model_assisted_turns': True,
             'knowledge_retrieval': True,
+            'external_service_offers': True,
         },
     }
     for binding in bindings:

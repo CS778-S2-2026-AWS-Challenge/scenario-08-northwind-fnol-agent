@@ -1,5 +1,8 @@
 import { CircleAlert, Clock3, ExternalLink, ShieldCheck } from 'lucide-react'
+import { useState } from 'react'
 import { formatDateTime, words } from '../format.js'
+import { canSubmitProjectedAction, isProjectedInputRequired } from '../projected-action.js'
+import { ActionDetails, ProjectedActionInput, ProjectedActionState } from './ProjectedAction.jsx'
 
 export function ExternalServiceSummary({ resource }) {
   if (resource?.loading) return <SummaryState message="Loading third-party tasks..." />
@@ -17,17 +20,15 @@ export function ExternalServiceSummary({ resource }) {
       </div>
       {records.length ? (
         <ul className="missing-list">
-          {records.map(({ task, lifecycle }) => {
-            return (
-              <li key={task.task_id}>
-                {lifecycle.needs_attention ? <CircleAlert size={15} /> : <Clock3 size={15} />}
-                <span>
-                  <strong>{words(lifecycle.service)} — {lifecycle.status_label}</strong>
-                  <small>{lifecycle.status_detail}{lifecycle.limitation ? ` ${lifecycle.limitation}` : ''}</small>
-                </span>
-              </li>
-            )
-          })}
+          {records.map(({ task, lifecycle }) => (
+            <li key={task.task_id}>
+              {lifecycle.needs_attention ? <CircleAlert size={15} /> : <Clock3 size={15} />}
+              <span>
+                <strong>{words(lifecycle.service)} — {lifecycle.status_label}</strong>
+                <small>{lifecycle.status_detail}{lifecycle.limitation ? ` ${lifecycle.limitation}` : ''}</small>
+              </span>
+            </li>
+          ))}
         </ul>
       ) : <p className="empty-note">No third-party task is recorded for this Claim.</p>}
     </section>
@@ -43,7 +44,13 @@ function SummaryState({ message, error = false }) {
   )
 }
 
-export default function ExternalServiceRecords({ records, capabilities = [] }) {
+export default function ExternalServiceRecords({
+  records,
+  capabilities = [],
+  allowedActions = [],
+  claimRevision,
+  onAction,
+}) {
   return (
     <section className="resource-view">
       <header className="content-header">
@@ -52,7 +59,18 @@ export default function ExternalServiceRecords({ records, capabilities = [] }) {
       </header>
       <p className="section-intro">Each request keeps its purpose, disclosure scope, authority, delivery state, and recovery path together.</p>
       {capabilities.length > 0 && <div className="record-list capability-list">{capabilities.map((capability) => <CapabilityRecord capability={capability} key={capability.service_identity} />)}</div>}
-      {records.length ? <div className="record-list">{records.map((record) => <ExternalServiceRecord record={record} key={record.task.task_id} />)}</div> : <p className="empty-note">No external-service request is recorded for this Claim.</p>}
+      {records.length ? (
+        <div className="record-list">
+          {records.map((record) => (
+            <ExternalServiceRecord
+              record={record}
+              actions={projectedTaskActions(allowedActions, record.task.task_id, claimRevision)}
+              onAction={onAction}
+              key={record.task.task_id}
+            />
+          ))}
+        </div>
+      ) : <p className="empty-note">No external-service request is recorded for this Claim.</p>}
     </section>
   )
 }
@@ -64,7 +82,7 @@ function CapabilityRecord({ capability }) {
   </details>
 }
 
-function ExternalServiceRecord({ record }) {
+function ExternalServiceRecord({ record, actions, onAction }) {
   const { task, request } = record
   const { lifecycle } = record
   const needsAttention = lifecycle.needs_attention
@@ -117,9 +135,118 @@ function ExternalServiceRecord({ record }) {
             </dl>
           </section>
         )}
+        {actions.map((action) => (
+          <ExternalTaskAction
+            action={action}
+            onAction={onAction}
+            key={`${action.action_code}:${action.target_ref}`}
+          />
+        ))}
         {needsAttention && <p className="attention-note"><CircleAlert size={16} />{lifecycle.next_action}</p>}
       </div>
     </details>
+  )
+}
+
+function ExternalTaskAction({ action, onAction }) {
+  const inputs = action.inputs || []
+  const [expanded, setExpanded] = useState(false)
+  const [values, setValues] = useState(() => initialValues(inputs))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const executable = canSubmitProjectedAction(action)
+  const supported = ['external.accept_review', 'external.reconcile_response'].includes(action.action_code)
+  const missingRequiredInput = inputs.some((input) => (
+    isProjectedInputRequired(input, values) && !String(values[input.field_code] || '').trim()
+  ))
+  const titleId = `external-action-${action.action_code.replaceAll('.', '-')}-${action.target_ref}`
+
+  async function submit(event) {
+    event.preventDefault()
+    if (!executable || !supported || missingRequiredInput || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      const payload = Object.fromEntries(
+        inputs.map((input) => [input.field_code, String(values[input.field_code] || '').trim()]),
+      )
+      await onAction(action, payload)
+      setExpanded(false)
+      setValues(initialValues(inputs))
+    } catch (nextError) {
+      setError(nextError.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="action-panel action-panel--compact" aria-labelledby={titleId}>
+      <div className="action-panel__heading">
+        <div>
+          <p className="eyebrow">Projected staff action</p>
+          <h3 id={titleId}>{action.label}</h3>
+        </div>
+      </div>
+      <p>{action.purpose}</p>
+      <p className="record-note"><strong>Exact task</strong>{action.target_ref} · Claim revision {action.based_on_revision}</p>
+      <ActionDetails action={action} />
+      {!supported && (
+        <p className="record-note record-note--blocked" role="status">
+          <strong>Action unavailable in this Workbench build</strong>
+          Refresh after the client is updated to the server-published action contract.
+        </p>
+      )}
+      {supported && !executable && (
+        <ProjectedActionState
+          action={action}
+          absentMessage="No external-task action is projected for this exact task."
+        />
+      )}
+      {supported && executable && !expanded && (
+        <button className="button button--secondary" type="button" onClick={() => setExpanded(true)}>
+          Review {action.label}
+        </button>
+      )}
+      {supported && executable && expanded && (
+        <form className="action-form" onSubmit={submit} aria-busy={busy}>
+          {inputs.map((input) => (
+            <ProjectedActionInput
+              key={input.field_code}
+              input={input}
+              value={values[input.field_code] || ''}
+              required={isProjectedInputRequired(input, values)}
+              onChange={(event) => setValues((current) => ({
+                ...current,
+                [input.field_code]: event.target.value,
+              }))}
+            />
+          ))}
+          {action.confirmation?.message && <p>{action.confirmation.message}</p>}
+          {error && <p className="form-error" role="alert">{error}</p>}
+          <div className="form-actions">
+            <button className="button button--ghost" type="button" disabled={busy} onClick={() => setExpanded(false)}>Cancel</button>
+            <button className="button button--primary" type="submit" disabled={busy || missingRequiredInput}>
+              {busy ? 'Working...' : action.label}
+            </button>
+          </div>
+        </form>
+      )}
+    </section>
+  )
+}
+
+function projectedTaskActions(actions, taskId, revision) {
+  return actions.filter((action) => (
+    action.target_type === 'external_task'
+    && action.target_ref === taskId
+    && action.based_on_revision === revision
+  ))
+}
+
+function initialValues(inputs) {
+  return Object.fromEntries(
+    inputs.map((input) => [input.field_code, '']),
   )
 }
 

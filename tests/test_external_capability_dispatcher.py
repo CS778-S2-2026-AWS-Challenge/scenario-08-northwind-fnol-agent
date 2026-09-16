@@ -35,9 +35,8 @@ def test_configured_capability_without_adapter_is_typed_unavailable() -> None:
         'vehicle_repairer_booking',
         'submit_request',
         {
-            'claim.vehicle.registration': 'ABC123',
-            'claim.vehicle.damage_summary': 'rear damage',
-            'claimant.contact.phone': '0210000000',
+            'vehicle.damage_description': 'rear damage',
+            'incident.location': 'Auckland',
         },
         product_family='motor',
     )
@@ -96,16 +95,15 @@ def test_required_and_extra_fields_are_rejected_before_adapter() -> None:
     missing = dispatcher.execute(
         'vehicle_repairer_booking',
         'submit_request',
-        {'claim.vehicle.registration': 'ABC123'},
+        {'vehicle.damage_description': 'rear damage'},
         product_family='motor',
     )
     extra = dispatcher.execute(
         'vehicle_repairer_booking',
         'submit_request',
         {
-            'claim.vehicle.registration': 'ABC123',
-            'claim.vehicle.damage_summary': 'rear damage',
-            'claimant.contact.phone': '0210000000',
+            'vehicle.damage_description': 'rear damage',
+            'incident.location': 'Auckland',
             'claimant.email': 'not-registered@example.test',
         },
         product_family='motor',

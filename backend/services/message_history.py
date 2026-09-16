@@ -6,6 +6,7 @@ from datetime import datetime
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.models import (
+    ActorType,
     ClaimantMessage,
     MessageListResponse,
     MessageRecord,
@@ -13,6 +14,7 @@ from backend.domain.models import (
     PageInfo,
 )
 from backend.repositories.protocols import PersistenceRepository
+from backend.services.external_service_offers import message_external_actions
 
 
 def _session_not_found() -> ApiError:
@@ -134,7 +136,19 @@ def list_claim_messages(
         if page_messages and len(visible_messages) > limit
         else None
     )
+    claim = repository.get_claim(claim_id, principal.subject)
     return MessageListResponse(
-        items=[_claimant_message(message) for message in page_messages],
+        items=[
+            _claimant_message(message).model_copy(
+                update={
+                    'message_actions': (
+                        message_external_actions(repository, claim, message.message_id)
+                        if claim is not None and message.actor is ActorType.AGENT
+                        else []
+                    )
+                }
+            )
+            for message in page_messages
+        ],
         page=PageInfo(next_cursor=next_cursor),
     )

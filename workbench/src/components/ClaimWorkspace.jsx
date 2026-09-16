@@ -21,15 +21,47 @@ const SECTIONS = [
   ['activity', 'Activity'],
 ]
 
-export default function ClaimWorkspace({ detail, resources = {}, loading, error, stale, section, conversationSessionId, draft, profile, onSection, onDraft, onAccept, onResolve, onSignalDecision, onUpdateAction, onLoadEvidence, onSend, onOwnershipAction, onReopen, onRetry, onRetrySection }) {
+export default function ClaimWorkspace({ detail, resources = {}, loading, error, stale, externalActionNotices = [], section, conversationSessionId, draft, profile, onSection, onDraft, onAccept, onResolve, onSignalDecision, onUpdateAction, onLoadEvidence, onSend, onOwnershipAction, onReopen, onExternalTaskAction, onRetry, onRetrySection, onRetryExternalActionContext }) {
   if (loading && !detail) return <main className="claim-state" role="status"><span className="loading-mark" /><p>Loading Claim...</p></main>
   if (error && !detail) return <ClaimUnavailable error={error} onRetry={onRetry} />
   if (!detail) return <EmptyWorkspace />
-  const interactionDetail = loading || stale || error ? { ...detail, allowed_actions: [] } : detail
+  const baseInteractionDetail = loading || stale || error ? { ...detail, allowed_actions: [] } : detail
+  const guardedExternalTaskIds = new Set(
+    externalActionNotices.map((notice) => notice.taskId).filter(Boolean),
+  )
+  const interactionDetail = guardedExternalTaskIds.size
+    ? {
+        ...baseInteractionDetail,
+        allowed_actions: (baseInteractionDetail.allowed_actions || []).filter(
+          (action) => !(
+            action.target_type === 'external_task'
+            && guardedExternalTaskIds.has(action.target_ref)
+          ),
+        ),
+      }
+    : baseInteractionDetail
+  const externalActions = resourceActionContextUnavailable(resources.externalRequests)
+    ? []
+    : interactionDetail.allowed_actions
 
   return (
     <main className="claim-workspace">
       {(loading || stale || error) && <ClaimSyncNotice loading={loading} error={error} onRetry={onRetry} />}
+      {externalActionNotices.map((notice) => (
+        <section className="claim-sync-notice" role="alert" aria-live="assertive" key={`${notice.claimId}:${notice.taskId}`}>
+          <strong>External-service action outcome not confirmed</strong>
+          <p>{notice.message}</p>
+          <p><strong>External task:</strong> {notice.taskId}</p>
+          <button
+            className="button button--quiet"
+            type="button"
+            disabled={notice.recovering}
+            onClick={() => onRetryExternalActionContext(notice.taskId)}
+          >
+            {notice.recovering ? 'Refreshing Claim and External Services...' : 'Refresh Claim and External Services'}
+          </button>
+        </section>
+      ))}
       {section !== 'conversation' && <ClaimHeader detail={detail} />}
       <nav className="section-tabs" aria-label="Claim sections" role="tablist">
         {SECTIONS.map(([value, label], index) => <button className={section === value ? 'is-active' : ''} type="button" role="tab" id={`claim-tab-${value}`} aria-controls={`claim-panel-${value}`} aria-selected={section === value} tabIndex={section === value ? 0 : -1} key={value} onClick={() => onSection(value)} onKeyDown={(event) => moveTabFocus(event, index, onSection)}>{label}</button>)}
@@ -40,11 +72,20 @@ export default function ClaimWorkspace({ detail, resources = {}, loading, error,
         {section === 'fields' && <ClaimFields resource={resources.fields} onRetry={onRetrySection} />}
         {section === 'evidence' && <ResourceBoundary resource={resources.evidence} onRetry={onRetrySection}><EvidenceRecords claimId={detail.claim_id} records={resources.evidence?.items || []} onLoadEvidence={onLoadEvidence} /></ResourceBoundary>}
         {section === 'references' && <ResourceBoundary resource={resources.retrievals} onRetry={onRetrySection}><ReferenceRecords records={resources.retrievals?.items || []} /></ResourceBoundary>}
-        {section === 'external-services' && <ResourceBoundary resource={resources.externalRequests} onRetry={onRetrySection}><ExternalServiceRecords records={resources.externalRequests?.items || []} capabilities={detail.external_capabilities || []} /></ResourceBoundary>}
+        {section === 'external-services' && <ResourceBoundary resource={resources.externalRequests} onRetry={onRetrySection}><ExternalServiceRecords records={resources.externalRequests?.items || []} capabilities={detail.external_capabilities || []} allowedActions={externalActions} claimRevision={interactionDetail.revision} onAction={onExternalTaskAction} /></ResourceBoundary>}
         {section === 'signals' && <ResourceBoundary resource={resources.signals} onRetry={onRetrySection}><SignalReviews key={detail.claim_id} signals={resources.signals?.items || []} allowedActions={interactionDetail.allowed_actions} onDecision={onSignalDecision} /></ResourceBoundary>}
         {section === 'activity' && <Activity key={detail.claim_id} detail={interactionDetail} resources={resources} onResolve={onResolve} onUpdateAction={onUpdateAction} onRetry={onRetrySection} />}
       </div>
     </main>
+  )
+}
+
+function resourceActionContextUnavailable(resource) {
+  return Boolean(
+    resource?.loading
+    || resource?.error
+    || resource?.stale
+    || ['partial', 'unavailable'].includes(resource?.status),
   )
 }
 

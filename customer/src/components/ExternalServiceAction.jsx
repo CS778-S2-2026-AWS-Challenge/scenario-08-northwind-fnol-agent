@@ -33,6 +33,34 @@ function claimantStatusCopy(action) {
       attention: false,
     }
   }
+  if (action.status === 'pending_input') {
+    return {
+      label: 'Permission recorded',
+      detail: 'Northwind will continue this request when its required claim details are ready.',
+      attention: false,
+    }
+  }
+  if (action.status === 'manual_available') {
+    return {
+      label: 'Official contact ready',
+      detail: 'Use the registered official contact below. Northwind has not created an external task.',
+      attention: false,
+    }
+  }
+  if (action.status === 'consent_declined') {
+    return {
+      label: 'Not requested',
+      detail: 'No information was shared and no external request was created.',
+      attention: false,
+    }
+  }
+  if (action.status === 'consent_withdrawn') {
+    return {
+      label: 'Permission withdrawn',
+      detail: 'Northwind will not send an unsubmitted request under this permission.',
+      attention: false,
+    }
+  }
   if (action.status === 'queued') {
     return {
       label: 'Request queued',
@@ -131,6 +159,8 @@ export default function ExternalServiceAction({
   consentChecked,
   setConsentChecked,
   onRequest,
+  onDecline,
+  onWithdraw,
   status,
   error,
   expanded = false,
@@ -140,6 +170,7 @@ export default function ExternalServiceAction({
   const isRequesting = status === 'requesting-assessor'
   const isBusy = isRecordingConsent || isRequesting
   const needsConsent = action.status === 'consent_required'
+  const manualAvailable = action.status === 'manual_available'
   const routing = action.routing
   const limitations = routing?.limitations || []
   const succeeded = action.status === 'assigned' || action.status === 'queued'
@@ -158,7 +189,9 @@ export default function ExternalServiceAction({
   return (
     <ConversationActionCard
       icon="↗"
-      title={succeeded ? 'Vehicle damage assessment' : 'Request a vehicle damage assessment'}
+      title={action.service_identity === 'vehicle_damage_assessment_routing' && !action.offer_id
+        ? (succeeded ? 'Vehicle damage assessment' : 'Request a vehicle damage assessment')
+        : action.service_name}
       description={error?.message || state.detail}
       status={cardStatus}
       completed={succeeded}
@@ -186,6 +219,13 @@ export default function ExternalServiceAction({
           <input type="checkbox" checked={consentChecked} onChange={(event) => setConsentChecked(event.target.checked)} disabled={isBusy} />
           <span>I give Northwind permission to share only these details for this assessment request.</span>
         </label>
+      )}
+      {manualAvailable && (action.official_url || action.official_phone) && (
+        <div className="service-result is-success" role="status">
+          <strong>Official contact ready</strong>
+          {action.official_url && <p><a href={action.official_url} target="_blank" rel="noreferrer">Open official service</a></p>}
+          {action.official_phone && <p><a href={`tel:${action.official_phone}`}>{action.official_phone}</a></p>}
+        </div>
       )}
       {isBusy && <div className="service-progress" role="status"><span className="status-dot" /><span>{isRecordingConsent ? 'Recording your permission...' : 'Sending the assessment request...'}</span></div>}
       {error && (
@@ -220,8 +260,18 @@ export default function ExternalServiceAction({
         </div>
       )}
       {action.can_request && (!error || error.retryable) && (
-        <button className="primary-button" type="button" onClick={onRequest} disabled={isBusy || (needsConsent && !consentChecked)}>
-          {isRecordingConsent ? 'Recording permission...' : isRequesting ? 'Sending request...' : (error?.retryable || retryableFailure) ? 'Retry assessment request' : needsConsent ? 'Agree and request assessor' : 'Request assessor'}
+        <div className="service-decision-actions">
+          <button className="primary-button" type="button" onClick={onRequest} disabled={isBusy || (needsConsent && !consentChecked)}>
+            {isRecordingConsent ? 'Recording permission...' : isRequesting ? 'Sending request...' : (error?.retryable || retryableFailure) ? (action.offer_id ? 'Retry request' : 'Retry assessment request') : needsConsent ? (action.offer_id ? 'Agree and continue' : 'Agree and request assessor') : (action.offer_id ? 'Continue' : 'Request assessor')}
+          </button>
+          {needsConsent && onDecline && (
+            <button className="secondary-button" type="button" onClick={onDecline} disabled={isBusy}>Not now</button>
+          )}
+        </div>
+      )}
+      {action.can_withdraw && onWithdraw && (
+        <button className="secondary-button" type="button" onClick={onWithdraw} disabled={isBusy}>
+          Withdraw permission
         </button>
       )}
     </ConversationActionCard>

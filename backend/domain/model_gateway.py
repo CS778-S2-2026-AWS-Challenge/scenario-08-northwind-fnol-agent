@@ -311,6 +311,13 @@ class ModelProposedContentsItem(ModelContract):
     source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
+class ModelExternalServiceIntent(ModelContract):
+    """A proposal to show help, never authority to contact a provider."""
+
+    service_identity: str = Field(min_length=1, max_length=100)
+    requested_action: str = Field(default='submit_request', min_length=1, max_length=100)
+
+
 class ModelAgentProposal(ModelContract):
     action: AgentAction
     reason_codes: list[str] = Field(min_length=1)
@@ -351,6 +358,10 @@ class ModelRuntimeProposal(ModelContract):
     evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
     source_claim_id: str | None = Field(default=None, min_length=1, max_length=120)
     removal_scope: Literal['draft', 'persisted'] | None = None
+    external_service_intents: list[ModelExternalServiceIntent] = Field(
+        default_factory=list,
+        max_length=3,
+    )
 
     @model_validator(mode='after')
     def validate_registered_actions(self) -> ModelRuntimeProposal:
