@@ -24,7 +24,7 @@
         {
           "field_code": "incident.description",
           "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning. Nobody was injured and the scene was safe. The vehicle is safe to drive.",
-          "status": "confirmed",
+          "status": "proposed",
           "source": "claimant"
         },
         {

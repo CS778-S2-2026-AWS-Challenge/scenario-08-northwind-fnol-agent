@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import WorkbenchPage from './WorkbenchPage.jsx'
 
 const api = vi.hoisted(() => ({
@@ -15,7 +15,10 @@ const api = vi.hoisted(() => ({
   conversations: vi.fn(),
   handoffs: vi.fn(),
   collaborationRequests: vi.fn(),
+  externalRequests: vi.fn(),
   acceptHandoff: vi.fn(),
+  acceptExternalTaskReview: vi.fn(),
+  reconcileExternalTaskResponse: vi.fn(),
   reopenClaim: vi.fn(),
 }))
 
@@ -32,6 +35,10 @@ const staffAgent = vi.hoisted(() => ({
   onBusinessActionExecuted: null,
 }))
 
+const externalActionTracker = vi.hoisted(() => ({
+  lastPromise: null,
+}))
+
 vi.mock('../api.js', () => ({ workbenchApi: api }))
 vi.mock('../auth/auth-context.js', () => ({
   useAuth: () => ({
@@ -44,11 +51,27 @@ vi.mock('../hooks/usePersistentTabs.js', () => ({ usePersistentTabs: () => tabs 
 vi.mock('../components/NavigationRail.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimTabs.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimWorkspace.jsx', () => ({
-  default: ({ detail, resources, onAccept, onReopen }) => <div>
+  default: ({ detail, resources, externalActionNotices = [], onAccept, onReopen, onExternalTaskAction, onRetryExternalActionContext, onRetry }) => <div>
     {detail && <output data-testid="claim-revision">Claim revision {detail.revision}</output>}
     {resources.handoffs?.error && <p>Handoff context unavailable</p>}
+    {resources.externalRequests?.error && <p>External context unavailable</p>}
+    {externalActionNotices.map((notice) => (
+      <div role="alert" key={`${notice.claimId}:${notice.taskId}`}>
+        <p>{notice.message}</p>
+        <p>{notice.taskId}</p>
+        <button type="button" disabled={notice.recovering} onClick={() => onRetryExternalActionContext(notice.taskId)}>
+          Retry external readback
+        </button>
+      </div>
+    ))}
+    <button type="button" onClick={onRetry}>Test claim refresh</button>
     {detail?.work_summary?.primary_action_code === 'claim.reopen' && <button type="button" onClick={() => onReopen(detail.allowed_actions[0], { reason: 'New material received.' }, 'reopen-route-key').catch(() => {})}>Test projected reopen</button>}
     {detail?.work_summary?.primary_action_code === 'human.accept_handoff' && <button type="button" onClick={() => onAccept({ handoff_id: 'hnd_1' }).catch(() => {})}>Test projected accept</button>}
+    {detail?.work_summary?.primary_action_code?.startsWith('external.') && !externalActionNotices.length && <button type="button" onClick={() => {
+      const promise = onExternalTaskAction(detail.allowed_actions[0], {})
+      externalActionTracker.lastPromise = promise
+      promise.catch(() => {})
+    }}>Test projected external action</button>}
   </div>,
 }))
 vi.mock('../components/StaffAgent.jsx', () => ({
@@ -78,6 +101,28 @@ const metadata = {
   priorities: [{ value: 'routine', label: 'Routine' }],
   tags: [],
   tag_registry_version: '0.3',
+}
+
+function externalTaskPage(taskId, status, claimId = 'clm_route_1') {
+  return {
+    items: [{
+      task: { task_id: taskId, claim_id: claimId, status },
+      lifecycle: {},
+    }],
+    page: { next_cursor: null },
+    status: 'available',
+  }
+}
+
+function reviewWorkAction(taskId, actionId, revision) {
+  return {
+    action_code: 'work_item.update',
+    target_type: 'staff_action',
+    target_ref: actionId,
+    availability: 'confirmation_required',
+    based_on_revision: revision,
+    source_refs: [taskId],
+  }
 }
 
 const claim = {
@@ -117,8 +162,18 @@ function LocationProbe() {
   return <output data-testid="location">{location.pathname}{location.search}</output>
 }
 
+function NavigationProbe() {
+  const navigate = useNavigate()
+  return (
+    <>
+      <button type="button" onClick={() => navigate('/workbench/claims/clm_route_1')}>Navigate Claim A</button>
+      <button type="button" onClick={() => navigate('/workbench/claims/clm_route_2')}>Navigate Claim B</button>
+    </>
+  )
+}
+
 function renderPage(initialEntry) {
-  const page = <><WorkbenchPage /><LocationProbe /></>
+  const page = <><WorkbenchPage /><LocationProbe /><NavigationProbe /></>
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
@@ -138,6 +193,7 @@ describe('WorkbenchPage queue routing', () => {
     tabs.tabs = []
     tabs.activeId = null
     staffAgent.onBusinessActionExecuted = null
+    externalActionTracker.lastPromise = null
     api.claimFilterMetadata.mockResolvedValue(metadata)
     api.claims.mockResolvedValue({
       items: [claim],
@@ -162,6 +218,7 @@ describe('WorkbenchPage queue routing', () => {
     api.messages.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.handoffs.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.collaborationRequests.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.externalRequests.mockResolvedValue({ items: [], page: { next_cursor: null }, status: 'available' })
   })
 
   it('restores the persisted active Claim section and claimant session from the Workbench root', async () => {
@@ -539,6 +596,603 @@ describe('WorkbenchPage queue routing', () => {
     ))
     await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 2'))
     expect(api.claim).toHaveBeenCalledTimes(2)
+  })
+
+  it('executes an exact projected external review and reads back Claim and external-service state before settling', async () => {
+    const user = userEvent.setup()
+    const externalAction = {
+      action_code: 'external.accept_review',
+      target_type: 'external_task',
+      target_ref: 'tsk_assessor_1',
+      label: 'Accept external-service review',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+      inputs: [],
+    }
+    const actionable = {
+      ...claim,
+      revision: 4,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: externalAction.action_code,
+        primary_action_target_ref: externalAction.target_ref,
+      },
+      allowed_actions: [externalAction],
+    }
+    const workAction = reviewWorkAction('tsk_assessor_1', 'act_external_review_1', 5)
+    const latest = {
+      ...actionable,
+      revision: 5,
+      work_summary: {
+        ...actionable.work_summary,
+        primary_action_code: workAction.action_code,
+        primary_action_target_ref: workAction.target_ref,
+      },
+      allowed_actions: [workAction],
+    }
+    api.claim.mockResolvedValueOnce(actionable).mockResolvedValue(latest)
+    api.acceptExternalTaskReview.mockResolvedValue({
+      revision: 5,
+      action: {
+        action_id: 'act_external_review_1',
+        source_refs: ['tsk_assessor_1'],
+      },
+    })
+    api.externalRequests.mockResolvedValue(
+      externalTaskPage('tsk_assessor_1', 'terminal_failure'),
+    )
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+
+    await waitFor(() => expect(api.acceptExternalTaskReview).toHaveBeenCalledWith(
+      'staff-token',
+      'clm_route_1',
+      'tsk_assessor_1',
+      4,
+      {},
+    ))
+    await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 5'))
+    await waitFor(() => expect(api.externalRequests).toHaveBeenCalledWith('staff-token', 'clm_route_1'))
+    await expect(externalActionTracker.lastPromise).resolves.toBeUndefined()
+    expect(api.claim).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps a successful external mutation unsettled when Claim readback returns an older HTTP 200 projection', async () => {
+    const user = userEvent.setup()
+    const externalAction = {
+      action_code: 'external.accept_review',
+      target_type: 'external_task',
+      target_ref: 'tsk_assessor_old_claim',
+      label: 'Accept external-service review',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+      inputs: [],
+    }
+    const actionable = {
+      ...claim,
+      revision: 4,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: externalAction.action_code,
+        primary_action_target_ref: externalAction.target_ref,
+      },
+      allowed_actions: [externalAction],
+    }
+    api.claim.mockResolvedValue(actionable)
+    api.acceptExternalTaskReview.mockResolvedValue({
+      revision: 5,
+      action: {
+        action_id: 'act_external_review_old_claim',
+        source_refs: ['tsk_assessor_old_claim'],
+      },
+    })
+    api.externalRequests.mockResolvedValue(
+      externalTaskPage('tsk_assessor_old_claim', 'terminal_failure'),
+    )
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+
+    await expect(externalActionTracker.lastPromise).rejects.toThrow(
+      /authoritative readback did not complete.*outcome is not confirmed/i,
+    )
+    expect(api.acceptExternalTaskReview).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 4')
+    expect(await screen.findByRole('alert')).toHaveTextContent('tsk_assessor_old_claim')
+  })
+
+  it('keeps accept-review unknown when a successful External Services HTTP 200 omits the target task', async () => {
+    const user = userEvent.setup()
+    const externalAction = {
+      action_code: 'external.accept_review',
+      target_type: 'external_task',
+      target_ref: 'tsk_assessor_missing',
+      label: 'Accept external-service review',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+      inputs: [],
+    }
+    const actionable = {
+      ...claim,
+      revision: 4,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: externalAction.action_code,
+        primary_action_target_ref: externalAction.target_ref,
+      },
+      allowed_actions: [externalAction],
+    }
+    const workAction = reviewWorkAction(
+      'tsk_assessor_missing',
+      'act_external_review_missing',
+      5,
+    )
+    const latest = {
+      ...actionable,
+      revision: 5,
+      work_summary: {
+        ...actionable.work_summary,
+        primary_action_code: workAction.action_code,
+        primary_action_target_ref: workAction.target_ref,
+      },
+      allowed_actions: [workAction],
+    }
+    api.claim.mockResolvedValueOnce(actionable).mockResolvedValue(latest)
+    api.acceptExternalTaskReview.mockResolvedValue({
+      revision: 5,
+      action: {
+        action_id: 'act_external_review_missing',
+        source_refs: ['tsk_assessor_missing'],
+      },
+    })
+    api.externalRequests.mockResolvedValue(
+      externalTaskPage('tsk_some_other_task', 'terminal_failure'),
+    )
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+
+    await expect(externalActionTracker.lastPromise).rejects.toThrow(
+      /authoritative readback did not complete.*outcome is not confirmed/i,
+    )
+    expect(api.acceptExternalTaskReview).toHaveBeenCalledTimes(1)
+    expect(await screen.findByRole('alert')).toHaveTextContent('tsk_assessor_missing')
+  })
+
+  it('keeps reconciliation unknown when a stale External Services HTTP 200 still reports unknown_outcome', async () => {
+    const user = userEvent.setup()
+    const externalAction = {
+      action_code: 'external.reconcile_response',
+      target_type: 'external_task',
+      target_ref: 'tsk_assessor_stale_reconcile',
+      label: 'Reconcile external outcome',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+      inputs: [],
+    }
+    const actionable = {
+      ...claim,
+      revision: 4,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: externalAction.action_code,
+        primary_action_target_ref: externalAction.target_ref,
+      },
+      allowed_actions: [externalAction],
+    }
+    const latest = {
+      ...actionable,
+      revision: 5,
+      work_summary: {
+        ...actionable.work_summary,
+        primary_action_code: null,
+        primary_action_target_ref: null,
+      },
+      allowed_actions: [],
+    }
+    api.claim.mockResolvedValueOnce(actionable).mockResolvedValue(latest)
+    api.reconcileExternalTaskResponse.mockResolvedValue({
+      claim_id: 'clm_route_1',
+      task_id: 'tsk_assessor_stale_reconcile',
+      revision: 5,
+      staff_action: {
+        action_id: 'act_external_reconcile',
+        status: 'completed',
+      },
+    })
+    api.externalRequests.mockResolvedValue(
+      externalTaskPage('tsk_assessor_stale_reconcile', 'unknown_outcome'),
+    )
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+
+    await expect(externalActionTracker.lastPromise).rejects.toThrow(
+      /authoritative readback did not complete.*outcome is not confirmed/i,
+    )
+    expect(api.reconcileExternalTaskResponse).toHaveBeenCalledTimes(1)
+    expect(await screen.findByRole('alert')).toHaveTextContent('tsk_assessor_stale_reconcile')
+  })
+
+  it('keeps a successful external mutation unsettled when Claim readback fails', async () => {
+    const user = userEvent.setup()
+    const externalAction = {
+      action_code: 'external.accept_review',
+      target_type: 'external_task',
+      target_ref: 'tsk_assessor_1',
+      label: 'Accept external-service review',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+      inputs: [],
+    }
+    const actionable = {
+      ...claim,
+      revision: 4,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: externalAction.action_code,
+        primary_action_target_ref: externalAction.target_ref,
+      },
+      allowed_actions: [externalAction],
+    }
+    api.claim
+      .mockResolvedValueOnce(actionable)
+      .mockRejectedValueOnce(Object.assign(
+        new Error('Claim readback is unavailable.'),
+        { status: 503, code: 'DEPENDENCY_UNAVAILABLE' },
+      ))
+    api.acceptExternalTaskReview.mockResolvedValue({
+      revision: 5,
+      action: {
+        action_id: 'act_external_review_1',
+        source_refs: ['tsk_assessor_1'],
+      },
+    })
+    api.externalRequests.mockResolvedValue(
+      externalTaskPage('tsk_assessor_1', 'terminal_failure'),
+    )
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+
+    await waitFor(() => expect(externalActionTracker.lastPromise).not.toBeNull())
+    await expect(externalActionTracker.lastPromise).rejects.toThrow(
+      /authoritative readback did not complete.*outcome is not confirmed/i,
+    )
+    expect(api.acceptExternalTaskReview).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 4')
+    expect(await screen.findByRole('alert')).toHaveTextContent(/tsk_assessor_1.*may have completed.*outcome is not confirmed/i)
+  })
+
+  it('keeps a successful external mutation unsettled when External Services readback fails', async () => {
+    const user = userEvent.setup()
+    const externalAction = {
+      action_code: 'external.accept_review',
+      target_type: 'external_task',
+      target_ref: 'tsk_assessor_1',
+      label: 'Accept external-service review',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+      inputs: [],
+    }
+    const actionable = {
+      ...claim,
+      revision: 4,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: externalAction.action_code,
+        primary_action_target_ref: externalAction.target_ref,
+      },
+      allowed_actions: [externalAction],
+    }
+    const workAction = reviewWorkAction('tsk_assessor_1', 'act_external_review_1', 5)
+    const latest = {
+      ...actionable,
+      revision: 5,
+      work_summary: {
+        ...actionable.work_summary,
+        primary_action_code: workAction.action_code,
+        primary_action_target_ref: workAction.target_ref,
+      },
+      allowed_actions: [workAction],
+    }
+    api.claim.mockResolvedValueOnce(actionable).mockResolvedValue(latest)
+    api.acceptExternalTaskReview.mockResolvedValue({
+      revision: 5,
+      action: {
+        action_id: 'act_external_review_1',
+        source_refs: ['tsk_assessor_1'],
+      },
+    })
+    api.externalRequests.mockRejectedValueOnce(Object.assign(
+      new Error('External Services readback is unavailable.'),
+      { status: 503, code: 'DEPENDENCY_UNAVAILABLE' },
+    ))
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+
+    await waitFor(() => expect(externalActionTracker.lastPromise).not.toBeNull())
+    await expect(externalActionTracker.lastPromise).rejects.toThrow(
+      /authoritative readback did not complete.*outcome is not confirmed/i,
+    )
+    expect(api.acceptExternalTaskReview).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 5'))
+    await waitFor(() => expect(screen.getByText('External context unavailable')).toBeInTheDocument())
+    expect(await screen.findByRole('alert')).toHaveTextContent(/tsk_assessor_1.*may have completed.*outcome is not confirmed/i)
+  })
+
+  it('keeps the recovery guard when an authoritative retry is superseded', async () => {
+    const user = userEvent.setup()
+    const externalAction = {
+      action_code: 'external.accept_review',
+      target_type: 'external_task',
+      target_ref: 'tsk_assessor_superseded',
+      label: 'Accept external-service review',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+      inputs: [],
+    }
+    const actionable = {
+      ...claim,
+      revision: 4,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: externalAction.action_code,
+        primary_action_target_ref: externalAction.target_ref,
+      },
+      allowed_actions: [externalAction],
+    }
+    const staleLatest = {
+      ...actionable,
+      revision: 5,
+      allowed_actions: [{ ...externalAction, based_on_revision: 5 }],
+    }
+    const recoveredWorkAction = reviewWorkAction(
+      'tsk_assessor_superseded',
+      'act_external_review_superseded',
+      5,
+    )
+    const settledLatest = {
+      ...actionable,
+      revision: 5,
+      work_summary: {
+        ...actionable.work_summary,
+        primary_action_code: recoveredWorkAction.action_code,
+        primary_action_target_ref: recoveredWorkAction.target_ref,
+      },
+      allowed_actions: [recoveredWorkAction],
+    }
+
+    let resolveRecoveryClaim
+    let resolveRecoveryExternal
+    const delayedRecoveryClaim = new Promise((resolve) => { resolveRecoveryClaim = resolve })
+    const delayedRecoveryExternal = new Promise((resolve) => { resolveRecoveryExternal = resolve })
+
+    api.claim
+      .mockResolvedValueOnce(actionable)
+      .mockRejectedValueOnce(Object.assign(
+        new Error('Claim readback is unavailable.'),
+        { status: 503, code: 'DEPENDENCY_UNAVAILABLE' },
+      ))
+      .mockReturnValueOnce(delayedRecoveryClaim)
+      .mockResolvedValueOnce(staleLatest)
+      .mockResolvedValueOnce(settledLatest)
+    api.externalRequests
+      .mockResolvedValueOnce(externalTaskPage('tsk_assessor_superseded', 'terminal_failure'))
+      .mockReturnValueOnce(delayedRecoveryExternal)
+      .mockResolvedValueOnce(externalTaskPage('tsk_assessor_superseded', 'terminal_failure'))
+    api.acceptExternalTaskReview.mockResolvedValue({
+      revision: 5,
+      action: {
+        action_id: 'act_external_review_superseded',
+        source_refs: ['tsk_assessor_superseded'],
+      },
+    })
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+    await expect(externalActionTracker.lastPromise).rejects.toThrow(/authoritative readback did not complete/i)
+
+    const warning = await screen.findByRole('alert')
+    expect(warning).toHaveTextContent('tsk_assessor_superseded')
+    expect(screen.queryByRole('button', { name: 'Test projected external action' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Retry external readback' }))
+    expect(screen.getByRole('button', { name: 'Retry external readback' })).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'Test claim refresh' }))
+    await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 5'))
+
+    await act(async () => {
+      resolveRecoveryClaim(staleLatest)
+      resolveRecoveryExternal(externalTaskPage('tsk_assessor_superseded', 'terminal_failure'))
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('tsk_assessor_superseded'))
+    expect(screen.queryByRole('button', { name: 'Test projected external action' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Retry external readback' }))
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+  })
+
+  it('preserves independent unconfirmed external-action guards across Claim tabs', async () => {
+    const user = userEvent.setup()
+    const actionA = {
+      action_code: 'external.accept_review',
+      target_type: 'external_task',
+      target_ref: 'tsk_claim_a',
+      label: 'Accept external-service review A',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+      inputs: [],
+    }
+    const actionB = {
+      ...actionA,
+      target_ref: 'tsk_claim_b',
+      label: 'Accept external-service review B',
+      based_on_revision: 6,
+    }
+    const claimA = {
+      ...claim,
+      claim_id: 'clm_route_1',
+      revision: 4,
+      display_reference: 'NW-A',
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: actionA.action_code,
+        primary_action_target_ref: actionA.target_ref,
+      },
+      allowed_actions: [actionA],
+    }
+    const claimB = {
+      ...claim,
+      claim_id: 'clm_route_2',
+      revision: 6,
+      display_reference: 'NW-B',
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: actionB.action_code,
+        primary_action_target_ref: actionB.target_ref,
+      },
+      allowed_actions: [actionB],
+    }
+    const calls = { clm_route_1: 0, clm_route_2: 0 }
+    api.claim.mockImplementation((token, id) => {
+      calls[id] += 1
+      if (calls[id] === 2) {
+        return Promise.reject(Object.assign(
+          new Error(`Claim ${id} readback is unavailable.`),
+          { status: 503, code: 'DEPENDENCY_UNAVAILABLE' },
+        ))
+      }
+      return Promise.resolve(id === 'clm_route_1' ? claimA : claimB)
+    })
+    api.acceptExternalTaskReview.mockImplementation((token, id) => Promise.resolve({
+      revision: id === 'clm_route_1' ? 5 : 7,
+      action: {
+        action_id: id === 'clm_route_1' ? 'act_claim_a' : 'act_claim_b',
+        source_refs: [id === 'clm_route_1' ? 'tsk_claim_a' : 'tsk_claim_b'],
+      },
+    }))
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('tsk_claim_a'))
+
+    await user.click(screen.getByRole('button', { name: 'Navigate Claim B' }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/workbench/claims/clm_route_2'))
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('tsk_claim_b'))
+
+    await user.click(screen.getByRole('button', { name: 'Navigate Claim A' }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/workbench/claims/clm_route_1'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('tsk_claim_a')
+    expect(screen.getByRole('alert')).not.toHaveTextContent('tsk_claim_b')
+    expect(screen.queryByRole('button', { name: 'Test projected external action' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Navigate Claim B' }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/workbench/claims/clm_route_2'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('tsk_claim_b')
+    expect(screen.queryByRole('button', { name: 'Test projected external action' })).not.toBeInTheDocument()
+  })
+
+  it('reads back external-service state after a stale external action conflict', async () => {
+    const user = userEvent.setup()
+    const externalAction = {
+      action_code: 'external.accept_review',
+      target_type: 'external_task',
+      target_ref: 'tsk_assessor_1',
+      label: 'Accept external-service review',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+      inputs: [],
+    }
+    const actionable = {
+      ...claim,
+      revision: 4,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: externalAction.action_code,
+        primary_action_target_ref: externalAction.target_ref,
+      },
+      allowed_actions: [externalAction],
+    }
+    const latest = {
+      ...actionable,
+      revision: 5,
+      work_summary: {
+        ...actionable.work_summary,
+        primary_action_code: null,
+        primary_action_target_ref: null,
+      },
+      allowed_actions: [],
+    }
+    api.claim.mockResolvedValueOnce(actionable).mockResolvedValue(latest)
+    api.acceptExternalTaskReview.mockRejectedValue(Object.assign(
+      new Error('Revision mismatch.'),
+      { status: 409, code: 'REVISION_CONFLICT', requestId: 'req_external_1' },
+    ))
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+
+    await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 5'))
+    await waitFor(() => expect(api.externalRequests).toHaveBeenCalledWith('staff-token', 'clm_route_1'))
+    expect(api.acceptExternalTaskReview).toHaveBeenCalledTimes(1)
+  })
+
+  it('performs authoritative readback after an ambiguous external reconciliation outcome without blind resubmission', async () => {
+    const user = userEvent.setup()
+    const externalAction = {
+      action_code: 'external.reconcile_response',
+      target_type: 'external_task',
+      target_ref: 'tsk_assessor_2',
+      label: 'Reconcile external outcome',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+      inputs: [],
+    }
+    const actionable = {
+      ...claim,
+      revision: 4,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: externalAction.action_code,
+        primary_action_target_ref: externalAction.target_ref,
+      },
+      allowed_actions: [externalAction],
+    }
+    const latest = {
+      ...actionable,
+      revision: 5,
+      work_summary: {
+        ...actionable.work_summary,
+        primary_action_code: null,
+        primary_action_target_ref: null,
+      },
+      allowed_actions: [],
+    }
+    api.claim.mockResolvedValueOnce(actionable).mockResolvedValue(latest)
+    api.reconcileExternalTaskResponse.mockRejectedValue(Object.assign(
+      new Error('The Workbench service could not be reached.'),
+      { status: 0, code: 'NETWORK_ERROR', retryable: true },
+    ))
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected external action' }))
+
+    await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 5'))
+    await waitFor(() => expect(api.externalRequests).toHaveBeenCalledWith('staff-token', 'clm_route_1'))
+    expect(api.reconcileExternalTaskResponse).toHaveBeenCalledWith(
+      'staff-token',
+      'clm_route_1',
+      'tsk_assessor_2',
+      4,
+    )
+    expect(api.reconcileExternalTaskResponse).toHaveBeenCalledTimes(1)
   })
 
   it('discards a late background refresh after a controlled action loads a newer revision', async () => {

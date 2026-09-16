@@ -17,6 +17,7 @@ from backend.domain.branch_registry import (
     BranchRuleEvaluator,
     validate_registered_field_value,
 )
+from backend.domain.external_service_registry import ExternalLifecycleStatus
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
 from backend.domain.intake import intake_field_for_requirement, next_requirement_step
@@ -2634,6 +2635,7 @@ def submit_message(
                 result_verification=item.result_verification,
             )
             for item in agent_context.external_services
+            if item.operation_status is not ExternalLifecycleStatus.CONSENT_REQUIRED
         ],
         runtime_directive=runtime_directive,
         limitations=list(
