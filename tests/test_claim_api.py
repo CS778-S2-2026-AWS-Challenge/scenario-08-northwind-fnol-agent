@@ -832,6 +832,8 @@ def test_vp_family_journey_confirms_registered_facts_and_creates_claim(
     assert confirmed['dynamic_form']['requirements']['ready'] is True
     assert confirmed['dynamic_form']['requirements']['missing_required_now'] == []
     assert confirmed['customer_next_step']['status'] == 'ready_to_create'
+    assert confirmed['primary_action']['action_code'] == 'claimant.create_claim'
+    assert confirmed['primary_action']['claim_revision'] == confirmed['revision']
 
     external = client.post(
         f'/api/v1/claims/{claim_id}/creation',
@@ -1893,6 +1895,7 @@ def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(
     assert corrected['source'] == 'claimant'
     assert corrected['updated_by']['actor_id'] == 'cus_demo'
     assert replay.json() == confirmed.json()
+    assert replay.json()['primary_action']['claim_revision'] == replay.json()['revision']
     evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
     assert [item.recomputation_reason for item in evaluations[-2:]] == [
         'form_confirmed',

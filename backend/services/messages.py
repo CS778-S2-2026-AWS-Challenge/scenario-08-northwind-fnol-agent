@@ -112,8 +112,10 @@ from backend.services.branching import (
     claimant_dynamic_form_projection,
     latest_applied_branch_evaluation,
 )
+from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.claimant_form_projection import project_claimant_form_fields
 from backend.services.evidence_visibility import default_evidence_visibility
+from backend.services.external_services import claimant_assessor_action, claimant_next_step
 from backend.services.fact_resolution import (
     provenance_messages_for_fields,
     resolve_contents_item_change,
@@ -339,7 +341,11 @@ def _claimant_message(message: MessageRecord) -> ClaimantMessage:
     )
 
 
-def _claimant_decision(decision: AgentDecisionRecord) -> ClaimantDecision:
+def _claimant_decision(
+    decision: AgentDecisionRecord,
+    *,
+    customer_next_step: CustomerNextStep | None = None,
+) -> ClaimantDecision:
     return ClaimantDecision(
         decision_id=decision.decision_id,
         action=decision.action,
@@ -350,7 +356,7 @@ def _claimant_decision(decision: AgentDecisionRecord) -> ClaimantDecision:
             else [code for code in decision.reason_codes if code not in INTERNAL_ONLY_REASON_CODES]
         ),
         customer_reason=decision.customer_reason,
-        customer_next_step=decision.customer_next_step,
+        customer_next_step=customer_next_step or decision.customer_next_step,
     )
 
 
@@ -400,10 +406,17 @@ def _message_turn_response(
         if claim is not None
         else decision.form_changes
     )
+    external_service_action = claimant_assessor_action(repository, claim) if claim else None
+    next_step = (
+        claimant_next_step(repository, claim, external_service_action)
+        if claim is not None
+        else decision.customer_next_step
+    )
+    response_revision = claim.revision if claim is not None else decision.resulting_revision
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=claimant_message.session_id,
-        claim_revision=decision.resulting_revision,
+        claim_revision=response_revision,
         claimant_message=_claimant_message(claimant_message),
         agent_message=_claimant_message(agent_message),
         form_changes=[
@@ -413,7 +426,7 @@ def _message_turn_response(
         contents_item_changes=[
             _claimant_contents_item(item) for item in decision.contents_item_changes
         ],
-        decision=_claimant_decision(decision),
+        decision=_claimant_decision(decision, customer_next_step=next_step),
         handoff=(
             claimant_handoff(handoff)
             if handoff is not None
@@ -422,15 +435,34 @@ def _message_turn_response(
             else None
         ),
         dynamic_form=dynamic_form,
+        primary_action=(
+            project_claimant_primary_action(
+                claim_id=claim_id,
+                claim_revision=response_revision,
+                next_step=next_step,
+                external_service_action=external_service_action,
+            )
+            if claim is not None
+            else None
+        ),
     )
 
 
 def _message_only_response(
+    repository: PersistenceRepository,
+    principal: Principal,
     claim_id: str,
     session_id: str,
     revision: int,
     message: MessageRecord,
+    *,
+    claim: WorkingClaim | None = None,
 ) -> MessageTurnResponse:
+    claim = claim or repository.get_claim(claim_id, principal.subject)
+    if claim is None:
+        raise _session_not_found()
+    external_service_action = claimant_assessor_action(repository, claim)
+    next_step = claimant_next_step(repository, claim, external_service_action)
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=session_id,
@@ -438,6 +470,13 @@ def _message_only_response(
         claimant_message=_claimant_message(message),
         form_changes=[],
         handoff=None,
+        decision=None,
+        primary_action=project_claimant_primary_action(
+            claim_id=claim_id,
+            claim_revision=revision,
+            next_step=next_step,
+            external_service_action=external_service_action,
+        ),
     )
 
 
@@ -453,6 +492,8 @@ def _namespaced_turn_response(
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _session_not_found()
+    external_service_action = claimant_assessor_action(repository, claim)
+    next_step = claimant_next_step(repository, claim, external_service_action)
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=claimant_message.session_id,
@@ -463,6 +504,12 @@ def _namespaced_turn_response(
         decision=None,
         handoff=None,
         dynamic_form=claimant_dynamic_form_projection(repository, claim),
+        primary_action=project_claimant_primary_action(
+            claim_id=claim_id,
+            claim_revision=claim_revision,
+            next_step=next_step,
+            external_service_action=external_service_action,
+        ),
     )
 
 
@@ -1672,7 +1719,12 @@ def submit_message(
                 claim = repository.get_claim(claim_id, principal.subject)
                 if claim is not None:
                     return _message_only_response(
-                        claim_id, session_id, claim.revision, existing_client_message
+                        repository,
+                        principal,
+                        claim_id,
+                        session_id,
+                        claim.revision,
+                        existing_client_message,
                     )
                 raise _session_not_found()
             return _message_turn_response(
@@ -1754,7 +1806,13 @@ def submit_message(
             message_id=claimant_message.message_id,
         )
         response = _message_only_response(
-            claim_id, session_id, updated_claim.revision, claimant_message
+            repository,
+            principal,
+            claim_id,
+            session_id,
+            updated_claim.revision,
+            claimant_message,
+            claim=updated_claim,
         )
         idempotency = IdempotencyRecord(
             **{

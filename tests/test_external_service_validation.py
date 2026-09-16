@@ -110,8 +110,11 @@ def _grant_consent(client: TestClient, claim_id: str, revision: int, *, key: str
         json={'consent': True},
     )
     assert response.status_code == 201
-    assert response.json()['action']['status'] == 'ready_to_request'
-    return int(response.json()['revision'])
+    body = response.json()
+    assert body['action']['status'] == 'ready_to_request'
+    assert body['primary_action']['action_code'] == 'claimant.request_assessment'
+    assert body['primary_action']['claim_revision'] == body['revision']
+    return int(body['revision'])
 
 
 class NeverCalledAssessorAdapter:
@@ -254,6 +257,8 @@ def test_success_is_claimant_safe_and_replays_without_a_second_assignment(
     projection = routed.json()
     assert projection['action']['status'] == 'assigned'
     assert projection['action']['routing']['routing_status'] == 'assigned'
+    assert projection['primary_action']['action_code'] == 'claimant.track_assessment'
+    assert projection['primary_action']['claim_revision'] == projection['revision']
     assert 'consent_ref' not in str(projection)
     assert 'decision_id' not in str(projection)
     stored = repository.get_claim_internal(claim_id)
@@ -338,6 +343,9 @@ def test_transient_failure_preserves_progress_then_retries_with_the_same_operati
     assert action_after_failure['status'] == 'retryable_failure'
     assert action_after_failure['failure_code'] == failure.value
     assert action_after_failure['can_request'] is True
+    assert claimant_after_failure.json()['primary_action']['action_code'] == (
+        'claimant.retry_assessment'
+    )
     assert retry.status_code == 201
     assert retry.json()['action']['status'] == 'assigned'
     assert replay.status_code == 200
@@ -528,6 +536,7 @@ def test_a_terminal_failure_is_shown_to_the_claimant_and_withdraws_the_request(
     assert action['failure_code'] == failure.value
     assert action['can_request'] is False
     assert action['routing'] is None
+    assert claimant.json()['primary_action']['action_code'] == 'claimant.await_staff_review'
     assert another.status_code == 409
     assert another.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
     after = repository.get_claim_internal(claim_id)
