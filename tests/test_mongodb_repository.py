@@ -2,7 +2,7 @@ import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
-from threading import Barrier, Lock
+from threading import Barrier, Event, Lock, Thread
 from typing import Any, ClassVar
 
 import mongomock
@@ -2094,6 +2094,98 @@ def test_mongodb_staff_acceptance_races_real_presence_transition() -> None:
         else:
             assert stored_claim == claim
             assert stored_presence == offline_presence
+    finally:
+        if connected:
+            client.drop_database(database_name)
+        client.close()
+
+
+def test_mongodb_realtime_sequence_serializes_reverse_commit_attempt() -> None:
+    """A shared counter prevents later commits from overtaking an earlier event."""
+
+    uri = os.environ.get(
+        'NORTHWIND_MONGODB_TEST_URI',
+        'mongodb://localhost:27017/?replicaSet=rs0&directConnection=true',
+    )
+    client: MongoClient[Any] = MongoClient(uri, serverSelectionTimeoutMS=750)
+    database_name = f'northwind_realtime_order_{datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")}'
+    connected = False
+    try:
+        try:
+            hello = client.admin.command('hello')
+            connected = True
+        except (PyMongoError, ValueError) as error:
+            pytest.skip(f'real MongoDB replica set unavailable: {type(error).__name__}')
+        if not hello.get('isWritablePrimary', False):
+            pytest.skip('real MongoDB replica set has no writable primary')
+
+        repository = MongoDBRepository(client, database_name)
+        first_claim = _claim().model_copy(update={'claim_id': 'clm_realtime_first'})
+        second_claim = _claim().model_copy(update={'claim_id': 'clm_realtime_second'})
+        first_appended = Event()
+        release_first = Event()
+        second_started = Event()
+        failures: list[BaseException] = []
+
+        def write_first() -> None:
+            try:
+                with client.start_session() as session:
+                    session.start_transaction()
+                    repository._append_realtime_event(
+                        first_claim,
+                        (RealtimeResource.CLAIM,),
+                        mongo_session=session,
+                    )
+                    first_appended.set()
+                    assert release_first.wait(timeout=5)
+                    session.commit_transaction()
+            except BaseException as error:
+                failures.append(error)
+
+        def attempt_second_commit() -> None:
+            try:
+                assert first_appended.wait(timeout=5)
+                with client.start_session() as session:
+                    session.start_transaction()
+                    second_started.set()
+                    repository._append_realtime_event(
+                        second_claim,
+                        (RealtimeResource.CLAIM,),
+                        mongo_session=session,
+                    )
+                    session.commit_transaction()
+            except BaseException as error:
+                failures.append(error)
+
+        first_thread = Thread(target=write_first)
+        second_thread = Thread(target=attempt_second_commit)
+        first_thread.start()
+        assert first_appended.wait(timeout=5)
+        second_thread.start()
+        assert second_started.wait(timeout=5)
+        release_first.set()
+        first_thread.join(timeout=10)
+        second_thread.join(timeout=10)
+
+        assert not first_thread.is_alive()
+        assert not second_thread.is_alive()
+        assert failures == []
+        events = repository.replay_realtime_events(None, limit=10)
+        assert [event.claim_id for event in events] == [
+            first_claim.claim_id,
+            second_claim.claim_id,
+        ]
+        assert events[0].sequence is not None
+        assert events[1].sequence == events[0].sequence + 1
+        replay = repository.replay_realtime_events(
+            RealtimeCursor(
+                occurred_at=events[0].occurred_at,
+                event_id=events[0].event_id,
+                sequence=events[0].sequence,
+            ),
+            limit=10,
+        )
+        assert replay == [events[1]]
     finally:
         if connected:
             client.drop_database(database_name)
