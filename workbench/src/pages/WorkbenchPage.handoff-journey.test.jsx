@@ -330,6 +330,7 @@ function handoffProjection(state) {
 function claimantMessage() {
   return {
     message_id: 'msg_claimant_initial',
+    claim_id: 'clm_handoff_journey',
     session_id: 'ses_journey',
     actor: 'claimant',
     visibility: 'shared',
@@ -508,6 +509,7 @@ function createHandoffJourneyService() {
       }
       const message = {
         message_id: 'msg_staff_journey',
+        claim_id: 'clm_handoff_journey',
         session_id: 'ses_journey',
         actor: 'staff',
         visibility: 'shared',
@@ -527,6 +529,8 @@ function createHandoffJourneyService() {
         resulting_revision: 3,
       })
       return jsonResponse(200, {
+        claim_id: 'clm_handoff_journey',
+        session_id: 'ses_journey',
         message,
         claim_revision: state.revision,
       })

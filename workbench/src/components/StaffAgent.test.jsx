@@ -48,6 +48,7 @@ describe('StaffAgent', () => {
     renderAgent({ open: false, onOpenChange })
 
     const trigger = screen.getByRole('button', { name: 'Open Staff Agent' })
+    expect(trigger).toHaveAttribute('title', 'Draft with AI')
     trigger.focus()
     await user.keyboard('{Enter}')
 
