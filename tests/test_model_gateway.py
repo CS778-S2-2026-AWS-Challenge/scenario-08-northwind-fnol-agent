@@ -547,11 +547,7 @@ def test_every_v7_schema_materializes_for_openai_and_bedrock(
             target.update(cast(dict[str, object], json.loads(request.content)))
             return httpx.Response(
                 200,
-                json={
-                    'choices': [
-                        {'finish_reason': 'stop', 'message': {'content': '{}'}}
-                    ]
-                },
+                json={'choices': [{'finish_reason': 'stop', 'message': {'content': '{}'}}]},
             )
 
         OpenAICompatibleModelGateway(

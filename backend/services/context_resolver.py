@@ -106,6 +106,7 @@ def resolver_for_turn(context: AgentTurnContext, plan: ContextPlan) -> TurnConte
                 ]
             }
         elif reference.resource_type == 'policy_version':
+
             def load_policy_and_guidance(
                 limit: int = reference.max_resolve_tokens,
             ) -> dict[str, object]:
@@ -121,6 +122,7 @@ def resolver_for_turn(context: AgentTurnContext, plan: ContextPlan) -> TurnConte
             sources[(reference.ref, 'matching_facts_and_guidance')] = load_policy_and_guidance
         elif reference.resource_type == 'claim_history':
             if context.claim_history_context_loader is not None:
+
                 def load_claim_history(
                     limit: int = reference.max_resolve_tokens,
                 ) -> dict[str, object]:
@@ -157,6 +159,7 @@ def resolver_for_turn(context: AgentTurnContext, plan: ContextPlan) -> TurnConte
                 'history' in reference.available_selectors
                 and context.evidence_history_context_loader is not None
             ):
+
                 def load_evidence_history(
                     limit: int = reference.max_resolve_tokens,
                 ) -> dict[str, object]:

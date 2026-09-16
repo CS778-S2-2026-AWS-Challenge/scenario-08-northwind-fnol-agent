@@ -1366,9 +1366,7 @@ def _claim_history_context_for_turn(
     )[:max_items]
     return {
         'status': (
-            RetrievalStatus.EVIDENCE_FOUND.value
-            if claims
-            else RetrievalStatus.NO_EVIDENCE.value
+            RetrievalStatus.EVIDENCE_FOUND.value if claims else RetrievalStatus.NO_EVIDENCE.value
         ),
         'claims': [
             {
@@ -1384,9 +1382,7 @@ def _claim_history_context_for_turn(
         ],
         'source_refs': [f'claim:{item.claim_id}:revision:{item.revision}' for item in claims],
         'limitations': (
-            []
-            if claims
-            else ['No other Claim is available in the authenticated customer scope.']
+            [] if claims else ['No other Claim is available in the authenticated customer scope.']
         ),
     }
 
