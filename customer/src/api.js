@@ -93,6 +93,100 @@ function streamError(message, options) {
   return new ApiRequestError(message, options)
 }
 
+async function readEventStream(response, signal, onEvent) {
+  if (!response.body) {
+    throw streamError(
+      'This browser could not keep the claim connected for live updates.',
+      { code: 'STREAM_UNAVAILABLE', retryable: true },
+    )
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  try {
+    while (!signal?.aborted) {
+      const { done, value } = await reader.read()
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+      buffer = buffer.replaceAll('\r\n', '\n')
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary >= 0) {
+        const frame = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+        const lines = frame.split('\n')
+        const event = lines.find((line) => line.startsWith('event:'))?.slice(6).trim()
+        const cursor = lines.find((line) => line.startsWith('id:'))?.slice(3).trim() || null
+        const data = lines
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trimStart())
+          .join('\n')
+        if (event && data) {
+          try {
+            await onEvent({ event, cursor, data: JSON.parse(data) })
+          } catch (error) {
+            if (error instanceof SyntaxError) {
+              throw streamError(
+                'A live claim update could not be read. We will reconnect.',
+                { code: 'INVALID_STREAM_EVENT', retryable: true },
+              )
+            }
+            throw error
+          }
+        }
+        boundary = buffer.indexOf('\n\n')
+      }
+      if (done) return
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+export async function streamRealtimeEvents({
+  cursor,
+  signal,
+  onEvent,
+}) {
+  const params = new URLSearchParams()
+  if (cursor) params.set('cursor', cursor)
+  const query = params.size ? `?${params}` : ''
+  let response
+  try {
+    response = await fetch(
+      `/api/v1/realtime/events${query}`,
+      {
+        headers: claimantHeaders({ Accept: 'text/event-stream' }),
+        signal,
+      },
+    )
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+    throw streamError(
+      'Live claim updates are temporarily disconnected. We will keep trying.',
+      { code: 'NETWORK_ERROR', retryable: true },
+    )
+  }
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null)
+    throw streamError(
+      payload?.error?.message || 'Live claim updates could not be started.',
+      {
+        code: payload?.error?.code || 'HTTP_ERROR',
+        status: response.status,
+        retryable: payload?.error?.retryable,
+        currentRevision: payload?.error?.current_revision,
+      },
+    )
+  }
+
+  await readEventStream(response, signal, async ({ event, cursor: eventCursor, data }) => {
+    if (event === 'resources.changed' || event === 'resync_required') {
+      await onEvent({ type: event, cursor: eventCursor, data })
+    }
+  })
+}
+
 export async function streamClaimUpdates({
   claimId,
   sessionId,
@@ -130,51 +224,9 @@ export async function streamClaimUpdates({
       },
     )
   }
-  if (!response.body) {
-    throw streamError(
-      'This browser could not keep the claim connected for live updates.',
-      { code: 'STREAM_UNAVAILABLE', retryable: true },
-    )
-  }
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  try {
-    while (!signal?.aborted) {
-      const { done, value } = await reader.read()
-      buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
-      buffer = buffer.replaceAll('\r\n', '\n')
-      let boundary = buffer.indexOf('\n\n')
-      while (boundary >= 0) {
-        const frame = buffer.slice(0, boundary)
-        buffer = buffer.slice(boundary + 2)
-        const lines = frame.split('\n')
-        const event = lines.find((line) => line.startsWith('event:'))?.slice(6).trim()
-        const data = lines
-          .filter((line) => line.startsWith('data:'))
-          .map((line) => line.slice(5).trimStart())
-          .join('\n')
-        if (event === 'claim.updated' && data) {
-          try {
-            await onEvent(JSON.parse(data))
-          } catch (error) {
-            if (error instanceof SyntaxError) {
-              throw streamError(
-                'A live claim update could not be read. We will reconnect.',
-                { code: 'INVALID_STREAM_EVENT', retryable: true },
-              )
-            }
-            throw error
-          }
-        }
-        boundary = buffer.indexOf('\n\n')
-      }
-      if (done) return
-    }
-  } finally {
-    reader.releaseLock()
-  }
+  await readEventStream(response, signal, async ({ event, data }) => {
+    if (event === 'claim.updated') await onEvent(data)
+  })
 }
 
 export function promoteAnonymousClaim(claimId) {
