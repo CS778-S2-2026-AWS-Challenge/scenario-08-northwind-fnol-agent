@@ -312,6 +312,7 @@ class AssessorRoutingOperationStatus(str, Enum):
 
 class ExternalServiceConsentStatus(str, Enum):
     GRANTED = 'granted'
+    DECLINED = 'declined'
     WITHDRAWN = 'withdrawn'
 
 
@@ -326,6 +327,10 @@ class ClaimantExternalServiceStatus(str, Enum):
     """
 
     CONSENT_REQUIRED = 'consent_required'
+    CONSENT_DECLINED = 'consent_declined'
+    CONSENT_WITHDRAWN = 'consent_withdrawn'
+    PENDING_INPUT = 'pending_input'
+    MANUAL_AVAILABLE = 'manual_available'
     READY_TO_REQUEST = 'ready_to_request'
     QUEUED = 'queued'
     ASSIGNED = 'assigned'
@@ -644,6 +649,8 @@ class AssessorRoutingResult(ContractModel):
 
 
 class ClaimantExternalServiceAction(ContractModel):
+    offer_id: str | None = Field(default=None, min_length=1, max_length=120)
+    agent_message_id: str | None = Field(default=None, min_length=1, max_length=120)
     service_identity: str
     registry_version: str = Field(
         default='external-service-lifecycle.v1', min_length=1, max_length=100
@@ -660,12 +667,20 @@ class ClaimantExternalServiceAction(ContractModel):
     service_name: str
     provider: str
     purpose: str
+    requested_action: str = Field(default='submit_request', min_length=1, max_length=100)
     shared_data_summary: list[str]
+    disclosure_fields: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    disclosure_fingerprint: str | None = Field(default=None, min_length=1, max_length=128)
+    official_url: str | None = None
+    official_phone: str | None = None
+    uses_external_task: bool = True
     status: ClaimantExternalServiceStatus
     consent_status: ExternalServiceConsentStatus | None = None
     routing: AssessorRoutingResult | None = None
     failure_code: AssessorRoutingFailureCode | None = None
     can_request: bool
+    can_withdraw: bool = False
 
 
 class ExternalCapabilityProjection(ContractModel):
@@ -680,6 +695,7 @@ class ExternalCapabilityProjection(ContractModel):
     provider_name: str
     product_families: tuple[str, ...]
     purpose: str
+    requested_action: str
     access_form: str
     adapter_kind: str
     uses_external_task: bool
@@ -733,7 +749,14 @@ class ExternalServiceConsent(ContractModel):
     consent_ref: str = Field(min_length=1, max_length=100)
     service_identity: str = Field(min_length=1, max_length=100)
     requested_action: str = Field(min_length=1, max_length=100)
-    permitted_fields: list[str] = Field(min_length=1, max_length=20)
+    permitted_fields: list[str] = Field(default_factory=list, max_length=20)
+    registry_version: str = Field(
+        default='external-service-lifecycle.v1', min_length=1, max_length=100
+    )
+    offer_ref: str | None = Field(default=None, min_length=1, max_length=120)
+    disclosure_manifest: list[str] = Field(default_factory=list, max_length=50)
+    disclosure_fingerprint: str | None = Field(default=None, min_length=1, max_length=128)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=50)
     status: ExternalServiceConsentStatus
     granted_by: ActorReference
     granted_at: datetime
@@ -743,10 +766,21 @@ class ExternalServiceConsent(ContractModel):
     def validate_consent_state(self) -> 'ExternalServiceConsent':
         if len(self.permitted_fields) != len(set(self.permitted_fields)):
             raise ValueError('External-service consent fields must be unique.')
-        if self.status is ExternalServiceConsentStatus.GRANTED and self.withdrawn_at is not None:
-            raise ValueError('Granted consent cannot have a withdrawal time.')
+        if (
+            self.status
+            in {
+                ExternalServiceConsentStatus.GRANTED,
+                ExternalServiceConsentStatus.DECLINED,
+            }
+            and self.withdrawn_at is not None
+        ):
+            raise ValueError('Only withdrawn consent may have a withdrawal time.')
         if self.status is ExternalServiceConsentStatus.WITHDRAWN and self.withdrawn_at is None:
             raise ValueError('Withdrawn consent requires a withdrawal time.')
+        if len(self.evidence_ids) != len(set(self.evidence_ids)):
+            raise ValueError('External-service consent Evidence references must be unique.')
+        if self.offer_ref is not None and not self.disclosure_fingerprint:
+            raise ValueError('Offer-bound consent requires a disclosure fingerprint.')
         return self
 
 
@@ -1619,6 +1653,10 @@ class GrantAssessorConsentRequest(ContractModel):
     consent: Literal[True]
 
 
+class ExternalServiceOfferDecisionRequest(ContractModel):
+    decision: Literal['grant', 'decline', 'withdraw']
+
+
 class ClaimantExternalServiceResponse(ContractModel):
     claim_id: str
     revision: int = Field(ge=1)
@@ -1975,6 +2013,7 @@ class ClaimantMessage(ContractModel):
     content: dict[str, Any]
     evidence_refs: list[str] = Field(default_factory=list)
     in_reply_to: str | None = None
+    message_actions: list[ClaimantExternalServiceAction] = Field(default_factory=list)
     created_at: datetime
 
 

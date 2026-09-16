@@ -28,6 +28,38 @@ class ExternalCapabilityResult:
 
 Adapter = Callable[[ExternalServiceRegistryEntry, Mapping[str, Any]], Mapping[str, Any]]
 
+
+def _controlled_task_adapter(
+    entry: ExternalServiceRegistryEntry,
+    payload: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Return the provider-shaped acknowledgement used by controlled environments."""
+
+    operation_id = str(payload['operation_id'])
+    reference_prefix = entry.catalogue_reference or entry.service_identity
+    return {
+        'status': 'accepted',
+        'provider_reference': f'{reference_prefix}-{operation_id.removeprefix("op_")[:8]}',
+        'next_action': f'{entry.service_name} accepted the request for processing.',
+    }
+
+
+def controlled_external_capability_dispatcher() -> 'ExternalCapabilityDispatcher':
+    """Compose registered task adapters for the controlled product runtime."""
+
+    return ExternalCapabilityDispatcher(
+        {
+            service_identity: _controlled_task_adapter
+            for service_identity in (
+                'vehicle_recovery_request',
+                'vehicle_repairer_booking',
+                'home_emergency_repair_request',
+                'contents_specialist_assessment',
+            )
+        }
+    )
+
+
 REGISTERED_OPERATIONS = frozenset(
     {
         'discover_capability',
@@ -45,6 +77,9 @@ REGISTERED_OPERATIONS = frozenset(
     }
 )
 REQUEST_OPERATIONS = frozenset({'prepare_request', 'submit_request'})
+RUNTIME_VALIDATION_OPERATIONS = frozenset(
+    {'load_requirements', 'classify_request', 'check_authority'}
+)
 CONTROL_FIELDS = frozenset(
     {
         'claim_id',
@@ -134,6 +169,20 @@ class ExternalCapabilityDispatcher:
         if validation_error is not None:
             return self._rejected(entry, validation_error)
         adapter = self._adapters.get(service_identity)
+        if adapter is None and operation in RUNTIME_VALIDATION_OPERATIONS:
+            return ExternalCapabilityResult(
+                status='validated',
+                service_identity=service_identity,
+                registry_version='external-service-lifecycle.v1',
+                access_form=entry.access_form,
+                uses_external_task=entry.uses_external_task,
+                payload={
+                    'purpose': entry.purpose,
+                    'required_fields': entry.required_fields,
+                    'disclosure_fields': entry.disclosure_fields,
+                },
+                next_action='Use Runtime authority and the exact registered disclosure scope.',
+            )
         if adapter is None:
             return ExternalCapabilityResult(
                 status='unavailable',

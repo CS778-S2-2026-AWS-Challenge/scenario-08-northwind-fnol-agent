@@ -109,7 +109,7 @@ def _create_assessor_ready_claim(client: TestClient, *, key: str) -> tuple[str, 
         },
     )
     assert external.status_code == 201
-    assert external.json()['external_service_action']['status'] == 'consent_required'
+    assert external.json()['external_service_action'] is None
     return claim_id, int(external.json()['revision'])
 
 

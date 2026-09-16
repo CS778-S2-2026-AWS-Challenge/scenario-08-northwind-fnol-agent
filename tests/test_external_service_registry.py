@@ -86,7 +86,8 @@ def test_registered_paths_preserve_manual_and_simulated_boundaries() -> None:
     assert entries['police_105_reporting_guidance'].uses_external_task is False
     assert entries['police_traffic_crash_report_guidance'].catalogue_reference == 'P3-NZP-TCR'
     assert entries['police_traffic_crash_report_guidance'].uses_external_task is False
-    assert 'Simulation-only' in entries['vehicle_damage_assessment_routing'].limitation
+    assert 'Simulation-only' not in entries['vehicle_damage_assessment_routing'].limitation
+    assert 'not completion' in entries['vehicle_damage_assessment_routing'].limitation
 
 
 def test_unknown_service_has_no_implicit_capability() -> None:

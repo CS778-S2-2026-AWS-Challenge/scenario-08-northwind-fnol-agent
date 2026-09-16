@@ -101,6 +101,10 @@ from backend.services.agent import (
     UnavailableAgent,
 )
 from backend.services.agent_action_execution import ClaimantRuntimeActionDispatcher
+from backend.services.external_capability_dispatcher import (
+    ExternalCapabilityDispatcher,
+    controlled_external_capability_dispatcher,
+)
 from backend.services.external_service_entry import (
     assert_adapter_matches_entry,
     resolve_external_service_entry,
@@ -144,6 +148,7 @@ def create_app(
     operation_repository: OperationRepository | None = None,
     evaluation_repository: EvaluationRepository | None = None,
     knowledge_admin_repository: KnowledgeAdminRepository | None = None,
+    external_capability_dispatcher: ExternalCapabilityDispatcher | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
     resolved_configuration_repository = configuration_repository or (
@@ -438,6 +443,9 @@ def create_app(
     )
     app.state.assessor_service_adapter = resolved_assessor_adapter
     app.state.assessor_service_entry = assessor_service_entry
+    app.state.external_capability_dispatcher = (
+        external_capability_dispatcher or controlled_external_capability_dispatcher()
+    )
 
     configure_cors(app, resolved_settings)
     app.add_middleware(RequestIdMiddleware)

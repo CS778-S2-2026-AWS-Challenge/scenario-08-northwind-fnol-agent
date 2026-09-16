@@ -1562,10 +1562,16 @@ class MongoDBRepository:
         operation: AssessorRoutingOperation,
     ) -> None:
         claim = self.get_claim_internal(operation.claim_id)
+        external_claim_id = (
+            claim.external_claim.external_claim_id
+            if claim is not None
+            and claim.external_claim is not None
+            and claim.external_claim.external_claim_id is not None
+            else operation.claim_id
+        )
         if (
             claim is None
-            or claim.external_claim is None
-            or claim.external_claim.external_claim_id != operation.external_claim_id
+            or external_claim_id != operation.external_claim_id
             or operation.authorised_revision > claim.revision
         ):
             raise KeyError(operation.claim_id)
@@ -1860,12 +1866,18 @@ class MongoDBRepository:
     ) -> None:
         claim = self.get_claim(operation.claim_id, customer_id)
         session = self.get_session(operation.claim_id, decision.session_id, customer_id)
+        external_claim_id = (
+            claim.external_claim.external_claim_id
+            if claim is not None
+            and claim.external_claim is not None
+            and claim.external_claim.external_claim_id is not None
+            else operation.claim_id
+        )
         if (
             claim is None
             or session is None
             or claim.active_session_id != decision.session_id
-            or claim.external_claim is None
-            or claim.external_claim.external_claim_id != operation.external_claim_id
+            or external_claim_id != operation.external_claim_id
             or operation.status is not AssessorRoutingOperationStatus.PREPARED
             or operation.authorised_revision != claim.revision
             or decision.claim_id != claim.claim_id
