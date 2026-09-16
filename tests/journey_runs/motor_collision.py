@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 from fastapi.testclient import TestClient
 
@@ -121,14 +123,12 @@ def _proposed_field_codes(journey: Journey) -> list[str]:
     claim = journey.read(f'/api/v1/claims/{journey.claim_id}', 'claimant')
     fields = ((claim.get('dynamic_form') or {}).get('fields')) or []
     return [
-        str(field.get('field_code'))
-        for field in fields
-        if field.get('value_state') == 'proposed'
+        str(field.get('field_code')) for field in fields if field.get('value_state') == 'proposed'
     ]
 
 
 def _drive_multi_turn(
-    journey: Journey, journey_input: dict[str, object], pack: tuple[PackMaterial, ...]
+    journey: Journey, journey_input: dict[str, Any], pack: tuple[PackMaterial, ...]
 ) -> tuple[list[AgentTurn], dict[str, str]]:
     """Replay a fixture's `turns` list through the claimant API.
 
@@ -164,7 +164,7 @@ def _drive_multi_turn(
                     {'field_codes': proposed},
                 )
         elif turn.get('input'):
-            name = f"turn {index}: {str(turn.get('expected_action', 'input')).lower()}"
+            name = f'turn {index}: {str(turn.get("expected_action", "input")).lower()}'
             payload = journey.say(name, session, str(turn['input']))
             if payload:
                 turns.append(agent_turn(name, str(turn['input']), payload))
@@ -180,7 +180,9 @@ def run_motor_journey(
 ) -> JourneyRunRecord:
     """Run one motor journey from a named fixture (AT-01 / PRES-01 / PRES-02)."""
     if fixture_name not in MOTOR_JOURNEY_FIXTURES:
-        raise ValueError(f'Unknown motor fixture: {fixture_name!r}; choose from {sorted(MOTOR_JOURNEY_FIXTURES)}')
+        raise ValueError(
+            f'Unknown motor fixture: {fixture_name!r}; choose from {sorted(MOTOR_JOURNEY_FIXTURES)}'
+        )
     journey_input = json.loads(MOTOR_JOURNEY_FIXTURES[fixture_name].read_text(encoding='utf-8'))
     scenario_id = str(
         journey_input.get('scenario_id')

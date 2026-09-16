@@ -238,8 +238,8 @@ CONTENTS_THEFT = replace(
             'The stolen item is a Dell XPS 13 laptop I bought in 2024 for 2400 dollars.'
         ),
     },
-    pack=CONTENTS.pack
-    + (
+    pack=(
+        *CONTENTS.pack,
         PackMaterial(
             'contents/contents-police-theft-report.pdf',
             'Authority or official report',
@@ -276,8 +276,8 @@ CONTENTS_EXPIRED_VALUATION = replace(
     CONTENTS,
     scenario_id='contents-damaged-item-expired-valuation',
     pack_id='contents-damaged-item-expired-valuation-v1',
-    pack=CONTENTS.pack
-    + (
+    pack=(
+        *CONTENTS.pack,
         PackMaterial(
             'contents/contents-valuation-expired.pdf',
             'Identity and ownership evidence',
@@ -294,8 +294,8 @@ CONTENTS_CONFLICTING_OWNERSHIP = replace(
     CONTENTS,
     scenario_id='contents-damaged-item-conflicting-ownership',
     pack_id='contents-damaged-item-conflicting-ownership-v1',
-    pack=CONTENTS.pack
-    + (
+    pack=(
+        *CONTENTS.pack,
         PackMaterial(
             'contents/contents-ownership-conflicting.pdf',
             'Identity and ownership evidence',
@@ -312,8 +312,8 @@ CONTENTS_NOT_HELD = replace(
     CONTENTS,
     scenario_id='contents-damaged-item-authority-not-held',
     pack_id='contents-damaged-item-authority-not-held-v1',
-    pack=CONTENTS.pack
-    + (
+    pack=(
+        *CONTENTS.pack,
         PackMaterial(
             'contents/contents-authority-outcome-not-held',
             'Authority or official report',

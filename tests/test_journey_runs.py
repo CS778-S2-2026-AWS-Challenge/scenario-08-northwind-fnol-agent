@@ -20,7 +20,11 @@ from journey_runs.household import (
     HouseholdScenario,
     run_household,
 )
-from journey_runs.motor_collision import MOTOR_COLLISION_PACK, run_motor_collision, run_motor_journey
+from journey_runs.motor_collision import (
+    MOTOR_COLLISION_PACK,
+    run_motor_collision,
+    run_motor_journey,
+)
 from journey_runs.record import (
     AgentTurn,
     Arrival,
@@ -360,12 +364,26 @@ def test_the_at01_motor_journey_is_unchanged_after_multi_turn_support() -> None:
 
 @pytest.mark.parametrize(
     'scenario',
-    [HOME_ILLEGIBLE, CONTENTS_THEFT, CONTENTS_ILLEGIBLE_RECEIPT, CONTENTS_EXPIRED_VALUATION,
-     CONTENTS_CONFLICTING_OWNERSHIP, CONTENTS_NOT_HELD],
-    ids=['home_illegible', 'contents_theft', 'contents_illegible_receipt',
-         'contents_expired_valuation', 'contents_conflicting_ownership', 'contents_not_held'],
+    [
+        HOME_ILLEGIBLE,
+        CONTENTS_THEFT,
+        CONTENTS_ILLEGIBLE_RECEIPT,
+        CONTENTS_EXPIRED_VALUATION,
+        CONTENTS_CONFLICTING_OWNERSHIP,
+        CONTENTS_NOT_HELD,
+    ],
+    ids=[
+        'home_illegible',
+        'contents_theft',
+        'contents_illegible_receipt',
+        'contents_expired_valuation',
+        'contents_conflicting_ownership',
+        'contents_not_held',
+    ],
 )
-def test_a_household_material_variant_runs_and_records_its_pack(scenario: HouseholdScenario) -> None:
+def test_a_household_material_variant_runs_and_records_its_pack(
+    scenario: HouseholdScenario,
+) -> None:
     run = run_household(scenario, head='test')
     record = run.record
 
@@ -380,7 +398,8 @@ def test_a_household_material_variant_runs_and_records_its_pack(scenario: Househ
     # A variant that adds a NO_ROUTE material must record it as such.
     if scenario.scenario_id == 'contents-damaged-item-authority-not-held':
         assert any(
-            m.path == 'contents/contents-authority-outcome-not-held' and m.arrival is Arrival.NO_ROUTE
+            m.path == 'contents/contents-authority-outcome-not-held'
+            and m.arrival is Arrival.NO_ROUTE
             for m in record.materials
         )
     # A variant that replaces a material must not carry the original.
