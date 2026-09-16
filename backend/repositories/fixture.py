@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from threading import RLock
 from typing import Any
 
+from backend.domain.assets import AssetRecord, ClaimAssetSnapshot
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
 from backend.domain.evidence import assert_material_history_is_append_only
 from backend.domain.external_services import (
@@ -87,6 +88,8 @@ class FixtureRepository(PersistenceRepository):
         self._validation_seed_lock = RLock()
         self._claim_mutation_lock = RLock()
         self._claims: dict[str, WorkingClaim] = {}
+        self._assets: dict[str, AssetRecord] = {}
+        self._claim_asset_snapshots: dict[str, ClaimAssetSnapshot] = {}
         self._audit_events: dict[str, AuditEventEnvelope] = {}
         self._sessions: dict[str, SessionRecord] = {}
         self._session_ids_by_claim: dict[tuple[str, str], list[str]] = {}
@@ -130,6 +133,108 @@ class FixtureRepository(PersistenceRepository):
     def connection_status(self) -> str:
         return 'using_fixture'
 
+    def create_asset(self, asset: AssetRecord, idempotency: IdempotencyRecord) -> None:
+        with self._claim_mutation_lock:
+            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            if (
+                asset.customer_id != idempotency.actor_id
+                or asset.asset_id != idempotency.claim_id
+                or asset.asset_id in self._assets
+                or lookup in self._idempotency
+            ):
+                raise IdempotencyConflict(idempotency.key)
+            self._assets[asset.asset_id] = deepcopy(asset)
+            self._idempotency[lookup] = deepcopy(idempotency)
+
+    def get_asset(self, asset_id: str, customer_id: str) -> AssetRecord | None:
+        asset = self._assets.get(asset_id)
+        if asset is None or asset.customer_id != customer_id:
+            return None
+        return deepcopy(asset)
+
+    def list_assets(
+        self,
+        customer_id: str,
+        *,
+        include_inactive: bool = False,
+        offset: int = 0,
+        limit: int = 25,
+    ) -> tuple[list[AssetRecord], bool]:
+        records = sorted(
+            (
+                deepcopy(asset)
+                for asset in self._assets.values()
+                if asset.customer_id == customer_id and (include_inactive or asset.active)
+            ),
+            key=lambda asset: (asset.updated_at, asset.asset_id),
+            reverse=True,
+        )
+        page = records[offset : offset + limit + 1]
+        return page[:limit], len(page) > limit
+
+    def update_asset(self, asset: AssetRecord, expected_revision: int) -> None:
+        with self._claim_mutation_lock:
+            current = self._assets.get(asset.asset_id)
+            if current is None or current.customer_id != asset.customer_id:
+                raise KeyError(asset.asset_id)
+            if current.revision != expected_revision:
+                raise RevisionConflict(current.revision)
+            if asset.revision != expected_revision + 1 or asset.created_at != current.created_at:
+                raise KeyError(asset.asset_id)
+            self._assets[asset.asset_id] = deepcopy(asset)
+
+    def save_asset_selection(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        snapshot: ClaimAssetSnapshot,
+        idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord,
+    ) -> None:
+        with self._claim_mutation_lock:
+            self._validate_claim_mutation(claim, expected_revision)
+            self._validate_branch_evaluation(claim, branch_evaluation)
+            asset = self._assets.get(snapshot.asset_id)
+            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            if (
+                asset is None
+                or asset.customer_id != claim.customer_id
+                or not asset.active
+                or asset.revision != snapshot.asset_revision
+                or snapshot.customer_id != claim.customer_id
+                or snapshot.claim_id != claim.claim_id
+                or snapshot.resulting_claim_revision != claim.revision
+                or idempotency.actor_id != claim.customer_id
+                or idempotency.claim_id != claim.claim_id
+                or idempotency.session_id != (claim.active_session_id or '')
+            ):
+                raise KeyError(claim.claim_id)
+            if snapshot.snapshot_id in self._claim_asset_snapshots or lookup in self._idempotency:
+                raise IdempotencyConflict(idempotency.key)
+            self._claims[claim.claim_id] = deepcopy(claim)
+            self._claim_asset_snapshots[snapshot.snapshot_id] = deepcopy(snapshot)
+            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
+            self._idempotency[lookup] = deepcopy(idempotency)
+
+    def list_claim_asset_snapshots(
+        self,
+        claim_id: str,
+        customer_id: str,
+        *,
+        offset: int = 0,
+        limit: int = 25,
+    ) -> tuple[list[ClaimAssetSnapshot], bool]:
+        records = sorted(
+            (
+                deepcopy(snapshot)
+                for snapshot in self._claim_asset_snapshots.values()
+                if snapshot.claim_id == claim_id and snapshot.customer_id == customer_id
+            ),
+            key=lambda snapshot: (snapshot.captured_at, snapshot.snapshot_id),
+        )
+        page = records[offset : offset + limit + 1]
+        return page[:limit], len(page) > limit
+
     @property
     def claim_count(self) -> int:
         return len(self._claims)
@@ -138,6 +243,8 @@ class FixtureRepository(PersistenceRepository):
         """Clear only records owned by this in-memory prototype repository."""
         cleared = {
             'claims': len(self._claims),
+            'assets': len(self._assets),
+            'claim_asset_snapshots': len(self._claim_asset_snapshots),
             'audit_events': len(self._audit_events),
             'sessions': len(self._sessions),
             'follow_ups': len(self._follow_ups),
@@ -167,6 +274,8 @@ class FixtureRepository(PersistenceRepository):
             'staff_presence': len(self._staff_presence),
         }
         self._claims.clear()
+        self._assets.clear()
+        self._claim_asset_snapshots.clear()
         self._audit_events.clear()
         self._sessions.clear()
         self._session_ids_by_claim.clear()

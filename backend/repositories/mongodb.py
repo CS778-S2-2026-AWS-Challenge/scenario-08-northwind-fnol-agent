@@ -17,6 +17,7 @@ from pymongo import MongoClient, ReturnDocument
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
+from backend.domain.assets import AssetRecord, ClaimAssetSnapshot
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
 from backend.domain.evidence import assert_material_history_is_append_only
 from backend.domain.external_services import (
@@ -216,6 +217,7 @@ IMMUTABLE_CHILD_RECORD_KINDS = frozenset(
         'turn_result',
         'runtime_work_item',
         'staff_agent_execution',
+        'claim_asset_snapshot',
     }
 )
 """Child records whose identity may never be rebound or rewritten once persisted.
@@ -253,6 +255,22 @@ class MongoDBRepository:
             ]
         )
         self._collection.create_index([('record_type', 1), ('customer_id', 1), ('updated_at', -1)])
+        self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('customer_id', 1),
+                ('active', 1),
+                ('updated_at', -1),
+                ('_id', -1),
+            ],
+            name='asset_customer_active_updated',
+            partialFilterExpression={'record_type': 'asset'},
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('claim_id', 1), ('captured_at', 1), ('_id', 1)],
+            name='claim_asset_snapshot_claim_captured',
+            partialFilterExpression={'record_type': 'claim_asset_snapshot'},
+        )
         self._collection.create_index(
             [('record_type', 1), ('actor_id', 1), ('route', 1), ('key', 1)],
             unique=True,
@@ -353,6 +371,161 @@ class MongoDBRepository:
 
     def close(self) -> None:
         self._client.close()
+
+    def create_asset(self, asset: AssetRecord, idempotency: IdempotencyRecord) -> None:
+        if asset.customer_id != idempotency.actor_id or asset.asset_id != idempotency.claim_id:
+            raise KeyError(asset.asset_id)
+
+        def persist(mongo_session: Any) -> None:
+            self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
+            self._put(
+                'asset',
+                asset.asset_id,
+                asset,
+                customer_id=asset.customer_id,
+                session=mongo_session,
+            )
+            self._save_idempotency(idempotency, mongo_session)
+
+        self._atomic(persist)
+
+    def get_asset(self, asset_id: str, customer_id: str) -> AssetRecord | None:
+        return self._get('asset', asset_id, AssetRecord, customer_id=customer_id)
+
+    def list_assets(
+        self,
+        customer_id: str,
+        *,
+        include_inactive: bool = False,
+        offset: int = 0,
+        limit: int = 25,
+    ) -> tuple[list[AssetRecord], bool]:
+        filters: dict[str, Any] = {'customer_id': customer_id}
+        if not include_inactive:
+            filters['active'] = True
+        documents = (
+            self._collection.find({'record_type': 'asset', **filters})
+            .sort([('updated_at', -1), ('_id', -1)])
+            .skip(offset)
+            .limit(limit + 1)
+        )
+        records = [
+            record
+            for document in documents
+            if (record := self._model_from_document(document, AssetRecord)) is not None
+        ]
+        return records[:limit], len(records) > limit
+
+    def update_asset(self, asset: AssetRecord, expected_revision: int) -> None:
+        if asset.revision != expected_revision + 1:
+            raise KeyError(asset.asset_id)
+        document = asset.model_dump(mode='json')
+        document.update(
+            {
+                '_id': self._record_id('asset', asset.asset_id),
+                'record_type': 'asset',
+                'customer_id': asset.customer_id,
+                'claim_id': None,
+            }
+        )
+        result = self._collection.replace_one(
+            {
+                '_id': document['_id'],
+                'record_type': 'asset',
+                'customer_id': asset.customer_id,
+                'revision': expected_revision,
+            },
+            document,
+        )
+        if result.matched_count != 1:
+            current = self._collection.find_one(
+                {
+                    '_id': document['_id'],
+                    'record_type': 'asset',
+                    'customer_id': asset.customer_id,
+                },
+                projection={'revision': 1},
+            )
+            if current is None:
+                raise KeyError(asset.asset_id)
+            raise RevisionConflict(int(current['revision']))
+
+    def save_asset_selection(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        snapshot: ClaimAssetSnapshot,
+        idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord,
+    ) -> None:
+        if (
+            snapshot.customer_id != claim.customer_id
+            or snapshot.claim_id != claim.claim_id
+            or snapshot.resulting_claim_revision != claim.revision
+            or idempotency.actor_id != claim.customer_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.session_id != (claim.active_session_id or '')
+        ):
+            raise KeyError(claim.claim_id)
+        self._validate_branch_evaluation(claim, branch_evaluation)
+
+        def persist(mongo_session: Any) -> None:
+            asset = self._get(
+                'asset',
+                snapshot.asset_id,
+                AssetRecord,
+                customer_id=claim.customer_id,
+                session=mongo_session,
+            )
+            if (
+                asset is None
+                or not asset.active
+                or asset.revision != snapshot.asset_revision
+                or asset.asset_type != snapshot.asset_type
+                or asset.display_name != snapshot.display_name
+                or asset.details != snapshot.details
+                or asset.policy_reference != snapshot.policy_reference
+            ):
+                raise KeyError(snapshot.asset_id)
+            self._save_child_mutation(
+                claim,
+                expected_revision,
+                idempotency,
+                mongo_session,
+                records=[
+                    ('claim_asset_snapshot', snapshot.snapshot_id, snapshot),
+                    ('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation),
+                ],
+            )
+
+        self._atomic(persist)
+
+    def list_claim_asset_snapshots(
+        self,
+        claim_id: str,
+        customer_id: str,
+        *,
+        offset: int = 0,
+        limit: int = 25,
+    ) -> tuple[list[ClaimAssetSnapshot], bool]:
+        documents = (
+            self._collection.find(
+                {
+                    'record_type': 'claim_asset_snapshot',
+                    'claim_id': claim_id,
+                    'customer_id': customer_id,
+                }
+            )
+            .sort([('captured_at', 1), ('_id', 1)])
+            .skip(offset)
+            .limit(limit + 1)
+        )
+        records = [
+            record
+            for document in documents
+            if (record := self._model_from_document(document, ClaimAssetSnapshot)) is not None
+        ]
+        return records[:limit], len(records) > limit
 
     @staticmethod
     def _record_id(kind: str, identifier: str) -> str:
