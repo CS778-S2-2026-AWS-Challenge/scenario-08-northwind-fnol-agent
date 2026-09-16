@@ -1702,8 +1702,8 @@ function App() {
     cancelComposerDraftAttachments()
     setStatus('resuming')
     try {
-      const current = await getClaim(claimId)
-      const canResume = current.can_resume ?? current.customer_next_step?.can_resume
+      const savedClaim = await getClaim(claimId)
+      const canResume = savedClaim.can_resume ?? savedClaim.customer_next_step?.can_resume
       if (canResume === false) {
         if (hasClaimantAccessToken()) {
           setClaimHistory((history) => history?.filter((item) => item.claim_id !== claimId) || history)
@@ -1715,6 +1715,7 @@ function App() {
         return
       }
       const session = await resumeClaimSession({ claimId })
+      const current = await getClaim(claimId)
       const conversation = await getClaimMessages(claimId, session.session_id)
       clearComposerAttachments()
       latestRevision.current = current.revision
@@ -2329,11 +2330,12 @@ function App() {
         <main className="entry-page">
           <section className="entry-hero" aria-labelledby="entry-title">
             <div className="entry-content">
-              <h1 className="entry-brand-line" id="entry-title">
+              <p className="entry-brand-line">
                 <span>Understand insurance.</span>
                 {' '}
                 <span>Understand you better.</span>
-              </h1>
+              </p>
+              <h1 className="entry-task-title" id="entry-title">Start your insurance claim</h1>
               <p className="entry-intro">Tell us what happened — we&apos;ll guide you through the next steps.</p>
               <section id="claims" className="claim-starter" aria-label="Start a claim">
                 <MessageComposer

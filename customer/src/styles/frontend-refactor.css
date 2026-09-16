@@ -364,14 +364,21 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 .entry-page .entry-content { padding-top: 0; }
 .entry-brand-line {
   max-width: var(--entry-composer-measure-max);
-  margin: 0 auto;
-  font-size: var(--font-size-display);
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: -.02em;
+  margin: 0 auto var(--space-5);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-section);
+  font-weight: var(--font-weight-regular);
   line-height: var(--line-height-heading);
 }
 .entry-brand-line span { display: inline; }
-.entry-intro { max-width: var(--entry-subtitle-measure); margin: var(--space-4) auto var(--space-8); color: var(--color-text-secondary); font-size: var(--font-size-body); line-height: var(--line-height-body); }
+.entry-task-title {
+  max-width: var(--entry-composer-measure-max);
+  margin: 0 auto;
+  font-size: var(--font-size-display);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-heading);
+}
+.entry-intro { max-width: var(--entry-subtitle-measure); margin: var(--space-6) auto var(--space-8); color: var(--color-text-secondary); font-size: var(--font-size-section); font-weight: var(--font-weight-regular); line-height: var(--line-height-body); }
 .claim-starter h1, .claim-starter h2 { color: var(--color-text-primary); font-size: var(--font-size-page); font-weight: var(--font-weight-semibold); }
 .entry-page .claim-starter {
   display: flex;
@@ -818,10 +825,6 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 
 @media (min-width: 641px) and (min-height: 700px) {
   .entry-content { transform: translateY(var(--entry-visual-lift)); }
-}
-
-@media (min-width: 641px) and (max-width: 1439px) {
-  .entry-brand-line span { display: block; }
 }
 
 @media (min-width: 1440px) {
@@ -1533,8 +1536,6 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   .product-header.is-intake-header .aux-link { font-size: 12px; }
   .product-header.is-intake-header .support-button { padding-inline: var(--space-2); font-size: 12px; }
   .header-assistance-chip { padding-inline: var(--space-2); }
-  .entry-brand-line { font-size: var(--font-size-page); }
-  .entry-brand-line span { display: block; }
   .intake-page { display: flex; flex-direction: column; }
   .mobile-intake-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-1); padding: var(--space-2); border-bottom: 1px solid var(--color-divider); background: var(--color-sidebar); }
   .mobile-intake-tabs button { min-height: 40px; border: 0; border-radius: var(--radius-md); color: var(--color-text-muted); background: transparent; font: inherit; font-size: var(--font-size-caption); font-weight: var(--font-weight-semibold); }

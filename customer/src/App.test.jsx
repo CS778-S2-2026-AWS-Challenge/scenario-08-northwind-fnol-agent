@@ -412,7 +412,8 @@ describe('claimant intake projection', () => {
 
     await user.click(backButton)
 
-    expect(screen.getByRole('heading', { name: /Understand insurance/ })).toBeVisible()
+    expect(screen.getByRole('heading', { level: 1, name: 'Start your insurance claim' })).toBeVisible()
+    expect(screen.getByText(/Understand insurance/)).not.toHaveRole('heading')
     expect(globalThis.location.pathname).toBe('/')
     expect(screen.queryByText(agentMessage.content.text)).not.toBeInTheDocument()
 
@@ -873,6 +874,75 @@ describe('claimant intake projection', () => {
     expect(api.listClaims).not.toHaveBeenCalled()
     expect(api.resumeClaimSession).toHaveBeenCalledWith({ claimId: initialClaim.claim_id })
     expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
+  })
+
+  it('uses the authoritative post-resume revision for the next claimant message', async () => {
+    const user = userEvent.setup()
+    let backendClaim = {
+      ...initialClaim,
+      revision: 4,
+      primary_action: primaryAction({ revision: 4 }),
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({
+      items: [{ ...backendClaim, can_resume: true }],
+      page: { next_cursor: null },
+    })
+    api.getClaim.mockImplementation(() => Promise.resolve(backendClaim))
+    api.resumeClaimSession.mockImplementation(() => {
+      backendClaim = {
+        ...backendClaim,
+        revision: 5,
+        primary_action: primaryAction({ revision: 5 }),
+      }
+      return Promise.resolve({
+        session_id: 'ses_resumed',
+        model_profile_id: 'qwen-local',
+        started_at: '2026-09-16T01:06:00Z',
+        resume: {
+          summary: 'A pipe burst in the kitchen.',
+          unresolved_questions: [],
+          pending_items: [],
+          prior_commitments: [],
+          customer_next_step: backendClaim.customer_next_step,
+        },
+      })
+    })
+    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+    api.submitClaimMessage.mockImplementation(({ revision }) => {
+      expect(revision).toBe(5)
+      return Promise.resolve({
+        ...initialTurn(),
+        claimant_message: {
+          ...claimantMessage,
+          message_id: 'msg_after_authoritative_resume',
+          content: { type: 'text', text: 'The water is now turned off.' },
+        },
+        agent_message: {
+          ...agentMessage,
+          message_id: 'msg_agent_after_authoritative_resume',
+          content: { type: 'text', text: 'Thanks, I recorded that update.' },
+        },
+        claim_revision: 6,
+        primary_action: primaryAction({ revision: 6 }),
+      })
+    })
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
+    await screen.findByText(initialClaim.claim_id)
+
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'The water is now turned off.')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(await screen.findByText('Thanks, I recorded that update.')).toBeVisible()
+    expect(api.submitClaimMessage).toHaveBeenCalledWith(expect.objectContaining({ revision: 5 }))
+    expect(api.getClaim).toHaveBeenCalledTimes(2)
   })
 
   it('removes an anonymous history reference after a permanent resume failure', async () => {
