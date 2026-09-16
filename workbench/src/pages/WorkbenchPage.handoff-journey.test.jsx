@@ -46,20 +46,39 @@ function jsonResponse(status, payload) {
   }
 }
 
+const ACTION_CONFIRMATIONS = {
+  'human.accept_handoff': 'Accepting this Claim makes you responsible for the current handoff.',
+  'conversation.send_claimant_message': 'This message will be visible to the claimant.',
+  'human.resolve_handoff': 'The recorded outcome will update the shared Claim context.',
+}
+
+const STANDARD_FAILURE_CODES = ['ACCESS_DENIED', 'REVISION_CONFLICT', 'VALIDATION_ERROR']
+const STANDARD_AUDIT_REQUIREMENTS = [
+  'action_code',
+  'target_ref',
+  'actor_id',
+  'resulting_revision',
+]
+
 function actionBase(actionCode, targetType, targetRef, revision, label, purpose) {
   return {
-    registry_version: '2026-09-11.1',
+    registry_version: '2026-09-15.1',
     action_code: actionCode,
     target_type: targetType,
     target_ref: targetRef,
     label,
     purpose,
     availability: 'confirmation_required',
-    confirmation: { level: 'explicit', message: `Confirm ${label.toLowerCase()}.` },
+    blocked_reason: null,
+    confirmation: { level: 'explicit', message: ACTION_CONFIRMATIONS[actionCode] },
     expected_effects: [],
     claimant_visible_effects: [],
+    failure_codes: STANDARD_FAILURE_CODES,
+    audit_requirements: STANDARD_AUDIT_REQUIREMENTS,
     source_refs: ['hnd_journey'],
     inputs: [],
+    payload_defaults: {},
+    result_state: 'awaiting_input',
     based_on_revision: revision,
   }
 }
@@ -96,6 +115,7 @@ function sendAction(revision) {
       label: 'Claimant-visible message',
       control: 'textarea',
       required: true,
+      required_when: null,
       choices: [],
     }],
   }
@@ -127,6 +147,7 @@ function resolveAction(revision) {
         label: 'Internal result summary',
         control: 'textarea',
         required: true,
+        required_when: null,
         choices: [],
       },
       {
@@ -134,6 +155,7 @@ function resolveAction(revision) {
         label: 'Claimant update',
         control: 'textarea',
         required: true,
+        required_when: null,
         choices: [],
       },
     ],
@@ -143,7 +165,10 @@ function resolveAction(revision) {
         reason_codes: ['SUPPORT_NEED_MET'],
         source_refs: ['msg_claimant_initial'],
       },
-      state_changes: [],
+      state_changes: [
+        { path: 'claim_state.workflow_state', to: 'ready_for_next' },
+        { path: 'claim_state.next_action', to: 'PROCEED' },
+      ],
       customer_update: {
         responsible_party: 'claims_professional',
         related_refs: ['hnd_journey'],
@@ -178,11 +203,11 @@ function claimProjection(state) {
       display_name: 'Journey Claimant',
     },
     incident: {
-      family: 'motor',
-      summary: 'Minor collision requiring staff assistance.',
+      family: state.family,
+      summary: 'Incident requiring staff assistance.',
     },
     lifecycle_state: resolved ? 'ready_to_create' : 'staff_support',
-    workflow_state: 'ready_for_next',
+    workflow_state: resolved ? 'ready_for_next' : 'professional_review',
     created_at: '2026-09-14T00:00:00Z',
     updated_at: `2026-09-14T00:0${state.revision}:00Z`,
     active_session_id: 'ses_journey',
@@ -193,8 +218,8 @@ function claimProjection(state) {
       fraud_signal: 'none',
       customer_support: 'human_requested',
       urgency: 'normal',
-      workflow_state: 'ready_for_next',
-      next_action: 'PROCEED',
+      workflow_state: resolved ? 'ready_for_next' : 'professional_review',
+      next_action: resolved ? 'PROCEED' : 'HANDOFF',
     },
     ownership: accepted
       ? {
@@ -246,7 +271,7 @@ function claimProjection(state) {
       evidence: { status: 'available', total: 0, needs_attention: 0 },
       reference_checks: { status: 'available', total: 0, needs_attention: 0 },
       external_services: { status: 'available', total: 0, needs_attention: 0 },
-      activity: { status: 'available', total: state.events.length, needs_attention: 0 },
+      activity: { status: 'available', total: activityEvents(state).length, needs_attention: 0 },
     },
     tags: [],
   }
@@ -304,7 +329,7 @@ function handoffProjection(state) {
     requested_action: 'Help the claimant continue the report.',
     applied_rule: 'claimant_support_request',
     packet: {
-      incident_summary: 'Minor collision requiring staff assistance.',
+      incident_summary: 'Incident requiring staff assistance.',
       form_revision: 1,
       form_snapshot: {},
       evidence_refs: [],
@@ -324,6 +349,8 @@ function handoffProjection(state) {
     created_at: '2026-09-14T00:00:00Z',
     accepted_at: state.phase === 'queued' ? null : '2026-09-14T00:02:00Z',
     resolved_at: state.phase === 'resolved' ? '2026-09-14T00:04:00Z' : null,
+    resume_workflow_state: 'ready_for_next',
+    resume_next_action: 'PROCEED',
   }
 }
 
@@ -339,13 +366,59 @@ function claimantMessage() {
   }
 }
 
-function createHandoffJourneyService() {
+function activityEvents(state) {
+  const handoff = handoffProjection(state)
+  const events = [
+    {
+      event_id: 'clm_handoff_journey:created',
+      event_type: 'claim.created',
+      actor_id: null,
+      summary: 'Claim context created.',
+      source_refs: ['clm_handoff_journey'],
+      created_at: '2026-09-14T00:00:00Z',
+      resulting_revision: 1,
+    },
+    ...state.messages.map((message) => ({
+      event_id: message.message_id,
+      event_type: 'message.appended',
+      actor_id: message.actor,
+      summary: `${message.actor === 'staff' ? 'Staff' : 'Claimant'} message recorded.`,
+      source_refs: [message.message_id, message.session_id],
+      created_at: message.created_at,
+      resulting_revision: null,
+    })),
+    {
+      event_id: handoff.handoff_id,
+      event_type: `handoff.${handoff.status}`,
+      actor_id: handoff.assigned_to,
+      summary: handoff.reason,
+      source_refs: [handoff.handoff_id],
+      created_at: handoff.resolved_at || handoff.accepted_at || handoff.created_at,
+      resulting_revision: null,
+    },
+    ...state.customerUpdates.map((update) => ({
+      event_id: update.update_id,
+      event_type: 'customer_update.recorded',
+      actor_id: update.created_by,
+      summary: update.summary,
+      source_refs: [update.update_id, ...update.related_refs],
+      created_at: update.created_at,
+      resulting_revision: null,
+    })),
+  ]
+  return events.sort((left, right) => (
+    right.created_at.localeCompare(left.created_at)
+    || right.event_id.localeCompare(left.event_id)
+  ))
+}
+
+function createHandoffJourneyService(family) {
   const state = {
+    family,
     revision: 1,
     phase: 'queued',
     messages: [claimantMessage()],
     customerUpdates: [],
-    events: [],
     acceptRequests: [],
     messageRequests: [],
     resolveRequests: [],
@@ -390,7 +463,14 @@ function createHandoffJourneyService() {
 
     if (method === 'GET' && path === '/api/v1/workbench/claims/clm_handoff_journey') {
       const detail = claimProjection(state)
-      state.claimReads.push({ revision: detail.revision, phase: state.phase })
+      state.claimReads.push({
+        revision: detail.revision,
+        phase: state.phase,
+        family: detail.incident.family,
+        lifecycle_state: detail.lifecycle_state,
+        workflow_state: detail.workflow_state,
+        next_action: detail.claim_state.next_action,
+      })
       return jsonResponse(200, detail)
     }
 
@@ -399,7 +479,12 @@ function createHandoffJourneyService() {
       && path.startsWith('/api/v1/workbench/claims/clm_handoff_journey/handoffs?')
     ) {
       const handoff = handoffProjection(state)
-      state.handoffReads.push({ status: handoff.status, revision: state.revision })
+      state.handoffReads.push({
+        status: handoff.status,
+        revision: state.revision,
+        resume_workflow_state: handoff.resume_workflow_state,
+        resume_next_action: handoff.resume_next_action,
+      })
       return jsonResponse(200, {
         items: [handoff],
         page: { next_cursor: null },
@@ -433,15 +518,6 @@ function createHandoffJourneyService() {
       }
       state.phase = 'accepted'
       state.revision = 2
-      state.events.push({
-        event_id: 'evt_accept',
-        event_type: 'handoff.accepted',
-        actor_id: 'stf_demo',
-        summary: 'Staff accepted the handoff.',
-        source_refs: ['hnd_journey'],
-        created_at: '2026-09-14T00:02:00Z',
-        resulting_revision: 2,
-      })
       return jsonResponse(200, {
         handoff: handoffProjection(state),
         revision: state.revision,
@@ -519,15 +595,6 @@ function createHandoffJourneyService() {
       state.messages.push(message)
       state.phase = 'in_progress'
       state.revision = 3
-      state.events.push({
-        event_id: 'evt_message',
-        event_type: 'message.appended',
-        actor_id: 'stf_demo',
-        summary: 'Staff sent a claimant-visible update.',
-        source_refs: ['msg_staff_journey'],
-        created_at: '2026-09-14T00:03:00Z',
-        resulting_revision: 3,
-      })
       return jsonResponse(200, {
         claim_id: 'clm_handoff_journey',
         session_id: 'ses_journey',
@@ -561,12 +628,17 @@ function createHandoffJourneyService() {
       method === 'GET'
       && path.startsWith('/api/v1/workbench/claims/clm_handoff_journey/events?')
     ) {
+      const events = activityEvents(state)
       state.eventReads.push({
         revision: state.revision,
-        summaries: state.events.map((item) => item.summary),
+        items: events.map((item) => ({
+          event_type: item.event_type,
+          summary: item.summary,
+          source_refs: item.source_refs,
+        })),
       })
       return jsonResponse(200, {
-        items: state.events.map((item) => ({ ...item })),
+        items: events,
         page: { next_cursor: null },
       })
     }
@@ -599,15 +671,6 @@ function createHandoffJourneyService() {
         summary: request.payload.customer_update.summary,
         related_refs: ['hnd_journey'],
         created_at: '2026-09-14T00:04:00Z',
-      })
-      state.events.push({
-        event_id: 'evt_resolved',
-        event_type: 'handoff.resolved',
-        actor_id: 'stf_demo',
-        summary: 'Staff handoff resolved and Claim returned to the authoritative workflow.',
-        source_refs: ['hnd_journey', 'upd_resolved'],
-        created_at: '2026-09-14T00:04:00Z',
-        resulting_revision: 4,
       })
       return jsonResponse(200, {
         handoff: handoffProjection(state),
@@ -664,9 +727,11 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
     vi.restoreAllMocks()
   })
 
-  it('opens, accepts, communicates, resolves, and re-reads the authoritative staff journey', async () => {
-    const { fetchMock, state } = createHandoffJourneyService()
-    vi.stubGlobal('fetch', fetchMock)
+  it.each(['motor', 'home', 'contents'])(
+    'opens, accepts, communicates, resolves, and restores the %s authoritative staff journey',
+    async (family) => {
+      const { fetchMock, state } = createHandoffJourneyService(family)
+      vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
     renderJourney()
 
@@ -679,10 +744,8 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
 
     await waitFor(() => {
       expect(state.acceptRequests).toHaveLength(1)
-      expect(state.acceptRequests[0]).toMatchObject({
-        revision: '1',
-        payload: {},
-      })
+      expect(state.acceptRequests[0].revision).toBe('1')
+      expect(state.acceptRequests[0].payload).toEqual({})
       expect(screen.getByText('Revision 2')).toBeVisible()
     })
     expect(state.acceptRequests[0].idempotencyKey).toBeTruthy()
@@ -699,13 +762,11 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
 
     await waitFor(() => {
       expect(state.messageRequests).toHaveLength(1)
-      expect(state.messageRequests[0]).toMatchObject({
-        revision: '2',
-        payload: {
-          content: {
-            type: 'text',
-            text: 'We have accepted your handoff and are continuing the review.',
-          },
+      expect(state.messageRequests[0].revision).toBe('2')
+      expect(state.messageRequests[0].payload).toEqual({
+        content: {
+          type: 'text',
+          text: 'We have accepted your handoff and are continuing the review.',
         },
       })
     })
@@ -732,38 +793,39 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
 
     await waitFor(() => {
       expect(state.resolveRequests).toHaveLength(1)
-      expect(state.resolveRequests[0]).toMatchObject({
-        revision: '3',
-        payload: {
-          result: {
-            outcome: 'support_completed',
-            reason_codes: ['SUPPORT_NEED_MET'],
-            source_refs: ['msg_claimant_initial'],
-            summary: 'Staff support completed after reviewing the claimant context.',
-          },
-          state_changes: [],
-          customer_update: {
-            responsible_party: 'claims_professional',
-            related_refs: ['hnd_journey'],
-            summary: 'Your staff handoff is resolved and your claim can continue.',
-          },
+      expect(state.resolveRequests[0].revision).toBe('3')
+      expect(state.resolveRequests[0].payload).toEqual({
+        result: {
+          outcome: 'support_completed',
+          reason_codes: ['SUPPORT_NEED_MET'],
+          source_refs: ['msg_claimant_initial'],
+          summary: 'Staff support completed after reviewing the claimant context.',
+        },
+        state_changes: [
+          { path: 'claim_state.workflow_state', to: 'ready_for_next' },
+          { path: 'claim_state.next_action', to: 'PROCEED' },
+        ],
+        customer_update: {
+          responsible_party: 'claims_professional',
+          related_refs: ['hnd_journey'],
+          summary: 'Your staff handoff is resolved and your claim can continue.',
         },
       })
       expect(screen.getByText('Revision 4')).toBeVisible()
     })
     expect(state.resolveRequests[0].idempotencyKey).toBeTruthy()
 
-    expect(await screen.findByText(
+    const claimantUpdateCopies = await screen.findAllByText(
       'Your staff handoff is resolved and your claim can continue.',
-    )).toBeVisible()
-    expect(await screen.findByText(
-      'Staff handoff resolved and Claim returned to the authoritative workflow.',
-    )).toBeVisible()
-
+    )
+    expect(claimantUpdateCopies.length).toBeGreaterThanOrEqual(2)
+    claimantUpdateCopies.forEach((copy) => expect(copy).toBeVisible())
     await waitFor(() => {
-      expect(state.handoffReads.at(-1)).toMatchObject({
+      expect(state.handoffReads.at(-1)).toEqual({
         status: 'resolved',
         revision: 4,
+        resume_workflow_state: 'ready_for_next',
+        resume_next_action: 'PROCEED',
       })
       expect(state.queueReads.at(-1)).toMatchObject({
         revision: 4,
@@ -773,9 +835,31 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
       expect(state.customerUpdateReads.at(-1).summaries).toContain(
         'Your staff handoff is resolved and your claim can continue.',
       )
-      expect(state.eventReads.at(-1).summaries).toContain(
-        'Staff handoff resolved and Claim returned to the authoritative workflow.',
-      )
+      expect(state.eventReads.at(-1).items).toContainEqual({
+        event_type: 'handoff.resolved',
+        summary: 'Claimant requested staff support.',
+        source_refs: ['hnd_journey'],
+      })
+      expect(state.eventReads.at(-1).items).toContainEqual({
+        event_type: 'customer_update.recorded',
+        summary: 'Your staff handoff is resolved and your claim can continue.',
+        source_refs: ['upd_resolved', 'hnd_journey'],
+      })
+      expect(state.claimReads.at(-1)).toMatchObject({
+        revision: 4,
+        phase: 'resolved',
+        family,
+        lifecycle_state: 'ready_to_create',
+        workflow_state: 'ready_for_next',
+        next_action: 'PROCEED',
+      })
+      expect(state.claimReads).toContainEqual(expect.objectContaining({
+        family,
+        lifecycle_state: 'staff_support',
+        workflow_state: 'professional_review',
+        next_action: 'HANDOFF',
+      }))
     })
-  })
+    },
+  )
 })
