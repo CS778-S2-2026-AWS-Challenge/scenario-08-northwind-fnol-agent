@@ -112,13 +112,16 @@ export default function WorkbenchPage() {
     expectedClaimId,
     requestId = null,
     announceRevision = false,
+    rejectOlder = false,
   }) => {
     if (
       currentClaimIdRef.current !== expectedClaimId
       || response?.claim_id !== expectedClaimId
       || (requestId !== null && detailRequestId.current !== requestId)
     ) return null
-    if (isOlderClaimProjection(response, detailRef.current)) return detailRef.current
+    if (isOlderClaimProjection(response, detailRef.current)) {
+      return rejectOlder ? null : detailRef.current
+    }
 
     detailRef.current = response
     setDetail((current) => {
@@ -194,7 +197,11 @@ export default function WorkbenchPage() {
     }
   }, [filterMetadata, queueFilters, token, viewAvailable])
 
-  const loadDetail = useCallback(async (id, { propagateError = false } = {}) => {
+  const loadDetail = useCallback(async (id, {
+    propagateError = false,
+    minimumRevision = null,
+    requireApplied = false,
+  } = {}) => {
     const requestId = ++detailRequestId.current
     if (!id) {
       detailRef.current = null
@@ -224,7 +231,20 @@ export default function WorkbenchPage() {
     ])
     try {
       const response = await workbenchApi.claim(token, id)
-      if (!applyDetailProjection(response, { expectedClaimId: id, requestId })) {
+      if (
+        minimumRevision !== null
+        && (!Number.isInteger(response?.revision) || response.revision < minimumRevision)
+      ) {
+        if (propagateError) {
+          throw readbackRevisionError(id, minimumRevision, response?.revision)
+        }
+        return null
+      }
+      if (!applyDetailProjection(response, {
+        expectedClaimId: id,
+        requestId,
+        rejectOlder: requireApplied,
+      })) {
         if (propagateError) throw readbackSupersededError('Claim', id)
         return null
       }
@@ -724,8 +744,9 @@ export default function WorkbenchPage() {
     const previous = detailRef.current
     if (!previous) throw new Error('The current Claim projection is unavailable. Refresh the Claim before acting.')
     const mutationRequestId = ++detailRequestId.current
+    let mutationResult = null
     try {
-      await operation(previous)
+      mutationResult = await operation(previous)
     } catch (error) {
       let latest = null
       const refreshGeneration = backgroundRefreshId.current
@@ -762,15 +783,37 @@ export default function WorkbenchPage() {
       error.message = actionFailureMessage(label, error, latest)
       throw error
     }
+    let claimReadback = null
     if (currentClaimIdRef.current === previous.claim_id) {
-      await Promise.all([
-        loadDetail(previous.claim_id, { propagateError: strictReadback }),
+      const [latest] = await Promise.all([
+        loadDetail(previous.claim_id, {
+          propagateError: strictReadback,
+          minimumRevision: strictReadback ? mutationResult?.revision ?? null : null,
+          requireApplied: strictReadback,
+        }),
         loadClaims(),
       ])
+      claimReadback = latest
+      if (
+        strictReadback
+        && (
+          !Number.isInteger(mutationResult?.revision)
+          || !claimReadback
+          || claimReadback.claim_id !== previous.claim_id
+          || claimReadback.revision < mutationResult.revision
+        )
+      ) {
+        throw readbackRevisionError(
+          previous.claim_id,
+          mutationResult?.revision,
+          claimReadback?.revision,
+        )
+      }
     } else {
       await loadClaims()
       if (strictReadback) throw readbackSupersededError('Claim', previous.claim_id)
     }
+    return { mutationResult, claimReadback }
   }
 
   async function acceptHandoff(handoff) {
@@ -904,8 +947,9 @@ export default function WorkbenchPage() {
     }
 
     let mutationSucceeded = false
+    let settlement = null
     try {
-      await runClaimMutation(projectedAction.label, async (current) => {
+      const { mutationResult, claimReadback } = await runClaimMutation(projectedAction.label, async (current) => {
         const currentAction = findProjectedAction(
           current.allowed_actions,
           projectedAction.action_code,
@@ -943,8 +987,17 @@ export default function WorkbenchPage() {
         }
 
         mutationSucceeded = true
+        settlement = externalActionSettlement(
+          current.claim_id,
+          currentAction,
+          result,
+        )
         return result
       }, { strictReadback: true })
+      settlement ||= externalActionSettlement(previous.claim_id, projectedAction, mutationResult)
+      if (!claimConfirmsExternalSettlement(claimReadback, settlement)) {
+        throw externalActionPostconditionError('Claim', settlement)
+      }
     } catch (error) {
       let externalReadbackError = null
       if (currentClaimIdRef.current === previous.claim_id) {
@@ -955,7 +1008,12 @@ export default function WorkbenchPage() {
         }
       }
       if (mutationSucceeded) {
-        addExternalActionRecovery(previous.claim_id, projectedAction.target_ref)
+        settlement ||= externalActionSettlement(previous.claim_id, projectedAction, null)
+        addExternalActionRecovery(
+          previous.claim_id,
+          projectedAction.target_ref,
+          settlement,
+        )
         throw externalActionReadbackError(externalReadbackError || error)
       }
       if (externalReadbackError) {
@@ -966,11 +1024,27 @@ export default function WorkbenchPage() {
 
     if (currentClaimIdRef.current === previous.claim_id) {
       try {
-        await loadSectionResources(previous.claim_id, 'external-services', { propagateError: true })
+        const externalReadback = await loadSectionResources(
+          previous.claim_id,
+          'external-services',
+          { propagateError: true },
+        )
+        if (!externalReadbackConfirmsSettlement(externalReadback, settlement)) {
+          throw externalActionPostconditionError('External Services', settlement)
+        }
       } catch (error) {
-        addExternalActionRecovery(previous.claim_id, projectedAction.target_ref)
+        addExternalActionRecovery(
+          previous.claim_id,
+          projectedAction.target_ref,
+          settlement,
+        )
         throw externalActionReadbackError(error)
       }
+    } else {
+      addExternalActionRecovery(previous.claim_id, projectedAction.target_ref, settlement)
+      throw externalActionReadbackError(
+        readbackSupersededError('External Services', previous.claim_id),
+      )
     }
     clearExternalActionRecovery(previous.claim_id, projectedAction.target_ref)
   }
@@ -1012,14 +1086,17 @@ export default function WorkbenchPage() {
 
     try {
       const [claimReadback, externalReadback] = await Promise.allSettled([
-        loadDetail(recoveryClaimId, { propagateError: true }),
+        loadDetail(recoveryClaimId, {
+          propagateError: true,
+          minimumRevision: notice.expectedRevision,
+          requireApplied: true,
+        }),
         loadSectionResources(recoveryClaimId, 'external-services', { propagateError: true }),
       ])
-      const claimApplied = claimReadback.status === 'fulfilled' && Boolean(claimReadback.value)
+      const claimApplied = claimReadback.status === 'fulfilled'
+        && claimConfirmsExternalSettlement(claimReadback.value, notice)
       const externalApplied = externalReadback.status === 'fulfilled'
-        && Array.isArray(externalReadback.value)
-        && externalReadback.value.length === 1
-        && Boolean(externalReadback.value[0])
+        && externalReadbackConfirmsSettlement(externalReadback.value, notice)
 
       if (
         claimApplied
@@ -1403,6 +1480,81 @@ function readbackSupersededError(resource, claimId) {
   return error
 }
 
+function readbackRevisionError(claimId, expectedRevision, receivedRevision) {
+  const error = new Error(
+    `Claim readback for ${claimId} did not reach the mutation revision ${expectedRevision ?? 'unknown'}; received ${receivedRevision ?? 'no revision'}.`,
+  )
+  error.code = 'READBACK_STALE'
+  return error
+}
+
+function externalActionSettlement(claimId, action, mutationResult) {
+  return {
+    claimId,
+    taskId: action?.target_ref || mutationResult?.task_id || null,
+    actionCode: action?.action_code || null,
+    expectedRevision: Number.isInteger(mutationResult?.revision)
+      ? mutationResult.revision
+      : null,
+    staffActionId: action?.action_code === 'external.accept_review'
+      ? mutationResult?.action?.action_id || null
+      : mutationResult?.staff_action?.action_id || null,
+    expectedTaskStatus: action?.action_code === 'external.reconcile_response'
+      ? 'accepted'
+      : null,
+  }
+}
+
+function claimConfirmsExternalSettlement(claim, settlement) {
+  if (
+    !claim
+    || !settlement
+    || claim.claim_id !== settlement.claimId
+    || !Number.isInteger(settlement.expectedRevision)
+    || claim.revision < settlement.expectedRevision
+  ) return false
+
+  if (findProjectedAction(
+    claim.allowed_actions,
+    settlement.actionCode,
+    settlement.taskId,
+  )) return false
+
+  if (settlement.actionCode === 'external.accept_review') {
+    if (!settlement.staffActionId) return false
+    return (claim.allowed_actions || []).some((action) => (
+      action.action_code === 'work_item.update'
+      && action.target_ref === settlement.staffActionId
+      && action.based_on_revision === claim.revision
+      && (action.source_refs || []).includes(settlement.taskId)
+    ))
+  }
+  return settlement.actionCode === 'external.reconcile_response'
+}
+
+function externalReadbackConfirmsSettlement(readbacks, settlement) {
+  if (!settlement || !Array.isArray(readbacks) || readbacks.length !== 1) return false
+  const response = readbacks[0]
+  if (!response || (response.status && response.status !== 'available')) return false
+  const record = (response.items || []).find((item) => (
+    item?.task?.claim_id === settlement.claimId
+    && item?.task?.task_id === settlement.taskId
+  ))
+  if (!record) return false
+  if (settlement.expectedTaskStatus !== null) {
+    return record.task.status === settlement.expectedTaskStatus
+  }
+  return settlement.actionCode === 'external.accept_review'
+}
+
+function externalActionPostconditionError(resource, settlement) {
+  const error = new Error(
+    `${resource} readback did not confirm the postcondition for external task ${settlement?.taskId || 'unknown'}.`,
+  )
+  error.code = 'READBACK_STALE'
+  return error
+}
+
 function externalActionRecoveryNotice(claimId, taskId) {
   return {
     claimId,
@@ -1421,7 +1573,6 @@ function externalActionReadbackError(cause) {
   error.cause = cause
   return error
 }
-
 function queueFilterKey(filters) {
   return JSON.stringify(queueRequestFilters(filters))
 }
