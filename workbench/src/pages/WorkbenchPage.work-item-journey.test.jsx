@@ -400,9 +400,11 @@ describe('WorkbenchPage WorkItem browser/API journey', () => {
     })
     expect(state.mutations[1].idempotencyKey).toBeTruthy()
     expect(await screen.findByText('Completed')).toBeVisible()
-    expect(await screen.findByText(
+    const claimantUpdateCopies = await screen.findAllByText(
       'The policy review is complete and your report can continue.',
-    )).toBeVisible()
+    )
+    expect(claimantUpdateCopies.length).toBeGreaterThanOrEqual(2)
+    claimantUpdateCopies.forEach((copy) => expect(copy).toBeVisible())
     await waitFor(() => {
       expect(state.workItemReads.at(-1)).toEqual({ revision: 4, status: 'completed' })
       expect(state.customerUpdateReads.at(-1).summaries).toContain(
