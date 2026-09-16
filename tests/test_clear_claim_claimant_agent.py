@@ -82,7 +82,7 @@ def _run_clear_claim_journey(
         == described_body['claimant_message']['message_id']
     )
     agent_text = described_body['agent_message']['content']['text'].lower()
-    assert 'structured' in agent_text
+    assert 'captured' in agent_text
     assert not any(
         forbidden in agent_text
         for forbidden in ('internal signal', 'source_refs', 'provider metadata', 'authority')

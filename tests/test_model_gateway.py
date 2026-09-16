@@ -2493,17 +2493,25 @@ def test_message_turn_persists_selected_external_lifecycle_coordinates() -> None
     assert runtime_turn.turn_plan.registry_versions == {
         'external_service_lifecycle': 'external-service-lifecycle.v1'
     }
-    assert [
+    lifecycle_coordinates = [
         item.model_dump(mode='json') for item in runtime_turn.turn_plan.external_lifecycle_context
-    ] == [
-        {
-            'registry_version': 'external-service-lifecycle.v1',
-            'service_identity': ASSESSOR_SERVICE_IDENTITY,
-            'operation_status': 'assigned',
-            'result_status': None,
-            'result_verification': None,
-        }
     ]
+    assert lifecycle_coordinates[0] == {
+        'registry_version': 'external-service-lifecycle.v1',
+        'service_identity': ASSESSOR_SERVICE_IDENTITY,
+        'operation_status': 'assigned',
+        'result_status': None,
+        'result_verification': None,
+    }
+    assert {
+        (item['service_identity'], item['operation_status']) for item in lifecycle_coordinates[1:]
+    } == {
+        ('vehicle_recovery_request', 'consent_required'),
+        ('vehicle_repairer_booking', 'consent_required'),
+        ('repairer_information_or_link', 'consent_required'),
+        ('police_105_reporting_guidance', 'consent_required'),
+        ('police_traffic_crash_report_guidance', 'consent_required'),
+    }
 
 
 def test_gateway_agent_receives_bounded_branch_context() -> None:
