@@ -1115,6 +1115,23 @@
         "additionalProperties": false,
         "description": "Non-safety Agent capabilities that a published release may disable.",
         "properties": {
+          "budgeted_context": {
+            "default": false,
+            "title": "Budgeted Context",
+            "type": "boolean"
+          },
+          "cache_layout_version": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Layout Version"
+          },
           "external_service_offers": {
             "default": true,
             "title": "External Service Offers",
@@ -1126,6 +1143,16 @@
             "title": "Feature Version",
             "type": "string"
           },
+          "fragmented_prompt": {
+            "default": false,
+            "title": "Fragmented Prompt",
+            "type": "boolean"
+          },
+          "isolated_execution": {
+            "default": false,
+            "title": "Isolated Execution",
+            "type": "boolean"
+          },
           "knowledge_retrieval": {
             "default": true,
             "title": "Knowledge Retrieval",
@@ -1134,6 +1161,16 @@
           "model_assisted_turns": {
             "default": true,
             "title": "Model Assisted Turns",
+            "type": "boolean"
+          },
+          "narrow_schema": {
+            "default": false,
+            "title": "Narrow Schema",
+            "type": "boolean"
+          },
+          "verified_rolling_summary": {
+            "default": false,
+            "title": "Verified Rolling Summary",
             "type": "boolean"
           }
         },
@@ -1147,6 +1184,36 @@
         "additionalProperties": false,
         "description": "Versioned system instruction compiled into claimant model requests.",
         "properties": {
+          "composition_mode": {
+            "default": "single",
+            "enum": [
+              "single",
+              "fragmented"
+            ],
+            "title": "Composition Mode",
+            "type": "string"
+          },
+          "fragments": {
+            "items": {
+              "$ref": "#/components/schemas/PublishedPromptFragment"
+            },
+            "maxItems": 100,
+            "title": "Fragments",
+            "type": "array"
+          },
+          "manifest_version": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manifest Version"
+          },
           "prompt_version": {
             "maxLength": 100,
             "minLength": 1,
@@ -1160,15 +1227,21 @@
             "type": "string"
           },
           "system_prompt": {
-            "maxLength": 50000,
-            "minLength": 1,
-            "title": "System Prompt",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 50000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Prompt"
           }
         },
         "required": [
-          "prompt_version",
-          "system_prompt"
+          "prompt_version"
         ],
         "title": "AgentInstructionConfiguration",
         "type": "object"
@@ -1268,6 +1341,28 @@
             "minLength": 1,
             "title": "Policy Version",
             "type": "string"
+          },
+          "provider_capabilities": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderCapability"
+            },
+            "title": "Provider Capabilities",
+            "type": "object"
+          },
+          "request_profiles": {
+            "items": {
+              "$ref": "#/components/schemas/RequestProfile"
+            },
+            "maxItems": 20,
+            "title": "Request Profiles",
+            "type": "array"
+          },
+          "schema_registry": {
+            "additionalProperties": {
+              "type": "object"
+            },
+            "title": "Schema Registry",
+            "type": "object"
           }
         },
         "required": [
@@ -4092,10 +4187,114 @@
         "title": "ContentsOwnership",
         "type": "string"
       },
+      "ContextBudgetPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "max_model_invocations": {
+            "default": 2,
+            "maximum": 2.0,
+            "minimum": 1.0,
+            "title": "Max Model Invocations",
+            "type": "integer"
+          },
+          "max_model_selected_tools": {
+            "default": 1,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Max Model Selected Tools",
+            "type": "integer"
+          },
+          "ordinary_input_hard_limit": {
+            "default": 3000,
+            "minimum": 100.0,
+            "title": "Ordinary Input Hard Limit",
+            "type": "integer"
+          },
+          "ordinary_input_target": {
+            "default": 1800,
+            "minimum": 100.0,
+            "title": "Ordinary Input Target",
+            "type": "integer"
+          },
+          "ordinary_output_limit": {
+            "default": 180,
+            "minimum": 1.0,
+            "title": "Ordinary Output Limit",
+            "type": "integer"
+          },
+          "policy_version": {
+            "default": "northwind-context-budget-v1",
+            "title": "Policy Version",
+            "type": "string"
+          },
+          "soft_latency_target_ms": {
+            "default": 10000,
+            "minimum": 100.0,
+            "title": "Soft Latency Target Ms",
+            "type": "integer"
+          },
+          "tool_path_input_hard_limit": {
+            "default": 3000,
+            "minimum": 100.0,
+            "title": "Tool Path Input Hard Limit",
+            "type": "integer"
+          },
+          "tool_path_output_limit": {
+            "default": 300,
+            "minimum": 1.0,
+            "title": "Tool Path Output Limit",
+            "type": "integer"
+          }
+        },
+        "title": "ContextBudgetPolicy",
+        "type": "object"
+      },
+      "ContextLoadMode": {
+        "enum": [
+          "always",
+          "route_match",
+          "auto_candidate",
+          "explicit",
+          "reference",
+          "compacted",
+          "isolated"
+        ],
+        "title": "ContextLoadMode",
+        "type": "string"
+      },
       "ControlledRulesConfiguration": {
         "additionalProperties": false,
         "description": "Bounded overlay for registered Dynamic Form branch rules.",
         "properties": {
+          "context_budget_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContextBudgetPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "context_catalogue_version": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Catalogue Version"
+          },
+          "deterministic_responses": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Deterministic Responses",
+            "type": "object"
+          },
           "disabled_rule_ids": {
             "items": {
               "type": "string"
@@ -4111,6 +4310,18 @@
             "maxItems": 100,
             "title": "Observation Rule Ids",
             "type": "array"
+          },
+          "route_policy_version": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route Policy Version"
           },
           "rules_version": {
             "maxLength": 100,
@@ -9484,6 +9695,241 @@
         "title": "ProfilePatchRequest",
         "type": "object"
       },
+      "PromptApplicability": {
+        "additionalProperties": false,
+        "properties": {
+          "capability_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Capability Ids",
+            "type": "array"
+          },
+          "product_family": {
+            "items": {
+              "enum": [
+                "motor",
+                "home",
+                "contents"
+              ],
+              "type": "string"
+            },
+            "title": "Product Family",
+            "type": "array"
+          },
+          "tasks": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "title": "PromptApplicability",
+        "type": "object"
+      },
+      "ProviderCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "cache_usage_fields": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Cache Usage Fields",
+            "type": "array"
+          },
+          "capability_version": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Capability Version",
+            "type": "string"
+          },
+          "continuation_mechanism": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Continuation Mechanism"
+          },
+          "maximum_cache_points": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum Cache Points"
+          },
+          "minimum_cache_tokens": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Cache Tokens"
+          },
+          "prompt_cache_type": {
+            "default": "none",
+            "enum": [
+              "none",
+              "implicit",
+              "explicit"
+            ],
+            "title": "Prompt Cache Type",
+            "type": "string"
+          },
+          "protocol": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Protocol",
+            "type": "string"
+          },
+          "structured_output_method": {
+            "enum": [
+              "json_schema",
+              "forced_tool"
+            ],
+            "title": "Structured Output Method",
+            "type": "string"
+          },
+          "supported_media_types": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Supported Media Types",
+            "type": "array"
+          },
+          "tool_call_support": {
+            "title": "Tool Call Support",
+            "type": "boolean"
+          },
+          "tool_result_continuation": {
+            "anyOf": [
+              {
+                "enum": [
+                  "assistant_tool_message",
+                  "tool_result_block"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Result Continuation"
+          }
+        },
+        "required": [
+          "capability_version",
+          "protocol",
+          "structured_output_method",
+          "tool_call_support"
+        ],
+        "title": "ProviderCapability",
+        "type": "object"
+      },
+      "PublishedPromptFragment": {
+        "additionalProperties": false,
+        "description": "Immutable Prompt fragment content stored inside one configuration revision.",
+        "properties": {
+          "applies_when": {
+            "$ref": "#/components/schemas/PromptApplicability"
+          },
+          "conflicts_with": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Conflicts With",
+            "type": "array"
+          },
+          "content": {
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "fragment_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Fragment Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "core",
+              "family",
+              "task",
+              "capability"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "load_mode": {
+            "$ref": "#/components/schemas/ContextLoadMode"
+          },
+          "max_tokens": {
+            "maximum": 3000.0,
+            "minimum": 1.0,
+            "title": "Max Tokens",
+            "type": "integer"
+          },
+          "path": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "priority": {
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Priority",
+            "type": "integer"
+          },
+          "requires": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Requires",
+            "type": "array"
+          },
+          "version": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fragment_id",
+          "version",
+          "path",
+          "kind",
+          "load_mode",
+          "priority",
+          "max_tokens",
+          "content"
+        ],
+        "title": "PublishedPromptFragment",
+        "type": "object"
+      },
       "QuestionRecord": {
         "additionalProperties": false,
         "properties": {
@@ -9988,6 +10434,88 @@
           "size_bytes"
         ],
         "title": "RequestEvidenceUploadRequest",
+        "type": "object"
+      },
+      "RequestProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "input_hard_limit": {
+            "minimum": 100.0,
+            "title": "Input Hard Limit",
+            "type": "integer"
+          },
+          "isolated": {
+            "default": false,
+            "title": "Isolated",
+            "type": "boolean"
+          },
+          "max_model_invocations": {
+            "maximum": 2.0,
+            "minimum": 1.0,
+            "title": "Max Model Invocations",
+            "type": "integer"
+          },
+          "max_model_selected_tools": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Max Model Selected Tools",
+            "type": "integer"
+          },
+          "output_limit": {
+            "minimum": 1.0,
+            "title": "Output Limit",
+            "type": "integer"
+          },
+          "profile_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "requires_media_types": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Requires Media Types",
+            "type": "array"
+          },
+          "requires_tool_continuation": {
+            "default": false,
+            "title": "Requires Tool Continuation",
+            "type": "boolean"
+          },
+          "schema_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "tool_names": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Tool Names",
+            "type": "array"
+          },
+          "version": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_id",
+          "version",
+          "schema_id",
+          "max_model_invocations",
+          "max_model_selected_tools",
+          "input_hard_limit",
+          "output_limit"
+        ],
+        "title": "RequestProfile",
         "type": "object"
       },
       "RequeueClaimRequest": {
