@@ -51,7 +51,9 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
             expected = require_staff
         elif route.path.startswith(('/api/v1/auth/', '/api/v1/account')):
             expected = require_claimant_session
-        elif route.path.startswith(('/api/v1/claims', '/api/v1/evidence')):
+        elif route.path.startswith(
+            ('/api/v1/claims', '/api/v1/evidence', '/api/v1/realtime')
+        ):
             expected = require_claimant
         elif route.path.startswith('/internal/v1/admin/'):
             expected = require_administrator
