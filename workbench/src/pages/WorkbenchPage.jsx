@@ -14,6 +14,8 @@ import { canSubmitProjectedAction, findProjectedAction } from '../projected-acti
 import { revisionNotice as buildRevisionNotice } from '../revision.js'
 import ConversationsPage from './ConversationsPage.jsx'
 
+const MAX_MESSAGE_READBACK_PAGES = 100
+
 export default function WorkbenchPage() {
   const { token, profile, logout } = useAuth()
   const { claimId, section: routeSection, agentSessionId: routeAgentSessionId, conversationSessionId } = useParams()
@@ -52,7 +54,7 @@ export default function WorkbenchPage() {
   const backgroundRefreshId = useRef(0)
   const resourceRequestIds = useRef({})
   const conversationRequestId = useRef(0)
-  const deliveryReadbackRef = useRef(null)
+  const deliveryReadbacksRef = useRef(new Set())
   const selectedConversationSessionIdRef = useRef(null)
   const [resources, setResources] = useState({})
   const [detailLoading, setDetailLoading] = useState(false)
@@ -455,33 +457,26 @@ export default function WorkbenchPage() {
     const targetSessionId = requestedSessionId || session.session_id
     const targetDelivery = expectedDelivery
       || workbenchApi.pendingMessageDelivery(id, session.session_id)
+    const targetDeliveryIdentity = deliveryIdentity(targetDelivery)
     const mayReconcileDelivery = Boolean(expectedDelivery)
-      || !deliveryReadbackRef.current
+      || !targetDeliveryIdentity
+      || !deliveryReadbacksRef.current.has(targetDeliveryIdentity)
     const messagesResult = await loadResource(
       'messages',
       id,
       async () => {
-        const response = await workbenchApi.messages(
-          token,
-          id,
-          session.session_id,
+        const response = await loadMessagePagesForDelivery(
+          (cursor) => workbenchApi.messages(
+            token,
+            id,
+            session.session_id,
+            cursor,
+          ),
+          targetDelivery && mayReconcileDelivery ? targetDelivery : null,
         )
-        let deliveryReconciliation = targetDelivery
+        const deliveryReconciliation = targetDelivery
           ? pendingDeliveryState(targetDelivery)
           : null
-
-        if (
-          targetDelivery
-          && messageListContainsDelivery(response.items, targetDelivery)
-          && mayReconcileDelivery
-        ) {
-          const confirmed = workbenchApi.confirmMessageDelivery(
-            targetDelivery.claim_id,
-            targetDelivery.session_id,
-            targetDelivery.message_id,
-          ) || targetDelivery
-          deliveryReconciliation = confirmedDeliveryState(confirmed)
-        }
 
         return {
           ...response,
@@ -493,8 +488,37 @@ export default function WorkbenchPage() {
       { isCurrent },
     )
 
-    const deliveryReconciliation = messagesResult.response?.delivery_reconciliation
+    let deliveryReconciliation = messagesResult.response?.delivery_reconciliation
       || (targetDelivery ? pendingDeliveryState(targetDelivery) : null)
+    const exactDeliveryApplied = Boolean(
+      messagesResult.status === 'applied'
+      && targetDelivery
+      && mayReconcileDelivery
+      && messageListContainsDelivery(messagesResult.response?.items, targetDelivery)
+      && isCurrent()
+    )
+
+    if (exactDeliveryApplied) {
+      const confirmed = workbenchApi.confirmMessageDelivery(
+        targetDelivery.claim_id,
+        targetDelivery.session_id,
+        targetDelivery.message_id,
+      ) || targetDelivery
+      deliveryReconciliation = confirmedDeliveryState(confirmed)
+      setResources((current) => {
+        if (
+          !isCurrent()
+          || current.messages?.resolved_session_id !== session.session_id
+        ) return current
+        return {
+          ...current,
+          messages: {
+            ...current.messages,
+            delivery_reconciliation: deliveryReconciliation,
+          },
+        }
+      })
+    }
 
     if (
       messagesResult.status === 'applied'
@@ -972,7 +996,7 @@ export default function WorkbenchPage() {
           operation.sessionId,
           operation.draft ?? operation.message,
         )
-        deliveryReadbackRef.current = expectedDelivery
+        deliveryReadbacksRef.current.add(deliveryIdentity(expectedDelivery))
         return response
       }, { backgroundDetailRefresh: true })
     } catch (error) {
@@ -994,9 +1018,7 @@ export default function WorkbenchPage() {
         }
       }
 
-      if (sameDelivery(deliveryReadbackRef.current, expectedDelivery)) {
-        deliveryReadbackRef.current = null
-      }
+      deliveryReadbacksRef.current.delete(deliveryIdentity(expectedDelivery))
       throw error
     }
 
@@ -1026,15 +1048,11 @@ export default function WorkbenchPage() {
         }
         throw messageReadbackError({ ...readback, delivery: expectedDelivery })
       } finally {
-        if (sameDelivery(deliveryReadbackRef.current, expectedDelivery)) {
-          deliveryReadbackRef.current = null
-        }
+        deliveryReadbacksRef.current.delete(deliveryIdentity(expectedDelivery))
       }
     }
 
-    if (sameDelivery(deliveryReadbackRef.current, expectedDelivery)) {
-      deliveryReadbackRef.current = null
-    }
+    deliveryReadbacksRef.current.delete(deliveryIdentity(expectedDelivery))
     throw messageReadbackError({ status: 'superseded', delivery: expectedDelivery })
   }
 
@@ -1360,6 +1378,13 @@ function messageListContainsDelivery(items = [], delivery) {
   )))
 }
 
+function deliveryIdentity(delivery) {
+  if (!delivery?.claim_id || !delivery?.session_id || !delivery?.message_id) {
+    return null
+  }
+  return JSON.stringify([delivery.claim_id, delivery.session_id, delivery.message_id])
+}
+
 function sameDelivery(left, right) {
   return Boolean(
     left
@@ -1368,6 +1393,36 @@ function sameDelivery(left, right) {
     && left.session_id === right.session_id
     && left.message_id === right.message_id
   )
+}
+
+async function loadMessagePagesForDelivery(loadPage, delivery) {
+  let response = await loadPage(null)
+  if (!delivery || messageListContainsDelivery(response?.items, delivery)) {
+    return response
+  }
+
+  const items = [...(response?.items || [])]
+  const seenCursors = new Set()
+  let nextCursor = response?.page?.next_cursor || null
+  let pagesRead = 1
+
+  while (
+    nextCursor
+    && pagesRead < MAX_MESSAGE_READBACK_PAGES
+    && !seenCursors.has(nextCursor)
+  ) {
+    seenCursors.add(nextCursor)
+    const pageResponse = await loadPage(nextCursor)
+    pagesRead += 1
+    items.push(...(pageResponse?.items || []))
+    response = { ...pageResponse, items }
+    if (messageListContainsDelivery(pageResponse?.items, delivery)) {
+      return response
+    }
+    nextCursor = pageResponse?.page?.next_cursor || null
+  }
+
+  return { ...response, items }
 }
 
 function pendingDeliveryState(delivery) {

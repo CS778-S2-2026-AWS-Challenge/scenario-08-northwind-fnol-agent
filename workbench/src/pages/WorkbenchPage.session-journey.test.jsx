@@ -127,6 +127,172 @@ function renderJourney(sessionId = 'ses_26', { withSessionSwitcher = false } = {
   )
 }
 
+function CrossClaimSwitcher() {
+  const navigate = useNavigate()
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => navigate('/workbench/claims/clm_a/conversation?session=ses_a')}
+      >
+        Open Claim A
+      </button>
+      <button
+        type="button"
+        onClick={() => navigate('/workbench/claims/clm_b/conversation?session=ses_b')}
+      >
+        Open Claim B
+      </button>
+    </>
+  )
+}
+
+function renderCrossClaimJourney() {
+  return render(
+    <MemoryRouter initialEntries={[
+      '/workbench/claims/clm_b/conversation?session=ses_b',
+    ]}>
+      <CrossClaimSwitcher />
+      <Routes>
+        <Route
+          path="/workbench/claims/:claimId/:section"
+          element={<WorkbenchPage />}
+        />
+      </Routes>
+    </MemoryRouter>,
+  )
+}
+
+function crossClaimDetail(claimId, revision) {
+  const suffix = claimId.slice(-1)
+  const sessionId = `ses_${suffix}`
+  return {
+    claim_id: claimId,
+    display_reference: `NW-${suffix.toUpperCase()}`,
+    claimant: { customer_id: `cus_${suffix}`, display_name: `Claimant ${suffix.toUpperCase()}` },
+    incident: { family: 'motor', summary: `Cross-Claim delivery ${suffix.toUpperCase()}.` },
+    lifecycle_state: 'staff_support',
+    workflow_state: 'collecting',
+    revision,
+    updated_at: '2026-09-10T06:30:00Z',
+    active_session_id: sessionId,
+    allowed_actions: [{
+      action_code: 'conversation.send_claimant_message',
+      target_ref: sessionId,
+      availability: 'available',
+      based_on_revision: revision,
+    }],
+  }
+}
+
+function createCrossClaimService() {
+  const state = {
+    revisions: { clm_a: 7, clm_b: 11 },
+    messages: { clm_a: [], clm_b: [] },
+    postRequests: [],
+    messageReads: [],
+    aPendingReads: 0,
+    bCaughtUp: false,
+  }
+
+  const fetchMock = vi.fn(async (url, options = {}) => {
+    const path = String(url)
+    const method = options.method || 'GET'
+
+    if (path === '/api/v1/workbench/claims/filter-metadata') {
+      return jsonResponse(200, metadata)
+    }
+    if (path.startsWith('/api/v1/workbench/claims?')) {
+      return jsonResponse(200, {
+        items: [],
+        page: { next_cursor: null },
+        view_counts: {
+          status: 'available',
+          items: [{ view: 'all', count: 0 }],
+          limitation: null,
+        },
+      })
+    }
+
+    const messageMatch = path.match(
+      /^\/api\/v1\/workbench\/claims\/(clm_[ab])\/sessions\/(ses_[ab])\/messages\?/,
+    )
+    if (messageMatch) {
+      const [, claimId, sessionId] = messageMatch
+      state.messageReads.push({ claimId, sessionId, path })
+      if (claimId === 'clm_a' && state.messages.clm_a.length) {
+        state.aPendingReads += 1
+        return new Promise(() => {})
+      }
+      return jsonResponse(200, {
+        items: claimId === 'clm_b' && !state.bCaughtUp
+          ? []
+          : state.messages[claimId].map((message) => ({ ...message })),
+        page: { next_cursor: null },
+      })
+    }
+
+    const postMatch = path.match(/^\/api\/v1\/workbench\/claims\/(clm_[ab])\/messages$/)
+    if (postMatch && method === 'POST') {
+      const claimId = postMatch[1]
+      const suffix = claimId.slice(-1)
+      const sessionId = `ses_${suffix}`
+      const request = {
+        claimId,
+        key: options.headers['Idempotency-Key'],
+        revision: options.headers['If-Match'],
+        payload: JSON.parse(options.body),
+      }
+      state.postRequests.push(request)
+      const message = {
+        message_id: `msg_staff_${suffix}`,
+        claim_id: claimId,
+        session_id: sessionId,
+        actor: 'staff',
+        visibility: 'shared',
+        content: request.payload.content,
+        created_at: '2026-09-10T06:31:00Z',
+      }
+      state.messages[claimId].push(message)
+      state.revisions[claimId] += 1
+      return jsonResponse(200, {
+        claim_id: claimId,
+        session_id: sessionId,
+        claim_revision: state.revisions[claimId],
+        message,
+      })
+    }
+
+    const sessionsMatch = path.match(
+      /^\/api\/v1\/workbench\/claims\/(clm_[ab])\/sessions\?/,
+    )
+    if (sessionsMatch) {
+      const suffix = sessionsMatch[1].slice(-1)
+      return jsonResponse(200, {
+        items: [{ session_id: `ses_${suffix}`, status: 'active' }],
+        page: { next_cursor: null },
+      })
+    }
+
+    const resourceMatch = path.match(
+      /^\/api\/v1\/workbench\/claims\/(clm_[ab])\/(handoffs|collaboration-requests)/,
+    )
+    if (resourceMatch) {
+      return jsonResponse(200, { items: [], page: { next_cursor: null } })
+    }
+
+    const claimMatch = path.match(/^\/api\/v1\/workbench\/claims\/(clm_[ab])$/)
+    if (claimMatch) {
+      const claimId = claimMatch[1]
+      return jsonResponse(200, crossClaimDetail(claimId, state.revisions[claimId]))
+    }
+
+    throw new Error(`Unexpected Workbench request: ${method} ${path}`)
+  })
+
+  return { fetchMock, state }
+}
+
 function messageReadCount(state, sessionId) {
   return state.messageReads.filter((readSessionId) => readSessionId === sessionId).length
 }
@@ -162,6 +328,7 @@ function createJourneyService({
     claimReads: 0,
     sessionReads: [],
     messageReads: [],
+    messageReadPaths: [],
   }
 
   const fetchMock = vi.fn(async (url, options = {}) => {
@@ -212,7 +379,8 @@ function createJourneyService({
     if (messageMatch) {
       const sessionId = decodeURIComponent(messageMatch[1])
       state.messageReads.push(sessionId)
-      const controlledResponse = onMessageRead?.(sessionId, state)
+      state.messageReadPaths.push(path)
+      const controlledResponse = onMessageRead?.(sessionId, state, path)
       if (controlledResponse) return controlledResponse
       return jsonResponse(200, {
         items: (state.messagesBySession[sessionId] || []).map((message) => ({ ...message })),
@@ -294,6 +462,164 @@ describe('WorkbenchPage staff session browser/API journey', () => {
       content: { type: 'text', text: 'Journey staff reply' },
     })
     expect(state.messagesBySession.ses_25).toHaveLength(0)
+  })
+
+  it('follows message cursors until the exact persisted delivery is found beyond the first 50 messages', async () => {
+    let finishSecondPageRead
+    let holdSecondPageRead = true
+    const messagesBySession = {
+      ses_25: [],
+      ses_26: Array.from({ length: 50 }, (_, index) => staffMessage(
+        `Earlier message ${index + 1}`,
+        `msg_earlier_${index + 1}`,
+      )),
+    }
+    const { fetchMock, state } = createJourneyService({
+      messagesBySession,
+      onMessageRead(sessionId, serviceState, path) {
+        if (sessionId !== 'ses_26') return null
+        const cursor = new URL(path, 'http://workbench.test').searchParams.get('cursor')
+        const messages = serviceState.messagesBySession.ses_26
+        if (cursor === 'message-page-2') {
+          if (!holdSecondPageRead) {
+            return jsonResponse(200, {
+              items: messages.slice(50).map((message) => ({ ...message })),
+              page: { next_cursor: null },
+            })
+          }
+          holdSecondPageRead = false
+          return new Promise((resolve) => {
+            finishSecondPageRead = () => resolve(jsonResponse(200, {
+              items: messages.slice(50).map((message) => ({ ...message })),
+              page: { next_cursor: null },
+            }))
+          })
+        }
+        return jsonResponse(200, {
+          items: messages.slice(0, 50).map((message) => ({ ...message })),
+          page: { next_cursor: messages.length > 50 ? 'message-page-2' : null },
+        })
+      },
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderJourney()
+
+    expect(await screen.findByText('Earlier message 1')).toBeVisible()
+    const sendButton = screen.getByRole('button', { name: 'Send message' })
+    await waitFor(() => expect(sendButton).toBeEnabled())
+    await userEvent.setup().click(sendButton)
+
+    await waitFor(() => {
+      expect(state.messageReadPaths.some((path) => (
+        new URL(path, 'http://workbench.test').searchParams.get('cursor') === 'message-page-2'
+      ))).toBe(true)
+      expect(finishSecondPageRead).toBeTypeOf('function')
+      expect(screen.getByLabelText('Message to claimant')).toHaveValue('Journey staff reply')
+    })
+
+    finishSecondPageRead()
+
+    expect((await screen.findAllByText(/refresh replaced its confirmation/i)).length).toBeGreaterThan(0)
+    const secondPageReadsBeforeRetry = state.messageReadPaths.filter((path) => (
+      new URL(path, 'http://workbench.test').searchParams.get('cursor') === 'message-page-2'
+    )).length
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry section' }))
+
+    await waitFor(() => {
+      expect(state.messageReadPaths.filter((path) => (
+        new URL(path, 'http://workbench.test').searchParams.get('cursor') === 'message-page-2'
+      )).length).toBeGreaterThan(secondPageReadsBeforeRetry)
+      expect(screen.getByRole('log', { name: 'Claimant conversation messages' })).toHaveTextContent(
+        'Journey staff reply',
+      )
+      expect(screen.getByLabelText('Message to claimant')).toHaveValue('')
+    })
+    expect(state.postRequests).toHaveLength(1)
+    expect(screen.queryAllByText(/does not include it yet/i)).toHaveLength(0)
+  })
+
+  it('stops a cyclic message cursor and keeps an unconfirmed delivery recoverable', async () => {
+    const { fetchMock, state } = createJourneyService({
+      onMessageRead(sessionId, serviceState) {
+        if (sessionId !== 'ses_26' || serviceState.postRequests.length === 0) return null
+        return jsonResponse(200, {
+          items: [],
+          page: { next_cursor: 'cyclic-message-page' },
+        })
+      },
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderJourney()
+
+    const sendButton = await screen.findByRole('button', { name: 'Send message' })
+    await waitFor(() => expect(sendButton).toBeEnabled())
+    await userEvent.setup().click(sendButton)
+
+    expect((await screen.findAllByText(/does not include it yet/i)).length).toBeGreaterThan(0)
+    expect(screen.getByLabelText('Message to claimant')).toHaveValue('Journey staff reply')
+    const cyclicPageReads = state.messageReadPaths.filter((path) => (
+      new URL(path, 'http://workbench.test').searchParams.get('cursor') === 'cyclic-message-page'
+    )).length
+    expect(cyclicPageReads).toBeGreaterThan(0)
+    expect(cyclicPageReads).toBeLessThanOrEqual(2)
+    expect(state.messageReads.length).toBeLessThanOrEqual(5)
+    expect(state.postRequests).toHaveLength(1)
+  })
+
+  it('reconciles Claim B while an exact Claim A delivery readback is still in flight', async () => {
+    tabs.tabs = [
+      {
+        claimId: 'clm_a',
+        displayReference: 'NW-A',
+        section: 'conversation',
+        sessionId: 'ses_a',
+        draft: 'Reply for Claim A',
+      },
+      {
+        claimId: 'clm_b',
+        displayReference: 'NW-B',
+        section: 'conversation',
+        sessionId: 'ses_b',
+        draft: 'Reply for Claim B',
+      },
+    ]
+    tabs.activeId = 'clm_b'
+    const { fetchMock, state } = createCrossClaimService()
+    vi.stubGlobal('fetch', fetchMock)
+    renderCrossClaimJourney()
+
+    const user = userEvent.setup()
+    const sendB = await screen.findByRole('button', { name: 'Send message' })
+    await waitFor(() => expect(sendB).toBeEnabled())
+    await user.click(sendB)
+
+    expect((await screen.findAllByText(/does not include it yet/i)).length).toBeGreaterThan(0)
+    expect(screen.getByLabelText('Message to claimant')).toHaveValue('Reply for Claim B')
+    expect(state.postRequests.filter(({ claimId }) => claimId === 'clm_b')).toHaveLength(1)
+
+    await user.click(screen.getByRole('button', { name: 'Open Claim A' }))
+    await waitFor(() => {
+      expect(screen.getByLabelText('Message to claimant')).toHaveValue('Reply for Claim A')
+      expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled()
+    })
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => {
+      expect(state.postRequests.filter(({ claimId }) => claimId === 'clm_a')).toHaveLength(1)
+      expect(state.aPendingReads).toBeGreaterThan(0)
+    })
+
+    state.bCaughtUp = true
+    await user.click(screen.getByRole('button', { name: 'Open Claim B' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('log', { name: 'Claimant conversation messages' })).toHaveTextContent(
+        'Reply for Claim B',
+      )
+      expect(screen.getByLabelText('Message to claimant')).toHaveValue('')
+    })
+    expect(state.aPendingReads).toBeGreaterThan(0)
+    expect(state.postRequests.filter(({ claimId }) => claimId === 'clm_b')).toHaveLength(1)
+    expect(screen.queryAllByText(/does not include it yet/i)).toHaveLength(0)
   })
 
   it('keeps a displayed historical session read only and never posts from it', async () => {
