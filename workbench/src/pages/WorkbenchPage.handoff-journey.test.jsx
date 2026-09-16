@@ -810,9 +810,11 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
     })
     expect(state.resolveRequests[0].idempotencyKey).toBeTruthy()
 
-    expect(await screen.findByText(
+    const claimantUpdateCopies = await screen.findAllByText(
       'Your staff handoff is resolved and your claim can continue.',
-    )).toBeVisible()
+    )
+    expect(claimantUpdateCopies.length).toBeGreaterThanOrEqual(2)
+    claimantUpdateCopies.forEach((copy) => expect(copy).toBeVisible())
     expect(await screen.findByText(
       'Staff handoff resolved and Claim returned to the authoritative workflow.',
     )).toBeVisible()
