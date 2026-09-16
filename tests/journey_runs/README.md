@@ -106,8 +106,8 @@ refusal is the evidence), or after 12 turns.
 - **Home (`home-water-ingress-provisional-1`):** roof-valley ingress into the lounge ceiling and an
   adjacent room. The two incident photos and the repair assessment are claimant uploads (the
   assessment as claimant-supplied material under `P3-REPAIRER`, manual); the disclosure consent
-  record has no home route. On the controlled runtime the journey fails at
-  `property.ongoing_risk` (#848).
+  record has no home route. The controlled runtime completes the registered
+  home intake fields and reaches Claim creation.
 - **Contents (`contents-damaged-item-provisional-1`):** one damaged laptop. The two item photos,
   the purchase receipt, and the replacement assessment (`P3-CONTENTS-EVIDENCE`, manual) are
   claimant uploads; the consent record has no contents route. The theft-path Police report is

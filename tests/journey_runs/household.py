@@ -53,7 +53,7 @@ CONTROLLED_FIXTURE = (
 )
 
 # Stop points already reported to their owner: required item -> tracking reference.
-KNOWN_STOPS = {'property.ongoing_risk': '#848'}
+KNOWN_STOPS: dict[str, str] = {}
 
 
 @dataclass(frozen=True)
