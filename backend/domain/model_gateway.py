@@ -105,6 +105,8 @@ class ModelUsage(ModelContract):
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
     total_tokens: int | None = Field(default=None, ge=0)
+    cache_read_input_tokens: int | None = Field(default=None, ge=0)
+    cache_write_input_tokens: int | None = Field(default=None, ge=0)
 
 
 class ModelCompletionStatus(str, Enum):
@@ -170,6 +172,7 @@ class ModelResponse(ModelContract):
     completion_status: ModelCompletionStatus = ModelCompletionStatus.UNKNOWN
     finish_reason: str | None = None
     usage: ModelUsage | None = None
+    first_token_latency_ms: float | None = Field(default=None, ge=0)
     provider_model: str | None = Field(default=None, max_length=300)
     provider_request_id: str | None = Field(default=None, max_length=500)
 
