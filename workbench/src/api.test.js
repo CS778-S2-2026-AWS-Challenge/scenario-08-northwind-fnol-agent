@@ -129,6 +129,78 @@ describe('Workbench API failures', () => {
   })
 })
 
+describe('workbenchApi external task actions', () => {
+  beforeEach(() => {
+    clearStoredSession()
+    sessionStorage.clear()
+    vi.unstubAllGlobals()
+  })
+
+  it('submits external review acceptance only through the staff-facing Workbench route', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(201, {
+      action: { action_id: 'act_1' },
+      revision: 8,
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await workbenchApi.acceptExternalTaskReview(
+      'staff-token',
+      'clm_1',
+      'tsk_1',
+      7,
+      {},
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, options] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/v1/workbench/claims/clm_1/external-tasks/tsk_1/accept-review')
+    expect(url).not.toContain('/internal/v1/')
+    expect(options.method).toBe('POST')
+    expect(options.headers.Authorization).toBe('Bearer staff-token')
+    expect(options.headers['If-Match']).toBe('7')
+    expect(options.headers['Idempotency-Key']).toEqual(expect.any(String))
+    expect(options.body).toBe('{}')
+  })
+
+  it('reuses the reconciliation idempotency identity after an ambiguous network outcome', async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('connection lost'))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        claim_id: 'clm_1',
+        task_id: 'tsk_1',
+        revision: 8,
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      workbenchApi.reconcileExternalTaskResponse(
+        'staff-token',
+        'clm_1',
+        'tsk_1',
+        7,
+      ),
+    ).rejects.toMatchObject({
+      code: 'NETWORK_ERROR',
+      retryable: true,
+    })
+
+    await workbenchApi.reconcileExternalTaskResponse(
+      'staff-token',
+      'clm_1',
+      'tsk_1',
+      7,
+    )
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/workbench/claims/clm_1/external-tasks/tsk_1/reconcile')
+    expect(fetchMock.mock.calls[0][0]).not.toContain('/internal/v1/')
+    expect(fetchMock.mock.calls[0][1].headers['If-Match']).toBe('7')
+    expect(fetchMock.mock.calls[0][1].headers['Idempotency-Key']).toBe(
+      fetchMock.mock.calls[1][1].headers['Idempotency-Key'],
+    )
+    expect(fetchMock.mock.calls[0][1].body).toBeUndefined()
+  })
+})
+
 describe('workbenchApi Claim session resolution', () => {
   beforeEach(() => {
     clearStoredSession()
