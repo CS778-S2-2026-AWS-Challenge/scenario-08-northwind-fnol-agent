@@ -46,7 +46,8 @@ The record rejects evidence that contradicts itself:
 The class is derived from the record's own evidence. A record that declares any other class is
 rejected. The first rule that matches wins:
 
-1. `failed`: a step failed, or a visibility check does not hold.
+1. `failed`: a step failed, a fixture oracle disagrees with an observed response, or a visibility
+   check does not hold.
 2. `blocked`: a step was refused.
 3. `unavailable`: a step the journey needs has no capability, or the run records a capability
    this runtime does not provide.
@@ -56,9 +57,11 @@ rejected. The first rule that matches wins:
    provider, or a simulated provider result.
 6. `completed`: the same, on a deployed runtime with live providers.
 
-A run is stopped at its first step that does not succeed. The steps that follow are not attempted,
-and every material they would have delivered is recorded as `not_delivered`, so the record never
-implies they ran.
+A run is stopped at its first step that does not succeed or its first fixture-oracle mismatch. The
+steps that follow are not attempted, and every material they would have delivered is recorded as
+`not_delivered`, so the record never implies they ran. An oracle mismatch remains a successful HTTP
+step, but its `detail` records the expected and actual values plus `defect_ref=untracked`; the runner
+returns and writes the resulting `failed` record instead of aborting before evidence exists.
 
 ## Runners
 
@@ -78,10 +81,13 @@ python -m tests.journey_runs --schema
 Each run starts a fresh fixture runtime and writes one `<run_id>.json`; `--schema` prints the
 record's JSON Schema. `--runs` selects from a bounded matrix of distinct input/material pairs and
 rejects a number larger than the matrix instead of silently repeating an identical input. For
-motor, the matrix interleaves AT-01, PRES-01, and PRES-02 with five input variants and the five
-material packs. The successful route step's `detail` records each fixture-oracle comparison;
-action, proposed fields, next step, response text, pending evidence, and handoff mismatches fail
-the run. PRES-02 also executes and verifies the fixture's declared staff resolution.
+motor, the matrix interleaves AT-01, PRES-01, and PRES-02 with 50 exact claimant/staff input
+variations drawn from ten Auckland locations and five incident times, plus five material packs.
+Every baseline case has a distinct serialized claimant/staff input, and the matrix assertion also
+includes the complete material pack rather than trusting synthetic IDs. The successful route
+step's `detail` records each fixture-oracle comparison; action, proposed fields, next step,
+response text, pending evidence, and handoff mismatches produce a serializable `failed` run.
+PRES-02 also executes and verifies the fixture's declared staff resolution.
 
 `tests/test_journey_runs.py` exercises the matrix contract and representative journeys in the
 ordinary suite. It fails on any `untracked` disagreement, and on a home or contents stop that is neither in

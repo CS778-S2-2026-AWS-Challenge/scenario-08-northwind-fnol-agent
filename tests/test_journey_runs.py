@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
+from journey_runs import motor_collision
+from journey_runs.__main__ import main as journey_main
 from journey_runs.household import (
     CONTENTS,
     CONTENTS_CONFLICTING_OWNERSHIP,
@@ -377,12 +380,41 @@ def test_the_sprint4_baseline_contains_100_independent_input_pack_pairs() -> Non
     contents = household_run_cases('contents')
 
     assert (len(motor), len(home), len(contents)) == (50, 30, 20)
-    assert len({(case.fixture_name, case.input_variant, case.pack_id) for case in motor}) == 50
+    assert len({(case.input_payload, case.pack) for case in motor}) == 50
+    assert len({case.input_payload for case in motor}) == 50
     assert {case.fixture_name for case in motor} == {'AT-01', 'PRES-01', 'PRES-02'}
-    assert {case.input_variant for case in motor} == set(range(5))
+    assert {case.input_variant for case in motor} == set(range(50))
     assert {case.pack_id for case in motor} == set(MOTOR_PACKS)
     assert len({(case.scenario_id, case.pack_id) for case in home}) == 30
     assert len({(case.scenario_id, case.pack_id) for case in contents}) == 20
+
+
+def test_an_oracle_mismatch_returns_a_serializable_failed_record(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    original = motor_collision._motor_input
+
+    def mismatching_input(fixture_name: str, variant: int) -> dict[str, Any]:
+        journey_input = original(fixture_name, variant)
+        first_turn = journey_input['turns'][0]
+        first_turn['expected_action'] = 'HANDOFF'
+        return journey_input
+
+    monkeypatch.setattr(motor_collision, '_motor_input', mismatching_input)
+
+    result = journey_main(['--scenario', 'motor:PRES-01', '--runs', '1', '--out', str(tmp_path)])
+    record_paths = list(tmp_path.glob('*.json'))
+
+    assert result == 0
+    assert len(record_paths) == 1
+    record = JourneyRunRecord.model_validate_json(record_paths[0].read_text(encoding='utf-8'))
+    assert record.result_class is ResultClass.FAILED
+    assert 'defect_ref=untracked' in record.result_reason
+    assert len(record.steps) == 2
+    assert record.steps[-1].outcome is StepOutcome.SUCCEEDED
+    assert record.steps[-1].detail is not None
+    assert record.steps[-1].detail.startswith('Fixture oracle failed')
 
 
 @pytest.mark.parametrize(

@@ -31,6 +31,7 @@ from backend.adapters.evidence_storage import MockEvidenceStorage
 from backend.core.config import Settings
 
 from .record import (
+    ORACLE_FAILURE,
     AgentTurn,
     Arrival,
     ClaimantEffort,
@@ -89,7 +90,7 @@ class PackMaterial(NamedTuple):
 
 
 class Journey:
-    """Issues each step once, records it, and stops at the first step that does not succeed."""
+    """Issue and record each step, stopping on route failure or oracle disagreement."""
 
     def __init__(self, client: TestClient) -> None:
         self.client = client
@@ -99,7 +100,11 @@ class Journey:
 
     @property
     def stopped(self) -> bool:
-        return any(step.outcome is not StepOutcome.SUCCEEDED for step in self.steps)
+        return any(
+            step.outcome is not StepOutcome.SUCCEEDED
+            or (step.detail is not None and ORACLE_FAILURE in step.detail)
+            for step in self.steps
+        )
 
     def name(self, identifier: str, placeholder: str) -> str:
         self._placeholders[identifier] = placeholder
@@ -153,7 +158,12 @@ class Journey:
         return any(s.name == name and s.outcome is StepOutcome.SUCCEEDED for s in self.steps)
 
     def record_oracle(
-        self, step_name: str, expected: Mapping[str, object], actual: Mapping[str, object]
+        self,
+        step_name: str,
+        expected: Mapping[str, object],
+        actual: Mapping[str, object],
+        *,
+        defect_ref: str = 'untracked',
     ) -> None:
         """Attach a fixture-oracle comparison to a completed route step.
 
@@ -161,19 +171,23 @@ class Journey:
             step_name: Name of the route step whose response was checked.
             expected: Observable values declared by the fixture.
             actual: Values read from the route response or subsequent API readback.
+            defect_ref: Issue reference for a mismatch, or `untracked` until one is assigned.
 
         Returns:
             None.
 
         Raises:
-            AssertionError: If the expected and actual observable values differ.
+            AssertionError: If the named route step does not exist.
         """
 
         matched = expected == actual
-        detail = (
-            f'Fixture oracle {"passed" if matched else "failed"}: '
-            f'expected={dict(expected)!r}; actual={dict(actual)!r}'
-        )
+        if matched:
+            detail = f'Fixture oracle passed: expected={dict(expected)!r}; actual={dict(actual)!r}'
+        else:
+            detail = (
+                f'{ORACLE_FAILURE} (defect_ref={defect_ref}): '
+                f'expected={dict(expected)!r}; actual={dict(actual)!r}'
+            )
         for index in range(len(self.steps) - 1, -1, -1):
             if self.steps[index].name == step_name:
                 previous = self.steps[index].detail
@@ -182,8 +196,6 @@ class Journey:
                 break
         else:
             raise AssertionError(f'Fixture oracle references missing step {step_name!r}.')
-        if not matched:
-            raise AssertionError(detail)
 
     def revision(self) -> int:
         return cast(int, self.read(f'/api/v1/claims/{self.claim_id}', 'claimant')['revision'])
@@ -503,6 +515,11 @@ def _reason(
     capabilities: list[UnavailableCapability],
     stop_note: str | None,
 ) -> str:
+    oracle_failure = next(
+        (step for step in steps if step.detail is not None and ORACLE_FAILURE in step.detail), None
+    )
+    if oracle_failure is not None:
+        return f'Fixture oracle mismatch at "{oracle_failure.name}" ({oracle_failure.detail}).'
     stopped = next((step for step in steps if step.outcome is not StepOutcome.SUCCEEDED), None)
     if stopped is not None:
         reason = f'Stopped at "{stopped.name}" ({stopped.http_status} {stopped.detail}).'

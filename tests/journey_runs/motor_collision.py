@@ -17,6 +17,7 @@ import json
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from itertools import product
 from pathlib import Path
 from typing import Any, cast
 
@@ -120,6 +121,7 @@ class MotorRunCase:
     input_variant: int
     pack_id: str
     pack: tuple[PackMaterial, ...]
+    input_payload: str
 
 
 def _replace_pack_material(path: str, replacement: PackMaterial) -> tuple[PackMaterial, ...]:
@@ -180,8 +182,28 @@ MOTOR_PACKS: dict[str, tuple[PackMaterial, ...]] = {
     ),
 }
 
-_MOTOR_LOCATIONS = ('Queen Street', 'Lake Road', 'Dominion Road', 'Lincoln Road', 'Ti Rakau Drive')
-_MOTOR_TIMES = ('this morning', 'this afternoon', 'this evening', 'last night', 'yesterday morning')
+_MOTOR_LOCATIONS = (
+    'Queen Street',
+    'Lake Road',
+    'Dominion Road',
+    'Lincoln Road',
+    'Ti Rakau Drive',
+    'Great South Road',
+    'New North Road',
+    'Manukau Road',
+    'Hobsonville Road',
+    'East Coast Road',
+)
+_MOTOR_TIMES = (
+    ('this morning', '9:15 am today'),
+    ('this afternoon', '2:40 pm today'),
+    ('this evening', '6:20 pm today'),
+    ('last night', '8:05 pm yesterday'),
+    ('yesterday morning', '10:30 am yesterday'),
+)
+_MOTOR_INPUT_VARIANTS = tuple(
+    (location, *times) for location, times in product(_MOTOR_LOCATIONS, _MOTOR_TIMES)
+)
 
 
 def motor_run_cases(fixture_name: str | None = None) -> tuple[MotorRunCase, ...]:
@@ -199,25 +221,36 @@ def motor_run_cases(fixture_name: str | None = None) -> tuple[MotorRunCase, ...]
 
     if fixture_name is not None and fixture_name not in MOTOR_JOURNEY_FIXTURES:
         raise ValueError(f'Unknown motor fixture: {fixture_name!r}')
-    combinations = tuple(
-        (variant, pack_id, pack)
-        for variant in range(len(_MOTOR_LOCATIONS))
-        for pack_id, pack in MOTOR_PACKS.items()
-    )
+    combinations = tuple(MOTOR_PACKS.items()) * 5
     if fixture_name:
         return tuple(
-            MotorRunCase(fixture_name, variant, pack_id, pack)
-            for variant, pack_id, pack in combinations
+            MotorRunCase(
+                fixture_name,
+                variant,
+                pack_id,
+                pack,
+                _motor_input_payload(fixture_name, variant),
+            )
+            for variant, (pack_id, pack) in enumerate(combinations)
         )
     fixture_pairs = (
         ('AT-01', 'PRES-01'),
         ('PRES-02', 'AT-01'),
         ('PRES-01', 'PRES-02'),
     )
+    scheduled: list[tuple[str, str, tuple[PackMaterial, ...]]] = []
+    for index, (pack_id, pack) in enumerate(combinations):
+        for fixture in fixture_pairs[index % len(fixture_pairs)]:
+            scheduled.append((fixture, pack_id, pack))
     return tuple(
-        MotorRunCase(fixture, variant, pack_id, pack)
-        for index, (variant, pack_id, pack) in enumerate(combinations)
-        for fixture in fixture_pairs[index % len(fixture_pairs)]
+        MotorRunCase(
+            fixture,
+            variant,
+            pack_id,
+            pack,
+            _motor_input_payload(fixture, variant),
+        )
+        for variant, (fixture, pack_id, pack) in enumerate(scheduled)
     )
 
 
@@ -227,12 +260,15 @@ def _motor_input(fixture_name: str, variant: int) -> dict[str, Any]:
         json.loads(MOTOR_JOURNEY_FIXTURES[fixture_name].read_text(encoding='utf-8')),
     )
     journey_input = deepcopy(loaded)
-    location = _MOTOR_LOCATIONS[variant % len(_MOTOR_LOCATIONS)]
-    occurred_at = _MOTOR_TIMES[variant % len(_MOTOR_TIMES)]
+    location, initial_time, guided_time = _MOTOR_INPUT_VARIANTS[variant]
 
     def vary(value: object) -> object:
         if isinstance(value, str):
-            return value.replace('Queen Street', location).replace('this morning', occurred_at)
+            return (
+                value.replace('Queen Street', location)
+                .replace('this morning', initial_time)
+                .replace('5:30 pm today', guided_time)
+            )
         if isinstance(value, list):
             return [vary(item) for item in value]
         if isinstance(value, dict):
@@ -240,6 +276,22 @@ def _motor_input(fixture_name: str, variant: int) -> dict[str, Any]:
         return value
 
     return cast(dict[str, Any], vary(journey_input))
+
+
+def _motor_input_payload(fixture_name: str, variant: int) -> str:
+    journey_input = _motor_input(fixture_name, variant)
+    turns = journey_input.get('turns') or []
+    claimant_inputs = [str(turn['input']) for turn in turns if turn.get('input')]
+    if not claimant_inputs:
+        claimant_inputs = [str(journey_input['input'])]
+    return json.dumps(
+        {
+            'claimant_inputs': claimant_inputs,
+            'staff_resolution': journey_input.get('staff_resolution'),
+        },
+        sort_keys=True,
+        separators=(',', ':'),
+    )
 
 
 # Disagreements already reported to their owner. Any other disagreement is `untracked`.
@@ -445,7 +497,7 @@ def _drive_multi_turn(
         # Keep the fixture's declared conversation oracle independent from evidence-upload
         # side effects, then attach the material pack before staff readback and resolution.
         evidence = upload_pack(journey, pack)
-    if journey_input.get('expected_handoff') and journey.steps:
+    if journey_input.get('expected_handoff') and journey.steps and not journey.stopped:
         _record_handoff_oracle(journey, journey_input['expected_handoff'], journey.steps[-1].name)
     if journey_input.get('staff_resolution') and not journey.stopped:
         _execute_staff_resolution(journey, journey_input['staff_resolution'])
@@ -474,13 +526,12 @@ def run_motor_journey(
 
     Raises:
         ValueError: If the fixture or input variant is unknown.
-        AssertionError: If an observable response contradicts the fixture oracle.
     """
     if fixture_name not in MOTOR_JOURNEY_FIXTURES:
         raise ValueError(
             f'Unknown motor fixture: {fixture_name!r}; choose from {sorted(MOTOR_JOURNEY_FIXTURES)}'
         )
-    if not 0 <= input_variant < len(_MOTOR_LOCATIONS):
+    if not 0 <= input_variant < len(_MOTOR_INPUT_VARIANTS):
         raise ValueError(f'Unknown motor input variant: {input_variant}')
     journey_input = _motor_input(fixture_name, input_variant)
     scenario_id = str(
