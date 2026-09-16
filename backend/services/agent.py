@@ -463,6 +463,8 @@ def _is_guided_rear_end_claim(claim: WorkingClaim, message_text: str) -> bool:
     candidate = str(description.value) if description is not None else message_text
     inferred_family = claim.form.get('claim.product_family')
     if description is None:
+        if claim.incident_type == 'motor' and _safety_is_explicitly_clear(message_text):
+            return False
         is_motor = claim.incident_type == 'motor' or (
             claim.incident_type is None and infer_controlled_product_family(candidate) == 'motor'
         )
