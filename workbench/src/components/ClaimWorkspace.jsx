@@ -26,16 +26,21 @@ export default function ClaimWorkspace({ detail, resources = {}, loading, error,
   if (error && !detail) return <ClaimUnavailable error={error} onRetry={onRetry} />
   if (!detail) return <EmptyWorkspace />
   const baseInteractionDetail = loading || stale || error ? { ...detail, allowed_actions: [] } : detail
-  const externalRecoveryActive = externalActionNotices.length > 0
-  const interactionDetail = externalRecoveryActive
+  const guardedExternalTaskIds = new Set(
+    externalActionNotices.map((notice) => notice.taskId).filter(Boolean),
+  )
+  const interactionDetail = guardedExternalTaskIds.size
     ? {
         ...baseInteractionDetail,
         allowed_actions: (baseInteractionDetail.allowed_actions || []).filter(
-          (action) => action.target_type !== 'external_task',
+          (action) => !(
+            action.target_type === 'external_task'
+            && guardedExternalTaskIds.has(action.target_ref)
+          ),
         ),
       }
     : baseInteractionDetail
-  const externalActions = resourceActionContextUnavailable(resources.externalRequests) || externalRecoveryActive
+  const externalActions = resourceActionContextUnavailable(resources.externalRequests)
     ? []
     : interactionDetail.allowed_actions
 
