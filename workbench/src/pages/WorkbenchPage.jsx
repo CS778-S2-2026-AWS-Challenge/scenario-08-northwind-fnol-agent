@@ -15,6 +15,7 @@ import { revisionNotice as buildRevisionNotice } from '../revision.js'
 import ConversationsPage from './ConversationsPage.jsx'
 
 const MAX_MESSAGE_READBACK_PAGES = 100
+const MESSAGE_DELIVERY_READBACK_TIMEOUT_MS = 15_000
 
 export default function WorkbenchPage() {
   const { token, profile, logout } = useAuth()
@@ -380,10 +381,13 @@ export default function WorkbenchPage() {
     const sessionsResult = await loadResource(
       'sessions',
       id,
-      () => workbenchApi.sessionsForTarget(
-        token,
-        id,
-        requestedSessionId,
+      () => withMessageReadbackTimeout(
+        workbenchApi.sessionsForTarget(
+          token,
+          id,
+          requestedSessionId,
+        ),
+        initialPendingDelivery,
       ),
       { isCurrent },
     )
@@ -477,11 +481,14 @@ export default function WorkbenchPage() {
       id,
       async () => {
         const response = await loadMessagePagesForDelivery(
-          (cursor) => workbenchApi.messages(
-            token,
-            id,
-            session.session_id,
-            cursor,
+          (cursor) => withMessageReadbackTimeout(
+            workbenchApi.messages(
+              token,
+              id,
+              session.session_id,
+              cursor,
+            ),
+            targetDelivery,
           ),
           targetDelivery && mayReconcileDelivery ? targetDelivery : null,
         )
@@ -1438,6 +1445,32 @@ function sameDelivery(left, right) {
     && left.session_id === right.session_id
     && left.message_id === right.message_id
   )
+}
+
+function withMessageReadbackTimeout(request, delivery) {
+  if (!delivery) return request
+
+  return new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      const error = new Error(
+        'The conversation refresh timed out before the saved message could be confirmed. Retry this section to reconcile the existing delivery; do not send it again.',
+      )
+      error.code = 'MESSAGE_READBACK_TIMEOUT'
+      error.retryable = true
+      reject(error)
+    }, MESSAGE_DELIVERY_READBACK_TIMEOUT_MS)
+
+    Promise.resolve(request).then(
+      (response) => {
+        window.clearTimeout(timeoutId)
+        resolve(response)
+      },
+      (error) => {
+        window.clearTimeout(timeoutId)
+        reject(error)
+      },
+    )
+  })
 }
 
 async function loadMessagePagesForDelivery(loadPage, delivery) {

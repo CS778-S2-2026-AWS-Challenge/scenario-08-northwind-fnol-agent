@@ -890,6 +890,74 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     expect(state.postRequests).toHaveLength(1)
   })
 
+  it('times out a hung readback and reconciles in place without accepting its late response', async () => {
+    let holdReadbacks = true
+    const stalledReadResolvers = []
+    const nativeSetTimeout = window.setTimeout.bind(window)
+    vi.spyOn(window, 'setTimeout').mockImplementation((callback, delay, ...args) => (
+      nativeSetTimeout(callback, delay === 15_000 ? 5 : delay, ...args)
+    ))
+    const { fetchMock, state } = createJourneyService({
+      onMessageRead(sessionId, serviceState) {
+        if (
+          sessionId !== 'ses_26'
+          || serviceState.postRequests.length === 0
+          || !holdReadbacks
+        ) return null
+        return new Promise((resolve) => {
+          stalledReadResolvers.push(() => resolve(jsonResponse(200, {
+            items: [],
+            page: { next_cursor: null },
+          })))
+        })
+      },
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderJourney()
+
+    const user = userEvent.setup()
+    const sendButton = await screen.findByRole('button', { name: 'Send message' })
+    await waitFor(() => expect(sendButton).toBeEnabled())
+    await user.click(sendButton)
+
+    expect(await screen.findByText(/timed out before the saved message/i)).toBeVisible()
+    expect(stalledReadResolvers.length).toBeGreaterThan(0)
+    expect(screen.getByLabelText('Message to claimant')).toHaveValue('Journey staff reply')
+    expect(screen.getByRole('button', { name: 'Retry section' })).toBeEnabled()
+    expect(state.postRequests).toHaveLength(1)
+
+    holdReadbacks = false
+    await user.click(screen.getByRole('button', { name: 'Retry section' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('log', { name: 'Claimant conversation messages' })).toHaveTextContent(
+        'Journey staff reply',
+      )
+      expect(screen.getByLabelText('Message to claimant')).toHaveValue('')
+      expect(screen.queryAllByText(/timed out before the saved message/i)).toHaveLength(0)
+      expect(screen.queryAllByText(/another conversation refresh replaced/i)).toHaveLength(0)
+    })
+    expect(state.postRequests).toHaveLength(1)
+
+    const composer = screen.getByLabelText('Message to claimant')
+    await waitFor(() => expect(composer).toBeEnabled())
+    await user.type(composer, 'Newer unsent draft')
+
+    await act(async () => {
+      for (const resolveRead of stalledReadResolvers) resolveRead()
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole('log', { name: 'Claimant conversation messages' })).toHaveTextContent(
+        'Journey staff reply',
+      )
+      expect(screen.getByLabelText('Message to claimant')).toHaveValue('Newer unsent draft')
+      expect(screen.queryAllByText(/timed out before the saved message/i)).toHaveLength(0)
+      expect(screen.queryAllByText(/another conversation refresh replaced/i)).toHaveLength(0)
+    })
+    expect(state.postRequests).toHaveLength(1)
+  })
+
   it('keeps a successful post unconfirmed until an exact stale readback catches up', async () => {
     let readModelCaughtUp = false
     const { fetchMock, state } = createJourneyService({
