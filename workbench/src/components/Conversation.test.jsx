@@ -128,6 +128,43 @@ describe('Conversation', () => {
     expect(onAccept).toHaveBeenCalledWith(handoff)
   })
 
+  it('keeps a queued handoff with unread messages in the composer take-over flow', async () => {
+    const user = userEvent.setup()
+    const onAccept = vi.fn().mockResolvedValue(undefined)
+    const handoff = assistanceHandoff('queued')
+    const { container } = renderConversation({
+      detail: {
+        ...detail,
+        revision: 2,
+        work_summary: { unread_claimant_messages: 1 },
+        allowed_actions: [action('human.accept_handoff', 'hnd_1')],
+      },
+      handoffs: [handoff],
+      profile: { staff_id: 'stf_demo', display_name: 'Demo Staff' },
+      resource: { items: [], resolved_session_id: 'ses_1' },
+      draft: '',
+      onDraft: vi.fn(),
+      onAccept,
+      onResolve: vi.fn(),
+      onSend: vi.fn(),
+    })
+
+    const composer = screen.getByLabelText('Message to claimant').closest('form')
+    expect(composer).toContainElement(screen.getByText('Customer requested staff assistance'))
+    expect(composer).toContainElement(screen.getByRole('button', { name: 'Take over conversation' }))
+    expect(container.querySelector('.conversation-view > .assistance-status')).toBeNull()
+    expect(screen.getByLabelText('Message to claimant')).toBeDisabled()
+    expect(screen.queryByText('Staff messaging not available yet')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Take over conversation' }))
+    expect(onAccept).not.toHaveBeenCalled()
+    expect(composer).toContainElement(screen.getByText('Confirm this action.'))
+
+    await user.click(screen.getByRole('button', { name: 'Confirm take over' }))
+    expect(onAccept).toHaveBeenCalledOnce()
+    expect(onAccept).toHaveBeenCalledWith(handoff)
+  })
+
   it('keeps the assignee and completion workflow in the compact status bar', async () => {
     const user = userEvent.setup()
     const onResolve = vi.fn().mockResolvedValue(undefined)

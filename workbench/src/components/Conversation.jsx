@@ -460,7 +460,18 @@ function assistanceDisplayState(detail, handoff, assignment) {
       expectedActor: null,
     }
   }
-  if ((detail.work_summary?.unread_claimant_messages || 0) > 0) {
+  if (handoff?.status === 'queued') {
+    return {
+      key: 'waiting-request',
+      label: 'Waiting request',
+      tone: '',
+      title: 'Customer requested staff assistance',
+    }
+  }
+  if (
+    ['accepted', 'in_progress'].includes(handoff?.status)
+    && (detail.work_summary?.unread_claimant_messages || 0) > 0
+  ) {
     return {
       key: 'action-needed',
       label: 'Action needed',
@@ -481,14 +492,6 @@ function assistanceDisplayState(detail, handoff, assignment) {
       title: 'Waiting for customer',
       description: 'The customer is expected to respond or provide information.',
       expectedActor: 'Customer',
-    }
-  }
-  if (handoff?.status === 'queued') {
-    return {
-      key: 'waiting-request',
-      label: 'Waiting request',
-      tone: '',
-      title: 'Customer requested staff assistance',
     }
   }
   return {
