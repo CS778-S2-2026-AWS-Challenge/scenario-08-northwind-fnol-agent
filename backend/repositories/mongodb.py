@@ -7,9 +7,10 @@ document details below the repository boundary.
 """
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from threading import Event
 from typing import Any, NoReturn, TypeVar
 
 from pydantic import BaseModel, TypeAdapter
@@ -50,6 +51,7 @@ from backend.domain.models import (
     FollowUpStatus,
     HandoffRecord,
     MessageRecord,
+    MessageVisibility,
     RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
@@ -57,6 +59,12 @@ from backend.domain.models import (
     StaffActionRecord,
     StaffActionStatus,
     WorkingClaim,
+)
+from backend.domain.realtime import (
+    RealtimeCursor,
+    RealtimeEvent,
+    RealtimeResource,
+    new_realtime_event,
 )
 from backend.domain.retrieval import (
     ClaimHistoryRetrievalRecord,
@@ -320,6 +328,12 @@ class MongoDBRepository:
             [('record_type', 1), ('claim_id', 1), ('created_at', 1)],
             name='branch_evaluation_claim_created',
         )
+        self._collection.create_index(
+            [('record_type', 1), ('occurred_at', 1), ('event_id', 1)],
+            unique=True,
+            name='realtime_event_cursor_unique',
+            partialFilterExpression={'record_type': 'realtime_event'},
+        )
         # One task carries one canonical result. Without this, two concurrent first
         # writes can each observe no held record and both insert.
         self._collection.create_index(
@@ -353,6 +367,96 @@ class MongoDBRepository:
 
     def close(self) -> None:
         self._client.close()
+
+    def append_realtime_event(self, event: RealtimeEvent) -> None:
+        self._put('realtime_event', event.event_id, event, customer_id=event.customer_id)
+
+    def _append_realtime_event(
+        self,
+        claim: WorkingClaim,
+        resources: tuple[RealtimeResource, ...],
+        *,
+        mongo_session: Any,
+        operation_correlation: str | None = None,
+        claimant_visible: bool = True,
+        claimant_resources: tuple[RealtimeResource, ...] | None = None,
+    ) -> None:
+        event = new_realtime_event(
+            claim_id=claim.claim_id,
+            customer_id=claim.customer_id,
+            occurred_at=datetime.now(UTC),
+            claim_revision=claim.revision,
+            operation_correlation=operation_correlation,
+            resources=tuple(dict.fromkeys(resources)),
+            claimant_visible=claimant_visible,
+            claimant_resources=claimant_resources,
+        )
+        self._put(
+            'realtime_event',
+            event.event_id,
+            event,
+            customer_id=event.customer_id,
+            claim_id=event.claim_id,
+            session=mongo_session,
+        )
+
+    def replay_realtime_events(
+        self,
+        after: RealtimeCursor | None,
+        *,
+        limit: int,
+    ) -> list[RealtimeEvent]:
+        if not 1 <= limit <= 1000:
+            raise ValueError('Realtime replay limit must be between 1 and 1000.')
+        query: dict[str, Any] = {'record_type': 'realtime_event'}
+        if after is not None:
+            timestamp = after.occurred_at.isoformat()
+            anchor = self._collection.find_one(
+                {
+                    'record_type': 'realtime_event',
+                    'event_id': after.event_id,
+                    'occurred_at': timestamp,
+                },
+                projection={'_id': 1},
+            )
+            if anchor is None:
+                raise ValueError('The realtime cursor is outside the available replay window.')
+            query['$or'] = [
+                {'occurred_at': {'$gt': timestamp}},
+                {'occurred_at': timestamp, 'event_id': {'$gt': after.event_id}},
+            ]
+        cursor = (
+            self._collection.find(query)
+            .sort([('occurred_at', 1), ('event_id', 1)])
+            .limit(limit)
+        )
+        return [
+            event
+            for document in cursor
+            if (event := self._model_from_document(document, RealtimeEvent)) is not None
+        ]
+
+    def watch_realtime_events(self, stop: Event) -> Iterator[RealtimeEvent]:
+        pipeline = [
+            {
+                '$match': {
+                    'operationType': 'insert',
+                    'fullDocument.record_type': 'realtime_event',
+                }
+            }
+        ]
+        with self._collection.watch(
+            pipeline,
+            full_document='updateLookup',
+            max_await_time_ms=1000,
+        ) as stream:
+            while not stop.is_set():
+                change = stream.try_next()
+                if change is None:
+                    continue
+                event = self._model_from_document(change.get('fullDocument', {}), RealtimeEvent)
+                if event is not None:
+                    yield event
 
     @staticmethod
     def _record_id(kind: str, identifier: str) -> str:
@@ -890,6 +994,11 @@ class MongoDBRepository:
             claim_id=session.claim_id,
             session=mongo_session,
         )
+        self._append_realtime_event(
+            claim,
+            (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
+            mongo_session=mongo_session,
+        )
 
     def get_claim(self, claim_id: str, customer_id: str) -> WorkingClaim | None:
         return self._get('claim', claim_id, WorkingClaim, customer_id=customer_id)
@@ -955,12 +1064,35 @@ class MongoDBRepository:
         customer_id: str,
     ) -> WorkingClaim | None:
         """Move an anonymous claim projection to an authenticated customer."""
-        claim = self.get_claim(claim_id, anonymous_customer_id)
+        return self._atomic(
+            lambda mongo_session: self._promote_claim_owner(
+                claim_id,
+                anonymous_customer_id,
+                customer_id,
+                mongo_session,
+            )
+        )
+
+    def _promote_claim_owner(
+        self,
+        claim_id: str,
+        anonymous_customer_id: str,
+        customer_id: str,
+        mongo_session: Any,
+    ) -> WorkingClaim | None:
+        claim = self._get(
+            'claim',
+            claim_id,
+            WorkingClaim,
+            customer_id=anonymous_customer_id,
+            session=mongo_session,
+        )
         if claim is None:
             return None
         self._collection.update_many(
             {'claim_id': claim_id, 'customer_id': anonymous_customer_id},
             {'$set': {'customer_id': customer_id}},
+            session=mongo_session,
         )
         self._collection.update_one(
             {'_id': self._record_id('claim', claim_id), 'record_type': 'claim'},
@@ -970,8 +1102,23 @@ class MongoDBRepository:
                     'staff_search.customer_reference': customer_id,
                 }
             },
+            session=mongo_session,
         )
-        return self.get_claim(claim_id, customer_id)
+        promoted = self._get(
+            'claim',
+            claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        if promoted is None:
+            raise KeyError(claim_id)
+        self._append_realtime_event(
+            promoted,
+            (RealtimeResource.CLAIM,),
+            mongo_session=mongo_session,
+        )
+        return promoted
 
     def save_claim(
         self,
@@ -990,31 +1137,30 @@ class MongoDBRepository:
                 )
             )
             return
-        self._ensure_claim_revision(claim, expected_revision, mongo_session=None)
+        self._atomic(
+            lambda mongo_session: self._save_claim_only(
+                claim,
+                expected_revision,
+                mongo_session,
+            )
+        )
+
+    def _save_claim_only(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        mongo_session: Any,
+    ) -> None:
+        self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
         if claim.revision != expected_revision + 1:
             raise KeyError(claim.claim_id)
-        result = self._collection.replace_one(
-            {
-                '_id': self._record_id('claim', claim.claim_id),
-                'record_type': 'claim',
-                'customer_id': claim.customer_id,
-                'revision': expected_revision,
-            },
-            {
-                **claim.model_dump(mode='json'),
-                'staff_search': self._staff_search_projection(claim).model_dump(mode='json'),
-                '_id': self._record_id('claim', claim.claim_id),
-                'record_type': 'claim',
-                'customer_id': claim.customer_id,
-                'claim_id': claim.claim_id,
-            },
+        if self._replace_claim_revision(claim, expected_revision, mongo_session=mongo_session) == 0:
+            self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
+        self._append_realtime_event(
+            claim,
+            (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
+            mongo_session=mongo_session,
         )
-        if result.matched_count == 0:
-            current = self._collection.find_one(
-                {'_id': self._record_id('claim', claim.claim_id), 'record_type': 'claim'},
-                projection={'revision': 1},
-            )
-            raise RevisionConflict(int(current['revision']) if current else 0)
 
     def _save_claim_with_evaluation(
         self,
@@ -1039,6 +1185,11 @@ class MongoDBRepository:
             customer_id=claim.customer_id,
             claim_id=claim.claim_id,
             session=mongo_session,
+        )
+        self._append_realtime_event(
+            claim,
+            (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
+            mongo_session=mongo_session,
         )
 
     def save_claim_mutation(
@@ -1342,9 +1493,34 @@ class MongoDBRepository:
         )
 
     def save_message(self, message: MessageRecord, customer_id: str) -> None:
+        self._atomic(
+            lambda mongo_session: self._save_message(message, customer_id, mongo_session)
+        )
+
+    def _save_message(
+        self,
+        message: MessageRecord,
+        customer_id: str,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            message.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        session = self._get(
+            'session',
+            message.session_id,
+            SessionRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
         if (
-            not self._claim_owned(message.claim_id, customer_id)
-            or self.get_session(message.claim_id, message.session_id, customer_id) is None
+            claim is None
+            or session is None
+            or session.claim_id != message.claim_id
         ):
             raise KeyError(message.claim_id)
         self._put(
@@ -1353,6 +1529,13 @@ class MongoDBRepository:
             message,
             customer_id=customer_id,
             claim_id=message.claim_id,
+            session=mongo_session,
+        )
+        self._append_realtime_event(
+            claim,
+            (RealtimeResource.MESSAGES,),
+            mongo_session=mongo_session,
+            claimant_visible=message.visibility is not MessageVisibility.INTERNAL_ONLY,
         )
 
     def get_message(
@@ -1933,10 +2116,31 @@ class MongoDBRepository:
         self._atomic(persist)
 
     def save_evidence(self, evidence: EvidenceRecord, customer_id: str) -> None:
-        if not self._claim_owned(evidence.claim_id, customer_id):
+        self._atomic(
+            lambda mongo_session: self._save_evidence(evidence, customer_id, mongo_session)
+        )
+
+    def _save_evidence(
+        self,
+        evidence: EvidenceRecord,
+        customer_id: str,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            evidence.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        if claim is None:
             raise KeyError(evidence.claim_id)
         current = self._get(
-            'evidence', evidence.evidence_id, EvidenceRecord, customer_id=customer_id
+            'evidence',
+            evidence.evidence_id,
+            EvidenceRecord,
+            customer_id=customer_id,
+            session=mongo_session,
         )
         try:
             assert_material_history_is_append_only(current, evidence)
@@ -1948,6 +2152,12 @@ class MongoDBRepository:
             evidence,
             customer_id=customer_id,
             claim_id=evidence.claim_id,
+            session=mongo_session,
+        )
+        self._append_realtime_event(
+            claim,
+            (RealtimeResource.EVIDENCE,),
+            mongo_session=mongo_session,
         )
 
     def get_evidence(
@@ -2019,7 +2229,24 @@ class MongoDBRepository:
             KeyError: The claim is missing or not owned by the customer.
             IdempotencyConflict: The write changes immutable identity or is stale.
         """
-        if not self._claim_owned(task.claim_id, customer_id):
+        self._atomic(
+            lambda mongo_session: self._save_external_task(task, customer_id, mongo_session)
+        )
+
+    def _save_external_task(
+        self,
+        task: ExternalTaskRecord,
+        customer_id: str,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            task.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        if claim is None:
             raise KeyError(task.claim_id)
         record_id = self._record_id('external_task', task.task_id)
         document = {
@@ -2029,15 +2256,24 @@ class MongoDBRepository:
             'customer_id': customer_id,
             'claim_id': task.claim_id,
         }
-        stored = self._collection.find_one({'_id': record_id, 'record_type': 'external_task'})
+        stored = self._collection.find_one(
+            {'_id': record_id, 'record_type': 'external_task'},
+            session=mongo_session,
+        )
         if stored is None:
             assert_external_task_registry_compatible(task)
             try:
-                self._collection.insert_one(document)
+                self._collection.insert_one(document, session=mongo_session)
+                self._append_realtime_event(
+                    claim,
+                    (RealtimeResource.EXTERNAL_TASKS, RealtimeResource.QUEUE),
+                    mongo_session=mongo_session,
+                )
                 return
             except DuplicateKeyError:
                 stored = self._collection.find_one(
-                    {'_id': record_id, 'record_type': 'external_task'}
+                    {'_id': record_id, 'record_type': 'external_task'},
+                    session=mongo_session,
                 )
         existing = self._model_from_document(stored, ExternalTaskRecord)
         if (
@@ -2070,15 +2306,25 @@ class MongoDBRepository:
                 'updated_at': stored.get('updated_at'),
             },
             document,
+            session=mongo_session,
         )
         if result.matched_count == 0:
-            current = self._collection.find_one({'_id': record_id, 'record_type': 'external_task'})
+            current = self._collection.find_one(
+                {'_id': record_id, 'record_type': 'external_task'},
+                session=mongo_session,
+            )
             same_owner = current is not None and (
                 current.get('customer_id') == customer_id
                 and current.get('claim_id') == task.claim_id
             )
             if not same_owner or self._model_from_document(current, ExternalTaskRecord) != task:
                 raise IdempotencyConflict(task.task_id)
+            return
+        self._append_realtime_event(
+            claim,
+            (RealtimeResource.EXTERNAL_TASKS, RealtimeResource.QUEUE),
+            mongo_session=mongo_session,
+        )
 
     def reserve_external_dispatch(
         self,
@@ -2197,12 +2443,31 @@ class MongoDBRepository:
             IdempotencyConflict: Identity changes, a send is rewritten, or the
                 task already has another request.
         """
-        claim = self.get_claim(request.claim_id, customer_id)
+        self._atomic(
+            lambda mongo_session: self._save_external_task_request(
+                request, customer_id, mongo_session
+            )
+        )
+
+    def _save_external_task_request(
+        self,
+        request: ExternalTaskRequest,
+        customer_id: str,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            request.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
         task = self._get(
             'external_task',
             request.task_id,
             ExternalTaskRecord,
             customer_id=customer_id,
+            session=mongo_session,
         )
         if claim is None or task is None or task.claim_id != request.claim_id:
             raise KeyError(request.claim_id)
@@ -2223,6 +2488,7 @@ class MongoDBRepository:
             request.authorisation.northwind_authority_ref,
             AgentDecisionRecord,
             customer_id=customer_id,
+            session=mongo_session,
         )
         if (
             consent is None
@@ -2250,15 +2516,23 @@ class MongoDBRepository:
             'claim_id': request.claim_id,
         }
         stored = self._collection.find_one(
-            {'_id': record_id, 'record_type': 'external_task_request'}
+            {'_id': record_id, 'record_type': 'external_task_request'},
+            session=mongo_session,
         )
         if stored is None:
             try:
-                self._collection.insert_one(document)
+                self._collection.insert_one(document, session=mongo_session)
+                self._append_realtime_event(
+                    claim,
+                    (RealtimeResource.EXTERNAL_TASKS,),
+                    mongo_session=mongo_session,
+                    operation_correlation=request.operation_id,
+                )
                 return
             except DuplicateKeyError:
                 stored = self._collection.find_one(
-                    {'_id': record_id, 'record_type': 'external_task_request'}
+                    {'_id': record_id, 'record_type': 'external_task_request'},
+                    session=mongo_session,
                 )
         existing = self._model_from_document(stored, ExternalTaskRequest)
         if (
@@ -2308,10 +2582,12 @@ class MongoDBRepository:
                 'operation_id': {'$in': [None, request.operation_id]},
             },
             document,
+            session=mongo_session,
         )
         if result.matched_count == 0:
             current = self._collection.find_one(
-                {'_id': record_id, 'record_type': 'external_task_request'}
+                {'_id': record_id, 'record_type': 'external_task_request'},
+                session=mongo_session,
             )
             same_owner = current is not None and (
                 current.get('customer_id') == customer_id
@@ -2319,6 +2595,13 @@ class MongoDBRepository:
             )
             if not same_owner or self._model_from_document(current, ExternalTaskRequest) != request:
                 raise IdempotencyConflict(request.request_id)
+            return
+        self._append_realtime_event(
+            claim,
+            (RealtimeResource.EXTERNAL_TASKS,),
+            mongo_session=mongo_session,
+            operation_correlation=request.operation_id,
+        )
 
     def list_external_task_requests_internal(
         self,
@@ -2360,17 +2643,44 @@ class MongoDBRepository:
             KeyError: The claim, task, or evidence record is missing or not owned.
             IdempotencyConflict: The evidence already has a different origin.
         """
-        if not self._claim_owned(link.claim_id, customer_id):
+        self._atomic(
+            lambda mongo_session: self._save_external_task_evidence_link(
+                link, customer_id, mongo_session
+            )
+        )
+
+    def _save_external_task_evidence_link(
+        self,
+        link: ExternalTaskEvidenceLink,
+        customer_id: str,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            link.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        if claim is None:
             raise KeyError(link.claim_id)
         task = self._get(
             'external_task',
             link.task_id,
             ExternalTaskRecord,
             customer_id=customer_id,
+            session=mongo_session,
         )
         if task is None or task.claim_id != link.claim_id:
             raise KeyError(link.task_id)
-        if self.get_evidence(link.claim_id, link.evidence_id, customer_id) is None:
+        evidence = self._get(
+            'evidence',
+            link.evidence_id,
+            EvidenceRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        if evidence is None or evidence.claim_id != link.claim_id:
             raise KeyError(link.evidence_id)
 
         identifier = f'{link.claim_id}:{link.evidence_id}'
@@ -2383,10 +2693,11 @@ class MongoDBRepository:
             'claim_id': link.claim_id,
         }
         try:
-            self._collection.insert_one(document)
+            self._collection.insert_one(document, session=mongo_session)
         except DuplicateKeyError as error:
             existing = self._collection.find_one(
-                {'_id': record_id, 'record_type': 'external_task_evidence_link'}
+                {'_id': record_id, 'record_type': 'external_task_evidence_link'},
+                session=mongo_session,
             )
             same_owner = existing is not None and (
                 existing.get('customer_id') == customer_id
@@ -2397,6 +2708,12 @@ class MongoDBRepository:
                 or self._model_from_document(existing, ExternalTaskEvidenceLink) != link
             ):
                 raise IdempotencyConflict(link.evidence_id) from error
+            return
+        self._append_realtime_event(
+            claim,
+            (RealtimeResource.EVIDENCE, RealtimeResource.EXTERNAL_TASKS),
+            mongo_session=mongo_session,
+        )
 
     def save_external_task_result(self, result: ExternalTaskResult, customer_id: str) -> None:
         """Ingest one returned result, or advance its verification, after validating it.
@@ -2414,13 +2731,33 @@ class MongoDBRepository:
             IdempotencyConflict: The write changes an ingestion fact, contradicts a
                 recorded verification, or adds a second result to one task.
         """
-        if not self._claim_owned(result.claim_id, customer_id):
+        self._atomic(
+            lambda mongo_session: self._save_external_task_result(
+                result, customer_id, mongo_session
+            )
+        )
+
+    def _save_external_task_result(
+        self,
+        result: ExternalTaskResult,
+        customer_id: str,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            result.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        if claim is None:
             raise KeyError(result.claim_id)
         task = self._get(
             'external_task',
             result.task_id,
             ExternalTaskRecord,
             customer_id=customer_id,
+            session=mongo_session,
         )
         if task is None:
             raise KeyError(result.task_id)
@@ -2436,6 +2773,7 @@ class MongoDBRepository:
                     f'{result.claim_id}:{evidence_id}',
                     ExternalTaskEvidenceLink,
                     customer_id=customer_id,
+                    session=mongo_session,
                 )
             )
             is not None
@@ -2446,7 +2784,14 @@ class MongoDBRepository:
         except ValueError as mismatch:
             raise KeyError(result.task_id) from mismatch
         for evidence_id in result.evidence_ids:
-            if self.get_evidence(result.claim_id, evidence_id, customer_id) is None:
+            evidence = self._get(
+                'evidence',
+                evidence_id,
+                EvidenceRecord,
+                customer_id=customer_id,
+                session=mongo_session,
+            )
+            if evidence is None or evidence.claim_id != result.claim_id:
                 raise KeyError(evidence_id)
 
         held = next(
@@ -2456,6 +2801,7 @@ class MongoDBRepository:
                     ExternalTaskResult,
                     {'claim_id': result.claim_id, 'task_id': result.task_id},
                     'received_at',
+                    session=mongo_session,
                 )
             ),
             None,
@@ -2465,6 +2811,7 @@ class MongoDBRepository:
             result.result_id,
             ExternalTaskResult,
             customer_id=customer_id,
+            session=mongo_session,
         )
         # A result identity belongs to one task for good, so a reused identifier is a
         # conflict even when the task it now names holds nothing.
@@ -2493,14 +2840,21 @@ class MongoDBRepository:
         }
         if held is None:
             try:
-                self._collection.insert_one(document)
+                self._collection.insert_one(document, session=mongo_session)
+                self._append_realtime_event(
+                    claim,
+                    (RealtimeResource.EXTERNAL_TASKS, RealtimeResource.QUEUE),
+                    mongo_session=mongo_session,
+                )
                 return
             except DuplicateKeyError as error:
                 # Another writer won the race. Whether that is a conflict depends on what
                 # it stored: an identical document means this call's intended result is
                 # the canonical one, and reporting failure would tell a retrying producer
                 # that ingestion failed after it had actually succeeded.
-                self._assert_race_winner_matches(result, customer_id, error)
+                self._assert_race_winner_matches(
+                    result, customer_id, error, mongo_session=mongo_session
+                )
                 return
         replaced = self._collection.replace_one(
             {
@@ -2511,17 +2865,28 @@ class MongoDBRepository:
                 'verification': held.verification.value,
             },
             document,
+            session=mongo_session,
         )
         if replaced.matched_count == 0:
             # The stored verification moved between the read and the write. The same
             # question applies: an identical winner is this call's own outcome.
-            self._assert_race_winner_matches(result, customer_id, None)
+            self._assert_race_winner_matches(
+                result, customer_id, None, mongo_session=mongo_session
+            )
+            return
+        self._append_realtime_event(
+            claim,
+            (RealtimeResource.EXTERNAL_TASKS, RealtimeResource.QUEUE),
+            mongo_session=mongo_session,
+        )
 
     def _assert_race_winner_matches(
         self,
         result: ExternalTaskResult,
         customer_id: str,
         cause: Exception | None,
+        *,
+        mongo_session: Any = None,
     ) -> None:
         """Refuse only when a concurrent writer stored something else.
 
@@ -2543,6 +2908,7 @@ class MongoDBRepository:
                     ExternalTaskResult,
                     {'claim_id': result.claim_id, 'task_id': result.task_id},
                     'received_at',
+                    session=mongo_session,
                 )
             ),
             None,
@@ -2614,7 +2980,24 @@ class MongoDBRepository:
         )
 
     def save_handoff(self, handoff: HandoffRecord, customer_id: str) -> None:
-        if not self._claim_owned(handoff.claim_id, customer_id):
+        self._atomic(
+            lambda mongo_session: self._save_handoff(handoff, customer_id, mongo_session)
+        )
+
+    def _save_handoff(
+        self,
+        handoff: HandoffRecord,
+        customer_id: str,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            handoff.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        if claim is None:
             raise KeyError(handoff.claim_id)
         self._put(
             'handoff',
@@ -2622,6 +3005,12 @@ class MongoDBRepository:
             handoff,
             customer_id=customer_id,
             claim_id=handoff.claim_id,
+            session=mongo_session,
+        )
+        self._append_realtime_event(
+            claim,
+            (RealtimeResource.HANDOFFS, RealtimeResource.QUEUE),
+            mongo_session=mongo_session,
         )
 
     def get_handoff(
@@ -3193,6 +3582,12 @@ class MongoDBRepository:
                 session=mongo_session,
             )
         self._save_idempotency(idempotency, mongo_session)
+        self._append_realtime_event(
+            claim,
+            (RealtimeResource.MESSAGES, RealtimeResource.WORK_ITEMS),
+            mongo_session=mongo_session,
+            operation_correlation=idempotency.key,
+        )
 
     def get_runtime_trace(
         self,
@@ -3696,6 +4091,37 @@ class MongoDBRepository:
                 session=mongo_session,
             )
         self._save_idempotency(idempotency, mongo_session)
+        resources = [RealtimeResource.CLAIM, RealtimeResource.QUEUE]
+        kind_resources = {
+            'message': RealtimeResource.MESSAGES,
+            'evidence': RealtimeResource.EVIDENCE,
+            'evidence_claim_link': RealtimeResource.EVIDENCE,
+            'handoff': RealtimeResource.HANDOFFS,
+            'runtime_work_item': RealtimeResource.WORK_ITEMS,
+            'external_task': RealtimeResource.EXTERNAL_TASKS,
+        }
+        resources.extend(
+            resource
+            for kind, _identifier, _record in records
+            if (resource := kind_resources.get(kind)) is not None
+        )
+        has_internal_message = any(
+            isinstance(record, MessageRecord)
+            and record.visibility is MessageVisibility.INTERNAL_ONLY
+            for _kind, _identifier, record in records
+        )
+        claimant_resources = tuple(
+            resource
+            for resource in dict.fromkeys(resources)
+            if resource is not RealtimeResource.MESSAGES or not has_internal_message
+        )
+        self._append_realtime_event(
+            claim,
+            tuple(resources),
+            mongo_session=mongo_session,
+            operation_correlation=idempotency.key,
+            claimant_resources=claimant_resources,
+        )
 
     def _ensure_claim_revision(
         self,
@@ -3924,6 +4350,16 @@ class MongoDBRepository:
             session=mongo_session,
         )
         self._save_idempotency(idempotency, mongo_session)
+        self._append_realtime_event(
+            claim,
+            (
+                RealtimeResource.CLAIM,
+                RealtimeResource.WORK_ITEMS,
+                RealtimeResource.QUEUE,
+            ),
+            mongo_session=mongo_session,
+            operation_correlation=idempotency.key,
+        )
 
     def save_session_mutation(
         self,
@@ -4155,6 +4591,12 @@ class MongoDBRepository:
                 session=mongo_session,
             )
         self._save_idempotency(record=idempotency, session=mongo_session)
+        self._append_realtime_event(
+            claim,
+            (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
+            mongo_session=mongo_session,
+            operation_correlation=idempotency.key,
+        )
 
     @staticmethod
     def _validate_branch_evaluation(
@@ -4329,13 +4771,18 @@ class MongoDBRepository:
         model_type: type[ModelT],
         filters: dict[str, Any],
         sort_field: str,
+        *,
+        session: Any = None,
     ) -> list[ModelT]:
         query = {'record_type': kind, **filters}
         descending = sort_field.startswith('-')
         field = sort_field.removeprefix('-')
         records: list[ModelT] = []
         direction = -1 if descending else 1
-        for document in self._collection.find(query).sort([(field, direction), ('_id', direction)]):
+        cursor = self._collection.find(query, session=session).sort(
+            [(field, direction), ('_id', direction)]
+        )
+        for document in cursor:
             record = self._model_from_document(document, model_type)
             if record is not None:
                 records.append(record)

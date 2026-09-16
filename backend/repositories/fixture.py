@@ -1,7 +1,10 @@
+from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from threading import RLock
+from functools import wraps
+from inspect import signature
+from threading import Condition, Event, RLock
 from typing import Any
 
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
@@ -37,6 +40,7 @@ from backend.domain.models import (
     FollowUpStatus,
     HandoffRecord,
     MessageRecord,
+    MessageVisibility,
     RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
@@ -44,6 +48,12 @@ from backend.domain.models import (
     StaffActionRecord,
     StaffActionStatus,
     WorkingClaim,
+)
+from backend.domain.realtime import (
+    RealtimeCursor,
+    RealtimeEvent,
+    RealtimeResource,
+    new_realtime_event,
 )
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 from backend.domain.runtime import (
@@ -86,6 +96,7 @@ class FixtureRepository(PersistenceRepository):
     def __init__(self) -> None:
         self._validation_seed_lock = RLock()
         self._claim_mutation_lock = RLock()
+        self._realtime_condition = Condition(self._claim_mutation_lock)
         self._claims: dict[str, WorkingClaim] = {}
         self._audit_events: dict[str, AuditEventEnvelope] = {}
         self._sessions: dict[str, SessionRecord] = {}
@@ -117,6 +128,7 @@ class FixtureRepository(PersistenceRepository):
         self._handoffs: dict[str, HandoffRecord] = {}
         self._idempotency: dict[tuple[str, str, str], IdempotencyRecord] = {}
         self._staff_presence: dict[str, StaffPresenceRecord] = {}
+        self._realtime_events: dict[str, RealtimeEvent] = {}
         now = datetime.now(UTC)
         self._staff_presence['stf_demo'] = StaffPresenceRecord(
             staff_id='stf_demo',
@@ -129,6 +141,52 @@ class FixtureRepository(PersistenceRepository):
 
     def connection_status(self) -> str:
         return 'using_fixture'
+
+    def append_realtime_event(self, event: RealtimeEvent) -> None:
+        with self._realtime_condition:
+            existing = self._realtime_events.get(event.event_id)
+            if existing is not None and existing != event:
+                raise IdempotencyConflict(event.event_id)
+            if existing is None:
+                self._realtime_events[event.event_id] = deepcopy(event)
+                self._realtime_condition.notify_all()
+
+    def replay_realtime_events(
+        self,
+        after: RealtimeCursor | None,
+        *,
+        limit: int,
+    ) -> list[RealtimeEvent]:
+        if not 1 <= limit <= 1000:
+            raise ValueError('Realtime replay limit must be between 1 and 1000.')
+        with self._claim_mutation_lock:
+            if after is not None:
+                stored = self._realtime_events.get(after.event_id)
+                if stored is None or stored.occurred_at != after.occurred_at:
+                    raise ValueError('The realtime cursor is outside the available replay window.')
+            events = sorted(
+                self._realtime_events.values(),
+                key=lambda item: (item.occurred_at, item.event_id),
+            )
+            if after is not None:
+                events = [
+                    item
+                    for item in events
+                    if (item.occurred_at, item.event_id) > (after.occurred_at, after.event_id)
+                ]
+            return deepcopy(events[:limit])
+
+    def watch_realtime_events(self, stop: Event) -> Iterator[RealtimeEvent]:
+        cursor: RealtimeCursor | None = None
+        while not stop.is_set():
+            with self._realtime_condition:
+                available = self.replay_realtime_events(cursor, limit=500)
+                if not available:
+                    self._realtime_condition.wait(timeout=1.0)
+                    continue
+            for event in available:
+                cursor = RealtimeCursor(occurred_at=event.occurred_at, event_id=event.event_id)
+                yield event
 
     @property
     def claim_count(self) -> int:
@@ -165,6 +223,7 @@ class FixtureRepository(PersistenceRepository):
             'handoffs': len(self._handoffs),
             'idempotency_records': len(self._idempotency),
             'staff_presence': len(self._staff_presence),
+            'realtime_events': len(self._realtime_events),
         }
         self._claims.clear()
         self._audit_events.clear()
@@ -196,6 +255,7 @@ class FixtureRepository(PersistenceRepository):
         self._handoffs.clear()
         self._idempotency.clear()
         self._staff_presence.clear()
+        self._realtime_events.clear()
         now = datetime.now(UTC)
         self._staff_presence['stf_demo'] = StaffPresenceRecord(
             staff_id='stf_demo',
@@ -2795,3 +2855,130 @@ for _material_claim_mutation in (
     _serialize_material_claim_mutation(_material_claim_mutation)
 
 del _material_claim_mutation
+
+
+def _publish_realtime_after(method_name: str, resources: tuple[RealtimeResource, ...]) -> None:
+    """Attach a deterministic, non-failing event append to one fixture transaction."""
+
+    method = getattr(FixtureRepository, method_name)
+    method_signature = signature(method)
+
+    @wraps(method)
+    def publishing(self: FixtureRepository, *args: Any, **kwargs: Any) -> Any:
+        with self._claim_mutation_lock:
+            values = method_signature.bind(self, *args, **kwargs).arguments
+            claim = values.get('claim')
+            if claim is None:
+                claim_id = getattr(
+                    values.get('message')
+                    or values.get('evidence')
+                    or values.get('task')
+                    or values.get('request')
+                    or values.get('result')
+                    or values.get('link')
+                    or values.get('handoff'),
+                    'claim_id',
+                    None,
+                )
+                claim = self._claims.get(claim_id) if claim_id else None
+            if claim is None and method_name == 'promote_claim_owner':
+                existing = self._claims.get(str(values.get('claim_id')))
+                claim = (
+                    existing.model_copy(update={'customer_id': values.get('customer_id')})
+                    if existing is not None
+                    else None
+                )
+            if claim is None:
+                return method(self, *args, **kwargs)
+            message = values.get('message')
+            claimant_visible = not (
+                isinstance(message, MessageRecord)
+                and message.visibility is MessageVisibility.INTERNAL_ONLY
+            )
+            claimant_resources = tuple(
+                resource
+                for resource in resources
+                if resource is not RealtimeResource.MESSAGES or claimant_visible
+            )
+            idempotency = values.get('idempotency')
+            event = new_realtime_event(
+                claim_id=claim.claim_id,
+                customer_id=claim.customer_id,
+                occurred_at=datetime.now(UTC),
+                claim_revision=claim.revision,
+                operation_correlation=(
+                    idempotency.key if isinstance(idempotency, IdempotencyRecord) else None
+                ),
+                resources=resources,
+                claimant_visible=claimant_visible,
+                claimant_resources=claimant_resources,
+            )
+            result = method(self, *args, **kwargs)
+            self._realtime_events[event.event_id] = event
+            self._realtime_condition.notify_all()
+            return result
+
+    setattr(FixtureRepository, method_name, publishing)
+
+
+for _method_name, _resources in {
+    'create_claim': (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
+    'promote_claim_owner': (RealtimeResource.CLAIM,),
+    'save_claim': (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
+    'save_claim_mutation': (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
+    'save_claim_mutation_with_audit': (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
+    'save_session_mutation': (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
+    'save_incomplete_checkpoint': (RealtimeResource.CLAIM, RealtimeResource.WORK_ITEMS),
+    'save_message': (RealtimeResource.MESSAGES,),
+    'save_message_mutation': (
+        RealtimeResource.CLAIM,
+        RealtimeResource.MESSAGES,
+        RealtimeResource.QUEUE,
+    ),
+    'save_agent_turn': (
+        RealtimeResource.CLAIM,
+        RealtimeResource.MESSAGES,
+        RealtimeResource.WORK_ITEMS,
+        RealtimeResource.QUEUE,
+    ),
+    'save_runtime_turn': (RealtimeResource.MESSAGES, RealtimeResource.WORK_ITEMS),
+    'save_evidence': (RealtimeResource.EVIDENCE,),
+    'save_evidence_action_mutation': (
+        RealtimeResource.CLAIM,
+        RealtimeResource.EVIDENCE,
+        RealtimeResource.QUEUE,
+    ),
+    'save_evidence_mutation': (
+        RealtimeResource.CLAIM,
+        RealtimeResource.EVIDENCE,
+        RealtimeResource.QUEUE,
+    ),
+    'save_external_task': (RealtimeResource.EXTERNAL_TASKS, RealtimeResource.QUEUE),
+    'save_external_task_request': (RealtimeResource.EXTERNAL_TASKS,),
+    'save_external_task_evidence_link': (
+        RealtimeResource.EVIDENCE,
+        RealtimeResource.EXTERNAL_TASKS,
+    ),
+    'save_external_task_result': (RealtimeResource.EXTERNAL_TASKS, RealtimeResource.QUEUE),
+    'save_ownership_mutation': (
+        RealtimeResource.CLAIM,
+        RealtimeResource.HANDOFFS,
+        RealtimeResource.QUEUE,
+    ),
+    'save_staff_mutation': (
+        RealtimeResource.CLAIM,
+        RealtimeResource.MESSAGES,
+        RealtimeResource.HANDOFFS,
+        RealtimeResource.WORK_ITEMS,
+        RealtimeResource.QUEUE,
+    ),
+    'save_handoff': (RealtimeResource.HANDOFFS, RealtimeResource.QUEUE),
+    'save_handoff_mutation': (
+        RealtimeResource.CLAIM,
+        RealtimeResource.HANDOFFS,
+        RealtimeResource.QUEUE,
+    ),
+}.items():
+    _publish_realtime_after(_method_name, _resources)
+
+del _method_name, _resources
