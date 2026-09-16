@@ -19,6 +19,7 @@ from typing import Final, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 RECORD_SCHEMA: Final = 'northwind-journey-run/3'
+ORACLE_FAILURE: Final = 'Fixture oracle failed'
 
 
 class ResultClass(StrEnum):
@@ -264,8 +265,9 @@ def classify(
 ) -> ResultClass:
     """Derive the result class from the evidence, most severe first.
 
-    - `failed`: a step errored in a way the journey did not expect, or an audience could see
-      what it must not (or could not see what it must).
+    - `failed`: a step errored in a way the journey did not expect, a fixture oracle disagreed
+      with an observed response, or an audience could see what it must not (or could not see
+      what it must).
     - `blocked`: the system refused a step the journey needs, for a known reason.
     - `unavailable`: a step the journey needs has no implemented capability, or the run records
       a capability this runtime does not provide.
@@ -277,7 +279,11 @@ def classify(
     """
 
     outcomes = {step.outcome for step in steps}
-    if StepOutcome.FAILED in outcomes or not all(check.holds for check in visibility_checks):
+    if (
+        StepOutcome.FAILED in outcomes
+        or any(step.detail is not None and ORACLE_FAILURE in step.detail for step in steps)
+        or not all(check.holds for check in visibility_checks)
+    ):
         return ResultClass.FAILED
     if StepOutcome.BLOCKED in outcomes:
         return ResultClass.BLOCKED
