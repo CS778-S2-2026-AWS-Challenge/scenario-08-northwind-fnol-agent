@@ -7534,6 +7534,9 @@
               }
             ]
           },
+          "primary_action": {
+            "$ref": "#/components/schemas/ClaimantPrimaryAction"
+          },
           "session": {
             "$ref": "#/components/schemas/ClaimantSession"
           },
@@ -7548,6 +7551,7 @@
           "claim_revision",
           "claimant_message",
           "form_changes",
+          "primary_action",
           "claim",
           "session"
         ],

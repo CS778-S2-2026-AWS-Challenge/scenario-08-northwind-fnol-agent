@@ -13,8 +13,8 @@ from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal, require_claimant
 from backend.core.errors import ApiError
-from backend.domain.ids import new_id
 from backend.domain.external_service_registry import capability_catalogue
+from backend.domain.ids import new_id
 from backend.domain.models import (
     Channel,
     ClaimantClaim,

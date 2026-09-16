@@ -3,7 +3,6 @@ import {
   ApiRequestError,
   bootstrapClaim,
   confirmClaimFields,
-  createClaim,
   createExternalClaim,
   grantAssessorConsent,
   getAuthenticatedAccount,
@@ -1197,8 +1196,6 @@ function App() {
       }
       const operation = pendingSubmission.current
       setPendingMessage({ text })
-      let activeClaim = claim
-      let activeSessionId = sessionId
       let turn
       let activeClaim = isWorkspaceActive ? claim : null
       let activeSessionId = isWorkspaceActive ? sessionId : null
@@ -1219,11 +1216,7 @@ function App() {
         setContentsItems(activeClaim.contents_items || [])
         setDynamicForm(activeClaim.dynamic_form || null)
         setNextStep(activeClaim.customer_next_step)
-        if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
-        setForm(created.claim.form)
-        setContentsItems(created.claim.contents_items || [])
-        setDynamicForm(created.claim.dynamic_form || null)
-        setNextStep(created.claim.customer_next_step)
+        if (turn.session.model_profile_id) setSelectedModel(turn.session.model_profile_id)
         setMessages([])
         setHandoff(null)
         setEvidenceItems([])
