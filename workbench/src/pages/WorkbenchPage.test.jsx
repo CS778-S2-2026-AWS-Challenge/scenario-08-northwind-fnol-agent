@@ -1396,6 +1396,34 @@ describe('WorkbenchPage queue routing', () => {
     expect(api.handoffs).toHaveBeenCalledTimes(handoffCalls)
   })
 
+  it('propagates a failed conversation reload during realtime resync', async () => {
+    let pushRealtime
+    api.sessionsForTarget.mockResolvedValue({
+      items: [{ session_id: 'ses_saved' }],
+      page: { next_cursor: null },
+      resolved_session: { session_id: 'ses_saved' },
+    })
+    api.realtimeEvents.mockImplementation((_token, { onEvent, signal }) => {
+      pushRealtime = onEvent
+      return new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+      })
+    })
+
+    renderPage('/workbench/claims/clm_route_1/conversation?session=ses_saved')
+    await waitFor(() => expect(api.messages).toHaveBeenCalled())
+    await waitFor(() => expect(pushRealtime).toBeTypeOf('function'))
+
+    const conversationFailure = new Error('Conversation resync failed.')
+    api.sessionsForTarget.mockRejectedValueOnce(conversationFailure)
+
+    await expect(pushRealtime({
+      type: 'resync_required',
+      cursor: null,
+      data: { reason: 'replay_gap' },
+    })).rejects.toBe(conversationFailure)
+  })
+
   it('uses one visible authoritative snapshot as degraded fallback when the stream fails', async () => {
     let rejectStream
     api.realtimeEvents
