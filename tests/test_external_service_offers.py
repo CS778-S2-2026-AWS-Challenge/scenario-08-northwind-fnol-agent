@@ -1,9 +1,12 @@
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, cast
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.domain.models import FormStatus
 from backend.repositories.fixture import FixtureRepository
+from backend.services import external_service_offers
 
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 ASSESSMENT_REQUEST = (
@@ -45,7 +48,7 @@ def _send(
         },
     )
     assert response.status_code == 200
-    return response.json()
+    return cast(dict[str, Any], response.json())
 
 
 def test_assessment_request_keeps_safety_question_and_binds_offer_to_message(
@@ -84,7 +87,7 @@ def test_offer_decision_is_idempotent_and_withdrawable_before_dispatch(
     claim_id, session_id = _start_motor_claim(client, 'decision')
     turn = _send(client, claim_id, session_id, ASSESSMENT_REQUEST, 'decision')
     offer = turn['agent_message']['message_actions'][0]
-    route = f"/api/v1/claims/{claim_id}/external-service-offers/{offer['offer_id']}/decision"
+    route = f'/api/v1/claims/{claim_id}/external-service-offers/{offer["offer_id"]}/decision'
     headers = {
         **AUTH,
         'Idempotency-Key': 'grant-decision',
@@ -102,9 +105,10 @@ def test_offer_decision_is_idempotent_and_withdrawable_before_dispatch(
     stored = repository.get_claim_internal(claim_id)
     assert stored is not None
     assert stored.external_service_consents[-1].offer_ref == offer['offer_id']
-    assert stored.external_service_consents[-1].disclosure_fingerprint == offer[
-        'disclosure_fingerprint'
-    ]
+    assert (
+        stored.external_service_consents[-1].disclosure_fingerprint
+        == offer['disclosure_fingerprint']
+    )
 
     withdrawn = client.post(
         route,
@@ -139,7 +143,7 @@ def test_manual_contact_consent_never_creates_an_external_task(
     )
 
     decided = client.post(
-        f"/api/v1/claims/{claim_id}/external-service-offers/{offer['offer_id']}/decision",
+        f'/api/v1/claims/{claim_id}/external-service-offers/{offer["offer_id"]}/decision',
         headers={
             **AUTH,
             'Idempotency-Key': 'grant-manual',
@@ -163,14 +167,12 @@ def test_ready_assessment_offer_dispatches_once_from_the_same_consent(
     offer = turn['agent_message']['message_actions'][0]
     stored = repository.get_claim_internal(claim_id)
     assert stored is not None
-    location = stored.form['incident.location'].model_copy(
-        update={'status': FormStatus.CONFIRMED}
-    )
+    location = stored.form['incident.location'].model_copy(update={'status': FormStatus.CONFIRMED})
     repository._claims[claim_id] = stored.model_copy(
         update={'form': {**stored.form, 'incident.location': location}}
     )
 
-    route = f"/api/v1/claims/{claim_id}/external-service-offers/{offer['offer_id']}/decision"
+    route = f'/api/v1/claims/{claim_id}/external-service-offers/{offer["offer_id"]}/decision'
     granted = client.post(
         route,
         headers={
@@ -203,7 +205,10 @@ def test_ready_assessment_offer_dispatches_once_from_the_same_consent(
 def test_ready_registered_task_service_uses_the_shared_dispatcher(
     client: TestClient,
     repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    fixed_time = datetime(2026, 9, 16, 2, 35, tzinfo=UTC)
+    monkeypatch.setattr(external_service_offers, 'now_utc', lambda: fixed_time)
     claim_id, session_id = _start_motor_claim(client, 'repair-booking')
     turn = _send(
         client,
@@ -235,7 +240,7 @@ def test_ready_registered_task_service_uses_the_shared_dispatcher(
     repository._claims[claim_id] = stored.model_copy(update={'form': confirmed_form})
 
     decided = client.post(
-        f"/api/v1/claims/{claim_id}/external-service-offers/{offer['offer_id']}/decision",
+        f'/api/v1/claims/{claim_id}/external-service-offers/{offer["offer_id"]}/decision',
         headers={
             **AUTH,
             'Idempotency-Key': 'grant-repair-booking',

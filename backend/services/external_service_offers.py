@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import re
 from contextlib import suppress
+from datetime import datetime, timedelta
 from hashlib import sha256
+from typing import Any
 
+from backend.adapters.claims_service import AssessorServiceAdapter
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.domain.audit import (
@@ -51,6 +54,7 @@ from backend.repositories.protocols import (
 from backend.services.branching import build_applied_branch_evaluation
 from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
+from backend.services.external_service_entry import ExternalServiceEntryDecision
 from backend.services.support import (
     now_utc,
     parse_if_match,
@@ -164,7 +168,7 @@ def offer_work_item(
     claim: WorkingClaim,
     turn_id: str,
     offer: ExternalServiceOfferMetadata,
-    timestamp,
+    timestamp: datetime,
 ) -> RuntimeWorkItemRecord:
     return RuntimeWorkItemRecord(
         work_item_id=offer.offer_id,
@@ -218,9 +222,8 @@ def message_external_actions(
             ),
             None,
         )
-        has_request = (
-            consent is not None
-            and _offer_has_request(repository, claim, consent.consent_ref)
+        has_request = consent is not None and _offer_has_request(
+            repository, claim, consent.consent_ref
         )
         status = ClaimantExternalServiceStatus.CONSENT_REQUIRED
         lifecycle_status = 'consent_required'
@@ -602,8 +605,8 @@ def continue_granted_service_offers(
     principal: Principal,
     claim: WorkingClaim,
     *,
-    assessor_adapter=None,
-    assessor_entry=None,
+    assessor_adapter: AssessorServiceAdapter | None = None,
+    assessor_entry: ExternalServiceEntryDecision | None = None,
     capability_dispatcher: ExternalCapabilityDispatcher | None = None,
 ) -> None:
     """Continue authorised work when a later turn supplies its requirements."""
@@ -674,7 +677,7 @@ def _claimant_disclosure_label(field: str) -> str:
     return _DISCLOSURE_LABELS.get(field, field.replace('.', ' ').replace('_', ' ').title())
 
 
-def _source_value(claim: WorkingClaim, source: str):
+def _source_value(claim: WorkingClaim, source: str) -> Any:
     if source == 'contents.items':
         values = [
             {
@@ -697,8 +700,7 @@ def _source_value(claim: WorkingClaim, source: str):
 def _generic_offer_ready(claim: WorkingClaim, offer: ExternalServiceOfferMetadata) -> bool:
     entry = service_registry_entry(offer.service_identity)
     return all(
-        _source_value(claim, source) not in (None, '', [], {})
-        for source in entry.required_fields
+        _source_value(claim, source) not in (None, '', [], {}) for source in entry.required_fields
     )
 
 
@@ -745,9 +747,7 @@ def _dispatch_generic_offer(
         customer_response=f'Northwind is sending the {entry.service_name.lower()} request.',
         state_changes=[],
         proposed_signals=[],
-        required_tools=[
-            {'tool': 'external_service.submit_request', 'operation': 'submit_request'}
-        ],
+        required_tools=[{'tool': 'external_service.submit_request', 'operation': 'submit_request'}],
         next_action_requirements=[],
         customer_next_step=claim.customer_next_step,
         authority=AgentAuthority(
@@ -793,10 +793,7 @@ def _dispatch_generic_offer(
     if reserved is None:
         return
 
-    payload = {
-        source: _source_value(claim, source)
-        for source in entry.disclosure_fields
-    }
+    payload = {source: _source_value(claim, source) for source in entry.disclosure_fields}
     result = dispatcher.execute(
         offer.service_identity,
         'submit_request',
@@ -814,7 +811,7 @@ def _dispatch_generic_offer(
     if result.status != 'accepted':
         repository.release_external_dispatch(claim.claim_id, request_id, claim.customer_id)
         return
-    sent_at = now_utc()
+    sent_at = max(now_utc(), task.updated_at + timedelta(microseconds=1))
     repository.save_external_task_request(
         reserved.model_copy(update={'sent_at': sent_at}),
         claim.customer_id,
