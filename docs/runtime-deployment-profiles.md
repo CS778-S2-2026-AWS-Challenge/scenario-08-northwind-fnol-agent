@@ -74,6 +74,12 @@ application instance. The example explicitly selects `NORTHWIND_IDENTITY_MODE=de
 enables only the synthetic local claimant, staff, and integration identities and cannot start in a
 non-development environment.
 
+The MongoDB replica set is also the realtime wake-up boundary. Relevant business writes and their
+`realtime_event` records commit in one transaction, and each Backend process opens one collection
+Change Stream that fans out through its process-level dispatcher. Deployments that provide CRUD
+but not transactions or Change Streams do not satisfy the `local_mvp` contract. Browser connection
+count does not create additional MongoDB polling loops or Change Streams.
+
 Start or repeat the single-host bootstrap and Backend composition with:
 
 ```powershell

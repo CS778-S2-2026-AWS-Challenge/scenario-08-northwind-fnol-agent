@@ -80,6 +80,7 @@ records remain target contracts.
 | Configuration | versioned Agent Policy, Registry snapshots, model profiles, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
 | Branch evaluation | immutable branch/form calculation evidence, selected family, active branches, field selection states, and Claim revision precondition | `claim_id`, `evaluation_id` |
 | Audit | append-only claim, integration, configuration, account, and access events | event identity and subject |
+| Realtime invalidation | durable ordering cursor, Claim/customer identity, revision, correlation, resource hints, and audience-safe claimant hints | `event_id`, ordered by `occurred_at` then `event_id` |
 | Retention | expiry, hold, purge eligibility, deletion or anonymisation result | subject identity and retention job |
 
 Original evidence bytes, policy documents, and other large objects are stored through
@@ -121,6 +122,34 @@ The existing configuration-only `backend.domain.configuration.AuditEvent` projec
 remains compatible with the Admin API and separate from this cross-domain repository
 envelope. #415 does not redefine that API projection or claim that every target action,
 failure, access, or configuration event is already wired.
+
+## Realtime Invalidation Contract
+
+`RealtimeEvent` is a durable invalidation record, not an audit substitute and not a second Claim,
+Message, Evidence, Handoff, WorkItem, or External Task projection. Its provider-neutral envelope
+contains only `event_id`, `occurred_at`, `claim_id`, `customer_id`, optional Claim revision,
+optional operation correlation, changed-resource hints, claimant-visible resource hints, and
+audiences. Business payloads and provider resume tokens are excluded.
+
+Every relevant authoritative mutation appends its realtime event inside the same Fixture mutation
+lock or MongoDB transaction. A failed event construction or failed transaction leaves neither
+member authoritative. An idempotent no-op does not need a second event. Covered groups are Claim
+and Session state, Messages, Evidence metadata and external evidence links, Handoffs, Runtime
+WorkItems, External Tasks/requests/results, recovery WorkItems, ownership, and queue-affecting
+staff mutations.
+
+Fixture stores events in process state and wakes one condition-backed watcher. MongoDB stores
+`record_type=realtime_event` in the repository collection, indexes the unique event cursor, and
+uses one collection Change Stream per application process. The process dispatcher performs
+role/customer/optional-Claim filtering and fans out to bounded transient subscriber queues. A
+subscriber queue is delivery state only and is never a persistence or authorization boundary.
+
+Replay requires the exact durable cursor anchor and returns records ordered by `occurred_at` then
+`event_id`. A missing anchor, replay-window overflow, slow-subscriber overflow, or source failure
+requires an authoritative full resynchronization. Delivery may repeat or arrive out of order;
+consumers compare opaque cursor coordinates and apply only strictly newer hints. Retention or purge
+of realtime records must preserve a detectable gap and must not silently reinterpret an expired
+cursor.
 
 Control Plane access policies are persisted as versioned `configuration` records with
 `domain=access`. Their values contain a role, actor type, scopes, visibility classes, and an
