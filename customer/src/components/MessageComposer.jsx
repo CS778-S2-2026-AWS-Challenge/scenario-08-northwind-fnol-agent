@@ -252,12 +252,13 @@ export default function MessageComposer({
     <form className={`composer ${isWorkspace ? 'workspace-composer' : ''}`} onSubmit={onSubmit}>
       <label className="sr-only" htmlFor={isWorkspace ? 'workspace-incident-input' : 'incident-input'}>{inputLabel}</label>
       <div className={isWorkspace ? 'composer-input-surface' : undefined}>
-        {isWorkspace && attachments.length > 0 && (
+        {attachments.length > 0 && (
           <div className="composer-attachments" aria-label="Attached files">
             {attachments.map((attachment) => {
               const attachmentId = attachment.id || attachment.name
               const canRemoveFromDraft = Boolean(onRemoveAttachment) && (
-                attachment.status === 'uploading'
+                attachment.status === 'staged'
+                || attachment.status === 'uploading'
                 || (attachment.status === 'failed' && !attachment.evidenceId)
               )
               const content = (

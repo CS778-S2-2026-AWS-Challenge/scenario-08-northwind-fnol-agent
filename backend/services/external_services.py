@@ -58,6 +58,7 @@ from backend.repositories.protocols import (
     RevisionConflict,
 )
 from backend.services.branching import build_applied_branch_evaluation
+from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.external_service_entry import ExternalServiceEntryDecision
 from backend.services.integrations import (
     assessor_operation_id,
@@ -419,11 +420,18 @@ def _response(
     action = claimant_assessor_action(repository, claim)
     if action is None:
         raise _invalid_state('A vehicle damage assessment is not a relevant next step.')
+    next_step = claimant_next_step(repository, claim, action)
     return ClaimantExternalServiceResponse(
         claim_id=claim.claim_id,
         revision=claim.revision,
         action=action,
-        customer_next_step=claimant_next_step(repository, claim, action),
+        customer_next_step=next_step,
+        primary_action=project_claimant_primary_action(
+            claim_id=claim.claim_id,
+            claim_revision=claim.revision,
+            next_step=next_step,
+            external_service_action=action,
+        ),
     )
 
 

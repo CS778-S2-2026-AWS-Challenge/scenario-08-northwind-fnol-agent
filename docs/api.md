@@ -644,8 +644,39 @@ The canonical backend record has these fields. API projections omit fields the c
 | `external_service_consents` | array | Yes | Internal task-specific consent records; omitted from claimant projections |
 | `assessor_routing` | object | No | Provider-neutral assessor result after an authorised request succeeds |
 | `customer_next_step` | object | Yes | Claimant-safe status, responsibility, and expected timing |
+| `primary_action` | object | Yes on every Claimant Claim and claimant mutation response | One backend-owned claimant action for the returned Claim revision; clients must not derive precedence from other fields |
 | `created_at` | timestamp | Yes | Server-generated creation time |
 | `updated_at` | timestamp | Yes | Server-generated last material update time |
+
+`primary_action` is the authoritative claimant-browser action projection. It is required and
+non-null on the Claimant Claim and on message, form-patch, form-confirmation, claim-creation,
+assessor-consent, assessor-request, and support-request responses. `customer_next_step` and
+`external_service_action` remain the content and lifecycle projections, but neither selects the
+browser's primary action or its precedence.
+
+The versioned claimant action registry contains only claimant-safe `claimant.*` codes:
+`claimant.create_claim`, `claimant.review_details`, `claimant.request_assessment`,
+`claimant.retry_assessment`, `claimant.track_assessment`, `claimant.await_staff_review`,
+`claimant.await_reconciliation`, and `claimant.continue_conversation`. These codes are separate
+from staff and Agent Runtime action registries; a browser must not execute an internal
+`external.*`, `human.*`, or other Runtime command because a similarly named lifecycle state is
+visible.
+
+`action_type` is `claim_creation`, `external_service`, or `conversation`; `action_id` is the stable
+identity for the action instance; and `target_ref` identifies the Claim or registered external
+service. `available` is the backend decision that the action may currently be presented as
+actionable. `required_inputs` contains the backend-owned input identifiers still needed before
+that action can be completed. `registry_version`, `visibility`, and `execution_boundary` identify
+the registry contract, claimant-safe visibility, and server-side operation boundary.
+`claim_revision` is the Claim revision used to derive the projection and `projection_version` is
+currently `v1`.
+
+The backend emits exactly one projection and gives external-service state precedence over Claim
+creation and conversation continuation. `terminal_failure` maps to staff review, while an unknown
+provider outcome maps to reconciliation; these states are not interchangeable. The frontend must
+fail closed when the code is unknown or its `claim_revision` differs from the returned Claim
+revision, and must not reconstruct or override the ordering from supporting fields. Idempotent
+mutation replay returns the same complete response, including this projection.
 
 `external_claim` contains `external_claim_id`, `claim_number`, `creation_status`, `route`, `next_step`, `expected_by`, and `created_at`. It MUST NOT be populated merely because a working claim was started.
 
@@ -1206,6 +1237,19 @@ Response `201`:
       "can_resume": true,
       "required_items": []
     },
+    "primary_action": {
+      "action_type": "conversation",
+      "action_code": "claimant.continue_conversation",
+      "action_id": "customer-next-step:describe_incident",
+      "target_ref": "clm_01J4Y7Q2AW",
+      "available": false,
+      "required_inputs": [],
+      "claim_revision": 1,
+      "registry_version": "1.0.0",
+      "visibility": "claimant",
+      "execution_boundary": "conversation",
+      "projection_version": "v1"
+    },
     "created_at": "2026-08-10T03:40:00Z",
     "updated_at": "2026-08-10T03:40:00Z"
   },
@@ -1588,7 +1632,9 @@ Request:
 }
 ```
 
-All fields must exist and be confirmable. Response `200` returns the new claim revision, confirmed fields, any new decision, and the current customer next step.
+All fields must exist and be confirmable. Response `200` returns the new claim revision, confirmed
+fields, any new decision, the current customer next step, and the authoritative `primary_action`
+for that same revision. An idempotent replay returns the stored complete response.
 
 When all controlled intake fields are confirmed, `customer_next_step.status` becomes
 `ready_to_create` and `workflow_state` becomes `ready_for_next`. A later material edit that makes
@@ -1732,7 +1778,9 @@ routing authority remain separate requirements.
 
 Response `201`, or `200` for an identical replay, returns the new revision,
 `customer_next_step`, and the claimant-safe `external_service_action` with status
-`ready_to_request`. Raw consent references and the internal consent list are not returned.
+`ready_to_request`. It also returns the required, same-revision `primary_action` with code
+`claimant.request_assessment`; consent is no longer listed in `required_inputs`. Raw consent
+references and the internal consent list are not returned.
 The consent, single Claim revision advance, and idempotency response are one repository
 mutation: a failed transaction leaves all three unchanged.
 
@@ -1749,8 +1797,12 @@ confirmed region from the shared Working Claim; the claimant cannot supply provi
 payload fields.
 
 Response `201`, or `200` for an identical replay, returns the resulting claim revision,
-`customer_next_step`, and the claimant-safe action. Status is `assigned` only when an individual
-assessor reference was returned and `queued` when only a queue accepted the request.
+`customer_next_step`, the claimant-safe external-service action, and the required same-revision
+`primary_action`. An accepted request projects `claimant.track_assessment`; a retryable known
+failure projects `claimant.retry_assessment`; a terminal failure projects
+`claimant.await_staff_review`; and an unknown outcome projects `claimant.await_reconciliation`.
+Status is `assigned` only when an individual assessor reference was returned and `queued` when
+only a queue accepted the request.
 
 Timeout and unavailable responses use `503 DEPENDENCY_UNAVAILABLE` with `retryable: true`.
 Access-denied and malformed responses use `502 DEPENDENCY_FAILED` with `retryable: false`. All
@@ -2106,9 +2158,9 @@ Request:
 ```
 
 `support_need` is `human_requested`, `accessibility_required`, `distress`, or `urgent`. Response
-`201` returns the customer-safe handoff projection, next step, and delivery state. The handoff
-contains `handoff_id`, `status`, `support_need`, `summary`, and `created_at`; it does not contain
-the internal routing `priority`.
+`201` returns the customer-safe handoff projection, next step, required same-revision
+`primary_action`, and delivery state. The handoff contains `handoff_id`, `status`, `support_need`,
+`summary`, and `created_at`; it does not contain the internal routing `priority`.
 
 `delivery.state` reports whether the staff queue system was notified:
 

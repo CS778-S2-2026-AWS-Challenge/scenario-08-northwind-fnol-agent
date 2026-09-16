@@ -854,6 +854,8 @@ def test_vp_family_journey_confirms_registered_facts_and_creates_claim(
     assert confirmed['dynamic_form']['requirements']['ready'] is True
     assert confirmed['dynamic_form']['requirements']['missing_required_now'] == []
     assert confirmed['customer_next_step']['status'] == 'ready_to_create'
+    assert confirmed['primary_action']['action_code'] == 'claimant.create_claim'
+    assert confirmed['primary_action']['claim_revision'] == confirmed['revision']
 
     external = client.post(
         f'/api/v1/claims/{claim_id}/creation',
@@ -967,6 +969,108 @@ def test_default_home_journey_creates_without_an_unapproved_external_service(
     assert claimant_view['external_service_action'] is None
     assert repository.list_external_tasks_internal(claim_id) == []
     assert repository.list_external_task_requests_internal(claim_id) == []
+
+
+@pytest.mark.parametrize(
+    ('case_id', 'answer', 'expected'),
+    [
+        ('none', 'There is no ongoing risk.', 'none'),
+        ('active-leak', 'The leak is still active.', 'active_leak'),
+        ('mixed-fire', 'There is no leak now, but the fire is still burning.', 'fire'),
+        (
+            'mixed-fire-danger',
+            'There is no danger from the leak, but the fire is still burning.',
+            'fire',
+        ),
+        (
+            'mixed-collapse-risk',
+            'There is no ongoing risk from the water now, but the ceiling is collapsing.',
+            'collapse',
+        ),
+        (
+            'mixed-exposure-danger',
+            'There is no danger from the leak, but part of the house is exposed.',
+            'exposure',
+        ),
+        ('positive-exposure', 'The property is exposed.', 'exposure'),
+        (
+            'mixed-exposure-no-comma',
+            'There is no danger from the leak but the property is exposed.',
+            'exposure',
+        ),
+        (
+            'mixed-collapse-and',
+            'There is no ongoing risk from water and the ceiling will collapse.',
+            'collapse',
+        ),
+        (
+            'mixed-exposure-and',
+            'There is no danger from the leak and the property is exposed.',
+            'exposure',
+        ),
+        ('negated-leak', 'The leak is not active anymore.', None),
+        ('negated-collapse', 'The ceiling is not collapsing.', None),
+        ('negated-exposure', 'Nothing is exposed.', None),
+    ],
+)
+def test_controlled_home_ongoing_risk_answer_uses_registered_enum(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    case_id: str,
+    answer: str,
+    expected: str | None,
+) -> None:
+    created = create_claim(
+        client,
+        auth_headers,
+        key=f'home-risk-{case_id}',
+        incident_type='home',
+    ).json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+    prepared = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(created['claim']['revision'])},
+        json={
+            'updates': [
+                {
+                    'field_code': field_code,
+                    'value': value,
+                    'status': 'confirmed',
+                }
+                for field_code, value in {
+                    'incident.description': 'A pipe leaked and damaged the kitchen.',
+                    'incident.occurred_at': '2026-09-14T09:00:00Z',
+                    'incident.injury_or_danger': False,
+                    'incident.location': '12 Queen Street, Auckland 1010',
+                    'loss.description': 'The kitchen wall and floor are water damaged.',
+                    'property.address': '12 Queen Street, Auckland 1010',
+                    'property.affected_areas': ['kitchen'],
+                }.items()
+            ]
+        },
+    )
+    assert prepared.status_code == 200, prepared.text
+    assert prepared.json()['dynamic_form']['requirements']['next_required_item'] == (
+        'property.ongoing_risk'
+    )
+
+    response = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=prepared.json()['revision'],
+        key=f'home-risk-message-{case_id}',
+        client_message_id=f'home-risk-message-{case_id}',
+        text=answer,
+    )
+
+    assert response.status_code == 200, response.text
+    changes = {
+        item['field_code']: item['field']['value'] for item in response.json()['form_changes']
+    }
+    assert changes.get('property.ongoing_risk') == expected
 
 
 def test_default_contents_journey_preserves_the_report_without_inventing_a_provider(
@@ -1823,6 +1927,7 @@ def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(
     assert corrected['source'] == 'claimant'
     assert corrected['updated_by']['actor_id'] == 'cus_demo'
     assert replay.json() == confirmed.json()
+    assert replay.json()['primary_action']['claim_revision'] == replay.json()['revision']
     evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
     assert [item.recomputation_reason for item in evaluations[-2:]] == [
         'form_confirmed',

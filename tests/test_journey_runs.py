@@ -30,8 +30,6 @@ from journey_runs.record import (
 )
 from pydantic import ValidationError
 
-from backend.services import agent
-
 _NOW = datetime(2026, 9, 15, tzinfo=UTC)
 
 
@@ -58,20 +56,7 @@ def test_a_household_journey_stops_only_where_the_stop_is_reported_or_documented
     _assert_household_run(run_household(scenario, head='test'), scenario)
 
 
-def test_a_household_journey_that_reaches_creation_is_accepted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Stand in for the #848 fix: the controlled parser proposes the registry enum, not a boolean.
-    parse = agent._controlled_requirement_value
-
-    def registry_value(field_code: str, message_text: str) -> Any:
-        value = parse(field_code, message_text)
-        if field_code == 'property.ongoing_risk' and isinstance(value, bool):
-            return 'active_leak' if value else 'none'
-        return value
-
-    monkeypatch.setattr(agent, '_controlled_requirement_value', registry_value)
-
+def test_a_home_household_journey_reaches_creation() -> None:
     run = run_household(HOME, head='test')
     record = run.record
 

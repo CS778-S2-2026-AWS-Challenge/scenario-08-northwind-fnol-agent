@@ -37,10 +37,12 @@ from backend.repositories.protocols import (
     RevisionConflict,
 )
 from backend.services.branching import build_applied_branch_evaluation
+from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.evidence_handoff import (
     assemble_evidence_handoff_packet,
     default_handoff_visibility,
 )
+from backend.services.external_services import claimant_assessor_action, claimant_next_step
 from backend.services.handoff_context import build_handoff_transfer_context
 from backend.services.runtime_integrations import RuntimeIntegrationPolicy
 from backend.services.support import (
@@ -88,14 +90,23 @@ def claimant_handoff(handoff: HandoffRecord) -> ClaimantHandoff:
 
 
 def _response(
+    repository: PersistenceRepository,
     handoff: HandoffRecord,
     claim: WorkingClaim,
     receipt: HandoffDispatchReceipt,
 ) -> SupportRequestResponse:
+    external_service_action = claimant_assessor_action(repository, claim)
+    next_step = claimant_next_step(repository, claim, external_service_action)
     return SupportRequestResponse(
         handoff=claimant_handoff(handoff),
         revision=claim.revision,
-        customer_next_step=claim.customer_next_step,
+        customer_next_step=next_step,
+        primary_action=project_claimant_primary_action(
+            claim_id=claim.claim_id,
+            claim_revision=claim.revision,
+            next_step=next_step,
+            external_service_action=external_service_action,
+        ),
         delivery=HandoffDelivery(
             state=receipt.state,
             limitations=list(receipt.limitations),
@@ -373,6 +384,7 @@ def create_support_request(
                 retryable=True,
             )
         return _response(
+            repository,
             handoff,
             claim,
             _notify_staff_queue(runtime_integration_policy, dispatch, handoff),
@@ -411,6 +423,7 @@ def create_support_request(
             )
         )
         return _response(
+            repository,
             active_handoff,
             claim,
             _notify_staff_queue(runtime_integration_policy, dispatch, active_handoff),
@@ -462,6 +475,7 @@ def create_support_request(
             message='The support request was already accepted with different retry data.',
         ) from conflict
     return _response(
+        repository,
         handoff,
         updated_claim,
         _notify_staff_queue(runtime_integration_policy, dispatch, handoff),
