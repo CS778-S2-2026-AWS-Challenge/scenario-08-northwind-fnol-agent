@@ -329,7 +329,7 @@ function handoffProjection(state) {
     requested_action: 'Help the claimant continue the report.',
     applied_rule: 'claimant_support_request',
     packet: {
-      incident_summary: 'Minor collision requiring staff assistance.',
+      incident_summary: 'Incident requiring staff assistance.',
       form_revision: 1,
       form_snapshot: {},
       evidence_refs: [],
@@ -726,7 +726,7 @@ describe('WorkbenchPage complete handoff browser/API journey', () => {
     'opens, accepts, communicates, resolves, and restores the %s authoritative staff journey',
     async (family) => {
       const { fetchMock, state } = createHandoffJourneyService(family)
-    vi.stubGlobal('fetch', fetchMock)
+      vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
     renderJourney()
 
