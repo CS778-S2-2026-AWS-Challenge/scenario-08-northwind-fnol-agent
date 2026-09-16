@@ -719,6 +719,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         branch_evaluation: BranchEvaluationRecord | None = None,
         runtime_trace: RuntimeTraceRecord | None = None,
         runtime_records: RuntimeTurnRecords | None = None,
+        create_claim: bool = False,
     ) -> None:
         """Atomically persist one validated Agent turn and optional Runtime trace."""
         raise NotImplementedError

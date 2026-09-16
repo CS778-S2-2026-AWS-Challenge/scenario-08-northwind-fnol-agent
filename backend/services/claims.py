@@ -612,7 +612,7 @@ def start_claim(
 ) -> CreateClaimResponse:
     key = require_idempotency_key(idempotency_key)
     route = '/api/v1/claims'
-    fingerprint = request_fingerprint(payload.model_dump(mode='json'))
+    fingerprint = request_fingerprint(payload.model_dump(mode='json', exclude={'initial_message'}))
     existing = repository.find_idempotency(principal.subject, route, key)
     if existing is not None:
         if existing.request_fingerprint != fingerprint:

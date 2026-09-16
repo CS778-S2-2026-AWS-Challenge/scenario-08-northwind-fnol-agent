@@ -55,6 +55,14 @@ returned result per task, its source and receipt time, linked Evidence identifie
 state, verification time, and checked Claim revision. Later provider attempts and reconciliation
 records remain target contracts.
 
+The initial claimant turn is one create transaction, not a Claim create followed by a message
+mutation. The accepted bundle creates the Claim and active Session and persists the claimant
+message, Agent message, validated decision, applied branch evaluation, Runtime trace and records,
+optional turn children, and idempotency result together. Agent or validation failure writes none
+of the bundle. Concurrent requests carrying the same actor, route, idempotency key, and request
+fingerprint resolve to one stored Claim and replay its authoritative result; a changed fingerprint
+conflicts without creating another Claim.
+
 ## Logical Record Groups
 
 | Group | Records | Primary ownership |
@@ -146,6 +154,8 @@ the append-only audit collection through a bounded, filterable projection.
 12. Persist an applied namespaced Runtime turn atomically with its claimant/agent messages,
     Claim revision, Session activity, Runtime trace, target turn records, WorkItems, and
     idempotency response.
+    The initial claimant bootstrap uses the same boundary while creating the transient Claim
+    and Session in that accepted transaction; no empty Claim is visible before the first turn.
 13. Resolve a current task-specific claimant consent before invoking an external participant.
 14. Reserve an immutable external-operation identity and fingerprint before invocation, then
     recover its accepted result independently of a later Claim State compare-and-set.
@@ -479,17 +489,17 @@ the append-only audit collection through a bounded, filterable projection.
   reused item writes a detached link and leaves the source Claim unchanged. Both
   operations advance only the target Claim revision and are persisted atomically
   with idempotency, Branch Evaluation, and audit data.
- - Evidence action writes require the authenticated claimant to own both Claims and
-   the source Evidence. The compare-and-set revision check occurs in the same
-   transaction as the relation or history-state change; retries with the same key
-   replay the stored typed result, while a different request under that key is a
-   conflict.
- - Evidence action authorization is grounded in immutable Runtime records: the persisted
-   `AgentProposalRecord` stores the target Evidence and source Claim for the exact action, and
-   the claimant confirmation is a later claimant-visible `MessageRecord` in the same active
-   session. Public Evidence mutations reject references that exist only in the request body;
-   fabricated or cross-session references fail before the Claim, link, history, audit, or
-   idempotency mutation begins.
+- Evidence action writes require the authenticated claimant to own both Claims and
+  the source Evidence. The compare-and-set revision check occurs in the same
+  transaction as the relation or history-state change; retries with the same key
+  replay the stored typed result, while a different request under that key is a
+  conflict.
+- Evidence action authorization is grounded in immutable Runtime records: the persisted
+  `AgentProposalRecord` stores the target Evidence and source Claim for the exact action, and
+  the claimant confirmation is a later claimant-visible `MessageRecord` in the same active
+  session. Public Evidence mutations reject references that exist only in the request body;
+  fabricated or cross-session references fail before the Claim, link, history, audit, or
+  idempotency mutation begins.
 - Pending, invalid, unofficial, and not-yet-generated evidence remain distinct states.
   `EvidenceStatus` carries the business condition of the material and
   `EvidenceFileStatus` the upload and processing lifecycle alone, so the two

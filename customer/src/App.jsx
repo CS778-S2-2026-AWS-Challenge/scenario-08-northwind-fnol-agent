@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ApiRequestError,
+  bootstrapClaim,
   confirmClaimFields,
   createClaim,
   createExternalClaim,
@@ -1196,19 +1197,28 @@ function App() {
       }
       const operation = pendingSubmission.current
       setPendingMessage({ text })
+      let activeClaim = claim
+      let activeSessionId = sessionId
+      let turn
       let activeClaim = isWorkspaceActive ? claim : null
       let activeSessionId = isWorkspaceActive ? sessionId : null
       if (!activeClaim) {
-        const created = await createClaim({
+        turn = await bootstrapClaim({
           idempotencyKey: operation.claimKey,
           incidentType: claimType || null,
           modelProfileId: selectedModel,
+          clientMessageId: operation.clientMessageId,
+          text,
         })
-        activeClaim = created.claim
-        activeSessionId = created.session.session_id
-        rememberClaimInHistory(created.claim)
-        setClaim(created.claim)
+        activeSessionId = turn.session.session_id
+        activeClaim = turn.claim
+        rememberClaimInHistory(activeClaim)
+        setClaim(activeClaim)
         setSessionId(activeSessionId)
+        setForm(activeClaim.form)
+        setContentsItems(activeClaim.contents_items || [])
+        setDynamicForm(activeClaim.dynamic_form || null)
+        setNextStep(activeClaim.customer_next_step)
         if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
         setForm(created.claim.form)
         setContentsItems(created.claim.contents_items || [])
@@ -1223,17 +1233,17 @@ function App() {
         setMobileView('chat')
         setWorkspaceActive(true)
         messageWasSubmitted = true
+      } else {
+        turn = await submitClaimMessage({
+          claimId: activeClaim.claim_id,
+          sessionId: activeSessionId,
+          revision: activeClaim.revision,
+          text,
+          modelProfileId: selectedModel,
+          idempotencyKey: operation.turnKey,
+          clientMessageId: operation.clientMessageId,
+        })
       }
-
-      const turn = await submitClaimMessage({
-        claimId: activeClaim.claim_id,
-        sessionId: activeSessionId,
-        revision: activeClaim.revision,
-        text,
-        modelProfileId: selectedModel,
-        idempotencyKey: operation.turnKey,
-        clientMessageId: operation.clientMessageId,
-      })
       setMessages((current) => [
         ...current,
         turn.claimant_message,

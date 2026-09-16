@@ -2986,6 +2986,7 @@ class MongoDBRepository:
         branch_evaluation: BranchEvaluationRecord | None = None,
         runtime_trace: RuntimeTraceRecord | None = None,
         runtime_records: RuntimeTurnRecords | None = None,
+        create_claim: bool = False,
     ) -> None:
         records_match = (
             claim.revision == expected_revision + 1
@@ -3051,6 +3052,7 @@ class MongoDBRepository:
                 branch_evaluation,
                 runtime_trace,
                 runtime_records,
+                create_claim,
                 mongo_session,
             )
         )
@@ -3332,6 +3334,7 @@ class MongoDBRepository:
         branch_evaluation: BranchEvaluationRecord | None,
         runtime_trace: RuntimeTraceRecord | None,
         runtime_records: RuntimeTurnRecords | None,
+        create_claim: bool,
         mongo_session: Any,
     ) -> None:
         if claimant_message.client_message_id is not None:
@@ -3396,6 +3399,7 @@ class MongoDBRepository:
             mongo_session,
             records=records,
             session=session,
+            create_claim=create_claim,
         )
 
     def save_evidence_mutation(
@@ -3536,9 +3540,28 @@ class MongoDBRepository:
         session: SessionRecord | None = None,
         required_staff_id: str | None = None,
         required_staff_revision: int | None = None,
+        create_claim: bool = False,
     ) -> None:
         self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
-        self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
+        if create_claim:
+            if expected_revision < 1 or claim.revision != expected_revision + 1 or session is None:
+                raise KeyError(claim.claim_id)
+            existing_claim = self._collection.find_one(
+                {'_id': self._record_id('claim', claim.claim_id), 'record_type': 'claim'},
+                session=mongo_session,
+            )
+            if existing_claim is not None:
+                raise IdempotencyConflict(claim.claim_id)
+            self._put(
+                'claim',
+                claim.claim_id,
+                claim,
+                customer_id=claim.customer_id,
+                claim_id=claim.claim_id,
+                session=mongo_session,
+            )
+        else:
+            self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
         if required_staff_id is not None:
             presence = self._collection.find_one(
                 {
@@ -3578,13 +3601,27 @@ class MongoDBRepository:
                 session=mongo_session,
             )
             if (
-                stored_session is None
-                or stored_session.claim_id != claim.claim_id
-                or stored_session.status is not SessionStatus.ACTIVE
+                (
+                    not create_claim
+                    and (
+                        stored_session is None
+                        or stored_session.claim_id != claim.claim_id
+                        or stored_session.status is not SessionStatus.ACTIVE
+                    )
+                )
                 or session.status is not SessionStatus.ACTIVE
                 or claim.active_session_id != session.session_id
             ):
                 raise KeyError(claim.claim_id)
+            if create_claim:
+                self._put(
+                    'session',
+                    session.session_id,
+                    session,
+                    customer_id=claim.customer_id,
+                    claim_id=claim.claim_id,
+                    session=mongo_session,
+                )
         for kind, identifier, record in records:
             if kind == 'staff_agent_execution':
                 if not isinstance(record, StaffAgentExecutionRecord):
@@ -3662,9 +3699,12 @@ class MongoDBRepository:
                 except ValueError as conflict:
                     raise IdempotencyConflict(identifier) from conflict
             self._reject_client_message_conflict(document, session=mongo_session)
-        result = self._replace_claim_revision(claim, expected_revision, mongo_session=mongo_session)
-        if result == 0:
-            self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
+        if not create_claim:
+            result = self._replace_claim_revision(
+                claim, expected_revision, mongo_session=mongo_session
+            )
+            if result == 0:
+                self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
         if session is not None:
             self._put(
                 'session',

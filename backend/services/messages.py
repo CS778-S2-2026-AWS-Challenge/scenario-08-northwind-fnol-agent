@@ -1607,14 +1607,18 @@ def submit_message(
     idempotency_key: str | None,
     if_match: str | None,
     runtime_agent_policy_resolver: RuntimeAgentPolicyResolver | None = None,
+    bootstrap_claim: WorkingClaim | None = None,
+    bootstrap_session: SessionRecord | None = None,
+    bootstrap_route: str | None = None,
     action_dispatcher: ClaimantRuntimeActionDispatcher | None = None,
     evidence_storage: EvidenceStorage | None = None,
+    bootstrap_fingerprint: str | None = None,
 ) -> MessageTurnResponse:
     live_dispatcher = action_dispatcher or ClaimantRuntimeActionDispatcher()
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
-    route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
-    fingerprint = request_fingerprint(payload.model_dump(mode='json'))
+    route = bootstrap_route or f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
+    fingerprint = bootstrap_fingerprint or request_fingerprint(payload.model_dump(mode='json'))
     existing_idempotency = repository.find_idempotency(principal.subject, route, key)
     if existing_idempotency is not None:
         if existing_idempotency.request_fingerprint != fingerprint:
@@ -1623,34 +1627,7 @@ def submit_message(
                 code='IDEMPOTENCY_CONFLICT',
                 message='The idempotency key was reused with a different request.',
             )
-        if existing_idempotency.response_payload is not None:
-            return MessageTurnResponse.model_validate(existing_idempotency.response_payload)
-        if existing_idempotency.message_id is None or existing_idempotency.decision_id is None:
-            raise ApiError(
-                status_code=500,
-                code='INTERNAL_ERROR',
-                message='The idempotent message turn could not be restored.',
-                retryable=True,
-            )
-        claimant_message = repository.get_message(
-            claim_id,
-            session_id,
-            existing_idempotency.message_id,
-            principal.subject,
-        )
-        decision = repository.get_agent_decision(
-            claim_id,
-            existing_idempotency.decision_id,
-            principal.subject,
-        )
-        if claimant_message is None or decision is None:
-            raise ApiError(
-                status_code=500,
-                code='INTERNAL_ERROR',
-                message='The idempotent message turn could not be restored.',
-                retryable=True,
-            )
-        return _message_turn_response(repository, principal, claim_id, claimant_message, decision)
+        return _restore_idempotent_message_turn(repository, principal, existing_idempotency)
 
     existing_client_message = repository.find_message_by_client_id(
         claim_id,
@@ -1740,8 +1717,8 @@ def submit_message(
             message='The client_message_id has already been used for this claim.',
         )
 
-    claim = repository.get_claim(claim_id, principal.subject)
-    session = repository.get_session(claim_id, session_id, principal.subject)
+    claim = bootstrap_claim or repository.get_claim(claim_id, principal.subject)
+    session = bootstrap_session or repository.get_session(claim_id, session_id, principal.subject)
     if claim is None or session is None:
         raise _session_not_found()
     if session.status.value != 'active':
@@ -2808,13 +2785,18 @@ def submit_message(
             evaluation_record,
             runtime_trace,
             runtime_records,
+            create_claim=bootstrap_claim is not None,
         )
         return ClaimContextHandlerOutcome(
             claim_id=claim_id,
             resulting_revision=updated_claim.revision,
         )
 
-    if live_mutation_command is not None:
+    # A bootstrap Claim is intentionally not visible to the repository until this
+    # complete first turn commits. The dispatcher validates against an existing
+    # Claim, so bootstrap must invoke the same handler directly with create_claim=True;
+    # later turns retain the live namespaced dispatcher boundary.
+    if live_mutation_command is not None and bootstrap_claim is None:
         live_result = live_dispatcher.execute(
             repository,
             live_mutation_command,
@@ -2838,6 +2820,7 @@ def submit_message(
                 evaluation_record,
                 runtime_trace,
                 runtime_records,
+                create_claim=bootstrap_claim is not None,
             )
         except RevisionConflict as conflict:
             raise ApiError(
@@ -2848,9 +2831,53 @@ def submit_message(
                 current_revision=conflict.current_revision,
             ) from conflict
         except IdempotencyConflict as conflict:
+            accepted = repository.find_idempotency(principal.subject, route, key)
+            if accepted is not None and accepted.request_fingerprint == fingerprint:
+                return _restore_idempotent_message_turn(repository, principal, accepted)
             raise ApiError(
                 status_code=409,
                 code='IDEMPOTENCY_CONFLICT',
                 message='The message turn was already accepted with different retry data.',
             ) from conflict
     return _message_turn_response(repository, principal, claim_id, claimant_message, decision)
+
+
+def _restore_idempotent_message_turn(
+    repository: PersistenceRepository,
+    principal: Principal,
+    idempotency: IdempotencyRecord,
+) -> MessageTurnResponse:
+    if idempotency.response_payload is not None:
+        return MessageTurnResponse.model_validate(idempotency.response_payload)
+    if idempotency.message_id is None or idempotency.decision_id is None:
+        raise ApiError(
+            status_code=500,
+            code='INTERNAL_ERROR',
+            message='The idempotent message turn could not be restored.',
+            retryable=True,
+        )
+    claimant_message = repository.get_message(
+        idempotency.claim_id,
+        idempotency.session_id,
+        idempotency.message_id,
+        principal.subject,
+    )
+    decision = repository.get_agent_decision(
+        idempotency.claim_id,
+        idempotency.decision_id,
+        principal.subject,
+    )
+    if claimant_message is None or decision is None:
+        raise ApiError(
+            status_code=500,
+            code='INTERNAL_ERROR',
+            message='The idempotent message turn could not be restored.',
+            retryable=True,
+        )
+    return _message_turn_response(
+        repository,
+        principal,
+        idempotency.claim_id,
+        claimant_message,
+        decision,
+    )

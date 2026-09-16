@@ -4046,6 +4046,16 @@
             ],
             "title": "Incident Type"
           },
+          "initial_message": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InitialClaimMessageRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "locale": {
             "default": "en-NZ",
             "maxLength": 35,
@@ -7407,6 +7417,142 @@
         ],
         "title": "HandoffType",
         "type": "string"
+      },
+      "InitialClaimMessageRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "client_message_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Client Message Id",
+            "type": "string"
+          },
+          "content": {
+            "$ref": "#/components/schemas/TextMessageContent"
+          },
+          "incident_type": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Type"
+          },
+          "model_profile_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Profile Id"
+          }
+        },
+        "required": [
+          "client_message_id",
+          "content"
+        ],
+        "title": "InitialClaimMessageRequest",
+        "type": "object"
+      },
+      "InitialClaimTurnResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_message": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantMessage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "claim": {
+            "$ref": "#/components/schemas/ClaimantClaim"
+          },
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "claim_revision": {
+            "title": "Claim Revision",
+            "type": "integer"
+          },
+          "claimant_message": {
+            "$ref": "#/components/schemas/ClaimantMessage"
+          },
+          "contents_item_changes": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimantContentsItem"
+            },
+            "title": "Contents Item Changes",
+            "type": "array"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantDecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dynamic_form": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DynamicFormProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "form_changes": {
+            "items": {
+              "$ref": "#/components/schemas/FormChange"
+            },
+            "title": "Form Changes",
+            "type": "array"
+          },
+          "handoff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantHandoff"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "session": {
+            "$ref": "#/components/schemas/ClaimantSession"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_id",
+          "session_id",
+          "claim_revision",
+          "claimant_message",
+          "form_changes",
+          "claim",
+          "session"
+        ],
+        "title": "InitialClaimTurnResponse",
+        "type": "object"
       },
       "IntegrationHealthCheckPage": {
         "additionalProperties": false,
@@ -15842,7 +15988,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CreateClaimResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CreateClaimResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InitialClaimTurnResponse"
+                    }
+                  ],
+                  "title": "Response Create Claim Api V1 Claims Post"
                 }
               }
             },

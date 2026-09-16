@@ -13,27 +13,36 @@ from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal, require_claimant
 from backend.core.errors import ApiError
+from backend.domain.ids import new_id
 from backend.domain.external_service_registry import capability_catalogue
 from backend.domain.models import (
+    Channel,
     ClaimantClaim,
     ClaimantExternalServiceResponse,
     ClaimantSession,
     ClaimCreationResponse,
     ClaimListResponse,
+    ClaimState,
     CreateClaimRequest,
     CreateClaimResponse,
     CreateMessageRequest,
+    CustomerNextStep,
     ExternalCapabilityProjection,
     FormConfirmationRequest,
     FormConfirmationResponse,
     FormPatchRequest,
     FormPatchResponse,
     GrantAssessorConsentRequest,
+    InitialClaimMessageRequest,
+    InitialClaimTurnResponse,
     MessageListResponse,
     MessageTurnResponse,
     PauseSessionResponse,
+    ResponsibleParty,
+    SessionRecord,
     StartSessionRequest,
     WorkflowState,
+    WorkingClaim,
 )
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider
@@ -57,6 +66,7 @@ from backend.services.messages import submit_message
 from backend.services.model_profiles import select_model_profile
 from backend.services.resume import start_session_with_recovery
 from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
+from backend.services.support import now_utc, request_fingerprint
 
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant'])
 logger = logging.getLogger(__name__)
@@ -116,13 +126,17 @@ def evidence_storage_for(request: Request) -> EvidenceStorage:
     return cast(EvidenceStorage, request.app.state.evidence_storage)
 
 
-@router.post('', response_model=CreateClaimResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    '',
+    response_model=CreateClaimResponse | InitialClaimTurnResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 def create_claim(
     request: Request,
     payload: CreateClaimRequest,
     principal: Principal = Depends(require_claimant),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
-) -> CreateClaimResponse:
+) -> CreateClaimResponse | InitialClaimTurnResponse:
     if payload.model_profile_id is not None:
         payload = payload.model_copy(
             update={'model_profile_id': select_model_profile(request, payload.model_profile_id)}
@@ -131,7 +145,98 @@ def create_claim(
         payload = payload.model_copy(
             update={'model_profile_id': select_model_profile(request, None)}
         )
+    if payload.initial_message is not None:
+        initial = payload.initial_message
+        bootstrap_payload = initial.model_copy(
+            update={
+                'incident_type': payload.incident_type,
+                'model_profile_id': payload.model_profile_id,
+            }
+        )
+        return _bootstrap_claim(
+            request,
+            bootstrap_payload,
+            principal,
+            idempotency_key,
+            route='/api/v1/claims',
+            fingerprint=request_fingerprint(payload.model_dump(mode='json')),
+            channel=payload.channel,
+            locale=payload.locale,
+        )
     return start_claim(repository_for(request), principal, payload, idempotency_key)
+
+
+def _bootstrap_claim(
+    request: Request,
+    payload: InitialClaimMessageRequest,
+    principal: Principal,
+    idempotency_key: str | None,
+    *,
+    route: str,
+    fingerprint: str,
+    channel: Channel,
+    locale: str,
+) -> InitialClaimTurnResponse:
+    model_profile_id = payload.model_profile_id
+    if model_profile_id is not None:
+        model_profile_id = select_model_profile(request, model_profile_id)
+    elif request.app.state.settings.agent_runtime_profile.value == 'model_gateway':
+        model_profile_id = select_model_profile(request, None)
+    timestamp = now_utc()
+    claim_id = new_id('clm')
+    session_id = new_id('ses')
+    claim = WorkingClaim(
+        claim_id=claim_id,
+        customer_id=principal.subject,
+        channel=channel,
+        locale=locale,
+        incident_type=payload.incident_type,
+        claim_state=ClaimState(),
+        active_session_id=session_id,
+        customer_next_step=CustomerNextStep(
+            status='describe_incident',
+            summary='Tell me what happened in your own words.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+        ),
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    session = SessionRecord(
+        session_id=session_id,
+        claim_id=claim_id,
+        customer_id=principal.subject,
+        model_profile_id=model_profile_id or 'qwen-local',
+        context_revision=claim.revision,
+        started_at=timestamp,
+        last_active_at=timestamp,
+    )
+    message_payload = CreateMessageRequest(
+        client_message_id=payload.client_message_id,
+        content=payload.content,
+        model_profile_id=model_profile_id,
+    )
+    turn = submit_message(
+        repository_for(request),
+        agent_for(request),
+        policy_history_adapter_for(request),
+        principal,
+        claim_id,
+        session_id,
+        message_payload,
+        idempotency_key,
+        '1',
+        runtime_agent_policy_for(request),
+        bootstrap_claim=claim,
+        bootstrap_session=session,
+        bootstrap_route=route,
+        bootstrap_fingerprint=fingerprint,
+    )
+    repository = repository_for(request)
+    return InitialClaimTurnResponse(
+        **turn.model_dump(mode='python'),
+        claim=get_claim(repository, principal, turn.claim_id),
+        session=get_session(repository, principal, turn.claim_id, turn.session_id),
+    )
 
 
 @router.get('', response_model=ClaimListResponse)

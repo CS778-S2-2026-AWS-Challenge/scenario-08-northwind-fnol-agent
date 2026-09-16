@@ -73,4 +73,4 @@ traceability but are never interpreted by ingestion as Agent authority or execut
 The generated keyword index is the deterministic MVP ingestion output. Filtered applicability,
 ranking, citations, empty-result limitations, and retrieval-provider failure behaviour belong to
 issue #255. End-to-end upload, ingestion, retrieval, and citation verification belongs to issue
-#265.
+Issue #265.
