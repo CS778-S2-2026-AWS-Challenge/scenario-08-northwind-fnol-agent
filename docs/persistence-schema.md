@@ -481,12 +481,12 @@ the append-only audit collection through a bounded, filterable projection.
   reused item writes a detached link and leaves the source Claim unchanged. Both
   operations advance only the target Claim revision and are persisted atomically
   with idempotency, Branch Evaluation, and audit data.
- - Evidence action writes require the authenticated claimant to own both Claims and
+- Evidence action writes require the authenticated claimant to own both Claims and
    the source Evidence. The compare-and-set revision check occurs in the same
    transaction as the relation or history-state change; retries with the same key
    replay the stored typed result, while a different request under that key is a
    conflict.
- - Evidence action authorization is grounded in immutable Runtime records: the persisted
+- Evidence action authorization is grounded in immutable Runtime records: the persisted
    `AgentProposalRecord` stores the target Evidence and source Claim for the exact action, and
    the claimant confirmation is a later claimant-visible `MessageRecord` in the same active
    session. Public Evidence mutations reject references that exist only in the request body;
