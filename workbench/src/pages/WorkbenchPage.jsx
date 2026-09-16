@@ -639,11 +639,14 @@ export default function WorkbenchPage() {
       ],
     }
     if (section === 'conversation') {
-      await loadConversationResources(
+      const result = await loadConversationResources(
         id,
         selectedSessionId || detail?.active_session_id || null,
       )
-      return
+      if (propagateError && result?.status !== 'applied') {
+        throw result?.error || readbackSupersededError('messages', id)
+      }
+      return result
     }
     return Promise.all((loaders[section] || []).map(([name, loader]) => (
       loadResource(name, id, loader, { propagateError })
