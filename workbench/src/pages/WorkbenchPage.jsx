@@ -744,7 +744,7 @@ export default function WorkbenchPage() {
     const previous = detailRef.current
     if (!previous) throw new Error('The current Claim projection is unavailable. Refresh the Claim before acting.')
     const mutationRequestId = ++detailRequestId.current
-    let mutationResult = null
+    let mutationResult
     try {
       mutationResult = await operation(previous)
     } catch (error) {
