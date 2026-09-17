@@ -49,15 +49,16 @@ function renderPanel(overrides = {}) {
 }
 
 describe('ClaimReviewPanel', () => {
-  it('shows Step 2, grouped Claim state, and backend-owned missing requirements', () => {
+  it('shows Step 2, grouped Claim state, and announces backend-owned missing requirements', () => {
     renderPanel()
 
     expect(screen.getByText('Step 2 of 4 · Review information')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Claim overview' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Incident details' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Insured item and loss' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Still needed' })).toBeInTheDocument()
-    expect(screen.getByText('When it happened')).toBeInTheDocument()
+    const missingNotice = screen.getByRole('alert')
+    expect(missingNotice).toHaveTextContent('Still needed')
+    expect(missingNotice).toHaveTextContent('When it happened')
     expect(screen.getByText('A pipe burst.')).toBeInTheDocument()
   })
 
