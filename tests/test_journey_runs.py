@@ -186,6 +186,9 @@ def test_an_assessor_failure_recovers_only_through_a_projected_action(
     assert [check.seam for check in record.seam_checks if check.defect_ref == 'untracked'] == []
     assert {check.defect_ref for check in record.seam_checks if check.defect_ref} == defect_refs
     assert record.result_class is result_class
+    # The reason says where the trajectory ends, not only how many steps succeeded.
+    ending = record.final_state.customer_next_step
+    assert ending is not None and f'Ends at {ending}' in record.result_reason
 
 
 def _assert_household_run(run: HouseholdRun, scenario: HouseholdScenario) -> None:
