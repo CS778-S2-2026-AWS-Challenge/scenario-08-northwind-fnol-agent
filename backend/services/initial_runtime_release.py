@@ -45,7 +45,10 @@ from backend.services.runtime_agent_policy import registered_agent_tool_names
 
 _AUTHOR = 'repository-initial-release-author'
 _REVIEWER = 'repository-initial-release-reviewer'
-_REQUIRED_MODEL_PROFILES = frozenset({'qwen-local', 'nowcoding-gpt55'})
+_REQUIRED_V7_MODEL_PROFILES = frozenset(
+    {'qwen-local', 'nowcoding-gpt55', 'google-gemini35-flash-lite'}
+)
+_REQUIRED_V6_MODEL_PROFILES = frozenset({'qwen-local', 'nowcoding-gpt55'})
 _VALIDATION_EVIDENCE = (
     'Repository-defined initial Runtime release passed structural and binding validation.'
 )
@@ -279,12 +282,17 @@ def install_initial_runtime_release(
         return releases.active(settings.environment, settings.data_runtime_profile.value)
 
     bindings = settings.model_runtime_bindings
+    prompt_versions = {binding.prompt_version for binding in bindings}
+    required_profiles = (
+        _REQUIRED_V7_MODEL_PROFILES
+        if prompt_versions == {CLAIMANT_V7_PROMPT_ID}
+        else _REQUIRED_V6_MODEL_PROFILES
+    )
     profile_ids = {binding.profile_id for binding in bindings}
-    if not _REQUIRED_MODEL_PROFILES.issubset(profile_ids):
-        missing = ', '.join(sorted(_REQUIRED_MODEL_PROFILES - profile_ids))
+    if not required_profiles.issubset(profile_ids):
+        missing = ', '.join(sorted(required_profiles - profile_ids))
         raise ValueError(f'The initial Runtime release is missing required models: {missing}.')
 
-    prompt_versions = {binding.prompt_version for binding in bindings}
     if prompt_versions == {CLAIMANT_V7_PROMPT_ID}:
         release_values = repository_v7_values(bindings)
     elif prompt_versions == {MOTOR_CLAIMANT_PROMPT_ID}:

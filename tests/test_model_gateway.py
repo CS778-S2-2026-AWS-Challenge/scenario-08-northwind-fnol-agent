@@ -11,9 +11,11 @@ from fastapi.testclient import TestClient
 
 from backend.adapters.model_gateway import (
     BedrockConverseModelGateway,
+    GoogleGenerateContentModelGateway,
     ModelGatewayConfig,
     ModelGatewayRegistry,
     OpenAICompatibleModelGateway,
+    default_model_gateway_registry,
 )
 from backend.app import create_app
 from backend.core.auth import Principal
@@ -984,6 +986,467 @@ def test_bedrock_converse_rejects_malformed_provider_payloads(
         )
 
     assert captured.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+
+
+def test_google_generate_content_maps_structured_multimodal_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+    resolver = EvidenceResolver(b'png-bytes')
+    observed: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed['url'] = str(request.url)
+        observed['credential'] = request.headers.get('x-goog-api-key')
+        observed['payload'] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                'candidates': [
+                    {
+                        'finishReason': 'STOP',
+                        'content': {
+                            'role': 'model',
+                            'parts': [{'text': '{"answer":"assessment offered"}'}],
+                        },
+                    }
+                ],
+                'usageMetadata': {
+                    'promptTokenCount': 12,
+                    'candidatesTokenCount': 4,
+                    'thoughtsTokenCount': 2,
+                    'totalTokenCount': 18,
+                    'cachedContentTokenCount': 3,
+                },
+                'modelVersion': 'gemini-3.5-flash-lite-001',
+                'responseId': 'google-response-1',
+            },
+        )
+
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            base_url='https://generativelanguage.googleapis.com/v1beta',
+            model='gemini-3.5-flash-lite',
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+            image_input=True,
+            evidence_resolver=resolver,
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    schema = {
+        'type': 'object',
+        'properties': {'answer': {'type': 'string'}},
+        'required': ['answer'],
+    }
+    response = gateway.complete(
+        ModelRequest(
+            messages=[
+                ModelMessage(role=ModelRole.SYSTEM, content='Follow Northwind authority.'),
+                ModelMessage(
+                    role=ModelRole.USER,
+                    content_blocks=[
+                        ModelTextContent(text='Review this damage.'),
+                        ModelEvidenceContent(
+                            evidence_id='evd_google_image',
+                            media_type='image/png',
+                        ),
+                    ],
+                ),
+            ],
+            response_schema=schema,
+            max_output_tokens=200,
+            required_capabilities=ModelCapabilities(
+                structured_output=True,
+                image_input=True,
+            ),
+        )
+    )
+
+    assert observed['url'] == (
+        'https://generativelanguage.googleapis.com/v1beta/'
+        'models/gemini-3.5-flash-lite:generateContent'
+    )
+    assert observed['credential'] == 'synthetic-google-key'
+    payload = cast(dict[str, object], observed['payload'])
+    assert payload['systemInstruction'] == {'parts': [{'text': 'Follow Northwind authority.'}]}
+    contents = cast(list[dict[str, object]], payload['contents'])
+    parts = cast(list[dict[str, object]], contents[0]['parts'])
+    assert parts[0] == {'text': 'Review this damage.'}
+    assert parts[1] == {'inlineData': {'mimeType': 'image/png', 'data': 'cG5nLWJ5dGVz'}}
+    assert payload['generationConfig'] == {
+        'maxOutputTokens': 200,
+        'responseMimeType': 'application/json',
+        'responseJsonSchema': schema,
+    }
+    assert resolver.requests == [('evd_google_image', 'image/png')]
+    assert response.structured_output == {'answer': 'assessment offered'}
+    assert response.completion_status is ModelCompletionStatus.COMPLETE
+    assert response.provider_model == 'gemini-3.5-flash-lite-001'
+    assert response.provider_request_id == 'google-response-1'
+    assert response.usage == ModelUsage(
+        input_tokens=12,
+        output_tokens=6,
+        total_tokens=18,
+        cache_read_input_tokens=3,
+    )
+
+
+def test_google_generate_content_maps_function_call_and_result_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+    observed: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(cast(dict[str, object], json.loads(request.content)))
+        if len(observed) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    'candidates': [
+                        {
+                            'finishReason': 'STOP',
+                            'content': {
+                                'parts': [
+                                    {
+                                        'functionCall': {
+                                            'name': 'context_resolve',
+                                            'args': {
+                                                'ref': 'policy:motor',
+                                                'selector': 'summary',
+                                            },
+                                        },
+                                        'thoughtSignature': 'synthetic-thought-signature',
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            headers={'x-request-id': 'google-header-request'},
+            json={
+                'candidates': [
+                    {
+                        'finishReason': 'STOP',
+                        'content': {'parts': [{'text': '{"answer":"covered"}'}]},
+                    }
+                ]
+            },
+        )
+
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    tool = ModelTool(
+        name='context.resolve',
+        description='Resolve one bounded context reference.',
+        input_schema={'type': 'object'},
+    )
+    first = gateway.complete(
+        ModelRequest(
+            messages=[ModelMessage(role=ModelRole.USER, content='Check my policy.')],
+            tools=[tool],
+            required_tool_name='context.resolve',
+        )
+    )
+
+    assert len(first.tool_calls) == 1
+    assert first.tool_calls[0].call_id.startswith('gemini-continuation.')
+    assert first.tool_calls[0].name == 'context.resolve'
+    assert first.tool_calls[0].arguments == {
+        'ref': 'policy:motor',
+        'selector': 'summary',
+    }
+    assert observed[0]['toolConfig'] == {
+        'functionCallingConfig': {
+            'mode': 'ANY',
+            'allowedFunctionNames': ['context_resolve'],
+        }
+    }
+    schema = {'type': 'object', 'properties': {'answer': {'type': 'string'}}}
+    continuation = gateway.complete(
+        ModelRequest(
+            messages=[
+                ModelMessage(role=ModelRole.USER, content='Check my policy.'),
+                ModelMessage(role=ModelRole.ASSISTANT, tool_calls=first.tool_calls),
+                ModelMessage(
+                    role=ModelRole.TOOL,
+                    name='context.resolve',
+                    tool_call_id=first.tool_calls[0].call_id,
+                    content='{"result":"covered"}',
+                ),
+            ],
+            response_schema=schema,
+        )
+    )
+
+    continuation_contents = cast(list[dict[str, object]], observed[1]['contents'])
+    assert continuation_contents[1]['parts'] == [
+        {
+            'functionCall': {
+                'name': 'context_resolve',
+                'args': {'ref': 'policy:motor', 'selector': 'summary'},
+            },
+            'thoughtSignature': 'synthetic-thought-signature',
+        }
+    ]
+    assert continuation_contents[2]['parts'] == [
+        {
+            'functionResponse': {
+                'name': 'context_resolve',
+                'response': {'result': 'covered'},
+            }
+        }
+    ]
+    assert continuation.structured_output == {'answer': 'covered'}
+    assert continuation.provider_request_id == 'google-header-request'
+
+
+@pytest.mark.parametrize(
+    ('status_code', 'code', 'retryable'),
+    [
+        (401, ModelGatewayErrorCode.AUTHENTICATION, False),
+        (408, ModelGatewayErrorCode.TIMEOUT, True),
+        (429, ModelGatewayErrorCode.RATE_LIMIT, True),
+        (500, ModelGatewayErrorCode.PROVIDER, True),
+        (400, ModelGatewayErrorCode.PROVIDER, False),
+    ],
+)
+def test_google_generate_content_maps_provider_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+    code: ModelGatewayErrorCode,
+    retryable: bool,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+        transport=httpx.MockTransport(lambda _: httpx.Response(status_code)),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(messages=[ModelMessage(role=ModelRole.USER, content='Synthetic input.')])
+        )
+
+    assert captured.value.code is code
+    assert captured.value.retryable is retryable
+    assert captured.value.provider_model == 'northwind-test-model'
+
+
+def test_google_generate_content_normalises_a_blocked_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={
+                    'candidates': [],
+                    'promptFeedback': {'blockReason': 'SAFETY'},
+                    'modelVersion': 'gemini-3.5-flash-lite',
+                    'responseId': 'blocked-response',
+                },
+            )
+        ),
+    )
+
+    response = gateway.complete(
+        ModelRequest(messages=[ModelMessage(role=ModelRole.USER, content='Synthetic input.')])
+    )
+
+    assert response.completion_status is ModelCompletionStatus.REFUSED
+    assert response.finish_reason == 'SAFETY'
+    assert response.provider_request_id == 'blocked-response'
+
+
+@pytest.mark.parametrize(
+    'credential_name',
+    [None, 'MISSING_GEMINI_API_KEY'],
+    ids=['missing-reference', 'missing-environment-value'],
+)
+def test_google_generate_content_requires_an_environment_owned_credential(
+    monkeypatch: pytest.MonkeyPatch,
+    credential_name: str | None,
+) -> None:
+    monkeypatch.delenv('MISSING_GEMINI_API_KEY', raising=False)
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable=credential_name,
+        )
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(messages=[ModelMessage(role=ModelRole.USER, content='Synthetic input.')])
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
+    assert 'MISSING_GEMINI_API_KEY' not in str(captured.value)
+
+
+@pytest.mark.parametrize(
+    ('transport_error', 'code'),
+    [
+        (httpx.ReadTimeout('Synthetic timeout.'), ModelGatewayErrorCode.TIMEOUT),
+        (httpx.ConnectError('Synthetic connection failure.'), ModelGatewayErrorCode.PROVIDER),
+    ],
+    ids=['timeout', 'request-error'],
+)
+def test_google_generate_content_maps_transport_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    transport_error: httpx.RequestError,
+    code: ModelGatewayErrorCode,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        transport_error.request = request
+        raise transport_error
+
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(messages=[ModelMessage(role=ModelRole.USER, content='Synthetic input.')])
+        )
+
+    assert captured.value.code is code
+    assert captured.value.retryable is True
+    assert captured.value.provider_model == 'northwind-test-model'
+
+
+@pytest.mark.parametrize(
+    ('model_request', 'structured_output', 'tools'),
+    [
+        (
+            ModelRequest(
+                messages=[ModelMessage(role=ModelRole.USER, content='Return JSON.')],
+                response_schema={'type': 'object'},
+            ),
+            False,
+            True,
+        ),
+        (
+            ModelRequest(
+                messages=[ModelMessage(role=ModelRole.USER, content='Use a tool.')],
+                tools=[ModelTool(name='context.resolve', description='Resolve.', input_schema={})],
+            ),
+            True,
+            False,
+        ),
+    ],
+    ids=['structured-output', 'tools'],
+)
+def test_google_generate_content_rejects_undeclared_capabilities(
+    model_request: ModelRequest,
+    structured_output: bool,
+    tools: bool,
+) -> None:
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='UNUSED_GEMINI_API_KEY',
+            structured_output=structured_output,
+            tools=tools,
+        )
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(model_request)
+
+    assert captured.value.code is ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
+
+
+def test_google_generate_content_rejects_a_malformed_provider_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=[])),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(messages=[ModelMessage(role=ModelRole.USER, content='Synthetic input.')])
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+    assert captured.value.provider_model == 'northwind-test-model'
+
+
+@pytest.mark.parametrize(
+    'tool_content',
+    [None, 'not-json', '[]'],
+    ids=['missing-content', 'invalid-json', 'non-object-json'],
+)
+def test_google_generate_content_rejects_an_invalid_tool_result(
+    monkeypatch: pytest.MonkeyPatch,
+    tool_content: str | None,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+        transport=httpx.MockTransport(lambda _: httpx.Response(500)),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(
+                messages=[
+                    ModelMessage(
+                        role=ModelRole.TOOL,
+                        name='context.resolve',
+                        tool_call_id='provider-call-1',
+                        content=tool_content,
+                    )
+                ]
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
+
+
+def test_default_model_gateway_registry_constructs_google_adapter() -> None:
+    gateway = default_model_gateway_registry().create(
+        'google_generate_content',
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+    )
+
+    assert isinstance(gateway, GoogleGenerateContentModelGateway)
 
 
 def test_openai_compatible_gateway_normalises_tool_calls() -> None:

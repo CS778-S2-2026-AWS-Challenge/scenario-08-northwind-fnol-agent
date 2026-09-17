@@ -161,6 +161,8 @@ def publish(args: argparse.Namespace) -> str:
         raise PublicationError('The deployment manifest must include nowcoding-gpt55.')
     if not any(item.profile_id == 'bedrock-nova2-lite' for item in bindings):
         raise PublicationError('The deployment manifest must include bedrock-nova2-lite.')
+    if not any(item.profile_id == 'google-gemini35-flash-lite' for item in bindings):
+        raise PublicationError('The deployment manifest must include google-gemini35-flash-lite.')
     for binding in bindings:
         credential_name = binding.credential_environment_variable
         if (

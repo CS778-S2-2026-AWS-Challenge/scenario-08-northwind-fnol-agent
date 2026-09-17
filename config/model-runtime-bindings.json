@@ -44,5 +44,21 @@
     "tools": false,
     "image_input": true,
     "document_input": false
+  },
+  {
+    "profile_id": "google-gemini35-flash-lite",
+    "protocol": "google_generate_content",
+    "provider": "google-ai-studio",
+    "model_identifier": "gemini-3.5-flash-lite",
+    "base_url": "https://generativelanguage.googleapis.com/v1beta",
+    "credential_environment_variable": "GEMINI_API_KEY",
+    "purpose": "agent_turn",
+    "privacy_class": "synthetic_fnol",
+    "prompt_version": "northwind-fnol-claimant-v7",
+    "evaluation_status": "configured",
+    "structured_output": true,
+    "tools": true,
+    "image_input": true,
+    "document_input": false
   }
 ]

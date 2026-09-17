@@ -24,6 +24,18 @@ def provider_capability(configuration: ModelRuntimeConfiguration) -> ProviderCap
             cache_usage_fields=['cacheReadInputTokens', 'cacheWriteInputTokens'],
             continuation_mechanism=None,
         )
+    if configuration.protocol == 'google_generate_content':
+        return ProviderCapability(
+            capability_version=f'{configuration.profile_id}@v1',
+            protocol=configuration.protocol,
+            structured_output_method='json_schema',
+            tool_call_support=configuration.tools,
+            tool_result_continuation=('assistant_tool_message' if configuration.tools else None),
+            supported_media_types=media_types,
+            prompt_cache_type='none',
+            cache_usage_fields=['cachedContentTokenCount'],
+            continuation_mechanism='google_function_response',
+        )
     return ProviderCapability(
         capability_version=f'{configuration.profile_id}@v1',
         protocol=configuration.protocol,

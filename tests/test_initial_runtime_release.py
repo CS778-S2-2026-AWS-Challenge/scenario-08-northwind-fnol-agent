@@ -33,24 +33,41 @@ def _binding(
 ) -> ModelRuntimeBinding:
     is_qwen = profile_id == 'qwen-local'
     is_bedrock = profile_id == 'bedrock-nova2-lite'
+    is_google = profile_id == 'google-gemini35-flash-lite'
     return ModelRuntimeBinding(
         profile_id=profile_id,
-        protocol='bedrock_converse' if is_bedrock else 'openai_compatible',
-        provider='amazon-bedrock' if is_bedrock else ('qwen-local' if is_qwen else 'nowcoding'),
+        protocol=(
+            'bedrock_converse'
+            if is_bedrock
+            else ('google_generate_content' if is_google else 'openai_compatible')
+        ),
+        provider=(
+            'amazon-bedrock'
+            if is_bedrock
+            else ('google-ai-studio' if is_google else ('qwen-local' if is_qwen else 'nowcoding'))
+        ),
         model_identifier=(
             'global.amazon.nova-2-lite-v1:0'
             if is_bedrock
-            else ('qwen3.8-27b' if is_qwen else 'gpt-5.5')
+            else (
+                'gemini-3.5-flash-lite' if is_google else ('qwen3.8-27b' if is_qwen else 'gpt-5.5')
+            )
         ),
         base_url=(
             'https://bedrock-runtime.ap-southeast-2.amazonaws.com'
             if is_bedrock
-            else ('http://qwen.test/v1' if is_qwen else 'https://nowcoding.ai/v1')
+            else (
+                'https://generativelanguage.googleapis.com/v1beta'
+                if is_google
+                else ('http://qwen.test/v1' if is_qwen else 'https://nowcoding.ai/v1')
+            )
         ),
         credential_environment_variable=(
             'AWS_BEARER_TOKEN_BEDROCK'
             if is_bedrock
-            else (None if is_qwen else 'NORTHWIND_MODEL_API_KEY')
+            else (
+                'GEMINI_API_KEY' if is_google else (None if is_qwen else 'NORTHWIND_MODEL_API_KEY')
+            )
         ),
         purpose='agent_turn',
         privacy_class='synthetic_fnol',
@@ -58,7 +75,7 @@ def _binding(
         evaluation_status='unavailable' if is_bedrock else 'configured',
         structured_output=True,
         tools=not is_bedrock,
-        image_input=is_bedrock,
+        image_input=is_bedrock or is_google,
         document_input=False,
     )
 
@@ -68,6 +85,7 @@ def _settings() -> Settings:
         _binding('qwen-local'),
         _binding('nowcoding-gpt55'),
         _binding('bedrock-nova2-lite'),
+        _binding('google-gemini35-flash-lite'),
     )
     return Settings(
         environment='test',
@@ -102,9 +120,10 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
         'model:qwen-local',
         'model:nowcoding-gpt55',
         'model:bedrock-nova2-lite',
+        'model:google-gemini35-flash-lite',
     }
     assert len(releases.list_release_sets('test', 'fixture')) == 1
-    assert len(configurations.list_configurations()) == 7
+    assert len(configurations.list_configurations()) == 8
     serialized = json.dumps(
         [record.model_dump(mode='json') for record in configurations.list_configurations()]
     )
@@ -127,6 +146,7 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
         'qwen-local',
         'nowcoding-gpt55',
         'bedrock-nova2-lite',
+        'google-gemini35-flash-lite',
     }
     assert {
         str(record.values['profile_id']): record.values['timeout_seconds']
@@ -135,6 +155,7 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
         'qwen-local': 180.0,
         'nowcoding-gpt55': 180.0,
         'bedrock-nova2-lite': 180.0,
+        'google-gemini35-flash-lite': 180.0,
     }
     bedrock = next(
         record
@@ -477,12 +498,20 @@ def test_capabilities_expose_the_repository_published_model_catalogue() -> None:
     assert [item['id'] for item in response.json()['models']] == [
         'qwen-local',
         'bedrock-nova2-lite',
+        'google-gemini35-flash-lite',
         'nowcoding-gpt55',
     ]
     assert response.json()['default_model_profile_id'] == 'qwen-local'
     bedrock = next(item for item in response.json()['models'] if item['id'] == 'bedrock-nova2-lite')
     assert bedrock['availability'] == 'unavailable'
     assert bedrock['image_input'] is True
+    gemini = next(
+        item for item in response.json()['models'] if item['id'] == 'google-gemini35-flash-lite'
+    )
+    assert gemini['availability'] == 'available'
+    assert gemini['structured_output'] is True
+    assert gemini['tools'] is True
+    assert gemini['image_input'] is True
 
     selection = client.post(
         '/api/v1/claims',

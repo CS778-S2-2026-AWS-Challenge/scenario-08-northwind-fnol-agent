@@ -48,6 +48,7 @@ class RecordingControlPlaneClient:
                 'model:qwen-local': _record('cfg_qwen-local'),
                 'model:nowcoding-gpt55': _record('cfg_nowcoding-gpt55'),
                 'model:bedrock-nova2-lite': _record('cfg_bedrock-nova2-lite'),
+                'model:google-gemini35-flash-lite': _record('cfg_google-gemini35-flash-lite'),
             },
         }
 
@@ -98,6 +99,7 @@ def test_publication_preserves_release_context_and_never_serializes_the_provider
     monkeypatch.setenv('NORTHWIND_CONTROL_PLANE_APPROVER_TOKEN', 'approver-token')
     monkeypatch.setenv('NORTHWIND_QWEN_BASE_URL', 'http://qwen.test/v1')
     monkeypatch.setenv('NORTHWIND_MODEL_API_KEY', 'provider-secret-must-not-be-serialized')
+    monkeypatch.setenv('GEMINI_API_KEY', 'google-secret-must-not-be-serialized')
     monkeypatch.setattr(publication, 'ControlPlaneClient', RecordingControlPlaneClient)
     args = argparse.Namespace(
         base_url='http://control-plane.test',
@@ -123,6 +125,7 @@ def test_publication_preserves_release_context_and_never_serializes_the_provider
         'model',
         'model',
         'model',
+        'model',
     ]
     release_payload = client.requests[0][2]
     assert release_payload is not None
@@ -135,6 +138,7 @@ def test_publication_preserves_release_context_and_never_serializes_the_provider
         'model:qwen-local',
         'model:nowcoding-gpt55',
         'model:bedrock-nova2-lite',
+        'model:google-gemini35-flash-lite',
     }
     assert cast(dict[str, object], release_payload['integration_refs']) == {
         'policy': {'configuration_id': 'cfg_policy', 'revision': 3}
@@ -146,8 +150,10 @@ def test_publication_preserves_release_context_and_never_serializes_the_provider
         {'configurations': client.published_configurations, 'requests': client.requests}
     )
     assert 'provider-secret-must-not-be-serialized' not in serialized
+    assert 'google-secret-must-not-be-serialized' not in serialized
     assert 'NORTHWIND_MODEL_API_KEY' in serialized
     assert 'AWS_BEARER_TOKEN_BEDROCK' in serialized
+    assert 'GEMINI_API_KEY' in serialized
 
 
 def test_publication_requires_environment_owned_private_endpoints(

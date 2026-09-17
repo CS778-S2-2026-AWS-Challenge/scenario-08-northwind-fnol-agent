@@ -1209,6 +1209,9 @@ published and configured, otherwise the first available published profile) and e
 profile's stable ID, provider model label, protocol, structured-output capability, tool-call
 capability, image-input capability, document-input capability, and `availability`. The frontend uses the default when creating a Session, while a
 message may select another published and available profile in the same conversation.
+The repository initial catalogue publishes `qwen-local`, `nowcoding-gpt55`,
+`google-gemini35-flash-lite`, and the explicitly unavailable `bedrock-nova2-lite`; deployment
+selection keeps `qwen-local` as the default unless `MODEL_PROFILE_ID` changes.
 
 ### `POST /api/v1/claims`
 

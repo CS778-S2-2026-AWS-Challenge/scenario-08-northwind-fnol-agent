@@ -174,7 +174,7 @@ model and Runtime authority validation before it can affect Claim State.
 | Variable | Meaning |
 | --- | --- |
 | `AGENT_RUNTIME_PROFILE` | `controlled` or `model_gateway` |
-| `MODEL_PROTOCOL_ADAPTER` | Registered adapter name; currently `openai_compatible` by default |
+| `MODEL_PROTOCOL_ADAPTER` | Registered adapter name; `openai_compatible` is the default, with native `bedrock_converse` and `google_generate_content` adapters available |
 | `MODEL_PROFILE_ID` | Identifier of the selected model profile |
 | `MODEL_PROVIDER` | Provider label used for internal profile audit context |
 | `MODEL_PURPOSE` | Allowed request purpose; `agent_turn` for the claimant Agent |
@@ -191,6 +191,7 @@ model and Runtime authority validation before it can affect Claim State.
 | `MODEL_SUPPORTS_DOCUMENT_INPUT` | Declared endpoint capability for PDF Evidence blocks; default `false` |
 | `MODEL_RUNTIME_BINDINGS_PATH` | Path to the deployment-owned, non-secret list of model bindings that Control Plane publication is allowed to reference |
 | `NORTHWIND_QWEN_BASE_URL` | Environment-owned Qwen endpoint resolved by the checked-in binding manifest |
+| `GEMINI_API_KEY` | Environment-owned Google AI Studio credential referenced by the Gemini binding |
 
 For an unauthenticated local server, leave `MODEL_API_KEY_ENV` empty. For an
 authenticated endpoint, set it to a separate secret environment variable name, for
@@ -218,6 +219,7 @@ The published claimant profiles use this adapter contract:
 | `qwen-local` | `qwen3.8-27b` through the environment-owned Qwen endpoint | deployment default through `MODEL_PROFILE_ID` | structured output and tools |
 | `nowcoding-gpt55` | `gpt-5.5` through the existing nowcoding endpoint | selectable | structured output and tools |
 | `bedrock-nova2-lite` | `global.amazon.nova-2-lite-v1:0` through Bedrock Sydney | published but unavailable until AWS account verification completes | structured output and image input |
+| `google-gemini35-flash-lite` | `gemini-3.5-flash-lite` through Google AI Studio | selectable | structured output, tools, and image input |
 
 The nowcoding `gpt-5.5` endpoint was verified on 15 September 2026 with live strict
 structured-output and forced tool-call requests. That verifies provider compatibility, not a
@@ -233,8 +235,9 @@ allow-list. Private endpoints are represented by environment-variable references
 inside the deployment process. The backend ships a reviewed initial Runtime Release that registers
 and publishes the complete Agent policy plus every binding in this allow-list. A Control Plane
 scope with no Release Set history installs that initial Release during application composition, so
-`qwen-local` and `nowcoding-gpt55` are available and `bedrock-nova2-lite` is published with its
-explicit evaluation status through the capabilities APIs on a clean deployment. The initializer
+`qwen-local`, `nowcoding-gpt55`, and `google-gemini35-flash-lite` are available, while
+`bedrock-nova2-lite` is published with its explicit evaluation status through the capabilities
+APIs on a clean deployment. The initializer
 runs only for a never-initialised scope. Existing active, superseded,
 withdrawn, or otherwise inactive Release Set history remains authoritative and is never repaired or
 overwritten on startup. Initial model records use a 180-second transport ceiling so a slow provider
@@ -250,6 +253,7 @@ the active Release Set's other references:
 $env:NORTHWIND_CONTROL_PLANE_AUTHOR_TOKEN = '<author bearer token>'
 $env:NORTHWIND_CONTROL_PLANE_APPROVER_TOKEN = '<independent approver bearer token>'
 $env:NORTHWIND_QWEN_BASE_URL = '<private Qwen endpoint>'
+$env:GEMINI_API_KEY = '<Google AI Studio API key>'
 py -3.12 scripts/publish_fnol_model_release.py `
   --validation-evidence 'Live strict schema and forced tool-call probes passed.'
 ```
@@ -280,6 +284,27 @@ does not satisfy the declared capability. The adapter normalises text, completio
 reason, usage, configured model identity, and AWS request identity into `ModelResponse`. HTTP
 authentication, rate-limit, provider, timeout, and malformed-output failures use the same
 provider-neutral errors as other adapters.
+
+### Google Gemini GenerateContent
+
+The `google_generate_content` adapter calls
+`POST {MODEL_BASE_URL}/models/{MODEL_IDENTIFIER}:generateContent`. It authenticates with the
+`x-goog-api-key` header using the credential stored in the environment variable named by
+`MODEL_API_KEY_ENV`; the checked-in Gemini binding names `GEMINI_API_KEY`. Credentials never
+appear in the URL, request body, model configuration, or provider-neutral response.
+
+The adapter maps system instructions, user and model messages, authorised image Evidence, JSON
+Schema output, function declarations, function calls, and function responses to the native Gemini
+shape. Gemini thought signatures required for a function-result continuation are carried inside
+the opaque provider call identity and restored only by this adapter; Google-specific fields do not
+enter the domain tool contract. Text, structured output, completion status, usage, cache-read
+usage, model version, and response identity are normalised into `ModelResponse`.
+
+The `google-gemini35-flash-lite` profile was verified on 2026-09-17 with a live image plus
+structured-output request and a live forced `context.resolve` call followed by structured
+continuation. This verifies transport compatibility for synthetic FNOL data. PDF input remains
+disabled, and provider availability and latency remain deployment observations rather than a
+permanent guarantee.
 
 The executable claimant Prompt Pack is `northwind-fnol-claimant-v7`, authored under
 `backend/prompts/v7/` and embedded immutably in the published `agent_instruction` configuration.
@@ -354,8 +379,8 @@ idempotency records unchanged.
 
 ## Current Limitations
 
-- The included transports implement synchronous OpenAI-compatible chat completions and Bedrock
-  Converse; streaming is not implemented.
+- The included transports implement synchronous OpenAI-compatible chat completions, Bedrock
+  Converse, and Google Gemini GenerateContent; streaming is not implemented.
 - Capability support is declared by configuration and verified by tests; there is no
   remote capability negotiation.
 - v7 lookup profiles wire only the read-only `context.resolve` tool. Policy and approved guidance,

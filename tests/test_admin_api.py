@@ -1299,6 +1299,20 @@ def test_model_validation_accepts_each_deployment_bound_profile() -> None:
             structured_output=True,
             image_input=True,
         ),
+        ModelRuntimeBinding(
+            profile_id='google-gemini35-flash-lite',
+            protocol='google_generate_content',
+            provider='google-ai-studio',
+            model_identifier='gemini-3.5-flash-lite',
+            base_url='https://generativelanguage.googleapis.com/v1beta',
+            credential_environment_variable='GEMINI_API_KEY',
+            purpose='agent_turn',
+            privacy_class='synthetic_fnol',
+            prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
+            structured_output=True,
+            tools=True,
+            image_input=True,
+        ),
     )
 
     for binding in bindings:
