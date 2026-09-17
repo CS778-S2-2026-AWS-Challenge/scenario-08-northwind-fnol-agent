@@ -1,5 +1,6 @@
 :root {
   --font-family-base: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-family-brand: "Source Serif 4", Georgia, serif;
   --font-size-caption: 14px;
   --font-size-body: 16px;
   --font-size-message: 18px;
@@ -7,6 +8,7 @@
   --font-size-section: 20px;
   --font-size-page: 24px;
   --font-size-hero: 28px;
+  --font-size-display: 40px;
   --font-weight-regular: 400;
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
@@ -59,7 +61,6 @@
   --color-risk-review-soft: #F4E1DC;
   --color-info: #536670;
   --color-info-soft: #E5EBED;
-
   --border-region: 2px solid var(--color-divider);
   --border-component: 1.5px solid var(--color-divider);
   --border-focus: 1.5px solid var(--color-accent);
@@ -69,6 +70,10 @@
   --shadow-subtle: 0 1px 3px rgba(26, 24, 20, .08);
   --shadow-popover: 0 8px 24px rgba(26, 24, 20, .14);
   --shadow-modal: 0 16px 40px rgba(26, 24, 20, .18);
+  --blur-subtle: blur(8px);
+  --blur-surface: blur(12px);
+  --blur-floating: blur(16px);
+  --blur-overlay: blur(20px);
   --opacity-disabled: .55;
 
   /* Workbench density tokens: the staff client may be denser, but component spacing
@@ -93,9 +98,48 @@
   --viewport-min-width: 320px;
   --size-control-touch: 44px;
   --size-header-compact: 52px;
+  --duration-standard: 200ms;
   --size-select-menu-min: 248px;
   --size-select-menu-max: 320px;
   --size-model-trigger-max: 200px;
   --layer-popover: 20;
   --size-popover-viewport-max: 80vw;
+
+  /* Claimant entry semantic contract. Component CSS consumes these roles
+     without reconstructing translucent states or page geometry. */
+  --claimant-entry-heading-size: var(--font-size-display);
+  --claimant-entry-heading-size-compact: var(--font-size-hero);
+  --claimant-entry-background-wash: color-mix(in srgb, var(--color-page) 44%, transparent);
+  --claimant-entry-background-wash-wide: radial-gradient(ellipse at center, color-mix(in srgb, var(--color-page) 64%, transparent) 0%, transparent 78%);
+  --claimant-entry-composer-surface: color-mix(in srgb, var(--color-surface) 88%, transparent);
+  --claimant-entry-selector-popover-surface: var(--claimant-entry-composer-surface);
+  --claimant-entry-control-surface: color-mix(in srgb, var(--color-surface) 56%, transparent);
+  --claimant-entry-control-hover-surface: color-mix(in srgb, var(--color-surface) 86%, transparent);
+  --claimant-entry-option-hover-surface: color-mix(in srgb, var(--color-accent-soft) 58%, transparent);
+  --claimant-entry-option-selected-surface: color-mix(in srgb, var(--color-accent-soft) 78%, transparent);
+  --claimant-entry-placeholder-color: color-mix(in srgb, var(--color-text-secondary) 68%, transparent);
+  --claimant-entry-surface-blur: var(--blur-surface);
+  --claimant-entry-popover-blur: var(--blur-floating);
+  --claimant-entry-content-measure: 1040px;
+  --claimant-entry-copy-measure: 720px;
+  --claimant-entry-composer-min-measure: 760px;
+  --claimant-entry-composer-fluid-measure: 64vw;
+  --claimant-entry-composer-min-height: 224px;
+  --claimant-entry-composer-large-min-height: 256px;
+  --claimant-entry-selector-measure: 224px;
+  --claimant-entry-content-lift: -3vh;
+
+  /* Claimant history semantic contract. */
+  --claimant-history-rail-width: calc(var(--size-control-touch) + var(--space-3));
+  --claimant-history-panel-width: 312px;
+  --claimant-history-rail-surface: color-mix(in srgb, var(--color-sidebar) 82%, transparent);
+  --claimant-history-panel-surface: color-mix(in srgb, var(--color-surface) 60%, transparent);
+  --claimant-history-subdued-surface: color-mix(in srgb, var(--color-surface) 54%, transparent);
+  --claimant-history-subdued-border-color: color-mix(in srgb, var(--color-divider) 56%, transparent);
+  --claimant-history-row-hover-surface: color-mix(in srgb, var(--color-surface) 46%, transparent);
+  --claimant-history-row-selected-surface: var(--claimant-entry-option-selected-surface);
+  --claimant-history-error-surface: color-mix(in srgb, var(--color-danger-soft) 76%, transparent);
+  --claimant-history-mobile-scrim: color-mix(in srgb, var(--color-text-primary) 6%, transparent);
+  --claimant-history-rail-blur: var(--blur-floating);
+  --claimant-history-panel-blur: var(--blur-overlay);
 }
