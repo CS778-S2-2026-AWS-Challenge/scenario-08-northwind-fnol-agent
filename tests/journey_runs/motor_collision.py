@@ -14,6 +14,7 @@ contradiction fails the run instead of becoming false-positive evidence.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -589,6 +590,31 @@ def run_motor_collision(
 def _drive(
     journey: Journey, journey_input: dict[str, object], pack: tuple[PackMaterial, ...]
 ) -> tuple[list[AgentTurn], dict[str, str]]:
+    turns, evidence = _drive_to_assessor_consent(journey, journey_input, pack)
+    claim = f'/api/v1/claims/{journey.claim_id}'
+    journey.step('route the assessor', 'POST', f'{claim}/assessor-routing', 201, 'claimant')
+    _receive_assessment(journey, _look_up_assessor_task(journey), pack)
+    return turns, evidence
+
+
+def _look_up_assessor_task(journey: Journey) -> str | None:
+    internal = f'/internal/v1/claims/{journey.claim_id}/external-tasks'
+    tasks = journey.step('look up the assessor task', 'GET', internal, 200, 'integration')
+    if not tasks or not tasks['items']:
+        return None
+    return journey.name(tasks['items'][0]['task']['task_id'], '{task_id}')
+
+
+def _receive_assessment(journey: Journey, task: str | None, pack: tuple[PackMaterial, ...]) -> None:
+    if task is None or not any(m.route is Arrival.SIMULATED_PROVIDER_RESULT for m in pack):
+        return
+    internal = f'/internal/v1/claims/{journey.claim_id}/external-tasks'
+    journey.step('receive the assessment', 'POST', f'{internal}/{task}/result', 201, 'integration')
+
+
+def _drive_to_assessor_consent(
+    journey: Journey, journey_input: dict[str, object], pack: tuple[PackMaterial, ...]
+) -> tuple[list[AgentTurn], dict[str, str]]:
     session = journey.create_working_claim('motor')
     if session is None:
         return [], {}
@@ -648,22 +674,13 @@ def _drive(
         'claimant',
         consent,
     )
-    journey.step('route the assessor', 'POST', f'{claim}/assessor-routing', 201, 'claimant')
-    internal = f'/internal/v1/claims/{journey.claim_id}/external-tasks'
-    tasks = journey.step('look up the assessor task', 'GET', internal, 200, 'integration')
-    has_provider_result = any(
-        material.route is Arrival.SIMULATED_PROVIDER_RESULT for material in pack
-    )
-    if tasks and tasks['items'] and has_provider_result:
-        task = journey.name(tasks['items'][0]['task']['task_id'], '{task_id}')
-        journey.step(
-            'receive the assessment', 'POST', f'{internal}/{task}/result', 201, 'integration'
-        )
     return turns, evidence
 
 
 def _assessor_read_back(
-    journey: Journey, shared: SharedReadBack
+    journey: Journey,
+    shared: SharedReadBack,
+    known_defects: Mapping[str, str] = KNOWN_DEFECTS,
 ) -> tuple[list[SeamCheck], list[VisibilityCheck], list[ConsentRecord]]:
     claim_id = journey.claim_id
     if not claim_id or shared.evidence_check is None:
@@ -712,7 +729,7 @@ def _assessor_read_back(
         if routed:
             verdict = SeamVerdict.CONSISTENT if agrees else disagreement
             checks.append(
-                seam_check(seam, question, claimant_said, staff_said, verdict, KNOWN_DEFECTS)
+                seam_check(seam, question, claimant_said, staff_said, verdict, known_defects)
             )
         else:
             checks.append(
@@ -722,7 +739,7 @@ def _assessor_read_back(
                     'not reached',
                     'not reached',
                     SeamVerdict.UNAVAILABLE,
-                    KNOWN_DEFECTS,
+                    known_defects,
                 )
             )
 

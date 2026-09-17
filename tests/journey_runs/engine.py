@@ -131,7 +131,10 @@ class Journey:
             if self.claim_id:
                 headers['If-Match'] = str(self.revision())
         response = self.client.request(method, path, headers=headers, json=body)
-        payload = cast(dict[str, Any], response.json()) if response.content else {}
+        try:
+            payload = cast(dict[str, Any], response.json()) if response.content else {}
+        except ValueError:
+            payload = {}
         outcome = step_outcome(response.status_code, expected)
         succeeded = outcome is StepOutcome.SUCCEEDED
         error = payload.get('error') or {}
@@ -152,7 +155,15 @@ class Journey:
                         if succeeded and method == 'POST' and self.claim_id
                         else None
                     ),
-                    'detail': None if succeeded else f'{error.get("code")}: {error.get("message")}',
+                    'detail': (
+                        None
+                        if succeeded
+                        else (
+                            f'{error.get("code")}: {error.get("message")}'
+                            if error
+                            else f'HTTP {response.status_code} returned a non-JSON response.'
+                        )
+                    ),
                 }
             )
         )
