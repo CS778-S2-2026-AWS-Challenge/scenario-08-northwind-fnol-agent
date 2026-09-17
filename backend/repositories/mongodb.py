@@ -61,10 +61,15 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.domain.realtime import (
+    MutationOutcome,
     RealtimeCursor,
     RealtimeEvent,
+    RealtimeMutation,
+    RealtimePublication,
     RealtimeResource,
-    new_realtime_event,
+    claimant_resources_for,
+    realtime_event_from_publication,
+    realtime_publication_for,
 )
 from backend.domain.retrieval import (
     ClaimHistoryRetrievalRecord,
@@ -368,77 +373,47 @@ class MongoDBRepository:
     def close(self) -> None:
         self._client.close()
 
-    def append_realtime_event(self, event: RealtimeEvent) -> None:
-        try:
-            self._atomic(
-                lambda mongo_session: self._insert_realtime_event(
-                    event,
-                    mongo_session=mongo_session,
-                )
+    def append_realtime_publication(self, publication: RealtimePublication) -> RealtimeEvent:
+        event = self._atomic(
+            lambda mongo_session: self._persist_realtime_publication(
+                publication,
+                MutationOutcome.CHANGED,
+                mongo_session=mongo_session,
             )
-        except DuplicateKeyError as error:
-            # A concurrent transaction may commit the same identity first. The
-            # failed transaction rolls back its sequence allocation before this read.
-            stored = self._find_realtime_event(event.event_id, mongo_session=None)
-            if stored is None or not self._realtime_retry_matches(stored, event):
-                raise IdempotencyConflict(event.event_id) from error
-
-    @staticmethod
-    def _realtime_retry_matches(stored: RealtimeEvent, event: RealtimeEvent) -> bool:
-        comparable = (
-            event.model_copy(update={'sequence': stored.sequence})
-            if event.sequence is None
-            else event
         )
-        return stored == comparable
+        assert event is not None
+        return event
 
-    def _find_realtime_event(
+    def _persist_realtime_publication(
         self,
-        event_id: str,
+        publication: RealtimePublication,
+        outcome: MutationOutcome,
         *,
         mongo_session: Any,
     ) -> RealtimeEvent | None:
-        document = self._collection.find_one(
-            {
-                '_id': self._record_id('realtime_event', event_id),
-                'record_type': 'realtime_event',
-            },
-            session=mongo_session,
+        if outcome is not MutationOutcome.CHANGED:
+            return None
+        event = realtime_event_from_publication(
+            publication,
+            occurred_at=datetime.now(UTC),
+            sequence=self._next_realtime_sequence(mongo_session),
         )
-        return self._model_from_document(document, RealtimeEvent)
-
-    def _insert_realtime_event(
-        self,
-        event: RealtimeEvent,
-        *,
-        mongo_session: Any,
-    ) -> None:
-        stored = self._find_realtime_event(event.event_id, mongo_session=mongo_session)
-        if stored is not None:
-            if not self._realtime_retry_matches(stored, event):
-                raise IdempotencyConflict(event.event_id)
-            return
-
-        prepared = event
-        if prepared.sequence is None:
-            prepared = prepared.model_copy(
-                update={'sequence': self._next_realtime_sequence(mongo_session)}
-            )
-        document = prepared.model_dump(mode='json')
+        document = event.model_dump(mode='json')
         document.update(
             {
-                '_id': self._record_id('realtime_event', prepared.event_id),
+                '_id': self._record_id('realtime_event', event.event_id),
                 'record_type': 'realtime_event',
-                'customer_id': prepared.customer_id,
-                'claim_id': prepared.claim_id,
+                'customer_id': event.customer_id,
+                'claim_id': event.claim_id,
                 'realtime_order': self._realtime_order(
-                    prepared.occurred_at,
-                    prepared.event_id,
-                    prepared.sequence,
+                    event.occurred_at,
+                    event.event_id,
+                    event.sequence,
                 ),
             }
         )
         self._collection.insert_one(document, session=mongo_session)
+        return event
 
     def _next_realtime_sequence(self, session: Any = None) -> int:
         counter = self._collection.find_one_and_update(
@@ -456,27 +431,31 @@ class MongoDBRepository:
             raise RuntimeError('MongoDB did not return a realtime sequence.')
         return sequence
 
-    def _append_realtime_event(
+    def _append_realtime_mutation(
         self,
+        mutation: RealtimeMutation,
         claim: WorkingClaim,
-        resources: tuple[RealtimeResource, ...],
         *,
         mongo_session: Any,
+        outcome: MutationOutcome = MutationOutcome.CHANGED,
         operation_correlation: str | None = None,
         claimant_visible: bool = True,
         claimant_resources: tuple[RealtimeResource, ...] | None = None,
-    ) -> None:
-        event = new_realtime_event(
+    ) -> RealtimeEvent | None:
+        publication = realtime_publication_for(
+            mutation=mutation,
             claim_id=claim.claim_id,
             customer_id=claim.customer_id,
-            occurred_at=datetime.now(UTC),
             claim_revision=claim.revision,
             operation_correlation=operation_correlation,
-            resources=tuple(dict.fromkeys(resources)),
             claimant_visible=claimant_visible,
             claimant_resources=claimant_resources,
         )
-        self._insert_realtime_event(event, mongo_session=mongo_session)
+        return self._persist_realtime_publication(
+            publication,
+            outcome,
+            mongo_session=mongo_session,
+        )
 
     def replay_realtime_events(
         self,
@@ -1067,7 +1046,19 @@ class MongoDBRepository:
         session: SessionRecord,
         mongo_session: Any,
     ) -> None:
-        if self._get('claim', claim.claim_id, WorkingClaim, session=mongo_session) is not None:
+        existing_claim = self._get('claim', claim.claim_id, WorkingClaim, session=mongo_session)
+        existing_session = self._get(
+            'session', session.session_id, SessionRecord, session=mongo_session
+        )
+        if existing_claim is not None or existing_session is not None:
+            if existing_claim == claim and existing_session == session:
+                self._append_realtime_mutation(
+                    RealtimeMutation.CLAIM_CREATED,
+                    claim,
+                    mongo_session=mongo_session,
+                    outcome=MutationOutcome.EXACT_NOOP,
+                )
+                return
             raise IdempotencyConflict(claim.claim_id)
         self._reject_session_identity_conflict(session, mongo_session=mongo_session)
         self._put(
@@ -1086,9 +1077,9 @@ class MongoDBRepository:
             claim_id=session.claim_id,
             session=mongo_session,
         )
-        self._append_realtime_event(
+        self._append_realtime_mutation(
+            RealtimeMutation.CLAIM_CREATED,
             claim,
-            (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
             mongo_session=mongo_session,
         )
 
@@ -1205,9 +1196,9 @@ class MongoDBRepository:
         )
         if promoted is None:
             raise KeyError(claim_id)
-        self._append_realtime_event(
+        self._append_realtime_mutation(
+            RealtimeMutation.CLAIM_OWNER_CHANGED,
             promoted,
-            (RealtimeResource.CLAIM,),
             mongo_session=mongo_session,
         )
         return promoted
@@ -1248,9 +1239,9 @@ class MongoDBRepository:
             raise KeyError(claim.claim_id)
         if self._replace_claim_revision(claim, expected_revision, mongo_session=mongo_session) == 0:
             self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
-        self._append_realtime_event(
+        self._append_realtime_mutation(
+            RealtimeMutation.CLAIM_CHANGED,
             claim,
-            (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
             mongo_session=mongo_session,
         )
 
@@ -1278,9 +1269,9 @@ class MongoDBRepository:
             claim_id=claim.claim_id,
             session=mongo_session,
         )
-        self._append_realtime_event(
+        self._append_realtime_mutation(
+            RealtimeMutation.CLAIM_CHANGED,
             claim,
-            (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
             mongo_session=mongo_session,
         )
 
@@ -1310,6 +1301,7 @@ class MongoDBRepository:
                 expected_revision,
                 idempotency,
                 mongo_session,
+                mutation=RealtimeMutation.CLAIM_CHANGED,
                 records=records,
             )
         )
@@ -1381,6 +1373,7 @@ class MongoDBRepository:
             expected_revision,
             idempotency,
             mongo_session,
+            mutation=RealtimeMutation.CLAIM_CHANGED,
             records=records,
         )
         for event in prepared:
@@ -1609,6 +1602,24 @@ class MongoDBRepository:
         )
         if claim is None or session is None or session.claim_id != message.claim_id:
             raise KeyError(message.claim_id)
+        existing = self._get(
+            'message',
+            message.message_id,
+            MessageRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        if existing is not None:
+            if existing == message:
+                self._append_realtime_mutation(
+                    RealtimeMutation.MESSAGE_CHANGED,
+                    claim,
+                    mongo_session=mongo_session,
+                    outcome=MutationOutcome.EXACT_NOOP,
+                    claimant_visible=message.visibility is not MessageVisibility.INTERNAL_ONLY,
+                )
+                return
+            raise IdempotencyConflict(message.message_id)
         self._put(
             'message',
             message.message_id,
@@ -1617,9 +1628,9 @@ class MongoDBRepository:
             claim_id=message.claim_id,
             session=mongo_session,
         )
-        self._append_realtime_event(
+        self._append_realtime_mutation(
+            RealtimeMutation.MESSAGE_CHANGED,
             claim,
-            (RealtimeResource.MESSAGES,),
             mongo_session=mongo_session,
             claimant_visible=message.visibility is not MessageVisibility.INTERNAL_ONLY,
         )
@@ -2061,21 +2072,11 @@ class MongoDBRepository:
                 raise IdempotencyConflict(evidence.evidence_id)
             self._validate_branch_evaluation(claim, branch_evaluation)
 
-            self._append_realtime_event(
+            self._append_realtime_mutation(
+                RealtimeMutation.ASSESSOR_RECONCILED,
                 claim,
-                (
-                    RealtimeResource.CLAIM,
-                    RealtimeResource.EXTERNAL_TASKS,
-                    RealtimeResource.EVIDENCE,
-                    RealtimeResource.QUEUE,
-                ),
                 mongo_session=mongo_session,
                 operation_correlation=(idempotency.key if idempotency is not None else None),
-                claimant_resources=(
-                    RealtimeResource.CLAIM,
-                    RealtimeResource.EXTERNAL_TASKS,
-                    RealtimeResource.EVIDENCE,
-                ),
             )
 
             if (
@@ -2249,6 +2250,14 @@ class MongoDBRepository:
             assert_material_history_is_append_only(current, evidence)
         except ValueError as conflict:
             raise IdempotencyConflict(evidence.evidence_id) from conflict
+        if current == evidence:
+            self._append_realtime_mutation(
+                RealtimeMutation.EVIDENCE_CHANGED,
+                claim,
+                mongo_session=mongo_session,
+                outcome=MutationOutcome.EXACT_NOOP,
+            )
+            return
         self._put(
             'evidence',
             evidence.evidence_id,
@@ -2257,9 +2266,9 @@ class MongoDBRepository:
             claim_id=evidence.claim_id,
             session=mongo_session,
         )
-        self._append_realtime_event(
+        self._append_realtime_mutation(
+            RealtimeMutation.EVIDENCE_CHANGED,
             claim,
-            (RealtimeResource.EVIDENCE,),
             mongo_session=mongo_session,
         )
 
@@ -2367,9 +2376,9 @@ class MongoDBRepository:
             assert_external_task_registry_compatible(task)
             try:
                 self._collection.insert_one(document, session=mongo_session)
-                self._append_realtime_event(
+                self._append_realtime_mutation(
+                    RealtimeMutation.EXTERNAL_TASK_CHANGED,
                     claim,
-                    (RealtimeResource.EXTERNAL_TASKS, RealtimeResource.QUEUE),
                     mongo_session=mongo_session,
                 )
                 return
@@ -2394,6 +2403,12 @@ class MongoDBRepository:
             'created_at',
         )
         if existing == task:
+            self._append_realtime_mutation(
+                RealtimeMutation.EXTERNAL_TASK_CHANGED,
+                claim,
+                mongo_session=mongo_session,
+                outcome=MutationOutcome.EXACT_NOOP,
+            )
             return
         if any(getattr(existing, name) != getattr(task, name) for name in immutable_identity):
             raise IdempotencyConflict(task.task_id)
@@ -2422,10 +2437,16 @@ class MongoDBRepository:
             )
             if not same_owner or self._model_from_document(current, ExternalTaskRecord) != task:
                 raise IdempotencyConflict(task.task_id)
+            self._append_realtime_mutation(
+                RealtimeMutation.EXTERNAL_TASK_CHANGED,
+                claim,
+                mongo_session=mongo_session,
+                outcome=MutationOutcome.EXACT_NOOP,
+            )
             return
-        self._append_realtime_event(
+        self._append_realtime_mutation(
+            RealtimeMutation.EXTERNAL_TASK_CHANGED,
             claim,
-            (RealtimeResource.EXTERNAL_TASKS, RealtimeResource.QUEUE),
             mongo_session=mongo_session,
         )
 
@@ -2625,9 +2646,9 @@ class MongoDBRepository:
         if stored is None:
             try:
                 self._collection.insert_one(document, session=mongo_session)
-                self._append_realtime_event(
+                self._append_realtime_mutation(
+                    RealtimeMutation.EXTERNAL_REQUEST_CHANGED,
                     claim,
-                    (RealtimeResource.EXTERNAL_TASKS,),
                     mongo_session=mongo_session,
                     operation_correlation=request.operation_id,
                 )
@@ -2646,6 +2667,13 @@ class MongoDBRepository:
         ):
             raise IdempotencyConflict(request.request_id)
         if existing == request:
+            self._append_realtime_mutation(
+                RealtimeMutation.EXTERNAL_REQUEST_CHANGED,
+                claim,
+                mongo_session=mongo_session,
+                outcome=MutationOutcome.EXACT_NOOP,
+                operation_correlation=request.operation_id,
+            )
             return
         immutable_identity = (
             'request_id',
@@ -2698,10 +2726,17 @@ class MongoDBRepository:
             )
             if not same_owner or self._model_from_document(current, ExternalTaskRequest) != request:
                 raise IdempotencyConflict(request.request_id)
+            self._append_realtime_mutation(
+                RealtimeMutation.EXTERNAL_REQUEST_CHANGED,
+                claim,
+                mongo_session=mongo_session,
+                outcome=MutationOutcome.EXACT_NOOP,
+                operation_correlation=request.operation_id,
+            )
             return
-        self._append_realtime_event(
+        self._append_realtime_mutation(
+            RealtimeMutation.EXTERNAL_REQUEST_CHANGED,
             claim,
-            (RealtimeResource.EXTERNAL_TASKS,),
             mongo_session=mongo_session,
             operation_correlation=request.operation_id,
         )
@@ -2811,10 +2846,16 @@ class MongoDBRepository:
                 or self._model_from_document(existing, ExternalTaskEvidenceLink) != link
             ):
                 raise IdempotencyConflict(link.evidence_id) from error
+            self._append_realtime_mutation(
+                RealtimeMutation.EXTERNAL_EVIDENCE_LINKED,
+                claim,
+                mongo_session=mongo_session,
+                outcome=MutationOutcome.EXACT_NOOP,
+            )
             return
-        self._append_realtime_event(
+        self._append_realtime_mutation(
+            RealtimeMutation.EXTERNAL_EVIDENCE_LINKED,
             claim,
-            (RealtimeResource.EVIDENCE, RealtimeResource.EXTERNAL_TASKS),
             mongo_session=mongo_session,
         )
 
@@ -2931,6 +2972,12 @@ class MongoDBRepository:
             except ValueError as conflict:
                 raise IdempotencyConflict(result.result_id) from conflict
             if held == result:
+                self._append_realtime_mutation(
+                    RealtimeMutation.EXTERNAL_RESULT_CHANGED,
+                    claim,
+                    mongo_session=mongo_session,
+                    outcome=MutationOutcome.EXACT_NOOP,
+                )
                 return
 
         record_id = self._record_id('external_task_result', result.result_id)
@@ -2944,9 +2991,9 @@ class MongoDBRepository:
         if held is None:
             try:
                 self._collection.insert_one(document, session=mongo_session)
-                self._append_realtime_event(
+                self._append_realtime_mutation(
+                    RealtimeMutation.EXTERNAL_RESULT_CHANGED,
                     claim,
-                    (RealtimeResource.EXTERNAL_TASKS, RealtimeResource.QUEUE),
                     mongo_session=mongo_session,
                 )
                 return
@@ -2957,6 +3004,12 @@ class MongoDBRepository:
                 # that ingestion failed after it had actually succeeded.
                 self._assert_race_winner_matches(
                     result, customer_id, error, mongo_session=mongo_session
+                )
+                self._append_realtime_mutation(
+                    RealtimeMutation.EXTERNAL_RESULT_CHANGED,
+                    claim,
+                    mongo_session=mongo_session,
+                    outcome=MutationOutcome.EXACT_NOOP,
                 )
                 return
         replaced = self._collection.replace_one(
@@ -2974,10 +3027,16 @@ class MongoDBRepository:
             # The stored verification moved between the read and the write. The same
             # question applies: an identical winner is this call's own outcome.
             self._assert_race_winner_matches(result, customer_id, None, mongo_session=mongo_session)
+            self._append_realtime_mutation(
+                RealtimeMutation.EXTERNAL_RESULT_CHANGED,
+                claim,
+                mongo_session=mongo_session,
+                outcome=MutationOutcome.EXACT_NOOP,
+            )
             return
-        self._append_realtime_event(
+        self._append_realtime_mutation(
+            RealtimeMutation.EXTERNAL_RESULT_CHANGED,
             claim,
-            (RealtimeResource.EXTERNAL_TASKS, RealtimeResource.QUEUE),
             mongo_session=mongo_session,
         )
 
@@ -3098,6 +3157,21 @@ class MongoDBRepository:
         )
         if claim is None:
             raise KeyError(handoff.claim_id)
+        existing = self._get(
+            'handoff',
+            handoff.handoff_id,
+            HandoffRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        if existing == handoff:
+            self._append_realtime_mutation(
+                RealtimeMutation.HANDOFF_CHANGED,
+                claim,
+                mongo_session=mongo_session,
+                outcome=MutationOutcome.EXACT_NOOP,
+            )
+            return
         self._put(
             'handoff',
             handoff.handoff_id,
@@ -3106,9 +3180,9 @@ class MongoDBRepository:
             claim_id=handoff.claim_id,
             session=mongo_session,
         )
-        self._append_realtime_event(
+        self._append_realtime_mutation(
+            RealtimeMutation.HANDOFF_CHANGED,
             claim,
-            (RealtimeResource.HANDOFFS, RealtimeResource.QUEUE),
             mongo_session=mongo_session,
         )
 
@@ -3369,6 +3443,7 @@ class MongoDBRepository:
                 expected_revision,
                 idempotency,
                 mongo_session,
+                mutation=RealtimeMutation.OWNERSHIP_CHANGED,
                 records=records,
             )
         )
@@ -3431,6 +3506,7 @@ class MongoDBRepository:
                 expected_revision,
                 idempotency,
                 mongo_session,
+                mutation=RealtimeMutation.STAFF_MUTATION_COMMITTED,
                 records=records,
                 required_staff_id=required_staff_id,
                 required_staff_revision=required_staff_revision,
@@ -3467,6 +3543,7 @@ class MongoDBRepository:
                 expected_revision,
                 idempotency,
                 mongo_session,
+                mutation=RealtimeMutation.MESSAGE_MUTATION_COMMITTED,
                 session=session,
                 records=[('message', message.message_id, message)],
             )
@@ -3616,7 +3693,6 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         mongo_session: Any,
     ) -> None:
-        self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
         self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
         stored_session = self._get(
             'session',
@@ -3631,6 +3707,55 @@ class MongoDBRepository:
             or stored_session.status is not SessionStatus.ACTIVE
         ):
             raise KeyError(claim.claim_id)
+        existing_idempotency = self._collection.find_one(
+            {
+                'record_type': 'idempotency',
+                'actor_id': idempotency.actor_id,
+                'route': idempotency.route,
+                'key': idempotency.key,
+            },
+            session=mongo_session,
+        )
+        if existing_idempotency is not None:
+            exact_retry = (
+                existing_idempotency.get('payload', {}).get('request_fingerprint')
+                == idempotency.request_fingerprint
+                and stored_session == session
+                and self._get(
+                    'message',
+                    claimant_message.message_id,
+                    MessageRecord,
+                    customer_id=claim.customer_id,
+                    session=mongo_session,
+                )
+                == claimant_message
+                and self._get(
+                    'message',
+                    agent_message.message_id,
+                    MessageRecord,
+                    customer_id=claim.customer_id,
+                    session=mongo_session,
+                )
+                == agent_message
+                and self._get(
+                    'runtime_trace',
+                    runtime_trace.trace_id,
+                    RuntimeTraceRecord,
+                    customer_id=claim.customer_id,
+                    session=mongo_session,
+                )
+                == runtime_trace
+            )
+            if exact_retry:
+                self._append_realtime_mutation(
+                    RealtimeMutation.RUNTIME_TURN_COMMITTED,
+                    claim,
+                    mongo_session=mongo_session,
+                    outcome=MutationOutcome.EXACT_NOOP,
+                    operation_correlation=idempotency.key,
+                )
+                return
+            raise IdempotencyConflict(idempotency.key)
         if claimant_message.client_message_id is not None:
             duplicate = self._collection.find_one(
                 {
@@ -3681,9 +3806,9 @@ class MongoDBRepository:
                 session=mongo_session,
             )
         self._save_idempotency(idempotency, mongo_session)
-        self._append_realtime_event(
+        self._append_realtime_mutation(
+            RealtimeMutation.RUNTIME_TURN_COMMITTED,
             claim,
-            (RealtimeResource.MESSAGES, RealtimeResource.WORK_ITEMS),
             mongo_session=mongo_session,
             operation_correlation=idempotency.key,
         )
@@ -3900,6 +4025,7 @@ class MongoDBRepository:
             expected_revision,
             idempotency,
             mongo_session,
+            mutation=RealtimeMutation.AGENT_TURN_COMMITTED,
             records=records,
             session=session,
         )
@@ -3932,6 +4058,7 @@ class MongoDBRepository:
                 expected_revision,
                 idempotency,
                 mongo_session,
+                mutation=RealtimeMutation.EVIDENCE_CLAIM_CHANGED,
                 records=records,
             )
         )
@@ -3991,6 +4118,7 @@ class MongoDBRepository:
                 expected_revision,
                 idempotency,
                 mongo_session,
+                mutation=RealtimeMutation.EVIDENCE_CLAIM_CHANGED,
                 records=records,
             )
             for event in prepared:
@@ -4027,6 +4155,7 @@ class MongoDBRepository:
                 expected_revision,
                 idempotency,
                 mongo_session,
+                mutation=RealtimeMutation.HANDOFF_MUTATION_COMMITTED,
                 records=records,
             )
         )
@@ -4038,6 +4167,7 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         mongo_session: Any,
         *,
+        mutation: RealtimeMutation,
         records: list[tuple[str, str, BaseModel]],
         session: SessionRecord | None = None,
         required_staff_id: str | None = None,
@@ -4190,36 +4320,18 @@ class MongoDBRepository:
                 session=mongo_session,
             )
         self._save_idempotency(idempotency, mongo_session)
-        resources = [RealtimeResource.CLAIM, RealtimeResource.QUEUE]
-        kind_resources = {
-            'message': RealtimeResource.MESSAGES,
-            'evidence': RealtimeResource.EVIDENCE,
-            'evidence_claim_link': RealtimeResource.EVIDENCE,
-            'handoff': RealtimeResource.HANDOFFS,
-            'runtime_work_item': RealtimeResource.WORK_ITEMS,
-            'external_task': RealtimeResource.EXTERNAL_TASKS,
-        }
-        resources.extend(
-            resource
-            for kind, _identifier, _record in records
-            if (resource := kind_resources.get(kind)) is not None
-        )
         has_internal_message = any(
             isinstance(record, MessageRecord)
             and record.visibility is MessageVisibility.INTERNAL_ONLY
             for _kind, _identifier, record in records
         )
-        claimant_resources = tuple(
-            resource
-            for resource in dict.fromkeys(resources)
-            if resource is not RealtimeResource.MESSAGES or not has_internal_message
-        )
-        self._append_realtime_event(
+        excluded = frozenset({RealtimeResource.MESSAGES}) if has_internal_message else frozenset()
+        self._append_realtime_mutation(
+            mutation,
             claim,
-            tuple(resources),
             mongo_session=mongo_session,
             operation_correlation=idempotency.key,
-            claimant_resources=claimant_resources,
+            claimant_resources=claimant_resources_for(mutation, excluded=excluded),
         )
 
     def _ensure_claim_revision(
@@ -4449,13 +4561,9 @@ class MongoDBRepository:
             session=mongo_session,
         )
         self._save_idempotency(idempotency, mongo_session)
-        self._append_realtime_event(
+        self._append_realtime_mutation(
+            RealtimeMutation.SESSION_PAUSED,
             claim,
-            (
-                RealtimeResource.CLAIM,
-                RealtimeResource.WORK_ITEMS,
-                RealtimeResource.QUEUE,
-            ),
             mongo_session=mongo_session,
             operation_correlation=idempotency.key,
         )
@@ -4690,9 +4798,9 @@ class MongoDBRepository:
                 session=mongo_session,
             )
         self._save_idempotency(record=idempotency, session=mongo_session)
-        self._append_realtime_event(
+        self._append_realtime_mutation(
+            RealtimeMutation.SESSION_CHANGED,
             claim,
-            (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
             mongo_session=mongo_session,
             operation_correlation=idempotency.key,
         )

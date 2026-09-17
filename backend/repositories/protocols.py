@@ -30,7 +30,7 @@ from backend.domain.models import (
     StaffActionRecord,
     WorkingClaim,
 )
-from backend.domain.realtime import RealtimeCursor, RealtimeEvent
+from backend.domain.realtime import RealtimeCursor, RealtimeEvent, RealtimePublication
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 from backend.domain.runtime import RuntimeTurnRecords, RuntimeWorkItemRecord
 from backend.domain.staff_agent import (
@@ -409,20 +409,14 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """Persist the graph, returning an existing idempotent result on replay."""
         raise NotImplementedError
 
-    def append_realtime_event(self, event: RealtimeEvent) -> None:
-        """Append one immutable event outside a business mutation transaction.
-
-        An exact retry is a no-op. Reusing an event identity with different
-        logical content raises ``IdempotencyConflict``.
+    def append_realtime_publication(self, publication: RealtimePublication) -> RealtimeEvent:
+        """Persist one provider-neutral publication outside a business mutation.
 
         Args:
-            event: Realtime event to append.
+            publication: Mutation intent without persistence-owned coordinates.
 
         Returns:
-            None.
-
-        Raises:
-            IdempotencyConflict: The event identity exists with different content.
+            The repository-created durable event.
         """
         raise NotImplementedError
 

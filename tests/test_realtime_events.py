@@ -18,18 +18,21 @@ from backend.api import claims as claims_api
 from backend.api.realtime import realtime_stream
 from backend.core.auth import Principal
 from backend.domain.realtime import (
+    REALTIME_MUTATION_RESOURCES,
     RealtimeAudience,
     RealtimeCursor,
     RealtimeDelivery,
     RealtimeEvent,
+    RealtimeMutation,
+    RealtimePublication,
     RealtimeResource,
     cursor_for,
     cursor_is_after,
-    new_realtime_event,
+    realtime_publication_for,
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
-from backend.repositories.protocols import IdempotencyConflict, PersistenceRepository
+from backend.repositories.protocols import PersistenceRepository
 from backend.services.realtime import (
     RealtimeDispatcher,
     RealtimeScope,
@@ -47,12 +50,48 @@ def _event(
     resources: tuple[RealtimeResource, ...] = (RealtimeResource.CLAIM,),
     claimant_resources: tuple[RealtimeResource, ...] | None = None,
 ) -> RealtimeEvent:
-    return new_realtime_event(
+    safe_resources = tuple(
+        resource
+        for resource in resources
+        if resource
+        in {
+            RealtimeResource.CLAIM,
+            RealtimeResource.MESSAGES,
+            RealtimeResource.EVIDENCE,
+            RealtimeResource.HANDOFFS,
+            RealtimeResource.EXTERNAL_TASKS,
+        }
+    )
+    visible = safe_resources if claimant_resources is None else claimant_resources
+    return RealtimeEvent(
+        event_id=f'rte_{suffix:020x}',
         claim_id='clm_one',
         customer_id=customer_id,
         occurred_at=NOW + timedelta(seconds=suffix),
         claim_revision=suffix + 1,
         resources=resources,
+        claimant_resources=visible,
+        audiences=(
+            (RealtimeAudience.CLAIMANT, RealtimeAudience.STAFF)
+            if visible
+            else (RealtimeAudience.STAFF,)
+        ),
+    )
+
+
+def _publication(
+    suffix: int,
+    *,
+    mutation: RealtimeMutation = RealtimeMutation.CLAIM_OWNER_CHANGED,
+    customer_id: str = 'cus_one',
+    claimant_resources: tuple[RealtimeResource, ...] | None = None,
+) -> RealtimePublication:
+    return realtime_publication_for(
+        mutation=mutation,
+        claim_id='clm_one',
+        customer_id=customer_id,
+        claim_revision=suffix + 1,
+        operation_correlation=f'op_{suffix}',
         claimant_resources=claimant_resources,
     )
 
@@ -67,14 +106,7 @@ def test_cursor_round_trip_preserves_stable_ordering_coordinates() -> None:
 
 
 def test_cursor_round_trip_preserves_mongo_commit_sequence() -> None:
-    event = new_realtime_event(
-        claim_id='clm_one',
-        customer_id='cus_one',
-        occurred_at=NOW,
-        claim_revision=2,
-        sequence=7,
-        resources=(RealtimeResource.CLAIM,),
-    )
+    event = _event(1).model_copy(update={'occurred_at': NOW, 'sequence': 7})
 
     cursor = RealtimeCursor.decode(cursor_for(event))
 
@@ -124,10 +156,8 @@ def test_realtime_event_rejects_inconsistent_visibility_sets(
 
 def test_fixture_replay_requires_a_durable_anchor() -> None:
     repository = FixtureRepository()
-    first = _event(1)
-    second = _event(2)
-    repository.append_realtime_event(first)
-    repository.append_realtime_event(second)
+    first = repository.append_realtime_publication(_publication(1))
+    second = repository.append_realtime_publication(_publication(2))
 
     replay = repository.replay_realtime_events(
         RealtimeCursor(occurred_at=first.occurred_at, event_id=first.event_id),
@@ -157,23 +187,9 @@ def test_fixture_sequence_preserves_append_order_for_live_and_reconnect() -> Non
 
     watcher = Thread(target=collect)
     watcher.start()
-    first = _event(1).model_copy(
-        update={'event_id': 'rte_ffffffffffffffffffff', 'occurred_at': NOW}
-    )
-    second = _event(2).model_copy(
-        update={'event_id': 'rte_00000000000000000000', 'occurred_at': NOW}
-    )
-    rolled_back_clock = _event(3).model_copy(
-        update={
-            'event_id': 'rte_11111111111111111111',
-            'occurred_at': NOW - timedelta(days=1),
-        }
-    )
-
-    repository.append_realtime_event(first)
-    repository.append_realtime_event(first)
-    repository.append_realtime_event(second)
-    repository.append_realtime_event(rolled_back_clock)
+    first = repository.append_realtime_publication(_publication(1))
+    second = repository.append_realtime_publication(_publication(2))
+    rolled_back_clock = repository.append_realtime_publication(_publication(3))
 
     live = [received.get(timeout=2) for _ in range(3)]
     watcher.join(timeout=2)
@@ -195,11 +211,6 @@ def test_fixture_sequence_preserves_append_order_for_live_and_reconnect() -> Non
     )
     assert replay == live[1:]
 
-    with pytest.raises(IdempotencyConflict):
-        repository.append_realtime_event(
-            first.model_copy(update={'customer_id': 'cus_conflicting_duplicate'})
-        )
-
 
 @pytest.fixture(params=('fixture', 'mongo'))
 def realtime_repository(request: pytest.FixtureRequest) -> PersistenceRepository:
@@ -210,26 +221,17 @@ def realtime_repository(request: pytest.FixtureRequest) -> PersistenceRepository
     return repository
 
 
-def test_realtime_append_is_immutable_and_idempotent_across_adapters(
+def test_realtime_publication_coordinates_are_repository_owned_across_adapters(
     realtime_repository: PersistenceRepository,
 ) -> None:
-    first = _event(1).model_copy(update={'event_id': 'rte_aaaaaaaaaaaaaaaaaaaa'})
-
-    realtime_repository.append_realtime_event(first)
+    first = realtime_repository.append_realtime_publication(_publication(1))
     stored_first = realtime_repository.replay_realtime_events(None, limit=10)[0]
     first_cursor = cursor_for(stored_first)
 
-    realtime_repository.append_realtime_event(first)
-    assert realtime_repository.replay_realtime_events(None, limit=10) == [stored_first]
-    assert cursor_for(realtime_repository.replay_realtime_events(None, limit=10)[0]) == first_cursor
-
-    with pytest.raises(IdempotencyConflict):
-        realtime_repository.append_realtime_event(first.model_copy(update={'claim_revision': 99}))
-    assert realtime_repository.replay_realtime_events(None, limit=10) == [stored_first]
-
-    second = _event(2).model_copy(update={'event_id': 'rte_bbbbbbbbbbbbbbbbbbbb'})
-    realtime_repository.append_realtime_event(second)
+    second = realtime_repository.append_realtime_publication(_publication(2))
     stored = realtime_repository.replay_realtime_events(None, limit=10)
+    assert first == stored_first
+    assert first.event_id != second.event_id
     assert [event.sequence for event in stored] == [1, 2]
     assert realtime_repository.replay_realtime_events(
         RealtimeCursor.decode(first_cursor),
@@ -237,19 +239,46 @@ def test_realtime_append_is_immutable_and_idempotent_across_adapters(
     ) == [stored[1]]
 
 
+@pytest.mark.parametrize('mutation', tuple(RealtimeMutation))
+def test_registered_mutation_projection_is_equivalent_across_adapters(
+    realtime_repository: PersistenceRepository,
+    mutation: RealtimeMutation,
+) -> None:
+    publication = realtime_publication_for(
+        mutation=mutation,
+        claim_id='clm_registry_matrix',
+        customer_id='cus_registry_matrix',
+        claim_revision=3,
+        operation_correlation='staff-operation',
+    )
+
+    event = realtime_repository.append_realtime_publication(publication)
+    replay = realtime_repository.replay_realtime_events(None, limit=10)
+
+    assert replay == [event]
+    assert event.resources == REALTIME_MUTATION_RESOURCES[mutation]
+    assert event.event_id.startswith('rte_')
+    assert event.sequence == 1
+    staff = delivery_for(event, RealtimeAudience.STAFF)
+    claimant = delivery_for(event, RealtimeAudience.CLAIMANT)
+    assert staff.data['resources'] == [resource.value for resource in event.resources]
+    assert staff.data['operation_correlation'] == 'staff-operation'
+    assert set(claimant.data['resources']).isdisjoint({'queue', 'work_items'})
+    assert 'operation_correlation' not in claimant.data
+
+
 def test_claimant_scope_filters_customer_and_internal_message_resources() -> None:
     dispatcher = RealtimeDispatcher(FixtureRepository())
     scope = RealtimeScope(RealtimeAudience.CLAIMANT, 'cus_one')
-    allowed = _event(
-        1,
-        resources=(RealtimeResource.CLAIM, RealtimeResource.MESSAGES),
-        claimant_resources=(RealtimeResource.CLAIM,),
+    anchor = dispatcher._repository.append_realtime_publication(_publication(0))
+    dispatcher._repository.append_realtime_publication(
+        _publication(
+            1,
+            mutation=RealtimeMutation.AGENT_TURN_COMMITTED,
+            claimant_resources=(RealtimeResource.CLAIM,),
+        )
     )
-    foreign = _event(2, customer_id='cus_two')
-    anchor = _event(0)
-    dispatcher._repository.append_realtime_event(anchor)
-    dispatcher._repository.append_realtime_event(allowed)
-    dispatcher._repository.append_realtime_event(foreign)
+    dispatcher._repository.append_realtime_publication(_publication(2, customer_id='cus_two'))
 
     deliveries = dispatcher.replay(scope, cursor_for(anchor))
 
@@ -259,7 +288,8 @@ def test_claimant_scope_filters_customer_and_internal_message_resources() -> Non
 
 
 def test_claimant_delivery_filters_staff_resources_and_correlation() -> None:
-    event = new_realtime_event(
+    event = RealtimeEvent(
+        event_id='rte_aaaaaaaaaaaaaaaaaaaa',
         claim_id='clm_one',
         customer_id='cus_one',
         occurred_at=NOW,
@@ -268,6 +298,8 @@ def test_claimant_delivery_filters_staff_resources_and_correlation() -> None:
             RealtimeResource.QUEUE,
             RealtimeResource.WORK_ITEMS,
         ),
+        claimant_resources=(RealtimeResource.CLAIM,),
+        audiences=(RealtimeAudience.CLAIMANT, RealtimeAudience.STAFF),
         operation_correlation='staff-idempotency-key',
     )
 
@@ -282,12 +314,8 @@ def test_claimant_delivery_filters_staff_resources_and_correlation() -> None:
 
 def test_sequence_cursor_advances_after_legacy_cursor() -> None:
     legacy = _event(1)
-    sequenced = new_realtime_event(
-        claim_id='clm_one',
-        customer_id='cus_one',
-        occurred_at=legacy.occurred_at - timedelta(seconds=10),
-        sequence=1,
-        resources=(RealtimeResource.CLAIM,),
+    sequenced = _event(2).model_copy(
+        update={'occurred_at': legacy.occurred_at - timedelta(seconds=10), 'sequence': 1}
     )
 
     assert cursor_is_after(cursor_for(sequenced), cursor_for(legacy)) is True
@@ -393,11 +421,14 @@ def test_fixture_event_construction_failure_leaves_no_claim(
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fail_event(**_: object) -> RealtimeEvent:
+    def fail_event(*_: object, **__: object) -> RealtimeEvent:
         raise RuntimeError('event construction failed')
 
     with monkeypatch.context() as event_patch:
-        event_patch.setattr('backend.repositories.fixture.new_realtime_event', fail_event)
+        event_patch.setattr(
+            'backend.repositories.fixture.realtime_event_from_publication',
+            fail_event,
+        )
         with pytest.raises(RuntimeError, match='event construction failed'):
             client.post(
                 '/api/v1/claims',
@@ -489,11 +520,8 @@ async def _stream_body(response: object) -> str:
 
 def test_realtime_stream_replays_changes_then_requires_resync() -> None:
     repository = FixtureRepository()
-    anchor = _event(0)
-    first = _event(1)
-    second = _event(2)
-    for event in (anchor, first, second):
-        repository.append_realtime_event(event)
+    for suffix in (0, 1, 2):
+        repository.append_realtime_publication(_publication(suffix))
     stored_anchor, stored_first, _ = repository.replay_realtime_events(None, limit=10)
     dispatcher = RealtimeDispatcher(repository, replay_limit=1)
     request = _StreamRequest(dispatcher)
@@ -516,10 +544,8 @@ def test_realtime_stream_replays_changes_then_requires_resync() -> None:
 
 def test_realtime_stream_preserves_legacy_claim_updated_shape() -> None:
     repository = FixtureRepository()
-    anchor = _event(0)
-    changed = _event(1)
-    repository.append_realtime_event(anchor)
-    repository.append_realtime_event(changed)
+    anchor = repository.append_realtime_publication(_publication(0))
+    repository.append_realtime_publication(_publication(1))
     dispatcher = RealtimeDispatcher(repository)
     request = _StreamRequest(dispatcher, disconnect_after=0)
 

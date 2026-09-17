@@ -1,6 +1,7 @@
 import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime
 from threading import Barrier, Event, Lock, Thread, current_thread
 from typing import Any, ClassVar
@@ -10,7 +11,6 @@ import pytest
 from pymongo import MongoClient
 from pymongo.errors import (
     ConfigurationError,
-    DuplicateKeyError,
     PyMongoError,
     ServerSelectionTimeoutError,
 )
@@ -27,6 +27,7 @@ from backend.domain.external_services import (
     ASSESSOR_SERVICE_IDENTITY,
     ExternalTaskDelivery,
     ExternalTaskOperationStatus,
+    ExternalTaskRecord,
 )
 from backend.domain.models import (
     ActorReference,
@@ -53,6 +54,12 @@ from backend.domain.models import (
     ExternalClaimResult,
     ExternalServiceConsent,
     ExternalServiceConsentStatus,
+    HandoffPacket,
+    HandoffPriority,
+    HandoffRecord,
+    HandoffStatus,
+    HandoffTrigger,
+    HandoffType,
     IntegrationSource,
     MessageRecord,
     MessageVisibility,
@@ -64,13 +71,15 @@ from backend.domain.models import (
     SessionStatus,
     StaffActionRecord,
     StaffActionStatus,
+    SupportNeed,
     WorkingClaim,
 )
 from backend.domain.realtime import (
+    REALTIME_MUTATION_RESOURCES,
     RealtimeAudience,
     RealtimeCursor,
+    RealtimeMutation,
     RealtimeResource,
-    new_realtime_event,
 )
 from backend.domain.retrieval import (
     PolicyFacts,
@@ -93,6 +102,7 @@ from backend.domain.staff_agent import (
     StaffAgentSession,
 )
 from backend.domain.staff_identity import StaffPresenceRecord
+from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import (
     MongoDBConfigurationError,
     MongoDBConnectionConfig,
@@ -115,6 +125,7 @@ from backend.services.integrations import (
     reconcile_assessor_routing,
     route_assessor,
 )
+from backend.services.realtime import delivery_for
 
 
 def _assert_persistence_contract(repository: MongoDBRepository) -> PersistenceRepository:
@@ -283,6 +294,29 @@ def _evidence(claim: WorkingClaim) -> EvidenceRecord:
     )
 
 
+def _handoff(claim: WorkingClaim) -> HandoffRecord:
+    return HandoffRecord(
+        handoff_id='hnd_mongo_001',
+        claim_id=claim.claim_id,
+        type=HandoffType.HUMAN_SUPPORT,
+        status=HandoffStatus.REQUESTED,
+        priority=HandoffPriority.STANDARD,
+        queue='human_support',
+        support_need=SupportNeed.HUMAN_REQUESTED,
+        trigger=HandoffTrigger.CLAIMANT_SUPPORT_REQUEST,
+        reason_codes=['HUMAN_SUPPORT_REQUESTED'],
+        reason='The claimant requested a person.',
+        requested_action='Continue the report with staff support.',
+        applied_rule='human_support_request',
+        packet=HandoffPacket(
+            form_revision=claim.revision,
+            promised_next_step='Northwind staff will continue the report.',
+        ),
+        source_message_id='msg_source',
+        created_at=claim.created_at,
+    )
+
+
 def _retrieval(claim: WorkingClaim) -> PolicyRetrievalRecord:
     return PolicyRetrievalRecord(
         retrieval_id='ret_mongo_001',
@@ -363,6 +397,171 @@ def repository() -> MongoDBRepository:
     repository = MongoDBRepository(mongomock.MongoClient(), 'northwind_test')
     repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
     return repository
+
+
+@pytest.fixture(params=('fixture', 'mongo'))
+def mutation_contract_repository(request: pytest.FixtureRequest) -> PersistenceRepository:
+    if request.param == 'fixture':
+        return FixtureRepository()
+    repository = MongoDBRepository(mongomock.MongoClient(), 'mutation_contract')
+    repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    return repository
+
+
+@pytest.mark.parametrize(
+    ('family', 'mutation'),
+    [
+        ('claim_session_queue', RealtimeMutation.CLAIM_CREATED),
+        ('message', RealtimeMutation.MESSAGE_CHANGED),
+        ('runtime_work_item', RealtimeMutation.RUNTIME_TURN_COMMITTED),
+        ('evidence', RealtimeMutation.EVIDENCE_CHANGED),
+        ('handoff_ownership', RealtimeMutation.HANDOFF_CHANGED),
+        ('external_task_queue', RealtimeMutation.EXTERNAL_TASK_CHANGED),
+    ],
+)
+def test_mutation_publication_contract_is_equivalent_across_adapters(
+    mutation_contract_repository: PersistenceRepository,
+    family: str,
+    mutation: RealtimeMutation,
+) -> None:
+    repository = mutation_contract_repository
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+
+    expected_correlation: str | None = None
+    if family == 'claim_session_queue':
+        changed_events = repository.replay_realtime_events(None, limit=20)
+
+        def exact_retry() -> None:
+            repository.create_claim(claim, session)
+
+        def conflicting_retry() -> None:
+            repository.create_claim(claim.model_copy(update={'locale': 'mi-NZ'}), session)
+
+    elif family == 'message':
+        message = _message(claim, session)
+        repository.save_message(message, claim.customer_id)
+        changed_events = repository.replay_realtime_events(None, limit=20)
+
+        def exact_retry() -> None:
+            repository.save_message(message, claim.customer_id)
+
+        def conflicting_retry() -> None:
+            repository.save_message(
+                message.model_copy(
+                    update={'content': {'type': 'text', 'text': 'A conflicting incident.'}}
+                ),
+                claim.customer_id,
+            )
+
+    elif family == 'runtime_work_item':
+        claimant_message, agent_message, trace, idempotency = _runtime_records(claim, session)
+        repository.save_runtime_turn(
+            claim,
+            claim.revision,
+            session,
+            claimant_message,
+            agent_message,
+            trace,
+            idempotency,
+        )
+        changed_events = repository.replay_realtime_events(None, limit=20)
+        expected_correlation = idempotency.key
+
+        def exact_retry() -> None:
+            repository.save_runtime_turn(
+                claim,
+                claim.revision,
+                session,
+                claimant_message,
+                agent_message,
+                trace,
+                idempotency,
+            )
+
+        def conflicting_retry() -> None:
+            repository.save_runtime_turn(
+                claim,
+                claim.revision,
+                session,
+                claimant_message,
+                agent_message,
+                trace,
+                replace(idempotency, request_fingerprint='conflicting-runtime-fingerprint'),
+            )
+
+    elif family == 'evidence':
+        evidence = _evidence(claim)
+        repository.save_evidence(evidence, claim.customer_id)
+        changed_events = repository.replay_realtime_events(None, limit=20)
+
+        def exact_retry() -> None:
+            repository.save_evidence(evidence, claim.customer_id)
+
+        def conflicting_retry() -> None:
+            repository.save_evidence(
+                evidence.model_copy(update={'claim_id': 'clm_not_owned'}),
+                claim.customer_id,
+            )
+
+    elif family == 'handoff_ownership':
+        handoff = _handoff(claim)
+        repository.save_handoff(handoff, claim.customer_id)
+        changed_events = repository.replay_realtime_events(None, limit=20)
+
+        def exact_retry() -> None:
+            repository.save_handoff(handoff, claim.customer_id)
+
+        def conflicting_retry() -> None:
+            repository.save_handoff(handoff, 'cus_not_owner')
+
+    else:
+        task = ExternalTaskRecord(
+            task_id='tsk_mongo_contract',
+            claim_id=claim.claim_id,
+            service_identity=ASSESSOR_SERVICE_IDENTITY,
+            requested_action=ASSESSOR_REQUESTED_ACTION,
+            integration_source=IntegrationSource.FIXTURE,
+            status=ExternalTaskOperationStatus.PREPARED,
+            delivery=ExternalTaskDelivery.NOT_SUBMITTED,
+            created_at=claim.created_at,
+            updated_at=claim.updated_at,
+        )
+        repository.save_external_task(task, claim.customer_id)
+        changed_events = repository.replay_realtime_events(None, limit=20)
+
+        def exact_retry() -> None:
+            repository.save_external_task(task, claim.customer_id)
+
+        def conflicting_retry() -> None:
+            repository.save_external_task(
+                task.model_copy(
+                    update={'integration_source': IntegrationSource.CONFIGURED_SERVICE}
+                ),
+                claim.customer_id,
+            )
+
+    assert changed_events[-1].resources == REALTIME_MUTATION_RESOURCES[mutation]
+    assert [event.sequence for event in changed_events] == list(range(1, len(changed_events) + 1))
+    before_retry = changed_events.copy()
+
+    exact_retry()
+    assert repository.replay_realtime_events(None, limit=20) == before_retry
+
+    with pytest.raises((IdempotencyConflict, KeyError)):
+        conflicting_retry()
+    assert repository.replay_realtime_events(None, limit=20) == before_retry
+
+    event = before_retry[-1]
+    staff_delivery = delivery_for(event, RealtimeAudience.STAFF)
+    claimant_delivery = delivery_for(event, RealtimeAudience.CLAIMANT)
+    assert tuple(staff_delivery.data['resources']) == tuple(
+        resource.value for resource in REALTIME_MUTATION_RESOURCES[mutation]
+    )
+    assert set(claimant_delivery.data['resources']).isdisjoint({'queue', 'work_items'})
+    assert staff_delivery.data.get('operation_correlation') == expected_correlation
+    assert 'operation_correlation' not in claimant_delivery.data
 
 
 def test_mongodb_connection_config_requires_uri_and_database(
@@ -650,7 +849,15 @@ def test_assessor_routing_service_executes_with_mongodb_repository(
     assert requests[0].task_id == tasks[0].task_id
     assert requests[0].operation_id == operation.operation_id
     assert requests[0].sent_at is not None
+    events_before_retry = repository.replay_realtime_events(None, limit=100)
+    request_event = next(
+        event
+        for event in reversed(events_before_retry)
+        if event.resources == REALTIME_MUTATION_RESOURCES[RealtimeMutation.EXTERNAL_REQUEST_CHANGED]
+    )
+    assert request_event.operation_correlation == operation.operation_id
     repository.save_external_task_request(requests[0], claim.customer_id)
+    assert repository.replay_realtime_events(None, limit=100) == events_before_retry
     with pytest.raises(IdempotencyConflict):
         repository.save_external_task_request(
             requests[0].model_copy(update={'purpose': 'Changed after the send.'}),
@@ -2300,16 +2507,21 @@ def test_mongodb_realtime_sequence_serializes_production_transactions(
             )
 
         monkeypatch.setattr(repository, '_next_realtime_sequence', original_next_sequence)
-        original_insert_realtime_event = repository._insert_realtime_event
+        original_persist_realtime_publication = repository._persist_realtime_publication
 
-        def reject_event_insert(
-            event: Any,
+        def reject_event_publication(
+            publication: Any,
+            outcome: Any,
             *,
             mongo_session: Any,
         ) -> None:
             raise RuntimeError('forced event write failure')
 
-        monkeypatch.setattr(repository, '_insert_realtime_event', reject_event_insert)
+        monkeypatch.setattr(
+            repository,
+            '_persist_realtime_publication',
+            reject_event_publication,
+        )
         aborted_claim, aborted_session = claim_graph('aborted')
         with pytest.raises(RuntimeError, match='forced event write failure'):
             repository.create_claim(aborted_claim, aborted_session)
@@ -2332,8 +2544,8 @@ def test_mongodb_realtime_sequence_serializes_production_transactions(
 
         monkeypatch.setattr(
             repository,
-            '_insert_realtime_event',
-            original_insert_realtime_event,
+            '_persist_realtime_publication',
+            original_persist_realtime_publication,
         )
         after_abort_claim, after_abort_session = claim_graph('after_abort')
         repository.create_claim(after_abort_claim, after_abort_session)
@@ -2402,13 +2614,8 @@ def test_mongodb_realtime_exact_retry_is_one_durable_and_live_event(
             pytest.skip('real MongoDB replica set has no writable primary')
 
         repository = MongoDBRepository(client, database_name)
-        event = new_realtime_event(
-            claim_id='clm_realtime_retry',
-            customer_id='cus_realtime_retry',
-            occurred_at=datetime.now(UTC),
-            claim_revision=1,
-            resources=(RealtimeResource.CLAIM,),
-        )
+        claim = _claim()
+        session = _session(claim)
         watcher_ready = Event()
         first_delivery = Event()
         duplicate_delivery = Event()
@@ -2441,19 +2648,22 @@ def test_mongodb_realtime_exact_retry_is_one_durable_and_live_event(
 
         start = Barrier(3)
 
-        def append_same_event() -> None:
+        def create_same_claim() -> None:
             start.wait(timeout=5)
-            repository.append_realtime_event(event)
+            repository.create_claim(claim, session)
 
         with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = [executor.submit(append_same_event) for _ in range(2)]
+            futures = [executor.submit(create_same_claim) for _ in range(2)]
             start.wait(timeout=5)
             for future in futures:
                 future.result(timeout=10)
 
         assert first_delivery.wait(timeout=5)
         with pytest.raises(IdempotencyConflict):
-            repository.append_realtime_event(event.model_copy(update={'claim_revision': 99}))
+            repository.create_claim(
+                claim.model_copy(update={'locale': 'mi-NZ'}),
+                session,
+            )
         assert not duplicate_delivery.wait(timeout=1.25)
         watcher_stop.set()
         watcher.join(timeout=3)
@@ -2463,16 +2673,24 @@ def test_mongodb_realtime_exact_retry_is_one_durable_and_live_event(
 
         stored = repository.replay_realtime_events(None, limit=10)
         assert len(stored) == 1
-        assert stored[0] == event.model_copy(update={'sequence': 1})
+        assert stored[0].sequence == 1
+        assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
 
-        following = new_realtime_event(
-            claim_id='clm_realtime_following',
-            customer_id='cus_realtime_following',
-            occurred_at=datetime.now(UTC),
-            claim_revision=1,
-            resources=(RealtimeResource.CLAIM,),
+        following_claim = claim.model_copy(
+            update={
+                'claim_id': 'clm_realtime_following',
+                'customer_id': 'cus_realtime_following',
+                'active_session_id': 'ses_realtime_following',
+            }
         )
-        repository.append_realtime_event(following)
+        following_session = session.model_copy(
+            update={
+                'session_id': 'ses_realtime_following',
+                'claim_id': following_claim.claim_id,
+                'customer_id': following_claim.customer_id,
+            }
+        )
+        repository.create_claim(following_claim, following_session)
         replay = repository.replay_realtime_events(None, limit=10)
         assert [item.sequence for item in replay] == [1, 2]
         assert replay[0] == stored[0]
@@ -2483,32 +2701,6 @@ def test_mongodb_realtime_exact_retry_is_one_durable_and_live_event(
         if connected:
             client.drop_database(database_name)
         client.close()
-
-
-def test_mongodb_realtime_duplicate_key_winner_uses_retry_contract(
-    repository: MongoDBRepository,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    event = new_realtime_event(
-        claim_id='clm_realtime_duplicate_winner',
-        customer_id='cus_realtime_duplicate_winner',
-        occurred_at=datetime.now(UTC),
-        claim_revision=1,
-        resources=(RealtimeResource.CLAIM,),
-    )
-    repository._insert_realtime_event(event, mongo_session=None)
-
-    def lose_concurrent_insert(operation: Any) -> None:
-        raise DuplicateKeyError('concurrent realtime event winner')
-
-    monkeypatch.setattr(repository, '_atomic', lose_concurrent_insert)
-
-    repository.append_realtime_event(event)
-    with pytest.raises(IdempotencyConflict):
-        repository.append_realtime_event(event.model_copy(update={'claim_revision': 99}))
-
-    stored = repository.replay_realtime_events(None, limit=10)
-    assert stored == [event.model_copy(update={'sequence': 1})]
 
 
 @pytest.mark.parametrize('invalid_session', ['foreign', 'missing'])
@@ -2874,7 +3066,7 @@ def test_runtime_turn_persists_trace_without_claim_revision_change(
     )
 
 
-def test_runtime_turn_rejects_mismatched_revision_and_duplicate_records(
+def test_runtime_turn_rejects_mismatched_revision_and_exact_retry_is_noop(
     repository: MongoDBRepository,
 ) -> None:
     claim = _claim()
@@ -2902,16 +3094,17 @@ def test_runtime_turn_rejects_mismatched_revision_and_duplicate_records(
         trace,
         idempotency,
     )
-    with pytest.raises(IdempotencyConflict):
-        repository.save_runtime_turn(
-            claim,
-            claim.revision,
-            session,
-            claimant_message,
-            agent_message,
-            trace,
-            idempotency,
-        )
+    events = repository.replay_realtime_events(None, limit=10)
+    repository.save_runtime_turn(
+        claim,
+        claim.revision,
+        session,
+        claimant_message,
+        agent_message,
+        trace,
+        idempotency,
+    )
+    assert repository.replay_realtime_events(None, limit=10) == events
 
     invalid_repository = MongoDBRepository(mongomock.MongoClient(), 'northwind_test')
     invalid_repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]

@@ -125,18 +125,29 @@ failure, access, or configuration event is already wired.
 
 ## Realtime Invalidation Contract
 
-`RealtimeEvent` is a durable invalidation record, not an audit substitute and not a second Claim,
-Message, Evidence, Handoff, WorkItem, or External Task projection. Its provider-neutral envelope
-contains only `event_id`, `occurred_at`, `claim_id`, `customer_id`, optional Claim revision,
-optional operation correlation, changed-resource hints, claimant-visible resource hints, and
-audiences. Business payloads and provider resume tokens are excluded.
+`RealtimePublication` is the provider-neutral intent produced for one changed authoritative
+mutation. It contains Claim/customer scope, optional Claim revision and operation correlation,
+and audience-safe resource hints. It cannot contain a durable identity, timestamp, or ordering
+coordinate. `RealtimeEvent` is the repository-created durable record and adds `event_id`,
+`occurred_at`, and monotonic `sequence`. It is not an audit substitute or a second Claim, Message,
+Evidence, Handoff, WorkItem, or External Task projection. Business payloads, provider resume
+tokens, and adapter physical keys are excluded.
 
-Every relevant authoritative mutation appends its realtime event inside the same Fixture mutation
-lock or MongoDB transaction. A failed event construction or failed transaction leaves neither
-member authoritative. An idempotent no-op does not need a second event. Covered groups are Claim
-and Session state, Messages, Evidence metadata and external evidence links, Handoffs, Runtime
-WorkItems, External Tasks/requests/results, recovery WorkItems, ownership, and queue-affecting
-staff mutations.
+`RealtimeMutation` and `REALTIME_MUTATION_RESOURCES` are the single mutation-to-resource registry
+used by both adapters. Claimant projection is derived from that registry through the domain
+allowlist; an adapter may exclude a claimant-safe hint for an internal-only child but cannot add
+its own mutation resources. Operation correlation is supplied by mutation orchestration, retained
+for staff delivery, and removed from claimant delivery.
+
+Every relevant authoritative mutation consumes that publication contract inside the same Fixture
+mutation lock or MongoDB transaction. The outcome is classified as `changed`, `exact_noop`, or
+conflict. Only `changed` creates an event, allocates a sequence, or wakes a live subscriber. An
+`exact_noop` preserves business state, event count, sequence state, and live delivery count. A
+conflict or failed publication leaves both business state and realtime state unchanged. Covered
+groups are Claim and Session state, Messages, Evidence metadata and external evidence links,
+Handoffs, Runtime WorkItems, External Tasks/requests/results, recovery WorkItems, ownership, and
+queue-affecting staff mutations. Fixture uses explicit publication at each mutation boundary;
+successful method return is not publication authority.
 
 Fixture allocates a process-local monotonic `sequence` while holding the Claim mutation lock,
 stores events in process state, and wakes one condition-backed watcher. MongoDB stores
@@ -160,13 +171,11 @@ consistent with committed Mongo visibility instead of relying on a pre-commit wa
 An acknowledged pre-sequence cursor remains valid when its durable event ID and timestamp still
 match; replay resolves that anchor to its stored sequence before selecting later events.
 
-Realtime event append is immutable and idempotent across runtime profiles. An exact retry with the
-same `event_id` and logical content is a no-op that preserves the original sequence and emits no
-second live notification. Reusing an `event_id` with different logical content raises an
-idempotency conflict and leaves the committed event unchanged. MongoDB resolves the stable event
-identity before allocating a sequence and inserts new events without replacement or upsert; a
-concurrent duplicate-key loser is read back after its transaction rolls back and follows the same
-exact-retry or conflict rule.
+Durable realtime events are immutable across runtime profiles. Callers cannot create or retry a
+persisted event identity; only a repository turns a changed publication into `event_id`,
+`occurred_at`, and `sequence`. Exact-retry detection occurs at the authoritative mutation boundary
+before publication. MongoDB inserts new event records without replacement or upsert, and Fixture
+commits one already-prepared event only after all business validation passes.
 
 Replay requires the exact durable cursor anchor and returns sequenced records in durable sequence
 order; pre-sequence records retain their timestamp/event-ID order. A missing anchor, replay-window

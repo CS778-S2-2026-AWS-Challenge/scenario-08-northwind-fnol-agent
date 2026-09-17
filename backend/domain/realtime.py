@@ -28,6 +28,35 @@ class RealtimeResource(str, Enum):
     QUEUE = 'queue'
 
 
+class RealtimeMutation(str, Enum):
+    CLAIM_CREATED = 'claim_created'
+    CLAIM_CHANGED = 'claim_changed'
+    CLAIM_OWNER_CHANGED = 'claim_owner_changed'
+    SESSION_CHANGED = 'session_changed'
+    SESSION_PAUSED = 'session_paused'
+    MESSAGE_CHANGED = 'message_changed'
+    MESSAGE_MUTATION_COMMITTED = 'message_mutation_committed'
+    AGENT_TURN_COMMITTED = 'agent_turn_committed'
+    RUNTIME_TURN_COMMITTED = 'runtime_turn_committed'
+    EVIDENCE_CHANGED = 'evidence_changed'
+    EVIDENCE_CLAIM_CHANGED = 'evidence_claim_changed'
+    EXTERNAL_TASK_CHANGED = 'external_task_changed'
+    EXTERNAL_REQUEST_CHANGED = 'external_request_changed'
+    EXTERNAL_EVIDENCE_LINKED = 'external_evidence_linked'
+    EXTERNAL_RESULT_CHANGED = 'external_result_changed'
+    OWNERSHIP_CHANGED = 'ownership_changed'
+    STAFF_MUTATION_COMMITTED = 'staff_mutation_committed'
+    HANDOFF_CHANGED = 'handoff_changed'
+    HANDOFF_MUTATION_COMMITTED = 'handoff_mutation_committed'
+    ASSESSOR_RECONCILED = 'assessor_reconciled'
+
+
+class MutationOutcome(str, Enum):
+    CHANGED = 'changed'
+    EXACT_NOOP = 'exact_noop'
+    CONFLICT = 'conflict'
+
+
 CLAIMANT_REALTIME_RESOURCES = frozenset(
     {
         RealtimeResource.CLAIM,
@@ -37,6 +66,106 @@ CLAIMANT_REALTIME_RESOURCES = frozenset(
         RealtimeResource.EXTERNAL_TASKS,
     }
 )
+
+
+REALTIME_MUTATION_RESOURCES: dict[RealtimeMutation, tuple[RealtimeResource, ...]] = {
+    RealtimeMutation.CLAIM_CREATED: (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
+    RealtimeMutation.CLAIM_CHANGED: (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
+    RealtimeMutation.CLAIM_OWNER_CHANGED: (RealtimeResource.CLAIM,),
+    RealtimeMutation.SESSION_CHANGED: (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
+    RealtimeMutation.SESSION_PAUSED: (
+        RealtimeResource.CLAIM,
+        RealtimeResource.WORK_ITEMS,
+        RealtimeResource.QUEUE,
+    ),
+    RealtimeMutation.MESSAGE_CHANGED: (RealtimeResource.MESSAGES,),
+    RealtimeMutation.MESSAGE_MUTATION_COMMITTED: (
+        RealtimeResource.CLAIM,
+        RealtimeResource.MESSAGES,
+        RealtimeResource.QUEUE,
+    ),
+    RealtimeMutation.AGENT_TURN_COMMITTED: (
+        RealtimeResource.CLAIM,
+        RealtimeResource.MESSAGES,
+        RealtimeResource.WORK_ITEMS,
+        RealtimeResource.QUEUE,
+    ),
+    RealtimeMutation.RUNTIME_TURN_COMMITTED: (
+        RealtimeResource.MESSAGES,
+        RealtimeResource.WORK_ITEMS,
+    ),
+    RealtimeMutation.EVIDENCE_CHANGED: (RealtimeResource.EVIDENCE,),
+    RealtimeMutation.EVIDENCE_CLAIM_CHANGED: (
+        RealtimeResource.CLAIM,
+        RealtimeResource.EVIDENCE,
+        RealtimeResource.QUEUE,
+    ),
+    RealtimeMutation.EXTERNAL_TASK_CHANGED: (
+        RealtimeResource.EXTERNAL_TASKS,
+        RealtimeResource.QUEUE,
+    ),
+    RealtimeMutation.EXTERNAL_REQUEST_CHANGED: (RealtimeResource.EXTERNAL_TASKS,),
+    RealtimeMutation.EXTERNAL_EVIDENCE_LINKED: (
+        RealtimeResource.EVIDENCE,
+        RealtimeResource.EXTERNAL_TASKS,
+    ),
+    RealtimeMutation.EXTERNAL_RESULT_CHANGED: (
+        RealtimeResource.EXTERNAL_TASKS,
+        RealtimeResource.QUEUE,
+    ),
+    RealtimeMutation.OWNERSHIP_CHANGED: (
+        RealtimeResource.CLAIM,
+        RealtimeResource.HANDOFFS,
+        RealtimeResource.QUEUE,
+    ),
+    RealtimeMutation.STAFF_MUTATION_COMMITTED: (
+        RealtimeResource.CLAIM,
+        RealtimeResource.MESSAGES,
+        RealtimeResource.HANDOFFS,
+        RealtimeResource.WORK_ITEMS,
+        RealtimeResource.QUEUE,
+    ),
+    RealtimeMutation.HANDOFF_CHANGED: (
+        RealtimeResource.HANDOFFS,
+        RealtimeResource.QUEUE,
+    ),
+    RealtimeMutation.HANDOFF_MUTATION_COMMITTED: (
+        RealtimeResource.CLAIM,
+        RealtimeResource.HANDOFFS,
+        RealtimeResource.QUEUE,
+    ),
+    RealtimeMutation.ASSESSOR_RECONCILED: (
+        RealtimeResource.CLAIM,
+        RealtimeResource.EXTERNAL_TASKS,
+        RealtimeResource.EVIDENCE,
+        RealtimeResource.QUEUE,
+    ),
+}
+
+
+class RealtimePublication(ContractModel):
+    """Provider-neutral intent emitted only for a changed authoritative mutation."""
+
+    mutation: RealtimeMutation
+    claim_id: str
+    customer_id: str
+    claim_revision: int | None = Field(default=None, ge=1)
+    operation_correlation: str | None = Field(default=None, max_length=200)
+    resources: tuple[RealtimeResource, ...] = Field(min_length=1, max_length=7)
+    claimant_resources: tuple[RealtimeResource, ...] = Field(default=(), max_length=7)
+    audiences: tuple[RealtimeAudience, ...] = Field(min_length=1, max_length=2)
+
+    @model_validator(mode='after')
+    def validate_sets(self) -> RealtimePublication:
+        _validate_visibility_sets(
+            self.resources,
+            self.claimant_resources,
+            self.audiences,
+        )
+        expected_resources = REALTIME_MUTATION_RESOURCES[self.mutation]
+        if self.resources != expected_resources:
+            raise ValueError('Realtime resources do not match the mutation registry.')
+        return self
 
 
 class RealtimeEvent(ContractModel):
@@ -55,17 +184,29 @@ class RealtimeEvent(ContractModel):
 
     @model_validator(mode='after')
     def validate_sets(self) -> RealtimeEvent:
-        if len(set(self.resources)) != len(self.resources):
-            raise ValueError('Realtime resources must be unique.')
-        if len(set(self.audiences)) != len(self.audiences):
-            raise ValueError('Realtime audiences must be unique.')
-        if not set(self.claimant_resources).issubset(self.resources):
-            raise ValueError('Claimant resources must be a subset of event resources.')
-        if not set(self.claimant_resources).issubset(CLAIMANT_REALTIME_RESOURCES):
-            raise ValueError('Claimant resources contain staff-only resource hints.')
-        if bool(self.claimant_resources) != (RealtimeAudience.CLAIMANT in self.audiences):
-            raise ValueError('Claimant audience and resources must be declared together.')
+        _validate_visibility_sets(
+            self.resources,
+            self.claimant_resources,
+            self.audiences,
+        )
         return self
+
+
+def _validate_visibility_sets(
+    resources: tuple[RealtimeResource, ...],
+    claimant_resources: tuple[RealtimeResource, ...],
+    audiences: tuple[RealtimeAudience, ...],
+) -> None:
+    if len(set(resources)) != len(resources):
+        raise ValueError('Realtime resources must be unique.')
+    if len(set(audiences)) != len(audiences):
+        raise ValueError('Realtime audiences must be unique.')
+    if not set(claimant_resources).issubset(resources):
+        raise ValueError('Claimant resources must be a subset of event resources.')
+    if not set(claimant_resources).issubset(CLAIMANT_REALTIME_RESOURCES):
+        raise ValueError('Claimant resources contain staff-only resource hints.')
+    if bool(claimant_resources) != (RealtimeAudience.CLAIMANT in audiences):
+        raise ValueError('Claimant audience and resources must be declared together.')
 
 
 class RealtimeCursor(ContractModel):
@@ -127,21 +268,18 @@ def cursor_is_after(candidate: str, previous: str | None) -> bool:
     return candidate_cursor.ordering_key > previous_cursor.ordering_key
 
 
-def new_realtime_event(
+def realtime_publication_for(
     *,
+    mutation: RealtimeMutation,
     claim_id: str,
     customer_id: str,
-    occurred_at: datetime,
-    resources: tuple[RealtimeResource, ...],
     claim_revision: int | None = None,
-    sequence: int | None = None,
     operation_correlation: str | None = None,
     claimant_visible: bool = True,
     claimant_resources: tuple[RealtimeResource, ...] | None = None,
-) -> RealtimeEvent:
-    safe_resources = tuple(
-        resource for resource in resources if resource in CLAIMANT_REALTIME_RESOURCES
-    )
+) -> RealtimePublication:
+    resources = REALTIME_MUTATION_RESOURCES[mutation]
+    safe_resources = claimant_resources_for(mutation)
     visible_resources = (
         tuple(
             resource
@@ -156,15 +294,47 @@ def new_realtime_event(
         if visible_resources
         else (RealtimeAudience.STAFF,)
     )
-    return RealtimeEvent(
-        event_id=new_id('rte'),
-        occurred_at=occurred_at,
+    return RealtimePublication(
+        mutation=mutation,
         claim_id=claim_id,
         customer_id=customer_id,
         claim_revision=claim_revision,
-        sequence=sequence,
         operation_correlation=operation_correlation,
         resources=resources,
         claimant_resources=visible_resources,
         audiences=audiences,
+    )
+
+
+def claimant_resources_for(
+    mutation: RealtimeMutation,
+    *,
+    excluded: frozenset[RealtimeResource] = frozenset(),
+) -> tuple[RealtimeResource, ...]:
+    """Project one registered mutation to claimant-safe resource hints."""
+
+    return tuple(
+        resource
+        for resource in REALTIME_MUTATION_RESOURCES[mutation]
+        if resource in CLAIMANT_REALTIME_RESOURCES and resource not in excluded
+    )
+
+
+def realtime_event_from_publication(
+    publication: RealtimePublication,
+    *,
+    occurred_at: datetime,
+    sequence: int,
+) -> RealtimeEvent:
+    return RealtimeEvent(
+        event_id=new_id('rte'),
+        occurred_at=occurred_at,
+        claim_id=publication.claim_id,
+        customer_id=publication.customer_id,
+        claim_revision=publication.claim_revision,
+        sequence=sequence,
+        operation_correlation=publication.operation_correlation,
+        resources=publication.resources,
+        claimant_resources=publication.claimant_resources,
+        audiences=publication.audiences,
     )
