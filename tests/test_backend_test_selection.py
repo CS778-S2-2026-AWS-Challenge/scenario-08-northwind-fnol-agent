@@ -163,8 +163,22 @@ def test_static_checks_use_only_changed_python_files_for_scoped_prs() -> None:
     ) == ('backend/api/claims.py',)
 
 
-def test_deleted_test_module_is_not_emitted_to_pytest() -> None:
+def test_intentionally_deleted_changed_test_module_is_not_emitted_to_pytest() -> None:
     assert existing_test_paths(('tests/test_removed_contract_never_exists.py',)) == ()
+
+
+def test_missing_declared_consumer_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(
+        selector.TOOLING_CONSUMER_RULES,
+        'scripts/synthetic_selector.py',
+        ('tests/test_missing_declared_consumer.py',),
+    )
+
+    with pytest.raises(
+        FileNotFoundError,
+        match='tests/test_missing_declared_consumer.py',
+    ):
+        existing_test_paths(())
 
 
 def test_contract_checks_follow_their_own_impact() -> None:

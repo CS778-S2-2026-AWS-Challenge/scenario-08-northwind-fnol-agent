@@ -240,7 +240,9 @@ the append-only audit collection through a bounded, filterable projection.
 ## Asset Record Mapping
 
 - `asset:{asset_id}` stores the current `AssetRecord`; `asset_id` uses `ase_` and is globally
-  opaque. Logical lookup/index: `(record_type, customer_id, active, updated_at, _id)`.
+  opaque. Reusable contents details are limited to description, category, brand, and model;
+  serial number and value are not stored in the Asset or copied into its Claim snapshot. Logical
+  lookup/index: `(record_type, customer_id, active, updated_at, _id)`.
 - `claim_asset_snapshot:{snapshot_id}` stores immutable `ClaimAssetSnapshot`; `snapshot_id`
   uses `cas_`. Logical lookup/index: `(record_type, claim_id, captured_at, _id)` with
   `customer_id` retained for ownership enforcement.

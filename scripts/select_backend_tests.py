@@ -325,7 +325,17 @@ def changed_python_files(changed: Sequence[str]) -> tuple[str, ...]:
 
 
 def existing_test_paths(selected: Sequence[str]) -> tuple[str, ...]:
-    """Return selected pytest paths that still exist in the checked-out revision."""
+    """Return existing changed tests after validating every configured consumer."""
+
+    configured = {
+        *(path for consumers in TOOLING_CONSUMER_RULES.values() for path in consumers),
+        *(path for consumers in TEST_SUPPORT_CONSUMERS.values() for path in consumers),
+        *(path for _, consumers in BACKEND_CONSUMER_RULES for path in consumers),
+    }
+    missing_configured = sorted(path for path in configured if not Path(path).is_file())
+    if missing_configured:
+        missing = ', '.join(missing_configured)
+        raise FileNotFoundError(f'Configured backend test consumers do not exist: {missing}')
 
     return tuple(path for path in selected if Path(path).is_file())
 

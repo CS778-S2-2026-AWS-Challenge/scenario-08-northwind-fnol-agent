@@ -359,8 +359,22 @@ def test_asset_contract_rejects_unapproved_policy_fields_and_anonymous_account_a
     fixed_token = client.get(
         '/api/v1/account/assets', headers={'Authorization': 'Bearer synthetic-claimant'}
     )
+    serial_number = client.post(
+        '/api/v1/account/assets',
+        headers={**owner, 'Idempotency-Key': 'asset-serial-number'},
+        json={
+            'asset_type': 'contents',
+            'display_name': 'Synthetic laptop',
+            'details': {
+                'description': 'Synthetic laptop',
+                'serial_number': 'SENSITIVE-SERIAL',
+            },
+        },
+    )
 
     assert mismatch.status_code == 422
+    assert serial_number.status_code == 422
+    assert 'SENSITIVE-SERIAL' not in serial_number.text
     assert fixed_token.status_code == 401
 
 

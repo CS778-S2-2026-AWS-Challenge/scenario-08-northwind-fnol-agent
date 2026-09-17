@@ -457,21 +457,49 @@ file, and operational data remain typed records.
 
 | Requested datum | Current canonical representation | Delivery owner |
 | --- | --- | --- |
-| Legal/preferred name, date of birth, phone, email, residential address | Profile extension required | #923 |
+| Legal name | Missing Profile member | #923 |
+| Preferred name | Missing Profile member | #923 |
+| Date of birth | Missing protected Profile member | #923 |
+| Phone number | Missing Profile contact member | #923 |
+| Email address | Existing authenticated account identifier; reusable Profile projection remains missing | #923 |
+| Residential address | Missing Profile address member | #923 |
 | Policy number | Reuse `policy.policy_number`; reusable account projection remains to be implemented | #923 |
-| Bank account type and account | Protected account record required; never a payment command | #923 |
-| Driver licence or passport number | Protected identity record required | #923 |
-| Reusable vehicle, property, or contents asset | Existing Asset and immutable Claim asset snapshot | #921 |
+| Bank account type | Missing protected Payment Destination member; never a payment command | #923 |
+| Bank account number | Missing protected Payment Destination member; never a payment command | #923 |
+| Driver licence number | Missing protected Identity Record member | #923 |
+| Passport number | Missing protected Identity Record member | #923 |
+| Reusable insured vehicle | Existing vehicle Asset and immutable Claim asset snapshot | #921 |
 | Vehicle registration | Reuse `vehicle.registration` and vehicle Asset snapshot | #921 |
-| Incident time, location, and description | Reuse `incident.occurred_at`, `incident.location`, and `incident.description` | Existing registry |
+| Vehicle registered owner | Existing optional `VehicleAssetDetails.registered_owner`; copied into the immutable vehicle snapshot | #921 |
+| Motor incident time | Reuse `incident.occurred_at` | Existing registry |
+| Motor incident location | Reuse `incident.location` | Existing registry |
+| Motor account of what happened | Reuse `incident.description` | Existing registry |
 | Vehicle damage | Reuse `vehicle.damage_description` | Existing registry |
-| Other driver name/contact and other vehicle registration | Missing typed Motor participant data | #919 |
-| Property address and damaged areas | Reuse `property.address` and `property.affected_areas`; property Asset snapshot supplies reusable details | #920 |
-| Contents item description | Existing ContentsItem | Existing baseline |
-| Contents brand and model | Missing optional ContentsItem members | #922 |
-| General loss description | Reuse `loss.description` | Existing registry |
-| Police reference | Reuse `authorities.police_report_reference` | Existing registry |
-| Damage photos, receipts, invoices, proof of purchase, repair quotes, and Police documents | Reuse Evidence; item-specific links remain missing | #920 for Home verification; #922 for Contents item links |
+| Vehicle damage photos | Reuse Evidence | Existing Evidence baseline |
+| Other driver name | Missing typed Motor participant member | #919 |
+| Other driver contact | Missing typed Motor participant member | #919 |
+| Other vehicle registration | Missing typed Motor participant/vehicle member | #919 |
+| Motor Police reference | Reuse `authorities.police_report_reference` | Existing registry |
+| Motor repair quote, invoice, or estimate | Reuse Evidence | Existing Evidence baseline |
+| Reusable insured property | Existing property Asset and immutable Claim asset snapshot | #921 |
+| Property address | Reuse `property.address`; property Asset snapshot supplies the reusable detail | #920 |
+| Property owner/name | Existing optional `PropertyAssetDetails.owner_name`; copied into the immutable property snapshot | #921 |
+| Home incident time | Reuse `incident.occurred_at` | Existing registry |
+| Home account of what happened | Reuse `incident.description` | Existing registry |
+| Damaged property areas | Reuse `property.affected_areas` | Existing registry |
+| Home damage photos | Reuse Evidence | Existing Evidence baseline |
+| Emergency repair receipt | Reuse Evidence; Home verification remains missing | #920 |
+| Home Police reference | Reuse `authorities.police_report_reference` | Existing registry |
+| Reusable contents asset | Existing contents Asset and immutable Claim asset snapshot | #921 |
+| Damaged, lost, or stolen item description | Existing ContentsItem and `loss.description` | Existing baseline |
+| Contents brand | Missing optional ContentsItem member | #922 |
+| Contents model | Missing optional ContentsItem member | #922 |
+| Receipt or proof of purchase | Reuse Evidence; item-specific link remains missing | #922 |
+| Contents incident time | Reuse `incident.occurred_at` | Existing registry |
+| Contents incident location | Reuse `incident.location` | Existing registry |
+| Contents repair quote | Reuse Evidence; item-specific link remains missing | #922 |
+| Contents Police reference | Reuse `authorities.police_report_reference` | Existing registry |
+| Contents serial number or value | Not part of the reusable Asset contract; any future restricted ContentsItem members and role-safe projection belong to #922 | #922 |
 
 No executable registry field is added by #918 or #921. Aliases such as `police_reference` are
 not registered, and requested files are Evidence rather than Dynamic Form strings.

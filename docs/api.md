@@ -3885,7 +3885,9 @@ Asset identifiers use `ase_`; snapshots use `cas_`. Asset records contain `asset
 projection omits `customer_id` and all physical storage/provider metadata. Assets do not accept
 claimant-supplied policy text. A durable Policy association requires the future account-owned
 `pol_` Policy Summary contract and ownership/status validation; it is not implemented by these
-routes.
+routes. Reusable contents details are limited to description, category, brand, and model. Serial
+number and value are not part of the Asset or Claim asset snapshot contract; any future restricted
+ContentsItem projection belongs to #922.
 
 Selection returns `claim_id`, resulting `revision`, the exact `proposed_fields`, and the
 immutable snapshot. It never silently confirms a field. A later asset update/deactivation does
