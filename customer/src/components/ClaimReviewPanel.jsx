@@ -1,4 +1,5 @@
 import { claimReviewRequirements, claimReviewSections } from '../claimReviewProjection.js'
+import './ClaimReviewPanel.css'
 
 function ContentsReviewItem({ item, fieldSourceLabel, fieldStatusLabel }) {
   return (
