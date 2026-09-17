@@ -79,7 +79,7 @@ class ModelMessage(ModelContract):
     content: str | None = None
     content_blocks: list[ModelContentBlock] = Field(default_factory=list, max_length=50)
     tool_calls: list[ModelToolCall] = Field(default_factory=list)
-    tool_call_id: str | None = None
+    tool_call_id: str | None = Field(default=None, min_length=1, max_length=120)
     name: str | None = None
 
     @model_validator(mode='after')
@@ -96,7 +96,7 @@ class ModelTool(ModelContract):
 
 
 class ModelToolCall(ModelContract):
-    call_id: str
+    call_id: str = Field(min_length=1, max_length=120)
     name: str
     arguments: dict[str, object]
 

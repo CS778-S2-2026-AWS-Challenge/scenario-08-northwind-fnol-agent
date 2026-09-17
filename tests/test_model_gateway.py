@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 from collections.abc import Callable
@@ -26,6 +27,7 @@ from backend.domain.configuration import (
     ConfigurationImpact,
     ConfigurationRecord,
     ConfigurationState,
+    ModelRuntimeBinding,
     now_utc,
 )
 from backend.domain.external_service_registry import (
@@ -1097,6 +1099,7 @@ def test_google_generate_content_maps_function_call_and_result_continuation(
 ) -> None:
     monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
     observed: list[dict[str, object]] = []
+    thought_signature = 'provider-private-signature-' + ('x' * 500)
 
     def handler(request: httpx.Request) -> httpx.Response:
         observed.append(cast(dict[str, object], json.loads(request.content)))
@@ -1117,7 +1120,7 @@ def test_google_generate_content_maps_function_call_and_result_continuation(
                                                 'selector': 'summary',
                                             },
                                         },
-                                        'thoughtSignature': 'synthetic-thought-signature',
+                                        'thoughtSignature': thought_signature,
                                     }
                                 ]
                             },
@@ -1159,7 +1162,11 @@ def test_google_generate_content_maps_function_call_and_result_continuation(
     )
 
     assert len(first.tool_calls) == 1
-    assert first.tool_calls[0].call_id.startswith('gemini-continuation.')
+    assert first.tool_calls[0].call_id.startswith('model-call-')
+    assert len(first.tool_calls[0].call_id) <= 120
+    assert thought_signature not in first.tool_calls[0].call_id
+    encoded_signature = base64.urlsafe_b64encode(thought_signature.encode()).decode().rstrip('=')
+    assert encoded_signature not in first.tool_calls[0].call_id
     assert first.tool_calls[0].name == 'context.resolve'
     assert first.tool_calls[0].arguments == {
         'ref': 'policy:motor',
@@ -1172,21 +1179,20 @@ def test_google_generate_content_maps_function_call_and_result_continuation(
         }
     }
     schema = {'type': 'object', 'properties': {'answer': {'type': 'string'}}}
-    continuation = gateway.complete(
-        ModelRequest(
-            messages=[
-                ModelMessage(role=ModelRole.USER, content='Check my policy.'),
-                ModelMessage(role=ModelRole.ASSISTANT, tool_calls=first.tool_calls),
-                ModelMessage(
-                    role=ModelRole.TOOL,
-                    name='context.resolve',
-                    tool_call_id=first.tool_calls[0].call_id,
-                    content='{"result":"covered"}',
-                ),
-            ],
-            response_schema=schema,
-        )
+    continuation_request = ModelRequest(
+        messages=[
+            ModelMessage(role=ModelRole.USER, content='Check my policy.'),
+            ModelMessage(role=ModelRole.ASSISTANT, tool_calls=first.tool_calls),
+            ModelMessage(
+                role=ModelRole.TOOL,
+                name='context.resolve',
+                tool_call_id=first.tool_calls[0].call_id,
+                content='{"result":"covered"}',
+            ),
+        ],
+        response_schema=schema,
     )
+    continuation = gateway.complete(continuation_request)
 
     continuation_contents = cast(list[dict[str, object]], observed[1]['contents'])
     assert continuation_contents[1]['parts'] == [
@@ -1195,7 +1201,7 @@ def test_google_generate_content_maps_function_call_and_result_continuation(
                 'name': 'context_resolve',
                 'args': {'ref': 'policy:motor', 'selector': 'summary'},
             },
-            'thoughtSignature': 'synthetic-thought-signature',
+            'thoughtSignature': thought_signature,
         }
     ]
     assert continuation_contents[2]['parts'] == [
@@ -1208,6 +1214,222 @@ def test_google_generate_content_maps_function_call_and_result_continuation(
     ]
     assert continuation.structured_output == {'answer': 'covered'}
     assert continuation.provider_request_id == 'google-header-request'
+
+    with pytest.raises(ModelGatewayError) as stale:
+        gateway.complete(continuation_request)
+    assert stale.value.code is ModelGatewayErrorCode.CONFIGURATION
+
+    another_exchange = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(ModelGatewayError) as missing:
+        another_exchange.complete(continuation_request)
+    assert missing.value.code is ModelGatewayErrorCode.CONFIGURATION
+    assert len(observed) == 2
+
+
+def test_google_exchange_keeps_long_continuation_state_out_of_runtime_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+    # Keep the formal v7 manifest while isolating this persistence regression from token budgets.
+    monkeypatch.setattr(
+        'backend.services.initial_runtime_release.load_fragment_contents',
+        lambda manifest: {
+            item.fragment_id: f'Follow {item.fragment_id}.' for item in manifest.fragments
+        },
+    )
+    thought_signature = 'provider-private-signature-' + ('x' * 500)
+    provider_call_id = 'provider-private-call-' + ('y' * 300)
+    observed: list[dict[str, object]] = []
+    exchanges: list[GoogleGenerateContentModelGateway] = []
+
+    def strings(value: object) -> list[str]:
+        if isinstance(value, str):
+            try:
+                decoded = json.loads(value)
+            except json.JSONDecodeError:
+                return [value]
+            return [value, *strings(decoded)]
+        if isinstance(value, list):
+            return [item for child in value for item in strings(child)]
+        if isinstance(value, dict):
+            return [item for child in value.values() for item in strings(child)]
+        return []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = cast(dict[str, object], json.loads(request.content))
+        observed.append(payload)
+        if len(observed) == 1:
+            references = [
+                value
+                for value in strings(payload)
+                if value.startswith('ctxref:') and value.endswith(':claim-history.customer')
+            ]
+            assert len(references) == 1, [value for value in strings(payload) if 'ctxref:' in value]
+            return httpx.Response(
+                200,
+                json={
+                    'candidates': [
+                        {
+                            'finishReason': 'STOP',
+                            'content': {
+                                'parts': [
+                                    {
+                                        'functionCall': {
+                                            'id': provider_call_id,
+                                            'name': 'context_resolve',
+                                            'args': {
+                                                'ref': references[0],
+                                                'selector': 'relevant_claims',
+                                                'max_tokens': 80,
+                                            },
+                                        },
+                                        'thoughtSignature': thought_signature,
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                'candidates': [
+                    {
+                        'finishReason': 'STOP',
+                        'content': {
+                            'parts': [
+                                {
+                                    'text': json.dumps(
+                                        {
+                                            'reply': 'No prior claims are available.',
+                                            'next_step': 'Continue the current report.',
+                                            'reason_codes': ['CLAIM_HISTORY_REPORTED'],
+                                        }
+                                    )
+                                }
+                            ]
+                        },
+                    }
+                ]
+            },
+        )
+
+    def build_exchange(config: ModelGatewayConfig) -> ModelGateway:
+        exchange = GoogleGenerateContentModelGateway(
+            config,
+            transport=httpx.MockTransport(handler),
+        )
+        exchanges.append(exchange)
+        return exchange
+
+    registry = ModelGatewayRegistry()
+    registry.register('google_generate_content', build_exchange)
+    repository = FixtureRepository()
+    headers = {'Authorization': 'Bearer synthetic-claimant'}
+    bindings = tuple(
+        ModelRuntimeBinding(
+            profile_id=profile_id,
+            protocol='google_generate_content',
+            provider='synthetic-google',
+            model_identifier='gemini-3.5-flash-lite',
+            base_url='https://generativelanguage.googleapis.com/v1beta',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+            purpose='agent_turn',
+            privacy_class='synthetic_fnol',
+            prompt_version='northwind-fnol-claimant-v7',
+            structured_output=True,
+            tools=True,
+        )
+        for profile_id in (
+            'qwen-local',
+            'nowcoding-gpt55',
+            'google-gemini35-flash-lite',
+        )
+    )
+    settings = replace(
+        model_gateway_settings('google_generate_content'),
+        model_profile_id='google-gemini35-flash-lite',
+        model_supports_tools=True,
+        model_runtime_bindings=bindings,
+    )
+
+    with TestClient(
+        create_app(
+            settings,
+            repository=repository,
+            model_gateway_registry=registry,
+        ),
+        raise_server_exceptions=False,
+    ) as client:
+        created = client.post(
+            '/api/v1/claims',
+            headers={**headers, 'Idempotency-Key': 'google-exchange-claim'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+        )
+        assert created.status_code == 201
+        claim_id = created.json()['claim']['claim_id']
+        session_id = created.json()['session']['session_id']
+        claim = repository.get_claim(claim_id, 'cus_demo')
+        assert claim is not None
+        exchanges.clear()
+
+        response = client.post(
+            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+            headers={
+                **headers,
+                'Idempotency-Key': 'google-exchange-message',
+                'If-Match': str(claim.revision),
+            },
+            json={
+                'client_message_id': 'google-exchange-client-message',
+                'content': {
+                    'type': 'text',
+                    'text': 'Previous claims? Motor.',
+                },
+                'evidence_refs': [],
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    assert len(exchanges) == 1
+    assert len(observed) == 2
+    continuation_payload = json.dumps(observed[1], sort_keys=True)
+    assert thought_signature in continuation_payload
+    assert provider_call_id in continuation_payload
+    trigger_message_id = response.json()['claimant_message']['message_id']
+    trace = repository.find_runtime_trace_for_trigger(claim_id, trigger_message_id, 'cus_demo')
+    runtime_turn = repository.get_runtime_turn_for_trigger(
+        claim_id,
+        trigger_message_id,
+        'cus_demo',
+    )
+    assert trace is not None
+    assert runtime_turn is not None
+    assert len(runtime_turn.tool_results) == 1
+    tool_result = runtime_turn.tool_results[0]
+    assert trace.tool_call_id == tool_result.tool_call_id
+    assert trace.tool_call_id is not None
+    assert trace.tool_call_id.startswith('model-call-')
+    assert len(trace.tool_call_id) <= 120
+    persisted = json.dumps(
+        {
+            'trace': trace.model_dump(mode='json'),
+            'runtime_turn': runtime_turn.model_dump(mode='json'),
+        },
+        sort_keys=True,
+    )
+    assert thought_signature not in persisted
+    assert provider_call_id not in persisted
+    assert 'gemini-continuation.' not in persisted
+    encoded_signature = base64.urlsafe_b64encode(thought_signature.encode()).decode().rstrip('=')
+    assert encoded_signature not in persisted
 
 
 @pytest.mark.parametrize(

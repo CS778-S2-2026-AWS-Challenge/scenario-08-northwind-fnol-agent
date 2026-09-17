@@ -295,10 +295,15 @@ appear in the URL, request body, model configuration, or provider-neutral respon
 
 The adapter maps system instructions, user and model messages, authorised image Evidence, JSON
 Schema output, function declarations, function calls, and function responses to the native Gemini
-shape. Gemini thought signatures required for a function-result continuation are carried inside
-the opaque provider call identity and restored only by this adapter; Google-specific fields do not
-enter the domain tool contract. Text, structured output, completion status, usage, cache-read
-usage, model version, and response identity are normalised into `ModelResponse`.
+shape. Runtime opens one concrete provider exchange for a turn and reuses it for the optional
+function-result continuation. That exchange returns a short provider-neutral call ID while keeping
+Gemini's provider call ID and `thoughtSignature` in adapter-owned transient memory. The continuation
+must use the same exchange; another exchange, a stale ID, or a replay after consumption fails
+closed. Provider continuation state is consumed after the continuation attempt and is never placed
+in a domain message, durable Runtime record, log, global cache, or fallback store. The same exchange
+boundary can hold equivalent provider-private continuation metadata for another adapter without
+changing the Runtime contract. Text, structured output, completion status, usage, cache-read usage,
+model version, and response identity are normalised into `ModelResponse`.
 
 The `google-gemini35-flash-lite` profile was verified on 2026-09-17 with a live image plus
 structured-output request and a live forced `context.resolve` call followed by structured

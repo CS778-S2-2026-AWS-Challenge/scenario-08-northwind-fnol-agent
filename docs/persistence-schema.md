@@ -600,6 +600,10 @@ Evidence record or protected object.
   output tokens, cache read/write tokens, cache-miss reason, first-token and total latency,
   `summary_state_mismatch`, and SLO outcome. Prompt text, resolved contents, raw provider payloads,
   credentials, and unrestricted customer data are excluded.
+- Persisted Runtime and ToolResult `tool_call_id` values are bounded provider-neutral correlation
+  identifiers. Provider call IDs, thought signatures, response handles, and other continuation
+  material remain inside the turn-scoped provider exchange and are never persisted or encoded into
+  that identifier.
 - Model-authored customer prose and model-proposed internal signals are not persistence
   authority. Claimant-visible response fields are server-rendered after deterministic
   validation, and any non-empty model signal proposal rejects the complete turn before write.

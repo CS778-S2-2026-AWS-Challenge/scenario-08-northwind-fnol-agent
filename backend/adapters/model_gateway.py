@@ -5,6 +5,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import quote
+from uuid import uuid4
 
 import httpx
 
@@ -59,6 +60,14 @@ class ModelGatewayConfig:
             or self.profile.timeout_seconds != self.timeout_seconds
         ):
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+
+
+@dataclass(frozen=True, slots=True)
+class _GoogleToolContinuation:
+    """Provider-only state retained for one turn-scoped model exchange."""
+
+    provider_call_id: str | None
+    thought_signature: str | None
 
 
 ModelGatewayFactory = Callable[[ModelGatewayConfig], ModelGateway]
@@ -775,6 +784,7 @@ class GoogleGenerateContentModelGateway:
     ) -> None:
         self._config = config
         self._transport = transport
+        self._tool_continuations: dict[str, _GoogleToolContinuation] = {}
 
     @property
     def capabilities(self) -> ModelCapabilities:
@@ -789,6 +799,7 @@ class GoogleGenerateContentModelGateway:
         if not credential:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
 
+        consumed_call_ids = self._continuation_call_ids(request)
         try:
             with httpx.Client(
                 base_url=f'{self._config.base_url.rstrip("/")}/',
@@ -816,6 +827,9 @@ class GoogleGenerateContentModelGateway:
                 retryable=True,
                 provider_model=self._config.model,
             ) from None
+        finally:
+            for call_id in consumed_call_ids:
+                self._tool_continuations.pop(call_id, None)
 
         self._raise_for_status(response.status_code)
         try:
@@ -948,13 +962,13 @@ class GoogleGenerateContentModelGateway:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from None
         if not isinstance(result, dict):
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
-        provider_call_id, _ = self._decode_call_id(message.tool_call_id)
+        continuation = self._continuation(message.tool_call_id)
         function_response: dict[str, object] = {
             'name': provider_tool_names.get(message.name, self._provider_tool_name(message.name)),
             'response': result,
         }
-        if provider_call_id is not None:
-            function_response['id'] = provider_call_id
+        if continuation.provider_call_id is not None:
+            function_response['id'] = continuation.provider_call_id
         return {
             'role': 'user',
             'parts': [
@@ -964,56 +978,53 @@ class GoogleGenerateContentModelGateway:
             ],
         }
 
-    @classmethod
+    def _continuation_call_ids(self, request: ModelRequest) -> set[str]:
+        call_ids: set[str] = set()
+        for message in request.messages:
+            tool_call_id = message.tool_call_id
+            if tool_call_id is not None and tool_call_id in self._tool_continuations:
+                call_ids.add(tool_call_id)
+            call_ids.update(
+                call.call_id
+                for call in message.tool_calls
+                if call.call_id in self._tool_continuations
+            )
+        return call_ids
+
+    def _continuation(self, call_id: str) -> _GoogleToolContinuation:
+        continuation = self._tool_continuations.get(call_id)
+        if continuation is None:
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        return continuation
+
     def _function_call_part(
-        cls,
+        self,
         call: ModelToolCall,
         provider_tool_names: dict[str, str],
     ) -> dict[str, object]:
-        provider_call_id, thought_signature = cls._decode_call_id(call.call_id)
+        continuation = self._continuation(call.call_id)
         function_call: dict[str, object] = {
-            'name': provider_tool_names.get(call.name, cls._provider_tool_name(call.name)),
+            'name': provider_tool_names.get(call.name, self._provider_tool_name(call.name)),
             'args': call.arguments,
         }
-        if provider_call_id is not None:
-            function_call['id'] = provider_call_id
+        if continuation.provider_call_id is not None:
+            function_call['id'] = continuation.provider_call_id
         part: dict[str, object] = {'functionCall': function_call}
-        if thought_signature is not None:
-            part['thoughtSignature'] = thought_signature
+        if continuation.thought_signature is not None:
+            part['thoughtSignature'] = continuation.thought_signature
         return part
 
-    @staticmethod
-    def _encode_call_id(
+    def _register_tool_continuation(
+        self,
         provider_call_id: str | None,
-        thought_signature: str,
+        thought_signature: str | None,
     ) -> str:
-        value = json.dumps(
-            {'id': provider_call_id, 'thought_signature': thought_signature},
-            separators=(',', ':'),
-        ).encode('utf-8')
-        encoded = base64.urlsafe_b64encode(value).decode('ascii').rstrip('=')
-        return f'gemini-continuation.{encoded}'
-
-    @staticmethod
-    def _decode_call_id(call_id: str) -> tuple[str | None, str | None]:
-        prefix = 'gemini-continuation.'
-        if not call_id.startswith(prefix):
-            return call_id, None
-        encoded = call_id.removeprefix(prefix)
-        try:
-            padding = '=' * (-len(encoded) % 4)
-            value = json.loads(base64.urlsafe_b64decode(encoded + padding).decode('utf-8'))
-        except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
-            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from None
-        if not isinstance(value, dict):
-            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
-        provider_call_id = value.get('id')
-        thought_signature = value.get('thought_signature')
-        if (
-            provider_call_id is not None and not isinstance(provider_call_id, str)
-        ) or not isinstance(thought_signature, str):
-            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
-        return provider_call_id, thought_signature
+        call_id = f'model-call-{uuid4().hex}'
+        self._tool_continuations[call_id] = _GoogleToolContinuation(
+            provider_call_id=provider_call_id,
+            thought_signature=thought_signature,
+        )
+        return call_id
 
     @staticmethod
     def _provider_tool_name(name: str) -> str:
@@ -1088,7 +1099,7 @@ class GoogleGenerateContentModelGateway:
         }
         text_parts: list[str] = []
         tool_calls: list[ModelToolCall] = []
-        for index, part in enumerate(content['parts']):
+        for part in content['parts']:
             if not isinstance(part, dict):
                 raise TypeError
             if 'text' in part:
@@ -1111,10 +1122,7 @@ class GoogleGenerateContentModelGateway:
                 or (thought_signature is not None and not isinstance(thought_signature, str))
             ):
                 raise TypeError
-            if thought_signature is not None:
-                call_id = self._encode_call_id(provider_call_id, thought_signature)
-            else:
-                call_id = provider_call_id or f'gemini-call-{index}'
+            call_id = self._register_tool_continuation(provider_call_id, thought_signature)
             tool_calls.append(
                 ModelToolCall(
                     call_id=call_id,

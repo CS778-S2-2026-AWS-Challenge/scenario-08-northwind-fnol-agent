@@ -549,16 +549,57 @@ class GatewayAgent:
             return cast(ModelResponse, cast(Any, complete_for_snapshot)(request, snapshot))
         return self._gateway.complete(request)
 
+    def _open_exchange(
+        self,
+        request: ModelRequest,
+        context: AgentTurnContext,
+    ) -> Callable[[ModelRequest], ModelResponse]:
+        """Fix one concrete provider adapter for all invocations in this turn."""
+
+        snapshot = context.runtime_configuration_snapshot
+        if context.evidence:
+            resolver = context.evidence_resolver
+            if resolver is None:
+                raise ModelGatewayError(ModelGatewayErrorCode.EVIDENCE_UNAVAILABLE)
+            if snapshot is not None:
+                opener = getattr(
+                    self._gateway,
+                    'open_exchange_for_snapshot_with_evidence',
+                    None,
+                )
+                if callable(opener):
+                    exchange = cast(Any, opener)(request, snapshot, resolver)
+                    return cast(Callable[[ModelRequest], ModelResponse], exchange.complete)
+            else:
+                opener = getattr(self._gateway, 'open_exchange_with_evidence', None)
+                if callable(opener):
+                    exchange = cast(Any, opener)(request, resolver)
+                    return cast(Callable[[ModelRequest], ModelResponse], exchange.complete)
+        elif snapshot is not None:
+            opener = getattr(self._gateway, 'open_exchange_for_snapshot', None)
+            if callable(opener):
+                exchange = cast(Any, opener)(request, snapshot)
+                return cast(Callable[[ModelRequest], ModelResponse], exchange.complete)
+        else:
+            opener = getattr(self._gateway, 'open_exchange', None)
+            if callable(opener):
+                exchange = cast(Any, opener)(request)
+                return cast(Callable[[ModelRequest], ModelResponse], exchange.complete)
+        return lambda next_request: self._complete(next_request, context)
+
     def _observed_complete(
         self,
         request: ModelRequest,
         context: AgentTurnContext,
         request_stage: str,
         observations: list[_ObservedModelInvocation],
+        completion: Callable[[ModelRequest], ModelResponse] | None = None,
     ) -> ModelResponse:
         started_at = perf_counter()
         try:
-            response = self._complete(request, context)
+            response = (
+                completion(request) if completion is not None else self._complete(request, context)
+            )
         except ModelGatewayError:
             observations.append(
                 _ObservedModelInvocation(
@@ -1025,7 +1066,14 @@ class GatewayAgent:
                 messages,
                 include_tools=bool(plan.request_profile.tool_names),
             )
-            response = self._observed_complete(request, context, 'single', observations)
+            exchange_completion = self._open_exchange(request, context)
+            response = self._observed_complete(
+                request,
+                context,
+                'single',
+                observations,
+                exchange_completion,
+            )
             invocations.append(_runtime_invocation_trace(1, response, observations[-1].latency_ms))
             if plan.request_profile.requires_tool_continuation and not response.tool_calls:
                 raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
@@ -1116,6 +1164,7 @@ class GatewayAgent:
                     context,
                     'continuation',
                     observations,
+                    exchange_completion,
                 )
                 invocations.append(
                     _runtime_invocation_trace(2, response, observations[-1].latency_ms)
