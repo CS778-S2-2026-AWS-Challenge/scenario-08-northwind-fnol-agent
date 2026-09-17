@@ -9,14 +9,18 @@ written outside the repository and summarised on the delivery issue. They are ne
 
 ## The record
 
-`record.JourneyRunRecord`, schema `northwind-journey-run/4`:
+`record.JourneyRunRecord`, schema `northwind-journey-run/5`:
+
+Schema `/5` is a breaking evidence-contract revision from `/4`. It adds
+`steps[].response_body_valid` and changes successful-response classification as described below;
+consumers must select the model by `record_schema` rather than parse a `/5` record as `/4`.
 
 | Field | Holds |
 |---|---|
 | `scenario_id`, `family`, `pack_id`, `rubric_refs` | What was run and which rubric items it evidences |
 | `configuration` | Exact head, start and finish time, runtime (`fixture`/`deployed`), provider mode (`simulated`/`live`), Agent runtime and model profile, evidence level |
 | `materials` | Every pack material: class, the condition the pack declares, who provides it, how the run actually got it in (`claimant_upload`, `consent_route`, `simulated_provider_result`), or why not (`no_route`: the journey needs it but nothing can deliver it; `not_delivered`: its step failed or was never reached; `not_applicable`: the selected operating form never calls for it, with `not_applicable_authority` quoting the document that says so), and the step that delivered it |
-| `steps` | Every route called, in order: actor (`claimant`/`staff`/`integration`), expected and actual HTTP status, outcome, resulting Claim revision, error detail |
+| `steps` | Every route called, in order: actor (`claimant`/`staff`/`integration`), expected and actual HTTP status, whether the response body is a valid JSON object, outcome, resulting Claim revision, error detail |
 | `agent_turns` | Each claimant input with the Agent's reply, proposed action, reason codes, and next step, plus tool calls and Runtime decisions, or the reason they could not be observed |
 | `consents` | Each permission given or refused: purpose, step, Claim revision, disclosed fields where observable |
 | `visibility_checks` | Whether the claimant or staff can see what they should, and cannot see what they should not |
@@ -28,9 +32,11 @@ written outside the repository and summarised on the delivery issue. They are ne
 
 The record rejects evidence that contradicts itself:
 
-- A step's outcome must be the one its HTTP status supports: the expected status is `succeeded`;
-  403, 409, 422 are `blocked`; 404, 501, 503 are `unavailable`; anything else, or no response, is
-  `failed`.
+- A step's outcome must be the one its HTTP status and response-body evidence support. A matching
+  status is `succeeded`, except that a 2xx response whose body is not a valid JSON object is
+  `failed`; 403, 409, 422 are `blocked`; 404, 501, 503 are `unavailable`; anything else, or no
+  response, is `failed`. An expected non-2xx response can still be `succeeded` as an observation
+  of the intended failure while `response_body_valid=false` and `detail` preserve its invalid body.
 - A `contradictory` or `missing` seam check must name the defect that tracks it, or `untracked`.
 - Unobserved tool calls or Runtime decisions need a `trace_limitation`. The claimant route keeps
   those records internal (`docs/api.md`), so an API-level run says so instead of recording them as
@@ -80,6 +86,7 @@ together.
 python -m tests.journey_runs --scenario motor --runs 50 --out ../journey-runs
 python -m tests.journey_runs --scenario home --runs 30 --out ../journey-runs
 python -m tests.journey_runs --scenario contents --runs 20 --out ../journey-runs
+python -m tests.journey_runs --scenario motor-failures --runs 5 --out ../journey-runs
 python -m tests.journey_runs --schema
 ```
 
@@ -102,6 +109,7 @@ record it there.
 | Runner | Journey | Evidence level |
 |---|---|---|
 | `motor_collision.py` | Run AT-01 creation/assessor routing, PRES-01 human handoff, or PRES-02 guided professional review and staff resolution; upload the selected claimant pack and validate the fixture oracle | API projections on the fixture runtime; not browser; no provider contacted |
+| `assessor_failures.py` (`motor-failures`) | Run AT-01 to assessor consent, route against an adapter scripted to fail one way, check both ends at the failure, then recover only through the claimant's retry or the projected Workbench `accept-review` or `reconcile` action | The same |
 | `household.py` (`home`, `contents`) | Create, describe, upload the claimant's pack, then answer each `dynamic_form.requirements.next_required_item` from a scripted claimant answer and confirm the proposals, until the requirements are `ready` and the claim is created | The same |
 
 The default motor pack (`motor-collision-provisional-2`) uses the `received` motor materials in
@@ -136,3 +144,13 @@ refusal is the evidence), or after 12 turns.
   states that external-send consent is not applicable because Northwind sends nothing
   (`P3-CONTENTS-EVIDENCE`). The theft-path Police report is excluded. On the controlled runtime `contents.items` is not captured, so the run is
   `unavailable` (`docs/model-gateway.md`; Discussion #847).
+
+The five assessor failure cases are a separate failure-path set, not part of the 50/30/20 baseline:
+`retryable-unavailable` (503, claimant retry), `terminal-access-denied` and `terminal-not-required`
+(502, staff accept the review), `unknown-outcome` (409, staff reconcile), and
+`interrupted-dispatch` (500, staff reconcile). Each routing step expects its documented status and
+records the error code as a fixture oracle. Four `failure.*` seam checks read both ends before any
+recovery: who acts next, whether staff can find the work and have a task action when either end
+names staff, and whether `can_request` matches what a resend does. The retryable case's
+disagreement is tracked by Discussion #934; any other disagreement is `untracked` and fails the
+suite.

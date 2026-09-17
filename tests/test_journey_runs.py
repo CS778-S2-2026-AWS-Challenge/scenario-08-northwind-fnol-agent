@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from journey_runs import motor_collision
 from journey_runs.__main__ import main as journey_main
+from journey_runs.assessor_failures import FAILURE_CASES, run_assessor_failure
 from journey_runs.engine import REPOSITORY_ROOT, PackMaterial
 from journey_runs.household import (
     CONTENTS,
@@ -40,6 +41,7 @@ from journey_runs.record import (
     JourneyRunRecord,
     ResultClass,
     RunConfiguration,
+    RunStep,
     SeamCheck,
     SeamVerdict,
     StepOutcome,
@@ -148,6 +150,44 @@ def test_every_not_applicable_authority_quotes_a_real_document() -> None:
             assert ' '.join(passage.split()) in text, (document, passage)
 
 
+_FAILURE_SEAMS = {
+    'failure.responsible_party',
+    'failure.staff_can_find_work',
+    'failure.staff_has_a_recovery_action',
+    'failure.request_matches_resend',
+}
+
+
+@pytest.mark.parametrize(
+    ('case_id', 'result_class', 'defect_refs'),
+    [
+        ('retryable-unavailable', ResultClass.PARTIAL, {'#934'}),
+        ('terminal-access-denied', ResultClass.PARTIAL, set()),
+        ('terminal-not-required', ResultClass.PARTIAL, set()),
+        ('unknown-outcome', ResultClass.FIXTURE_ONLY, set()),
+        ('interrupted-dispatch', ResultClass.FIXTURE_ONLY, set()),
+    ],
+)
+def test_an_assessor_failure_recovers_only_through_a_projected_action(
+    case_id: str, result_class: ResultClass, defect_refs: set[str]
+) -> None:
+    case = FAILURE_CASES[case_id]
+    record = run_assessor_failure(case, head='test')
+
+    assert JourneyRunRecord.model_validate_json(record.model_dump_json()) == record
+    assert all(check.holds for check in record.visibility_checks)
+    # Every recovery step went through an offered action; a refused one would not succeed.
+    assert {step.outcome for step in record.steps} == {StepOutcome.SUCCEEDED}
+    route = next(step for step in record.steps if step.name == 'route the assessor')
+    assert route.http_status == case.route_status
+    assert route.detail is not None and route.detail.startswith('Fixture oracle passed')
+    assert {check.seam for check in record.seam_checks} >= _FAILURE_SEAMS
+    # A disagreement nobody has reported must fail here, so it reaches its owner.
+    assert [check.seam for check in record.seam_checks if check.defect_ref == 'untracked'] == []
+    assert {check.defect_ref for check in record.seam_checks if check.defect_ref} == defect_refs
+    assert record.result_class is result_class
+
+
 def _assert_household_run(run: HouseholdRun, scenario: HouseholdScenario) -> None:
     record = run.record
     assert JourneyRunRecord.model_validate_json(record.model_dump_json()) == record
@@ -209,6 +249,7 @@ def _step(http_status: int | None, outcome: str, name: str = 'step') -> dict[str
         'route': 'POST /x',
         'expected_status': 201,
         'http_status': http_status,
+        'response_body_valid': True,
         'outcome': outcome,
     }
 
@@ -445,6 +486,19 @@ def test_a_capability_is_unavailable_only_for_a_step_the_run_did_not_attempt() -
         JourneyRunRecord.model_validate(
             _record(unavailable_capabilities=attempted, result_class='unavailable')
         )
+
+
+def test_a_step_must_carry_response_body_validity_evidence() -> None:
+    """The /5 contract requires every step to declare whether its body decoded."""
+    step = _step(201, 'succeeded')
+    del step['response_body_valid']
+    with pytest.raises(ValidationError, match='response_body_valid'):
+        JourneyRunRecord.model_validate(_record(steps=[step], result_class='completed'))
+
+
+def test_the_run_step_schema_lists_response_body_valid_as_required() -> None:
+    required = RunStep.model_json_schema().get('required', [])
+    assert 'response_body_valid' in required
 
 
 # --- Multi-turn motor journey fixtures (PRES-01 / PRES-02) -------------------------------
