@@ -31,9 +31,11 @@ def project_claimant_primary_action(
 ) -> ClaimantPrimaryAction:
     """Project one deterministic action without frontend precedence rules.
 
-    External-service state is authoritative when it exists. Claim creation is
-    represented by the existing ready-to-create next-step status. All other
-    states remain a conversation action carrying the backend-required inputs.
+    External-service state is authoritative when it exists. Until the server-owned
+    payout/contact and final-submission progression contracts are available, a
+    ``ready_to_create`` intake state is deliberately fail-closed instead of exposing
+    the legacy direct-creation browser action. All other states remain conversation
+    actions carrying the backend-required inputs.
     """
 
     if external_service_action is not None:
@@ -61,13 +63,13 @@ def project_claimant_primary_action(
         )
 
     if next_step.status == 'ready_to_create':
-        definition = claimant_action_contract('claimant.create_claim')
+        definition = claimant_action_contract('claimant.continue_conversation')
         return ClaimantPrimaryAction(
             action_type=definition.action_type,
             action_code=definition.action_code,
             action_id=f'customer-next-step:{next_step.status}',
             target_ref=claim_id,
-            available=True,
+            available=False,
             required_inputs=list(next_step.required_items),
             claim_revision=claim_revision,
             registry_version=CLAIMANT_ACTION_REGISTRY_VERSION,
