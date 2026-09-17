@@ -175,10 +175,23 @@ def test_model_binding_manifest_selects_qwen_without_exposing_a_secret(
     assert [item.profile_id for item in settings.model_runtime_bindings] == [
         'qwen-local',
         'nowcoding-gpt55',
+        'bedrock-nova2-lite',
+        'google-gemini35-flash-lite',
     ]
     gpt = settings.model_runtime_bindings[1]
     assert gpt.model_identifier == 'gpt-5.5'
     assert gpt.credential_environment_variable == 'NORTHWIND_MODEL_API_KEY'
+    bedrock = settings.model_runtime_bindings[2]
+    assert bedrock.model_identifier == 'global.amazon.nova-2-lite-v1:0'
+    assert bedrock.credential_environment_variable == 'AWS_BEARER_TOKEN_BEDROCK'
+    assert bedrock.evaluation_status == 'unavailable'
+    assert bedrock.image_input is True
+    gemini = settings.model_runtime_bindings[3]
+    assert gemini.protocol == 'google_generate_content'
+    assert gemini.model_identifier == 'gemini-3.5-flash-lite'
+    assert gemini.credential_environment_variable == 'GEMINI_API_KEY'
+    assert gemini.tools is True
+    assert gemini.image_input is True
 
 
 def test_model_binding_manifest_rejects_invalid_json(

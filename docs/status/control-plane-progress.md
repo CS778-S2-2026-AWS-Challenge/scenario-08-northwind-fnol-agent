@@ -1,6 +1,6 @@
 # Control Plane implementation status
 
-Updated: 2026-09-15
+Updated: 2026-09-17
 
 This status record reports what is currently backed by the repository and what
 still requires implementation. It is evidence, not a replacement for the
@@ -13,10 +13,13 @@ in `docs/api.md`.
   approval for high-impact publication, publication, withdrawal, supersession,
   rollback, idempotency, and configuration audit events.
 - Model configurations use `configuration_key=profile_id` and can publish one catalog
-  containing `qwen-local` as primary plus `nowcoding-gpt55` as a selectable claimant
-  profile. Publication validation matches every field against one exact deployment-owned binding;
-  the binding list itself does not publish a model. Credentials remain outside both the binding
-  manifest and Control Plane records; only an environment-variable name is stored.
+  containing `qwen-local` as primary, `nowcoding-gpt55` as a selectable claimant profile, and
+  `bedrock-nova2-lite` as an explicitly unavailable multimodal Bedrock profile pending AWS account
+  verification. The catalogue also publishes `google-gemini35-flash-lite` as a selectable native
+  Gemini profile after live structured-image and function-continuation verification. Publication
+  validation matches every field against one exact deployment-owned
+  binding; the binding list itself does not publish a model. Credentials remain outside both the
+  binding manifest and Control Plane records; only an environment-variable name is stored.
 - Release Sets and Runtime Snapshots for one complete published configuration
   boundary per environment and runtime profile.
 - Customer and staff account creation, revision-checked updates, safe session listing, and active-

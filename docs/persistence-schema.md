@@ -392,6 +392,12 @@ the append-only audit collection through a bounded, filterable projection.
   it; later unrelated messages remain session-only and must not overwrite claim facts.
 - A session summary records the claim revision it represents. That revision may lag but
   must not exceed the current claim revision.
+- A verified rolling summary is an immutable record with `summary_id`, `claim_id`, `session_id`,
+  `source_message_ids`, `covered_message_range`, `generator_profile_and_version`,
+  `claim_revision_at_generation`, `verified_against_claim_revision`, `summary`, and `created_at`.
+  An identical idempotent replay is accepted; different content under the same identity is
+  rejected. A summary that conflicts with current Claim State is omitted and recorded as a
+  `summary_state_mismatch`; it never overwrites Claim facts.
 - Complete messages remain durable outside the bounded summary. Message lists use the stable
   `(created_at, message_id)` ascending order, including when timestamps are equal.
 - A message `in_reply_to` reference may identify only a message belonging to the same claim and
@@ -589,6 +595,17 @@ Evidence record or protected object.
   payloads. Any proposed form field or contents item derived from that attachment retains the
   Evidence ID as its source reference and remains unconfirmed until the ordinary fact-confirmation
   path accepts it.
+- A v7 Runtime trace records only bounded configuration and performance metadata:
+  `release_set_id`, Request Profile and provider capability versions, Prompt bundle and fragment
+  references, schema and route, context load decisions, request budgets, cache layout,
+  `prefix_fingerprint`, `tool_manifest_id`, resolved-reference count, invocation/tool counts,
+  output tokens, cache read/write tokens, cache-miss reason, first-token and total latency,
+  `summary_state_mismatch`, and SLO outcome. Prompt text, resolved contents, raw provider payloads,
+  credentials, and unrestricted customer data are excluded.
+- Persisted Runtime and ToolResult `tool_call_id` values are bounded provider-neutral correlation
+  identifiers. Provider call IDs, thought signatures, response handles, and other continuation
+  material remain inside the turn-scoped provider exchange and are never persisted or encoded into
+  that identifier.
 - Model-authored customer prose and model-proposed internal signals are not persistence
   authority. Claimant-visible response fields are server-rendered after deterministic
   validation, and any non-empty model signal proposal rejects the complete turn before write.
@@ -839,10 +856,18 @@ tool-permission change cannot silently rewrite instructions or feature settings.
 components use the existing independent approval record and publication guard; no component may
 write production Claim State.
 
+A published v7 Release Set is valid only when it atomically fixes the complete Prompt fragment
+manifest and bodies, route/catalogue/budget rules, every registered Request Profile, every schema
+those profiles reference, provider capabilities for the exact model catalogue, all v7 feature
+flags, and one cache layout version. An incomplete or incompatible set fails resolution; Runtime
+does not repair it by combining another release or falling back to v6.
+
 Model records use `domain=model` and `configuration_key=profile_id`, so one published Release
-Set can bind both `qwen-local` and `nowcoding-gpt55` without overwriting either profile.
-Claimant profiles must declare `structured_output=true` and `tools=true`; a Session stores the
-selected profile ID and Runtime resolves that exact key for every turn.
+Set can bind `qwen-local`, `nowcoding-gpt55`, `bedrock-nova2-lite`, and
+`google-gemini35-flash-lite` without overwriting any profile.
+Claimant profiles must declare `structured_output=true`. Tool and continuation capabilities are
+profile-specific and are checked before a route can send work to provider transport. A Session
+stores the selected profile ID and Runtime resolves that exact key for every turn.
 The deployment binding manifest is not persisted catalogue state. It contains only non-secret
 connection metadata and credential environment-variable names used to reject unapproved model
 configurations before publication. The active Release Set remains the authority for which matched
