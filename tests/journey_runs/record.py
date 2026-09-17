@@ -185,7 +185,7 @@ class RunStep(_Record):
     route: str
     expected_status: int
     http_status: int | None
-    response_body_valid: bool = True
+    response_body_valid: bool
     outcome: StepOutcome
     claim_revision: int | None = None
     detail: str | None = None

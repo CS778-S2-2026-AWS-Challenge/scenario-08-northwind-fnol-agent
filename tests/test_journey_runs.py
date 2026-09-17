@@ -40,6 +40,7 @@ from journey_runs.record import (
     JourneyRunRecord,
     ResultClass,
     RunConfiguration,
+    RunStep,
     SeamCheck,
     SeamVerdict,
     StepOutcome,
@@ -209,6 +210,7 @@ def _step(http_status: int | None, outcome: str, name: str = 'step') -> dict[str
         'route': 'POST /x',
         'expected_status': 201,
         'http_status': http_status,
+        'response_body_valid': True,
         'outcome': outcome,
     }
 
@@ -445,6 +447,19 @@ def test_a_capability_is_unavailable_only_for_a_step_the_run_did_not_attempt() -
         JourneyRunRecord.model_validate(
             _record(unavailable_capabilities=attempted, result_class='unavailable')
         )
+
+
+def test_a_step_must_carry_response_body_validity_evidence() -> None:
+    """The /5 contract requires every step to declare whether its body decoded."""
+    step = _step(201, 'succeeded')
+    del step['response_body_valid']
+    with pytest.raises(ValidationError, match='response_body_valid'):
+        JourneyRunRecord.model_validate(_record(steps=[step], result_class='completed'))
+
+
+def test_the_run_step_schema_lists_response_body_valid_as_required() -> None:
+    required = RunStep.model_json_schema().get('required', [])
+    assert 'response_body_valid' in required
 
 
 # --- Multi-turn motor journey fixtures (PRES-01 / PRES-02) -------------------------------
