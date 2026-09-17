@@ -725,7 +725,7 @@ def test_concurrent_exact_asset_selection_retry_restores_one_persisted_response(
             audit_event,
         )
 
-    repository.save_asset_selection = concurrent_save  # type: ignore[method-assign]
+    repository.save_asset_selection = concurrent_save  # type: ignore[assignment]
     response = select_claim_asset(
         repository,
         repository,
