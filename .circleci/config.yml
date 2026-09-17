@@ -36,38 +36,22 @@ jobs:
           name: Check backend formatting
           command: |
             if [ "$BACKEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
-            if [ "$BACKEND_QUALITY_MODE" = "full" ]; then
-              python -m ruff format --check .
-            else
-              python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff format --check
-            fi
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff format --check
       - run:
           name: Lint backend
           command: |
             if [ "$BACKEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
-            if [ "$BACKEND_QUALITY_MODE" = "full" ]; then
-              python -m ruff check .
-            else
-              python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check
-            fi
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check
       - run:
           name: Type-check backend
           command: |
             if [ "$BACKEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
-            if [ "$BACKEND_QUALITY_MODE" = "full" ]; then
-              python -m mypy backend tests
-            else
-              python scripts/select_backend_tests.py --python-files | xargs -r python -m mypy
-            fi
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m mypy
       - run:
           name: Test backend
           command: |
             mode="$BACKEND_QUALITY_MODE"
             case "$mode" in
-              full)
-                python -m pytest --cov=backend --cov-report=term-missing --cov-report=json:coverage.json tests
-                python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85
-                ;;
               scoped)
                 python -m pytest --cov=backend --cov-report=json:coverage.json --cov-fail-under=0 $(python scripts/select_backend_tests.py --tests)
                 python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85

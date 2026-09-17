@@ -56,6 +56,23 @@ def test_diff_coverage_counts_only_executable_changed_lines() -> None:
     )
 
 
+def test_diff_coverage_normalises_windows_report_paths() -> None:
+    coverage = {
+        'files': {
+            'backend\\example.py': {
+                'executed_lines': [2],
+                'missing_lines': [3],
+            }
+        }
+    }
+
+    assert diff_coverage(coverage, {'backend/example.py': {2, 3}}) == (
+        1,
+        2,
+        {'backend/example.py': [3]},
+    )
+
+
 def test_main_skips_non_backend_diff_and_fails_uncovered_changed_lines(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

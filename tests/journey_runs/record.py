@@ -11,6 +11,7 @@ complete than it was.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from datetime import datetime
 from enum import StrEnum
@@ -18,7 +19,7 @@ from typing import Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-RECORD_SCHEMA: Final = 'northwind-journey-run/3'
+RECORD_SCHEMA: Final = 'northwind-journey-run/4'
 ORACLE_FAILURE: Final = 'Fixture oracle failed'
 
 
@@ -43,8 +44,10 @@ class StepOutcome(StrEnum):
 class Arrival(StrEnum):
     """How a pack material actually reached the Claim, if it did.
 
-    `no_route`: nothing in the system could deliver it. `not_delivered`: a route exists, but
-    the run did not get the material in, because its step failed or was never reached.
+    `no_route`: the journey needs it, but nothing in the system could deliver it.
+    `not_delivered`: a route exists, but the run did not get the material in, because its step
+    failed or was never reached. `not_applicable`: the selected operating form never calls for
+    it, so its absence is not a gap; the material must cite the document that says so.
     """
 
     CLAIMANT_UPLOAD = 'claimant_upload'
@@ -52,9 +55,27 @@ class Arrival(StrEnum):
     SIMULATED_PROVIDER_RESULT = 'simulated_provider_result'
     NO_ROUTE = 'no_route'
     NOT_DELIVERED = 'not_delivered'
+    NOT_APPLICABLE = 'not_applicable'
 
 
 _UNDELIVERED = {Arrival.NO_ROUTE, Arrival.NOT_DELIVERED}
+_ARRIVED_BY_NO_STEP = _UNDELIVERED | {Arrival.NOT_APPLICABLE}
+_CITED_DOCUMENT = re.compile(r'((?:docs|SPEC)(?:/[\w-][\w.-]*)+\.[A-Za-z]+)\b[^"]*"')
+_QUOTED_PASSAGE = re.compile(r'"([^"]{12,})"')
+
+
+def cited_authority(authority: str | None) -> tuple[str, list[str]] | None:
+    """The document path an authority starts with and the passages it quotes from it.
+
+    None unless the authority begins with a file path below `docs/` or `SPEC/` and quotes at
+    least one passage, so a directory name or a stray path fragment is not a citation.
+    """
+
+    document = _CITED_DOCUMENT.match(authority or '')
+    passages = _QUOTED_PASSAGE.findall(authority or '')
+    if document is None or not passages:
+        return None
+    return document.group(1), passages
 
 
 class SeamVerdict(StrEnum):
@@ -98,7 +119,11 @@ class RunConfiguration(_Record):
 
 class InputMaterial(_Record):
     """One pack material. `pack_condition` is what the pack declares the material to be;
-    `arrival` and `delivered_at_step` are what the run observed."""
+    `arrival` and `delivered_at_step` are what the run observed.
+
+    `not_applicable_authority` quotes the repository document under which the selected operating
+    form never calls for the material. Only a `not_applicable` material carries one, and it must.
+    """
 
     path: str
     material_class: str
@@ -109,18 +134,38 @@ class InputMaterial(_Record):
     evidence_kind: str | None = None
     evidence_id: str | None = None
     note: str | None = None
+    not_applicable_authority: str | None = None
 
     @model_validator(mode='after')
     def _delivery_names_its_step(self) -> Self:
-        undelivered = self.arrival in _UNDELIVERED
-        if undelivered == (self.delivered_at_step is not None):
+        stepless = self.arrival in _ARRIVED_BY_NO_STEP
+        if stepless == (self.delivered_at_step is not None):
             raise ValueError(
                 f'{self.path}: a {self.arrival} material '
-                + ('cannot name' if undelivered else 'must name')
+                + ('cannot name' if stepless else 'must name')
                 + ' the step that delivered it'
             )
         if self.arrival is Arrival.CLAIMANT_UPLOAD and not self.evidence_id:
             raise ValueError(f'{self.path}: an uploaded material must name its evidence')
+        return self
+
+    @model_validator(mode='after')
+    def _not_applicable_cites_its_authority(self) -> Self:
+        authority = self.not_applicable_authority
+        if self.arrival is not Arrival.NOT_APPLICABLE:
+            if authority is not None:
+                raise ValueError(
+                    f'{self.path}: only a not_applicable material carries a '
+                    'not_applicable_authority'
+                )
+            return self
+        if cited_authority(authority) is None:
+            raise ValueError(
+                f'{self.path}: a not_applicable authority must start with a repository document '
+                'path under docs/ or SPEC/ and quote the passage that makes it not applicable'
+            )
+        if self.evidence_id is not None:
+            raise ValueError(f'{self.path}: a not_applicable material cannot name evidence')
         return self
 
 
@@ -271,8 +316,9 @@ def classify(
     - `blocked`: the system refused a step the journey needs, for a known reason.
     - `unavailable`: a step the journey needs has no implemented capability, or the run records
       a capability this runtime does not provide.
-    - `partial`: every step succeeded, but a pack material had no route in or was not
-      delivered, or claimant and staff disagree (a `contradictory` or `missing` seam check).
+    - `partial`: every step succeeded, but a pack material the journey needs had no route in or
+      was not delivered, or claimant and staff disagree (a `contradictory` or `missing` seam
+      check). A `not_applicable` material is not needed, so it never makes a run partial.
     - `fixture-only`: everything was exercised and agrees, but on the fixture runtime, a
       simulated provider, or a simulated provider result.
     - `completed`: the same, on a deployed runtime with live providers.
@@ -303,7 +349,7 @@ def classify(
 
 
 class JourneyRunRecord(_Record):
-    record_schema: Literal['northwind-journey-run/3'] = RECORD_SCHEMA
+    record_schema: Literal['northwind-journey-run/4'] = RECORD_SCHEMA
     run_id: str
     scenario_id: str
     family: Literal['motor', 'home', 'contents']
