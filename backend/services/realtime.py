@@ -7,6 +7,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from queue import Empty, Full, Queue
 from threading import Event, RLock, Thread
+from time import monotonic
 
 from backend.core.auth import Principal
 from backend.domain.realtime import (
@@ -125,33 +126,52 @@ class RealtimeDispatcher:
         *,
         queue_capacity: int = 100,
         replay_limit: int = 500,
+        durable_poll_seconds: float = 1.0,
+        source_retry_seconds: float = 1.0,
+        startup_timeout_seconds: float = 5.0,
     ) -> None:
         self._repository = repository
         self._queue_capacity = queue_capacity
         self._replay_limit = replay_limit
+        self._durable_poll_seconds = durable_poll_seconds
+        self._source_retry_seconds = source_retry_seconds
+        self._startup_timeout_seconds = startup_timeout_seconds
         self._subscriptions: set[RealtimeSubscription] = set()
         self._lock = RLock()
         self._stop = Event()
+        self._wake = Event()
+        self._ready = Event()
         self._thread: Thread | None = None
+        self._source_thread: Thread | None = None
+        self._processed_cursor: str | None = None
 
     def start(self) -> None:
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 return
             self._stop.clear()
+            self._wake.clear()
+            self._ready.clear()
             self._thread = Thread(target=self._run, name='realtime-dispatcher', daemon=True)
             self._thread.start()
+        if not self._ready.wait(self._startup_timeout_seconds):
+            self.stop()
+            raise RuntimeError('Realtime durable replay did not become ready before startup.')
 
     def stop(self) -> None:
         self._stop.set()
+        self._wake.set()
         with self._lock:
             subscriptions = tuple(self._subscriptions)
             self._subscriptions.clear()
             thread = self._thread
+            source_thread = self._source_thread
         for subscription in subscriptions:
             subscription.close()
         if thread is not None:
             thread.join(timeout=2)
+        if source_thread is not None:
+            source_thread.join(timeout=2)
 
     def subscribe(self, scope: RealtimeScope) -> RealtimeSubscription:
         subscription = RealtimeSubscription(scope, capacity=self._queue_capacity)
@@ -189,22 +209,81 @@ class RealtimeDispatcher:
         return deliveries
 
     def _run(self) -> None:
+        next_source_start = 0.0
         while not self._stop.is_set():
+            source_thread = self._source_thread
+            if (
+                source_thread is None or not source_thread.is_alive()
+            ) and monotonic() >= next_source_start:
+                source_thread = Thread(
+                    target=self._watch_source,
+                    name='realtime-event-source',
+                    daemon=True,
+                )
+                with self._lock:
+                    self._source_thread = source_thread
+                source_thread.start()
+                next_source_start = monotonic() + self._source_retry_seconds
             try:
-                for event in self._repository.watch_realtime_events(self._stop):
-                    if self._stop.is_set():
-                        return
-                    with self._lock:
-                        subscriptions = tuple(self._subscriptions)
-                    for subscription in subscriptions:
-                        subscription.offer(event)
+                self._drain_durable_events()
+                self._ready.set()
+            except ValueError:
+                logger.exception('Realtime durable cursor cannot be resumed.')
+                self._require_resync('durable_replay_gap')
+                self._processed_cursor = None
+                try:
+                    self._drain_durable_events(publish=False)
+                    self._ready.set()
+                except Exception:
+                    logger.exception('Realtime durable cursor recovery failed.')
+            except Exception:
+                logger.exception('Realtime durable replay stopped unexpectedly.')
+                self._require_resync('durable_event_store_unavailable')
+            self._wake.wait(self._durable_poll_seconds)
+            self._wake.clear()
+
+    def _watch_source(self) -> None:
+        """Use the provider stream only as a low-latency durable-drain wake-up hint."""
+
+        try:
+            for _event in self._repository.watch_realtime_events(self._stop):
                 if self._stop.is_set():
                     return
-                raise RuntimeError('Realtime repository subscription ended unexpectedly.')
-            except Exception:
+                self._wake.set()
+            if not self._stop.is_set():
+                logger.warning('Realtime repository subscription ended unexpectedly.')
+        except Exception:
+            if not self._stop.is_set():
                 logger.exception('Realtime repository subscription stopped unexpectedly.')
-                with self._lock:
-                    subscriptions = tuple(self._subscriptions)
-                for subscription in subscriptions:
-                    subscription.require_resync('event_source_unavailable')
-                self._stop.wait(1.0)
+
+    def _drain_durable_events(self, *, publish: bool = True) -> None:
+        while not self._stop.is_set():
+            after = (
+                RealtimeCursor.decode(self._processed_cursor)
+                if self._processed_cursor is not None
+                else None
+            )
+            events = self._repository.replay_realtime_events(after, limit=self._replay_limit)
+            if not events:
+                return
+            for event in events:
+                event_cursor = cursor_for(event)
+                if not cursor_is_after(event_cursor, self._processed_cursor):
+                    continue
+                if publish:
+                    self._publish(event)
+                self._processed_cursor = event_cursor
+            if len(events) < self._replay_limit:
+                return
+
+    def _publish(self, event: RealtimeEvent) -> None:
+        with self._lock:
+            subscriptions = tuple(self._subscriptions)
+        for subscription in subscriptions:
+            subscription.offer(event)
+
+    def _require_resync(self, reason: str) -> None:
+        with self._lock:
+            subscriptions = tuple(self._subscriptions)
+        for subscription in subscriptions:
+            subscription.require_resync(reason)

@@ -29,6 +29,7 @@ from backend.domain.realtime import (
     cursor_for,
     cursor_is_after,
     realtime_publication_for,
+    realtime_resources_for_records,
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
@@ -268,6 +269,94 @@ def test_registered_mutation_projection_is_equivalent_across_adapters(
     assert 'operation_correlation' not in claimant.data
 
 
+def test_composite_resource_inventory_tracks_concrete_agent_children() -> None:
+    resources = realtime_resources_for_records(
+        RealtimeMutation.AGENT_TURN_COMMITTED,
+        ('message', 'evidence', 'handoff', 'runtime_work_item'),
+    )
+
+    assert resources == (
+        RealtimeResource.CLAIM,
+        RealtimeResource.MESSAGES,
+        RealtimeResource.EVIDENCE,
+        RealtimeResource.HANDOFFS,
+        RealtimeResource.WORK_ITEMS,
+        RealtimeResource.QUEUE,
+    )
+    publication = realtime_publication_for(
+        mutation=RealtimeMutation.AGENT_TURN_COMMITTED,
+        claim_id='clm_composite',
+        customer_id='cus_composite',
+        resources=resources,
+    )
+    assert publication.resources == resources
+
+    with pytest.raises(ValidationError, match='required mutation projection'):
+        publication.model_copy(update={'resources': (RealtimeResource.EVIDENCE,)}).model_validate(
+            {
+                **publication.model_dump(),
+                'resources': (RealtimeResource.EVIDENCE,),
+                'claimant_resources': (RealtimeResource.EVIDENCE,),
+            }
+        )
+    with pytest.raises(ValueError, match='missing from the realtime inventory'):
+        realtime_resources_for_records(
+            RealtimeMutation.AGENT_TURN_COMMITTED,
+            ('unregistered_child',),
+        )
+
+
+@pytest.mark.parametrize(
+    'resources',
+    [
+        (
+            RealtimeResource.CLAIM,
+            RealtimeResource.MESSAGES,
+            RealtimeResource.EVIDENCE,
+            RealtimeResource.QUEUE,
+        ),
+        (
+            RealtimeResource.MESSAGES,
+            RealtimeResource.CLAIM,
+            RealtimeResource.QUEUE,
+        ),
+    ],
+)
+def test_publication_rejects_unregistered_or_noncanonical_resources(
+    resources: tuple[RealtimeResource, ...],
+) -> None:
+    claimant_resources = tuple(
+        resource for resource in resources if resource is not RealtimeResource.QUEUE
+    )
+
+    with pytest.raises(ValidationError, match='mutation contract|canonical registry order'):
+        RealtimePublication(
+            mutation=RealtimeMutation.MESSAGE_MUTATION_COMMITTED,
+            claim_id='clm_invalid_resources',
+            customer_id='cus_invalid_resources',
+            resources=resources,
+            claimant_resources=claimant_resources,
+            audiences=(RealtimeAudience.CLAIMANT, RealtimeAudience.STAFF),
+        )
+
+
+def test_scope_rejects_event_without_requested_audience() -> None:
+    claimant_scope = RealtimeScope(RealtimeAudience.CLAIMANT, 'cus_one')
+    staff_only = _event(1).model_copy(
+        update={
+            'claimant_resources': (),
+            'audiences': (RealtimeAudience.STAFF,),
+        }
+    )
+
+    assert claimant_scope.permits(staff_only) is False
+
+
+def test_fixture_replay_rejects_invalid_limit() -> None:
+    with pytest.raises(ValueError, match='between 1 and 1000'):
+        FixtureRepository().replay_realtime_events(None, limit=0)
+
+
 def test_claimant_scope_filters_customer_and_internal_message_resources() -> None:
     dispatcher = RealtimeDispatcher(FixtureRepository())
     scope = RealtimeScope(RealtimeAudience.CLAIMANT, 'cus_one')
@@ -376,6 +465,8 @@ class _SingleEventSource:
     def replay_realtime_events(
         self, after: RealtimeCursor | None, *, limit: int
     ) -> list[RealtimeEvent]:
+        if after is None:
+            return [self.event][:limit]
         return []
 
     def watch_realtime_events(self, stop: Event) -> Iterator[RealtimeEvent]:
@@ -401,17 +492,153 @@ def test_dispatcher_uses_one_watcher_for_multiple_subscribers() -> None:
         dispatcher.stop()
 
 
-def test_dispatcher_failure_requires_resync() -> None:
+def test_dispatcher_source_failure_still_drains_durable_event() -> None:
     source = _SingleEventSource(_event(1), fail=True)
-    dispatcher = RealtimeDispatcher(source)  # type: ignore[arg-type]
+    dispatcher = RealtimeDispatcher(
+        source,  # type: ignore[arg-type]
+        durable_poll_seconds=0.01,
+        source_retry_seconds=0.01,
+    )
     subscription = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
 
     dispatcher.start()
     try:
         delivery = subscription.next(1.0)
         assert delivery is not None
+        assert delivery.event == 'resources.changed'
+        assert delivery.data['claim_revision'] == 2
+    finally:
+        dispatcher.stop()
+
+
+class _DurableHintSource:
+    def __init__(self, events: list[RealtimeEvent] | None = None) -> None:
+        self.events = list(events or [])
+        self.watch_started = Event()
+        self.fail_watch = False
+        self.invalidate_anchor = False
+
+    def replay_realtime_events(
+        self, after: RealtimeCursor | None, *, limit: int
+    ) -> list[RealtimeEvent]:
+        if after is not None and self.invalidate_anchor:
+            raise ValueError('cursor outside retained history')
+        start = 0
+        if after is not None:
+            start = next(
+                index + 1
+                for index, event in enumerate(self.events)
+                if event.event_id == after.event_id
+            )
+        return self.events[start : start + limit]
+
+    def watch_realtime_events(self, stop: Event) -> Iterator[RealtimeEvent]:
+        self.watch_started.set()
+        if self.fail_watch:
+            raise RuntimeError('source unavailable')
+        stop.wait(1.0)
+        return
+        yield  # pragma: no cover
+
+
+class _BlockedReplaySource(_DurableHintSource):
+    def replay_realtime_events(
+        self, after: RealtimeCursor | None, *, limit: int
+    ) -> list[RealtimeEvent]:
+        Event().wait(0.05)
+        return []
+
+
+def test_dispatcher_start_fails_when_durable_boundary_never_becomes_ready() -> None:
+    dispatcher = RealtimeDispatcher(
+        _BlockedReplaySource(),  # type: ignore[arg-type]
+        startup_timeout_seconds=0.01,
+    )
+
+    with pytest.raises(RuntimeError, match='did not become ready'):
+        dispatcher.start()
+
+
+def test_dispatcher_closes_replay_to_watcher_start_gap() -> None:
+    source = _DurableHintSource()
+    dispatcher = RealtimeDispatcher(
+        source,  # type: ignore[arg-type]
+        durable_poll_seconds=0.01,
+    )
+    subscription = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
+
+    dispatcher.start()
+    try:
+        assert source.watch_started.wait(1.0)
+        assert dispatcher.replay(subscription.scope, None) == []
+        source.events.append(_event(1))
+
+        delivery = subscription.next(1.0)
+        assert delivery is not None
+        assert delivery.event == 'resources.changed'
+        assert delivery.data['claim_revision'] == 2
+    finally:
+        dispatcher.stop()
+
+
+def test_dispatcher_drains_commit_while_source_is_restarting() -> None:
+    source = _DurableHintSource()
+    source.fail_watch = True
+    dispatcher = RealtimeDispatcher(
+        source,  # type: ignore[arg-type]
+        durable_poll_seconds=0.01,
+        source_retry_seconds=0.01,
+    )
+    subscription = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
+
+    dispatcher.start()
+    try:
+        assert source.watch_started.wait(1.0)
+        source.events.append(_event(1))
+
+        delivery = subscription.next(1.0)
+        assert delivery is not None
+        assert delivery.event == 'resources.changed'
+        assert delivery.data['claim_revision'] == 2
+    finally:
+        dispatcher.stop()
+
+
+def test_dispatcher_deduplicates_repeated_durable_observation() -> None:
+    source = _DurableHintSource([_event(1)])
+    dispatcher = RealtimeDispatcher(
+        source,  # type: ignore[arg-type]
+        durable_poll_seconds=0.01,
+    )
+    subscription = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
+
+    dispatcher.start()
+    try:
+        assert subscription.next(1.0) is not None
+        dispatcher._wake.set()
+        assert subscription.next(0.05) is None
+    finally:
+        dispatcher.stop()
+
+
+def test_dispatcher_requires_resync_when_durable_anchor_is_lost() -> None:
+    source = _DurableHintSource([_event(1)])
+    dispatcher = RealtimeDispatcher(
+        source,  # type: ignore[arg-type]
+        durable_poll_seconds=0.01,
+    )
+    subscription = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
+
+    dispatcher.start()
+    try:
+        assert subscription.next(1.0) is not None
+        source.invalidate_anchor = True
+        source.events.append(_event(2))
+
+        delivery = subscription.next(1.0)
+        assert delivery is not None
         assert delivery.event == 'resync_required'
-        assert delivery.data == {'reason': 'event_source_unavailable'}
+        assert delivery.data == {'reason': 'durable_replay_gap'}
     finally:
         dispatcher.stop()
 

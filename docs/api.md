@@ -1613,11 +1613,13 @@ receive all permitted resource hints. Claimants receive only their own customer 
 delivery.
 
 Reconnect replays events strictly after the acknowledged cursor. Duplicate or older deliveries are
-discarded. An invalid or unavailable cursor returns `409 INVALID_EVENT_CURSOR`; a replay window
-larger than the bounded server window, subscriber queue overflow, or event-source failure emits
-`resync_required` with a bounded reason and closes that stream. The client then reloads its
-authoritative snapshots before reconnecting without the stale cursor. A 15-second comment heartbeat
-keeps an otherwise idle transport open and carries no state.
+discarded. The process dispatcher also drains the durable sequence across Change Stream startup or
+restart, so a temporary wake-up-source failure does not by itself interrupt clients. An invalid or
+unavailable client cursor returns `409 INVALID_EVENT_CURSOR`; a replay window larger than the
+bounded server window, subscriber queue overflow, unavailable durable store, or detected internal
+durable-anchor gap emits `resync_required` with a bounded reason and closes that stream. The client
+then reloads its authoritative snapshots before reconnecting without the stale cursor. A 15-second
+comment heartbeat keeps an otherwise idle transport open and carries no state.
 
 ### `PATCH /api/v1/claims/{claim_id}/form`
 

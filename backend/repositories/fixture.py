@@ -58,6 +58,7 @@ from backend.domain.realtime import (
     claimant_resources_for,
     realtime_event_from_publication,
     realtime_publication_for,
+    realtime_resources_for_records,
 )
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 from backend.domain.runtime import (
@@ -190,6 +191,7 @@ class FixtureRepository(PersistenceRepository):
         *,
         operation_correlation: str | None = None,
         claimant_visible: bool = True,
+        resources: tuple[RealtimeResource, ...] | None = None,
         claimant_resources: tuple[RealtimeResource, ...] | None = None,
     ) -> RealtimeEvent | None:
         publication = realtime_publication_for(
@@ -199,6 +201,7 @@ class FixtureRepository(PersistenceRepository):
             claim_revision=claim.revision,
             operation_correlation=operation_correlation,
             claimant_visible=claimant_visible,
+            resources=resources,
             claimant_resources=claimant_resources,
         )
         return self._prepare_realtime_publication(publication, outcome)
@@ -1484,6 +1487,10 @@ class FixtureRepository(PersistenceRepository):
             RealtimeMutation.MESSAGE_MUTATION_COMMITTED,
             claim,
             operation_correlation=idempotency.key,
+            resources=realtime_resources_for_records(
+                RealtimeMutation.MESSAGE_MUTATION_COMMITTED,
+                ('message',),
+            ),
         )
         assert realtime_event is not None
         self._claims[claim.claim_id] = deepcopy(claim)
@@ -1805,6 +1812,10 @@ class FixtureRepository(PersistenceRepository):
                 RealtimeMutation.ASSESSOR_RECONCILED,
                 claim,
                 operation_correlation=(idempotency.key if idempotency is not None else None),
+                resources=realtime_resources_for_records(
+                    RealtimeMutation.ASSESSOR_RECONCILED,
+                    ('staff_action',) if staff_action is not None else (),
+                ),
             )
             assert realtime_event is not None
 
@@ -2087,15 +2098,31 @@ class FixtureRepository(PersistenceRepository):
             item.visibility is not MessageVisibility.INTERNAL_ONLY
             for item in (claimant_message, agent_message)
         )
+        changed_record_kinds = ['message', 'message']
+        if handoff is not None:
+            changed_record_kinds.append('handoff')
+        if evidence is not None:
+            changed_record_kinds.append('evidence')
+        if runtime_records is not None:
+            changed_record_kinds.extend('runtime_work_item' for _ in runtime_records.work_items)
+        resources = realtime_resources_for_records(
+            RealtimeMutation.AGENT_TURN_COMMITTED,
+            tuple(changed_record_kinds),
+        )
         realtime_event = self._prepare_realtime_mutation(
             RealtimeMutation.AGENT_TURN_COMMITTED,
             claim,
             operation_correlation=idempotency.key,
+            resources=resources,
             claimant_resources=(
-                claimant_resources_for(RealtimeMutation.AGENT_TURN_COMMITTED)
+                claimant_resources_for(
+                    RealtimeMutation.AGENT_TURN_COMMITTED,
+                    resources=resources,
+                )
                 if public_messages
                 else claimant_resources_for(
                     RealtimeMutation.AGENT_TURN_COMMITTED,
+                    resources=resources,
                     excluded=frozenset({RealtimeResource.MESSAGES}),
                 )
             ),
@@ -2214,15 +2241,24 @@ class FixtureRepository(PersistenceRepository):
             item.visibility is not MessageVisibility.INTERNAL_ONLY
             for item in (claimant_message, agent_message)
         )
+        resources = realtime_resources_for_records(
+            RealtimeMutation.RUNTIME_TURN_COMMITTED,
+            ('message', 'message', 'runtime_trace'),
+        )
         realtime_event = self._prepare_realtime_mutation(
             RealtimeMutation.RUNTIME_TURN_COMMITTED,
             claim,
             operation_correlation=idempotency.key,
+            resources=resources,
             claimant_resources=(
-                claimant_resources_for(RealtimeMutation.RUNTIME_TURN_COMMITTED)
+                claimant_resources_for(
+                    RealtimeMutation.RUNTIME_TURN_COMMITTED,
+                    resources=resources,
+                )
                 if public_messages
                 else claimant_resources_for(
                     RealtimeMutation.RUNTIME_TURN_COMMITTED,
+                    resources=resources,
                     excluded=frozenset({RealtimeResource.MESSAGES}),
                 )
             ),
@@ -2424,6 +2460,17 @@ class FixtureRepository(PersistenceRepository):
                 RealtimeMutation.EVIDENCE_CLAIM_CHANGED,
                 claim,
                 operation_correlation=idempotency.key,
+                resources=realtime_resources_for_records(
+                    RealtimeMutation.EVIDENCE_CLAIM_CHANGED,
+                    tuple(
+                        kind
+                        for kind, present in (
+                            ('evidence', evidence is not None),
+                            ('evidence_claim_link', link is not None),
+                        )
+                        if present
+                    ),
+                ),
             )
             assert realtime_event is not None
             self._claims[claim.claim_id] = deepcopy(claim)
@@ -2474,6 +2521,10 @@ class FixtureRepository(PersistenceRepository):
             RealtimeMutation.EVIDENCE_CLAIM_CHANGED,
             claim,
             operation_correlation=idempotency.key,
+            resources=realtime_resources_for_records(
+                RealtimeMutation.EVIDENCE_CLAIM_CHANGED,
+                ('evidence',),
+            ),
         )
         assert realtime_event is not None
         self._claims[claim.claim_id] = deepcopy(claim)
@@ -3075,6 +3126,15 @@ class FixtureRepository(PersistenceRepository):
             RealtimeMutation.OWNERSHIP_CHANGED,
             claim,
             operation_correlation=idempotency.key,
+            resources=realtime_resources_for_records(
+                RealtimeMutation.OWNERSHIP_CHANGED,
+                (
+                    'collaboration_request',
+                    *(('claim_coworker',) if coworker_records else ()),
+                    *(('handoff',) if handoff is not None else ()),
+                    *(('staff_agent_execution',) if staff_agent_execution is not None else ()),
+                ),
+            ),
         )
         assert realtime_event is not None
         self._claims[claim.claim_id] = deepcopy(claim)
@@ -3213,12 +3273,27 @@ class FixtureRepository(PersistenceRepository):
             if message is not None and message.visibility is MessageVisibility.INTERNAL_ONLY
             else frozenset()
         )
+        changed_record_kinds = tuple(
+            kind
+            for kind, present in (
+                ('staff_action', staff_action is not None),
+                ('handoff', handoff is not None),
+                ('message', message is not None),
+            )
+            if present
+        )
+        resources = realtime_resources_for_records(
+            RealtimeMutation.STAFF_MUTATION_COMMITTED,
+            changed_record_kinds,
+        )
         realtime_event = self._prepare_realtime_mutation(
             RealtimeMutation.STAFF_MUTATION_COMMITTED,
             claim,
             operation_correlation=idempotency.key,
+            resources=resources,
             claimant_resources=claimant_resources_for(
                 RealtimeMutation.STAFF_MUTATION_COMMITTED,
+                resources=resources,
                 excluded=excluded,
             ),
         )
@@ -3314,6 +3389,10 @@ class FixtureRepository(PersistenceRepository):
             RealtimeMutation.HANDOFF_MUTATION_COMMITTED,
             claim,
             operation_correlation=idempotency.key,
+            resources=realtime_resources_for_records(
+                RealtimeMutation.HANDOFF_MUTATION_COMMITTED,
+                ('handoff',),
+            ),
         )
         assert realtime_event is not None
         self._claims[claim.claim_id] = deepcopy(claim)

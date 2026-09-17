@@ -141,8 +141,13 @@ coordinate. `RealtimeEvent` is the repository-created durable record and adds `e
 Evidence, Handoff, WorkItem, or External Task projection. Business payloads, provider resume
 tokens, and adapter physical keys are excluded.
 
-`RealtimeMutation` and `REALTIME_MUTATION_RESOURCES` are the single mutation-to-resource registry
-used by both adapters. Claimant projection is derived from that registry through the domain
+`RealtimeMutation`, its required/allowed resource registry, and the record-kind resource inventory
+form the single mutation-to-resource contract used by both adapters. A simple mutation emits its
+registered complete set. A composite mutation derives its concrete set from the records actually
+committed in that transaction, so optional Evidence, Handoff, Runtime WorkItem, StaffAction, or
+Message children cannot be omitted or advertised when they were not written. The domain validator
+requires the mutation's base projections, rejects resources outside its allowed set, and enforces
+canonical ordering. Claimant projection is then derived from that concrete set through the domain
 allowlist; an adapter may exclude a claimant-safe hint for an internal-only child but cannot add
 its own mutation resources. Operation correlation is supplied by mutation orchestration, retained
 for staff delivery, and removed from claimant delivery.
@@ -160,9 +165,15 @@ successful method return is not publication authority.
 Fixture allocates a process-local monotonic `sequence` while holding the Claim mutation lock,
 stores events in process state, and wakes one condition-backed watcher. MongoDB stores
 `record_type=realtime_event` in the repository collection, indexes the unique event cursor, and
-uses one collection Change Stream per application process. The process dispatcher performs
-role/customer/optional-Claim filtering and fans out to bounded transient subscriber queues. A
-subscriber queue is delivery state only and is never a persistence or authorization boundary.
+uses one collection Change Stream per application process. The Change Stream is only a low-latency
+wake-up hint. The process dispatcher owns a last-processed durable cursor and drains sequenced
+events from the repository before startup readiness, after every hint, and on a bounded fallback
+interval. It advances that cursor only after offering an event to the current subscriptions.
+Consequently a commit before watcher readiness, during watcher failure, or between client replay
+and live observation is recovered from the durable store; repeated hint/replay observation is
+harmlessly deduplicated. The dispatcher performs role/customer/optional-Claim filtering and fans
+out to bounded transient subscriber queues. A subscriber queue is delivery state only and is never
+a persistence or authorization boundary.
 MongoDB allocates a transaction-local monotonic `sequence` from the single durable
 `realtime_sequence:global` counter inside the same transaction that writes the event. This
 intentionally serializes realtime-producing MongoDB transactions. `with_transaction()` retries
@@ -186,12 +197,15 @@ before publication. MongoDB inserts new event records without replacement or ups
 commits one already-prepared event only after all business validation passes.
 
 Replay requires the exact durable cursor anchor and returns sequenced records in durable sequence
-order; pre-sequence records retain their timestamp/event-ID order. A missing anchor, replay-window
-overflow, slow-subscriber overflow, or source failure
-requires an authoritative full resynchronization. Delivery may repeat or arrive out of order;
-consumers compare opaque cursor coordinates and apply only strictly newer hints. Retention or purge
-of realtime records must preserve a detectable gap and must not silently reinterpret an expired
-cursor.
+order; pre-sequence records retain their timestamp/event-ID order. A temporary Change Stream
+failure does not itself force resynchronization because the dispatcher continues durable draining
+and restarts the hint source. A missing durable anchor, replay-window overflow, slow-subscriber
+overflow, or unavailable durable store requires an authoritative full resynchronization. After an
+internal anchor gap, the dispatcher emits `durable_replay_gap`, fast-forwards its process position
+from the retained durable history without publishing that recovery scan, and resumes only after the
+boundary is re-established. Delivery may repeat or arrive out of order; consumers compare opaque
+cursor coordinates and apply only strictly newer hints. Retention or purge of realtime records must
+preserve a detectable gap and must not silently reinterpret an expired cursor.
 
 Control Plane access policies are persisted as versioned `configuration` records with
 `domain=access`. Their values contain a role, actor type, scopes, visibility classes, and an

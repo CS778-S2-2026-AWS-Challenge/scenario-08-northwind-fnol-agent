@@ -87,6 +87,8 @@ REALTIME_MUTATION_RESOURCES: dict[RealtimeMutation, tuple[RealtimeResource, ...]
     RealtimeMutation.AGENT_TURN_COMMITTED: (
         RealtimeResource.CLAIM,
         RealtimeResource.MESSAGES,
+        RealtimeResource.EVIDENCE,
+        RealtimeResource.HANDOFFS,
         RealtimeResource.WORK_ITEMS,
         RealtimeResource.QUEUE,
     ),
@@ -138,8 +140,81 @@ REALTIME_MUTATION_RESOURCES: dict[RealtimeMutation, tuple[RealtimeResource, ...]
         RealtimeResource.CLAIM,
         RealtimeResource.EXTERNAL_TASKS,
         RealtimeResource.EVIDENCE,
+        RealtimeResource.WORK_ITEMS,
         RealtimeResource.QUEUE,
     ),
+}
+
+
+# Required resources are the projections changed by every variant of a mutation.
+# Optional resources are admitted only when the concrete transaction writes the
+# corresponding child record from REALTIME_RECORD_RESOURCES.
+REALTIME_MUTATION_REQUIRED_RESOURCES: dict[RealtimeMutation, tuple[RealtimeResource, ...]] = {
+    **REALTIME_MUTATION_RESOURCES,
+    RealtimeMutation.MESSAGE_MUTATION_COMMITTED: (
+        RealtimeResource.CLAIM,
+        RealtimeResource.QUEUE,
+    ),
+    RealtimeMutation.AGENT_TURN_COMMITTED: (
+        RealtimeResource.CLAIM,
+        RealtimeResource.MESSAGES,
+        RealtimeResource.QUEUE,
+    ),
+    RealtimeMutation.RUNTIME_TURN_COMMITTED: (RealtimeResource.MESSAGES,),
+    RealtimeMutation.EVIDENCE_CLAIM_CHANGED: (
+        RealtimeResource.CLAIM,
+        RealtimeResource.QUEUE,
+    ),
+    RealtimeMutation.OWNERSHIP_CHANGED: (
+        RealtimeResource.CLAIM,
+        RealtimeResource.QUEUE,
+    ),
+    RealtimeMutation.STAFF_MUTATION_COMMITTED: (
+        RealtimeResource.CLAIM,
+        RealtimeResource.QUEUE,
+    ),
+    RealtimeMutation.HANDOFF_MUTATION_COMMITTED: (
+        RealtimeResource.CLAIM,
+        RealtimeResource.QUEUE,
+    ),
+    RealtimeMutation.ASSESSOR_RECONCILED: (
+        RealtimeResource.CLAIM,
+        RealtimeResource.EXTERNAL_TASKS,
+        RealtimeResource.EVIDENCE,
+        RealtimeResource.QUEUE,
+    ),
+}
+
+
+REALTIME_RECORD_RESOURCES: dict[str, tuple[RealtimeResource, ...]] = {
+    'claim_asset_snapshot': (),
+    'branch_evaluation': (),
+    'collaboration_request': (),
+    'claim_coworker': (),
+    'customer_update': (),
+    'signal_decision': (),
+    'staff_agent_execution': (),
+    'agent_decision': (),
+    'runtime_trace': (),
+    'turn_plan': (),
+    'agent_proposal': (),
+    'execution_plan': (),
+    'action_envelope': (),
+    'tool_result': (),
+    'turn_result': (),
+    'message': (RealtimeResource.MESSAGES,),
+    'evidence': (RealtimeResource.EVIDENCE,),
+    'evidence_claim_link': (RealtimeResource.EVIDENCE,),
+    'external_task_evidence_link': (
+        RealtimeResource.EVIDENCE,
+        RealtimeResource.EXTERNAL_TASKS,
+    ),
+    'handoff': (RealtimeResource.HANDOFFS,),
+    'runtime_work_item': (RealtimeResource.WORK_ITEMS,),
+    'staff_action': (RealtimeResource.WORK_ITEMS,),
+    'external_task': (RealtimeResource.EXTERNAL_TASKS,),
+    'external_task_request': (RealtimeResource.EXTERNAL_TASKS,),
+    'external_task_result': (RealtimeResource.EXTERNAL_TASKS,),
 }
 
 
@@ -162,9 +237,14 @@ class RealtimePublication(ContractModel):
             self.claimant_resources,
             self.audiences,
         )
-        expected_resources = REALTIME_MUTATION_RESOURCES[self.mutation]
-        if self.resources != expected_resources:
-            raise ValueError('Realtime resources do not match the mutation registry.')
+        allowed = REALTIME_MUTATION_RESOURCES[self.mutation]
+        required = REALTIME_MUTATION_REQUIRED_RESOURCES[self.mutation]
+        if not set(required).issubset(self.resources):
+            raise ValueError('Realtime resources omit a required mutation projection.')
+        if not set(self.resources).issubset(allowed):
+            raise ValueError('Realtime resources exceed the mutation contract.')
+        if self.resources != tuple(resource for resource in allowed if resource in self.resources):
+            raise ValueError('Realtime resources do not use canonical registry order.')
         return self
 
 
@@ -276,10 +356,13 @@ def realtime_publication_for(
     claim_revision: int | None = None,
     operation_correlation: str | None = None,
     claimant_visible: bool = True,
+    resources: tuple[RealtimeResource, ...] | None = None,
     claimant_resources: tuple[RealtimeResource, ...] | None = None,
 ) -> RealtimePublication:
-    resources = REALTIME_MUTATION_RESOURCES[mutation]
-    safe_resources = claimant_resources_for(mutation)
+    changed_resources = (
+        resources if resources is not None else REALTIME_MUTATION_RESOURCES[mutation]
+    )
+    safe_resources = claimant_resources_for(mutation, resources=changed_resources)
     visible_resources = (
         tuple(
             resource
@@ -300,7 +383,7 @@ def realtime_publication_for(
         customer_id=customer_id,
         claim_revision=claim_revision,
         operation_correlation=operation_correlation,
-        resources=resources,
+        resources=changed_resources,
         claimant_resources=visible_resources,
         audiences=audiences,
     )
@@ -309,15 +392,37 @@ def realtime_publication_for(
 def claimant_resources_for(
     mutation: RealtimeMutation,
     *,
+    resources: tuple[RealtimeResource, ...] | None = None,
     excluded: frozenset[RealtimeResource] = frozenset(),
 ) -> tuple[RealtimeResource, ...]:
     """Project one registered mutation to claimant-safe resource hints."""
 
     return tuple(
         resource
-        for resource in REALTIME_MUTATION_RESOURCES[mutation]
+        for resource in (
+            resources if resources is not None else REALTIME_MUTATION_RESOURCES[mutation]
+        )
         if resource in CLAIMANT_REALTIME_RESOURCES and resource not in excluded
     )
+
+
+def realtime_resources_for_records(
+    mutation: RealtimeMutation,
+    record_kinds: tuple[str, ...],
+) -> tuple[RealtimeResource, ...]:
+    """Return the validated projection set changed by one concrete transaction."""
+
+    changed = set(REALTIME_MUTATION_REQUIRED_RESOURCES[mutation])
+    for kind in record_kinds:
+        if kind not in REALTIME_RECORD_RESOURCES:
+            raise ValueError(f'Record kind {kind} is missing from the realtime inventory.')
+        changed.update(REALTIME_RECORD_RESOURCES[kind])
+    allowed = REALTIME_MUTATION_RESOURCES[mutation]
+    unexpected = changed.difference(allowed)
+    if unexpected:
+        names = ', '.join(sorted(resource.value for resource in unexpected))
+        raise ValueError(f'Record changes exceed the {mutation.value} contract: {names}.')
+    return tuple(resource for resource in allowed if resource in changed)
 
 
 def realtime_event_from_publication(

@@ -71,6 +71,7 @@ from backend.domain.realtime import (
     claimant_resources_for,
     realtime_event_from_publication,
     realtime_publication_for,
+    realtime_resources_for_records,
 )
 from backend.domain.retrieval import (
     ClaimHistoryRetrievalRecord,
@@ -466,6 +467,7 @@ class MongoDBRepository:
         outcome: MutationOutcome = MutationOutcome.CHANGED,
         operation_correlation: str | None = None,
         claimant_visible: bool = True,
+        resources: tuple[RealtimeResource, ...] | None = None,
         claimant_resources: tuple[RealtimeResource, ...] | None = None,
     ) -> RealtimeEvent | None:
         publication = realtime_publication_for(
@@ -475,6 +477,7 @@ class MongoDBRepository:
             claim_revision=claim.revision,
             operation_correlation=operation_correlation,
             claimant_visible=claimant_visible,
+            resources=resources,
             claimant_resources=claimant_resources,
         )
         return self._persist_realtime_publication(
@@ -2310,6 +2313,10 @@ class MongoDBRepository:
                 claim,
                 mongo_session=mongo_session,
                 operation_correlation=(idempotency.key if idempotency is not None else None),
+                resources=realtime_resources_for_records(
+                    RealtimeMutation.ASSESSOR_RECONCILED,
+                    ('staff_action',) if staff_action is not None else (),
+                ),
             )
 
             if (
@@ -4044,6 +4051,10 @@ class MongoDBRepository:
             claim,
             mongo_session=mongo_session,
             operation_correlation=idempotency.key,
+            resources=realtime_resources_for_records(
+                RealtimeMutation.RUNTIME_TURN_COMMITTED,
+                ('message', 'message', 'runtime_trace'),
+            ),
         )
 
     def get_runtime_trace(
@@ -4406,6 +4417,16 @@ class MongoDBRepository:
         required_staff_id: str | None = None,
         required_staff_revision: int | None = None,
     ) -> None:
+        has_internal_message = any(
+            isinstance(record, MessageRecord)
+            and record.visibility is MessageVisibility.INTERNAL_ONLY
+            for _kind, _identifier, record in records
+        )
+        excluded = frozenset({RealtimeResource.MESSAGES}) if has_internal_message else frozenset()
+        resources = realtime_resources_for_records(
+            mutation,
+            tuple(kind for kind, _identifier, _record in records),
+        )
         self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
         self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
         if required_staff_id is not None:
@@ -4553,18 +4574,17 @@ class MongoDBRepository:
                 session=mongo_session,
             )
         self._save_idempotency(idempotency, mongo_session)
-        has_internal_message = any(
-            isinstance(record, MessageRecord)
-            and record.visibility is MessageVisibility.INTERNAL_ONLY
-            for _kind, _identifier, record in records
-        )
-        excluded = frozenset({RealtimeResource.MESSAGES}) if has_internal_message else frozenset()
         self._append_realtime_mutation(
             mutation,
             claim,
             mongo_session=mongo_session,
             operation_correlation=idempotency.key,
-            claimant_resources=claimant_resources_for(mutation, excluded=excluded),
+            resources=resources,
+            claimant_resources=claimant_resources_for(
+                mutation,
+                resources=resources,
+                excluded=excluded,
+            ),
         )
 
     def _ensure_claim_revision(

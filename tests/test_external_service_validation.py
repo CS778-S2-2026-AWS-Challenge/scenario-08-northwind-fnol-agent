@@ -1229,6 +1229,13 @@ def test_staff_reconciliation_settles_the_existing_operation_atomically(
     ]
     assert reconciliation_events
     assert reconciliation_events[-1].claim_revision == after['revision']
+    assert reconciliation_events[-1].resources == (
+        RealtimeResource.CLAIM,
+        RealtimeResource.EXTERNAL_TASKS,
+        RealtimeResource.EVIDENCE,
+        RealtimeResource.WORK_ITEMS,
+        RealtimeResource.QUEUE,
+    )
     assert reconciliation_events[-1].claimant_resources == (
         RealtimeResource.CLAIM,
         RealtimeResource.EXTERNAL_TASKS,
