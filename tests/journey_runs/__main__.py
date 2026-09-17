@@ -3,6 +3,7 @@
     python -m tests.journey_runs --scenario motor --runs 50 --out DIR
     python -m tests.journey_runs --scenario home --runs 30 --out DIR
     python -m tests.journey_runs --scenario contents --runs 20 --out DIR
+    python -m tests.journey_runs --scenario motor-failures --runs 5 --out DIR
 
 Each run writes one `<run_id>.json` record. Records are evidence of a run, not fixtures, so
 write them outside the repository and summarise them on the delivery issue.
@@ -15,6 +16,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from .assessor_failures import FAILURE_CASES, FailureCase, run_assessor_failure
 from .engine import current_head
 from .household import (
     SCENARIOS,
@@ -36,7 +38,9 @@ _MOTOR_CHOICES = ['motor', *[f'motor:{name}' for name in MOTOR_JOURNEY_FIXTURES]
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--scenario', choices=[*_MOTOR_CHOICES, *SCENARIOS], default='motor')
+    parser.add_argument(
+        '--scenario', choices=[*_MOTOR_CHOICES, 'motor-failures', *SCENARIOS], default='motor'
+    )
     parser.add_argument('--runs', type=int, default=1)
     parser.add_argument('--out', type=Path)
     parser.add_argument('--schema', action='store_true', help='print the record JSON Schema')
@@ -54,7 +58,11 @@ def main(argv: list[str] | None = None) -> int:
     reasons: Counter[str] = Counter()
     if arguments.scenario == 'motor' or arguments.scenario.startswith('motor:'):
         fixture_name = arguments.scenario.split(':', 1)[1] if ':' in arguments.scenario else None
-        cases: tuple[MotorRunCase | HouseholdScenario, ...] = motor_run_cases(fixture_name)
+        cases: tuple[MotorRunCase | HouseholdScenario | FailureCase, ...] = motor_run_cases(
+            fixture_name
+        )
+    elif arguments.scenario == 'motor-failures':
+        cases = tuple(FAILURE_CASES.values())
     elif arguments.scenario in {'home', 'contents'}:
         cases = household_run_cases(arguments.scenario)
     else:
@@ -66,7 +74,9 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     for case in cases[: arguments.runs]:
-        if isinstance(case, MotorRunCase):
+        if isinstance(case, FailureCase):
+            record = run_assessor_failure(case, head=head)
+        elif isinstance(case, MotorRunCase):
             record = run_motor_journey(
                 case.fixture_name,
                 head=head,
