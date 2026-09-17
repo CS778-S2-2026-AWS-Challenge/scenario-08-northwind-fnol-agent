@@ -49,8 +49,12 @@ def test_a_non_json_success_response_cannot_be_recorded_as_successful_evidence()
     assert journey.steps[0].detail == 'HTTP 200 returned a non-JSON response.'
 
 
-def test_response_body_validity_has_a_new_record_schema_revision() -> None:
-    """Serialized response-validity evidence is declared as a breaking schema revision."""
+def test_a_required_record_field_declares_a_new_schema_revision() -> None:
+    """Each required field a consumer must read is a declared, breaking revision.
 
-    assert RECORD_SCHEMA == 'northwind-journey-run/5'
+    `/5` added response-body validity to every step; `/6` adds the Sprint 4 metric coverage
+    every run must state. A consumer selects the model by this revision rather than guessing.
+    """
+
+    assert RECORD_SCHEMA == 'northwind-journey-run/6'
     assert JourneyRunRecord.model_fields['record_schema'].default == RECORD_SCHEMA

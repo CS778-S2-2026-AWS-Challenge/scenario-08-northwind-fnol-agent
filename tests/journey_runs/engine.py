@@ -30,6 +30,7 @@ from fastapi.testclient import TestClient
 from backend.adapters.evidence_storage import MockEvidenceStorage
 from backend.core.config import Settings
 
+from .metrics import metric_coverage
 from .record import (
     ORACLE_FAILURE,
     AgentTurn,
@@ -505,6 +506,12 @@ def build_record(
     steps = journey.steps
     capabilities = unavailable_capabilities or []
     succeeded = [step.name for step in steps if step.outcome is StepOutcome.SUCCEEDED]
+    effort = ClaimantEffort(
+        messages=len(turns),
+        confirmations=sum(name.startswith('confirm') for name in succeeded),
+        uploads=sum(name.startswith('complete upload') for name in succeeded),
+        consents=sum(name.startswith('consent') for name in succeeded),
+    )
     return JourneyRunRecord(
         run_id=f'{scenario_id}-{uuid4().hex[:12]}',
         scenario_id=scenario_id,
@@ -520,12 +527,8 @@ def build_record(
         seam_checks=seam_checks,
         unavailable_capabilities=capabilities,
         final_state=state,
-        effort=ClaimantEffort(
-            messages=len(turns),
-            confirmations=sum(name.startswith('confirm') for name in succeeded),
-            uploads=sum(name.startswith('complete upload') for name in succeeded),
-            consents=sum(name.startswith('consent') for name in succeeded),
-        ),
+        effort=effort,
+        metrics=metric_coverage(turns=turns, effort=effort, state=state),
         result_class=classify(
             steps=steps,
             materials=materials,
