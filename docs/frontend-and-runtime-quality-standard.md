@@ -667,7 +667,57 @@ shadow-modal: 0 16px 40px rgba(26,24,20,.18)
 
 Workbench density 需要单独定义，例如列表行高、section 内间距和 metadata 间距；允许更密，但不能用密度替代信息层级。
 
-### 6.5 状态语义
+### 6.5 Claimant entry 与 history token contract
+
+下表只记录 claimant entry/history 使用或新增的共享基础角色，以及该产品表面的完整语义角色。通用色板、间距、圆角和边框的其余成员继续以 6.2–6.4 为准。页面组件只能消费表中的语义角色或已列明的共享基础角色，不得在 selector 内重新计算透明度、blur 或交互状态颜色。
+
+| Token | Concrete value | Semantic purpose | Allowed consumers | Responsive behaviour |
+|---|---|---|---|---|
+| `--font-family-brand` | `"Source Serif 4", Georgia, serif` | Formal secondary brand typography foundation | Short brand statements and approved editorial headings | Fixed across viewports |
+| `--font-size-display` | `40px` | Desktop display heading foundation | Short landing/display headings with an authorised semantic role | Fixed desktop value; compact layouts select a smaller role |
+| `--font-size-hero` | `28px` | Compact hero heading foundation | Informational entry headings and compact display fallback | Fixed value; used by claimant entry at `≤640px` |
+| `--blur-subtle` | `blur(8px)` | Low header-glass blur foundation | Shared translucent headers | Fixed across viewports |
+| `--blur-surface` | `blur(12px)` | Low glass-surface blur foundation | Semantic translucent content surfaces | Fixed across viewports |
+| `--blur-floating` | `blur(16px)` | Floating-control/popover blur foundation | Semantic floating menus and lightweight rails | Fixed across viewports |
+| `--blur-overlay` | `blur(20px)` | Overlay-panel blur foundation | Semantic overlay/drawer panels | Fixed across viewports |
+| `--shadow-subtle` | `0 1px 3px rgba(26, 24, 20, .08)` | Low elevation foundation | Resting controls and the history rail | Fixed across viewports |
+| `--shadow-popover` | `0 8px 24px rgba(26, 24, 20, .14)` | Floating elevation foundation | Composer, selector popover, and history panel | Fixed across viewports |
+| `--duration-standard` | `200ms` | Standard interaction motion foundation | Claimant entry/history transitions | Disabled for non-essential motion under `prefers-reduced-motion` |
+| `--claimant-entry-heading-size` | `var(--font-size-display)` (`40px`) | Primary task-heading size on the landing composition | Claimant entry H1 | Desktop/tablet only |
+| `--claimant-entry-heading-size-compact` | `var(--font-size-hero)` (`28px`) | Compact primary task-heading size | Claimant entry H1 | Selected at `≤640px` |
+| `--claimant-entry-background-wash` | `color-mix(in srgb, var(--color-page) 44%, transparent)` | Compact/mobile artwork readability wash | Claimant entry background overlay | Default and compact layouts |
+| `--claimant-entry-background-wash-wide` | `radial-gradient(ellipse at center, color-mix(in srgb, var(--color-page) 64%, transparent) 0%, transparent 78%)` | Wide-screen centre wash that keeps artwork visible at the edges | Claimant entry background overlay | Selected above `640px` |
+| `--claimant-entry-composer-surface` | `color-mix(in srgb, var(--color-surface) 88%, transparent)` | Main translucent composer glass surface | Homepage claim composer | Fixed across viewports |
+| `--claimant-entry-selector-popover-surface` | `var(--claimant-entry-composer-surface)` | Floating selector surface aligned with the composer glass | Homepage Agent/model selector popovers | Fixed across viewports |
+| `--claimant-entry-control-surface` | `color-mix(in srgb, var(--color-surface) 56%, transparent)` | Resting attachment, voice, and selector control surface | Homepage composer controls | Fixed across viewports |
+| `--claimant-entry-control-hover-surface` | `color-mix(in srgb, var(--color-surface) 86%, transparent)` | Hover/open surface for composer controls | Homepage composer controls | Pointer/open state only |
+| `--claimant-entry-option-hover-surface` | `color-mix(in srgb, var(--color-accent-soft) 58%, transparent)` | Selector option hover state | Homepage Agent/model options | Pointer state only |
+| `--claimant-entry-option-selected-surface` | `color-mix(in srgb, var(--color-accent-soft) 78%, transparent)` | Selected option state shared with selected history emphasis | Homepage selector options; aliased by claimant history selected rows | Fixed across viewports |
+| `--claimant-entry-placeholder-color` | `color-mix(in srgb, var(--color-text-secondary) 68%, transparent)` | Readable but subordinate composer prompt | Homepage incident textarea placeholder | Fixed across viewports |
+| `--claimant-entry-surface-blur` | `var(--blur-surface)` (`blur(12px)`) | Composer glass blur | Homepage claim composer | Fixed across viewports |
+| `--claimant-entry-popover-blur` | `var(--blur-floating)` (`blur(16px)`) | Selector floating-surface blur | Homepage Agent/model selector popovers | Fixed across viewports |
+| `--claimant-entry-content-measure` | `1040px` | Maximum entry composition and large composer measure | Claimant entry hero/composer | Maximum bound; narrower viewports shrink to available width |
+| `--claimant-entry-copy-measure` | `720px` | Supporting-copy readability measure | Claimant entry supporting sentence | Maximum bound; narrower viewports shrink to available width |
+| `--claimant-entry-composer-min-measure` | `760px` | Preferred laptop composer measure | Homepage claim composer | Lower clamp bound while the viewport can accommodate it |
+| `--claimant-entry-composer-fluid-measure` | `64vw` | Fluid large-screen composer measure | Homepage claim composer | Applies inside the bounded width clamp |
+| `--claimant-entry-composer-min-height` | `224px` | Default composer workspace height | Homepage claim composer | Default through desktop layouts |
+| `--claimant-entry-composer-large-min-height` | `256px` | Expanded large-desktop composer height | Homepage claim composer | Selected at `≥1440px` |
+| `--claimant-entry-selector-measure` | `224px` | Minimum Agent selector popover measure | Homepage Agent selector popover | Shrinks only when constrained by viewport rules |
+| `--claimant-entry-content-lift` | `-3vh` | Intentional viewport-relative optical centring of the unified entry group | Claimant entry content group | Applied only above `640px` when viewport height is at least `700px` |
+| `--claimant-history-rail-width` | `calc(var(--size-control-touch) + var(--space-3))` (`56px`) | Desktop collapsed-history rail width | Conversation history rail | Desktop only; rail is hidden at `≤640px` |
+| `--claimant-history-panel-width` | `312px` | Expanded history panel measure | Conversation history panel | Capped by available viewport width |
+| `--claimant-history-rail-surface` | `color-mix(in srgb, var(--color-sidebar) 82%, transparent)` | Translucent desktop rail and mobile trigger surface | History rail and mobile history trigger | Rail on desktop; trigger occupies normal flow below the header at `≤640px` |
+| `--claimant-history-panel-surface` | `color-mix(in srgb, var(--color-surface) 60%, transparent)` | Expanded translucent history surface | Conversation history panel | Drawer semantics at `≤640px`; overlay panel on wider screens |
+| `--claimant-history-subdued-surface` | `color-mix(in srgb, var(--color-surface) 54%, transparent)` | Low-emphasis search and stale-state surface | History search and stale notice | Fixed across viewports |
+| `--claimant-history-subdued-border-color` | `color-mix(in srgb, var(--color-divider) 56%, transparent)` | Soft panel, input, and footer divider | History panel/search/footer boundaries | Fixed across viewports |
+| `--claimant-history-row-hover-surface` | `color-mix(in srgb, var(--color-surface) 46%, transparent)` | Quiet history-row hover state | Conversation history rows | Pointer state only |
+| `--claimant-history-row-selected-surface` | `var(--claimant-entry-option-selected-surface)` | Selected/current conversation surface | Current history row and related history actions | Fixed across viewports; selection also has text/ARIA state |
+| `--claimant-history-error-surface` | `color-mix(in srgb, var(--color-danger-soft) 76%, transparent)` | Claim-history load error surface | History error state | Fixed across viewports; paired with alert semantics and border |
+| `--claimant-history-mobile-scrim` | `color-mix(in srgb, var(--color-text-primary) 6%, transparent)` | Low-contrast modal-drawer scrim | Mobile history overlay only | Applied at `≤640px` |
+| `--claimant-history-rail-blur` | `var(--blur-floating)` (`blur(16px)`) | Rail/mobile-trigger glass blur | History rail and mobile history trigger | Consumer switches with the `640px` breakpoint |
+| `--claimant-history-panel-blur` | `var(--blur-overlay)` (`blur(20px)`) | Expanded overlay-panel blur | Conversation history panel | Fixed across viewports |
+
+### 6.6 状态语义
 
 状态不能只依赖颜色，必须同时表达：
 
@@ -683,7 +733,7 @@ Workbench density 需要单独定义，例如列表行高、section 内间距和
 - risk signal 与 confirmed business decision；
 - fixture、configured service、verified result。
 
-### 6.6 按钮层级
+### 6.7 按钮层级
 
 - Primary：当前唯一主动作；
 - Secondary：相关但不改变主路径的动作；
