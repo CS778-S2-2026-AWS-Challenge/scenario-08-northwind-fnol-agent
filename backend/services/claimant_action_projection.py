@@ -32,10 +32,11 @@ def project_claimant_primary_action(
     """Project one deterministic action without frontend precedence rules.
 
     External-service state is authoritative when it exists. Until the server-owned
-    payout/contact and final-submission progression contracts are available, a
-    ``ready_to_create`` intake state is deliberately fail-closed instead of exposing
-    the legacy direct-creation browser action. All other states remain conversation
-    actions carrying the backend-required inputs.
+    payout/contact and final-submission progression contracts are available, the
+    legacy ``claimant.create_claim`` identity remains visible in the contract but is
+    deliberately unavailable when intake reaches ``ready_to_create``. This keeps the
+    browser fail-closed without inventing a frontend transition or a second action
+    vocabulary.
     """
 
     if external_service_action is not None:
@@ -63,7 +64,7 @@ def project_claimant_primary_action(
         )
 
     if next_step.status == 'ready_to_create':
-        definition = claimant_action_contract('claimant.continue_conversation')
+        definition = claimant_action_contract('claimant.create_claim')
         return ClaimantPrimaryAction(
             action_type=definition.action_type,
             action_code=definition.action_code,
