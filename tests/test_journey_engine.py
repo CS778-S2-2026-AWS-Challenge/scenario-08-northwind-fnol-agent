@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 from fastapi.testclient import TestClient
 from journey_runs.engine import Journey
-from journey_runs.record import StepOutcome
+from journey_runs.record import RECORD_SCHEMA, JourneyRunRecord, StepOutcome
 
 
 def _plain_app(status_code: int) -> FastAPI:
@@ -47,3 +47,10 @@ def test_a_non_json_success_response_cannot_be_recorded_as_successful_evidence()
     assert journey.steps[0].response_body_valid is False
     assert journey.steps[0].outcome is StepOutcome.FAILED
     assert journey.steps[0].detail == 'HTTP 200 returned a non-JSON response.'
+
+
+def test_response_body_validity_has_a_new_record_schema_revision() -> None:
+    """Serialized response-validity evidence is declared as a breaking schema revision."""
+
+    assert RECORD_SCHEMA == 'northwind-journey-run/5'
+    assert JourneyRunRecord.model_fields['record_schema'].default == RECORD_SCHEMA

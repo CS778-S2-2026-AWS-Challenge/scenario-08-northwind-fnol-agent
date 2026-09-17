@@ -19,7 +19,7 @@ from typing import Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-RECORD_SCHEMA: Final = 'northwind-journey-run/4'
+RECORD_SCHEMA: Final = 'northwind-journey-run/5'
 ORACLE_FAILURE: Final = 'Fixture oracle failed'
 
 
@@ -361,7 +361,7 @@ def classify(
 
 
 class JourneyRunRecord(_Record):
-    record_schema: Literal['northwind-journey-run/4'] = RECORD_SCHEMA
+    record_schema: Literal['northwind-journey-run/5'] = RECORD_SCHEMA
     run_id: str
     scenario_id: str
     family: Literal['motor', 'home', 'contents']
