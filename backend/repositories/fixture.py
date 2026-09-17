@@ -1569,8 +1569,70 @@ class FixtureRepository(PersistenceRepository):
         branch_evaluation: BranchEvaluationRecord | None = None,
         runtime_trace: RuntimeTraceRecord | None = None,
         runtime_records: RuntimeTurnRecords | None = None,
+        create_claim: bool = False,
     ) -> None:
-        stored_claim = self._validate_claim_mutation(claim, expected_revision)
+        """Persist one accepted Agent turn under the Claim mutation lock.
+
+        Args:
+            claim: Resulting authoritative Claim snapshot.
+            expected_revision: Revision on which the turn was prepared.
+            session: Active Session updated by the turn.
+            claimant_message: Accepted claimant message.
+            agent_message: Agent response linked to the claimant message.
+            decision: Validated Agent decision.
+            idempotency: Retry identity for the complete turn.
+            handoff: Optional handoff created by the turn.
+            evidence: Optional Evidence record created by the turn.
+            branch_evaluation: Optional applied branch evaluation.
+            runtime_trace: Optional Runtime trace.
+            runtime_records: Optional namespaced Runtime records.
+            create_claim: Whether this turn atomically creates its Claim and Session.
+
+        Returns:
+            None.
+
+        Raises:
+            RevisionConflict: The stored Claim revision changed first.
+            IdempotencyConflict: A retry or immutable identity conflicts.
+            KeyError: Linked records are missing, malformed, or cross-scoped.
+        """
+
+        with self._claim_mutation_lock:
+            self._save_agent_turn(
+                claim,
+                expected_revision,
+                session,
+                claimant_message,
+                agent_message,
+                decision,
+                idempotency,
+                handoff,
+                evidence,
+                branch_evaluation,
+                runtime_trace,
+                runtime_records,
+                create_claim,
+            )
+
+    def _save_agent_turn(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        claimant_message: MessageRecord,
+        agent_message: MessageRecord,
+        decision: AgentDecisionRecord,
+        idempotency: IdempotencyRecord,
+        handoff: HandoffRecord | None = None,
+        evidence: EvidenceRecord | None = None,
+        branch_evaluation: BranchEvaluationRecord | None = None,
+        runtime_trace: RuntimeTraceRecord | None = None,
+        runtime_records: RuntimeTurnRecords | None = None,
+        create_claim: bool = False,
+    ) -> None:
+        stored_claim = (
+            None if create_claim else self._validate_claim_mutation(claim, expected_revision)
+        )
         stored_session = self._sessions.get(session.session_id)
         existing_claimant_message = self._messages.get(claimant_message.message_id)
         existing_agent_message = self._messages.get(agent_message.message_id)
@@ -1594,12 +1656,25 @@ class FixtureRepository(PersistenceRepository):
         records_match = (
             child_ownership_matches
             and claimant_message.message_id != agent_message.message_id
-            and stored_claim.customer_id == claim.customer_id
-            and stored_session is not None
-            and stored_session.claim_id == claim.claim_id
-            and stored_session.customer_id == claim.customer_id
-            and stored_session.status is SessionStatus.ACTIVE
-            and stored_claim.active_session_id == session.session_id
+            and (
+                not create_claim
+                or (expected_revision == 1 and claim.revision == 2 and stored_session is None)
+            )
+            and (
+                create_claim
+                or (stored_claim is not None and stored_claim.customer_id == claim.customer_id)
+            )
+            and (
+                create_claim
+                or (
+                    stored_session is not None
+                    and stored_session.claim_id == claim.claim_id
+                    and stored_session.customer_id == claim.customer_id
+                    and stored_session.status is SessionStatus.ACTIVE
+                    and stored_claim is not None
+                    and stored_claim.active_session_id == session.session_id
+                )
+            )
             and claim.active_session_id == session.session_id
             and session.status is SessionStatus.ACTIVE
             and claim.customer_id == session.customer_id
@@ -1700,12 +1775,19 @@ class FixtureRepository(PersistenceRepository):
             raise IdempotencyConflict(claimant_message.client_message_id or '')
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
         existing_idempotency = self._idempotency.get(lookup)
-        if (
-            existing_idempotency is not None
-            and existing_idempotency.request_fingerprint != idempotency.request_fingerprint
-        ):
+        if existing_idempotency is not None:
             raise IdempotencyConflict(idempotency.key)
 
+        existing_runtime = (
+            self._runtime_turns.get(runtime_records.turn_plan.turn_id)
+            if runtime_records is not None
+            else None
+        )
+        if runtime_records is not None and existing_runtime is not None:
+            raise IdempotencyConflict(runtime_records.turn_plan.turn_id)
+
+        if create_claim and claim.claim_id in self._claims:
+            raise IdempotencyConflict(claim.claim_id)
         self._claims[claim.claim_id] = deepcopy(claim)
         self._store_session(session)
         self._store_message(claimant_message)
@@ -1722,9 +1804,6 @@ class FixtureRepository(PersistenceRepository):
         if runtime_trace is not None:
             self._runtime_traces[runtime_trace.trace_id] = deepcopy(runtime_trace)
         if runtime_records is not None:
-            existing_runtime = self._runtime_turns.get(runtime_records.turn_plan.turn_id)
-            if existing_runtime is not None and existing_runtime != runtime_records:
-                raise IdempotencyConflict(runtime_records.turn_plan.turn_id)
             self._runtime_turns[runtime_records.turn_plan.turn_id] = deepcopy(runtime_records)
         self._idempotency[lookup] = idempotency
 

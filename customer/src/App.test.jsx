@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   confirmClaimFields: vi.fn(),
   createExternalClaim: vi.fn(),
   createClaim: vi.fn(),
+  bootstrapClaim: vi.fn(),
   grantAssessorConsent: vi.fn(),
   getAuthenticatedAccount: vi.fn(),
   hasClaimantAccessToken: vi.fn(),
@@ -133,6 +134,16 @@ function initialTurn() {
   }
 }
 
+function initialBootstrap({ claim = initialClaim, sessionId = 'ses_ui_vp', turn = initialTurn() } = {}) {
+  return {
+    claim,
+    session: { session_id: sessionId, model_profile_id: 'qwen-local' },
+    claim_id: claim.claim_id,
+    session_id: sessionId,
+    ...turn,
+  }
+}
+
 function dynamicForm({ value = '8pm', valueState = 'proposed' } = {}) {
   return {
     selected_family: 'home',
@@ -211,6 +222,8 @@ describe('claimant intake projection', () => {
       claim: initialClaim,
       session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
     })
+    api.getClaim.mockResolvedValue(initialClaim)
+    api.bootstrapClaim.mockResolvedValue(initialBootstrap())
   })
 
   it('shows the backend default model before creating a session', async () => {
@@ -285,7 +298,7 @@ describe('claimant intake projection', () => {
 
   it('shows one server-confirmed delivery failure with retry guidance', async () => {
     const user = userEvent.setup()
-    api.submitClaimMessage.mockRejectedValue(Object.assign(
+    api.bootstrapClaim.mockRejectedValue(Object.assign(
       new api.ApiRequestError('The model service is temporarily unavailable. The claim is unchanged.'),
       { code: 'DEPENDENCY_UNAVAILABLE', status: 503, retryable: true },
     ))
@@ -295,23 +308,25 @@ describe('claimant intake projection', () => {
     await user.type(input, 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    expect(api.createClaim).toHaveBeenCalledWith(expect.objectContaining({ incidentType: null }))
+    expect(api.bootstrapClaim).toHaveBeenCalledWith(expect.objectContaining({ incidentType: null }))
 
-    const failure = await screen.findByText(
-      'The model service is temporarily unavailable. The claim is unchanged. Try again in a moment.',
+    const failure = await screen.findByRole('alert')
+    expect(failure).toHaveTextContent(
+      'The model service is temporarily unavailable. The claim is unchanged.',
     )
     expect(failure).toBeInTheDocument()
-    expect(screen.getByText('Not sent')).toBeInTheDocument()
-    expect(container.querySelector('.workspace-composer [role="alert"]')).toHaveTextContent(
-      'The model service is temporarily unavailable. The claim is unchanged. Try again in a moment.',
-    )
+    expect(screen.queryByRole('button', { name: 'Retry message' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Not sent')).not.toBeInTheDocument()
+    expect(container.querySelector('.workspace-composer')).not.toBeInTheDocument()
     expect(screen.queryByText('We could not confirm delivery. Please try again.')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Retry message' })).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Tell us what happened…')).toHaveValue(
+      'A pipe burst in the kitchen.',
+    )
   })
 
   it('keeps third-party support out of chat and reopens it from What to provide', async () => {
     const user = userEvent.setup()
-    api.createClaim.mockResolvedValue({
+    api.bootstrapClaim.mockResolvedValue(initialBootstrap({
       claim: {
         ...initialClaim,
         external_capabilities: [
@@ -330,9 +345,7 @@ describe('claimant intake projection', () => {
           },
         ],
       },
-      session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
-    })
-    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    }))
 
     const { container } = render(<App />)
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'My car was damaged.')
@@ -402,9 +415,7 @@ describe('claimant intake projection', () => {
 
   it('scrolls to the latest messages after the claimant sends from earlier in the conversation', async () => {
     const user = userEvent.setup()
-    api.submitClaimMessage
-      .mockResolvedValueOnce(initialTurn())
-      .mockResolvedValueOnce({
+    api.submitClaimMessage.mockResolvedValueOnce({
         ...initialTurn(),
         claimant_message: {
           ...claimantMessage,
@@ -513,11 +524,9 @@ describe('claimant intake projection', () => {
       pushLiveUpdate = onEvent
       return new Promise(() => {})
     })
-    api.submitClaimMessage
-      .mockResolvedValueOnce(initialTurn())
-      .mockImplementationOnce(() => new Promise((resolve) => {
-        resolveReply = resolve
-      }))
+    api.submitClaimMessage.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveReply = resolve
+    }))
     api.requestHumanSupport.mockResolvedValue({
       revision: 3,
       handoff: assistanceHandoff(),
@@ -747,15 +756,12 @@ describe('claimant intake projection', () => {
       claim_revision: 2,
       decision: { customer_next_step: initialClaim.customer_next_step },
     })
-    api.createClaim
-      .mockResolvedValueOnce({
-        claim: initialClaim,
-        session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
-      })
-      .mockResolvedValueOnce({
+    api.bootstrapClaim
+      .mockResolvedValueOnce(initialBootstrap())
+      .mockResolvedValueOnce(initialBootstrap({
         claim: { ...initialClaim, claim_id: 'clm_ui_second' },
-        session: { session_id: 'ses_ui_second', model_profile_id: 'qwen-local' },
-      })
+        sessionId: 'ses_ui_second',
+      }))
     api.listClaims.mockResolvedValue({
       items: [
         {
@@ -766,7 +772,10 @@ describe('claimant intake projection', () => {
         },
       ],
     })
-
+    api.getClaim.mockImplementation(async (claimId) => ({
+      ...initialClaim,
+      claim_id: claimId,
+    }))
     render(<App />)
     const input = screen.getByPlaceholderText('Tell us what happened…')
     await user.type(input, 'A pipe burst in the kitchen.')
@@ -775,7 +784,8 @@ describe('claimant intake projection', () => {
 
     await user.click(screen.getByRole('button', { name: 'New chat' }))
 
-    expect(api.createClaim).toHaveBeenCalledTimes(1)
+    expect(api.bootstrapClaim).toHaveBeenCalledTimes(1)
+    expect(api.createClaim).not.toHaveBeenCalled()
     expect(api.startClaimSession).not.toHaveBeenCalled()
     expect(screen.getByPlaceholderText('Tell us what happened…')).toHaveValue('')
     expect(screen.queryByText('clm_ui_second')).not.toBeInTheDocument()
@@ -786,7 +796,8 @@ describe('claimant intake projection', () => {
     )
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    expect(api.createClaim).toHaveBeenCalledTimes(2)
+    expect(api.bootstrapClaim).toHaveBeenCalledTimes(2)
+    expect(api.createClaim).not.toHaveBeenCalled()
     expect(await screen.findByText('clm_ui_second')).toBeInTheDocument()
     expect(screen.getByText('Conversation history')).toBeInTheDocument()
     await waitFor(() => expect(api.streamClaimUpdates).toHaveBeenCalledWith(expect.objectContaining({
@@ -852,7 +863,7 @@ describe('claimant intake projection', () => {
 
   it('keeps creation and assessment actions in the Agent message flow', async () => {
     const user = userEvent.setup()
-    api.submitClaimMessage.mockResolvedValue({
+    api.bootstrapClaim.mockResolvedValue(initialBootstrap({ turn: {
       claimant_message: claimantMessage,
       agent_message: {
         ...agentMessage,
@@ -875,7 +886,7 @@ describe('claimant intake projection', () => {
         available: true,
         revision: 2,
       }),
-    })
+    } }))
     api.createExternalClaim.mockResolvedValue({
       revision: 3,
       external_claim: {
@@ -956,7 +967,7 @@ describe('claimant intake projection', () => {
       status: 'consent_required',
       can_request: true,
     }
-    api.createClaim.mockResolvedValue({
+    api.bootstrapClaim.mockResolvedValue(initialBootstrap({
       claim: {
         ...initialClaim,
         external_service_action: externalServiceAction,
@@ -968,9 +979,7 @@ describe('claimant intake projection', () => {
           targetRef: 'vehicle_damage_assessment_routing',
         }),
       },
-      session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
-    })
-    api.submitClaimMessage.mockResolvedValue({
+      turn: {
       ...initialTurn(),
       dynamic_form: readyDynamicForm(),
       decision: {
@@ -986,7 +995,8 @@ describe('claimant intake projection', () => {
         available: true,
         revision: 2,
       }),
-    })
+      },
+    }))
 
     render(<App />)
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'My car was damaged.')
@@ -1001,7 +1011,7 @@ describe('claimant intake projection', () => {
 
   it('uses backend-required items for the review action instead of local field counts', async () => {
     const user = userEvent.setup()
-    api.submitClaimMessage.mockResolvedValue({
+    api.bootstrapClaim.mockResolvedValue(initialBootstrap({ turn: {
       ...initialTurn(),
       form_changes: [{
         field_code: 'incident.occurred_at',
@@ -1024,7 +1034,7 @@ describe('claimant intake projection', () => {
         requiredInputs: ['incident.occurred_at', 'incident.location'],
         revision: 2,
       }),
-    })
+    } }))
 
     render(<App />)
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
@@ -1036,7 +1046,38 @@ describe('claimant intake projection', () => {
 
   it('renders backend dynamic requirements and re-renders a corrected field', async () => {
     const user = userEvent.setup()
+    api.getClaim.mockResolvedValue({
+      ...initialClaim,
+      form: dynamicForm().form,
+      dynamic_form: dynamicForm(),
+    })
     api.submitClaimMessage.mockResolvedValue({
+      claimant_message: claimantMessage,
+      agent_message: agentMessage,
+      form_changes: [{
+        field_code: 'incident.occurred_at',
+        field: dynamicForm().form['incident.occurred_at'],
+      }],
+      contents_item_changes: [],
+      dynamic_form: dynamicForm(),
+      claim_revision: 2,
+      decision: {
+        customer_next_step: {
+          status: 'more_information_needed',
+          summary: 'Add the affected property address',
+          required_items: ['property.address'],
+        },
+      },
+    })
+    api.bootstrapClaim.mockResolvedValue({
+      claim: {
+        ...initialClaim,
+        form: dynamicForm().form,
+        dynamic_form: dynamicForm(),
+      },
+      session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
+      claim_id: initialClaim.claim_id,
+      session_id: 'ses_ui_vp',
       claimant_message: claimantMessage,
       agent_message: agentMessage,
       form_changes: [{
@@ -1076,6 +1117,10 @@ describe('claimant intake projection', () => {
     await user.type(input, 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
+    expect(api.bootstrapClaim).toHaveBeenCalledWith(expect.objectContaining({
+      incidentType: null,
+      text: 'A pipe burst in the kitchen.',
+    }))
     await waitFor(() => expect(screen.getAllByText('When it happened').length).toBeGreaterThan(0))
     expect(screen.queryByRole('button', { name: /Review claim details/i })).not.toBeInTheDocument()
     const progress = screen.getByRole('button', {
@@ -1337,9 +1382,10 @@ describe('claimant intake projection', () => {
       claimId: initialClaim.claim_id,
       revision: 2,
     })))
-    expect(api.createClaim).toHaveBeenCalledTimes(1)
-    expect(api.submitClaimMessage).toHaveBeenCalledTimes(1)
-    expect(api.submitClaimMessage.mock.invocationCallOrder[0])
+    expect(api.bootstrapClaim).toHaveBeenCalledTimes(1)
+    expect(api.createClaim).not.toHaveBeenCalled()
+    expect(api.submitClaimMessage).not.toHaveBeenCalled()
+    expect(api.bootstrapClaim.mock.invocationCallOrder[0])
       .toBeLessThan(api.requestEvidenceUpload.mock.invocationCallOrder[0])
     expect(await screen.findByText('Ready')).toBeInTheDocument()
   })

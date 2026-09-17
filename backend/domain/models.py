@@ -1867,6 +1867,7 @@ class CreateClaimRequest(ContractModel):
     locale: str = Field(default='en-NZ', min_length=2, max_length=35)
     incident_type: str | None = Field(default=None, max_length=100)
     model_profile_id: str | None = Field(default=None, min_length=1, max_length=100)
+    initial_message: 'InitialClaimMessageRequest | None' = None
 
 
 class StartSessionRequest(ContractModel):
@@ -2043,6 +2044,18 @@ class MessageTurnResponse(ContractModel):
     handoff: ClaimantHandoff | None = None
     dynamic_form: 'DynamicFormProjection | None' = None
     primary_action: ClaimantPrimaryAction
+
+
+class InitialClaimTurnResponse(MessageTurnResponse):
+    claim: ClaimantClaim
+    session: ClaimantSession
+
+
+class InitialClaimMessageRequest(ContractModel):
+    incident_type: str | None = Field(default=None, max_length=100)
+    model_profile_id: str | None = Field(default=None, min_length=1, max_length=100)
+    client_message_id: str = Field(min_length=1, max_length=200)
+    content: TextMessageContent
 
 
 class MessageListResponse(ContractModel):
