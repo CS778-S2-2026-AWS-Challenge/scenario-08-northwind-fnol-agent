@@ -79,6 +79,7 @@ const initialClaim = {
     status: 'describe_incident',
     summary: 'Describe what happened',
     required_items: [],
+    can_resume: true,
   },
   primary_action: primaryAction(),
   created_at: '2026-09-14T01:00:00Z',
@@ -195,6 +196,9 @@ function readyDynamicForm() {
 describe('claimant intake projection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    globalThis.localStorage.clear()
+    globalThis.sessionStorage.clear()
+    globalThis.sessionStorage.setItem('northwind.anonymousSession', 'anonymous-session-test')
     globalThis.history.replaceState({}, '', '/')
     api.hasClaimantAccessToken.mockReturnValue(false)
     api.getRuntimeCapabilities.mockResolvedValue({
@@ -225,13 +229,13 @@ describe('claimant intake projection', () => {
 
     await user.click(model)
     expect(screen.getByRole('listbox', { name: 'Model' })).toBeInTheDocument()
-    await user.click(screen.getByRole('option', { name: /gpt-5\.5.*nowcoding-gpt55/ }))
+    await user.click(screen.getByRole('option', { name: 'gpt-5.5' }))
     expect(model).toHaveTextContent('gpt-5.5')
 
     await waitFor(() => expect(model).toHaveFocus())
     await user.keyboard('{ArrowDown}')
     const selectedGpt = screen.getByRole('option', {
-      name: /gpt-5\.5.*nowcoding-gpt55/,
+      name: 'gpt-5.5',
     })
     await waitFor(() => expect(selectedGpt).toHaveFocus())
     await user.keyboard('{Home}{Enter}')
@@ -270,7 +274,7 @@ describe('claimant intake projection', () => {
     api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
 
     render(<App />)
-    await user.click(screen.getByRole('button', { name: 'Create an account' }))
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
     await user.type(screen.getByLabelText('Your name'), 'Test claimant')
     await user.type(screen.getByLabelText('Email address'), 'test@example.test')
     await user.type(screen.getByLabelText('Password'), 'correct-horse')
@@ -281,6 +285,25 @@ describe('claimant intake projection', () => {
     expect(api.createClaim).not.toHaveBeenCalled()
     expect(api.promoteAnonymousClaim).not.toHaveBeenCalled()
     expect(screen.queryByText(initialClaim.claim_id)).not.toBeInTheDocument()
+  })
+
+  it('keeps account actions and the composer without exposing the legacy form route', async () => {
+    globalThis.history.replaceState({}, '', '/claim-form')
+    const { container } = render(<App />)
+
+    const header = container.querySelector('.product-header')
+    expect(header).toContainElement(screen.getByRole('button', { name: 'Log in' }))
+    expect(header).toContainElement(screen.getByRole('button', { name: 'Sign up' }))
+
+    const composer = container.querySelector('.claim-starter')
+    const composerInput = screen.getByPlaceholderText('Tell us what happened…')
+    expect(composer).toHaveAttribute('aria-label', 'Start a claim')
+    expect(composer.querySelector('h2')).not.toBeInTheDocument()
+    expect(composer).toContainElement(composerInput)
+    const processLink = screen.getByRole('button', { name: 'How does the claim process work?' })
+    expect(composer.compareDocumentPosition(processLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Use the traditional web form' })).not.toBeInTheDocument()
+    await waitFor(() => expect(globalThis.location.pathname).toBe('/'))
   })
 
   it('shows one server-confirmed delivery failure with retry guidance', async () => {
@@ -389,15 +412,20 @@ describe('claimant intake projection', () => {
 
     await user.click(backButton)
 
-    expect(screen.getByText('Understand insurance. Understand you better.')).toBeVisible()
+    expect(screen.getByRole('heading', { level: 1, name: 'Start your insurance claim' })).toBeVisible()
+    expect(screen.getByText(/Understand insurance/)).not.toHaveRole('heading')
     expect(globalThis.location.pathname).toBe('/')
     expect(screen.queryByText(agentMessage.content.text)).not.toBeInTheDocument()
 
-    act(() => {
-      globalThis.history.replaceState({}, '', `/claims/${initialClaim.claim_id}`)
-      globalThis.dispatchEvent(new PopStateEvent('popstate'))
-    })
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    const activeConversation = screen.getByRole('button', { name: /Open Home claim/ })
+    expect(activeConversation).toHaveAttribute('aria-current', 'page')
+    await user.click(activeConversation)
+
     expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
+    expect(globalThis.location.pathname).toBe(`/claims/${initialClaim.claim_id}`)
+    expect(api.createClaim).toHaveBeenCalledTimes(1)
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
   })
 
   it('scrolls to the latest messages after the claimant sends from earlier in the conversation', async () => {
@@ -667,7 +695,8 @@ describe('claimant intake projection', () => {
       .mockResolvedValueOnce({ items: [claimantMessage, agentMessage, postResumeMessage] })
 
     render(<App />)
-    await user.click(await screen.findByRole('button', { name: 'Resume claim' }))
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
 
     expect(await screen.findByRole('status', { name: /Staff assistance completed/ })).toBeVisible()
     expect(screen.queryByRole('button', { name: /Where you left off/ })).not.toBeInTheDocument()
@@ -724,7 +753,8 @@ describe('claimant intake projection', () => {
     api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
 
     render(<App />)
-    await user.click(await screen.findByRole('button', { name: 'Resume claim' }))
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
 
     expect(await screen.findByRole('button', { name: 'Staff assistance' })).toBeEnabled()
     expect(screen.queryByRole('status', { name: /Staff assistance completed/ })).not.toBeInTheDocument()
@@ -796,6 +826,170 @@ describe('claimant intake projection', () => {
     })))
   })
 
+  it('uses the homepage rail to return to the existing empty conversation workspace', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const input = screen.getByPlaceholderText('Tell us what happened…')
+    await user.type(input, 'A draft that has not been sent.')
+    await user.click(screen.getByRole('button', { name: 'New conversation' }))
+
+    expect(input).toHaveValue('')
+    expect(api.createClaim).not.toHaveBeenCalled()
+    expect(globalThis.location.pathname).toBe('/')
+  })
+
+  it('restores anonymous session-local history through the existing Claim APIs after reload', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_ui_vp',
+      model_profile_id: 'qwen-local',
+      started_at: '2026-09-16T01:06:00Z',
+      resume: {
+        summary: 'A pipe burst in the kitchen.',
+        unresolved_questions: [],
+        pending_items: [],
+        prior_commitments: [],
+        customer_next_step: initialClaim.customer_next_step,
+      },
+    })
+    api.getClaim.mockResolvedValue(initialClaim)
+    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+    const { unmount } = render(<App />)
+
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    unmount()
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+
+    expect(screen.queryByText('Sign in to view saved conversations')).not.toBeInTheDocument()
+    expect(screen.getByText('Saved in this browser session.')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: /Open Home claim/ }))
+
+    expect(api.listClaims).not.toHaveBeenCalled()
+    expect(api.resumeClaimSession).toHaveBeenCalledWith({ claimId: initialClaim.claim_id })
+    expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
+  })
+
+  it('uses the authoritative post-resume revision for the next claimant message', async () => {
+    const user = userEvent.setup()
+    let backendClaim = {
+      ...initialClaim,
+      revision: 4,
+      primary_action: primaryAction({ revision: 4 }),
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({
+      items: [{ ...backendClaim, can_resume: true }],
+      page: { next_cursor: null },
+    })
+    api.getClaim.mockImplementation(() => Promise.resolve(backendClaim))
+    api.resumeClaimSession.mockImplementation(() => {
+      backendClaim = {
+        ...backendClaim,
+        revision: 5,
+        primary_action: primaryAction({ revision: 5 }),
+      }
+      return Promise.resolve({
+        session_id: 'ses_resumed',
+        model_profile_id: 'qwen-local',
+        started_at: '2026-09-16T01:06:00Z',
+        resume: {
+          summary: 'A pipe burst in the kitchen.',
+          unresolved_questions: [],
+          pending_items: [],
+          prior_commitments: [],
+          customer_next_step: backendClaim.customer_next_step,
+        },
+      })
+    })
+    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+    api.submitClaimMessage.mockImplementation(({ revision }) => {
+      expect(revision).toBe(5)
+      return Promise.resolve({
+        ...initialTurn(),
+        claimant_message: {
+          ...claimantMessage,
+          message_id: 'msg_after_authoritative_resume',
+          content: { type: 'text', text: 'The water is now turned off.' },
+        },
+        agent_message: {
+          ...agentMessage,
+          message_id: 'msg_agent_after_authoritative_resume',
+          content: { type: 'text', text: 'Thanks, I recorded that update.' },
+        },
+        claim_revision: 6,
+        primary_action: primaryAction({ revision: 6 }),
+      })
+    })
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
+    await screen.findByText(initialClaim.claim_id)
+
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'The water is now turned off.')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(await screen.findByText('Thanks, I recorded that update.')).toBeVisible()
+    expect(api.submitClaimMessage).toHaveBeenCalledWith(expect.objectContaining({ revision: 5 }))
+    expect(api.getClaim).toHaveBeenCalledTimes(2)
+  })
+
+  it('removes an anonymous history reference after a permanent resume failure', async () => {
+    const user = userEvent.setup()
+    const historyKey = 'northwind.anonymousConversationHistory.v1.anonymous-session-test'
+    globalThis.sessionStorage.setItem(historyKey, JSON.stringify([{ ...initialClaim, can_resume: true }]))
+    api.getClaim.mockRejectedValue(Object.assign(
+      new api.ApiRequestError('The claim was not found.'),
+      { code: 'RESOURCE_NOT_FOUND', status: 404, retryable: false },
+    ))
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(screen.getByRole('button', { name: /Open Home claim/ }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This conversation is no longer available in this browser session, so it was removed from history.',
+    )
+    expect(JSON.parse(globalThis.sessionStorage.getItem(historyKey))).toEqual([])
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    expect(screen.queryByRole('button', { name: /Open Home claim/ })).not.toBeInTheDocument()
+  })
+
+  it('retains an anonymous history reference after a transient resume failure', async () => {
+    const user = userEvent.setup()
+    const historyKey = 'northwind.anonymousConversationHistory.v1.anonymous-session-test'
+    globalThis.sessionStorage.setItem(historyKey, JSON.stringify([{ ...initialClaim, can_resume: true }]))
+    api.getClaim.mockRejectedValue(Object.assign(
+      new api.ApiRequestError('We could not reach the claim service.'),
+      { code: 'NETWORK_ERROR', retryable: true },
+    ))
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(screen.getByRole('button', { name: /Open Home claim/ }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The conversation is still saved in history. Try opening it again.',
+    )
+    expect(JSON.parse(globalThis.sessionStorage.getItem(historyKey))).toHaveLength(1)
+
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    expect(screen.getByRole('button', { name: /Open Home claim/ })).toBeVisible()
+  })
+
   it('keeps conversation history rows stable when switching the active Claim', async () => {
     const user = userEvent.setup()
     const reportA = {
@@ -834,7 +1028,8 @@ describe('claimant intake projection', () => {
     api.getClaimMessages.mockResolvedValue({ items: [] })
 
     render(<App />)
-    await user.click((await screen.findAllByRole('button', { name: 'Resume claim' }))[0])
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
     expect(await screen.findByText(reportA.claim_id)).toBeInTheDocument()
 
     const historyCards = () => [...document.querySelectorAll('.intake-history-item')]
