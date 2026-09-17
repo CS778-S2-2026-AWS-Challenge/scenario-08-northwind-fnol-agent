@@ -1544,6 +1544,17 @@ def test_an_interrupted_dispatch_is_reconcilable_rather_than_stranded() -> None:
         held = repository.list_external_task_requests_internal(claim_id)[0]
         stalled_task = repository.list_external_tasks_internal(claim_id)[0]
 
+        claimant = client.get(f'/api/v1/claims/{claim_id}', headers=AUTH).json()
+        workbench = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
+        lifecycle = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/external-requests',
+            headers=STAFF_AUTH,
+        ).json()['items'][0]['lifecycle']
+        all_claims = client.get('/api/v1/workbench/claims?view=all', headers=STAFF_AUTH).json()
+        processing_claims = client.get(
+            '/api/v1/workbench/claims?view=processing', headers=STAFF_AUTH
+        ).json()
+
         # The second caller cannot reach the assessor, whatever key it presents.
         blocked = _route(client, claim_id, key=f'{key}-again', revision=consent_revision)
         calls_after_block = adapter.calls
@@ -1565,6 +1576,31 @@ def test_an_interrupted_dispatch_is_reconcilable_rather_than_stranded() -> None:
     assert held.operation_id is not None
     assert held.sent_at is None
     assert stalled_task.status is ExternalTaskOperationStatus.PREPARED
+
+    action = claimant['external_service_action']
+    assert action['status'] == 'awaiting_reconciliation'
+    assert action['can_request'] is False
+    assert action['failure_code'] is None
+    assert claimant['primary_action']['action_code'] == 'claimant.await_reconciliation'
+    assert claimant['customer_next_step']['responsible_party'] == 'claims_professional'
+
+    assert lifecycle['status_label'] == 'Outcome not confirmed'
+    assert lifecycle['verification_state'] == 'reconciliation_required'
+    assert lifecycle['delivery_state'] == 'not_submitted'
+    assert lifecycle['needs_attention'] is True
+    assert 'Reconcile' in lifecycle['next_action']
+
+    assert workbench['work_summary']['queue_key'] == 'processing'
+    assert workbench['work_summary']['primary_action_code'] == 'external.reconcile_response'
+    reconcile_action = next(
+        item
+        for item in workbench['allowed_actions']
+        if item['action_code'] == 'external.reconcile_response'
+    )
+    assert reconcile_action['target_ref'] == stalled_task.task_id
+    assert reconcile_action['source_refs'] == [stalled_task.task_id]
+    assert claim_id in {item['claim_id'] for item in all_claims['items']}
+    assert claim_id in {item['claim_id'] for item in processing_claims['items']}
 
     assert blocked.status_code == 409
     assert [detail['reason'] for detail in blocked.json()['error']['details']] == [
