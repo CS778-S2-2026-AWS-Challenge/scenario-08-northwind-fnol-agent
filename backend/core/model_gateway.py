@@ -344,7 +344,7 @@ class ConfigurationBackedModelGateway:
         )
 
     def complete(self, request: ModelRequest) -> ModelResponse:
-        return self._complete(request, evidence_resolver=None)
+        return self.open_exchange(request).complete(request)
 
     def complete_with_evidence(
         self,
@@ -353,14 +353,28 @@ class ConfigurationBackedModelGateway:
     ) -> ModelResponse:
         """Complete one request with a resolver scoped to its authorised Evidence."""
 
-        return self._complete(request, evidence_resolver=evidence_resolver)
+        return self.open_exchange_with_evidence(request, evidence_resolver).complete(request)
 
-    def _complete(
+    def open_exchange(self, request: ModelRequest) -> ModelGateway:
+        """Bind one concrete provider adapter for the lifetime of a model turn."""
+
+        return self._open_exchange(request, evidence_resolver=None)
+
+    def open_exchange_with_evidence(
+        self,
+        request: ModelRequest,
+        evidence_resolver: ModelEvidenceContentResolver,
+    ) -> ModelGateway:
+        """Bind one provider adapter and one authorised Evidence resolver."""
+
+        return self._open_exchange(request, evidence_resolver=evidence_resolver)
+
+    def _open_exchange(
         self,
         request: ModelRequest,
         *,
         evidence_resolver: ModelEvidenceContentResolver | None,
-    ) -> ModelResponse:
+    ) -> ModelGateway:
         configuration, authoritative = self._active_model_configuration(request.model_profile_id)
         if configuration is None:
             if (
@@ -383,14 +397,14 @@ class ConfigurationBackedModelGateway:
                 configuration.protocol,
                 _model_gateway_config_from_runtime(configuration, evidence_resolver),
             )
-        return gateway.complete(request)
+        return gateway
 
     def complete_for_snapshot(
         self,
         request: ModelRequest,
         snapshot: RuntimeConfigurationSnapshot,
     ) -> ModelResponse:
-        return self._complete_for_snapshot(request, snapshot, evidence_resolver=None)
+        return self.open_exchange_for_snapshot(request, snapshot).complete(request)
 
     def complete_for_snapshot_with_evidence(
         self,
@@ -400,34 +414,57 @@ class ConfigurationBackedModelGateway:
     ) -> ModelResponse:
         """Use one Release Set snapshot and one turn-scoped Evidence resolver."""
 
-        return self._complete_for_snapshot(
+        return self.open_exchange_for_snapshot_with_evidence(
+            request,
+            snapshot,
+            evidence_resolver,
+        ).complete(request)
+
+    def open_exchange_for_snapshot(
+        self,
+        request: ModelRequest,
+        snapshot: RuntimeConfigurationSnapshot,
+    ) -> ModelGateway:
+        """Bind the snapshot-selected provider adapter for one model turn."""
+
+        return self._open_exchange_for_snapshot(request, snapshot, evidence_resolver=None)
+
+    def open_exchange_for_snapshot_with_evidence(
+        self,
+        request: ModelRequest,
+        snapshot: RuntimeConfigurationSnapshot,
+        evidence_resolver: ModelEvidenceContentResolver,
+    ) -> ModelGateway:
+        """Bind a snapshot-selected adapter and authorised Evidence resolver."""
+
+        return self._open_exchange_for_snapshot(
             request,
             snapshot,
             evidence_resolver=evidence_resolver,
         )
 
-    def _complete_for_snapshot(
+    def _open_exchange_for_snapshot(
         self,
         request: ModelRequest,
         snapshot: RuntimeConfigurationSnapshot,
         *,
         evidence_resolver: ModelEvidenceContentResolver | None,
-    ) -> ModelResponse:
-        """Complete a request with the model selected by the turn's existing snapshot.
+    ) -> ModelGateway:
+        """Create an exchange with the model selected by the existing snapshot.
 
         Args:
             request: Provider-neutral request for the current Agent turn.
             snapshot: Single Release Set snapshot already selected for that turn.
 
         Returns:
-            The normalized provider response.
+            A concrete provider adapter fixed for this model turn.
 
         Raises:
             ModelGatewayError: If the snapshot omits or contains an invalid model.
         """
 
         if snapshot.release_set_id is None:
-            return self._complete(request, evidence_resolver=evidence_resolver)
+            return self._open_exchange(request, evidence_resolver=evidence_resolver)
         try:
             record = snapshot.model(request.model_profile_id)
             if record is None:
@@ -438,8 +475,7 @@ class ConfigurationBackedModelGateway:
         except (RuntimeConfigurationResolutionError, ValueError) as error:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from error
         registry = self._registry or default_model_gateway_registry()
-        gateway = registry.create(
+        return registry.create(
             configuration.protocol,
             _model_gateway_config_from_runtime(configuration, evidence_resolver),
         )
-        return gateway.complete(request)

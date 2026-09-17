@@ -2031,7 +2031,7 @@ function App() {
   }
 
   function renderConversationAction() {
-    if (conversationActionKind === 'external-service') {
+    if (conversationActionKind === 'external-service' && claim?.external_service_action) {
       return (
         <ExternalServiceAction
           key={conversationAction.identity}

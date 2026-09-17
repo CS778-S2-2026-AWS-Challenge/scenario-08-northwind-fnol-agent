@@ -18,6 +18,7 @@ from pymongo import MongoClient, ReturnDocument
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
+from backend.domain.agent_context_runtime import VerifiedConversationSummary
 from backend.domain.assets import AssetRecord, ClaimAssetSnapshot
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
 from backend.domain.evidence import assert_material_history_is_append_only
@@ -228,6 +229,7 @@ def probe_mongodb_connectivity(config: MongoDBConnectionConfig) -> str:
 IMMUTABLE_CHILD_RECORD_KINDS = frozenset(
     {
         'message',
+        'conversation_summary',
         'agent_decision',
         'branch_evaluation',
         'runtime_trace',
@@ -1952,6 +1954,60 @@ class MongoDBRepository:
             if message is not None
         ]
         return list(reversed(messages))
+
+    def save_conversation_summary(
+        self,
+        summary: VerifiedConversationSummary,
+        customer_id: str,
+    ) -> None:
+        if self.get_session(summary.claim_id, summary.session_id, customer_id) is None:
+            raise KeyError(summary.session_id)
+        document = summary.model_dump(mode='json')
+        document.update(
+            {
+                '_id': self._record_id('conversation_summary', summary.summary_id),
+                'record_type': 'conversation_summary',
+                'customer_id': customer_id,
+                'claim_id': summary.claim_id,
+            }
+        )
+        try:
+            self._collection.insert_one(document)
+        except DuplicateKeyError as error:
+            existing_document = self._collection.find_one(
+                {
+                    '_id': document['_id'],
+                    'record_type': 'conversation_summary',
+                    'customer_id': customer_id,
+                    'claim_id': summary.claim_id,
+                }
+            )
+            existing = self._model_from_document(
+                existing_document,
+                VerifiedConversationSummary,
+            )
+            if existing != summary:
+                raise IdempotencyConflict(summary.summary_id) from error
+
+    def get_latest_conversation_summary(
+        self,
+        claim_id: str,
+        session_id: str,
+        customer_id: str,
+    ) -> VerifiedConversationSummary | None:
+        if self.get_session(claim_id, session_id, customer_id) is None:
+            return None
+        summaries = self._list(
+            'conversation_summary',
+            VerifiedConversationSummary,
+            {
+                'claim_id': claim_id,
+                'session_id': session_id,
+                'customer_id': customer_id,
+            },
+            'created_at',
+        )
+        return summaries[-1] if summaries else None
 
     def save_agent_decision(self, decision: AgentDecisionRecord, customer_id: str) -> None:
         if (

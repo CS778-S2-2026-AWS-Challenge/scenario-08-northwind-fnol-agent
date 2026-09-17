@@ -272,10 +272,12 @@ They are operational records only; they cannot mutate Claim State, WorkItems, ha
 or configuration values. The operation list supports bounded filters and cursor-shaped responses.
 
 Each claimant or staff model call creates a `model_invocation` operation. Its bounded result contains
-the model purpose, provider-reported model identifier when available, nullable input/output/total
-token counts, and measured latency in milliseconds. Controlled failures use a stable `MODEL_*`
-error code. The record never contains prompts, credentials, provider request payloads, raw provider
-responses, or claimant message content.
+the model purpose, requested model profile, prompt version, request stage, invocation ordinal and
+count, configured or provider-reported model identifier, nullable input/output/total token counts,
+and measured latency in milliseconds. A transport failure records the configured model identifier
+even when the provider never returns usage or provenance. Controlled failures use a stable
+`MODEL_*` error code. The record never contains prompts, credentials, provider request payloads,
+raw provider responses, or claimant message content.
 
 `GET /internal/v1/admin/operations/metrics` aggregates the complete persisted operation ledger. Its
 response contains `total`, `by_state`, `by_kind`, model `usage`, `cost`, `rate_limit`, `alerts`, and
@@ -323,10 +325,10 @@ AGENT_CONFIGURATION_INVALID`.
 
 | Component path | Configuration domain | Required `values` fields |
 | --- | --- | --- |
-| `instructions` | `agent_instruction` | `prompt_version`, `purpose` (`claimant_agent`), and `system_prompt` |
-| `tool_permissions` | `agent_tool_policy` | `policy_version`, `allowed_action_codes`, and `allowed_tool_names` |
-| `controlled_rules` | `agent_rule` | `rules_version`, `disabled_rule_ids`, and `observation_rule_ids` |
-| `features` | `feature` | `feature_version`, `model_assisted_turns`, and `knowledge_retrieval` |
+| `instructions` | `agent_instruction` | `prompt_version`, `purpose`, `composition_mode`, `manifest_version`, and embedded `fragments` for v7 |
+| `tool_permissions` | `agent_tool_policy` | `policy_version`, action/tool allow-lists, Request Profiles, provider capabilities, and schema registry |
+| `controlled_rules` | `agent_rule` | `rules_version`, protected overlays, route/catalogue versions, deterministic responses, and context budget |
+| `features` | `feature` | `feature_version`, model/retrieval switches, v7 feature flags, and cache layout version |
 
 The tool policy can only restrict server-registered actions and tools. It must retain
 `conversation.state_limitation`, `human.create_handoff`, `runtime.fail_safe`,
@@ -439,13 +441,15 @@ credential field contains only an
 environment-variable name; the secret itself remains outside the configuration record. Every
 model configuration must declare `impact=high`; an omitted or normal impact returns `422
 PROVIDER_CONFIGURATION_INVALID` and cannot enter the lifecycle. Model validation permits
-publication only when `evaluation_status` is `configured`; profile ID, provider, model identifier,
-protocol, base URL, credential environment-variable name, purpose, privacy class, executable
-prompt identifier, and capabilities match one exact entry in the deployment-owned model binding
-allow-list. The allow-list does not publish a model; the independently approved configuration and
-active Release Set remain the selectable-catalogue authority. The current executable prompt
-identifier is `northwind-fnol-claimant-v6`. A
-degraded, unavailable, deployment-mismatched, or Runtime-incompatible profile returns `422
+publication only when the complete configuration, including `evaluation_status`, matches one
+deployment-owned binding. A `configured` profile is selectable; a published `degraded` or
+`unavailable` profile remains visible but cannot be selected or sent to provider transport.
+Profile ID, provider, model identifier, protocol, base URL, credential environment-variable name,
+purpose, privacy class, executable prompt identifier, and capabilities must match one exact entry
+in the deployment-owned model binding allow-list. The allow-list does not publish a model; the
+independently approved configuration and active Release Set remain the selectable-catalogue
+authority. The current executable prompt identifier is `northwind-fnol-claimant-v7`. A
+deployment-mismatched, status-mismatched, or Runtime-incompatible profile returns `422
 PROVIDER_CONFIGURATION_UNAVAILABLE` and remains a draft. Other invalid or incomplete model values
 return `422 PROVIDER_CONFIGURATION_INVALID`.
 
@@ -1206,6 +1210,9 @@ published and configured, otherwise the first available published profile) and e
 profile's stable ID, provider model label, protocol, structured-output capability, tool-call
 capability, image-input capability, document-input capability, and `availability`. The frontend uses the default when creating a Session, while a
 message may select another published and available profile in the same conversation.
+The repository initial catalogue publishes `qwen-local`, `nowcoding-gpt55`,
+`google-gemini35-flash-lite`, and the explicitly unavailable `bedrock-nova2-lite`; deployment
+selection keeps `qwen-local` as the default unless `MODEL_PROFILE_ID` changes.
 
 ### `POST /api/v1/claims`
 
@@ -1438,11 +1445,13 @@ structured form fact or contents item attributed to an attachment must name that
 ID. It is persisted with `image` or `document` provenance and remains `proposed` for claimant
 confirmation.
 
-On the target namespaced Runtime path the model must first call `claim.read`. The Runtime executes
-the read against the authenticated Claim, sends the assistant tool call and result back to the
-same model, and accepts only a registered `action_code` and `runtime_action_code` pairing. An
-unknown directive such as `runtime.confirm_claimant_facts`, a deprecated flat action, or an
-invalid pairing is rejected before Claim State mutation.
+On the v7 Runtime path, Runtime builds the current Claim projection before transport. Ordinary
+profiles make one tool-free call. A lookup profile can resolve one published turn-scoped
+`context.resolve` reference and make one continuation call; the continuation exposes no tools.
+Policy/RAG, claimant-owned Claim history, claimant-scoped Evidence history, and older messages use
+separate bounded selectors. PDF, multi-Evidence, and cross-Claim review use one isolated,
+mutation-incapable request. Unknown, stale, cross-scope, recursive, or malformed references are
+rejected before Claim State mutation.
 The validated proposal is then applied through the ordinary revision-checked Claim transaction.
 The response includes the resulting Claim revision and compatibility decision projection, while
 the distinct TurnPlan, AgentProposal, ExecutionPlan, ActionEnvelope, ToolResult, TurnResult, and
@@ -3197,9 +3206,9 @@ A target `TurnPlan` may contain multiple detected intents, conversation moves,
 content-branch candidates, form-patch proposals, Claim-command proposals, tool requests,
 unresolved work, and limitations, with one primary Runtime control directive.
 
-The claimant message route implements the applied target slice: `claim.read` is executed against
-the authenticated Claim, the same model receives the tool result, and the final namespaced
-proposal is validated and persisted atomically with Claim State, messages, branch evaluation,
+The claimant message route implements the applied v7 slice: Runtime selects one published profile,
+composes the Prompt fragments and context under budget, optionally resolves one bounded read-only
+reference, and validates the resulting narrow proposal. The result is persisted atomically with Claim State, messages, branch evaluation,
 Runtime records, WorkItems, and idempotency. The public response remains claimant-safe and keeps
 the compatibility decision projection while internal target records are available only through
 authorised repository boundaries.

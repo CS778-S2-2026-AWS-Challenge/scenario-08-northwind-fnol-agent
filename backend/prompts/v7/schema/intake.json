@@ -1,0 +1,131 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "reply",
+    "next_step",
+    "reason_codes",
+    "field_changes",
+    "contents_item_changes",
+    "service_offer_ids"
+  ],
+  "properties": {
+    "reply": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "next_step": {"type": "string", "minLength": 1, "maxLength": 500},
+    "reason_codes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {"type": "string", "minLength": 1, "maxLength": 100}
+    },
+    "field_changes": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field_code",
+          "value",
+          "needed_for",
+          "confidence",
+          "precision",
+          "relation",
+          "reported_text",
+          "source_evidence_id"
+        ],
+        "properties": {
+          "field_code": {"type": "string", "minLength": 1, "maxLength": 100},
+          "value": {
+            "anyOf": [
+              {"type": "string"},
+              {"type": "number"},
+              {"type": "boolean"},
+              {"type": "null"}
+            ]
+          },
+          "needed_for": {"enum": ["current_action", "later_action"]},
+          "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+          "precision": {"enum": ["exact", "approximate", "range", "partial", "unknown"]},
+          "relation": {
+            "type": ["string", "null"],
+            "enum": [
+              "initial",
+              "equivalent",
+              "refinement",
+              "correction",
+              "material_conflict",
+              "irrelevant",
+              null
+            ]
+          },
+          "reported_text": {"type": ["string", "null"], "maxLength": 5000},
+          "source_evidence_id": {"type": ["string", "null"], "maxLength": 100}
+        }
+      }
+    },
+    "contents_item_changes": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "item_id",
+          "description",
+          "category",
+          "quantity",
+          "loss_type",
+          "ownership",
+          "estimated_value",
+          "confidence",
+          "relation",
+          "reported_text",
+          "source_evidence_id"
+        ],
+        "properties": {
+          "item_id": {"type": ["string", "null"], "maxLength": 100},
+          "description": {"type": "string", "minLength": 1, "maxLength": 500},
+          "category": {"type": "string", "minLength": 1, "maxLength": 100},
+          "quantity": {"type": "integer", "minimum": 1},
+          "loss_type": {"enum": ["damaged", "lost", "stolen", "destroyed"]},
+          "ownership": {"enum": ["owned", "leased", "borrowed", "gifted", "other"]},
+          "estimated_value": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["amount", "currency"],
+                "properties": {
+                  "amount": {"type": "number", "minimum": 0},
+                  "currency": {"type": "string", "pattern": "^[A-Z]{3}$"}
+                }
+              },
+              {"type": "null"}
+            ]
+          },
+          "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+          "relation": {
+            "type": ["string", "null"],
+            "enum": [
+              "initial",
+              "equivalent",
+              "refinement",
+              "correction",
+              "material_conflict",
+              "irrelevant",
+              null
+            ]
+          },
+          "reported_text": {"type": ["string", "null"], "maxLength": 5000},
+          "source_evidence_id": {"type": ["string", "null"], "maxLength": 100}
+        }
+      }
+    },
+    "service_offer_ids": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {"type": "string", "minLength": 1, "maxLength": 100}
+    }
+  }
+}

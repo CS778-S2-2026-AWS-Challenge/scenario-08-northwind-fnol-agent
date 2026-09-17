@@ -27,18 +27,20 @@ normalise:
   unavailable usage fields remain explicitly unknown rather than being reported as zero; and
 - optional first-token latency when a transport can report it.
 
-For the target model-backed claimant path, `GatewayAgent` performs a bounded two-stage
-turn: it advertises the read-only `claim.read` tool, validates and executes that tool against
-the authenticated `WorkingClaim`, then sends the assistant tool call and typed tool result back
-to the same model for a namespaced final response. The model never executes a tool, writes Claim
-State, creates a claim, or authorises a handoff by itself; the Runtime performs those checks.
+The v7 claimant path selects a published Request Profile before transport. Ordinary intake,
+answer, correction, confirmation, claim creation, and third-party offers make one tool-free model
+call over a server-built Claim projection. A lookup profile may resolve one turn-scoped
+`context.resolve` reference and make one continuation call. PDF, multi-Evidence, and cross-Claim
+review run in a mutation-incapable isolated request. The model never executes a tool, writes Claim
+State, grants consent, creates a claim, or authorises a handoff by itself; Runtime performs those
+checks.
 
 When a claimant message explicitly carries `evidence_refs`, the message boundary resolves only
 claimant-visible records on that claimant's Claim whose lifecycle and media type permit model
 input. Staff and external-system Evidence remains internal-only even when it belongs to the same
 Claim. The boundary binds eligible IDs and media types to a resolver that exists for that turn
-only. The adapter must use that same resolver for the initial `claim.read` request and its
-continuation; it re-checks the allow-list, claimant visibility, current record, media type,
+only. The adapter uses that same resolver for the selected v7 request; it re-checks the allow-list,
+claimant visibility, current record, media type,
 lifecycle state, and immutable storage key before reading bytes. Arbitrary URLs, storage keys,
 unselected Evidence, internal-only Evidence, and cross-Claim records never enter the model
 request. Missing content or a profile without the required image/document capability fails before
@@ -47,8 +49,8 @@ a text fallback can be attempted.
 The applied claimant Runtime persists the claimant and agent messages, the Claim revision and
 validated form changes, the compatibility decision projection, a bounded `RuntimeTraceRecord`,
 the TurnPlan/AgentProposal/ExecutionPlan/ActionEnvelope/ToolResult/TurnResult/WorkItem family,
-Session activity, and the idempotency response atomically. `claim.read` is observational, but it
-is followed by the validated Claim mutation path rather than a read-only turn. A model may
+Session activity, and the idempotency response atomically. The current Claim projection is built
+at the authenticated message boundary and is followed by the validated Claim mutation path. A model may
 propose `human.create_handoff`, but model output never authorises that action. A server-owned
 support or safety interrupt runs before the provider and is the only Runtime path that authorises
 the handoff builder.
@@ -111,18 +113,17 @@ sizes are observation fields rather than a public API contract. A successful mul
 trace additionally records only the selected Evidence ID, media type, and `submitted` outcome; raw
 bytes and storage metadata are excluded.
 
-The model-facing schema does not contain the server-only `controlled_rule_authorised`
-marker, and rejects a response that tries to provide it. The target request exposes only the
-`claim.read` manifest; unknown, multiple, or malformed tool calls fail closed before any
-persistence. A model response using the deprecated eight-action schema is rejected with
+The model-facing schemas do not contain the server-only `controlled_rule_authorised`
+marker. v7 publishes separate answer, intake patch, external offer, Evidence action, handoff,
+claim-creation, and sourced-summary schemas. Tool-free profiles expose no tool manifest. Lookup
+profiles expose only `context.resolve`; unknown, multiple, recursive, stale, cross-scope, or
+malformed resolutions fail closed before persistence. A model response using the deprecated eight-action schema is rejected with
 `LEGACY_AGENT_ACTION_DEPRECATED` and cannot fall back to the controlled Agent. The compatibility
 path still permits structured `required_tools` proposals for the bounded context operations
 published by Branch Evaluation and Runtime policy; it validates arguments, executes at most one
-context lookup, and permits one typed re-plan. The target model-backed path uses the provider
-tool-call side channel for `claim.read` and never mixes it with the legacy eight-action response.
-The first request names `claim.read` as the required tool; compatible adapters force that exact
-tool choice and disable parallel tool calls rather than relying on prompt compliance. The
-continuation is constrained to registered `action_code` and `runtime_action_code` pairs. Ordinary
+context lookup, and permits one typed re-plan. The v7 continuation removes tools after the first
+bounded resolution, so recursive tool chains are impossible. Provider adapters materialize the
+selected stable schema and output limit without changing Runtime authority. Ordinary
 intake uses `conversation.answer` with `runtime.wait_for_user` or `runtime.continue`; human support
 uses `human.create_handoff` with `runtime.pause_for_review`. Claim preparation, creation, and
 prior-Evidence proposals use only their explicitly registered directives. The proposal remains
@@ -173,7 +174,7 @@ model and Runtime authority validation before it can affect Claim State.
 | Variable | Meaning |
 | --- | --- |
 | `AGENT_RUNTIME_PROFILE` | `controlled` or `model_gateway` |
-| `MODEL_PROTOCOL_ADAPTER` | Registered adapter name; currently `openai_compatible` by default |
+| `MODEL_PROTOCOL_ADAPTER` | Registered adapter name; `openai_compatible` is the default, with native `bedrock_converse` and `google_generate_content` adapters available |
 | `MODEL_PROFILE_ID` | Identifier of the selected model profile |
 | `MODEL_PROVIDER` | Provider label used for internal profile audit context |
 | `MODEL_PURPOSE` | Allowed request purpose; `agent_turn` for the claimant Agent |
@@ -190,6 +191,7 @@ model and Runtime authority validation before it can affect Claim State.
 | `MODEL_SUPPORTS_DOCUMENT_INPUT` | Declared endpoint capability for PDF Evidence blocks; default `false` |
 | `MODEL_RUNTIME_BINDINGS_PATH` | Path to the deployment-owned, non-secret list of model bindings that Control Plane publication is allowed to reference |
 | `NORTHWIND_QWEN_BASE_URL` | Environment-owned Qwen endpoint resolved by the checked-in binding manifest |
+| `GEMINI_API_KEY` | Environment-owned Google AI Studio credential referenced by the Gemini binding |
 
 For an unauthenticated local server, leave `MODEL_API_KEY_ENV` empty. For an
 authenticated endpoint, set it to a separate secret environment variable name, for
@@ -204,16 +206,20 @@ capability must be enabled for the `model_gateway` runtime to start.
 `MODEL_RUNTIME_BINDINGS_PATH` is an allow-list, not the model catalogue. It lets the deployment
 approve more than one exact profile, adapter, endpoint, model, and credential-name combination
 without putting a credential in configuration. A profile becomes selectable only after a matching
-high-impact model configuration is independently approved, published, and included in the active
-Release Set. A provider, model identifier, endpoint, prompt, capability, or credential-reference
-mismatch fails validation with `PROVIDER_CONFIGURATION_UNAVAILABLE`.
+high-impact model configuration is independently approved, published, included in the active
+Release Set, and marked `configured`. Publishing a deployment-bound `degraded` or `unavailable`
+profile registers it without making it selectable or allowing provider transport. A provider,
+model identifier, endpoint, prompt, evaluation status, capability, or credential-reference mismatch
+fails validation with `PROVIDER_CONFIGURATION_UNAVAILABLE`.
 
-Both published claimant profiles use this adapter contract:
+The published claimant profiles use this adapter contract:
 
 | Profile | Model | Role | Required capabilities |
 | --- | --- | --- | --- |
 | `qwen-local` | `qwen3.8-27b` through the environment-owned Qwen endpoint | deployment default through `MODEL_PROFILE_ID` | structured output and tools |
 | `nowcoding-gpt55` | `gpt-5.5` through the existing nowcoding endpoint | selectable | structured output and tools |
+| `bedrock-nova2-lite` | `global.amazon.nova-2-lite-v1:0` through Bedrock Sydney | published but unavailable until AWS account verification completes | structured output and image input |
+| `google-gemini35-flash-lite` | `gemini-3.5-flash-lite` through Google AI Studio | selectable | structured output, tools, and image input |
 
 The nowcoding `gpt-5.5` endpoint was verified on 15 September 2026 with live strict
 structured-output and forced tool-call requests. That verifies provider compatibility, not a
@@ -229,10 +235,15 @@ allow-list. Private endpoints are represented by environment-variable references
 inside the deployment process. The backend ships a reviewed initial Runtime Release that registers
 and publishes the complete Agent policy plus every binding in this allow-list. A Control Plane
 scope with no Release Set history installs that initial Release during application composition, so
-both `qwen-local` and `nowcoding-gpt55` are available through the capabilities APIs on a clean
-deployment. The initializer runs only for a never-initialised scope. Existing active, superseded,
+`qwen-local`, `nowcoding-gpt55`, and `google-gemini35-flash-lite` are available, while
+`bedrock-nova2-lite` is published with its explicit evaluation status through the capabilities
+APIs on a clean deployment. The initializer
+runs only for a never-initialised scope. Existing active, superseded,
 withdrawn, or otherwise inactive Release Set history remains authoritative and is never repaired or
-overwritten on startup.
+overwritten on startup. Initial model records use a 180-second transport ceiling so a slow provider
+can return a controlled result instead of failing at the former 30-second boundary. This ceiling is
+not a response-time target: ordinary v7 profiles retain their input and output budgets, one-call
+path, and deployment telemetry for measuring actual latency.
 
 For a later governed replacement, an operator supplies independent administrator bearer tokens
 through process environment variables and publishes the prompt and model slots while preserving
@@ -242,14 +253,15 @@ the active Release Set's other references:
 $env:NORTHWIND_CONTROL_PLANE_AUTHOR_TOKEN = '<author bearer token>'
 $env:NORTHWIND_CONTROL_PLANE_APPROVER_TOKEN = '<independent approver bearer token>'
 $env:NORTHWIND_QWEN_BASE_URL = '<private Qwen endpoint>'
+$env:GEMINI_API_KEY = '<Google AI Studio API key>'
 py -3.12 scripts/publish_fnol_model_release.py `
   --validation-evidence 'Live strict schema and forced tool-call probes passed.'
 ```
 
 The replacement command never accepts or prints the provider credential. It refuses publication when the
-credential environment variable named by a configured profile is unavailable, when there is no
+credential environment variable named by an available configured profile is unavailable, when there is no
 active complete Release Set to extend, or when the resulting active snapshot does not contain the
-exact two-profile catalogue.
+exact manifest-defined catalogue.
 
 The Workbench Staff Agent uses the same published profile catalog under its separate
 `staff_assistant` purpose and `staff_internal_fnol` privacy class. Its selected profile is
@@ -273,17 +285,53 @@ reason, usage, configured model identity, and AWS request identity into `ModelRe
 authentication, rate-limit, provider, timeout, and malformed-output failures use the same
 provider-neutral errors as other adapters.
 
-The executable claimant prompt is `northwind-fnol-claimant-v6`, stored under
-`backend/prompts/`. It defines the bounded motor, home, and contents VP behaviour, natural-language
-correction, current-action questioning, context lookup, and handoff proposals. Runtime injects the
-Branch Evaluation, minimum Claim projection, bounded knowledge citations, typed tool results, and
-response schema; the adapter does not own FNOL authority. Earlier prompt versions remain immutable
-historical artifacts. Changing executable prompt content requires another prompt identifier and
-regression evidence.
+### Google Gemini GenerateContent
+
+The `google_generate_content` adapter calls
+`POST {MODEL_BASE_URL}/models/{MODEL_IDENTIFIER}:generateContent`. It authenticates with the
+`x-goog-api-key` header using the credential stored in the environment variable named by
+`MODEL_API_KEY_ENV`; the checked-in Gemini binding names `GEMINI_API_KEY`. Credentials never
+appear in the URL, request body, model configuration, or provider-neutral response.
+
+The adapter maps system instructions, user and model messages, authorised image Evidence, JSON
+Schema output, function declarations, function calls, and function responses to the native Gemini
+shape. Runtime opens one concrete provider exchange for a turn and reuses it for the optional
+function-result continuation. That exchange returns a short provider-neutral call ID while keeping
+Gemini's provider call ID and `thoughtSignature` in adapter-owned transient memory. The continuation
+must use the same exchange; another exchange, a stale ID, or a replay after consumption fails
+closed. Provider continuation state is consumed after the continuation attempt and is never placed
+in a domain message, durable Runtime record, log, global cache, or fallback store. The same exchange
+boundary can hold equivalent provider-private continuation metadata for another adapter without
+changing the Runtime contract. Text, structured output, completion status, usage, cache-read usage,
+model version, and response identity are normalised into `ModelResponse`.
+
+The `google-gemini35-flash-lite` profile was verified on 2026-09-17 with a live image plus
+structured-output request and a live forced `context.resolve` call followed by structured
+continuation. This verifies transport compatibility for synthetic FNOL data. PDF input remains
+disabled, and provider availability and latency remain deployment observations rather than a
+permanent guarantee.
+
+The executable claimant Prompt Pack is `northwind-fnol-claimant-v7`, authored under
+`backend/prompts/v7/` and embedded immutably in the published `agent_instruction` configuration.
+Runtime deterministically composes core, one family, one task, and matching capability fragments;
+it then injects a budgeted Claim projection, bounded references, and the selected narrow schema.
+The versioned `config/model-runtime-bindings-v6.json` manifest remains an explicit rollback
+artifact. A never-initialised scope started with that manifest publishes the complete v6 Runtime
+rather than rewriting its bindings to v7. An existing scope requires an operator to select or
+publish the matching complete v6 Release Set as well as the v6 deployment allow-list; changing
+the manifest alone never mixes it into an active v7 release. A v7 failure never activates v6
+automatically. Changing executable fragment content requires a new fragment or pack version and a
+complete atomic Release Set.
 
 The repository includes configuration and transport tests, but a deployment is live only after an
 authorised model invocation succeeds in its selected AWS account and region. Model listing or
 successful local composition is not proof of Runtime access.
+
+The Sydney catalogue exposes the active Global Amazon Nova 2 Lite inference profile as
+`global.amazon.nova-2-lite-v1:0`. The repository publishes that profile as `unavailable` because
+the current AWS account can list Bedrock models but Runtime invocation is blocked pending AWS
+account verification. Promote its binding to `configured` only after a live image request with
+forced structured output succeeds; publishing the profile does not by itself make it selectable.
 
 Run the repeatable synthetic live verifier only in an authorised, budgeted environment after
 injecting the configured credential through the environment variable named by
@@ -336,13 +384,13 @@ idempotency records unchanged.
 
 ## Current Limitations
 
-- The included transports implement synchronous OpenAI-compatible chat completions and Bedrock
-  Converse; streaming is not implemented.
+- The included transports implement synchronous OpenAI-compatible chat completions, Bedrock
+  Converse, and Google Gemini GenerateContent; streaming is not implemented.
 - Capability support is declared by configuration and verified by tests; there is no
   remote capability negotiation.
-- Only `claim.read` is currently wired into the target tool loop. Other registered tools and
-  namespaced actions remain unavailable until their handlers, authority checks, and persistence
-  contracts are implemented.
+- v7 lookup profiles wire only the read-only `context.resolve` tool. Policy and approved guidance,
+  claimant-owned Claim history, claimant-scoped Evidence history, and older message ranges are
+  exposed through turn-scoped references; mutation tools remain separate Runtime handlers.
 - Runtime trace and the claimant `TurnPlan`/`AgentProposal`/`ExecutionPlan`/`ActionEnvelope`/
   `ToolResult`/`TurnResult` record family are implemented for Fixture and MongoDB repositories.
   Admin trace projection and broader external action records remain open.
@@ -379,9 +427,9 @@ deliberately explicit:
 - the current configuration declares endpoint capabilities; the target Model Profile
   Registry also governs allowed purposes, privacy terms, evaluation evidence, lifecycle,
   and qualified fallback groups; and
-- the current Gateway executes the published `claim.read` Tool Registry capability on the target
-  path, while compatibility context tools remain bounded by a per-turn allow-list and one
-  re-plan; additional action tools require published Tool Registry entries, authority checks,
+- the current Gateway executes only the published v7 Request Profile: ordinary calls are tool-free,
+  bounded lookup allows one `context.resolve` and one re-plan, and isolated execution has no
+  mutation capability; additional action tools require published Tool Registry entries, authority checks,
   typed results, idempotency, and trajectory tests before execution is enabled.
 
 These are incremental extensions, not reasons to replace the implemented provider-neutral

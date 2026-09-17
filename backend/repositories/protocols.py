@@ -4,6 +4,7 @@ from datetime import datetime
 from threading import Event
 from typing import Any, Protocol
 
+from backend.domain.agent_context_runtime import VerifiedConversationSummary
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
@@ -604,6 +605,25 @@ class PersistenceRepository(ClaimRepository, Protocol):
         limit: int,
     ) -> list[MessageRecord]:
         """Return at most the newest requested messages in stable ascending order."""
+        raise NotImplementedError
+
+    def save_conversation_summary(
+        self,
+        summary: VerifiedConversationSummary,
+        customer_id: str,
+    ) -> None:
+        """Persist one immutable verified summary without replacing message history."""
+
+        raise NotImplementedError
+
+    def get_latest_conversation_summary(
+        self,
+        claim_id: str,
+        session_id: str,
+        customer_id: str,
+    ) -> VerifiedConversationSummary | None:
+        """Return the newest authorised summary for one claimant session."""
+
         raise NotImplementedError
 
     def save_agent_decision(self, decision: AgentDecisionRecord, customer_id: str) -> None:

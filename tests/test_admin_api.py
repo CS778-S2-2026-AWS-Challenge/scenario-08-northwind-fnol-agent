@@ -1285,6 +1285,34 @@ def test_model_validation_accepts_each_deployment_bound_profile() -> None:
             structured_output=True,
             tools=True,
         ),
+        ModelRuntimeBinding(
+            profile_id='bedrock-nova2-lite',
+            protocol='bedrock_converse',
+            provider='amazon-bedrock',
+            model_identifier='global.amazon.nova-2-lite-v1:0',
+            base_url='https://bedrock-runtime.ap-southeast-2.amazonaws.com',
+            credential_environment_variable='AWS_BEARER_TOKEN_BEDROCK',
+            purpose='agent_turn',
+            privacy_class='synthetic_fnol',
+            prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
+            evaluation_status='unavailable',
+            structured_output=True,
+            image_input=True,
+        ),
+        ModelRuntimeBinding(
+            profile_id='google-gemini35-flash-lite',
+            protocol='google_generate_content',
+            provider='google-ai-studio',
+            model_identifier='gemini-3.5-flash-lite',
+            base_url='https://generativelanguage.googleapis.com/v1beta',
+            credential_environment_variable='GEMINI_API_KEY',
+            purpose='agent_turn',
+            privacy_class='synthetic_fnol',
+            prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
+            structured_output=True,
+            tools=True,
+            image_input=True,
+        ),
     )
 
     for binding in bindings:
@@ -1292,7 +1320,6 @@ def test_model_validation_accepts_each_deployment_bound_profile() -> None:
             'model',
             {
                 **binding.model_dump(mode='json'),
-                'evaluation_status': 'configured',
                 'timeout_seconds': 30.0,
             },
             for_validation=True,
