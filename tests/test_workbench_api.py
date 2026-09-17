@@ -309,7 +309,7 @@ def _create_claim_with_context(
     )
     repository.save_message(
         MessageRecord(
-            message_id='msg_internal_note',
+            message_id=f'msg_internal_note_{claim_id}',
             claim_id=claim_id,
             session_id=session_id,
             actor='staff',
