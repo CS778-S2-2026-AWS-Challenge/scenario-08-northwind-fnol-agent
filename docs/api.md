@@ -441,13 +441,15 @@ credential field contains only an
 environment-variable name; the secret itself remains outside the configuration record. Every
 model configuration must declare `impact=high`; an omitted or normal impact returns `422
 PROVIDER_CONFIGURATION_INVALID` and cannot enter the lifecycle. Model validation permits
-publication only when `evaluation_status` is `configured`; profile ID, provider, model identifier,
-protocol, base URL, credential environment-variable name, purpose, privacy class, executable
-prompt identifier, and capabilities match one exact entry in the deployment-owned model binding
-allow-list. The allow-list does not publish a model; the independently approved configuration and
-active Release Set remain the selectable-catalogue authority. The current executable prompt
-identifier is `northwind-fnol-claimant-v7`. A
-degraded, unavailable, deployment-mismatched, or Runtime-incompatible profile returns `422
+publication only when the complete configuration, including `evaluation_status`, matches one
+deployment-owned binding. A `configured` profile is selectable; a published `degraded` or
+`unavailable` profile remains visible but cannot be selected or sent to provider transport.
+Profile ID, provider, model identifier, protocol, base URL, credential environment-variable name,
+purpose, privacy class, executable prompt identifier, and capabilities must match one exact entry
+in the deployment-owned model binding allow-list. The allow-list does not publish a model; the
+independently approved configuration and active Release Set remain the selectable-catalogue
+authority. The current executable prompt identifier is `northwind-fnol-claimant-v7`. A
+deployment-mismatched, status-mismatched, or Runtime-incompatible profile returns `422
 PROVIDER_CONFIGURATION_UNAVAILABLE` and remains a draft. Other invalid or incomplete model values
 return `422 PROVIDER_CONFIGURATION_INVALID`.
 

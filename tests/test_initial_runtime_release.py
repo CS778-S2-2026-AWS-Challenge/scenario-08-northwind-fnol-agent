@@ -32,25 +32,43 @@ def _binding(
     prompt_version: str = 'northwind-fnol-claimant-v7',
 ) -> ModelRuntimeBinding:
     is_qwen = profile_id == 'qwen-local'
+    is_bedrock = profile_id == 'bedrock-nova2-lite'
     return ModelRuntimeBinding(
         profile_id=profile_id,
-        protocol='openai_compatible',
-        provider='qwen-local' if is_qwen else 'nowcoding',
-        model_identifier='qwen3.8-27b' if is_qwen else 'gpt-5.5',
-        base_url='http://qwen.test/v1' if is_qwen else 'https://nowcoding.ai/v1',
-        credential_environment_variable=None if is_qwen else 'NORTHWIND_MODEL_API_KEY',
+        protocol='bedrock_converse' if is_bedrock else 'openai_compatible',
+        provider='amazon-bedrock' if is_bedrock else ('qwen-local' if is_qwen else 'nowcoding'),
+        model_identifier=(
+            'global.amazon.nova-2-lite-v1:0'
+            if is_bedrock
+            else ('qwen3.8-27b' if is_qwen else 'gpt-5.5')
+        ),
+        base_url=(
+            'https://bedrock-runtime.ap-southeast-2.amazonaws.com'
+            if is_bedrock
+            else ('http://qwen.test/v1' if is_qwen else 'https://nowcoding.ai/v1')
+        ),
+        credential_environment_variable=(
+            'AWS_BEARER_TOKEN_BEDROCK'
+            if is_bedrock
+            else (None if is_qwen else 'NORTHWIND_MODEL_API_KEY')
+        ),
         purpose='agent_turn',
         privacy_class='synthetic_fnol',
         prompt_version=prompt_version,
+        evaluation_status='unavailable' if is_bedrock else 'configured',
         structured_output=True,
-        tools=True,
-        image_input=False,
+        tools=not is_bedrock,
+        image_input=is_bedrock,
         document_input=False,
     )
 
 
 def _settings() -> Settings:
-    bindings = (_binding('qwen-local'), _binding('nowcoding-gpt55'))
+    bindings = (
+        _binding('qwen-local'),
+        _binding('nowcoding-gpt55'),
+        _binding('bedrock-nova2-lite'),
+    )
     return Settings(
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
@@ -83,9 +101,10 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
         'feature',
         'model:qwen-local',
         'model:nowcoding-gpt55',
+        'model:bedrock-nova2-lite',
     }
     assert len(releases.list_release_sets('test', 'fixture')) == 1
-    assert len(configurations.list_configurations()) == 6
+    assert len(configurations.list_configurations()) == 7
     serialized = json.dumps(
         [record.model_dump(mode='json') for record in configurations.list_configurations()]
     )
@@ -107,6 +126,7 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
     assert set(policy.tool_policy.provider_capabilities) == {
         'qwen-local',
         'nowcoding-gpt55',
+        'bedrock-nova2-lite',
     }
     assert {
         str(record.values['profile_id']): record.values['timeout_seconds']
@@ -114,7 +134,15 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
     } == {
         'qwen-local': 180.0,
         'nowcoding-gpt55': 180.0,
+        'bedrock-nova2-lite': 180.0,
     }
+    bedrock = next(
+        record
+        for record in configurations.list_configurations('model')
+        if record.values['profile_id'] == 'bedrock-nova2-lite'
+    )
+    assert bedrock.values['evaluation_status'] == 'unavailable'
+    assert bedrock.values['image_input'] is True
     assert policy.controlled_rules.context_budget_policy is not None
     assert policy.features.verified_rolling_summary is True
     assert policy.features.isolated_execution is True
@@ -437,7 +465,7 @@ def test_published_prompt_content_is_runtime_authority_not_a_container_file_mirr
     )
 
 
-def test_capabilities_expose_the_repository_published_dual_model_catalogue() -> None:
+def test_capabilities_expose_the_repository_published_model_catalogue() -> None:
     client = TestClient(create_app(_settings()))
 
     response = client.get(
@@ -448,9 +476,29 @@ def test_capabilities_expose_the_repository_published_dual_model_catalogue() -> 
     assert response.status_code == 200
     assert [item['id'] for item in response.json()['models']] == [
         'qwen-local',
+        'bedrock-nova2-lite',
         'nowcoding-gpt55',
     ]
     assert response.json()['default_model_profile_id'] == 'qwen-local'
+    bedrock = next(item for item in response.json()['models'] if item['id'] == 'bedrock-nova2-lite')
+    assert bedrock['availability'] == 'unavailable'
+    assert bedrock['image_input'] is True
+
+    selection = client.post(
+        '/api/v1/claims',
+        headers={
+            'Authorization': 'Bearer synthetic-claimant',
+            'Idempotency-Key': 'unavailable-bedrock-profile',
+        },
+        json={
+            'channel': 'web_agent',
+            'locale': 'en-NZ',
+            'incident_type': 'motor',
+            'model_profile_id': 'bedrock-nova2-lite',
+        },
+    )
+    assert selection.status_code == 422
+    assert selection.json()['error']['code'] == 'MODEL_PROFILE_UNAVAILABLE'
 
 
 def test_v6_binding_manifest_installs_a_real_manual_rollback_release() -> None:

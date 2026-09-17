@@ -159,9 +159,15 @@ def publish(args: argparse.Namespace) -> str:
         raise PublicationError('The deployment manifest must retain qwen-local.')
     if not any(item.profile_id == 'nowcoding-gpt55' for item in bindings):
         raise PublicationError('The deployment manifest must include nowcoding-gpt55.')
+    if not any(item.profile_id == 'bedrock-nova2-lite' for item in bindings):
+        raise PublicationError('The deployment manifest must include bedrock-nova2-lite.')
     for binding in bindings:
         credential_name = binding.credential_environment_variable
-        if credential_name and not os.getenv(credential_name, ''):
+        if (
+            binding.evaluation_status == 'configured'
+            and credential_name
+            and not os.getenv(credential_name, '')
+        ):
             raise PublicationError(f'{credential_name} is not available to the publishing process.')
 
     client = ControlPlaneClient(
@@ -222,7 +228,7 @@ def publish(args: argparse.Namespace) -> str:
         payload={
             'scenario_results': [
                 {
-                    'scenario_id': 'fnol-dual-model-release',
+                    'scenario_id': 'fnol-model-catalogue-release',
                     'outcome': 'passed',
                     'evidence': args.validation_evidence,
                 }
@@ -235,7 +241,7 @@ def publish(args: argparse.Namespace) -> str:
         f'/internal/v1/admin/release-sets/{release_id}/publish',
         token=client.author_token,
         revision=int(validated['revision']),
-        payload={'reason': 'Activate the validated FNOL dual-model Release Set.'},
+        payload={'reason': 'Activate the validated FNOL model-catalogue Release Set.'},
         idempotent=True,
     )
     verified = client.get(f'/internal/v1/admin/runtime-snapshots?{query}')

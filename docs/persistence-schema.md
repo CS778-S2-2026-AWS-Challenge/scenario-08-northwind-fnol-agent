@@ -799,9 +799,11 @@ flags, and one cache layout version. An incomplete or incompatible set fails res
 does not repair it by combining another release or falling back to v6.
 
 Model records use `domain=model` and `configuration_key=profile_id`, so one published Release
-Set can bind both `qwen-local` and `nowcoding-gpt55` without overwriting either profile.
-Claimant profiles must declare `structured_output=true` and `tools=true`; a Session stores the
-selected profile ID and Runtime resolves that exact key for every turn.
+Set can bind `qwen-local`, `nowcoding-gpt55`, and `bedrock-nova2-lite` without overwriting any
+profile.
+Claimant profiles must declare `structured_output=true`. Tool and continuation capabilities are
+profile-specific and are checked before a route can send work to provider transport. A Session
+stores the selected profile ID and Runtime resolves that exact key for every turn.
 The deployment binding manifest is not persisted catalogue state. It contains only non-secret
 connection metadata and credential environment-variable names used to reject unapproved model
 configurations before publication. The active Release Set remains the authority for which matched

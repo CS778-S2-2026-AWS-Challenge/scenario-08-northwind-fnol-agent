@@ -61,7 +61,7 @@ def _model_values(
     values.update(
         {
             'prompt_version': prompt_version,
-            'evaluation_status': 'configured',
+            'evaluation_status': binding.evaluation_status,
             'timeout_seconds': _MODEL_TIMEOUT_CEILING_SECONDS,
         }
     )

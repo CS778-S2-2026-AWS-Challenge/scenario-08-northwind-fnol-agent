@@ -36,7 +36,9 @@ profile.
 
 The Backend contains the versioned initial Agent Runtime Release. When the selected Control Plane
 scope has no Release Set history, application composition installs the complete Agent policy and
-the `qwen-local` plus `nowcoding-gpt55` model configurations as one active published Release Set.
+the `qwen-local`, `nowcoding-gpt55`, and `bedrock-nova2-lite` model configurations as one active
+published Release Set. A model configuration can remain explicitly unavailable inside that
+Release Set; publication does not claim provider connectivity.
 This is backend initialization, not a deployment-script repair step. Once any Release Set history
 exists, that history is authoritative and startup never republishes or restores a model that an
 operator removed.

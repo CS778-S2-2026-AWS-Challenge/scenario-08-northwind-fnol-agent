@@ -205,16 +205,19 @@ capability must be enabled for the `model_gateway` runtime to start.
 `MODEL_RUNTIME_BINDINGS_PATH` is an allow-list, not the model catalogue. It lets the deployment
 approve more than one exact profile, adapter, endpoint, model, and credential-name combination
 without putting a credential in configuration. A profile becomes selectable only after a matching
-high-impact model configuration is independently approved, published, and included in the active
-Release Set. A provider, model identifier, endpoint, prompt, capability, or credential-reference
-mismatch fails validation with `PROVIDER_CONFIGURATION_UNAVAILABLE`.
+high-impact model configuration is independently approved, published, included in the active
+Release Set, and marked `configured`. Publishing a deployment-bound `degraded` or `unavailable`
+profile registers it without making it selectable or allowing provider transport. A provider,
+model identifier, endpoint, prompt, evaluation status, capability, or credential-reference mismatch
+fails validation with `PROVIDER_CONFIGURATION_UNAVAILABLE`.
 
-Both published claimant profiles use this adapter contract:
+The published claimant profiles use this adapter contract:
 
 | Profile | Model | Role | Required capabilities |
 | --- | --- | --- | --- |
 | `qwen-local` | `qwen3.8-27b` through the environment-owned Qwen endpoint | deployment default through `MODEL_PROFILE_ID` | structured output and tools |
 | `nowcoding-gpt55` | `gpt-5.5` through the existing nowcoding endpoint | selectable | structured output and tools |
+| `bedrock-nova2-lite` | `global.amazon.nova-2-lite-v1:0` through Bedrock Sydney | published but unavailable until AWS account verification completes | structured output and image input |
 
 The nowcoding `gpt-5.5` endpoint was verified on 15 September 2026 with live strict
 structured-output and forced tool-call requests. That verifies provider compatibility, not a
@@ -230,8 +233,9 @@ allow-list. Private endpoints are represented by environment-variable references
 inside the deployment process. The backend ships a reviewed initial Runtime Release that registers
 and publishes the complete Agent policy plus every binding in this allow-list. A Control Plane
 scope with no Release Set history installs that initial Release during application composition, so
-both `qwen-local` and `nowcoding-gpt55` are available through the capabilities APIs on a clean
-deployment. The initializer runs only for a never-initialised scope. Existing active, superseded,
+`qwen-local` and `nowcoding-gpt55` are available and `bedrock-nova2-lite` is published with its
+explicit evaluation status through the capabilities APIs on a clean deployment. The initializer
+runs only for a never-initialised scope. Existing active, superseded,
 withdrawn, or otherwise inactive Release Set history remains authoritative and is never repaired or
 overwritten on startup. Initial model records use a 180-second transport ceiling so a slow provider
 can return a controlled result instead of failing at the former 30-second boundary. This ceiling is
@@ -251,9 +255,9 @@ py -3.12 scripts/publish_fnol_model_release.py `
 ```
 
 The replacement command never accepts or prints the provider credential. It refuses publication when the
-credential environment variable named by a configured profile is unavailable, when there is no
+credential environment variable named by an available configured profile is unavailable, when there is no
 active complete Release Set to extend, or when the resulting active snapshot does not contain the
-exact two-profile catalogue.
+exact manifest-defined catalogue.
 
 The Workbench Staff Agent uses the same published profile catalog under its separate
 `staff_assistant` purpose and `staff_internal_fnol` privacy class. Its selected profile is
@@ -292,6 +296,12 @@ complete atomic Release Set.
 The repository includes configuration and transport tests, but a deployment is live only after an
 authorised model invocation succeeds in its selected AWS account and region. Model listing or
 successful local composition is not proof of Runtime access.
+
+The Sydney catalogue exposes the active Global Amazon Nova 2 Lite inference profile as
+`global.amazon.nova-2-lite-v1:0`. The repository publishes that profile as `unavailable` because
+the current AWS account can list Bedrock models but Runtime invocation is blocked pending AWS
+account verification. Promote its binding to `configured` only after a live image request with
+forced structured output succeeds; publishing the profile does not by itself make it selectable.
 
 Run the repeatable synthetic live verifier only in an authorised, budgeted environment after
 injecting the configured credential through the environment variable named by

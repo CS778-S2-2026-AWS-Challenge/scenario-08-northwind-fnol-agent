@@ -47,6 +47,7 @@ class RecordingControlPlaneClient:
                 'feature': _record('cfg_feature'),
                 'model:qwen-local': _record('cfg_qwen-local'),
                 'model:nowcoding-gpt55': _record('cfg_nowcoding-gpt55'),
+                'model:bedrock-nova2-lite': _record('cfg_bedrock-nova2-lite'),
             },
         }
 
@@ -121,6 +122,7 @@ def test_publication_preserves_release_context_and_never_serializes_the_provider
         'feature',
         'model',
         'model',
+        'model',
     ]
     release_payload = client.requests[0][2]
     assert release_payload is not None
@@ -132,6 +134,7 @@ def test_publication_preserves_release_context_and_never_serializes_the_provider
         'feature',
         'model:qwen-local',
         'model:nowcoding-gpt55',
+        'model:bedrock-nova2-lite',
     }
     assert cast(dict[str, object], release_payload['integration_refs']) == {
         'policy': {'configuration_id': 'cfg_policy', 'revision': 3}
@@ -144,6 +147,7 @@ def test_publication_preserves_release_context_and_never_serializes_the_provider
     )
     assert 'provider-secret-must-not-be-serialized' not in serialized
     assert 'NORTHWIND_MODEL_API_KEY' in serialized
+    assert 'AWS_BEARER_TOKEN_BEDROCK' in serialized
 
 
 def test_publication_requires_environment_owned_private_endpoints(
