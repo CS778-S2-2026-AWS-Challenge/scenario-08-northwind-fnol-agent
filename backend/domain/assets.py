@@ -2,9 +2,10 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, cast
 
 from pydantic import Field, StringConstraints, model_validator
+from pydantic_core import PydanticUndefined
 
 from backend.domain.models import ContractModel, PageInfo, StructuredFormField
 
@@ -40,6 +41,14 @@ class ContentsAssetDetails(ContractModel):
 
 
 AssetDetails = VehicleAssetDetails | PropertyAssetDetails | ContentsAssetDetails
+
+
+def _omitted_short_text() -> str:
+    return cast(str, PydanticUndefined)
+
+
+def _omitted_asset_details() -> AssetDetails:
+    return cast(AssetDetails, PydanticUndefined)
 
 
 class AssetRecord(ContractModel):
@@ -99,8 +108,9 @@ class CreateAssetRequest(ContractModel):
 
 
 class UpdateAssetRequest(ContractModel):
-    display_name: ShortText | None = None
-    details: AssetDetails | None = None
+    # A default factory keeps each PATCH field optional without making explicit null valid.
+    display_name: ShortText = Field(default_factory=_omitted_short_text)
+    details: AssetDetails = Field(default_factory=_omitted_asset_details)
 
     @model_validator(mode='after')
     def require_change(self) -> 'UpdateAssetRequest':

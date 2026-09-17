@@ -69,7 +69,9 @@ from backend.domain.staff_agent_tools import (
 from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.assets import (
     AssetSelectionRevisionConflictError,
+    AssetSelectionSnapshotConflictError,
     AssetSelectionUnavailableError,
+    asset_matches_snapshot,
 )
 from backend.repositories.protocols import (
     DemoSeedConflict,
@@ -204,6 +206,8 @@ class FixtureRepository(PersistenceRepository):
                 raise AssetSelectionUnavailableError(snapshot.asset_id)
             if asset.revision != snapshot.asset_revision:
                 raise AssetSelectionRevisionConflictError(asset.revision)
+            if not asset_matches_snapshot(asset, snapshot):
+                raise AssetSelectionSnapshotConflictError(snapshot.asset_id)
             if (
                 snapshot.customer_id != claim.customer_id
                 or snapshot.claim_id != claim.claim_id

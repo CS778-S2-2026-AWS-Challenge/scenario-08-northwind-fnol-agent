@@ -2,6 +2,8 @@
 
 from typing import cast
 
+from pydantic import ValidationError
+
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.assets import (
@@ -12,6 +14,7 @@ from backend.domain.assets import (
     ClaimAssetSelectionResponse,
     ClaimAssetSnapshot,
     ClaimAssetSnapshotListResponse,
+    ContentsAssetDetails,
     CreateAssetRequest,
     PropertyAssetDetails,
     SelectClaimAssetRequest,
@@ -35,6 +38,7 @@ from backend.domain.models import (
 from backend.repositories.assets import (
     AssetRepository,
     AssetSelectionRevisionConflictError,
+    AssetSelectionSnapshotConflictError,
     AssetSelectionUnavailableError,
 )
 from backend.repositories.protocols import (
@@ -94,6 +98,37 @@ def _idempotency_conflict() -> ApiError:
         status_code=409,
         code='IDEMPOTENCY_CONFLICT',
         message='The Idempotency-Key was already used with a different request.',
+    )
+
+
+def _validation_error(error: ValidationError) -> ApiError:
+    details = [
+        ErrorDetail(
+            field='.'.join(str(part) for part in item['loc']) or 'asset',
+            reason=str(item['msg']),
+        )
+        for item in error.errors()
+    ]
+    return ApiError(
+        status_code=422,
+        code='VALIDATION_ERROR',
+        message='The request did not match the Asset contract.',
+        details=details,
+    )
+
+
+def _snapshot_conflict() -> ApiError:
+    return ApiError(
+        status_code=409,
+        code='RESOURCE_CONFLICT',
+        message='The selected asset no longer matches the prepared snapshot.',
+        details=[
+            ErrorDetail(
+                field='asset_id',
+                reason='Reload the asset before selecting it again.',
+            )
+        ],
+        retryable=True,
     )
 
 
@@ -186,10 +221,31 @@ def update_asset(
     if current.revision != expected_revision:
         raise _revision_conflict(current.revision)
     changes = payload.model_dump(exclude_unset=True)
+    if 'details' in changes:
+        expected_details = {
+            AssetType.VEHICLE: VehicleAssetDetails,
+            AssetType.PROPERTY: PropertyAssetDetails,
+            AssetType.CONTENTS: ContentsAssetDetails,
+        }[current.asset_type]
+        if not isinstance(payload.details, expected_details):
+            raise ApiError(
+                status_code=422,
+                code='VALIDATION_ERROR',
+                message='The request did not match the Asset contract.',
+                details=[
+                    ErrorDetail(
+                        field='details',
+                        reason='Replacement details must match the existing asset type.',
+                    )
+                ],
+            )
     updated_payload = current.model_dump()
     updated_payload.update(changes)
     updated_payload.update({'revision': current.revision + 1, 'updated_at': now_utc()})
-    updated = AssetRecord.model_validate(updated_payload)
+    try:
+        updated = AssetRecord.model_validate(updated_payload)
+    except ValidationError as error:
+        raise _validation_error(error) from error
     try:
         repository.update_asset(updated, expected_revision)
     except RevisionConflict as error:
@@ -357,6 +413,8 @@ def select_claim_asset(
         raise _asset_revision_conflict(error.current_revision) from error
     except AssetSelectionUnavailableError as error:
         raise _not_found('asset') from error
+    except AssetSelectionSnapshotConflictError as error:
+        raise _snapshot_conflict() from error
     except IdempotencyConflict as error:
         replay = claim_repository.find_idempotency(principal.subject, route, key)
         if (

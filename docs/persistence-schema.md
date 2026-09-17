@@ -289,6 +289,10 @@ the append-only audit collection through a bounded, filterable projection.
   claim writes.
 - A mutation using a stale expected revision fails without a partial write.
 - A successful material mutation advances the revision exactly once.
+- An Asset selection revalidates the exact Asset type, display name, and typed details copied into
+  its immutable snapshot inside the authoritative write. Fixture and MongoDB reject any mismatch
+  with the same typed repository conflict and persist no Claim, snapshot, Branch Evaluation, or
+  idempotency change.
 - An idempotency record identifies an accepted operation and request fingerprint. An
   identical replay returns the current authorised projection; changed input under the
   same key is a conflict.

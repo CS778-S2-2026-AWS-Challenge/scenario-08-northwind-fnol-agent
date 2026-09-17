@@ -12366,25 +12366,15 @@
               },
               {
                 "$ref": "#/components/schemas/ContentsAssetDetails"
-              },
-              {
-                "type": "null"
               }
             ],
             "title": "Details"
           },
           "display_name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Display Name"
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
           }
         },
         "title": "UpdateAssetRequest",

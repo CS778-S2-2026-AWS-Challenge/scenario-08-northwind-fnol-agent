@@ -21,6 +21,7 @@ from backend.domain.models import (
 )
 from backend.repositories.assets import (
     AssetSelectionRevisionConflictError,
+    AssetSelectionSnapshotConflictError,
     AssetSelectionUnavailableError,
 )
 from backend.repositories.fixture import FixtureRepository
@@ -268,3 +269,101 @@ def test_mongodb_rejects_stale_asset_during_selection_without_partial_claim_writ
         )
     assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
     assert repository.list_claim_asset_snapshots(claim.claim_id, claim.customer_id) == ([], False)
+    assert (
+        repository.find_idempotency(
+            claim.customer_id, unavailable_idempotency.route, unavailable_idempotency.key
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
+def test_asset_selection_adapters_reject_mismatched_snapshot_without_partial_write(
+    adapter: str,
+) -> None:
+    repository: FixtureRepository | MongoDBRepository
+    if adapter == 'fixture':
+        repository = FixtureRepository()
+    else:
+        mongo = MongoDBRepository(mongomock.MongoClient(), f'asset_snapshot_parity_{adapter}')
+        mongo._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+        repository = mongo
+
+    asset = _asset()
+    repository.create_asset(
+        asset,
+        IdempotencyRecord(
+            actor_id=asset.customer_id,
+            route='/api/v1/account/assets',
+            key=f'parity-create-{adapter}',
+            request_fingerprint=f'parity-create-fingerprint-{adapter}',
+            claim_id=asset.asset_id,
+            session_id='',
+        ),
+    )
+    now = datetime.now(UTC)
+    claim = WorkingClaim(
+        claim_id=f'clm_asset_parity_{adapter}',
+        customer_id=asset.customer_id,
+        channel=Channel.WEB_AGENT,
+        locale='en-NZ',
+        claim_state=ClaimState(),
+        active_session_id=f'ses_asset_parity_{adapter}',
+        customer_next_step=CustomerNextStep(
+            status='describe_incident',
+            summary='Describe the synthetic incident.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+        ),
+        created_at=now,
+        updated_at=now,
+    )
+    repository.create_claim(
+        claim,
+        SessionRecord(
+            session_id=claim.active_session_id or '',
+            claim_id=claim.claim_id,
+            customer_id=claim.customer_id,
+            context_revision=claim.revision,
+            started_at=now,
+            last_active_at=now,
+            status=SessionStatus.ACTIVE,
+        ),
+    )
+    updated_claim = claim.model_copy(update={'revision': 2, 'updated_at': now})
+    snapshot = ClaimAssetSnapshot(
+        snapshot_id='cas_00000000000000000004',
+        claim_id=claim.claim_id,
+        customer_id=claim.customer_id,
+        asset_id=asset.asset_id,
+        asset_revision=asset.revision,
+        asset_type=asset.asset_type,
+        display_name='Mismatched copied name',
+        details=asset.details,
+        captured_at=now,
+        resulting_claim_revision=2,
+        source_refs=[f'asset:{asset.asset_id}:revision:{asset.revision}'],
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route=f'/api/v1/claims/{claim.claim_id}/asset-selections',
+        key=f'parity-select-{adapter}',
+        request_fingerprint=f'parity-select-fingerprint-{adapter}',
+        claim_id=claim.claim_id,
+        session_id=claim.active_session_id or '',
+    )
+    evaluation = build_applied_branch_evaluation(
+        updated_claim,
+        repository=repository,
+        recomputation_reason='claim_asset_selected',
+        created_at=now,
+    )
+
+    with pytest.raises(AssetSelectionSnapshotConflictError):
+        repository.save_asset_selection(updated_claim, 1, snapshot, idempotency, evaluation)
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+    assert repository.list_claim_asset_snapshots(claim.claim_id, claim.customer_id) == ([], False)
+    assert repository.list_branch_evaluations(claim.claim_id, claim.customer_id) == []
+    assert (
+        repository.find_idempotency(claim.customer_id, idempotency.route, idempotency.key) is None
+    )

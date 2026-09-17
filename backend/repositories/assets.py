@@ -19,6 +19,20 @@ class AssetSelectionRevisionConflictError(RepositoryConflict):
         self.current_revision = current_revision
 
 
+class AssetSelectionSnapshotConflictError(RepositoryConflict):
+    """The proposed snapshot does not copy the authoritative Asset exactly."""
+
+
+def asset_matches_snapshot(asset: AssetRecord, snapshot: ClaimAssetSnapshot) -> bool:
+    """Return whether a snapshot copies the selection-relevant Asset fields exactly."""
+
+    return (
+        asset.asset_type == snapshot.asset_type
+        and asset.display_name == snapshot.display_name
+        and asset.details == snapshot.details
+    )
+
+
 class AssetRepository(Protocol):
     def create_asset(self, asset: AssetRecord, idempotency: IdempotencyRecord) -> None: ...
 

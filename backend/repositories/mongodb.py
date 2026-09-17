@@ -94,7 +94,9 @@ from backend.domain.staff_agent_tools import (
 from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.assets import (
     AssetSelectionRevisionConflictError,
+    AssetSelectionSnapshotConflictError,
     AssetSelectionUnavailableError,
+    asset_matches_snapshot,
 )
 from backend.repositories.protocols import (
     DemoSeedConflict,
@@ -485,12 +487,8 @@ class MongoDBRepository:
                 raise AssetSelectionUnavailableError(snapshot.asset_id)
             if asset.revision != snapshot.asset_revision:
                 raise AssetSelectionRevisionConflictError(asset.revision)
-            if (
-                asset.asset_type != snapshot.asset_type
-                or asset.display_name != snapshot.display_name
-                or asset.details != snapshot.details
-            ):
-                raise KeyError(snapshot.asset_id)
+            if not asset_matches_snapshot(asset, snapshot):
+                raise AssetSelectionSnapshotConflictError(snapshot.asset_id)
             self._save_child_mutation(
                 claim,
                 expected_revision,

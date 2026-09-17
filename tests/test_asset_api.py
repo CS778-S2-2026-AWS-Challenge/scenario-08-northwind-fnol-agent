@@ -252,6 +252,36 @@ def test_asset_contract_rejects_unapproved_policy_fields_and_anonymous_account_a
 
 
 @pytest.mark.parametrize(
+    ('payload', 'expected_field'),
+    [
+        ({'display_name': None}, 'body.display_name'),
+        ({'details': None}, 'body.details'),
+        ({'details': {'address': '1 Synthetic Street'}}, 'details'),
+    ],
+)
+def test_asset_patch_rejects_null_and_cross_type_content_without_mutation(
+    client: TestClient,
+    payload: dict[str, object],
+    expected_field: str,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    asset = _create_asset(client, owner)
+    route = f'/api/v1/account/assets/{asset["asset_id"]}'
+
+    response = client.patch(route, headers={**owner, 'If-Match': '1'}, json=payload)
+    stored = client.get(route, headers=owner)
+
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert any(
+        item['field'].startswith(expected_field)
+        for item in response.json()['error'].get('details', [])
+    )
+    assert stored.status_code == 200
+    assert stored.json() == asset
+
+
+@pytest.mark.parametrize(
     ('asset_type', 'details', 'family', 'expected_fields'),
     [
         (
