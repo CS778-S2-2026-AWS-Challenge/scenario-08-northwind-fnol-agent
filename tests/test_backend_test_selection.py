@@ -49,6 +49,25 @@ def test_asset_modules_select_asset_claim_branch_and_mongodb_contracts() -> None
     } <= set(selection.tests)
 
 
+def test_realtime_modules_select_projection_lifecycle_and_boundary_contracts() -> None:
+    selection = select_tests(
+        [
+            'backend/api/realtime.py',
+            'backend/domain/realtime.py',
+            'backend/services/realtime.py',
+        ]
+    )
+
+    assert selection.mode == 'scoped'
+    assert {
+        'tests/test_api_boundaries.py',
+        'tests/test_asset_repository.py',
+        'tests/test_mongodb_repository.py',
+        'tests/test_realtime_events.py',
+        'tests/test_staff_mutation_actor_links.py',
+    } <= set(selection.tests)
+
+
 def test_audit_contract_change_selects_audit_contract_tests() -> None:
     selection = select_tests(['backend/domain/audit.py'])
 

@@ -429,6 +429,10 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """Return durable events in stable cursor order."""
         raise NotImplementedError
 
+    def realtime_high_watermark(self) -> RealtimeEvent | None:
+        """Return the current durable tail without replaying retained history."""
+        raise NotImplementedError
+
     def watch_realtime_events(self, stop: Event) -> Iterator[RealtimeEvent]:
         """Yield newly appended events without per-client repository polling."""
         raise NotImplementedError

@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from queue import Queue
 from threading import Event, Thread
+from time import monotonic, sleep
 from types import SimpleNamespace
 from typing import cast
 
@@ -18,7 +19,9 @@ from backend.api import claims as claims_api
 from backend.api.realtime import realtime_stream
 from backend.core.auth import Principal
 from backend.domain.realtime import (
+    AUTHORITATIVE_RECORD_PROJECTION_IMPACTS,
     REALTIME_MUTATION_RESOURCES,
+    REALTIME_RESOURCE_READ_APIS,
     RealtimeAudience,
     RealtimeCursor,
     RealtimeDelivery,
@@ -36,6 +39,7 @@ from backend.repositories.mongodb import MongoDBRepository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.realtime import (
     RealtimeDispatcher,
+    RealtimeDispatcherState,
     RealtimeScope,
     RealtimeSubscription,
     delivery_for,
@@ -234,6 +238,7 @@ def test_realtime_publication_coordinates_are_repository_owned_across_adapters(
     assert first == stored_first
     assert first.event_id != second.event_id
     assert [event.sequence for event in stored] == [1, 2]
+    assert realtime_repository.realtime_high_watermark() == second
     assert realtime_repository.replay_realtime_events(
         RealtimeCursor.decode(first_cursor),
         limit=10,
@@ -299,7 +304,21 @@ def test_composite_resource_inventory_tracks_concrete_agent_children() -> None:
                 'claimant_resources': (RealtimeResource.EVIDENCE,),
             }
         )
-    with pytest.raises(ValueError, match='missing from the realtime inventory'):
+
+
+def test_public_projection_matrix_covers_every_resource_and_independent_staff_reads() -> None:
+    assert set(REALTIME_RESOURCE_READ_APIS) == set(RealtimeResource)
+    assert AUTHORITATIVE_RECORD_PROJECTION_IMPACTS['customer_update'] == (
+        RealtimeResource.CUSTOMER_UPDATES,
+    )
+    assert AUTHORITATIVE_RECORD_PROJECTION_IMPACTS['signal_decision'] == (RealtimeResource.SIGNALS,)
+    assert AUTHORITATIVE_RECORD_PROJECTION_IMPACTS['collaboration_request'] == (
+        RealtimeResource.COLLABORATION_REQUESTS,
+    )
+    assert AUTHORITATIVE_RECORD_PROJECTION_IMPACTS['claim_asset_snapshot'] == (
+        RealtimeResource.ASSET_SNAPSHOTS,
+    )
+    with pytest.raises(ValueError, match='missing from the projection-impact matrix'):
         realtime_resources_for_records(
             RealtimeMutation.AGENT_TURN_COMMITTED,
             ('unregistered_child',),
@@ -461,11 +480,16 @@ class _SingleEventSource:
         self.event = event
         self.fail = fail
         self.watch_calls = 0
+        self.available = False
+        self.release_watch = Event()
+
+    def realtime_high_watermark(self) -> RealtimeEvent | None:
+        return None
 
     def replay_realtime_events(
         self, after: RealtimeCursor | None, *, limit: int
     ) -> list[RealtimeEvent]:
-        if after is None:
+        if after is None and self.available:
             return [self.event][:limit]
         return []
 
@@ -473,6 +497,8 @@ class _SingleEventSource:
         self.watch_calls += 1
         if self.fail:
             raise RuntimeError('source unavailable')
+        self.release_watch.wait(1.0)
+        self.available = True
         yield self.event
         stop.wait(0.2)
 
@@ -480,11 +506,11 @@ class _SingleEventSource:
 def test_dispatcher_uses_one_watcher_for_multiple_subscribers() -> None:
     source = _SingleEventSource(_event(1))
     dispatcher = RealtimeDispatcher(source)  # type: ignore[arg-type]
-    first = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
-    second = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_two'))
-
     dispatcher.start()
     try:
+        first = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
+        second = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_two'))
+        source.release_watch.set()
         assert first.next(1.0) is not None
         assert second.next(1.0) is not None
         assert source.watch_calls == 1
@@ -499,10 +525,11 @@ def test_dispatcher_source_failure_still_drains_durable_event() -> None:
         durable_poll_seconds=0.01,
         source_retry_seconds=0.01,
     )
-    subscription = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
-
     dispatcher.start()
     try:
+        subscription = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
+        source.available = True
+        dispatcher._wake.set()
         delivery = subscription.next(1.0)
         assert delivery is not None
         assert delivery.event == 'resources.changed'
@@ -517,10 +544,15 @@ class _DurableHintSource:
         self.watch_started = Event()
         self.fail_watch = False
         self.invalidate_anchor = False
+        self.replay_calls = 0
+
+    def realtime_high_watermark(self) -> RealtimeEvent | None:
+        return self.events[-1] if self.events else None
 
     def replay_realtime_events(
         self, after: RealtimeCursor | None, *, limit: int
     ) -> list[RealtimeEvent]:
+        self.replay_calls += 1
         if after is not None and self.invalidate_anchor:
             raise ValueError('cursor outside retained history')
         start = 0
@@ -542,11 +574,28 @@ class _DurableHintSource:
 
 
 class _BlockedReplaySource(_DurableHintSource):
+    def realtime_high_watermark(self) -> RealtimeEvent | None:
+        Event().wait(0.05)
+        return None
+
+
+class _BlockingGapRecoverySource(_DurableHintSource):
+    def __init__(self, events: list[RealtimeEvent]) -> None:
+        super().__init__(events)
+        self.trigger_gap = False
+        self.recovery_started = Event()
+        self.release_recovery = Event()
+
     def replay_realtime_events(
         self, after: RealtimeCursor | None, *, limit: int
     ) -> list[RealtimeEvent]:
-        Event().wait(0.05)
-        return []
+        if after is not None and self.trigger_gap:
+            self.trigger_gap = False
+            raise ValueError('cursor outside retained history')
+        if after is None and not self.release_recovery.is_set():
+            self.recovery_started.set()
+            self.release_recovery.wait(1.0)
+        return super().replay_realtime_events(after, limit=limit)
 
 
 def test_dispatcher_start_fails_when_durable_boundary_never_becomes_ready() -> None:
@@ -559,16 +608,31 @@ def test_dispatcher_start_fails_when_durable_boundary_never_becomes_ready() -> N
         dispatcher.start()
 
 
+def test_dispatcher_start_anchors_at_tail_without_replaying_retained_history() -> None:
+    source = _DurableHintSource([_event(index) for index in range(100)])
+    dispatcher = RealtimeDispatcher(
+        source,  # type: ignore[arg-type]
+        durable_poll_seconds=1.0,
+    )
+
+    dispatcher.start()
+    try:
+        assert dispatcher.state is RealtimeDispatcherState.READY
+        assert dispatcher._processed_cursor == cursor_for(source.events[-1])
+        assert source.replay_calls <= 1
+    finally:
+        dispatcher.stop()
+
+
 def test_dispatcher_closes_replay_to_watcher_start_gap() -> None:
     source = _DurableHintSource()
     dispatcher = RealtimeDispatcher(
         source,  # type: ignore[arg-type]
         durable_poll_seconds=0.01,
     )
-    subscription = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
-
     dispatcher.start()
     try:
+        subscription = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
         assert source.watch_started.wait(1.0)
         assert dispatcher.replay(subscription.scope, None) == []
         source.events.append(_event(1))
@@ -589,10 +653,9 @@ def test_dispatcher_drains_commit_while_source_is_restarting() -> None:
         durable_poll_seconds=0.01,
         source_retry_seconds=0.01,
     )
-    subscription = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
-
     dispatcher.start()
     try:
+        subscription = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
         assert source.watch_started.wait(1.0)
         source.events.append(_event(1))
 
@@ -610,10 +673,11 @@ def test_dispatcher_deduplicates_repeated_durable_observation() -> None:
         source,  # type: ignore[arg-type]
         durable_poll_seconds=0.01,
     )
-    subscription = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
-
     dispatcher.start()
     try:
+        subscription = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
+        source.events.append(_event(2))
+        dispatcher._wake.set()
         assert subscription.next(1.0) is not None
         dispatcher._wake.set()
         assert subscription.next(0.05) is None
@@ -627,11 +691,9 @@ def test_dispatcher_requires_resync_when_durable_anchor_is_lost() -> None:
         source,  # type: ignore[arg-type]
         durable_poll_seconds=0.01,
     )
-    subscription = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
-
     dispatcher.start()
     try:
-        assert subscription.next(1.0) is not None
+        subscription = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_one'))
         source.invalidate_anchor = True
         source.events.append(_event(2))
 
@@ -639,6 +701,47 @@ def test_dispatcher_requires_resync_when_durable_anchor_is_lost() -> None:
         assert delivery is not None
         assert delivery.event == 'resync_required'
         assert delivery.data == {'reason': 'durable_replay_gap'}
+    finally:
+        dispatcher.stop()
+
+
+def test_subscriptions_before_during_and_after_gap_recovery_have_closed_semantics() -> None:
+    source = _BlockingGapRecoverySource([_event(1)])
+    dispatcher = RealtimeDispatcher(source, durable_poll_seconds=0.01)  # type: ignore[arg-type]
+    dispatcher.start()
+    try:
+        existing = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_existing'))
+        source.trigger_gap = True
+        source.events.append(_event(2))
+        dispatcher._wake.set()
+        assert source.recovery_started.wait(1.0)
+        assert dispatcher.state is RealtimeDispatcherState.GAP_RECOVERING
+
+        arriving = dispatcher.subscribe(RealtimeScope(RealtimeAudience.STAFF, 'stf_new'))
+        existing_delivery = existing.next(0.1)
+        arriving_delivery = arriving.next(0.1)
+
+        assert existing_delivery is not None
+        assert existing_delivery.data == {'reason': 'durable_replay_gap'}
+        assert arriving_delivery is not None
+        assert arriving_delivery.data == {'reason': 'durable_replay_gap'}
+        assert arriving not in dispatcher._subscriptions
+
+        source.release_recovery.set()
+        deadline = monotonic() + 1.0
+        while dispatcher.state is not RealtimeDispatcherState.READY and monotonic() < deadline:
+            sleep(0.01)
+        assert dispatcher.state is RealtimeDispatcherState.READY
+
+        after_recovery = dispatcher.subscribe(
+            RealtimeScope(RealtimeAudience.STAFF, 'stf_after_recovery')
+        )
+        source.events.append(_event(3))
+        dispatcher._wake.set()
+        changed = after_recovery.next(1.0)
+        assert changed is not None
+        assert changed.event == 'resources.changed'
+        assert changed.data['claim_revision'] == 4
     finally:
         dispatcher.stop()
 

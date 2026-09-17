@@ -250,6 +250,12 @@ class FixtureRepository(PersistenceRepository):
                 events = [item for item in events if self._realtime_order(item) > anchor_order]
             return deepcopy(events[:limit])
 
+    def realtime_high_watermark(self) -> RealtimeEvent | None:
+        with self._claim_mutation_lock:
+            if not self._realtime_events:
+                return None
+            return deepcopy(max(self._realtime_events.values(), key=self._realtime_order))
+
     def watch_realtime_events(self, stop: Event) -> Iterator[RealtimeEvent]:
         cursor: RealtimeCursor | None = None
         while not stop.is_set():
@@ -380,6 +386,10 @@ class FixtureRepository(PersistenceRepository):
                 RealtimeMutation.CLAIM_CHANGED,
                 claim,
                 operation_correlation=idempotency.key,
+                resources=realtime_resources_for_records(
+                    RealtimeMutation.CLAIM_CHANGED,
+                    ('claim_asset_snapshot', 'branch_evaluation'),
+                ),
             )
             assert realtime_event is not None
             self._claims[claim.claim_id] = deepcopy(claim)
@@ -3277,6 +3287,8 @@ class FixtureRepository(PersistenceRepository):
             kind
             for kind, present in (
                 ('staff_action', staff_action is not None),
+                ('customer_update', customer_update is not None),
+                ('signal_decision', signal_decision is not None),
                 ('handoff', handoff is not None),
                 ('message', message is not None),
             )

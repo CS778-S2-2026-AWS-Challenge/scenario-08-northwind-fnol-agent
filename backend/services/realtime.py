@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from contextlib import suppress
 from dataclasses import dataclass
+from enum import Enum
 from queue import Empty, Full, Queue
 from threading import Event, RLock, Thread
 from time import monotonic
@@ -40,6 +41,15 @@ class RealtimeScope:
         if self.audience is RealtimeAudience.CLAIMANT and event.customer_id != self.subject:
             return False
         return self.claim_id is None or event.claim_id == self.claim_id
+
+
+class RealtimeDispatcherState(str, Enum):
+    STARTING = 'starting'
+    READY = 'ready'
+    SOURCE_DEGRADED = 'source_degraded'
+    GAP_RECOVERING = 'gap_recovering'
+    STOPPING = 'stopping'
+    STOPPED = 'stopped'
 
 
 class RealtimeSubscription:
@@ -144,6 +154,13 @@ class RealtimeDispatcher:
         self._thread: Thread | None = None
         self._source_thread: Thread | None = None
         self._processed_cursor: str | None = None
+        self._state = RealtimeDispatcherState.STOPPED
+        self._recovery_reason: str | None = None
+
+    @property
+    def state(self) -> RealtimeDispatcherState:
+        with self._lock:
+            return self._state
 
     def start(self) -> None:
         with self._lock:
@@ -152,6 +169,8 @@ class RealtimeDispatcher:
             self._stop.clear()
             self._wake.clear()
             self._ready.clear()
+            self._state = RealtimeDispatcherState.STARTING
+            self._recovery_reason = None
             self._thread = Thread(target=self._run, name='realtime-dispatcher', daemon=True)
             self._thread.start()
         if not self._ready.wait(self._startup_timeout_seconds):
@@ -159,24 +178,42 @@ class RealtimeDispatcher:
             raise RuntimeError('Realtime durable replay did not become ready before startup.')
 
     def stop(self) -> None:
-        self._stop.set()
-        self._wake.set()
         with self._lock:
+            self._state = RealtimeDispatcherState.STOPPING
             subscriptions = tuple(self._subscriptions)
             self._subscriptions.clear()
             thread = self._thread
             source_thread = self._source_thread
+        self._stop.set()
+        self._wake.set()
         for subscription in subscriptions:
             subscription.close()
         if thread is not None:
             thread.join(timeout=2)
         if source_thread is not None:
             source_thread.join(timeout=2)
+        with self._lock:
+            self._state = RealtimeDispatcherState.STOPPED
 
     def subscribe(self, scope: RealtimeScope) -> RealtimeSubscription:
         subscription = RealtimeSubscription(scope, capacity=self._queue_capacity)
         with self._lock:
-            self._subscriptions.add(subscription)
+            if self._state in {
+                RealtimeDispatcherState.READY,
+                RealtimeDispatcherState.SOURCE_DEGRADED,
+            }:
+                self._subscriptions.add(subscription)
+                return subscription
+            reason = (
+                self._recovery_reason
+                or {
+                    RealtimeDispatcherState.STARTING: 'dispatcher_starting',
+                    RealtimeDispatcherState.GAP_RECOVERING: 'durable_replay_gap',
+                    RealtimeDispatcherState.STOPPING: 'dispatcher_stopping',
+                    RealtimeDispatcherState.STOPPED: 'dispatcher_unavailable',
+                }[self._state]
+            )
+        subscription.require_resync(reason)
         return subscription
 
     def unsubscribe(self, subscription: RealtimeSubscription) -> None:
@@ -209,6 +246,17 @@ class RealtimeDispatcher:
         return deliveries
 
     def _run(self) -> None:
+        try:
+            high_watermark = self._repository.realtime_high_watermark()
+            self._processed_cursor = (
+                cursor_for(high_watermark) if high_watermark is not None else None
+            )
+            self._transition(RealtimeDispatcherState.READY)
+            self._ready.set()
+        except Exception:
+            logger.exception('Realtime durable high watermark is unavailable at startup.')
+            return
+
         next_source_start = 0.0
         while not self._stop.is_set():
             source_thread = self._source_thread
@@ -225,20 +273,22 @@ class RealtimeDispatcher:
                 source_thread.start()
                 next_source_start = monotonic() + self._source_retry_seconds
             try:
-                self._drain_durable_events()
-                self._ready.set()
+                recovering = self.state is RealtimeDispatcherState.GAP_RECOVERING
+                self._drain_durable_events(publish=not recovering)
+                if recovering:
+                    self._transition(RealtimeDispatcherState.READY)
             except ValueError:
                 logger.exception('Realtime durable cursor cannot be resumed.')
-                self._require_resync('durable_replay_gap')
+                self._begin_recovery('durable_replay_gap')
                 self._processed_cursor = None
                 try:
                     self._drain_durable_events(publish=False)
-                    self._ready.set()
+                    self._transition(RealtimeDispatcherState.READY)
                 except Exception:
                     logger.exception('Realtime durable cursor recovery failed.')
             except Exception:
                 logger.exception('Realtime durable replay stopped unexpectedly.')
-                self._require_resync('durable_event_store_unavailable')
+                self._begin_recovery('durable_event_store_unavailable')
             self._wake.wait(self._durable_poll_seconds)
             self._wake.clear()
 
@@ -249,12 +299,15 @@ class RealtimeDispatcher:
             for _event in self._repository.watch_realtime_events(self._stop):
                 if self._stop.is_set():
                     return
+                self._mark_source_ready()
                 self._wake.set()
             if not self._stop.is_set():
                 logger.warning('Realtime repository subscription ended unexpectedly.')
+                self._transition(RealtimeDispatcherState.SOURCE_DEGRADED)
         except Exception:
             if not self._stop.is_set():
                 logger.exception('Realtime repository subscription stopped unexpectedly.')
+                self._transition(RealtimeDispatcherState.SOURCE_DEGRADED)
 
     def _drain_durable_events(self, *, publish: bool = True) -> None:
         while not self._stop.is_set():
@@ -287,3 +340,32 @@ class RealtimeDispatcher:
             subscriptions = tuple(self._subscriptions)
         for subscription in subscriptions:
             subscription.require_resync(reason)
+
+    def _begin_recovery(self, reason: str) -> None:
+        with self._lock:
+            self._state = RealtimeDispatcherState.GAP_RECOVERING
+            self._recovery_reason = reason
+            subscriptions = tuple(self._subscriptions)
+        for subscription in subscriptions:
+            subscription.require_resync(reason)
+
+    def _transition(self, state: RealtimeDispatcherState) -> None:
+        with self._lock:
+            if self._state in {
+                RealtimeDispatcherState.STOPPING,
+                RealtimeDispatcherState.STOPPED,
+            }:
+                return
+            if (
+                self._state is RealtimeDispatcherState.GAP_RECOVERING
+                and state is RealtimeDispatcherState.SOURCE_DEGRADED
+            ):
+                return
+            self._state = state
+            if state is not RealtimeDispatcherState.GAP_RECOVERING:
+                self._recovery_reason = None
+
+    def _mark_source_ready(self) -> None:
+        with self._lock:
+            if self._state is RealtimeDispatcherState.SOURCE_DEGRADED:
+                self._state = RealtimeDispatcherState.READY

@@ -1612,9 +1612,28 @@ receive all permitted resource hints. Claimants receive only their own customer 
 `internal_only` message, queue/WorkItem hint, or operation correlation never appears in their
 delivery.
 
+`resources[]` uses public refresh boundaries, not persistence record names:
+
+| Resource | Authoritative reads to refresh |
+| --- | --- |
+| `claim` | claimant Claim; Workbench Claim, fields, and sessions |
+| `messages` | claimant or Workbench session messages |
+| `evidence` | claimant or Workbench Evidence |
+| `handoffs` | Workbench handoffs and any claimant-safe handoff projection |
+| `work_items` | Workbench staff actions and Runtime WorkItems |
+| `external_tasks` | Workbench external requests and bounded claimant-safe status |
+| `asset_snapshots` | claimant or Workbench Claim Asset snapshots |
+| `collaboration_requests` | Workbench collaboration requests |
+| `customer_updates` | Workbench customer updates |
+| `signals` | Workbench signals and decisions |
+| `queue` | Workbench list, search, ownership, priority, and queue projection |
+
 Reconnect replays events strictly after the acknowledged cursor. Duplicate or older deliveries are
-discarded. The process dispatcher also drains the durable sequence across Change Stream startup or
-restart, so a temporary wake-up-source failure does not by itself interrupt clients. An invalid or
+discarded. Process startup anchors at the current durable high watermark, while browser reconnect
+replay remains anchored at the browser's acknowledged cursor. The dispatcher drains the durable
+sequence across Change Stream restart, so a temporary wake-up-source failure does not by itself
+interrupt clients. During startup, gap recovery, stopping, or an unavailable dispatcher, a newly
+arriving stream receives `resync_required` instead of entering an uncovered live window. An invalid or
 unavailable client cursor returns `409 INVALID_EVENT_CURSOR`; a replay window larger than the
 bounded server window, subscriber queue overflow, unavailable durable store, or detected internal
 durable-anchor gap emits `resync_required` with a bounded reason and closes that stream. The client

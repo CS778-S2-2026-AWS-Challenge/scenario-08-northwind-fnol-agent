@@ -19,13 +19,53 @@ class RealtimeAudience(str, Enum):
 
 
 class RealtimeResource(str, Enum):
+    """Stable client refresh boundaries backed by documented public read APIs."""
+
     CLAIM = 'claim'
     MESSAGES = 'messages'
     EVIDENCE = 'evidence'
     HANDOFFS = 'handoffs'
     WORK_ITEMS = 'work_items'
     EXTERNAL_TASKS = 'external_tasks'
+    ASSET_SNAPSHOTS = 'asset_snapshots'
+    COLLABORATION_REQUESTS = 'collaboration_requests'
+    CUSTOMER_UPDATES = 'customer_updates'
+    SIGNALS = 'signals'
     QUEUE = 'queue'
+
+
+REALTIME_RESOURCE_READ_APIS: dict[RealtimeResource, tuple[str, ...]] = {
+    RealtimeResource.CLAIM: (
+        '/api/v1/claims/{claim_id}',
+        '/api/v1/workbench/claims/{claim_id}',
+        '/api/v1/workbench/claims/{claim_id}/fields',
+        '/api/v1/workbench/claims/{claim_id}/sessions',
+    ),
+    RealtimeResource.MESSAGES: (
+        '/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+        '/api/v1/workbench/claims/{claim_id}/sessions/{session_id}/messages',
+    ),
+    RealtimeResource.EVIDENCE: (
+        '/api/v1/claims/{claim_id}/evidence',
+        '/api/v1/workbench/claims/{claim_id}/evidence',
+    ),
+    RealtimeResource.HANDOFFS: ('/api/v1/workbench/claims/{claim_id}/handoffs',),
+    RealtimeResource.WORK_ITEMS: (
+        '/api/v1/workbench/claims/{claim_id}/work-items',
+        '/api/v1/workbench/claims/{claim_id}/runtime-work-items',
+    ),
+    RealtimeResource.EXTERNAL_TASKS: ('/api/v1/workbench/claims/{claim_id}/external-requests',),
+    RealtimeResource.ASSET_SNAPSHOTS: (
+        '/api/v1/claims/{claim_id}/asset-snapshots',
+        '/api/v1/workbench/claims/{claim_id}/asset-snapshots',
+    ),
+    RealtimeResource.COLLABORATION_REQUESTS: (
+        '/api/v1/workbench/claims/{claim_id}/collaboration-requests',
+    ),
+    RealtimeResource.CUSTOMER_UPDATES: ('/api/v1/workbench/claims/{claim_id}/customer-updates',),
+    RealtimeResource.SIGNALS: ('/api/v1/workbench/claims/{claim_id}/signals',),
+    RealtimeResource.QUEUE: ('/api/v1/workbench/claims',),
+}
 
 
 class RealtimeMutation(str, Enum):
@@ -64,13 +104,18 @@ CLAIMANT_REALTIME_RESOURCES = frozenset(
         RealtimeResource.EVIDENCE,
         RealtimeResource.HANDOFFS,
         RealtimeResource.EXTERNAL_TASKS,
+        RealtimeResource.ASSET_SNAPSHOTS,
     }
 )
 
 
 REALTIME_MUTATION_RESOURCES: dict[RealtimeMutation, tuple[RealtimeResource, ...]] = {
     RealtimeMutation.CLAIM_CREATED: (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
-    RealtimeMutation.CLAIM_CHANGED: (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
+    RealtimeMutation.CLAIM_CHANGED: (
+        RealtimeResource.CLAIM,
+        RealtimeResource.ASSET_SNAPSHOTS,
+        RealtimeResource.QUEUE,
+    ),
     RealtimeMutation.CLAIM_OWNER_CHANGED: (RealtimeResource.CLAIM,),
     RealtimeMutation.SESSION_CHANGED: (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
     RealtimeMutation.SESSION_PAUSED: (
@@ -117,6 +162,7 @@ REALTIME_MUTATION_RESOURCES: dict[RealtimeMutation, tuple[RealtimeResource, ...]
     ),
     RealtimeMutation.OWNERSHIP_CHANGED: (
         RealtimeResource.CLAIM,
+        RealtimeResource.COLLABORATION_REQUESTS,
         RealtimeResource.HANDOFFS,
         RealtimeResource.QUEUE,
     ),
@@ -125,6 +171,8 @@ REALTIME_MUTATION_RESOURCES: dict[RealtimeMutation, tuple[RealtimeResource, ...]
         RealtimeResource.MESSAGES,
         RealtimeResource.HANDOFFS,
         RealtimeResource.WORK_ITEMS,
+        RealtimeResource.CUSTOMER_UPDATES,
+        RealtimeResource.SIGNALS,
         RealtimeResource.QUEUE,
     ),
     RealtimeMutation.HANDOFF_CHANGED: (
@@ -148,9 +196,10 @@ REALTIME_MUTATION_RESOURCES: dict[RealtimeMutation, tuple[RealtimeResource, ...]
 
 # Required resources are the projections changed by every variant of a mutation.
 # Optional resources are admitted only when the concrete transaction writes the
-# corresponding child record from REALTIME_RECORD_RESOURCES.
+# corresponding record from AUTHORITATIVE_RECORD_PROJECTION_IMPACTS.
 REALTIME_MUTATION_REQUIRED_RESOURCES: dict[RealtimeMutation, tuple[RealtimeResource, ...]] = {
     **REALTIME_MUTATION_RESOURCES,
+    RealtimeMutation.CLAIM_CHANGED: (RealtimeResource.CLAIM, RealtimeResource.QUEUE),
     RealtimeMutation.MESSAGE_MUTATION_COMMITTED: (
         RealtimeResource.CLAIM,
         RealtimeResource.QUEUE,
@@ -167,6 +216,7 @@ REALTIME_MUTATION_REQUIRED_RESOURCES: dict[RealtimeMutation, tuple[RealtimeResou
     ),
     RealtimeMutation.OWNERSHIP_CHANGED: (
         RealtimeResource.CLAIM,
+        RealtimeResource.COLLABORATION_REQUESTS,
         RealtimeResource.QUEUE,
     ),
     RealtimeMutation.STAFF_MUTATION_COMMITTED: (
@@ -186,13 +236,17 @@ REALTIME_MUTATION_REQUIRED_RESOURCES: dict[RealtimeMutation, tuple[RealtimeResou
 }
 
 
-REALTIME_RECORD_RESOURCES: dict[str, tuple[RealtimeResource, ...]] = {
-    'claim_asset_snapshot': (),
+AUTHORITATIVE_RECORD_PROJECTION_IMPACTS: dict[str, tuple[RealtimeResource, ...]] = {
+    'claim_asset_snapshot': (RealtimeResource.ASSET_SNAPSHOTS,),
     'branch_evaluation': (),
-    'collaboration_request': (),
-    'claim_coworker': (),
-    'customer_update': (),
-    'signal_decision': (),
+    'collaboration_request': (RealtimeResource.COLLABORATION_REQUESTS,),
+    'claim_coworker': (
+        RealtimeResource.CLAIM,
+        RealtimeResource.COLLABORATION_REQUESTS,
+        RealtimeResource.QUEUE,
+    ),
+    'customer_update': (RealtimeResource.CUSTOMER_UPDATES,),
+    'signal_decision': (RealtimeResource.SIGNALS,),
     'staff_agent_execution': (),
     'agent_decision': (),
     'runtime_trace': (),
@@ -226,8 +280,8 @@ class RealtimePublication(ContractModel):
     customer_id: str
     claim_revision: int | None = Field(default=None, ge=1)
     operation_correlation: str | None = Field(default=None, max_length=200)
-    resources: tuple[RealtimeResource, ...] = Field(min_length=1, max_length=7)
-    claimant_resources: tuple[RealtimeResource, ...] = Field(default=(), max_length=7)
+    resources: tuple[RealtimeResource, ...] = Field(min_length=1, max_length=11)
+    claimant_resources: tuple[RealtimeResource, ...] = Field(default=(), max_length=11)
     audiences: tuple[RealtimeAudience, ...] = Field(min_length=1, max_length=2)
 
     @model_validator(mode='after')
@@ -258,8 +312,8 @@ class RealtimeEvent(ContractModel):
     claim_revision: int | None = Field(default=None, ge=1)
     sequence: int | None = Field(default=None, ge=1)
     operation_correlation: str | None = Field(default=None, max_length=200)
-    resources: tuple[RealtimeResource, ...] = Field(min_length=1, max_length=7)
-    claimant_resources: tuple[RealtimeResource, ...] = Field(default=(), max_length=7)
+    resources: tuple[RealtimeResource, ...] = Field(min_length=1, max_length=11)
+    claimant_resources: tuple[RealtimeResource, ...] = Field(default=(), max_length=11)
     audiences: tuple[RealtimeAudience, ...] = Field(min_length=1, max_length=2)
 
     @model_validator(mode='after')
@@ -414,9 +468,9 @@ def realtime_resources_for_records(
 
     changed = set(REALTIME_MUTATION_REQUIRED_RESOURCES[mutation])
     for kind in record_kinds:
-        if kind not in REALTIME_RECORD_RESOURCES:
-            raise ValueError(f'Record kind {kind} is missing from the realtime inventory.')
-        changed.update(REALTIME_RECORD_RESOURCES[kind])
+        if kind not in AUTHORITATIVE_RECORD_PROJECTION_IMPACTS:
+            raise ValueError(f'Record kind {kind} is missing from the projection-impact matrix.')
+        changed.update(AUTHORITATIVE_RECORD_PROJECTION_IMPACTS[kind])
     allowed = REALTIME_MUTATION_RESOURCES[mutation]
     unexpected = changed.difference(allowed)
     if unexpected:

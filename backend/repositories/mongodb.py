@@ -523,6 +523,13 @@ class MongoDBRepository:
             if (event := self._model_from_document(document, RealtimeEvent)) is not None
         ]
 
+    def realtime_high_watermark(self) -> RealtimeEvent | None:
+        document = self._collection.find_one(
+            {'record_type': 'realtime_event'},
+            sort=[('realtime_order', -1)],
+        )
+        return self._model_from_document(document, RealtimeEvent)
+
     def watch_realtime_events(self, stop: Event) -> Iterator[RealtimeEvent]:
         pipeline = [
             {

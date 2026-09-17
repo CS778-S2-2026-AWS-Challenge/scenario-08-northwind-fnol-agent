@@ -76,10 +76,12 @@ non-development environment.
 
 The MongoDB replica set is also the realtime wake-up boundary. Relevant business writes and their
 `realtime_event` records commit in one transaction, and each Backend process opens one collection
-Change Stream as a low-latency wake-up hint. Before application startup completes, and after every
-hint or bounded fallback interval, the process-level dispatcher drains the durable sequence from
-its last processed cursor. This closes watcher startup/restart gaps without making provider resume
-tokens part of the domain contract. Deployments that provide CRUD but not transactions or Change
+Change Stream as a low-latency wake-up hint. Before application startup completes, the dispatcher
+anchors its process-local position at the durable high watermark rather than replaying retained
+history. It then drains strictly newer events after every hint or bounded fallback interval. Browser
+reconnect replay remains anchored at each browser's acknowledged cursor. This closes watcher
+startup/restart gaps without making provider resume tokens part of the domain contract. Deployments
+that provide CRUD but not transactions or Change
 Streams do not satisfy the `local_mvp` contract. Browser connection count does not create
 additional MongoDB polling loops or Change Streams. The prototype uses one
 durable global realtime sequence, which deliberately serializes realtime-producing transactions;
