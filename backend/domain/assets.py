@@ -52,7 +52,7 @@ def _omitted_asset_details() -> AssetDetails:
 
 
 class AssetRecord(ContractModel):
-    asset_id: str = Field(pattern=r'^ast_[a-f0-9]{20}$')
+    asset_id: str = Field(pattern=r'^ase_[a-f0-9]{20}$')
     customer_id: str = Field(min_length=1, max_length=200)
     asset_type: AssetType
     display_name: ShortText
@@ -96,7 +96,7 @@ class CreateAssetRequest(ContractModel):
     def validate_request(self) -> 'CreateAssetRequest':
         # Reuse the authoritative record validator without inventing a second rule set.
         AssetRecord(
-            asset_id='ast_00000000000000000000',
+            asset_id='ase_00000000000000000000',
             customer_id='validation',
             revision=1,
             active=True,
@@ -128,7 +128,7 @@ class ClaimAssetSnapshot(ContractModel):
     snapshot_id: str = Field(pattern=r'^cas_[a-f0-9]{20}$')
     claim_id: str = Field(min_length=1, max_length=200)
     customer_id: str = Field(min_length=1, max_length=200)
-    asset_id: str = Field(pattern=r'^ast_[a-f0-9]{20}$')
+    asset_id: str = Field(pattern=r'^ase_[a-f0-9]{20}$')
     asset_revision: int = Field(ge=1)
     asset_type: AssetType
     display_name: ShortText
@@ -152,7 +152,7 @@ class ClaimAssetSnapshotProjection(ContractModel):
 
 
 class SelectClaimAssetRequest(ContractModel):
-    asset_id: str = Field(pattern=r'^ast_[a-f0-9]{20}$')
+    asset_id: str = Field(pattern=r'^ase_[a-f0-9]{20}$')
 
 
 class ClaimAssetSelectionResponse(ContractModel):

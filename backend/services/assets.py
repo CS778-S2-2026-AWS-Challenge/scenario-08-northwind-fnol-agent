@@ -23,6 +23,15 @@ from backend.domain.assets import (
     project_asset,
     project_snapshot,
 )
+from backend.domain.audit import (
+    AuditActor,
+    AuditEventEnvelope,
+    AuditEventType,
+    AuditOutcome,
+    AuditSubject,
+    AuditSubjectType,
+    AuditVisibility,
+)
 from backend.domain.branch_registry import validate_registered_field_value
 from backend.domain.ids import new_id
 from backend.domain.models import (
@@ -34,6 +43,7 @@ from backend.domain.models import (
     PageInfo,
     ProposedFormChange,
     StructuredFormField,
+    WorkingClaim,
 )
 from backend.repositories.assets import (
     AssetRepository,
@@ -132,6 +142,84 @@ def _snapshot_conflict() -> ApiError:
     )
 
 
+def _terminal_claim_conflict() -> ApiError:
+    return ApiError(
+        status_code=409,
+        code='INVALID_STATE_TRANSITION',
+        message='A terminal claim cannot accept an asset selection.',
+        details=[
+            ErrorDetail(
+                field='claim_id',
+                reason=(
+                    'Reopen an abandoned or closed claim before active work; '
+                    'a completed claim cannot resume active work.'
+                ),
+            )
+        ],
+    )
+
+
+def _asset_audit_event(
+    asset: AssetRecord,
+    principal: Principal,
+    *,
+    action: str,
+    idempotency_key: str | None = None,
+) -> AuditEventEnvelope:
+    return AuditEventEnvelope(
+        event_id=new_id('aud'),
+        event_type=AuditEventType.ACTION_COMPLETED,
+        outcome=AuditOutcome.SUCCEEDED,
+        subject=AuditSubject(
+            subject_type=AuditSubjectType.ASSET,
+            subject_id=asset.asset_id,
+        ),
+        actor=AuditActor(
+            actor_type=ActorType.CLAIMANT,
+            actor_id=principal.subject,
+            auth_source=principal.auth_source,
+        ),
+        reason=f'Claimant {action} the account Asset.',
+        source_refs=[f'asset:{asset.asset_id}:revision:{asset.revision}'],
+        visibility=AuditVisibility.AUDIT_ONLY,
+        idempotency_key=idempotency_key,
+        created_at=asset.updated_at,
+    )
+
+
+def _asset_selection_audit_event(
+    claim: WorkingClaim,
+    snapshot: ClaimAssetSnapshot,
+    principal: Principal,
+    *,
+    idempotency_key: str,
+) -> AuditEventEnvelope:
+    return AuditEventEnvelope(
+        event_id=new_id('aud'),
+        event_type=AuditEventType.ACTION_COMPLETED,
+        outcome=AuditOutcome.SUCCEEDED,
+        subject=AuditSubject(
+            subject_type=AuditSubjectType.CLAIM,
+            subject_id=claim.claim_id,
+            claim_id=claim.claim_id,
+        ),
+        actor=AuditActor(
+            actor_type=ActorType.CLAIMANT,
+            actor_id=principal.subject,
+            auth_source=principal.auth_source,
+        ),
+        reason='Claimant selected an account Asset for Claim prefill.',
+        source_refs=[
+            f'asset:{snapshot.asset_id}:revision:{snapshot.asset_revision}',
+            snapshot.snapshot_id,
+        ],
+        visibility=AuditVisibility.AUDIT_ONLY,
+        idempotency_key=idempotency_key,
+        claim_revision=claim.revision,
+        created_at=snapshot.captured_at,
+    )
+
+
 def create_asset(
     repository: AssetRepository,
     idempotency_repository: PersistenceRepository,
@@ -149,7 +237,7 @@ def create_asset(
 
     timestamp = now_utc()
     asset = AssetRecord(
-        asset_id=new_id('ast'),
+        asset_id=new_id('ase'),
         customer_id=principal.subject,
         revision=1,
         active=True,
@@ -168,7 +256,16 @@ def create_asset(
         response_payload=projection.model_dump(mode='json'),
     )
     try:
-        repository.create_asset(asset, record)
+        repository.create_asset(
+            asset,
+            record,
+            _asset_audit_event(
+                asset,
+                principal,
+                action='created',
+                idempotency_key=key,
+            ),
+        )
     except IdempotencyConflict as error:
         replay = idempotency_repository.find_idempotency(principal.subject, CREATE_ROUTE, key)
         if (
@@ -247,7 +344,11 @@ def update_asset(
     except ValidationError as error:
         raise _validation_error(error) from error
     try:
-        repository.update_asset(updated, expected_revision)
+        repository.update_asset(
+            updated,
+            expected_revision,
+            _asset_audit_event(updated, principal, action='updated'),
+        )
     except RevisionConflict as error:
         raise _revision_conflict(error.current_revision) from error
     return project_asset(updated)
@@ -271,7 +372,11 @@ def deactivate_asset(
         update={'active': False, 'revision': current.revision + 1, 'updated_at': now_utc()}
     )
     try:
-        repository.update_asset(updated, expected_revision)
+        repository.update_asset(
+            updated,
+            expected_revision,
+            _asset_audit_event(updated, principal, action='deactivated'),
+        )
     except RevisionConflict as error:
         raise _revision_conflict(error.current_revision) from error
 
@@ -322,6 +427,8 @@ def select_claim_asset(
         raise _not_found('claim')
     if claim.revision != expected_revision:
         raise _revision_conflict(claim.revision)
+    if claim.terminal_disposition is not None:
+        raise _terminal_claim_conflict()
     asset = repository.get_asset(payload.asset_id, principal.subject)
     if asset is None or not asset.active:
         raise _not_found('asset')
@@ -406,6 +513,12 @@ def select_claim_asset(
             snapshot,
             idempotency,
             evaluation,
+            _asset_selection_audit_event(
+                updated_claim,
+                snapshot,
+                principal,
+                idempotency_key=key,
+            ),
         )
     except RevisionConflict as error:
         raise _revision_conflict(error.current_revision) from error

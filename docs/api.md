@@ -3863,7 +3863,7 @@ or Claim outside the authenticated customer boundary.
 | `GET /api/v1/claims/{claim_id}/asset-snapshots` | Cursor-page claimant-safe immutable snapshots for an owned Claim. |
 | `GET /api/v1/workbench/claims/{claim_id}/asset-snapshots` | Cursor-page the same approved snapshot fields for authorised staff. |
 
-Asset identifiers use `ast_`; snapshots use `cas_`. Asset records contain `asset_type`,
+Asset identifiers use `ase_`; snapshots use `cas_`. Asset records contain `asset_type`,
 `display_name`, matching typed `details`, `revision`, `active`, and timestamps. The account-safe
 projection omits `customer_id` and all physical storage/provider metadata. Assets do not accept
 claimant-supplied policy text. A durable Policy association requires the future account-owned
@@ -3882,6 +3882,11 @@ the owner boundary, the API returns the same concealed `404 RESOURCE_NOT_FOUND`.
 leave the Claim revision, snapshot, Branch Evaluation, and idempotency result unchanged.
 An internal copied-detail mismatch is rejected consistently by every persistence adapter and maps
 to `409 RESOURCE_CONFLICT`; it cannot persist a snapshot that differs from the selected Asset.
+Abandoned, closed, and completed Claims reject a new Asset selection with `409
+INVALID_STATE_TRANSITION`; no Claim, snapshot, Branch Evaluation, idempotency, or audit write is
+performed. Asset create, update, and soft-deactivate atomically persist one Asset-scoped audit
+fact. Selection atomically persists one Claim-scoped audit fact with the resulting revision. Audit
+facts retain only bounded identities and source references, not copied Asset details.
 
 ### Target child-resource boundaries
 

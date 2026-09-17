@@ -67,7 +67,7 @@ records remain target contracts.
 | Staff account | local/runtime staff identity, salted password hash, display name, roles, active state, revision, and update time | `staff_id` |
 | Staff auth session | `ias_` session identity, hash of an opaque staff token, authenticated staff reference, revision, creation, expiry, revocation, and update timestamps | `session_id`, linked to `staff_id`; token lookup uses `token_hash` |
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
-| Asset | account-owned typed vehicle, property, or contents details, revision, active state, and timestamps; Policy association is deferred until an owned `pol_` resource exists | `asset_id` (`ast_`), linked to `customer_id` |
+| Asset | account-owned typed vehicle, property, or contents details, revision, active state, and timestamps; Policy association is deferred until an owned `pol_` resource exists | `asset_id` (`ase_`), linked to `customer_id` |
 | Claim | Working Claim State, structured facts, independent attributes, lifecycle status, optional source-linked terminal disposition, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Claim asset snapshot | immutable approved asset details selected for one Claim revision, source asset/revision, provenance, and capture time | `snapshot_id` (`cas_`), linked to `claim_id`, `customer_id`, and `asset_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
@@ -215,11 +215,15 @@ the append-only audit collection through a bounded, filterable projection.
     one explicit Session.
 41. Create, read, update, soft-deactivate, and cursor-page assets by authenticated `customer_id`
     using optimistic asset revision and create idempotency, without cross-customer discovery.
+    Create, update, and soft-deactivate persist one bounded Asset-scoped audit fact in the same
+    authoritative mutation.
 42. Atomically select an active owned asset and persist the immutable Claim asset snapshot,
     proposed registered facts, resulting Claim revision, applied Branch Evaluation, and
     idempotency response. Revalidate owner, active state, revision, and copied details inside the
     authoritative write. A changed Asset returns its current revision; an unavailable Asset is
-    concealed. Either result leaves all selection records unchanged.
+    concealed. A terminal Claim rejects the selection. Any rejected result leaves the Claim,
+    snapshot, Branch Evaluation, idempotency, and audit records unchanged. A successful selection
+    persists one bounded Claim-scoped audit fact in the same authoritative mutation.
 43. List Claim asset snapshots in stable `(captured_at, snapshot_id)` order after claimant
     ownership or Workbench staff authority has been established.
 44. Create, revise, list, mask, and retire account Identity Records and Payment Destinations by
@@ -235,7 +239,7 @@ the append-only audit collection through a bounded, filterable projection.
 
 ## Asset Record Mapping
 
-- `asset:{asset_id}` stores the current `AssetRecord`; `asset_id` uses `ast_` and is globally
+- `asset:{asset_id}` stores the current `AssetRecord`; `asset_id` uses `ase_` and is globally
   opaque. Logical lookup/index: `(record_type, customer_id, active, updated_at, _id)`.
 - `claim_asset_snapshot:{snapshot_id}` stores immutable `ClaimAssetSnapshot`; `snapshot_id`
   uses `cas_`. Logical lookup/index: `(record_type, claim_id, captured_at, _id)` with

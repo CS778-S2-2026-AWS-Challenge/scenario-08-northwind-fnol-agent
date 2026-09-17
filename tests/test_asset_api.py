@@ -5,7 +5,19 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.domain.assets import ClaimAssetSnapshot
-from backend.domain.models import BranchEvaluationRecord, WorkingClaim
+from backend.domain.audit import AuditEventEnvelope, AuditSubject, AuditSubjectType
+from backend.domain.models import (
+    ActorReference,
+    ActorType,
+    BranchEvaluationRecord,
+    ClaimCreationStatus,
+    ClaimTerminalDisposition,
+    ExternalClaimResult,
+    IntegrationSource,
+    TerminalDispositionReasonCode,
+    TerminalDispositionValue,
+    WorkingClaim,
+)
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.protocols import IdempotencyRecord
 
@@ -39,6 +51,7 @@ def _create_asset(client: TestClient, headers: dict[str, str]) -> dict[str, Any]
 
 def test_account_assets_are_owned_paginated_revisioned_and_soft_deleted(
     client: TestClient,
+    repository: FixtureRepository,
 ) -> None:
     owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
     other = _login(client, 'claimant.two@example.invalid', 'northwind-demo-two')
@@ -139,10 +152,20 @@ def test_account_assets_are_owned_paginated_revisioned_and_soft_deleted(
     assert removed_projection['active'] is False
     assert removed_projection['revision'] == 3
     assert repeated_delete.status_code == 204
+    asset_events = repository.list_audit_events_internal(
+        AuditSubject(subject_type=AuditSubjectType.ASSET, subject_id=asset_id)
+    )
+    assert [event.reason for event in asset_events] == [
+        'Claimant created the account Asset.',
+        'Claimant updated the account Asset.',
+        'Claimant deactivated the account Asset.',
+    ]
+    assert all('SYN123' not in event.model_dump_json() for event in asset_events)
 
 
 def test_asset_selection_prefills_proposals_and_snapshot_remains_immutable(
     client: TestClient,
+    repository: FixtureRepository,
 ) -> None:
     owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
     asset = _create_asset(client, owner)
@@ -169,7 +192,7 @@ def test_asset_selection_prefills_proposals_and_snapshot_remains_immutable(
     changed_asset = client.post(
         route,
         headers=selection_headers,
-        json={'asset_id': 'ast_00000000000000000000'},
+        json={'asset_id': 'ase_00000000000000000000'},
     )
     missing_if_match = client.post(
         route,
@@ -227,6 +250,96 @@ def test_asset_selection_prefills_proposals_and_snapshot_remains_immutable(
     assert staff_snapshots.status_code == 200
     assert staff_snapshots.json()['items'] == snapshots.json()['items']
     assert 'customer_id' not in snapshots.text
+    selection_events = repository.list_audit_events_internal(
+        AuditSubject(
+            subject_type=AuditSubjectType.CLAIM,
+            subject_id=claim['claim_id'],
+            claim_id=claim['claim_id'],
+        )
+    )
+    assert len(selection_events) == 1
+    assert selection_events[0].claim_revision == selected.json()['revision']
+    assert selection_events[0].idempotency_key == 'asset-selection-1'
+    assert asset['details']['registration'] not in selection_events[0].model_dump_json()
+
+
+@pytest.mark.parametrize('disposition', list(TerminalDispositionValue))
+def test_terminal_claim_rejects_asset_selection_without_any_write(
+    client: TestClient,
+    repository: FixtureRepository,
+    disposition: TerminalDispositionValue,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    asset = _create_asset(client, owner)
+    created = client.post(
+        '/api/v1/claims',
+        headers={**owner, 'Idempotency-Key': f'terminal-claim-{disposition.value}'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ'},
+    ).json()['claim']
+    current = repository.get_claim_internal(created['claim_id'])
+    assert current is not None
+    external_claim = (
+        ExternalClaimResult(
+            external_claim_id=f'ext_{current.claim_id}',
+            claim_number=f'NW-{current.claim_id}',
+            creation_status=ClaimCreationStatus.CREATED,
+            route='standard_motor_intake',
+            next_step='A claims professional will review the created Claim.',
+            source=IntegrationSource.FIXTURE,
+            created_at=current.updated_at,
+        )
+        if disposition is TerminalDispositionValue.COMPLETED
+        else None
+    )
+    reason = {
+        TerminalDispositionValue.COMPLETED: TerminalDispositionReasonCode.CLAIM_CREATED,
+        TerminalDispositionValue.ABANDONED: (
+            TerminalDispositionReasonCode.ABANDONMENT_POLICY_APPLIED
+        ),
+        TerminalDispositionValue.CLOSED: TerminalDispositionReasonCode.AUTHORISED_CLOSURE,
+    }[disposition]
+    terminal = current.model_copy(
+        update={
+            'external_claim': external_claim,
+            'terminal_disposition': ClaimTerminalDisposition(
+                value=disposition,
+                reason_code=reason,
+                source_refs=[f'terminal:{disposition.value}'],
+                recorded_by=ActorReference(
+                    actor_type=ActorType.SYSTEM,
+                    actor_id='asset-terminal-test',
+                ),
+                recorded_at=current.updated_at,
+                recorded_revision=current.revision,
+            ),
+        }
+    )
+    repository._claims[current.claim_id] = terminal
+    route = f'/api/v1/claims/{current.claim_id}/asset-selections'
+    branch_count = len(repository._branch_evaluations)
+    audit_count = len(repository._audit_events)
+    idempotency_key = f'terminal-selection-{disposition.value}'
+
+    response = client.post(
+        route,
+        headers={
+            **owner,
+            'Idempotency-Key': idempotency_key,
+            'If-Match': str(current.revision),
+        },
+        json={'asset_id': asset['asset_id']},
+    )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    assert repository.get_claim_internal(current.claim_id) == terminal
+    assert repository.list_claim_asset_snapshots(current.claim_id, current.customer_id) == (
+        [],
+        False,
+    )
+    assert len(repository._branch_evaluations) == branch_count
+    assert len(repository._audit_events) == audit_count
+    assert repository.find_idempotency(current.customer_id, route, idempotency_key) is None
 
 
 def test_asset_contract_rejects_unapproved_policy_fields_and_anonymous_account_access(
@@ -358,7 +471,7 @@ def test_asset_selection_errors_are_concealed_and_revision_safe(client: TestClie
             'Idempotency-Key': 'missing-asset-select',
             'If-Match': str(created_claim['revision']),
         },
-        json={'asset_id': 'ast_00000000000000000000'},
+        json={'asset_id': 'ase_00000000000000000000'},
     )
     missing_claim = client.post(
         '/api/v1/claims/clm_missing/asset-selections',
@@ -367,12 +480,12 @@ def test_asset_selection_errors_are_concealed_and_revision_safe(client: TestClie
     )
     missing_snapshots = client.get('/api/v1/claims/clm_missing/asset-snapshots', headers=owner)
     missing_update = client.patch(
-        '/api/v1/account/assets/ast_00000000000000000000',
+        '/api/v1/account/assets/ase_00000000000000000000',
         headers={**owner, 'If-Match': '1'},
         json={'display_name': 'Missing'},
     )
     missing_delete = client.delete(
-        '/api/v1/account/assets/ast_00000000000000000000',
+        '/api/v1/account/assets/ase_00000000000000000000',
         headers={**owner, 'If-Match': '1'},
     )
 
@@ -406,6 +519,7 @@ def test_asset_selection_race_is_typed_and_leaves_no_partial_write(
     route = f'/api/v1/claims/{claim["claim_id"]}/asset-selections'
     original_save = repository.save_asset_selection
     branch_count = len(repository._branch_evaluations)
+    audit_count = len(repository._audit_events)
 
     def race_save(
         updated_claim: WorkingClaim,
@@ -413,17 +527,15 @@ def test_asset_selection_race_is_typed_and_leaves_no_partial_write(
         snapshot: ClaimAssetSnapshot,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord,
+        audit_event: AuditEventEnvelope,
     ) -> None:
         current = repository.get_asset(snapshot.asset_id, updated_claim.customer_id)
         assert current is not None
-        repository.update_asset(
-            current.model_copy(
-                update={
-                    'revision': current.revision + 1,
-                    'active': race_mode != 'unavailable',
-                }
-            ),
-            current.revision,
+        repository._assets[current.asset_id] = current.model_copy(
+            update={
+                'revision': current.revision + 1,
+                'active': race_mode != 'unavailable',
+            }
         )
         original_save(
             updated_claim,
@@ -431,6 +543,7 @@ def test_asset_selection_race_is_typed_and_leaves_no_partial_write(
             snapshot,
             idempotency,
             branch_evaluation,
+            audit_event,
         )
 
     monkeypatch.setattr(repository, 'save_asset_selection', race_save)
@@ -458,6 +571,7 @@ def test_asset_selection_race_is_typed_and_leaves_no_partial_write(
         False,
     )
     assert len(repository._branch_evaluations) == branch_count
+    assert len(repository._audit_events) == audit_count
     assert (
         repository.find_idempotency(stored_claim.customer_id, route, f'race-selection-{race_mode}')
         is None
@@ -478,6 +592,7 @@ def test_asset_selection_maps_concurrent_idempotency_conflict(
     ).json()['claim']
     route = f'/api/v1/claims/{claim["claim_id"]}/asset-selections'
     original_save = repository.save_asset_selection
+    audit_count = len(repository._audit_events)
 
     def conflicting_save(
         updated_claim: WorkingClaim,
@@ -485,6 +600,7 @@ def test_asset_selection_maps_concurrent_idempotency_conflict(
         snapshot: ClaimAssetSnapshot,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord,
+        audit_event: AuditEventEnvelope,
     ) -> None:
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
         repository._idempotency[lookup] = replace(
@@ -496,6 +612,7 @@ def test_asset_selection_maps_concurrent_idempotency_conflict(
             snapshot,
             idempotency,
             branch_evaluation,
+            audit_event,
         )
 
     monkeypatch.setattr(repository, 'save_asset_selection', conflicting_save)
@@ -511,3 +628,4 @@ def test_asset_selection_maps_concurrent_idempotency_conflict(
 
     assert response.status_code == 409
     assert response.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert len(repository._audit_events) == audit_count

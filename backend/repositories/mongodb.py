@@ -96,7 +96,9 @@ from backend.repositories.assets import (
     AssetSelectionRevisionConflictError,
     AssetSelectionSnapshotConflictError,
     AssetSelectionUnavailableError,
+    asset_audit_matches,
     asset_matches_snapshot,
+    asset_selection_audit_matches,
 )
 from backend.repositories.protocols import (
     DemoSeedConflict,
@@ -378,12 +380,23 @@ class MongoDBRepository:
     def close(self) -> None:
         self._client.close()
 
-    def create_asset(self, asset: AssetRecord, idempotency: IdempotencyRecord) -> None:
-        if asset.customer_id != idempotency.actor_id or asset.asset_id != idempotency.claim_id:
+    def create_asset(
+        self,
+        asset: AssetRecord,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        if (
+            asset.customer_id != idempotency.actor_id
+            or asset.asset_id != idempotency.claim_id
+            or not asset_audit_matches(asset, audit_event)
+            or audit_event.idempotency_key != idempotency.key
+        ):
             raise KeyError(asset.asset_id)
 
         def persist(mongo_session: Any) -> None:
             self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
+            self._ensure_new_audit_event(audit_event, mongo_session=mongo_session)
             self._put(
                 'asset',
                 asset.asset_id,
@@ -392,6 +405,7 @@ class MongoDBRepository:
                 session=mongo_session,
             )
             self._save_idempotency(idempotency, mongo_session)
+            self._insert_audit_event(audit_event, mongo_session=mongo_session)
 
         self._atomic(persist)
 
@@ -422,39 +436,56 @@ class MongoDBRepository:
         ]
         return records[:limit], len(records) > limit
 
-    def update_asset(self, asset: AssetRecord, expected_revision: int) -> None:
-        if asset.revision != expected_revision + 1:
+    def update_asset(
+        self,
+        asset: AssetRecord,
+        expected_revision: int,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        if (
+            asset.revision != expected_revision + 1
+            or not asset_audit_matches(asset, audit_event)
+            or audit_event.idempotency_key is not None
+        ):
             raise KeyError(asset.asset_id)
-        document = asset.model_dump(mode='json')
-        document.update(
-            {
-                '_id': self._record_id('asset', asset.asset_id),
-                'record_type': 'asset',
-                'customer_id': asset.customer_id,
-                'claim_id': None,
-            }
-        )
-        result = self._collection.replace_one(
-            {
-                '_id': document['_id'],
-                'record_type': 'asset',
-                'customer_id': asset.customer_id,
-                'revision': expected_revision,
-            },
-            document,
-        )
-        if result.matched_count != 1:
-            current = self._collection.find_one(
+
+        def persist(mongo_session: Any) -> None:
+            self._ensure_new_audit_event(audit_event, mongo_session=mongo_session)
+            document = asset.model_dump(mode='json')
+            document.update(
+                {
+                    '_id': self._record_id('asset', asset.asset_id),
+                    'record_type': 'asset',
+                    'customer_id': asset.customer_id,
+                    'claim_id': None,
+                },
+            )
+            result = self._collection.replace_one(
                 {
                     '_id': document['_id'],
                     'record_type': 'asset',
                     'customer_id': asset.customer_id,
+                    'revision': expected_revision,
                 },
-                projection={'revision': 1},
+                document,
+                session=mongo_session,
             )
-            if current is None:
-                raise KeyError(asset.asset_id)
-            raise RevisionConflict(int(current['revision']))
+            if result.matched_count != 1:
+                current = self._collection.find_one(
+                    {
+                        '_id': document['_id'],
+                        'record_type': 'asset',
+                        'customer_id': asset.customer_id,
+                    },
+                    projection={'revision': 1},
+                    session=mongo_session,
+                )
+                if current is None:
+                    raise KeyError(asset.asset_id)
+                raise RevisionConflict(int(current['revision']))
+            self._insert_audit_event(audit_event, mongo_session=mongo_session)
+
+        self._atomic(persist)
 
     def save_asset_selection(
         self,
@@ -463,6 +494,7 @@ class MongoDBRepository:
         snapshot: ClaimAssetSnapshot,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord,
+        audit_event: AuditEventEnvelope,
     ) -> None:
         if (
             snapshot.customer_id != claim.customer_id
@@ -471,6 +503,7 @@ class MongoDBRepository:
             or idempotency.actor_id != claim.customer_id
             or idempotency.claim_id != claim.claim_id
             or idempotency.session_id != (claim.active_session_id or '')
+            or not asset_selection_audit_matches(claim, snapshot, idempotency, audit_event)
         ):
             raise KeyError(claim.claim_id)
         self._validate_branch_evaluation(claim, branch_evaluation)
@@ -489,6 +522,11 @@ class MongoDBRepository:
                 raise AssetSelectionRevisionConflictError(asset.revision)
             if not asset_matches_snapshot(asset, snapshot):
                 raise AssetSelectionSnapshotConflictError(snapshot.asset_id)
+            prepared_audit = self._prepare_audit_events(
+                claim,
+                (audit_event,),
+                mongo_session=mongo_session,
+            )
             self._save_child_mutation(
                 claim,
                 expected_revision,
@@ -499,6 +537,8 @@ class MongoDBRepository:
                     ('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation),
                 ],
             )
+            for event in prepared_audit:
+                self._insert_audit_event(event, mongo_session=mongo_session)
 
         self._atomic(persist)
 
@@ -800,6 +840,23 @@ class MongoDBRepository:
             stored = self._model_from_document(existing, AuditEventEnvelope)
             if stored != event:
                 raise IdempotencyConflict(event.event_id) from error
+
+    def _ensure_new_audit_event(
+        self,
+        event: AuditEventEnvelope,
+        *,
+        mongo_session: Any,
+    ) -> None:
+        existing = self._collection.find_one(
+            {
+                '_id': self._record_id('audit_event', event.event_id),
+                'record_type': 'audit_event',
+            },
+            projection={'_id': 1},
+            session=mongo_session,
+        )
+        if existing is not None:
+            raise IdempotencyConflict(event.event_id)
 
     def append_audit_event(self, event: AuditEventEnvelope) -> None:
         """Append one immutable audit event to MongoDB.

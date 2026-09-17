@@ -71,7 +71,9 @@ from backend.repositories.assets import (
     AssetSelectionRevisionConflictError,
     AssetSelectionSnapshotConflictError,
     AssetSelectionUnavailableError,
+    asset_audit_matches,
     asset_matches_snapshot,
+    asset_selection_audit_matches,
 )
 from backend.repositories.protocols import (
     DemoSeedConflict,
@@ -139,18 +141,29 @@ class FixtureRepository(PersistenceRepository):
     def connection_status(self) -> str:
         return 'using_fixture'
 
-    def create_asset(self, asset: AssetRecord, idempotency: IdempotencyRecord) -> None:
+    def create_asset(
+        self,
+        asset: AssetRecord,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
         with self._claim_mutation_lock:
             lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
             if (
                 asset.customer_id != idempotency.actor_id
                 or asset.asset_id != idempotency.claim_id
+                or not asset_audit_matches(asset, audit_event)
+                or audit_event.idempotency_key != idempotency.key
                 or asset.asset_id in self._assets
                 or lookup in self._idempotency
             ):
                 raise IdempotencyConflict(idempotency.key)
+            existing_audit = self._audit_events.get(audit_event.event_id)
+            if existing_audit is not None:
+                raise IdempotencyConflict(audit_event.event_id)
             self._assets[asset.asset_id] = deepcopy(asset)
             self._idempotency[lookup] = deepcopy(idempotency)
+            self._audit_events[audit_event.event_id] = deepcopy(audit_event)
 
     def get_asset(self, asset_id: str, customer_id: str) -> AssetRecord | None:
         asset = self._assets.get(asset_id)
@@ -178,16 +191,30 @@ class FixtureRepository(PersistenceRepository):
         page = records[offset : offset + limit + 1]
         return page[:limit], len(page) > limit
 
-    def update_asset(self, asset: AssetRecord, expected_revision: int) -> None:
+    def update_asset(
+        self,
+        asset: AssetRecord,
+        expected_revision: int,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
         with self._claim_mutation_lock:
             current = self._assets.get(asset.asset_id)
             if current is None or current.customer_id != asset.customer_id:
                 raise KeyError(asset.asset_id)
             if current.revision != expected_revision:
                 raise RevisionConflict(current.revision)
-            if asset.revision != expected_revision + 1 or asset.created_at != current.created_at:
+            if (
+                asset.revision != expected_revision + 1
+                or asset.created_at != current.created_at
+                or not asset_audit_matches(asset, audit_event)
+                or audit_event.idempotency_key is not None
+            ):
                 raise KeyError(asset.asset_id)
+            existing_audit = self._audit_events.get(audit_event.event_id)
+            if existing_audit is not None:
+                raise IdempotencyConflict(audit_event.event_id)
             self._assets[asset.asset_id] = deepcopy(asset)
+            self._audit_events[audit_event.event_id] = deepcopy(audit_event)
 
     def save_asset_selection(
         self,
@@ -196,12 +223,15 @@ class FixtureRepository(PersistenceRepository):
         snapshot: ClaimAssetSnapshot,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord,
+        audit_event: AuditEventEnvelope,
     ) -> None:
         with self._claim_mutation_lock:
+            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            if lookup in self._idempotency:
+                raise IdempotencyConflict(idempotency.key)
             self._validate_claim_mutation(claim, expected_revision)
             self._validate_branch_evaluation(claim, branch_evaluation)
             asset = self._assets.get(snapshot.asset_id)
-            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
             if asset is None or asset.customer_id != claim.customer_id or not asset.active:
                 raise AssetSelectionUnavailableError(snapshot.asset_id)
             if asset.revision != snapshot.asset_revision:
@@ -215,14 +245,17 @@ class FixtureRepository(PersistenceRepository):
                 or idempotency.actor_id != claim.customer_id
                 or idempotency.claim_id != claim.claim_id
                 or idempotency.session_id != (claim.active_session_id or '')
+                or not asset_selection_audit_matches(claim, snapshot, idempotency, audit_event)
             ):
                 raise KeyError(claim.claim_id)
-            if snapshot.snapshot_id in self._claim_asset_snapshots or lookup in self._idempotency:
+            existing_audit = self._audit_events.get(audit_event.event_id)
+            if snapshot.snapshot_id in self._claim_asset_snapshots or existing_audit is not None:
                 raise IdempotencyConflict(idempotency.key)
             self._claims[claim.claim_id] = deepcopy(claim)
             self._claim_asset_snapshots[snapshot.snapshot_id] = deepcopy(snapshot)
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
             self._idempotency[lookup] = deepcopy(idempotency)
+            self._audit_events[audit_event.event_id] = deepcopy(audit_event)
 
     def list_claim_asset_snapshots(
         self,

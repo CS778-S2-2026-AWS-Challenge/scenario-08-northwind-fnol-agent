@@ -10770,7 +10770,7 @@
         "additionalProperties": false,
         "properties": {
           "asset_id": {
-            "pattern": "^ast_[a-f0-9]{20}$",
+            "pattern": "^ase_[a-f0-9]{20}$",
             "title": "Asset Id",
             "type": "string"
           }

@@ -42,6 +42,13 @@ must be published before a child implementation relies on them.
 | ContentsItem | Describe claimed items without implying coverage | Claimant and staff Claim projections | Bounded active item context only; serial/value omitted unless current task requires it | Open under #918; preserve current Claim assertion history until a schedule is approved |
 | Evidence | Support the report with protected files and metadata | Claimant-safe metadata; staff provenance; bytes through protected object boundary | Extracted proposals only after controls; bytes/storage keys never in RAG or logs | Open under #918; current append-only history remains, with no new deletion schedule claimed |
 
+Asset create, update, and soft-deactivate persist an Asset-scoped `action.completed` audit fact in
+the same authoritative mutation as the Asset. Asset selection persists a Claim-scoped
+`action.completed` fact in the same mutation as the Claim revision, snapshot, Branch Evaluation,
+and idempotency response. These facts contain actor, time, outcome, revision/idempotency identity,
+and bounded source references only; they do not copy registration, address, contents details, or
+other Asset values.
+
 The prototype uses anonymous or synthetic data only. Real policyholder data,
 real credentials, private incidents, and production datasets must not be added
 to source control, MinIO, fixtures, logs, prompts, or evaluation material.
