@@ -198,8 +198,15 @@ def test_existing_release_history_is_never_repaired_or_overwritten() -> None:
 
 def test_initial_release_rejects_missing_or_mixed_model_catalogues() -> None:
     base = _settings()
-    missing_model = replace(base, model_runtime_bindings=(_binding('qwen-local'),))
-    with pytest.raises(ValueError, match='missing required models'):
+    missing_model = replace(
+        base,
+        model_runtime_bindings=tuple(
+            binding
+            for binding in base.model_runtime_bindings
+            if binding.profile_id != 'google-gemini35-flash-lite'
+        ),
+    )
+    with pytest.raises(ValueError, match='google-gemini35-flash-lite'):
         install_initial_runtime_release(
             missing_model,
             ConfigurationRepository(),
