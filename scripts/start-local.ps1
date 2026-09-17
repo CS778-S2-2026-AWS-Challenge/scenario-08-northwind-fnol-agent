@@ -15,7 +15,10 @@ Import-Module (Join-Path $PSScriptRoot 'Northwind.LocalSecrets.psm1') -Force
 $credentialNames = @(
     Get-Content -Raw -LiteralPath $bindingPath |
         ConvertFrom-Json |
-        Where-Object { $_.evaluation_status -ne 'unavailable' } |
+        Where-Object {
+            -not $_.PSObject.Properties['evaluation_status'] -or
+            $_.evaluation_status -ne 'unavailable'
+        } |
         ForEach-Object { $_.credential_environment_variable } |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
         Sort-Object -Unique
