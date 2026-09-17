@@ -77,11 +77,14 @@ def test_audit_contract_change_selects_audit_contract_tests() -> None:
     assert selection.tests == ('tests/test_audit_contract.py',)
 
 
-def test_shared_domain_model_change_uses_scoped_sentinel() -> None:
+def test_shared_domain_model_change_uses_sentinel_and_complete_journey() -> None:
     selection = select_tests(['backend/domain/models.py'])
 
     assert selection.mode == 'scoped'
-    assert selection.tests == ('tests/test_backend_test_selection.py',)
+    assert selection.tests == (
+        'tests/test_backend_test_selection.py',
+        'tests/test_journey_runs.py',
+    )
 
 
 def test_unmapped_backend_change_never_returns_an_empty_selection() -> None:
@@ -130,6 +133,43 @@ def test_journey_run_support_changes_select_their_consumer_suite() -> None:
 
     assert selection.mode == 'scoped'
     assert selection.tests == ('tests/test_journey_runs.py',)
+
+
+@pytest.mark.parametrize(
+    'path',
+    [
+        'backend/app.py',
+        'backend/api/claims.py',
+        'backend/api/evidence.py',
+        'backend/api/workbench.py',
+        'backend/domain/branch_registry.py',
+        'backend/domain/external_service_registry.py',
+        'backend/services/messages.py',
+        'backend/services/external_services.py',
+        'backend/repositories/fixture.py',
+    ],
+)
+def test_journey_critical_backend_change_selects_complete_journey(path: str) -> None:
+    selection = select_tests([path])
+
+    assert selection.mode == 'scoped'
+    assert 'tests/test_journey_runs.py' in selection.tests
+
+
+@pytest.mark.parametrize(
+    'path',
+    [
+        'backend/api/admin.py',
+        'backend/domain/audit.py',
+        'backend/adapters/model_gateway.py',
+        'backend/repositories/mongodb.py',
+    ],
+)
+def test_unrelated_backend_change_does_not_select_complete_journey(path: str) -> None:
+    selection = select_tests([path])
+
+    assert selection.mode == 'scoped'
+    assert 'tests/test_journey_runs.py' not in selection.tests
 
 
 def test_unknown_test_support_module_uses_scoped_sentinel() -> None:
