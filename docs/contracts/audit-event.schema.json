@@ -136,7 +136,6 @@
         "claim",
         "customer",
         "asset",
-        "policy",
         "external_request",
         "configuration",
         "access"

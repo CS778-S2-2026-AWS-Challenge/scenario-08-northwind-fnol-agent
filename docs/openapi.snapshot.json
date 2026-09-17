@@ -1470,18 +1470,6 @@
             "title": "Display Name",
             "type": "string"
           },
-          "policy_id": {
-            "anyOf": [
-              {
-                "pattern": "^pol_[a-f0-9]{20}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Policy Id"
-          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -1779,16 +1767,6 @@
           "display_name": {
             "title": "Display Name",
             "type": "string"
-          },
-          "policy": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PolicyAssociationSnapshot"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "resulting_claim_revision": {
             "title": "Resulting Claim Revision",
@@ -4464,18 +4442,6 @@
             "minLength": 1,
             "title": "Display Name",
             "type": "string"
-          },
-          "policy_id": {
-            "anyOf": [
-              {
-                "pattern": "^pol_[a-f0-9]{20}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Policy Id"
           }
         },
         "required": [
@@ -4679,33 +4645,6 @@
           "client_message_id"
         ],
         "title": "CreateMessageRequest",
-        "type": "object"
-      },
-      "CreatePolicySummaryRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "display_name": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Display Name",
-            "type": "string"
-          },
-          "policy_number": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Policy Number",
-            "type": "string"
-          },
-          "product_family": {
-            "$ref": "#/components/schemas/PolicyProductFamily"
-          }
-        },
-        "required": [
-          "policy_number",
-          "display_name",
-          "product_family"
-        ],
-        "title": "CreatePolicySummaryRequest",
         "type": "object"
       },
       "CreateStaffActionRequest": {
@@ -9547,42 +9486,6 @@
         "title": "PendingEvidenceReference",
         "type": "object"
       },
-      "PolicyAssociationSnapshot": {
-        "additionalProperties": false,
-        "properties": {
-          "policy_id": {
-            "pattern": "^pol_[a-f0-9]{20}$",
-            "title": "Policy Id",
-            "type": "string"
-          },
-          "policy_number": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Policy Number",
-            "type": "string"
-          },
-          "policy_revision": {
-            "minimum": 1.0,
-            "title": "Policy Revision",
-            "type": "integer"
-          },
-          "product_family": {
-            "$ref": "#/components/schemas/PolicyProductFamily"
-          },
-          "verification_status": {
-            "$ref": "#/components/schemas/PolicyVerificationStatus"
-          }
-        },
-        "required": [
-          "policy_id",
-          "policy_revision",
-          "policy_number",
-          "product_family",
-          "verification_status"
-        ],
-        "title": "PolicyAssociationSnapshot",
-        "type": "object"
-      },
       "PolicyFacts": {
         "additionalProperties": false,
         "properties": {
@@ -9679,15 +9582,6 @@
         ],
         "title": "PolicyFacts",
         "type": "object"
-      },
-      "PolicyProductFamily": {
-        "enum": [
-          "motor",
-          "home",
-          "contents"
-        ],
-        "title": "PolicyProductFamily",
-        "type": "string"
       },
       "PolicyRetrievalRecord": {
         "additionalProperties": false,
@@ -9855,90 +9749,6 @@
         ],
         "title": "PolicySearchResponse",
         "type": "object"
-      },
-      "PolicySummaryListResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/PolicySummaryProjection"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "page": {
-            "$ref": "#/components/schemas/PageInfo"
-          }
-        },
-        "required": [
-          "items",
-          "page"
-        ],
-        "title": "PolicySummaryListResponse",
-        "type": "object"
-      },
-      "PolicySummaryProjection": {
-        "additionalProperties": false,
-        "properties": {
-          "active": {
-            "title": "Active",
-            "type": "boolean"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "display_name": {
-            "title": "Display Name",
-            "type": "string"
-          },
-          "policy_id": {
-            "pattern": "^pol_[a-f0-9]{20}$",
-            "title": "Policy Id",
-            "type": "string"
-          },
-          "policy_number": {
-            "title": "Policy Number",
-            "type": "string"
-          },
-          "product_family": {
-            "$ref": "#/components/schemas/PolicyProductFamily"
-          },
-          "revision": {
-            "title": "Revision",
-            "type": "integer"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "title": "Updated At",
-            "type": "string"
-          },
-          "verification_status": {
-            "$ref": "#/components/schemas/PolicyVerificationStatus"
-          }
-        },
-        "required": [
-          "policy_id",
-          "policy_number",
-          "display_name",
-          "product_family",
-          "verification_status",
-          "revision",
-          "active",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "PolicySummaryProjection",
-        "type": "object"
-      },
-      "PolicyVerificationStatus": {
-        "enum": [
-          "unverified",
-          "verified"
-        ],
-        "title": "PolicyVerificationStatus",
-        "type": "string"
       },
       "PreferencesPatchRequest": {
         "additionalProperties": false,
@@ -12565,40 +12375,9 @@
             "minLength": 1,
             "title": "Display Name",
             "type": "string"
-          },
-          "policy_id": {
-            "anyOf": [
-              {
-                "pattern": "^pol_[a-f0-9]{20}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Policy Id"
           }
         },
         "title": "UpdateAssetRequest",
-        "type": "object"
-      },
-      "UpdatePolicySummaryRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "display_name": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Display Name",
-            "type": "string"
-          },
-          "policy_number": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Policy Number",
-            "type": "string"
-          }
-        },
-        "title": "UpdatePolicySummaryRequest",
         "type": "object"
       },
       "UpdateStaffActionRequest": {
@@ -16551,376 +16330,6 @@
         "tags": [
           "claimant identity",
           "claimant assets"
-        ]
-      }
-    },
-    "/api/v1/account/policies": {
-      "get": {
-        "operationId": "read_account_policy_summaries_api_v1_account_policies_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "include_inactive",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Include Inactive",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 25,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PolicySummaryListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Read Account Policy Summaries",
-        "tags": [
-          "claimant identity",
-          "claimant policies"
-        ]
-      },
-      "post": {
-        "operationId": "create_account_policy_summary_api_v1_account_policies_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreatePolicySummaryRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PolicySummaryProjection"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Account Policy Summary",
-        "tags": [
-          "claimant identity",
-          "claimant policies"
-        ]
-      }
-    },
-    "/api/v1/account/policies/{policy_id}": {
-      "delete": {
-        "operationId": "delete_account_policy_summary_api_v1_account_policies__policy_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "policy_id",
-            "required": true,
-            "schema": {
-              "title": "Policy Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "If-Match",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "If-Match"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Account Policy Summary",
-        "tags": [
-          "claimant identity",
-          "claimant policies"
-        ]
-      },
-      "get": {
-        "operationId": "read_account_policy_summary_api_v1_account_policies__policy_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "policy_id",
-            "required": true,
-            "schema": {
-              "title": "Policy Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PolicySummaryProjection"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Read Account Policy Summary",
-        "tags": [
-          "claimant identity",
-          "claimant policies"
-        ]
-      },
-      "patch": {
-        "operationId": "patch_account_policy_summary_api_v1_account_policies__policy_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "policy_id",
-            "required": true,
-            "schema": {
-              "title": "Policy Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "If-Match",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "If-Match"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdatePolicySummaryRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PolicySummaryProjection"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Patch Account Policy Summary",
-        "tags": [
-          "claimant identity",
-          "claimant policies"
         ]
       }
     },

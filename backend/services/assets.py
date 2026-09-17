@@ -1,6 +1,6 @@
 """Ownership-safe application behavior for reusable claimant assets."""
 
-from typing import NoReturn, cast
+from typing import cast
 
 from pydantic import ValidationError
 
@@ -45,21 +45,12 @@ from backend.domain.models import (
     StructuredFormField,
     WorkingClaim,
 )
-from backend.domain.policies import (
-    PolicySummaryRecord,
-    snapshot_policy_summary,
-)
 from backend.repositories.assets import (
     AssetRepository,
     AssetSelectionRevisionConflictError,
     AssetSelectionSnapshotConflictError,
     AssetSelectionUnavailableError,
-    PolicyAssociationMismatchError,
-    PolicyAssociationRevisionConflictError,
-    PolicyAssociationUnavailableError,
-    policy_family_for_asset,
 )
-from backend.repositories.policies import PolicySummaryRepository
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -151,65 +142,6 @@ def _snapshot_conflict() -> ApiError:
     )
 
 
-def _policy_mismatch() -> ApiError:
-    return ApiError(
-        status_code=422,
-        code='VALIDATION_ERROR',
-        message='The policy summary cannot be associated with this Asset.',
-        details=[
-            ErrorDetail(
-                field='policy_id',
-                reason='The Policy Summary product family must match the Asset type.',
-            )
-        ],
-    )
-
-
-def _policy_revision_conflict(current_revision: int) -> ApiError:
-    return ApiError(
-        status_code=409,
-        code='REVISION_CONFLICT',
-        message='The associated policy summary changed after it was loaded.',
-        details=[
-            ErrorDetail(
-                field='policy_id',
-                reason='Reload the Policy Summary before retrying the Asset operation.',
-            )
-        ],
-        retryable=True,
-        current_revision=current_revision,
-    )
-
-
-def _policy_for_asset(
-    repository: AssetRepository,
-    principal: Principal,
-    asset_type: AssetType,
-    policy_id: str | None,
-) -> PolicySummaryRecord | None:
-    if policy_id is None:
-        return None
-    policy = cast(PolicySummaryRepository, repository).get_policy_summary(
-        policy_id,
-        principal.subject,
-    )
-    if policy is None or not policy.active:
-        raise _not_found('policy summary')
-    if policy.product_family is not policy_family_for_asset(asset_type):
-        raise _policy_mismatch()
-    return policy
-
-
-def _raise_policy_write_error(error: Exception) -> NoReturn:
-    if isinstance(error, PolicyAssociationUnavailableError):
-        raise _not_found('policy summary') from error
-    if isinstance(error, PolicyAssociationRevisionConflictError):
-        raise _policy_revision_conflict(error.current_revision) from error
-    if isinstance(error, PolicyAssociationMismatchError):
-        raise _policy_mismatch() from error
-    raise error
-
-
 def _terminal_claim_conflict() -> ApiError:
     return ApiError(
         status_code=409,
@@ -262,12 +194,6 @@ def _asset_selection_audit_event(
     *,
     idempotency_key: str,
 ) -> AuditEventEnvelope:
-    source_refs = [f'asset:{snapshot.asset_id}:revision:{snapshot.asset_revision}']
-    if snapshot.policy is not None:
-        source_refs.append(
-            f'policy:{snapshot.policy.policy_id}:revision:{snapshot.policy.policy_revision}'
-        )
-    source_refs.append(snapshot.snapshot_id)
     return AuditEventEnvelope(
         event_id=new_id('aud'),
         event_type=AuditEventType.ACTION_COMPLETED,
@@ -283,7 +209,10 @@ def _asset_selection_audit_event(
             auth_source=principal.auth_source,
         ),
         reason='Claimant selected an account Asset for Claim prefill.',
-        source_refs=source_refs,
+        source_refs=[
+            f'asset:{snapshot.asset_id}:revision:{snapshot.asset_revision}',
+            snapshot.snapshot_id,
+        ],
         visibility=AuditVisibility.AUDIT_ONLY,
         idempotency_key=idempotency_key,
         claim_revision=claim.revision,
@@ -307,12 +236,6 @@ def create_asset(
         return AssetProjection.model_validate(existing.response_payload)
 
     timestamp = now_utc()
-    policy = _policy_for_asset(
-        repository,
-        principal,
-        payload.asset_type,
-        payload.policy_id,
-    )
     asset = AssetRecord(
         asset_id=new_id('ase'),
         customer_id=principal.subject,
@@ -342,14 +265,7 @@ def create_asset(
                 action='created',
                 idempotency_key=key,
             ),
-            policy,
         )
-    except (
-        PolicyAssociationUnavailableError,
-        PolicyAssociationRevisionConflictError,
-        PolicyAssociationMismatchError,
-    ) as error:
-        _raise_policy_write_error(error)
     except IdempotencyConflict as error:
         replay = idempotency_repository.find_idempotency(principal.subject, CREATE_ROUTE, key)
         if (
@@ -427,27 +343,14 @@ def update_asset(
         updated = AssetRecord.model_validate(updated_payload)
     except ValidationError as error:
         raise _validation_error(error) from error
-    policy = _policy_for_asset(
-        repository,
-        principal,
-        updated.asset_type,
-        updated.policy_id,
-    )
     try:
         repository.update_asset(
             updated,
             expected_revision,
             _asset_audit_event(updated, principal, action='updated'),
-            policy,
         )
     except RevisionConflict as error:
         raise _revision_conflict(error.current_revision) from error
-    except (
-        PolicyAssociationUnavailableError,
-        PolicyAssociationRevisionConflictError,
-        PolicyAssociationMismatchError,
-    ) as error:
-        _raise_policy_write_error(error)
     return project_asset(updated)
 
 
@@ -466,12 +369,7 @@ def deactivate_asset(
     if not current.active:
         return
     updated = current.model_copy(
-        update={
-            'active': False,
-            'policy_id': None,
-            'revision': current.revision + 1,
-            'updated_at': now_utc(),
-        }
+        update={'active': False, 'revision': current.revision + 1, 'updated_at': now_utc()}
     )
     try:
         repository.update_asset(
@@ -483,28 +381,19 @@ def deactivate_asset(
         raise _revision_conflict(error.current_revision) from error
 
 
-def _prefill_values(
-    asset: AssetRecord,
-    policy: PolicySummaryRecord | None,
-) -> dict[str, tuple[object, str]]:
+def _prefill_values(asset: AssetRecord) -> dict[str, object]:
     family = {
         AssetType.VEHICLE: 'motor',
         AssetType.PROPERTY: 'home',
         AssetType.CONTENTS: 'contents',
     }[asset.asset_type]
-    asset_source = f'asset:{asset.asset_id}:revision:{asset.revision}'
-    values: dict[str, tuple[object, str]] = {'claim.product_family': (family, asset_source)}
+    values: dict[str, object] = {'claim.product_family': family}
     if asset.asset_type is AssetType.VEHICLE:
         vehicle = cast(VehicleAssetDetails, asset.details)
-        values['vehicle.registration'] = (vehicle.registration, asset_source)
+        values['vehicle.registration'] = vehicle.registration
     elif asset.asset_type is AssetType.PROPERTY:
         property_details = cast(PropertyAssetDetails, asset.details)
-        values['property.address'] = (property_details.address, asset_source)
-    if policy is not None:
-        values['policy.policy_number'] = (
-            policy.policy_number,
-            f'policy:{policy.policy_id}:revision:{policy.revision}',
-        )
+        values['property.address'] = property_details.address
     return values
 
 
@@ -543,20 +432,11 @@ def select_claim_asset(
     asset = repository.get_asset(payload.asset_id, principal.subject)
     if asset is None or not asset.active:
         raise _not_found('asset')
-    policy = _policy_for_asset(
-        repository,
-        principal,
-        asset.asset_type,
-        asset.policy_id,
-    )
 
     timestamp = now_utc()
     source_ref = f'asset:{asset.asset_id}:revision:{asset.revision}'
-    policy_source_ref = (
-        f'policy:{policy.policy_id}:revision:{policy.revision}' if policy is not None else None
-    )
     proposed_fields: dict[str, StructuredFormField] = {}
-    for field_code, (value, field_source_ref) in _prefill_values(asset, policy).items():
+    for field_code, value in _prefill_values(asset).items():
         try:
             validate_registered_field_value(field_code, value, status=FormStatus.PROPOSED)
         except ValueError as error:
@@ -577,7 +457,7 @@ def select_claim_asset(
                 needed_for=NeededFor.CURRENT_ACTION,
                 reported_text=f'Selected registered asset {asset.display_name}.',
             ),
-            source_ref=field_source_ref,
+            source_ref=source_ref,
             message_text=None,
             timestamp=timestamp,
             accepted_status=FormStatus.PROPOSED,
@@ -600,14 +480,9 @@ def select_claim_asset(
         asset_type=asset.asset_type,
         display_name=asset.display_name,
         details=asset.details,
-        policy=snapshot_policy_summary(policy) if policy is not None else None,
         captured_at=timestamp,
         resulting_claim_revision=updated_claim.revision,
-        source_refs=[
-            source_ref,
-            *([policy_source_ref] if policy_source_ref is not None else []),
-            f'claim:{claim.claim_id}:revision:{updated_claim.revision}',
-        ],
+        source_refs=[source_ref, f'claim:{claim.claim_id}:revision:{updated_claim.revision}'],
     )
     response = ClaimAssetSelectionResponse(
         claim_id=claim.claim_id,
@@ -628,10 +503,7 @@ def select_claim_asset(
         updated_claim,
         repository=claim_repository,
         recomputation_reason='claim_asset_selected',
-        trigger_source_refs=[
-            source_ref,
-            *([policy_source_ref] if policy_source_ref is not None else []),
-        ],
+        trigger_source_refs=[source_ref],
         created_at=timestamp,
     )
     try:
@@ -656,12 +528,6 @@ def select_claim_asset(
         raise _not_found('asset') from error
     except AssetSelectionSnapshotConflictError as error:
         raise _snapshot_conflict() from error
-    except (
-        PolicyAssociationUnavailableError,
-        PolicyAssociationRevisionConflictError,
-        PolicyAssociationMismatchError,
-    ) as error:
-        _raise_policy_write_error(error)
     except IdempotencyConflict as error:
         replay = claim_repository.find_idempotency(principal.subject, route, key)
         if (

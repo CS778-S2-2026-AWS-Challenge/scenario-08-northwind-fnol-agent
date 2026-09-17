@@ -8,6 +8,7 @@ from scripts import select_backend_tests as selector
 from scripts.select_backend_tests import (
     changed_paths,
     changed_python_files,
+    existing_test_paths,
     needs_audit_contract_check,
     needs_openapi_check,
     select_tests,
@@ -43,24 +44,11 @@ def test_asset_modules_select_asset_claim_branch_and_mongodb_contracts() -> None
     assert {
         'tests/test_asset_api.py',
         'tests/test_asset_repository.py',
+        'tests/test_api_boundaries.py',
         'tests/test_branch_registry.py',
         'tests/test_claim_api.py',
         'tests/test_mongodb_repository.py',
     } <= set(selection.tests)
-
-
-def test_policy_summary_modules_select_policy_asset_contracts() -> None:
-    selection = select_tests(
-        [
-            'backend/api/policies.py',
-            'backend/domain/policies.py',
-            'backend/repositories/policies.py',
-            'backend/services/policies.py',
-        ]
-    )
-
-    assert selection.mode == 'scoped'
-    assert 'tests/test_policy_asset_api.py' in selection.tests
 
 
 def test_audit_contract_change_selects_audit_contract_tests() -> None:
@@ -173,6 +161,10 @@ def test_static_checks_use_only_changed_python_files_for_scoped_prs() -> None:
     assert changed_python_files(
         ['backend/api/claims.py', 'backend/removed.py', 'docs/README.md']
     ) == ('backend/api/claims.py',)
+
+
+def test_deleted_test_module_is_not_emitted_to_pytest() -> None:
+    assert existing_test_paths(('tests/test_removed_contract_never_exists.py',)) == ()
 
 
 def test_contract_checks_follow_their_own_impact() -> None:

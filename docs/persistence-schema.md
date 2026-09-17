@@ -62,14 +62,14 @@ records remain target contracts.
 | Customer | authorised identity reference, permitted contact and communication preferences, active state, revision, and update time | `customer_id` |
 | Identity record | protected identity-document reference, masked value, type, issuer, verification state, dates, provenance, and revision | `identity_id` (`idn_`), linked to `customer_id` |
 | Payment destination | protected account reference, masked account number, type/name, verification state, dates, and revision | `payment_destination_id` (`pyd_`), linked to `customer_id` |
-| Policy summary | bounded policy number/display name, product family, verification status, revision, active lifecycle, and timestamps | `policy_id` (`pol_`), linked to `customer_id` |
+| Policy summary | bounded policy identity, product family, display status, effective dates, and provenance | `policy_id` (`pol_`), linked to `customer_id` |
 | Claimant auth session | `ias_` session identity, hash of an opaque development/test token, authenticated customer reference, revision, creation, expiry, revocation, and update timestamps | `session_id`, linked to `customer_id`; token lookup uses `token_hash` |
 | Staff account | local/runtime staff identity, salted password hash, display name, roles, active state, revision, and update time | `staff_id` |
 | Staff auth session | `ias_` session identity, hash of an opaque staff token, authenticated staff reference, revision, creation, expiry, revocation, and update timestamps | `session_id`, linked to `staff_id`; token lookup uses `token_hash` |
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
-| Asset | account-owned typed vehicle, property, or contents details, optional active owned same-family Policy reference, revision, active state, and timestamps | `asset_id` (`ase_`), linked to `customer_id` and optional `policy_id` |
+| Asset | account-owned typed vehicle, property, or contents details, revision, active state, and timestamps; Policy association is deferred until an owned `pol_` resource exists | `asset_id` (`ase_`), linked to `customer_id` |
 | Claim | Working Claim State, structured facts, independent attributes, lifecycle status, optional source-linked terminal disposition, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
-| Claim asset snapshot | immutable approved asset details and optional bounded Policy association selected for one Claim revision, source revisions, provenance, and capture time | `snapshot_id` (`cas_`), linked to `claim_id`, `customer_id`, `asset_id`, and optional `policy_id` |
+| Claim asset snapshot | immutable approved asset details selected for one Claim revision, source asset/revision, provenance, and capture time | `snapshot_id` (`cas_`), linked to `claim_id`, `customer_id`, and `asset_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
 | Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
 | Staff Agent interaction | staff-owned persistent sessions, session-bound published model profile, explicitly scoped questions, source-aware answers, and drafts with stable identity; executable drafts carry a registered action proposal but remain non-executing until staff confirmation | `staff_id`, `session_id`, `message_id`, and `draft_id`; Claim IDs are per-message scope only |
@@ -213,12 +213,10 @@ the append-only audit collection through a bounded, filterable projection.
     limit is satisfied, and returning unavailable when the examined-set bound cannot prove a
     complete result (`SEARCH_SCOPE_EXCEEDED`). Read at most the requested newest 50 messages for
     one explicit Session.
-41. Create, read, update, soft-deactivate, and cursor-page Policy Summaries and Assets by
-    authenticated `customer_id`
+41. Create, read, update, soft-deactivate, and cursor-page assets by authenticated `customer_id`
     using optimistic asset revision and create idempotency, without cross-customer discovery.
-    Create, update, and soft-deactivate persist one bounded resource-scoped audit fact in the same
-    authoritative mutation. An Asset Policy reference must resolve to an active same-owner,
-    same-product-family Policy Summary inside the authoritative write.
+    Create, update, and soft-deactivate persist one bounded Asset-scoped audit fact in the same
+    authoritative mutation.
 42. Atomically select an active owned asset and persist the immutable Claim asset snapshot,
     proposed registered facts, resulting Claim revision, applied Branch Evaluation, and
     idempotency response. Revalidate owner, active state, revision, and copied details inside the
@@ -230,8 +228,8 @@ the append-only audit collection through a bounded, filterable projection.
     ownership or Workbench staff authority has been established.
 44. Create, revise, list, mask, and retire account Identity Records and Payment Destinations by
     owner while resolving protected values only inside separately authorised adapters.
-45. List/select bounded Policy Summaries by account and product family without treating
-    verification status as a coverage decision or exposing provider credentials.
+45. List/select bounded Policy Summaries by account and product family without treating display
+    status as a coverage decision or exposing provider credentials.
 46. Create/list/revise Participants by Claim and role after Claim authorization, with contact
     masking and contact-consent enforcement before any external use.
 47. Append/list immutable same-Claim ContentsItem-to-Evidence associations and reject links when
@@ -241,25 +239,21 @@ the append-only audit collection through a bounded, filterable projection.
 
 ## Asset Record Mapping
 
-- `policy_summary:{policy_id}` stores the current `PolicySummaryRecord`; `policy_id` uses `pol_`.
-  Logical lookup/index: `(record_type, customer_id, active, updated_at, _id)`.
 - `asset:{asset_id}` stores the current `AssetRecord`; `asset_id` uses `ase_` and is globally
-  opaque and may carry one `policy_id`. Logical lookup/index:
-  `(record_type, customer_id, active, updated_at, _id)`.
+  opaque. Logical lookup/index: `(record_type, customer_id, active, updated_at, _id)`.
 - `claim_asset_snapshot:{snapshot_id}` stores immutable `ClaimAssetSnapshot`; `snapshot_id`
   uses `cas_`. Logical lookup/index: `(record_type, claim_id, captured_at, _id)` with
   `customer_id` retained for ownership enforcement.
 - Fixture and MongoDB adapters implement the same port. MongoDB selection uses one transaction;
   Fixture uses one Claim mutation lock. No adapter may reconstruct a historical snapshot from
   the current asset.
-- Existing records require no backfill. A missing `policy_id` remains valid and means no governed
-  association. Migrations copy IDs, revisions, timestamps, lifecycle state, and snapshots exactly,
-  verify owner-scoped counts and snapshot hashes before cutover, and never infer a Policy
-  relationship from claimant text.
-- Existing Profiles remain valid during #923 migration. `display_name` remains the compatibility
-  read/write source until the expanded profile is written once; after that, it is projected as
-  `preferred_name` then `legal_name` and is no longer a second writable source. Migration never
-  invents legal name, date
+- Existing records require no backfill. Assets and snapshots are additive. A future provider
+  migration copies IDs, revisions, timestamps, lifecycle state, and snapshots exactly, then
+  verifies owner-scoped counts and snapshot hashes before cutover. It must not infer a Policy
+  relationship from claimant text; that association requires an owned `pol_` record.
+- The proposed Profile migration is not executable while #918 remains open. Existing Profiles
+  remain valid under the current contract; a later approved migration must define the
+  transitional validity state before it can make `legal_name` required. It must never guess date
   of birth, address, identity, payment, policy, Participant, ContentsItem metadata, or Evidence
   associations.
 - Protected values migrate through the approved encryption/tokenisation adapter; raw values,
@@ -299,9 +293,8 @@ the append-only audit collection through a bounded, filterable projection.
   claim writes.
 - A mutation using a stale expected revision fails without a partial write.
 - A successful material mutation advances the revision exactly once.
-- An Asset selection revalidates the exact Asset type, display name, typed details, and optional
-  owned active same-family Policy Summary copied into its immutable snapshot inside the
-  authoritative write. Fixture and MongoDB reject any mismatch
+- An Asset selection revalidates the exact Asset type, display name, and typed details copied into
+  its immutable snapshot inside the authoritative write. Fixture and MongoDB reject any mismatch
   with the same typed repository conflict and persist no Claim, snapshot, Branch Evaluation, or
   idempotency change.
 - An idempotency record identifies an accepted operation and request fingerprint. An

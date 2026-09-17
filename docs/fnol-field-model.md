@@ -428,17 +428,15 @@ merely to make a Dynamic Form table appear complete.
   evidence status. Staff sees structured facts, sources, corrections, pending work,
   restricted review signals, and handoff context.
 
-## Remaining product decisions
+## Open decisions
 
-The following decisions do not change the child-record contracts below and must not be invented by
-their implementations:
-
-1. Additional catalogue fields and enum values beyond the approved vocabulary.
-2. Provider-specific policy lookup or identity-match schemas.
-3. Production `required_now` sets beyond the implemented VP claim-creation baseline.
-4. Production retention durations, residency, and legal-hold authorities; children use the
-   lifecycle in `docs/privacy-governance.md` until an authorised configuration supplies values.
-5. Professional-review thresholds and staff-authority decisions.
+1. Approve additional catalogue candidates and enum values beyond the executable VP baseline.
+2. Confirm policy lookup and identity-match inputs without inventing provider schemas.
+3. Approve production `required_now` sets beyond the implemented VP claim-creation baseline.
+4. Approve retention/visibility for participant, Police, licence, serial, and value data.
+5. Decide whether contents uses one record per item, grouped records, or both with IDs.
+6. Define publication/rollback behavior for in-progress claims.
+7. Define professional-review thresholds and staff-authority decisions.
 
 ## Current implementation statement
 
@@ -449,33 +447,34 @@ role-safe projections, and claim creation for each family. The broader catalogue
 input: a candidate is not implemented until its type, visibility, persistence boundary, Registry
 entry, consumers, and tests are approved together.
 
-## Claimant data classification contract
+## Requested-data inventory and ownership
 
-This section is the authoritative classification consumed by the #917 implementation children.
-Policy Summary, Asset, and Claim asset snapshot are executable; the remaining classes define the
-exact contract their owning child must implement. Only Dynamic Form entries belong in the
-Field/Branch Registry. Account, protected, repeatable, file, and operational data remain typed
-records even when a screen displays them beside Claim facts. Design Discussion #925 records the
-ownership boundary; the rules below resolve the implementation inputs that remained open there.
+This section is the #918 inventory and minimum privacy boundary. It does not create APIs,
+lifecycle states, migrations, provider verification, payment execution, Policy Summary CRUD, or
+Policy-to-Asset associations. Those implementation contracts belong to the bounded child issues.
+Only Dynamic Form entries belong in the Field/Branch Registry; account, protected, repeatable,
+file, and operational data remain typed records.
 
-| Requested datum | Authoritative class | Shape and cardinality | Source and mutability | Role projection |
-| --- | --- | --- | --- | --- |
-| Legal name, preferred name, date of birth, phone, email, residential address | Profile | One account profile; preferred name and contact channels optional | Claimant or verified identity source; revisioned account update | Claimant full; staff minimum needed; Agent only for the current authorised purpose |
-| Driver licence or passport identifier and verification | Identity Record | Zero or more typed identity records; protected value plus type, issuer, verification state, dates, provenance | Claimant/provider; never an ordinary profile patch or Claim field | Claimant masked; identity-authorised staff masked/full by task; excluded from routine Agent/RAG/logs |
-| Bank account type and destination | Payment Destination | Zero or more tokenised destinations; display label, type, protected provider reference, last digits, status | Claimant/payment provider; revisioned, separately authorised | Claimant masked; payment-authorised staff masked; no Agent/RAG/log access; never executes payment |
-| Policy number and policy summary | Policy Summary | Account-owned `pol_`; policy number, display name, product family, verification status, revision, and active lifecycle | Account-route writes use the authenticated claimant as source authority and retain the actor plus `policy:{policy_id}:revision:{revision}` in audit provenance; a later approved structured lookup must identify its own source without copying provider detail | Claimant and authorised staff bounded projection; Agent receives only selected purpose-limited facts |
-| Vehicle, property, reusable contents item | Asset Record | Account-owned `ase_`; typed details, optional owned same-family `pol_` reference, revision, active lifecycle | Claimant/approved lookup; revisioned and soft-deactivated | Owner claimant and authorised staff only; no cross-account discovery |
-| Asset selected for FNOL | Claim asset snapshot | Immutable `cas_`; one record per selection, source asset/revision, copied approved details, resulting Claim revision | Server-captured in the Claim mutation; never changed by later asset edits | Owning claimant and authorised Workbench staff |
-| Incident time/location/description, damage description, affected areas, safety and police reference | Dynamic Form | Registered Claim facts with assertion history | Claimant, Evidence, provider, staff, or inference with explicit provenance/status | Claimant-safe and staff projections; Agent receives only active registered fields |
-| Owner, driver, other driver, witness and contact details | Participant | Repeatable typed `participant` records with role, contact/vehicle references and sensitive-field visibility | Claimant/staff/provider; revisioned under Claim authority | Claimant-safe minimum; staff task view; sensitive contacts excluded from RAG/logs |
-| Contents brand, model, purchase date/value and ownership | ContentsItem | Members of typed repeatable Claim items, not flat fields | Claimant/Evidence/staff with item assertion provenance | Claimant and staff item projections; value does not imply coverage |
-| Photos, receipts, quotes, invoices, police documents, proof of purchase | Evidence | Evidence metadata plus protected object reference; many-to-many item/Claim links | Upload/provider; append-only material history and explicit link lifecycle | Claimant-safe metadata; authorised staff provenance; bytes never enter form or logs |
+| Requested datum | Current canonical representation | Delivery owner |
+| --- | --- | --- |
+| Legal/preferred name, date of birth, phone, email, residential address | Profile extension required | #923 |
+| Policy number | Reuse `policy.policy_number`; reusable account projection remains to be implemented | #923 |
+| Bank account type and account | Protected account record required; never a payment command | #923 |
+| Driver licence or passport number | Protected identity record required | #923 |
+| Reusable vehicle, property, or contents asset | Existing Asset and immutable Claim asset snapshot | #921 |
+| Vehicle registration | Reuse `vehicle.registration` and vehicle Asset snapshot | #921 |
+| Incident time, location, and description | Reuse `incident.occurred_at`, `incident.location`, and `incident.description` | Existing registry |
+| Vehicle damage | Reuse `vehicle.damage_description` | Existing registry |
+| Other driver name/contact and other vehicle registration | Missing typed Motor participant data | #919 |
+| Property address and damaged areas | Reuse `property.address` and `property.affected_areas`; property Asset snapshot supplies reusable details | #920 |
+| Contents item description | Existing ContentsItem | Existing baseline |
+| Contents brand and model | Missing optional ContentsItem members | #922 |
+| General loss description | Reuse `loss.description` | Existing registry |
+| Police reference | Reuse `authorities.police_report_reference` | Existing registry |
+| Damage photos, receipts, invoices, proof of purchase, repair quotes, and Police documents | Reuse Evidence; item-specific links remain missing | #920 for Home verification; #922 for Contents item links |
 
-The canonical police field remains `authorities.police_report_reference`; aliases such as
-`police_reference` are not registered. The current executable registry remains version 5 in
-this PR because selecting an asset reuses existing Claim fields. Profile, identity, payment,
-policy, asset, participant, ContentsItem, and Evidence records must not be registered as flat
-fields. Future Claim-fact additions require a new Field Registry and Branch Registry version.
+No executable registry field is added by #918 or #921. Aliases such as `police_reference` are
+not registered, and requested files are Evidence rather than Dynamic Form strings.
 
 ### Asset-to-Claim prefill
 
@@ -488,58 +487,5 @@ Selecting an active owned asset proposes, but does not confirm, only these exist
 | Contents | `claim.product_family=contents` |
 
 Each proposal uses claimant source authority because the authenticated claimant selected the
-record and keeps `status=proposed`. Asset facts record
-`asset:{asset_id}:revision:{revision}`. A linked policy number records
-`policy:{policy_id}:revision:{revision}`. Selection does not confirm coverage, liability,
-identity, payment eligibility, or loss.
-
-### Approved child-record vocabulary
-
-Policy Summary, Asset, and Claim asset snapshot entries below are executable. Other entries are
-the approved implementation contract for #919, #920, #922, and #923. Their owning child must
-deliver the listed lifecycle, masking, failure, revision, idempotency, and migration behavior; it
-must not rename members or flatten records into Claim fields.
-
-| Class / prefix | Exact approved members |
-| --- | --- |
-| Profile / existing `customer_id` | `legal_name: string` required; `preferred_name: string?`; `date_of_birth: date?` (past date); `phone: string?`; `email: email` required; `residential_address: PostalAddress?`; existing `display_name` becomes a compatibility projection of preferred then legal name and is not independently writable after migration |
-| PostalAddress | `line1: string`, `line2: string?`, `suburb: string?`, `city: string`, `region: string?`, `postal_code: string?`, `country_code: ISO-3166 alpha-2` |
-| Identity Record / `idn_` | `identity_id`, `customer_id`, `document_type: driver_licence\|passport`, `protected_value_ref`, `masked_value`, `issuing_country?`, `expires_on?`, `verification_status: unverified\|verified\|rejected\|expired`, `verified_at?`, `verification_source?`; raw number is accepted only at the protected write boundary and is never returned |
-| Payment Destination / `pyd_` | `payment_destination_id`, `customer_id`, `account_type: transaction\|savings\|other`, `account_name`, `protected_account_ref`, `masked_account_number`, `verification_status: unverified\|verified\|rejected`, `verified_at?`; no balance, credential, or payment command |
-| Policy Summary / `pol_` | `policy_id`, `customer_id`, `policy_number: trimmed string 1..200`, `display_name: trimmed string 1..200`, `product_family: motor\|home\|contents`, `verification_status: unverified\|verified`, `revision >= 1`, `active`, `created_at`, `updated_at >= created_at`; claimant create defaults verification to `unverified`, claimant PATCH cannot change family or verification, and each mutation retains claimant actor plus the revision source ref in audit provenance; no coverage conclusion, provider secret, schedule wording, or payment data |
-| Asset / `ase_` | Common members implemented by this change plus optional `policy_id` and exactly one typed details object: vehicle `{registration, registered_owner?, make?, model?, year?}`; property `{address, owner_name?, property_type?}`; contents `{description, category?, brand?, model?, serial_number?}`; `policy_id` must resolve to an active owned same-family `pol_` |
-| Claim asset snapshot / `cas_` | `snapshot_id`, `claim_id`, `customer_id`, `asset_id`, `asset_revision`, copied `asset_type`, `display_name`, typed `details`, optional copied Policy association `{policy_id, policy_revision, policy_number, product_family, verification_status}`, `captured_at`, `resulting_claim_revision`, `source_refs`; immutable |
-| Participant / `par_` | `participant_id`, `claim_id`, `role: insured_owner\|driver\|other_driver\|witness`, `legal_name?`, `relationship_to_claimant: self\|partner\|family\|employee\|other\|unknown`, `phone?`, `email?`, `vehicle_registration?`, `consent_to_contact: granted\|declined\|not_requested`, `source_refs`; repeatable and revisioned |
-| ContentsItem / existing `item_id` | Preserve existing members and add optional `brand`, `model`, `serial_number`, `purchase_date: date`, `purchase_source: retailer\|private_sale\|gift\|other\|unknown`, and `asset_snapshot_id?`; serial number is masked outside its owning claimant/staff task projection |
-| Item-Evidence association / `iea_` | `association_id`, `claim_id`, `item_id`, `evidence_id`, `purpose: item_photo\|proof_of_purchase\|receipt\|valuation\|repair_quote\|police_document\|other`, `source_refs`, `created_at`; immutable, same-Claim only |
-| Emergency repair / `mit_` | `mitigation_id`, `claim_id`, `kind=emergency_repair`, `status: reported\|planned\|completed\|unavailable`, `summary?`, `responsible_party`, `evidence_ids`, `work_item_id?`, `source_refs`; this is mitigation/work, not a form string |
-
-Identity `protected_value_ref` and payment `protected_account_ref` are adapter-owned protected
-references, not provider keys exposed through APIs. Contact fields on another participant are
-collected only for Claim handling and must not be reused as account identity or marketing consent.
-
-### Approved next Field and Branch Registry versions
-
-The next registry release after the current version 5 is `vp-field-registry-v6`. It is implemented
-by the family-specific child that first requires these genuine Claim facts, together with
-`vp-dynamic-form-branch-rules-v2`; this contract issue does not register them early:
-
-| Code | Type | Allowed values / validation | Family | Default selection |
-| --- | --- | --- | --- | --- |
-| `property.occupancy_relationship` | enum | `owner`, `tenant`, `landlord`, `other`, `unknown` | home | `candidate_now`; required only by a published action rule |
-| `property.building_damage` | text | non-empty, trimmed, max 5000 | home | `candidate_now`; may become required for the relevant damage action |
-
-The corresponding `vp-dynamic-form-branch-rules-v2` adds both fields to `family.home` and to
-the Home requirement priority without changing safety interruption precedence. It does not add
-new motor or contents flat fields. Candidate resolution is explicit:
-
-- `vehicle.identity` becomes the Asset plus Claim snapshot, while `vehicle.registration`
-  remains the canonical Claim fact.
-- `driver.identity`, `driver.relationship`, `other_vehicle.identity`, `other_party.contact`,
-  and `witness.details` become Participant members.
-- `property.address` stays canonical; property selection uses the Asset snapshot. Requested
-  building damage uses `property.building_damage`; emergency work uses the mitigation record.
-- `contents.item.brand`, `model`, `serial_number`, `purchase_date`, and `purchase_source` become
-  ContentsItem members; item evidence uses `iea_` associations.
-- Photos, receipts, estimates, invoices, proof of purchase, and police documents stay Evidence.
-- `authorities.police_report_reference` remains the only registered police reference code.
+record, keeps `status=proposed`, and records `asset:{asset_id}:revision:{revision}`. Selection
+does not confirm ownership, coverage, liability, identity, payment eligibility, or loss.

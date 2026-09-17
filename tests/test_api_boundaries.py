@@ -29,6 +29,8 @@ def _assert_error(response_status: int, response_body: dict[str, object], code: 
 def test_non_health_routes_declare_the_expected_authentication_boundary(app: FastAPI) -> None:
     expected_dependencies: dict[str, Callable[..., object]] = {
         '/api/claims/message': require_claimant,
+        '/api/v1/claims/{claim_id}/asset-selections': require_claimant_session,
+        '/api/v1/claims/{claim_id}/asset-snapshots': require_claimant_session,
     }
     health_paths = {'/health', '/health/live', '/health/ready'}
     public_routes = {
@@ -47,7 +49,9 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
             continue
 
         expected: Callable[..., object] | None
-        if route.path.startswith(('/api/v1/workbench/', '/api/v1/staff/')):
+        if route.path in expected_dependencies:
+            expected = expected_dependencies[route.path]
+        elif route.path.startswith(('/api/v1/workbench/', '/api/v1/staff/')):
             expected = require_staff
         elif route.path.startswith(('/api/v1/auth/', '/api/v1/account')):
             expected = require_claimant_session
@@ -58,7 +62,7 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
         elif route.path.startswith('/internal/v1/'):
             expected = require_integration_service
         else:
-            expected = expected_dependencies.get(route.path)
+            expected = None
 
         assert expected is not None, f'Route {route.path} has no classified permission boundary.'
         assert expected in dependency_calls, f'Route {route.path} is missing {expected.__name__}.'
