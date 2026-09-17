@@ -17,7 +17,7 @@ jobs:
   frontend-impact:
     name: Select frontend impact
     if: github.event_name == 'pull_request' || github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, northwind-ci]
     outputs:
       customer: ${{ steps.impact.outputs.customer }}
       workbench: ${{ steps.impact.outputs.workbench }}
@@ -50,9 +50,7 @@ jobs:
 
   backend-quality:
     name: Backend quality
-    # Set repository variable NORTHWIND_CI_RUNNER to northwind-ci after the
-    # trusted self-hosted runner is installed. Fork pull requests stay hosted.
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || vars.NORTHWIND_CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: [self-hosted, northwind-ci]
     timeout-minutes: 20
 
     steps:
@@ -123,7 +121,7 @@ jobs:
     name: Customer quality
     needs: frontend-impact
     if: needs.frontend-impact.outputs.customer == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, northwind-ci]
     timeout-minutes: 10
     defaults:
       run:
@@ -150,7 +148,7 @@ jobs:
     name: Workbench quality
     needs: frontend-impact
     if: needs.frontend-impact.outputs.workbench == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, northwind-ci]
     timeout-minutes: 10
     defaults:
       run:
@@ -177,7 +175,7 @@ jobs:
     name: Admin quality
     needs: frontend-impact
     if: needs.frontend-impact.outputs.admin == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, northwind-ci]
     timeout-minutes: 10
     defaults:
       run:
@@ -203,7 +201,7 @@ jobs:
   docs-quality:
     name: Docs quality
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, northwind-ci]
     timeout-minutes: 10
 
     steps:

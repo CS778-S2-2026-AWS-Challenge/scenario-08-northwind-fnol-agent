@@ -21,8 +21,10 @@ from backend.domain.external_services import (
     ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
+    ExternalTaskRequest,
     ExternalTaskResult,
     ExternalTaskResultVerification,
+    external_task_requires_reconciliation,
     request_provenance,
 )
 from backend.domain.models import (
@@ -915,27 +917,33 @@ def _incomplete_context(
 def _external_tasks(
     repository: PersistenceRepository,
     claim_id: str,
-) -> tuple[list[ExternalTaskRecord], str | None]:
+) -> tuple[list[ExternalTaskRecord], list[ExternalTaskRequest], str | None]:
     try:
-        return repository.list_external_tasks_internal(claim_id), None
+        return (
+            repository.list_external_tasks_internal(claim_id),
+            repository.list_external_task_requests_internal(claim_id),
+            None,
+        )
     except RuntimeError:
-        return [], 'External-service records are temporarily unavailable.'
+        return [], [], 'External-service records are temporarily unavailable.'
 
 
 def _external_staff_attention(
     external_tasks: Sequence[ExternalTaskRecord],
+    external_requests: Sequence[ExternalTaskRequest],
     results: Sequence[ExternalTaskResult],
     staff_actions: Sequence[StaffActionRecord],
 ) -> list[tuple[ExternalTaskRecord, ExternalTaskResult | None, str, StaffActionRecord | None]]:
     """Return exact external records that still require a staff-owned next step."""
 
     results_by_task = {item.task_id: item for item in results}
+    requests_by_task = {item.task_id: item for item in external_requests}
     attention: list[
         tuple[ExternalTaskRecord, ExternalTaskResult | None, str, StaffActionRecord | None]
     ] = []
     for task in external_tasks:
         result = results_by_task.get(task.task_id)
-        if task.status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
+        if external_task_requires_reconciliation(task, requests_by_task.get(task.task_id)):
             attention.append((task, result, 'reconcile', None))
             continue
         action_type = None
@@ -1081,11 +1089,13 @@ def _allowed_actions(
     risk_signals: Sequence[WorkbenchRiskSignal],
     collaboration_requests: Sequence[ClaimCollaborationRequest],
     external_tasks: Sequence[ExternalTaskRecord],
+    external_requests: Sequence[ExternalTaskRequest],
     external_results: Sequence[ExternalTaskResult],
     principal: Principal,
 ) -> list[WorkbenchAllowedAction]:
     external_attention = _external_staff_attention(
         external_tasks,
+        external_requests,
         external_results,
         staff_actions,
     )
@@ -1748,7 +1758,9 @@ def _build_projection(
     messages = _claim_messages(repository, claim, sessions)
     actions = repository.list_staff_actions(claim.claim_id)
     projected_risk_signals = risk_signals(repository, claim)
-    external_tasks, external_limitation = _external_tasks(repository, claim.claim_id)
+    external_tasks, external_requests, external_limitation = _external_tasks(
+        repository, claim.claim_id
+    )
     external_results = repository.list_external_task_results_internal(claim.claim_id)
     integration_summary = _integration_summary(claim, external_tasks, external_results)
     computed_at = now_utc()
@@ -1771,6 +1783,7 @@ def _build_projection(
         projected_risk_signals,
         collaboration_requests,
         external_tasks,
+        external_requests,
         external_results,
         principal,
     )
@@ -1789,7 +1802,14 @@ def _build_projection(
             lifecycle,
             missing,
             active_handoffs,
-            bool(_external_staff_attention(external_tasks, external_results, actions)),
+            bool(
+                _external_staff_attention(
+                    external_tasks,
+                    external_requests,
+                    external_results,
+                    actions,
+                )
+            ),
             any(
                 task.status is ExternalTaskOperationStatus.ACCEPTED
                 and all(result.task_id != task.task_id for result in external_results)
@@ -2331,13 +2351,17 @@ def list_workbench_customer_updates(
 
 def _external_lifecycle(
     task: ExternalTaskRecord,
-    request: Any | None,
+    request: ExternalTaskRequest | None,
     result: ExternalTaskResult | None = None,
     result_evidence: Sequence[EvidenceRecord] = (),
     assessor_routing: AssessorRoutingResult | None = None,
     completed_review: StaffActionRecord | None = None,
 ) -> WorkbenchExternalLifecycle:
-    status = task.status
+    status = (
+        ExternalTaskOperationStatus.UNKNOWN_OUTCOME
+        if external_task_requires_reconciliation(task, request)
+        else task.status
+    )
     projection = projection_metadata(status.value)
     result_status = None
     if result is not None:

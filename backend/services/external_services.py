@@ -24,8 +24,10 @@ from backend.domain.external_services import (
     ASSESSOR_SHARED_DATA_SUMMARY,
     ExternalTaskContinuation,
     ExternalTaskContinuationOutcome,
+    ExternalTaskOperationStatus,
     ExternalTaskRecord,
     continuation_for_failed_task,
+    external_task_requires_reconciliation,
 )
 from backend.domain.models import (
     ActorReference,
@@ -182,11 +184,11 @@ _CLAIMANT_CONTINUATION_STATUS = {
 }
 
 
-def _latest_failed_assessor_task(
+def _latest_actionable_assessor_task(
     repository: PersistenceRepository,
     claim: WorkingClaim,
-) -> ExternalTaskRecord | None:
-    """Find the most recent assessor task that ended in a failure the claimant may see.
+) -> tuple[ExternalTaskRecord, bool] | None:
+    """Find the latest failed or interrupted assessor attempt the claimant may see.
 
     AT-10 requires the claimant to receive an honest state and next step. The
     failure is read from the task rather than stored on the claim, because that
@@ -205,19 +207,31 @@ def _latest_failed_assessor_task(
         claim: Working Claim whose assessor action is being projected.
 
     Returns:
-        The latest failed assessor task, or None when no attempt has failed.
+        The latest task and whether it is an interrupted dispatch, or None when no
+        attempt affects the claimant projection.
     """
-    failed = [
-        task
-        for task in repository.list_external_tasks_internal(claim.claim_id)
-        if task.service_identity == ASSESSOR_SERVICE_IDENTITY
-        and task.failure_code is not None
-        and task.failure_code.value in _CLAIMANT_FAILURE_CODES
-        and continuation_for_failed_task(task).continuation in _CLAIMANT_CONTINUATION_STATUS
-    ]
-    if not failed:
+    requests_by_task = {
+        request.task_id: request
+        for request in repository.list_external_task_requests_internal(claim.claim_id)
+    }
+    candidates: list[tuple[ExternalTaskRecord, bool]] = []
+    for task in repository.list_external_tasks_internal(claim.claim_id):
+        if task.service_identity != ASSESSOR_SERVICE_IDENTITY:
+            continue
+        interrupted = (
+            task.status is ExternalTaskOperationStatus.PREPARED
+            and external_task_requires_reconciliation(task, requests_by_task.get(task.task_id))
+        )
+        visible_failure = (
+            task.failure_code is not None
+            and task.failure_code.value in _CLAIMANT_FAILURE_CODES
+            and continuation_for_failed_task(task).continuation in _CLAIMANT_CONTINUATION_STATUS
+        )
+        if interrupted or visible_failure:
+            candidates.append((task, interrupted))
+    if not candidates:
         return None
-    return max(failed, key=lambda task: (task.updated_at, task.task_id))
+    return max(candidates, key=lambda item: (item[0].updated_at, item[0].task_id))
 
 
 def claimant_assessor_action(
@@ -226,9 +240,12 @@ def claimant_assessor_action(
 ) -> ClaimantExternalServiceAction | None:
     routing = claim.assessor_routing
     failed_task = None
+    interrupted_dispatch = False
     continuation: ExternalTaskContinuationOutcome | None = None
     if routing is None:
-        failed_task = _latest_failed_assessor_task(repository, claim)
+        actionable_task = _latest_actionable_assessor_task(repository, claim)
+        if actionable_task is not None:
+            failed_task, interrupted_dispatch = actionable_task
         consent = _active_assessor_consent(claim)
         if failed_task is None and consent is None:
             return None
@@ -241,6 +258,8 @@ def claimant_assessor_action(
             status = ClaimantExternalServiceStatus.QUEUED
         else:
             return None
+    elif interrupted_dispatch:
+        status = ClaimantExternalServiceStatus.AWAITING_RECONCILIATION
     elif failed_task is not None:
         continuation = continuation_for_failed_task(failed_task)
         status = _CLAIMANT_CONTINUATION_STATUS[continuation.continuation]
@@ -765,7 +784,17 @@ def request_assessor_routing(
     if consent is None:
         raise _invalid_state('Record claimant permission before requesting an assessor.')
     action = claimant_assessor_action(repository, claim)
-    if action is None or not action.can_request:
+    requests_by_task = {
+        request.task_id: request
+        for request in repository.list_external_task_requests_internal(claim_id)
+    }
+    interrupted_dispatch = any(
+        task.service_identity == ASSESSOR_SERVICE_IDENTITY
+        and task.status is ExternalTaskOperationStatus.PREPARED
+        and external_task_requires_reconciliation(task, requests_by_task.get(task.task_id))
+        for task in repository.list_external_tasks_internal(claim_id)
+    )
+    if (action is None or not action.can_request) and not interrupted_dispatch:
         raise _invalid_state('The assessment request cannot be sent in its current state.')
     if claim.active_session_id is None:
         raise _invalid_state('An active claim session is required for assessor routing.')
