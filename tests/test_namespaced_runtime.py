@@ -455,7 +455,10 @@ def test_model_profile_can_change_between_turns_without_new_claim(
         assert history_actors == {'claimant', 'agent'}
 
 
-def test_session_model_catalog_exposes_qwen_default_and_gpt_selection() -> None:
+def test_session_model_catalog_exposes_qwen_default_and_gpt_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('NORTHWIND_MODEL_API_KEY', 'test-gpt-key')
     settings = Settings(
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
