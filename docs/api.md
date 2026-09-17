@@ -3936,6 +3936,10 @@ or staff routes. Capability and failure semantics are documented in
 Authenticated account sessions own reusable assets. A concealed `404` is returned for an asset
 or Claim outside the authenticated customer boundary.
 
+All account Asset routes and the claimant Claim selection/snapshot routes require a real
+authenticated claimant account session. Development-only synthetic claimant bearer identities
+cannot read or select account Assets. The Workbench snapshot route remains staff-authenticated.
+
 | Method and route | Contract |
 | --- | --- |
 | `POST /api/v1/account/assets` | Create a typed vehicle, property, or contents asset. Requires `Idempotency-Key`; returns `201`. |
@@ -3952,7 +3956,9 @@ Asset identifiers use `ase_`; snapshots use `cas_`. Asset records contain `asset
 projection omits `customer_id` and all physical storage/provider metadata. Assets do not accept
 claimant-supplied policy text. A durable Policy association requires the future account-owned
 `pol_` Policy Summary contract and ownership/status validation; it is not implemented by these
-routes.
+routes. Reusable contents details are limited to description, category, brand, and model. Serial
+number and value are not part of the Asset or Claim asset snapshot contract; any future restricted
+ContentsItem projection belongs to #922.
 
 Selection returns `claim_id`, resulting `revision`, the exact `proposed_fields`, and the
 immutable snapshot. It never silently confirms a field. A later asset update/deactivation does
@@ -3971,19 +3977,6 @@ INVALID_STATE_TRANSITION`; no Claim, snapshot, Branch Evaluation, idempotency, o
 performed. Asset create, update, and soft-deactivate atomically persist one Asset-scoped audit
 fact. Selection atomically persists one Claim-scoped audit fact with the resulting revision. Audit
 facts retain only bounded identities and source references, not copied Asset details.
-
-### Target child-resource boundaries
-
-These governed target routes are owned by later #917 children and are not implementation claims
-for this PR: `/api/v1/account/identity-records`, `/api/v1/account/payment-destinations`,
-`/api/v1/account/policies`, `/api/v1/claims/{claim_id}/participants`,
-`/api/v1/claims/{claim_id}/contents-items/{item_id}/evidence-associations`, and
-`/api/v1/claims/{claim_id}/mitigations`. Account resources require an authenticated account
-session; Claim resources require Claim ownership or staff task authority. Create operations use
-`Idempotency-Key`; mutations use numeric `If-Match`; lists are cursor-paginated. Protected writes
-accept sensitive values at a dedicated boundary, store only an adapter protected reference in
-the ordinary record, and return only the masked projection. Authorization occurs before
-existence disclosure.
 
 ## Persistence and Provider Boundary
 

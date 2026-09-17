@@ -3,14 +3,18 @@ from datetime import UTC, datetime
 
 import mongomock
 import pytest
+from pydantic import ValidationError
 
 from backend.core.auth import Principal
 from backend.domain.assets import (
     AssetRecord,
     AssetType,
     ClaimAssetSnapshot,
+    ContentsAssetDetails,
     SelectClaimAssetRequest,
     VehicleAssetDetails,
+    project_asset,
+    project_snapshot,
 )
 from backend.domain.audit import (
     AuditActor,
@@ -62,6 +66,80 @@ def _asset() -> AssetRecord:
         created_at=now,
         updated_at=now,
     )
+
+
+def test_mongodb_reads_legacy_contents_asset_and_snapshot_without_exposing_serial() -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'legacy_contents_asset_test')
+    now = datetime.now(UTC)
+    asset = AssetRecord(
+        asset_id='ase_00000000000000000009',
+        customer_id='cus_owner',
+        asset_type=AssetType.CONTENTS,
+        display_name='Synthetic laptop',
+        details=ContentsAssetDetails(
+            description='Synthetic laptop',
+            category='electronics',
+            brand='Example',
+            model='Model One',
+        ),
+        revision=1,
+        active=True,
+        created_at=now,
+        updated_at=now,
+    )
+    snapshot = ClaimAssetSnapshot(
+        snapshot_id='cas_00000000000000000009',
+        claim_id='clm_legacy_contents',
+        customer_id=asset.customer_id,
+        asset_id=asset.asset_id,
+        asset_revision=asset.revision,
+        asset_type=asset.asset_type,
+        display_name=asset.display_name,
+        details=asset.details,
+        captured_at=now,
+        resulting_claim_revision=2,
+        source_refs=[f'asset:{asset.asset_id}:revision:{asset.revision}'],
+    )
+    asset_document = asset.model_dump(mode='json')
+    asset_document.update({'_id': f'asset:{asset.asset_id}', 'record_type': 'asset'})
+    asset_document['details']['serial_number'] = 'LEGACY-SENSITIVE-SERIAL'
+    snapshot_document = snapshot.model_dump(mode='json')
+    snapshot_document.update(
+        {
+            '_id': f'claim_asset_snapshot:{snapshot.snapshot_id}',
+            'record_type': 'claim_asset_snapshot',
+        }
+    )
+    snapshot_document['details']['serial_number'] = 'LEGACY-SENSITIVE-SERIAL'
+    repository._collection.insert_many([asset_document, snapshot_document])
+
+    restored_asset = repository.get_asset(asset.asset_id, asset.customer_id)
+    restored_snapshots, has_more = repository.list_claim_asset_snapshots(
+        snapshot.claim_id,
+        snapshot.customer_id,
+    )
+
+    assert restored_asset == asset
+    assert restored_snapshots == [snapshot]
+    assert has_more is False
+    assert 'LEGACY-SENSITIVE-SERIAL' not in project_asset(restored_asset).model_dump_json()
+    assert (
+        'LEGACY-SENSITIVE-SERIAL' not in project_snapshot(restored_snapshots[0]).model_dump_json()
+    )
+    stored_asset_document = repository._collection.find_one({'_id': asset_document['_id']})
+    stored_snapshot_document = repository._collection.find_one({'_id': snapshot_document['_id']})
+    assert stored_asset_document is not None
+    assert stored_snapshot_document is not None
+    assert stored_asset_document['details']['serial_number'] == 'LEGACY-SENSITIVE-SERIAL'
+    assert stored_snapshot_document['details']['serial_number'] == 'LEGACY-SENSITIVE-SERIAL'
+
+    unsupported_document = dict(asset_document)
+    unsupported_document['details'] = {
+        **asset_document['details'],
+        'unapproved_legacy_field': 'must-fail-closed',
+    }
+    with pytest.raises(ValidationError):
+        repository._model_from_document(unsupported_document, AssetRecord)
 
 
 def _asset_audit(

@@ -37,7 +37,6 @@ class ContentsAssetDetails(ContractModel):
     category: ShortText | None = None
     brand: ShortText | None = None
     model: ShortText | None = None
-    serial_number: ShortText | None = None
 
 
 AssetDetails = VehicleAssetDetails | PropertyAssetDetails | ContentsAssetDetails

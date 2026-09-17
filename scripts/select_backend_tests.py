@@ -52,6 +52,7 @@ BACKEND_CONSUMER_RULES = (
         (
             'tests/test_asset_api.py',
             'tests/test_asset_repository.py',
+            'tests/test_api_boundaries.py',
             'tests/test_branch_registry.py',
             'tests/test_claim_api.py',
             'tests/test_mongodb_repository.py',
@@ -339,6 +340,22 @@ def changed_python_files(changed: Sequence[str]) -> tuple[str, ...]:
     )
 
 
+def existing_test_paths(selected: Sequence[str]) -> tuple[str, ...]:
+    """Return existing changed tests after validating every configured consumer."""
+
+    configured = {
+        *(path for consumers in TOOLING_CONSUMER_RULES.values() for path in consumers),
+        *(path for consumers in TEST_SUPPORT_CONSUMERS.values() for path in consumers),
+        *(path for _, consumers in BACKEND_CONSUMER_RULES for path in consumers),
+    }
+    missing_configured = sorted(path for path in configured if not Path(path).is_file())
+    if missing_configured:
+        missing = ', '.join(missing_configured)
+        raise FileNotFoundError(f'Configured backend test consumers do not exist: {missing}')
+
+    return tuple(path for path in selected if Path(path).is_file())
+
+
 def needs_openapi_check(changed: Sequence[str]) -> bool:
     """Return whether the changed paths can alter the generated OpenAPI schema."""
 
@@ -412,7 +429,7 @@ def main() -> int:
     if args.mode:
         print(selection.mode)
     elif args.tests:
-        print('\n'.join(selection.tests))
+        print('\n'.join(existing_test_paths(selection.tests)))
     elif args.python_files:
         print('\n'.join(changed_python_files(paths)))
     elif args.needs_openapi:

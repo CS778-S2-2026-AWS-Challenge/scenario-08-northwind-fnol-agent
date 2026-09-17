@@ -4214,19 +4214,6 @@
               }
             ],
             "title": "Model"
-          },
-          "serial_number": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Serial Number"
           }
         },
         "required": [
