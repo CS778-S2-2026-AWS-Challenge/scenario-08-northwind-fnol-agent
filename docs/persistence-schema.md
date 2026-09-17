@@ -60,17 +60,25 @@ records remain target contracts.
 | Group | Records | Primary ownership |
 | --- | --- | --- |
 | Customer | authorised identity reference, permitted contact and communication preferences, active state, revision, and update time | `customer_id` |
+| Identity record | protected identity-document reference, masked value, type, issuer, verification state, dates, provenance, and revision | `identity_id` (`idn_`), linked to `customer_id` |
+| Payment destination | protected account reference, masked account number, type/name, verification state, dates, and revision | `payment_destination_id` (`pyd_`), linked to `customer_id` |
+| Policy summary | bounded policy identity, product family, display status, effective dates, and provenance | `policy_id` (`pol_`), linked to `customer_id` |
 | Claimant auth session | `ias_` session identity, hash of an opaque development/test token, authenticated customer reference, revision, creation, expiry, revocation, and update timestamps | `session_id`, linked to `customer_id`; token lookup uses `token_hash` |
 | Staff account | local/runtime staff identity, salted password hash, display name, roles, active state, revision, and update time | `staff_id` |
 | Staff auth session | `ias_` session identity, hash of an opaque staff token, authenticated staff reference, revision, creation, expiry, revocation, and update timestamps | `session_id`, linked to `staff_id`; token lookup uses `token_hash` |
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
+| Asset | account-owned typed vehicle, property, or contents details, revision, active state, and timestamps; Policy association is deferred until an owned `pol_` resource exists | `asset_id` (`ase_`), linked to `customer_id` |
 | Claim | Working Claim State, structured facts, independent attributes, lifecycle status, optional source-linked terminal disposition, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
+| Claim asset snapshot | immutable approved asset details selected for one Claim revision, source asset/revision, provenance, and capture time | `snapshot_id` (`cas_`), linked to `claim_id`, `customer_id`, and `asset_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
 | Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
 | Staff Agent interaction | staff-owned persistent sessions, session-bound published model profile, explicitly scoped questions, source-aware answers, and drafts with stable identity; executable drafts carry a registered action proposal but remain non-executing until staff confirmation | `staff_id`, `session_id`, `message_id`, and `draft_id`; Claim IDs are per-message scope only |
 | Staff Agent execution | immutable readback evidence for one explicitly confirmed draft and its registered Workbench handler result | `execution_id = sax_{draft_id}`; linked to the owned assistant message, exact draft, Claim, action, target, expected/resulting revision, and idempotency record |
 | Agent turn | Target TurnPlan/AgentProposal/ExecutionPlan/ActionEnvelopes plus the implemented bounded Runtime Trace, ToolRequests and results, TurnResult, policy and Registry versions, selected external-service lifecycle coordinates, usage, latency, limitations | `turn_id`/`trace_id`, linked to session and optional Claim |
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
+| Participant | repeatable role, relationship, bounded contact/vehicle facts, contact consent, provenance, and revision | `participant_id` (`par_`), linked to `claim_id` and `customer_id` |
+| Item-Evidence association | immutable same-Claim relationship and purpose connecting one ContentsItem to one Evidence record | `association_id` (`iea_`), linked to `claim_id`, `item_id`, and `evidence_id` |
+| Mitigation | typed emergency-repair state, bounded summary, responsibility, Evidence and WorkItem references, provenance, and revision | `mitigation_id` (`mit_`), linked to `claim_id` |
 | Retrieval | structured policy/history results, knowledge citations, limitations, source versions | `claim_id` and retrieval identity |
 | Review | internal signals, source references, professional decisions, staff actions | `claim_id` and work identity |
 | Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps, and support continuation target (`resume_workflow_state`, `resume_next_action`) | `claim_id` and `handoff_id` |
@@ -268,6 +276,52 @@ the append-only audit collection through a bounded, filterable projection.
     limit is satisfied, and returning unavailable when the examined-set bound cannot prove a
     complete result (`SEARCH_SCOPE_EXCEEDED`). Read at most the requested newest 50 messages for
     one explicit Session.
+41. Create, read, update, soft-deactivate, and cursor-page assets by authenticated `customer_id`
+    using optimistic asset revision and create idempotency, without cross-customer discovery.
+    Create, update, and soft-deactivate persist one bounded Asset-scoped audit fact in the same
+    authoritative mutation.
+42. Atomically select an active owned asset and persist the immutable Claim asset snapshot,
+    proposed registered facts, resulting Claim revision, applied Branch Evaluation, and
+    idempotency response. Revalidate owner, active state, revision, and copied details inside the
+    authoritative write. A changed Asset returns its current revision; an unavailable Asset is
+    concealed. A terminal Claim rejects the selection. Any rejected result leaves the Claim,
+    snapshot, Branch Evaluation, idempotency, and audit records unchanged. A successful selection
+    persists one bounded Claim-scoped audit fact in the same authoritative mutation.
+43. List Claim asset snapshots in stable `(captured_at, snapshot_id)` order after claimant
+    ownership or Workbench staff authority has been established.
+44. Create, revise, list, mask, and retire account Identity Records and Payment Destinations by
+    owner while resolving protected values only inside separately authorised adapters.
+45. List/select bounded Policy Summaries by account and product family without treating display
+    status as a coverage decision or exposing provider credentials.
+46. Create/list/revise Participants by Claim and role after Claim authorization, with contact
+    masking and contact-consent enforcement before any external use.
+47. Append/list immutable same-Claim ContentsItem-to-Evidence associations and reject links when
+    either side belongs to another Claim or customer.
+48. Create/revise/list emergency-repair mitigation records and their Evidence/WorkItem links in
+    the same authoritative Claim mutation when Claim State also changes.
+
+## Asset Record Mapping
+
+- `asset:{asset_id}` stores the current `AssetRecord`; `asset_id` uses `ase_` and is globally
+  opaque. Logical lookup/index: `(record_type, customer_id, active, updated_at, _id)`.
+- `claim_asset_snapshot:{snapshot_id}` stores immutable `ClaimAssetSnapshot`; `snapshot_id`
+  uses `cas_`. Logical lookup/index: `(record_type, claim_id, captured_at, _id)` with
+  `customer_id` retained for ownership enforcement.
+- Fixture and MongoDB adapters implement the same port. MongoDB selection uses one transaction;
+  Fixture uses one Claim mutation lock. No adapter may reconstruct a historical snapshot from
+  the current asset.
+- Existing records require no backfill. Assets and snapshots are additive. A future provider
+  migration copies IDs, revisions, timestamps, lifecycle state, and snapshots exactly, then
+  verifies owner-scoped counts and snapshot hashes before cutover. It must not infer a Policy
+  relationship from claimant text; that association requires an owned `pol_` record.
+- The proposed Profile migration is not executable while #918 remains open. Existing Profiles
+  remain valid under the current contract; a later approved migration must define the
+  transitional validity state before it can make `legal_name` required. It must never guess date
+  of birth, address, identity, payment, policy, Participant, ContentsItem metadata, or Evidence
+  associations.
+- Protected values migrate through the approved encryption/tokenisation adapter; raw values,
+  provider credentials, and protected references never enter migration logs or verification
+  reports. Failed verification leaves the old source authoritative and performs no cutover.
 
 ## Development/Test Identity Invariants
 
@@ -302,6 +356,10 @@ the append-only audit collection through a bounded, filterable projection.
   claim writes.
 - A mutation using a stale expected revision fails without a partial write.
 - A successful material mutation advances the revision exactly once.
+- An Asset selection revalidates the exact Asset type, display name, and typed details copied into
+  its immutable snapshot inside the authoritative write. Fixture and MongoDB reject any mismatch
+  with the same typed repository conflict and persist no Claim, snapshot, Branch Evaluation, or
+  idempotency change.
 - An idempotency record identifies an accepted operation and request fingerprint. An
   identical replay returns the current authorised projection; changed input under the
   same key is a conflict.

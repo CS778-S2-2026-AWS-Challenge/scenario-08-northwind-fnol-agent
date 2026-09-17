@@ -9,6 +9,7 @@ from backend.adapters.claims_service import AssessorServiceAdapter, ClaimsServic
 from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.api.realtime import realtime_stream
+from backend.api.assets import claim_router as claim_assets_router
 from backend.core.auth import Principal, require_claimant
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.external_service_registry import capability_catalogue
@@ -65,6 +66,7 @@ from backend.services.resume import start_session_with_recovery
 from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
 
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant'])
+router.include_router(claim_assets_router)
 logger = logging.getLogger(__name__)
 
 

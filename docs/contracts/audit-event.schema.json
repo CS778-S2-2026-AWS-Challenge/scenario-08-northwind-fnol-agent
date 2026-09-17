@@ -135,6 +135,7 @@
       "enum": [
         "claim",
         "customer",
+        "asset",
         "external_request",
         "configuration",
         "access"

@@ -1412,6 +1412,96 @@
         "title": "AssessorRoutingStatus",
         "type": "string"
       },
+      "AssetListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssetProjection"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "AssetListResponse",
+        "type": "object"
+      },
+      "AssetProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "asset_type": {
+            "$ref": "#/components/schemas/AssetType"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VehicleAssetDetails"
+              },
+              {
+                "$ref": "#/components/schemas/PropertyAssetDetails"
+              },
+              {
+                "$ref": "#/components/schemas/ContentsAssetDetails"
+              }
+            ],
+            "title": "Details"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "asset_type",
+          "display_name",
+          "details",
+          "revision",
+          "active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AssetProjection",
+        "type": "object"
+      },
+      "AssetType": {
+        "enum": [
+          "vehicle",
+          "property",
+          "contents"
+        ],
+        "title": "AssetType",
+        "type": "string"
+      },
       "AuditEvent": {
         "properties": {
           "action": {
@@ -1584,6 +1674,130 @@
         ],
         "title": "Channel",
         "type": "string"
+      },
+      "ClaimAssetSelectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "proposed_fields": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/StructuredFormField-Output"
+            },
+            "title": "Proposed Fields",
+            "type": "object"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/ClaimAssetSnapshotProjection"
+          }
+        },
+        "required": [
+          "claim_id",
+          "revision",
+          "proposed_fields",
+          "snapshot"
+        ],
+        "title": "ClaimAssetSelectionResponse",
+        "type": "object"
+      },
+      "ClaimAssetSnapshotListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimAssetSnapshotProjection"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "ClaimAssetSnapshotListResponse",
+        "type": "object"
+      },
+      "ClaimAssetSnapshotProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "asset_revision": {
+            "title": "Asset Revision",
+            "type": "integer"
+          },
+          "asset_type": {
+            "$ref": "#/components/schemas/AssetType"
+          },
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VehicleAssetDetails"
+              },
+              {
+                "$ref": "#/components/schemas/PropertyAssetDetails"
+              },
+              {
+                "$ref": "#/components/schemas/ContentsAssetDetails"
+              }
+            ],
+            "title": "Details"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "resulting_claim_revision": {
+            "title": "Resulting Claim Revision",
+            "type": "integer"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "claim_id",
+          "asset_id",
+          "asset_revision",
+          "asset_type",
+          "display_name",
+          "details",
+          "captured_at",
+          "resulting_claim_revision",
+          "source_refs"
+        ],
+        "title": "ClaimAssetSnapshotProjection",
+        "type": "object"
       },
       "ClaimCollaborationRequest": {
         "additionalProperties": false,
@@ -3858,6 +4072,74 @@
         "title": "ConfirmationLevel",
         "type": "string"
       },
+      "ContentsAssetDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "brand": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "description": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "serial_number": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serial Number"
+          }
+        },
+        "required": [
+          "description"
+        ],
+        "title": "ContentsAssetDetails",
+        "type": "object"
+      },
       "ContentsItem": {
         "additionalProperties": false,
         "description": "One source-aware contents item; Evidence associations remain separate records.",
@@ -4134,6 +4416,41 @@
         ],
         "title": "Coverage",
         "type": "string"
+      },
+      "CreateAssetRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_type": {
+            "$ref": "#/components/schemas/AssetType"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VehicleAssetDetails"
+              },
+              {
+                "$ref": "#/components/schemas/PropertyAssetDetails"
+              },
+              {
+                "$ref": "#/components/schemas/ContentsAssetDetails"
+              }
+            ],
+            "title": "Details"
+          },
+          "display_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_type",
+          "display_name",
+          "details"
+        ],
+        "title": "CreateAssetRequest",
+        "type": "object"
       },
       "CreateClaimRequest": {
         "additionalProperties": false,
@@ -9484,6 +9801,48 @@
         "title": "ProfilePatchRequest",
         "type": "object"
       },
+      "PropertyAssetDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Address",
+            "type": "string"
+          },
+          "owner_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Name"
+          },
+          "property_type": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Type"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "title": "PropertyAssetDetails",
+        "type": "object"
+      },
       "QuestionRecord": {
         "additionalProperties": false,
         "properties": {
@@ -10405,6 +10764,21 @@
           "configurations"
         ],
         "title": "RuntimeSnapshot",
+        "type": "object"
+      },
+      "SelectClaimAssetRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "pattern": "^ase_[a-f0-9]{20}$",
+            "title": "Asset Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id"
+        ],
+        "title": "SelectClaimAssetRequest",
         "type": "object"
       },
       "SessionStatus": {
@@ -11979,6 +12353,33 @@
         "title": "TransitionRequest",
         "type": "object"
       },
+      "UpdateAssetRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VehicleAssetDetails"
+              },
+              {
+                "$ref": "#/components/schemas/PropertyAssetDetails"
+              },
+              {
+                "$ref": "#/components/schemas/ContentsAssetDetails"
+              }
+            ],
+            "title": "Details"
+          },
+          "display_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          }
+        },
+        "title": "UpdateAssetRequest",
+        "type": "object"
+      },
       "UpdateStaffActionRequest": {
         "additionalProperties": false,
         "properties": {
@@ -12167,6 +12568,74 @@
           "evidence"
         ],
         "title": "ValidationScenarioResult",
+        "type": "object"
+      },
+      "VehicleAssetDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "make": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Make"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "registered_owner": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registered Owner"
+          },
+          "registration": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Registration",
+            "type": "string"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "maximum": 2200.0,
+                "minimum": 1886.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "registration"
+        ],
+        "title": "VehicleAssetDetails",
         "type": "object"
       },
       "WorkPriorityLevel": {
@@ -15494,6 +15963,376 @@
         ]
       }
     },
+    "/api/v1/account/assets": {
+      "get": {
+        "operationId": "read_account_assets_api_v1_account_assets_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_inactive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Inactive",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Account Assets",
+        "tags": [
+          "claimant identity",
+          "claimant assets"
+        ]
+      },
+      "post": {
+        "operationId": "create_account_asset_api_v1_account_assets_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAssetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Account Asset",
+        "tags": [
+          "claimant identity",
+          "claimant assets"
+        ]
+      }
+    },
+    "/api/v1/account/assets/{asset_id}": {
+      "delete": {
+        "operationId": "delete_account_asset_api_v1_account_assets__asset_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Account Asset",
+        "tags": [
+          "claimant identity",
+          "claimant assets"
+        ]
+      },
+      "get": {
+        "operationId": "read_account_asset_api_v1_account_assets__asset_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Account Asset",
+        "tags": [
+          "claimant identity",
+          "claimant assets"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_account_asset_api_v1_account_assets__asset_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAssetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Account Asset",
+        "tags": [
+          "claimant identity",
+          "claimant assets"
+        ]
+      }
+    },
     "/api/v1/account/preferences": {
       "patch": {
         "operationId": "patch_account_preferences_api_v1_account_preferences_patch",
@@ -16356,6 +17195,194 @@
         "summary": "Create Assessor Consent",
         "tags": [
           "claimant"
+        ]
+      }
+    },
+    "/api/v1/claims/{claim_id}/asset-selections": {
+      "post": {
+        "operationId": "create_claim_asset_selection_api_v1_claims__claim_id__asset_selections_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectClaimAssetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimAssetSelectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Claim Asset Selection",
+        "tags": [
+          "claimant",
+          "claimant assets"
+        ]
+      }
+    },
+    "/api/v1/claims/{claim_id}/asset-snapshots": {
+      "get": {
+        "operationId": "read_claim_asset_snapshots_api_v1_claims__claim_id__asset_snapshots_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimAssetSnapshotListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Claim Asset Snapshots",
+        "tags": [
+          "claimant",
+          "claimant assets"
         ]
       }
     },
@@ -19719,6 +20746,92 @@
           }
         },
         "summary": "Read Workbench Claim",
+        "tags": [
+          "workbench"
+        ]
+      }
+    },
+    "/api/v1/workbench/claims/{claim_id}/asset-snapshots": {
+      "get": {
+        "operationId": "read_workbench_claim_asset_snapshots_api_v1_workbench_claims__claim_id__asset_snapshots_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimAssetSnapshotListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Workbench Claim Asset Snapshots",
         "tags": [
           "workbench"
         ]
