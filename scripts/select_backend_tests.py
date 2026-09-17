@@ -27,6 +27,52 @@ TOOLING_CONSUMER_RULES: dict[str, tuple[str, ...]] = {
 TEST_SUPPORT_CONSUMERS: dict[str, tuple[str, ...]] = {
     'tests/journey_runs/': ('tests/test_journey_runs.py',),
 }
+JOURNEY_TEST_PATH = 'tests/test_journey_runs.py'
+JOURNEY_CRITICAL_PATHS = frozenset(
+    {
+        'backend/adapters/claims_service.py',
+        'backend/adapters/evidence_storage.py',
+        'backend/app.py',
+        'backend/api/claims.py',
+        'backend/api/evidence.py',
+        'backend/api/handoffs.py',
+        'backend/api/integrations.py',
+        'backend/api/workbench.py',
+        'backend/domain/branch_registry.py',
+        'backend/domain/evidence.py',
+        'backend/domain/external_services.py',
+        'backend/domain/models.py',
+        'backend/domain/runtime.py',
+        'backend/domain/workbench.py',
+        'backend/repositories/fixture.py',
+        'backend/repositories/handoff_guard.py',
+        'backend/repositories/protocols.py',
+        'backend/services/agent.py',
+        'backend/services/agent_external_lifecycle.py',
+        'backend/services/agent_tools.py',
+        'backend/services/branching.py',
+        'backend/services/claim_creation.py',
+        'backend/services/claimant_action_projection.py',
+        'backend/services/claimant_form_projection.py',
+        'backend/services/claims.py',
+        'backend/services/evidence.py',
+        'backend/services/external_capability_dispatcher.py',
+        'backend/services/external_service_entry.py',
+        'backend/services/external_service_offers.py',
+        'backend/services/external_services.py',
+        'backend/services/external_tasks.py',
+        'backend/services/fact_resolution.py',
+        'backend/services/handoff_context.py',
+        'backend/services/handoffs.py',
+        'backend/services/integrations.py',
+        'backend/services/message_history.py',
+        'backend/services/messages.py',
+        'backend/services/ownership.py',
+        'backend/services/runtime_agent_policy.py',
+        'backend/services/runtime_work_items.py',
+        'backend/services/workbench.py',
+    }
+)
 BACKEND_CONSUMER_RULES = (
     (
         (
@@ -243,6 +289,8 @@ def select_tests(changed_paths: Sequence[str]) -> TestSelection:
         path_text = path.as_posix()
         if consumers := TOOLING_CONSUMER_RULES.get(path_text):
             selected.update(consumers)
+        if path_text in JOURNEY_CRITICAL_PATHS:
+            selected.add(JOURNEY_TEST_PATH)
         if path_text == 'docs/vp-field-branch-mapping.md':
             selected.add('tests/test_branch_registry.py')
         if path_text.startswith('backend/'):
