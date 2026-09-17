@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
-from threading import Event
+from queue import Queue
+from threading import Event, Thread
 from types import SimpleNamespace
 from typing import cast
 
@@ -26,6 +27,7 @@ from backend.domain.realtime import (
     new_realtime_event,
 )
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.protocols import IdempotencyConflict
 from backend.services.realtime import (
     RealtimeDispatcher,
     RealtimeScope,
@@ -130,11 +132,70 @@ def test_fixture_replay_requires_a_durable_anchor() -> None:
         limit=10,
     )
 
-    assert replay == [second]
+    assert [event.event_id for event in replay] == [second.event_id]
+    assert replay[0].sequence == 2
     with pytest.raises(ValueError, match='outside the available replay window'):
         repository.replay_realtime_events(
             RealtimeCursor(occurred_at=NOW, event_id='rte_00000000000000000000'),
             limit=10,
+        )
+
+
+def test_fixture_sequence_preserves_append_order_for_live_and_reconnect() -> None:
+    repository = FixtureRepository()
+    stop = Event()
+    received: Queue[RealtimeEvent] = Queue()
+
+    def collect() -> None:
+        for event in repository.watch_realtime_events(stop):
+            received.put(event)
+            if received.qsize() == 3:
+                stop.set()
+                return
+
+    watcher = Thread(target=collect)
+    watcher.start()
+    first = _event(1).model_copy(
+        update={'event_id': 'rte_ffffffffffffffffffff', 'occurred_at': NOW}
+    )
+    second = _event(2).model_copy(
+        update={'event_id': 'rte_00000000000000000000', 'occurred_at': NOW}
+    )
+    rolled_back_clock = _event(3).model_copy(
+        update={
+            'event_id': 'rte_11111111111111111111',
+            'occurred_at': NOW - timedelta(days=1),
+        }
+    )
+
+    repository.append_realtime_event(first)
+    repository.append_realtime_event(first)
+    repository.append_realtime_event(second)
+    repository.append_realtime_event(rolled_back_clock)
+
+    live = [received.get(timeout=2) for _ in range(3)]
+    watcher.join(timeout=2)
+    assert not watcher.is_alive()
+    assert [event.event_id for event in live] == [
+        first.event_id,
+        second.event_id,
+        rolled_back_clock.event_id,
+    ]
+    assert [event.sequence for event in live] == [1, 2, 3]
+
+    replay = repository.replay_realtime_events(
+        RealtimeCursor(
+            occurred_at=live[0].occurred_at,
+            event_id=live[0].event_id,
+            sequence=live[0].sequence,
+        ),
+        limit=10,
+    )
+    assert replay == live[1:]
+
+    with pytest.raises(IdempotencyConflict):
+        repository.append_realtime_event(
+            first.model_copy(update={'customer_id': 'cus_conflicting_duplicate'})
         )
 
 
@@ -297,17 +358,41 @@ def test_fixture_event_construction_failure_leaves_no_claim(
     def fail_event(**_: object) -> RealtimeEvent:
         raise RuntimeError('event construction failed')
 
-    monkeypatch.setattr('backend.repositories.fixture.new_realtime_event', fail_event)
-
-    with pytest.raises(RuntimeError, match='event construction failed'):
-        client.post(
-            '/api/v1/claims',
-            headers={**auth_headers, 'Idempotency-Key': 'realtime-atomic-failure'},
-            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
-        )
+    with monkeypatch.context() as event_patch:
+        event_patch.setattr('backend.repositories.fixture.new_realtime_event', fail_event)
+        with pytest.raises(RuntimeError, match='event construction failed'):
+            client.post(
+                '/api/v1/claims',
+                headers={**auth_headers, 'Idempotency-Key': 'realtime-atomic-failure'},
+                json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+            )
 
     assert repository.claim_count == 0
     assert repository.replay_realtime_events(None, limit=10) == []
+
+    def fail_sequence() -> int:
+        raise RuntimeError('sequence allocation failed')
+
+    with monkeypatch.context() as sequence_patch:
+        sequence_patch.setattr(repository, '_next_realtime_sequence', fail_sequence)
+        with pytest.raises(RuntimeError, match='sequence allocation failed'):
+            client.post(
+                '/api/v1/claims',
+                headers={**auth_headers, 'Idempotency-Key': 'realtime-sequence-failure'},
+                json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+            )
+
+    assert repository.claim_count == 0
+    assert repository.replay_realtime_events(None, limit=10) == []
+
+    response = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'realtime-after-failure'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+    assert response.status_code == 201
+    events = repository.replay_realtime_events(None, limit=10)
+    assert [event.sequence for event in events] == [1]
 
 
 def test_scope_for_unsupported_principal_is_rejected() -> None:
@@ -371,18 +456,19 @@ def test_realtime_stream_replays_changes_then_requires_resync() -> None:
     second = _event(2)
     for event in (anchor, first, second):
         repository.append_realtime_event(event)
+    stored_anchor, stored_first, _ = repository.replay_realtime_events(None, limit=10)
     dispatcher = RealtimeDispatcher(repository, replay_limit=1)
     request = _StreamRequest(dispatcher)
 
     response = realtime_stream(
         cast(Request, request),
         Principal(subject='cus_one', actor_type='claimant'),
-        cursor=cursor_for(anchor),
+        cursor=cursor_for(stored_anchor),
     )
     body = asyncio.run(_stream_body(response))
 
     assert body.startswith('retry: 1500\n: connected\n\n')
-    assert f'id: {cursor_for(first)}' in body
+    assert f'id: {cursor_for(stored_first)}' in body
     assert 'event: resources.changed' in body
     assert '"resources":["claim"]' in body
     assert 'event: resync_required' in body

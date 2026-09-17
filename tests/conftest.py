@@ -1,3 +1,4 @@
+import os
 from collections.abc import Iterator
 from functools import partial
 
@@ -9,6 +10,19 @@ from backend.app import create_app
 from backend.core.config import DataRuntimeProfile, IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import AgentTurnProvider, ControlledAgent
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Keep real-infrastructure tests out of ordinary local and PR runs."""
+
+    if os.environ.get('NORTHWIND_RUN_INTEGRATION_TESTS') == '1':
+        return
+    skip = pytest.mark.skip(
+        reason='set NORTHWIND_RUN_INTEGRATION_TESTS=1 to run external integration tests'
+    )
+    for item in items:
+        if 'integration' in item.keywords:
+            item.add_marker(skip)
 
 
 @pytest.fixture(autouse=True)

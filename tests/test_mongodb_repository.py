@@ -2,7 +2,7 @@ import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
-from threading import Barrier, Event, Lock, Thread
+from threading import Barrier, Event, Lock, Thread, current_thread
 from typing import Any, ClassVar
 
 import mongomock
@@ -1986,6 +1986,7 @@ def test_mongodb_external_review_stale_competitor_cannot_overwrite_owner(
     )
 
 
+@pytest.mark.integration
 def test_mongodb_staff_acceptance_races_real_presence_transition() -> None:
     """Exercise the acceptance guard through a real MongoDB transaction.
 
@@ -2100,8 +2101,11 @@ def test_mongodb_staff_acceptance_races_real_presence_transition() -> None:
         client.close()
 
 
-def test_mongodb_realtime_sequence_serializes_reverse_commit_attempt() -> None:
-    """A shared counter prevents later commits from overtaking an earlier event."""
+@pytest.mark.integration
+def test_mongodb_realtime_sequence_serializes_production_transactions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Production transactions serialize events without partial or duplicate writes."""
 
     uri = os.environ.get(
         'NORTHWIND_MONGODB_TEST_URI',
@@ -2110,6 +2114,9 @@ def test_mongodb_realtime_sequence_serializes_reverse_commit_attempt() -> None:
     client: MongoClient[Any] = MongoClient(uri, serverSelectionTimeoutMS=750)
     database_name = f'northwind_realtime_order_{datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")}'
     connected = False
+    release_first = Event()
+    watcher_stop = Event()
+    watcher: Thread | None = None
     try:
         try:
             hello = client.admin.command('hello')
@@ -2120,49 +2127,108 @@ def test_mongodb_realtime_sequence_serializes_reverse_commit_attempt() -> None:
             pytest.skip('real MongoDB replica set has no writable primary')
 
         repository = MongoDBRepository(client, database_name)
-        first_claim = _claim().model_copy(update={'claim_id': 'clm_realtime_first'})
-        second_claim = _claim().model_copy(update={'claim_id': 'clm_realtime_second'})
-        first_appended = Event()
-        release_first = Event()
-        second_started = Event()
+
+        def claim_graph(suffix: str) -> tuple[WorkingClaim, SessionRecord]:
+            claim = _claim().model_copy(
+                update={
+                    'claim_id': f'clm_realtime_{suffix}',
+                    'customer_id': f'cus_realtime_{suffix}',
+                    'active_session_id': f'ses_realtime_{suffix}',
+                }
+            )
+            session = _session(claim).model_copy(
+                update={
+                    'session_id': claim.active_session_id,
+                    'claim_id': claim.claim_id,
+                    'customer_id': claim.customer_id,
+                }
+            )
+            return claim, session
+
+        first_claim, first_session = claim_graph('first')
+        second_claim, second_session = claim_graph('second')
+        watcher_ready = Event()
+        observed: list[Any] = []
+        watcher_failures: list[BaseException] = []
+        collection_type = type(repository._collection)
+        original_watch = collection_type.watch
+
+        def notifying_watch(collection: Any, *args: Any, **kwargs: Any) -> Any:
+            stream = original_watch(collection, *args, **kwargs)
+            watcher_ready.set()
+            return stream
+
+        monkeypatch.setattr(collection_type, 'watch', notifying_watch)
+
+        def collect_live_events() -> None:
+            try:
+                for event in repository.watch_realtime_events(watcher_stop):
+                    observed.append(event)
+                    if len(observed) == 2:
+                        watcher_stop.set()
+                        return
+            except BaseException as error:
+                watcher_failures.append(error)
+
+        watcher = Thread(target=collect_live_events, name='realtime-change-stream')
+        watcher.start()
+        assert watcher_ready.wait(timeout=5)
+
+        first_allocated = Event()
+        conflict_observed = Event()
         failures: list[BaseException] = []
+        original_next_sequence = repository._next_realtime_sequence
+        original_find_one_and_update = collection_type.find_one_and_update
+
+        def observe_sequence_conflict(
+            collection: Any,
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            try:
+                return original_find_one_and_update(collection, *args, **kwargs)
+            except PyMongoError as error:
+                if current_thread().name == 'second-realtime-write' and error.has_error_label(
+                    'TransientTransactionError'
+                ):
+                    conflict_observed.set()
+                raise
+
+        monkeypatch.setattr(
+            collection_type,
+            'find_one_and_update',
+            observe_sequence_conflict,
+        )
+
+        def coordinated_sequence(session: Any = None) -> int:
+            if current_thread().name == 'first-realtime-write':
+                sequence = original_next_sequence(session)
+                first_allocated.set()
+                assert release_first.wait(timeout=5)
+                return sequence
+            return original_next_sequence(session)
+
+        monkeypatch.setattr(repository, '_next_realtime_sequence', coordinated_sequence)
 
         def write_first() -> None:
             try:
-                with client.start_session() as session:
-                    session.start_transaction()
-                    repository._append_realtime_event(
-                        first_claim,
-                        (RealtimeResource.CLAIM,),
-                        mongo_session=session,
-                    )
-                    first_appended.set()
-                    assert release_first.wait(timeout=5)
-                    session.commit_transaction()
+                repository.create_claim(first_claim, first_session)
             except BaseException as error:
                 failures.append(error)
 
         def attempt_second_commit() -> None:
             try:
-                assert first_appended.wait(timeout=5)
-                with client.start_session() as session:
-                    session.start_transaction()
-                    second_started.set()
-                    repository._append_realtime_event(
-                        second_claim,
-                        (RealtimeResource.CLAIM,),
-                        mongo_session=session,
-                    )
-                    session.commit_transaction()
+                assert first_allocated.wait(timeout=5)
+                repository.create_claim(second_claim, second_session)
             except BaseException as error:
                 failures.append(error)
 
-        first_thread = Thread(target=write_first)
-        second_thread = Thread(target=attempt_second_commit)
+        first_thread = Thread(target=write_first, name='first-realtime-write')
+        second_thread = Thread(target=attempt_second_commit, name='second-realtime-write')
         first_thread.start()
-        assert first_appended.wait(timeout=5)
+        assert first_allocated.wait(timeout=5)
         second_thread.start()
-        assert second_started.wait(timeout=5)
+        assert conflict_observed.wait(timeout=5)
         release_first.set()
         first_thread.join(timeout=10)
         second_thread.join(timeout=10)
@@ -2170,6 +2236,14 @@ def test_mongodb_realtime_sequence_serializes_reverse_commit_attempt() -> None:
         assert not first_thread.is_alive()
         assert not second_thread.is_alive()
         assert failures == []
+        watcher.join(timeout=10)
+        assert not watcher.is_alive()
+        assert watcher_failures == []
+        assert [event.claim_id for event in observed] == [
+            first_claim.claim_id,
+            second_claim.claim_id,
+        ]
+
         events = repository.replay_realtime_events(None, limit=10)
         assert [event.claim_id for event in events] == [
             first_claim.claim_id,
@@ -2186,7 +2260,107 @@ def test_mongodb_realtime_sequence_serializes_reverse_commit_attempt() -> None:
             limit=10,
         )
         assert replay == [events[1]]
+
+        for claim, session in (
+            (first_claim, first_session),
+            (second_claim, second_session),
+        ):
+            assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+            assert (
+                repository.get_session(claim.claim_id, session.session_id, claim.customer_id)
+                == session
+            )
+            assert (
+                repository._collection.count_documents(
+                    {'record_type': 'claim', 'claim_id': claim.claim_id}
+                )
+                == 1
+            )
+            assert (
+                repository._collection.count_documents(
+                    {'record_type': 'session', 'claim_id': claim.claim_id}
+                )
+                == 1
+            )
+            assert (
+                repository._collection.count_documents(
+                    {'record_type': 'realtime_event', 'claim_id': claim.claim_id}
+                )
+                == 1
+            )
+
+        monkeypatch.setattr(repository, '_next_realtime_sequence', original_next_sequence)
+        original_put = repository._put
+
+        def reject_event_put(
+            kind: str,
+            identifier: str,
+            model: Any,
+            **kwargs: Any,
+        ) -> None:
+            if kind == 'realtime_event':
+                raise RuntimeError('forced event write failure')
+            original_put(kind, identifier, model, **kwargs)
+
+        monkeypatch.setattr(repository, '_put', reject_event_put)
+        aborted_claim, aborted_session = claim_graph('aborted')
+        with pytest.raises(RuntimeError, match='forced event write failure'):
+            repository.create_claim(aborted_claim, aborted_session)
+
+        assert repository.get_claim(aborted_claim.claim_id, aborted_claim.customer_id) is None
+        assert (
+            repository.get_session(
+                aborted_claim.claim_id,
+                aborted_session.session_id,
+                aborted_claim.customer_id,
+            )
+            is None
+        )
+        assert (
+            repository._collection.count_documents(
+                {'record_type': 'realtime_event', 'claim_id': aborted_claim.claim_id}
+            )
+            == 0
+        )
+
+        monkeypatch.setattr(repository, '_put', original_put)
+        after_abort_claim, after_abort_session = claim_graph('after_abort')
+        repository.create_claim(after_abort_claim, after_abort_session)
+        after_abort_event = repository.replay_realtime_events(
+            RealtimeCursor(
+                occurred_at=events[1].occurred_at,
+                event_id=events[1].event_id,
+                sequence=events[1].sequence,
+            ),
+            limit=10,
+        )
+        assert len(after_abort_event) == 1
+        assert after_abort_event[0].claim_id == after_abort_claim.claim_id
+        assert after_abort_event[0].sequence == events[1].sequence + 1
+
+        concurrent_graphs = [claim_graph(f'concurrent_{index}') for index in range(6)]
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [
+                executor.submit(repository.create_claim, claim, session)
+                for claim, session in concurrent_graphs
+            ]
+            for future in futures:
+                future.result(timeout=15)
+
+        final_events = repository.replay_realtime_events(None, limit=20)
+        assert len(final_events) == 9
+        assert [event.sequence for event in final_events] == list(range(1, 10))
+        for claim, session in concurrent_graphs:
+            assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+            assert (
+                repository.get_session(claim.claim_id, session.session_id, claim.customer_id)
+                == session
+            )
     finally:
+        release_first.set()
+        watcher_stop.set()
+        if watcher is not None:
+            watcher.join(timeout=5)
         if connected:
             client.drop_database(database_name)
         client.close()

@@ -138,13 +138,21 @@ and Session state, Messages, Evidence metadata and external evidence links, Hand
 WorkItems, External Tasks/requests/results, recovery WorkItems, ownership, and queue-affecting
 staff mutations.
 
-Fixture stores events in process state and wakes one condition-backed watcher. MongoDB stores
+Fixture allocates a process-local monotonic `sequence` while holding the Claim mutation lock,
+stores events in process state, and wakes one condition-backed watcher. MongoDB stores
 `record_type=realtime_event` in the repository collection, indexes the unique event cursor, and
 uses one collection Change Stream per application process. The process dispatcher performs
 role/customer/optional-Claim filtering and fans out to bounded transient subscriber queues. A
 subscriber queue is delivery state only and is never a persistence or authorization boundary.
-MongoDB allocates a transaction-local monotonic `sequence` from the durable realtime counter
-inside the same transaction that writes the event. The adapter derives a fixed-width
+MongoDB allocates a transaction-local monotonic `sequence` from the single durable
+`realtime_sequence:global` counter inside the same transaction that writes the event. This
+intentionally serializes realtime-producing MongoDB transactions. `with_transaction()` retries
+transient write conflicts, so a retry must not duplicate either the authoritative business write
+or its event, and an aborted transaction consumes no durable sequence. This global counter is
+accepted only for the current prototype throughput boundary: it is a known write hotspot and is
+not presented as a high-scale architecture. Real-replica-set integration tests cover bounded
+concurrent writes for independent Claims, transaction retry, abort rollback, and duplicate-free
+effects. The adapter derives a fixed-width
 `realtime_order` from that sequence and `event_id`; legacy records without a sequence retain the
 timestamp/event-id fallback. The sequence is included only inside the opaque cursor, while the
 adapter-owned physical key is never returned by the repository or API. This keeps replay order
