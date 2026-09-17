@@ -50,7 +50,11 @@ export default function ClaimReviewPanel({
       </div>
 
       {requirements.available && requirements.missingRequiredNow.length > 0 && (
-        <section className="confirmation-bar" aria-labelledby="claim-review-missing-title">
+        <section
+          className="confirmation-bar"
+          aria-labelledby="claim-review-missing-title"
+          role="alert"
+        >
           <p className="confirmation-kicker">Required before you can continue</p>
           <h2 id="claim-review-missing-title">Still needed</h2>
           <ul className="confirmation-list">
