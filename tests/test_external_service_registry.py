@@ -167,6 +167,26 @@ def test_late_result_does_not_override_unknown_outcome_reconciliation() -> None:
 
 
 @pytest.mark.parametrize(
+    ('status', 'owner', 'needs_attention'),
+    [
+        (ExternalLifecycleStatus.RETRYABLE_FAILURE, 'claimant', False),
+        (ExternalLifecycleStatus.TERMINAL_FAILURE, 'claims_professional', True),
+        (ExternalLifecycleStatus.UNKNOWN_OUTCOME, 'claims_professional', True),
+    ],
+)
+def test_failure_projection_names_the_party_who_recovers(
+    status: ExternalLifecycleStatus, owner: str, needs_attention: bool
+) -> None:
+    projection = build_lifecycle_projection(
+        service_identity=ASSESSOR_SERVICE_IDENTITY,
+        operation_status=status,
+    )
+
+    assert projection.pending_owner == owner
+    assert projection.needs_attention is needs_attention
+
+
+@pytest.mark.parametrize(
     'status', [ExternalLifecycleStatus.QUEUED, ExternalLifecycleStatus.ASSIGNED]
 )
 def test_assessor_progress_uses_only_matching_provider_reference(
