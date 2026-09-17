@@ -289,4 +289,7 @@ def run_assessor_failure(case: FailureCase, *, head: str) -> JourneyRunRecord:
         seam_checks=[*failure_checks, *seam_checks],
         visibility_checks=visibility,
         state=state,
+        stop_note=(
+            f'Ends at {state.customer_next_step}, owned by {state.next_step_responsible_party}.'
+        ),
     )
