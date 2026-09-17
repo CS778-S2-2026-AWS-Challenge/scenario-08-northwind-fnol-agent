@@ -1,6 +1,9 @@
 [tool.pytest.ini_options]
 addopts = "--strict-markers --strict-config"
 testpaths = ["tests"]
+markers = [
+    "integration: requires explicitly enabled external infrastructure",
+]
 
 [tool.coverage.run]
 branch = true

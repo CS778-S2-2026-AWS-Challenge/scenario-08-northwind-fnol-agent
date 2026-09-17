@@ -159,17 +159,17 @@ _FAILURE_SEAMS = {
 
 
 @pytest.mark.parametrize(
-    ('case_id', 'result_class', 'defect_refs'),
+    ('case_id', 'result_class'),
     [
-        ('retryable-unavailable', ResultClass.PARTIAL, {'#934'}),
-        ('terminal-access-denied', ResultClass.PARTIAL, set()),
-        ('terminal-not-required', ResultClass.PARTIAL, set()),
-        ('unknown-outcome', ResultClass.FIXTURE_ONLY, set()),
-        ('interrupted-dispatch', ResultClass.FIXTURE_ONLY, set()),
+        ('retryable-unavailable', ResultClass.FIXTURE_ONLY),
+        ('terminal-access-denied', ResultClass.PARTIAL),
+        ('terminal-not-required', ResultClass.PARTIAL),
+        ('unknown-outcome', ResultClass.FIXTURE_ONLY),
+        ('interrupted-dispatch', ResultClass.FIXTURE_ONLY),
     ],
 )
 def test_an_assessor_failure_recovers_only_through_a_projected_action(
-    case_id: str, result_class: ResultClass, defect_refs: set[str]
+    case_id: str, result_class: ResultClass
 ) -> None:
     case = FAILURE_CASES[case_id]
     record = run_assessor_failure(case, head='test')
@@ -182,9 +182,8 @@ def test_an_assessor_failure_recovers_only_through_a_projected_action(
     assert route.http_status == case.route_status
     assert route.detail is not None and route.detail.startswith('Fixture oracle passed')
     assert {check.seam for check in record.seam_checks} >= _FAILURE_SEAMS
-    # A disagreement nobody has reported must fail here, so it reaches its owner.
-    assert [check.seam for check in record.seam_checks if check.defect_ref == 'untracked'] == []
-    assert {check.defect_ref for check in record.seam_checks if check.defect_ref} == defect_refs
+    # Both ends agree at every seam; any disagreement fails here, so it reaches its owner.
+    assert [check.seam for check in record.seam_checks if check.defect_ref] == []
     assert record.result_class is result_class
     # The reason says where the trajectory ends, not only how many steps succeeded.
     ending = record.final_state.customer_next_step

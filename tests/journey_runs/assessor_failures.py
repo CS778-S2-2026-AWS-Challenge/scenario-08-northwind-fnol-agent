@@ -103,7 +103,6 @@ _SENT_THEN_LOST = ScriptedAssessorFailure(
     delivery=ExternalTaskDelivery.SUBMITTED,
     delivery_evidence='fixture send acknowledged; no routing answer returned',
 )
-_RETRYABLE_OWNER = '#934'
 
 FAILURE_CASES = {
     case.case_id: case
@@ -114,11 +113,6 @@ FAILURE_CASES = {
             503,
             'DEPENDENCY_UNAVAILABLE',
             'claimant_retry',
-            {
-                'failure.responsible_party': _RETRYABLE_OWNER,
-                'failure.staff_can_find_work': _RETRYABLE_OWNER,
-                'failure.staff_has_a_recovery_action': _RETRYABLE_OWNER,
-            },
         ),
         FailureCase(
             'terminal-access-denied',

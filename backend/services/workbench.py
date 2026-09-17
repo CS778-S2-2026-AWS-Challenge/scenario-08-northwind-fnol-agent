@@ -154,6 +154,10 @@ from backend.services.tag_projection import project_staff_tags
 
 ResourceT = TypeVar('ResourceT')
 
+_INCONSISTENT_EXTERNAL_LIFECYCLE = (
+    'External-service lifecycle records are inconsistent and cannot be displayed safely.'
+)
+
 _PRIORITY_RANK = {
     WorkPriorityLevel.IMMEDIATE: 0,
     WorkPriorityLevel.URGENT: 100,
@@ -655,8 +659,15 @@ def _missing_information(
         # review the request before another attempt", and AT-10 says the same to the
         # claimant, so the gap this task already projects is reclassified rather than
         # duplicated: it belongs to a claims professional, now, and is what
-        # `primary_blocker` should surface.
+        # `primary_blocker` should surface. A retryable failure is not the external party's
+        # either: the claimant owns the retry (Discussion #934), as its lifecycle says.
         terminal = task.status is ExternalTaskOperationStatus.TERMINAL_FAILURE
+        if terminal:
+            responsible = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
+        elif task.status is ExternalTaskOperationStatus.RETRYABLE_FAILURE:
+            responsible = WorkbenchResponsibility.CLAIMANT
+        else:
+            responsible = WorkbenchResponsibility.EXTERNAL_PARTY
         items.append(
             WorkbenchMissingInformation(
                 kind='external_service',
@@ -673,11 +684,7 @@ def _missing_information(
                     if status in {WorkbenchGapStatus.UNAVAILABLE, WorkbenchGapStatus.UNCERTAIN}
                     else None
                 ),
-                responsible_party=(
-                    WorkbenchResponsibility.CLAIMS_PROFESSIONAL
-                    if terminal
-                    else WorkbenchResponsibility.EXTERNAL_PARTY
-                ),
+                responsible_party=responsible,
                 source_refs=_unique_refs(
                     [
                         task.task_id,
@@ -983,6 +990,10 @@ def _integration_summary(
     request lifecycle said the answer was in and needed their review. `external_wait_count`
     is the length of this list, so the contradiction was also a count staff act on.
 
+    A retryable failure is not one of them either. The attempt failed, so no answer is on
+    its way, and the claimant owns the retry (Discussion #934); listing it would tell
+    staff the claim waits on the external party while its lifecycle names the claimant.
+
     Args:
         claim: Working Claim being projected.
         external_tasks: Tasks recorded for the claim.
@@ -1007,7 +1018,6 @@ def _integration_summary(
             ExternalTaskOperationStatus.PREPARED,
             ExternalTaskOperationStatus.ACCEPTED,
             ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
-            ExternalTaskOperationStatus.RETRYABLE_FAILURE,
         }
     ]
     return WorkbenchIntegrationSummary(
@@ -1874,7 +1884,20 @@ def _build_projection(
         assessor_routing_status=integration_summary.assessor_routing_status,
         waiting_external_services=integration_summary.waiting_external_services,
     )
-    unavailable_external = external_limitation is not None
+    external_section_limitation = external_limitation
+    external_attention = 0
+    if external_limitation is None:
+        # The section count reads the same lifecycle rows staff open, so a task counts as
+        # needing attention exactly when its lifecycle says so.
+        try:
+            external_attention = sum(
+                item.lifecycle.needs_attention
+                for item in _external_requests(
+                    claim, external_tasks, external_requests, external_results, evidence, actions
+                )
+            )
+        except (InvalidExternalLifecycleTransition, ValueError):
+            external_section_limitation = _INCONSISTENT_EXTERNAL_LIFECYCLE
     return WorkbenchClaimDetail(
         **base,
         active_session_id=claim.active_session_id,
@@ -1917,15 +1940,12 @@ def _build_projection(
             external_services=WorkbenchSectionSummary(
                 status=(
                     ResourceAvailability.UNAVAILABLE
-                    if unavailable_external
+                    if external_section_limitation is not None
                     else ResourceAvailability.AVAILABLE
                 ),
                 total=len(external_tasks),
-                needs_attention=sum(
-                    item.status is not ExternalTaskOperationStatus.ACCEPTED
-                    for item in external_tasks
-                ),
-                limitation=external_limitation,
+                needs_attention=external_attention,
+                limitation=external_section_limitation,
             ),
             activity=WorkbenchSectionSummary(
                 status=ResourceAvailability.AVAILABLE,
@@ -2535,54 +2555,90 @@ def list_workbench_external_requests(
             status=ResourceAvailability.UNAVAILABLE,
             limitation='External-service records are temporarily unavailable.',
         )
-    by_task = {item.task_id: item for item in requests}
-    results_by_task = {item.task_id: item for item in results}
-    evidence_by_id = {item.evidence_id: item for item in evidence}
-    completed_reviews_by_task = {
-        source_ref: action
-        for action in staff_actions
-        if action.status is StaffActionStatus.COMPLETED
-        and action.action_type in {'external_failure_review', 'external_result_review'}
-        for source_ref in action.source_refs
-        if source_ref in {task.task_id for task in tasks}
-    }
-    items = []
     try:
-        for task in tasks:
-            external_request = by_task.get(task.task_id)
-            result = results_by_task.get(task.task_id)
-            items.append(
-                WorkbenchExternalRequest(
-                    request=external_request,
-                    task=task,
-                    lifecycle=_external_lifecycle(
-                        task,
-                        external_request,
-                        result,
-                        [
-                            evidence_by_id[evidence_id]
-                            for evidence_id in result.evidence_ids
-                            if evidence_id in evidence_by_id
-                        ]
-                        if result is not None
-                        else [],
-                        claim.assessor_routing,
-                        completed_reviews_by_task.get(task.task_id),
-                    ),
-                )
-            )
+        items = _external_requests(claim, tasks, requests, results, evidence, staff_actions)
     except (InvalidExternalLifecycleTransition, ValueError):
         return WorkbenchResourcePage(
             items=[],
             page={'next_cursor': None},
             status=ResourceAvailability.UNAVAILABLE,
-            limitation=(
-                'External-service lifecycle records are inconsistent and cannot be displayed '
-                'safely.'
-            ),
+            limitation=_INCONSISTENT_EXTERNAL_LIFECYCLE,
         )
     items.sort(key=lambda item: (item.task.created_at, item.task.task_id))
     return _page(items, limit, cursor)
+
+
+def _external_requests(
+    claim: WorkingClaim,
+    tasks: Sequence[ExternalTaskRecord],
+    requests: Sequence[ExternalTaskRequest],
+    results: Sequence[ExternalTaskResult],
+    evidence: Sequence[EvidenceRecord],
+    staff_actions: Sequence[StaffActionRecord],
+) -> list[WorkbenchExternalRequest]:
+    """Project every external task with its effective lifecycle.
+
+    The request list and the Claim detail's external-services attention count read this
+    one projection, so the count staff see cannot disagree with the lifecycle rows.
+
+    Args:
+        claim: Working Claim that owns the tasks.
+        tasks: External tasks recorded for the Claim.
+        requests: External task requests recorded for the Claim.
+        results: Provider results recorded for the Claim.
+        evidence: Evidence recorded for the Claim.
+        staff_actions: Staff actions recorded for the Claim.
+
+    Returns:
+        One request projection per task, in task order.
+
+    Raises:
+        InvalidExternalLifecycleTransition: A stored record contradicts the registry.
+        ValueError: A stored record cannot form a valid projection.
+    """
+
+    by_task = {item.task_id: item for item in requests}
+    results_by_task = {item.task_id: item for item in results}
+    evidence_by_id = {item.evidence_id: item for item in evidence}
+    task_ids = {task.task_id for task in tasks}
+    completed_reviews_by_task: dict[str, StaffActionRecord] = {}
+    for action in staff_actions:
+        if action.status is not StaffActionStatus.COMPLETED or action.action_type not in {
+            'external_failure_review',
+            'external_result_review',
+        }:
+            continue
+        for source_ref in action.source_refs:
+            if source_ref in task_ids:
+                completed_reviews_by_task[source_ref] = action
+    items = []
+    for task in tasks:
+        external_request = by_task.get(task.task_id)
+        result = results_by_task.get(task.task_id)
+        result_evidence = (
+            [
+                evidence_by_id[evidence_id]
+                for evidence_id in result.evidence_ids
+                if evidence_id in evidence_by_id
+            ]
+            if result is not None
+            else []
+        )
+        items.append(
+            WorkbenchExternalRequest(
+                request=external_request,
+                task=task,
+                lifecycle=_external_lifecycle(
+                    task,
+                    external_request,
+                    result,
+                    result_evidence,
+                    claim.assessor_routing,
+                    completed_reviews_by_task.get(task.task_id),
+                ),
+            )
+        )
+    return items
 
 
 def list_workbench_events(

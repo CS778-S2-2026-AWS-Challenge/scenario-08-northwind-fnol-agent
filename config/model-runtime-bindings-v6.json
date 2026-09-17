@@ -1,0 +1,32 @@
+[
+  {
+    "profile_id": "qwen-local",
+    "protocol": "openai_compatible",
+    "provider": "qwen-local",
+    "model_identifier": "qwen3.8-27b",
+    "base_url": "${NORTHWIND_QWEN_BASE_URL}",
+    "credential_environment_variable": null,
+    "purpose": "agent_turn",
+    "privacy_class": "synthetic_fnol",
+    "prompt_version": "northwind-fnol-claimant-v6",
+    "structured_output": true,
+    "tools": true,
+    "image_input": false,
+    "document_input": false
+  },
+  {
+    "profile_id": "nowcoding-gpt55",
+    "protocol": "openai_compatible",
+    "provider": "nowcoding",
+    "model_identifier": "gpt-5.5",
+    "base_url": "https://nowcoding.ai/v1",
+    "credential_environment_variable": "NORTHWIND_MODEL_API_KEY",
+    "purpose": "agent_turn",
+    "privacy_class": "synthetic_fnol",
+    "prompt_version": "northwind-fnol-claimant-v6",
+    "structured_output": true,
+    "tools": true,
+    "image_input": false,
+    "document_input": false
+  }
+]

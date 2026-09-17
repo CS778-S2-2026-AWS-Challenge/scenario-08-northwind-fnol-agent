@@ -79,7 +79,7 @@ class ModelMessage(ModelContract):
     content: str | None = None
     content_blocks: list[ModelContentBlock] = Field(default_factory=list, max_length=50)
     tool_calls: list[ModelToolCall] = Field(default_factory=list)
-    tool_call_id: str | None = None
+    tool_call_id: str | None = Field(default=None, min_length=1, max_length=120)
     name: str | None = None
 
     @model_validator(mode='after')
@@ -96,7 +96,7 @@ class ModelTool(ModelContract):
 
 
 class ModelToolCall(ModelContract):
-    call_id: str
+    call_id: str = Field(min_length=1, max_length=120)
     name: str
     arguments: dict[str, object]
 
@@ -155,6 +155,7 @@ class ModelRequest(ModelContract):
     response_schema: dict[str, object] | None = None
     tools: list[ModelTool] = Field(default_factory=list)
     required_tool_name: str | None = Field(default=None, min_length=1, max_length=100)
+    max_output_tokens: int | None = Field(default=None, ge=1, le=16_384)
     purpose: str = Field(default=CLAIMANT_AGENT_PURPOSE, min_length=1, max_length=100)
     prompt_version: str = Field(default='current', min_length=1, max_length=100)
     privacy_class: str = Field(
@@ -436,10 +437,17 @@ _ERROR_MESSAGES = {
 
 
 class ModelGatewayError(RuntimeError):
-    def __init__(self, code: ModelGatewayErrorCode, *, retryable: bool = False) -> None:
+    def __init__(
+        self,
+        code: ModelGatewayErrorCode,
+        *,
+        retryable: bool = False,
+        provider_model: str | None = None,
+    ) -> None:
         super().__init__(_ERROR_MESSAGES[code])
         self.code = code
         self.retryable = retryable
+        self.provider_model = provider_model
 
 
 class ModelGateway(Protocol):

@@ -131,6 +131,7 @@ class ModelRuntimeBinding(BaseModel):
     purpose: str = Field(min_length=1, max_length=100)
     privacy_class: str = Field(min_length=1, max_length=100)
     prompt_version: str = Field(min_length=1, max_length=100)
+    evaluation_status: Literal['configured', 'degraded', 'unavailable'] = 'configured'
     structured_output: bool
     tools: bool = False
     image_input: bool = False

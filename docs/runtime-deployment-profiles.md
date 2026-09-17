@@ -36,7 +36,10 @@ profile.
 
 The Backend contains the versioned initial Agent Runtime Release. When the selected Control Plane
 scope has no Release Set history, application composition installs the complete Agent policy and
-the `qwen-local` plus `nowcoding-gpt55` model configurations as one active published Release Set.
+the `qwen-local`, `nowcoding-gpt55`, `bedrock-nova2-lite`, and
+`google-gemini35-flash-lite` model configurations as one active published Release Set. A model
+configuration can remain explicitly unavailable inside that
+Release Set; publication does not claim provider connectivity.
 This is backend initialization, not a deployment-script repair step. Once any Release Set history
 exists, that history is authoritative and startup never republishes or restores a model that an
 operator removed.
@@ -44,8 +47,8 @@ operator removed.
 Before starting this profile, inject `NORTHWIND_OBJECT_STORAGE_PRESIGN_ENDPOINT` as the public
 HTTP(S) origin through which claimant browsers reach MinIO. Inject the staff bootstrap email and
 password and, when `AGENT_RUNTIME_PROFILE=model_gateway`, the model endpoint, identifier, and
-`NORTHWIND_MODEL_API_KEY` through the deployment secret mechanism. Do not add those values to a
-committed environment file.
+`NORTHWIND_MODEL_API_KEY` and `GEMINI_API_KEY` through the deployment secret mechanism. Do not add
+those values to a committed environment file.
 
 ## Startup preflight
 
@@ -73,6 +76,28 @@ evidence bytes, staff projection, knowledge retrieval, and recovery through a ne
 application instance. The example explicitly selects `NORTHWIND_IDENTITY_MODE=developer`; this
 enables only the synthetic local claimant, staff, and integration identities and cannot start in a
 non-development environment.
+
+The MongoDB replica set is also the realtime wake-up boundary. Relevant business writes and their
+`realtime_event` records commit in one transaction, and each Backend process opens one collection
+Change Stream as a low-latency wake-up hint. Before application startup completes, the dispatcher
+anchors its process-local position at the durable high watermark rather than replaying retained
+history. It then drains strictly newer events after every hint or bounded fallback interval. Browser
+reconnect replay remains anchored at each browser's acknowledged cursor. This closes watcher
+startup/restart gaps without making provider resume tokens part of the domain contract. Deployments
+that provide CRUD but not transactions or Change
+Streams do not satisfy the `local_mvp` contract. Browser connection count does not create
+additional MongoDB polling loops or Change Streams. The prototype uses one
+durable global realtime sequence, which deliberately serializes realtime-producing transactions;
+MongoDB retries transient conflicts through `with_transaction()`. This bounded-throughput write
+hotspot is accepted for the prototype and is not a high-scale deployment claim.
+
+Real MongoDB transaction and Change Stream checks are excluded from ordinary fast test runs. With
+the Compose replica set running, execute them explicitly from PowerShell:
+
+```powershell
+$env:NORTHWIND_RUN_INTEGRATION_TESTS = '1'
+py -3.12 -m pytest -m integration tests/test_mongodb_repository.py -q
+```
 
 Start or repeat the single-host bootstrap and Backend composition with:
 

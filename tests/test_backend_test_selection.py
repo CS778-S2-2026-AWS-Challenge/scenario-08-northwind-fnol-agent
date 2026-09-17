@@ -8,6 +8,7 @@ from scripts import select_backend_tests as selector
 from scripts.select_backend_tests import (
     changed_paths,
     changed_python_files,
+    existing_test_paths,
     needs_audit_contract_check,
     needs_openapi_check,
     select_tests,
@@ -43,9 +44,29 @@ def test_asset_modules_select_asset_claim_branch_and_mongodb_contracts() -> None
     assert {
         'tests/test_asset_api.py',
         'tests/test_asset_repository.py',
+        'tests/test_api_boundaries.py',
         'tests/test_branch_registry.py',
         'tests/test_claim_api.py',
         'tests/test_mongodb_repository.py',
+    } <= set(selection.tests)
+
+
+def test_realtime_modules_select_projection_lifecycle_and_boundary_contracts() -> None:
+    selection = select_tests(
+        [
+            'backend/api/realtime.py',
+            'backend/domain/realtime.py',
+            'backend/services/realtime.py',
+        ]
+    )
+
+    assert selection.mode == 'scoped'
+    assert {
+        'tests/test_api_boundaries.py',
+        'tests/test_asset_repository.py',
+        'tests/test_mongodb_repository.py',
+        'tests/test_realtime_events.py',
+        'tests/test_staff_mutation_actor_links.py',
     } <= set(selection.tests)
 
 
@@ -199,6 +220,24 @@ def test_static_checks_use_only_changed_python_files_for_scoped_prs() -> None:
     assert changed_python_files(
         ['backend/api/claims.py', 'backend/removed.py', 'docs/README.md']
     ) == ('backend/api/claims.py',)
+
+
+def test_intentionally_deleted_changed_test_module_is_not_emitted_to_pytest() -> None:
+    assert existing_test_paths(('tests/test_removed_contract_never_exists.py',)) == ()
+
+
+def test_missing_declared_consumer_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(
+        selector.TOOLING_CONSUMER_RULES,
+        'scripts/synthetic_selector.py',
+        ('tests/test_missing_declared_consumer.py',),
+    )
+
+    with pytest.raises(
+        FileNotFoundError,
+        match='tests/test_missing_declared_consumer.py',
+    ):
+        existing_test_paths(())
 
 
 def test_contract_checks_follow_their_own_impact() -> None:

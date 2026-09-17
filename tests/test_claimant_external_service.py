@@ -503,7 +503,15 @@ def test_claimant_assessor_request_creates_current_authority_and_safe_success(
     assert permission_event.consent_ref == stored.external_service_consents[-1].consent_ref
     assert permission_event.claim_revision == consent['revision']
     assert permission_event.visibility is AuditVisibility.AUDIT_ONLY
+    events_before_retry = repository.replay_realtime_events(None, limit=100)
+    request_event = next(
+        event
+        for event in reversed(events_before_retry)
+        if {resource.value for resource in event.resources} == {'external_tasks'}
+    )
+    assert request_event.operation_correlation == request.operation_id
     repository.save_external_task_request(request, 'cus_demo')
+    assert repository.replay_realtime_events(None, limit=100) == events_before_retry
     with pytest.raises(IdempotencyConflict):
         repository.save_external_task_request(
             request.model_copy(update={'purpose': 'Changed after the send.'}),

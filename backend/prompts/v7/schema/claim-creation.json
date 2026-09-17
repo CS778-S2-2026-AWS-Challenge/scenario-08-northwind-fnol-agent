@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reply", "next_step", "reason_codes", "ready"],
+  "properties": {
+    "reply": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "next_step": {"type": "string", "minLength": 1, "maxLength": 500},
+    "reason_codes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {"type": "string", "minLength": 1, "maxLength": 100}
+    },
+    "ready": {"type": "boolean"}
+  }
+}
