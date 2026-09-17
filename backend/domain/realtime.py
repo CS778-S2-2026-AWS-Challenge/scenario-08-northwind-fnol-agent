@@ -34,38 +34,70 @@ class RealtimeResource(str, Enum):
     QUEUE = 'queue'
 
 
-REALTIME_RESOURCE_READ_APIS: dict[RealtimeResource, tuple[str, ...]] = {
-    RealtimeResource.CLAIM: (
-        '/api/v1/claims/{claim_id}',
-        '/api/v1/workbench/claims/{claim_id}',
-        '/api/v1/workbench/claims/{claim_id}/fields',
-        '/api/v1/workbench/claims/{claim_id}/sessions',
-    ),
-    RealtimeResource.MESSAGES: (
-        '/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
-        '/api/v1/workbench/claims/{claim_id}/sessions/{session_id}/messages',
-    ),
-    RealtimeResource.EVIDENCE: (
-        '/api/v1/claims/{claim_id}/evidence',
-        '/api/v1/workbench/claims/{claim_id}/evidence',
-    ),
-    RealtimeResource.HANDOFFS: ('/api/v1/workbench/claims/{claim_id}/handoffs',),
-    RealtimeResource.WORK_ITEMS: (
-        '/api/v1/workbench/claims/{claim_id}/work-items',
-        '/api/v1/workbench/claims/{claim_id}/runtime-work-items',
-    ),
-    RealtimeResource.EXTERNAL_TASKS: ('/api/v1/workbench/claims/{claim_id}/external-requests',),
-    RealtimeResource.ASSET_SNAPSHOTS: (
-        '/api/v1/claims/{claim_id}/asset-snapshots',
-        '/api/v1/workbench/claims/{claim_id}/asset-snapshots',
-    ),
-    RealtimeResource.COLLABORATION_REQUESTS: (
-        '/api/v1/workbench/claims/{claim_id}/collaboration-requests',
-    ),
-    RealtimeResource.CUSTOMER_UPDATES: ('/api/v1/workbench/claims/{claim_id}/customer-updates',),
-    RealtimeResource.SIGNALS: ('/api/v1/workbench/claims/{claim_id}/signals',),
-    RealtimeResource.QUEUE: ('/api/v1/workbench/claims',),
+REALTIME_RESOURCE_READ_APIS: dict[RealtimeResource, dict[RealtimeAudience, tuple[str, ...]]] = {
+    RealtimeResource.CLAIM: {
+        RealtimeAudience.CLAIMANT: ('/api/v1/claims/{claim_id}',),
+        RealtimeAudience.STAFF: (
+            '/api/v1/workbench/claims/{claim_id}',
+            '/api/v1/workbench/claims/{claim_id}/fields',
+            '/api/v1/workbench/claims/{claim_id}/sessions',
+        ),
+    },
+    RealtimeResource.MESSAGES: {
+        RealtimeAudience.CLAIMANT: ('/api/v1/claims/{claim_id}/sessions/{session_id}/messages',),
+        RealtimeAudience.STAFF: (
+            '/api/v1/workbench/claims/{claim_id}/sessions/{session_id}/messages',
+        ),
+    },
+    RealtimeResource.EVIDENCE: {
+        RealtimeAudience.CLAIMANT: ('/api/v1/claims/{claim_id}/evidence',),
+        RealtimeAudience.STAFF: ('/api/v1/workbench/claims/{claim_id}/evidence',),
+    },
+    RealtimeResource.HANDOFFS: {
+        RealtimeAudience.CLAIMANT: ('/api/v1/claims/{claim_id}',),
+        RealtimeAudience.STAFF: ('/api/v1/workbench/claims/{claim_id}/handoffs',),
+    },
+    RealtimeResource.WORK_ITEMS: {
+        RealtimeAudience.STAFF: (
+            '/api/v1/workbench/claims/{claim_id}/work-items',
+            '/api/v1/workbench/claims/{claim_id}/runtime-work-items',
+        ),
+    },
+    RealtimeResource.EXTERNAL_TASKS: {
+        RealtimeAudience.CLAIMANT: ('/api/v1/claims/{claim_id}',),
+        RealtimeAudience.STAFF: ('/api/v1/workbench/claims/{claim_id}/external-requests',),
+    },
+    RealtimeResource.ASSET_SNAPSHOTS: {
+        RealtimeAudience.CLAIMANT: ('/api/v1/claims/{claim_id}/asset-snapshots',),
+        RealtimeAudience.STAFF: ('/api/v1/workbench/claims/{claim_id}/asset-snapshots',),
+    },
+    RealtimeResource.COLLABORATION_REQUESTS: {
+        RealtimeAudience.STAFF: ('/api/v1/workbench/claims/{claim_id}/collaboration-requests',),
+    },
+    RealtimeResource.CUSTOMER_UPDATES: {
+        RealtimeAudience.STAFF: ('/api/v1/workbench/claims/{claim_id}/customer-updates',),
+    },
+    RealtimeResource.SIGNALS: {
+        RealtimeAudience.STAFF: ('/api/v1/workbench/claims/{claim_id}/signals',),
+    },
+    RealtimeResource.QUEUE: {
+        RealtimeAudience.STAFF: ('/api/v1/workbench/claims',),
+    },
 }
+
+
+def realtime_read_apis_for(
+    audience: RealtimeAudience,
+    resources: tuple[RealtimeResource, ...],
+) -> tuple[str, ...]:
+    """Resolve role-authorised refresh routes while preserving order and removing duplicates."""
+
+    routes: list[str] = []
+    for resource in resources:
+        for route in REALTIME_RESOURCE_READ_APIS[resource].get(audience, ()):
+            if route not in routes:
+                routes.append(route)
+    return tuple(routes)
 
 
 class RealtimeMutation(str, Enum):

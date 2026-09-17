@@ -20,6 +20,7 @@ from backend.api.realtime import realtime_stream
 from backend.core.auth import Principal
 from backend.domain.realtime import (
     AUTHORITATIVE_RECORD_PROJECTION_IMPACTS,
+    CLAIMANT_REALTIME_RESOURCES,
     REALTIME_MUTATION_RESOURCES,
     REALTIME_RESOURCE_READ_APIS,
     RealtimeAudience,
@@ -32,6 +33,7 @@ from backend.domain.realtime import (
     cursor_for,
     cursor_is_after,
     realtime_publication_for,
+    realtime_read_apis_for,
     realtime_resources_for_records,
 )
 from backend.repositories.fixture import FixtureRepository
@@ -306,8 +308,79 @@ def test_composite_resource_inventory_tracks_concrete_agent_children() -> None:
         )
 
 
-def test_public_projection_matrix_covers_every_resource_and_independent_staff_reads() -> None:
-    assert set(REALTIME_RESOURCE_READ_APIS) == set(RealtimeResource)
+def test_public_projection_matrix_has_literal_authorised_reads_for_each_audience() -> None:
+    expected: dict[RealtimeResource, dict[RealtimeAudience, tuple[str, ...]]] = {
+        RealtimeResource.CLAIM: {
+            RealtimeAudience.CLAIMANT: ('/api/v1/claims/{claim_id}',),
+            RealtimeAudience.STAFF: (
+                '/api/v1/workbench/claims/{claim_id}',
+                '/api/v1/workbench/claims/{claim_id}/fields',
+                '/api/v1/workbench/claims/{claim_id}/sessions',
+            ),
+        },
+        RealtimeResource.MESSAGES: {
+            RealtimeAudience.CLAIMANT: (
+                '/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+            ),
+            RealtimeAudience.STAFF: (
+                '/api/v1/workbench/claims/{claim_id}/sessions/{session_id}/messages',
+            ),
+        },
+        RealtimeResource.EVIDENCE: {
+            RealtimeAudience.CLAIMANT: ('/api/v1/claims/{claim_id}/evidence',),
+            RealtimeAudience.STAFF: ('/api/v1/workbench/claims/{claim_id}/evidence',),
+        },
+        RealtimeResource.HANDOFFS: {
+            RealtimeAudience.CLAIMANT: ('/api/v1/claims/{claim_id}',),
+            RealtimeAudience.STAFF: ('/api/v1/workbench/claims/{claim_id}/handoffs',),
+        },
+        RealtimeResource.WORK_ITEMS: {
+            RealtimeAudience.STAFF: (
+                '/api/v1/workbench/claims/{claim_id}/work-items',
+                '/api/v1/workbench/claims/{claim_id}/runtime-work-items',
+            ),
+        },
+        RealtimeResource.EXTERNAL_TASKS: {
+            RealtimeAudience.CLAIMANT: ('/api/v1/claims/{claim_id}',),
+            RealtimeAudience.STAFF: ('/api/v1/workbench/claims/{claim_id}/external-requests',),
+        },
+        RealtimeResource.ASSET_SNAPSHOTS: {
+            RealtimeAudience.CLAIMANT: ('/api/v1/claims/{claim_id}/asset-snapshots',),
+            RealtimeAudience.STAFF: ('/api/v1/workbench/claims/{claim_id}/asset-snapshots',),
+        },
+        RealtimeResource.COLLABORATION_REQUESTS: {
+            RealtimeAudience.STAFF: ('/api/v1/workbench/claims/{claim_id}/collaboration-requests',),
+        },
+        RealtimeResource.CUSTOMER_UPDATES: {
+            RealtimeAudience.STAFF: ('/api/v1/workbench/claims/{claim_id}/customer-updates',),
+        },
+        RealtimeResource.SIGNALS: {
+            RealtimeAudience.STAFF: ('/api/v1/workbench/claims/{claim_id}/signals',),
+        },
+        RealtimeResource.QUEUE: {
+            RealtimeAudience.STAFF: ('/api/v1/workbench/claims',),
+        },
+    }
+
+    assert expected == REALTIME_RESOURCE_READ_APIS
+    assert all(
+        expected[resource][RealtimeAudience.CLAIMANT] for resource in CLAIMANT_REALTIME_RESOURCES
+    )
+    assert all(expected[resource][RealtimeAudience.STAFF] for resource in RealtimeResource)
+    assert realtime_read_apis_for(
+        RealtimeAudience.CLAIMANT,
+        (RealtimeResource.HANDOFFS, RealtimeResource.EXTERNAL_TASKS),
+    ) == ('/api/v1/claims/{claim_id}',)
+    assert realtime_read_apis_for(
+        RealtimeAudience.STAFF,
+        (RealtimeResource.HANDOFFS, RealtimeResource.EXTERNAL_TASKS),
+    ) == (
+        '/api/v1/workbench/claims/{claim_id}/handoffs',
+        '/api/v1/workbench/claims/{claim_id}/external-requests',
+    )
+
+
+def test_authoritative_record_projection_matrix_fails_closed() -> None:
     assert AUTHORITATIVE_RECORD_PROJECTION_IMPACTS['customer_update'] == (
         RealtimeResource.CUSTOMER_UPDATES,
     )

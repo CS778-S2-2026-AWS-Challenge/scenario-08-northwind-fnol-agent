@@ -1628,14 +1628,20 @@ delivery.
 | `claim` | claimant Claim; Workbench Claim, fields, and sessions |
 | `messages` | claimant or Workbench session messages |
 | `evidence` | claimant or Workbench Evidence |
-| `handoffs` | Workbench handoffs and any claimant-safe handoff projection |
+| `handoffs` | claimant `GET /api/v1/claims/{claim_id}`; staff `GET /api/v1/workbench/claims/{claim_id}/handoffs` |
 | `work_items` | Workbench staff actions and Runtime WorkItems |
-| `external_tasks` | Workbench external requests and bounded claimant-safe status |
+| `external_tasks` | claimant `GET /api/v1/claims/{claim_id}`; staff `GET /api/v1/workbench/claims/{claim_id}/external-requests` |
 | `asset_snapshots` | claimant or Workbench Claim Asset snapshots |
 | `collaboration_requests` | Workbench collaboration requests |
 | `customer_updates` | Workbench customer updates |
 | `signals` | Workbench signals and decisions |
 | `queue` | Workbench list, search, ownership, priority, and queue projection |
+
+The mapping is audience-specific: clients must use only the route listed for their authenticated
+role. The claimant Claim response is the visibility-filtered authoritative projection for both
+`handoffs` and `external_tasks`. When one event contains either or both hints, a claimant client
+deduplicates the route and performs one `GET /api/v1/claims/{claim_id}` refresh. Staff clients refresh
+the separate Workbench handoff and external-request routes named above.
 
 Reconnect replays events strictly after the acknowledged cursor. Duplicate or older deliveries are
 discarded. Process startup anchors at the current durable high watermark, while browser reconnect
