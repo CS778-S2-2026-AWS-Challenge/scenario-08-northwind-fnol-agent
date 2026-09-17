@@ -131,11 +131,25 @@ class Journey:
             if self.claim_id:
                 headers['If-Match'] = str(self.revision())
         response = self.client.request(method, path, headers=headers, json=body)
+        invalid_payload = None
         try:
-            payload = cast(dict[str, Any], response.json()) if response.content else {}
+            parsed = response.json() if response.content else {}
         except ValueError:
             payload = {}
-        outcome = step_outcome(response.status_code, expected)
+            invalid_payload = f'HTTP {response.status_code} returned a non-JSON response.'
+        else:
+            if isinstance(parsed, dict):
+                payload = cast(dict[str, Any], parsed)
+            else:
+                payload = {}
+                invalid_payload = (
+                    f'HTTP {response.status_code} returned a non-object JSON response.'
+                )
+        outcome = step_outcome(
+            response.status_code,
+            expected,
+            response_body_valid=invalid_payload is None,
+        )
         succeeded = outcome is StepOutcome.SUCCEEDED
         error = payload.get('error') or {}
         route = path.split('?')[0]
@@ -149,6 +163,7 @@ class Journey:
                     'route': f'{method} {route}',
                     'expected_status': expected,
                     'http_status': response.status_code,
+                    'response_body_valid': invalid_payload is None,
                     'outcome': outcome,
                     'claim_revision': (
                         self.revision()
@@ -156,12 +171,14 @@ class Journey:
                         else None
                     ),
                     'detail': (
-                        None
+                        invalid_payload
+                        if invalid_payload is not None
+                        else None
                         if succeeded
                         else (
                             f'{error.get("code")}: {error.get("message")}'
                             if error
-                            else f'HTTP {response.status_code} returned a non-JSON response.'
+                            else f'HTTP {response.status_code} returned no error detail.'
                         )
                     ),
                 }

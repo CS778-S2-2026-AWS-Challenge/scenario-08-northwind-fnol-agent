@@ -88,10 +88,17 @@ class SeamVerdict(StrEnum):
 _DISAGREEMENT = {SeamVerdict.CONTRADICTORY, SeamVerdict.MISSING}
 
 
-def step_outcome(http_status: int | None, expected_status: int) -> StepOutcome:
-    """The only outcome a step's status evidence supports."""
+def step_outcome(
+    http_status: int | None,
+    expected_status: int,
+    *,
+    response_body_valid: bool = True,
+) -> StepOutcome:
+    """The only outcome a step's status and response-body evidence support."""
 
     if http_status is None:
+        return StepOutcome.FAILED
+    if 200 <= http_status < 300 and not response_body_valid:
         return StepOutcome.FAILED
     if http_status == expected_status:
         return StepOutcome.SUCCEEDED
@@ -178,13 +185,18 @@ class RunStep(_Record):
     route: str
     expected_status: int
     http_status: int | None
+    response_body_valid: bool = True
     outcome: StepOutcome
     claim_revision: int | None = None
     detail: str | None = None
 
     @model_validator(mode='after')
     def _outcome_follows_the_status(self) -> Self:
-        supported = step_outcome(self.http_status, self.expected_status)
+        supported = step_outcome(
+            self.http_status,
+            self.expected_status,
+            response_body_valid=self.response_body_valid,
+        )
         if self.outcome is not supported:
             raise ValueError(
                 f'{self.name}: outcome {self.outcome} contradicts HTTP {self.http_status} '
