@@ -1337,8 +1337,8 @@ def test_staff_reconciliation_checks_authority_and_exact_claim_task_pair() -> No
     assert repository.list_staff_actions(second_claim_id) == []
 
 
-def test_a_retryable_failure_stays_a_follow_up_owned_by_the_external_party() -> None:
-    """Only the terminal case is reclassified."""
+def test_a_retryable_failure_stays_a_follow_up_owned_by_the_claimant() -> None:
+    """Only the terminal case becomes staff work; the claimant owns a retry (Discussion #934)."""
 
     repository = FixtureRepository()
     client, claim_id = _failed_attempt(
@@ -1352,8 +1352,55 @@ def test_a_retryable_failure_stays_a_follow_up_owned_by_the_external_party() -> 
     ]
     assert len(external_gaps) == 1
     assert external_gaps[0]['attention'] == 'follow_up'
-    assert external_gaps[0]['responsible_party'] == 'external_party'
+    assert external_gaps[0]['responsible_party'] == 'claimant'
     assert summary['primary_blocker'] != external_gaps[0]['label']
+
+
+@pytest.mark.parametrize(
+    ('failure', 'delivery_evidence', 'owner', 'needs_attention', 'waiting'),
+    [
+        (AssessorFixtureFailure.UNAVAILABLE, None, 'claimant', False, False),
+        (AssessorFixtureFailure.ACCESS_DENIED, None, 'claims_professional', True, False),
+        (
+            AssessorFixtureFailure.TIMEOUT,
+            'fixture send acknowledged; no routing answer returned',
+            'claims_professional',
+            True,
+            True,
+        ),
+    ],
+)
+def test_workbench_detail_agrees_with_the_lifecycle_after_a_failed_attempt(
+    failure: AssessorFixtureFailure,
+    delivery_evidence: str | None,
+    owner: str,
+    needs_attention: bool,
+    waiting: bool,
+) -> None:
+    """The detail's summaries say what the task's lifecycle row says about who acts next.
+
+    A retryable failure is the claimant's to retry, so no summary counts it as staff
+    attention or as a wait on the external party; a terminal failure and an unknown outcome
+    stay staff attention.
+    """
+
+    repository = FixtureRepository()
+    client, claim_id = _failed_attempt(
+        repository, failure, key=f'agree-{failure.value}', delivery_evidence=delivery_evidence
+    )
+    with client:
+        detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
+        lifecycle = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/external-requests', headers=STAFF_AUTH
+        ).json()['items'][0]['lifecycle']
+
+    waiting_services = detail['integration_summary']['waiting_external_services']
+    assert (lifecycle['pending_owner'], lifecycle['needs_attention']) == (owner, needs_attention)
+    assert detail['section_summaries']['external_services']['needs_attention'] == int(
+        needs_attention
+    )
+    assert bool(waiting_services) is waiting
+    assert detail['work_summary']['external_wait_count'] == len(waiting_services)
 
 
 def test_a_claim_whose_result_arrived_is_no_longer_waiting_on_the_assessor() -> None:

@@ -707,16 +707,26 @@ def test_workbench_marks_contradictory_registered_source_unavailable(
         f'/api/v1/workbench/claims/{claim_id}/external-requests',
         headers=staff_auth_headers,
     )
+    detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers)
 
+    limitation = (
+        'External-service lifecycle records are inconsistent and cannot be displayed safely.'
+    )
     assert response.status_code == 200
     assert response.json() == {
         'items': [],
         'page': {'next_cursor': None},
         'status': 'unavailable',
-        'limitation': (
-            'External-service lifecycle records are inconsistent and cannot be displayed safely.'
-        ),
+        'limitation': limitation,
     }
+    # The detail's attention count reads the same rows, so it is unavailable too.
+    assert detail.status_code == 200
+    section = detail.json()['section_summaries']['external_services']
+    assert (section['status'], section['needs_attention'], section['limitation']) == (
+        'unavailable',
+        0,
+        limitation,
+    )
 
 
 @pytest.mark.parametrize(
@@ -928,13 +938,8 @@ def test_external_wait_count_matches_the_named_pending_task_projection(
     detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers).json()
 
     waiting = detail['integration_summary']['waiting_external_services']
-    assert detail['work_summary']['external_wait_count'] == len(waiting) == 4
-    assert {item['status'] for item in waiting} == {
-        'prepared',
-        'accepted',
-        'retryable_failure',
-        'unknown_outcome',
-    }
+    assert detail['work_summary']['external_wait_count'] == len(waiting) == 3
+    assert {item['status'] for item in waiting} == {'prepared', 'accepted', 'unknown_outcome'}
 
 
 def test_staff_primary_action_pair_resolves_to_the_exact_non_blocked_action(
