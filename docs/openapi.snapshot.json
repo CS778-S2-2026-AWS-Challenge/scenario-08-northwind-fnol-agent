@@ -1470,16 +1470,6 @@
             "title": "Display Name",
             "type": "string"
           },
-          "policy_reference": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PolicyReference"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -1777,16 +1767,6 @@
           "display_name": {
             "title": "Display Name",
             "type": "string"
-          },
-          "policy_reference": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PolicyReference"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "resulting_claim_revision": {
             "title": "Resulting Claim Revision",
@@ -4462,16 +4442,6 @@
             "minLength": 1,
             "title": "Display Name",
             "type": "string"
-          },
-          "policy_reference": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PolicyReference"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "required": [
@@ -9613,33 +9583,6 @@
         "title": "PolicyFacts",
         "type": "object"
       },
-      "PolicyReference": {
-        "additionalProperties": false,
-        "description": "Bounded policy association; it is not a coverage decision or provider record.",
-        "properties": {
-          "policy_number": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Policy Number",
-            "type": "string"
-          },
-          "product_family": {
-            "enum": [
-              "motor",
-              "home",
-              "contents"
-            ],
-            "title": "Product Family",
-            "type": "string"
-          }
-        },
-        "required": [
-          "policy_number",
-          "product_family"
-        ],
-        "title": "PolicyReference",
-        "type": "object"
-      },
       "PolicyRetrievalRecord": {
         "additionalProperties": false,
         "properties": {
@@ -12442,16 +12385,6 @@
               }
             ],
             "title": "Display Name"
-          },
-          "policy_reference": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PolicyReference"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "title": "UpdateAssetRequest",

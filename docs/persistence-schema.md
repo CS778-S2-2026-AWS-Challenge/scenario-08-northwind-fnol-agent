@@ -67,7 +67,7 @@ records remain target contracts.
 | Staff account | local/runtime staff identity, salted password hash, display name, roles, active state, revision, and update time | `staff_id` |
 | Staff auth session | `ias_` session identity, hash of an opaque staff token, authenticated staff reference, revision, creation, expiry, revocation, and update timestamps | `session_id`, linked to `staff_id`; token lookup uses `token_hash` |
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
-| Asset | account-owned typed vehicle, property, or contents details, optional bounded policy association, revision, active state, and timestamps | `asset_id` (`ast_`), linked to `customer_id` |
+| Asset | account-owned typed vehicle, property, or contents details, revision, active state, and timestamps; Policy association is deferred until an owned `pol_` resource exists | `asset_id` (`ast_`), linked to `customer_id` |
 | Claim | Working Claim State, structured facts, independent attributes, lifecycle status, optional source-linked terminal disposition, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Claim asset snapshot | immutable approved asset details selected for one Claim revision, source asset/revision, provenance, and capture time | `snapshot_id` (`cas_`), linked to `claim_id`, `customer_id`, and `asset_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
@@ -217,7 +217,9 @@ the append-only audit collection through a bounded, filterable projection.
     using optimistic asset revision and create idempotency, without cross-customer discovery.
 42. Atomically select an active owned asset and persist the immutable Claim asset snapshot,
     proposed registered facts, resulting Claim revision, applied Branch Evaluation, and
-    idempotency response; a stale or missing asset leaves all records unchanged.
+    idempotency response. Revalidate owner, active state, revision, and copied details inside the
+    authoritative write. A changed Asset returns its current revision; an unavailable Asset is
+    concealed. Either result leaves all selection records unchanged.
 43. List Claim asset snapshots in stable `(captured_at, snapshot_id)` order after claimant
     ownership or Workbench staff authority has been established.
 44. Create, revise, list, mask, and retire account Identity Records and Payment Destinations by
@@ -242,12 +244,14 @@ the append-only audit collection through a bounded, filterable projection.
   Fixture uses one Claim mutation lock. No adapter may reconstruct a historical snapshot from
   the current asset.
 - Existing records require no backfill. Assets and snapshots are additive. A future provider
-  migration copies IDs, revisions, timestamps, lifecycle state, policy-safe fields, and
-  snapshots exactly, then verifies owner-scoped counts and snapshot hashes before cutover.
-- The later profile migration copies current `display_name` to `preferred_name` when non-empty,
-  leaves `legal_name` unset for claimant completion, and then derives compatibility
-  `display_name` from preferred then legal name. It never guesses date of birth, address,
-  identity, payment, policy, Participant, ContentsItem metadata, or Evidence associations.
+  migration copies IDs, revisions, timestamps, lifecycle state, and snapshots exactly, then
+  verifies owner-scoped counts and snapshot hashes before cutover. It must not infer a Policy
+  relationship from claimant text; that association requires an owned `pol_` record.
+- The proposed Profile migration is not executable while #918 remains open. Existing Profiles
+  remain valid under the current contract; a later approved migration must define the
+  transitional validity state before it can make `legal_name` required. It must never guess date
+  of birth, address, identity, payment, policy, Participant, ContentsItem metadata, or Evidence
+  associations.
 - Protected values migrate through the approved encryption/tokenisation adapter; raw values,
   provider credentials, and protected references never enter migration logs or verification
   reports. Failed verification leaves the old source authoritative and performs no cutover.

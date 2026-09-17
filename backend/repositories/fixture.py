@@ -67,6 +67,10 @@ from backend.domain.staff_agent_tools import (
     staff_session_search_matches,
 )
 from backend.domain.staff_identity import StaffPresenceRecord
+from backend.repositories.assets import (
+    AssetSelectionRevisionConflictError,
+    AssetSelectionUnavailableError,
+)
 from backend.repositories.protocols import (
     DemoSeedConflict,
     IdempotencyConflict,
@@ -196,12 +200,12 @@ class FixtureRepository(PersistenceRepository):
             self._validate_branch_evaluation(claim, branch_evaluation)
             asset = self._assets.get(snapshot.asset_id)
             lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            if asset is None or asset.customer_id != claim.customer_id or not asset.active:
+                raise AssetSelectionUnavailableError(snapshot.asset_id)
+            if asset.revision != snapshot.asset_revision:
+                raise AssetSelectionRevisionConflictError(asset.revision)
             if (
-                asset is None
-                or asset.customer_id != claim.customer_id
-                or not asset.active
-                or asset.revision != snapshot.asset_revision
-                or snapshot.customer_id != claim.customer_id
+                snapshot.customer_id != claim.customer_id
                 or snapshot.claim_id != claim.claim_id
                 or snapshot.resulting_claim_revision != claim.revision
                 or idempotency.actor_id != claim.customer_id

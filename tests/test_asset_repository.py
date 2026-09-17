@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import mongomock
@@ -17,6 +18,10 @@ from backend.domain.models import (
     SessionRecord,
     SessionStatus,
     WorkingClaim,
+)
+from backend.repositories.assets import (
+    AssetSelectionRevisionConflictError,
+    AssetSelectionUnavailableError,
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
@@ -227,11 +232,39 @@ def test_mongodb_rejects_stale_asset_during_selection_without_partial_claim_writ
         created_at=now,
     )
 
-    with pytest.raises(KeyError):
+    with pytest.raises(AssetSelectionRevisionConflictError) as conflict:
         repository.save_asset_selection(updated_claim, 1, stale_snapshot, idempotency, evaluation)
+    assert conflict.value.current_revision == asset.revision
 
     assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
     assert repository.list_claim_asset_snapshots(claim.claim_id, claim.customer_id) == ([], False)
     assert (
         repository.find_idempotency(claim.customer_id, idempotency.route, idempotency.key) is None
     )
+
+    repository.update_asset(
+        asset.model_copy(update={'revision': 2, 'active': False}),
+        expected_revision=1,
+    )
+    unavailable_snapshot = stale_snapshot.model_copy(
+        update={
+            'snapshot_id': 'cas_00000000000000000003',
+            'asset_revision': 2,
+            'source_refs': ['asset:ast_00000000000000000001:revision:2'],
+        }
+    )
+    unavailable_idempotency = replace(
+        idempotency,
+        key='atomic-select-unavailable',
+        request_fingerprint='atomic-select-unavailable-fingerprint',
+    )
+    with pytest.raises(AssetSelectionUnavailableError):
+        repository.save_asset_selection(
+            updated_claim,
+            1,
+            unavailable_snapshot,
+            unavailable_idempotency,
+            evaluation,
+        )
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+    assert repository.list_claim_asset_snapshots(claim.claim_id, claim.customer_id) == ([], False)

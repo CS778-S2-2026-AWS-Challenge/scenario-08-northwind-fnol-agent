@@ -3857,22 +3857,29 @@ or Claim outside the authenticated customer boundary.
 | `POST /api/v1/account/assets` | Create a typed vehicle, property, or contents asset. Requires `Idempotency-Key`; returns `201`. |
 | `GET /api/v1/account/assets` | Cursor-page active owned assets; `include_inactive=true` includes soft-deactivated records. |
 | `GET /api/v1/account/assets/{asset_id}` | Read one owned claimant-safe asset projection. |
-| `PATCH /api/v1/account/assets/{asset_id}` | Update approved details/policy reference with numeric `If-Match`; increments asset revision. |
+| `PATCH /api/v1/account/assets/{asset_id}` | Update approved asset details with numeric `If-Match`; increments asset revision. |
 | `DELETE /api/v1/account/assets/{asset_id}` | Soft-deactivate with numeric `If-Match`; returns `204`. |
 | `POST /api/v1/claims/{claim_id}/asset-selections` | Select one active owned asset with `Idempotency-Key` and Claim `If-Match`; atomically writes proposed facts, immutable snapshot, Branch Evaluation, Claim revision, and retry result. |
 | `GET /api/v1/claims/{claim_id}/asset-snapshots` | Cursor-page claimant-safe immutable snapshots for an owned Claim. |
 | `GET /api/v1/workbench/claims/{claim_id}/asset-snapshots` | Cursor-page the same approved snapshot fields for authorised staff. |
 
 Asset identifiers use `ast_`; snapshots use `cas_`. Asset records contain `asset_type`,
-`display_name`, matching typed `details`, optional bounded `policy_reference`, `revision`,
-`active`, and timestamps. The account-safe projection omits `customer_id` and all physical
-storage/provider metadata. A policy reference contains only `policy_number` and matching
-`product_family`; it is not a coverage result.
+`display_name`, matching typed `details`, `revision`, `active`, and timestamps. The account-safe
+projection omits `customer_id` and all physical storage/provider metadata. Assets do not accept
+claimant-supplied policy text. A durable Policy association requires the future account-owned
+`pol_` Policy Summary contract and ownership/status validation; it is not implemented by these
+routes.
 
 Selection returns `claim_id`, resulting `revision`, the exact `proposed_fields`, and the
 immutable snapshot. It never silently confirms a field. A later asset update/deactivation does
-not alter a snapshot. Reusing an idempotency key with another payload returns `409`; stale
-asset or Claim revisions return `409` with the current revision where available.
+not alter a snapshot. The selection idempotency identity includes the Claim ID, request payload,
+and accepted numeric `If-Match` revision. An exact retry replays the stored response even after
+the Claim advances; changing the Asset ID or `If-Match` while reusing the key returns `409
+IDEMPOTENCY_CONFLICT`. Missing or malformed `If-Match` returns `409 REVISION_REQUIRED` before a
+replay lookup. If an Asset changes during the authoritative write, the API returns `409
+REVISION_CONFLICT` with its current revision. If it becomes inactive, is removed, or is outside
+the owner boundary, the API returns the same concealed `404 RESOURCE_NOT_FOUND`. These outcomes
+leave the Claim revision, snapshot, Branch Evaluation, and idempotency result unchanged.
 
 ### Target child-resource boundaries
 

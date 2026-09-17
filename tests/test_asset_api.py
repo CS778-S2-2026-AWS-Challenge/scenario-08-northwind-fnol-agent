@@ -1,7 +1,13 @@
+from dataclasses import replace
 from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
+
+from backend.domain.assets import ClaimAssetSnapshot
+from backend.domain.models import BranchEvaluationRecord, WorkingClaim
+from backend.repositories.fixture import FixtureRepository
+from backend.repositories.protocols import IdempotencyRecord
 
 
 def _login(client: TestClient, email: str, password: str) -> dict[str, str]:
@@ -24,10 +30,6 @@ def _create_asset(client: TestClient, headers: dict[str, str]) -> dict[str, Any]
                 'make': 'Example Motors',
                 'model': 'Model One',
                 'year': 2024,
-            },
-            'policy_reference': {
-                'policy_number': 'POL-SYN-001',
-                'product_family': 'motor',
             },
         },
     )
@@ -65,10 +67,6 @@ def test_account_assets_are_owned_paginated_revisioned_and_soft_deleted(
                 'make': 'Example Motors',
                 'model': 'Model One',
                 'year': 2024,
-            },
-            'policy_reference': {
-                'policy_number': 'POL-SYN-001',
-                'product_family': 'motor',
             },
         },
     )
@@ -163,13 +161,43 @@ def test_asset_selection_prefills_proposals_and_snapshot_remains_immutable(
     }
     selected = client.post(route, headers=selection_headers, json={'asset_id': asset['asset_id']})
     replay = client.post(route, headers=selection_headers, json={'asset_id': asset['asset_id']})
+    changed_revision = client.post(
+        route,
+        headers={**selection_headers, 'If-Match': str(claim['revision'] + 1)},
+        json={'asset_id': asset['asset_id']},
+    )
+    changed_asset = client.post(
+        route,
+        headers=selection_headers,
+        json={'asset_id': 'ast_00000000000000000000'},
+    )
+    missing_if_match = client.post(
+        route,
+        headers={
+            **owner,
+            'Idempotency-Key': selection_headers['Idempotency-Key'],
+        },
+        json={'asset_id': asset['asset_id']},
+    )
+    malformed_if_match = client.post(
+        route,
+        headers={**selection_headers, 'If-Match': 'not-a-revision'},
+        json={'asset_id': asset['asset_id']},
+    )
 
     assert selected.status_code == 201, selected.text
     assert replay.status_code == 201
     assert replay.json() == selected.json()
+    assert changed_revision.status_code == 409
+    assert changed_revision.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert changed_asset.status_code == 409
+    assert changed_asset.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert missing_if_match.status_code == 409
+    assert missing_if_match.json()['error']['code'] == 'REVISION_REQUIRED'
+    assert malformed_if_match.status_code == 409
+    assert malformed_if_match.json()['error']['code'] == 'REVISION_REQUIRED'
     assert set(selected.json()['proposed_fields']) == {
         'claim.product_family',
-        'policy.policy_number',
         'vehicle.registration',
     }
     assert all(
@@ -183,10 +211,7 @@ def test_asset_selection_prefills_proposals_and_snapshot_remains_immutable(
     changed = client.patch(
         f'/api/v1/account/assets/{asset["asset_id"]}',
         headers={**owner, 'If-Match': '1'},
-        json={
-            'details': {'registration': 'NEW456'},
-            'policy_reference': None,
-        },
+        json={'details': {'registration': 'NEW456'}},
     )
     snapshots = client.get(f'/api/v1/claims/{claim["claim_id"]}/asset-snapshots', headers=owner)
     staff_snapshots = client.get(
@@ -198,13 +223,13 @@ def test_asset_selection_prefills_proposals_and_snapshot_remains_immutable(
     assert changed.json()['details']['registration'] == 'NEW456'
     assert snapshots.status_code == 200
     assert snapshots.json()['items'][0]['details']['registration'] == 'SYN123'
-    assert snapshots.json()['items'][0]['policy_reference']['policy_number'] == 'POL-SYN-001'
+    assert 'policy_reference' not in snapshots.json()['items'][0]
     assert staff_snapshots.status_code == 200
     assert staff_snapshots.json()['items'] == snapshots.json()['items']
     assert 'customer_id' not in snapshots.text
 
 
-def test_asset_contract_rejects_type_policy_mismatch_and_anonymous_account_access(
+def test_asset_contract_rejects_unapproved_policy_fields_and_anonymous_account_access(
     client: TestClient,
 ) -> None:
     owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
@@ -215,10 +240,7 @@ def test_asset_contract_rejects_type_policy_mismatch_and_anonymous_account_acces
             'asset_type': 'vehicle',
             'display_name': 'Invalid asset',
             'details': {'registration': 'SYN123'},
-            'policy_reference': {
-                'policy_number': 'POL-HOME-001',
-                'product_family': 'home',
-            },
+            'policy_reference': {'policy_id': 'pol_unverified'},
         },
     )
     fixed_token = client.get(
@@ -331,3 +353,131 @@ def test_asset_selection_errors_are_concealed_and_revision_safe(client: TestClie
     assert missing_snapshots.status_code == 404
     assert missing_update.status_code == 404
     assert missing_delete.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ('race_mode', 'expected_status'),
+    [('revision', 409), ('unavailable', 404)],
+)
+def test_asset_selection_race_is_typed_and_leaves_no_partial_write(
+    client: TestClient,
+    repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+    race_mode: str,
+    expected_status: int,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    asset = _create_asset(client, owner)
+    claim = client.post(
+        '/api/v1/claims',
+        headers={**owner, 'Idempotency-Key': f'race-claim-{race_mode}'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ'},
+    ).json()['claim']
+    route = f'/api/v1/claims/{claim["claim_id"]}/asset-selections'
+    original_save = repository.save_asset_selection
+    branch_count = len(repository._branch_evaluations)
+
+    def race_save(
+        updated_claim: WorkingClaim,
+        expected_revision: int,
+        snapshot: ClaimAssetSnapshot,
+        idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord,
+    ) -> None:
+        current = repository.get_asset(snapshot.asset_id, updated_claim.customer_id)
+        assert current is not None
+        repository.update_asset(
+            current.model_copy(
+                update={
+                    'revision': current.revision + 1,
+                    'active': race_mode != 'unavailable',
+                }
+            ),
+            current.revision,
+        )
+        original_save(
+            updated_claim,
+            expected_revision,
+            snapshot,
+            idempotency,
+            branch_evaluation,
+        )
+
+    monkeypatch.setattr(repository, 'save_asset_selection', race_save)
+    response = client.post(
+        route,
+        headers={
+            **owner,
+            'Idempotency-Key': f'race-selection-{race_mode}',
+            'If-Match': str(claim['revision']),
+        },
+        json={'asset_id': asset['asset_id']},
+    )
+
+    assert response.status_code == expected_status
+    assert response.json()['error']['code'] == (
+        'REVISION_CONFLICT' if race_mode == 'revision' else 'RESOURCE_NOT_FOUND'
+    )
+    if race_mode == 'revision':
+        assert response.json()['error']['current_revision'] == asset['revision'] + 1
+    stored_claim = repository.get_claim_internal(claim['claim_id'])
+    assert stored_claim is not None
+    assert stored_claim.revision == claim['revision']
+    assert repository.list_claim_asset_snapshots(claim['claim_id'], stored_claim.customer_id) == (
+        [],
+        False,
+    )
+    assert len(repository._branch_evaluations) == branch_count
+    assert (
+        repository.find_idempotency(stored_claim.customer_id, route, f'race-selection-{race_mode}')
+        is None
+    )
+
+
+def test_asset_selection_maps_concurrent_idempotency_conflict(
+    client: TestClient,
+    repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    asset = _create_asset(client, owner)
+    claim = client.post(
+        '/api/v1/claims',
+        headers={**owner, 'Idempotency-Key': 'idempotency-race-claim'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ'},
+    ).json()['claim']
+    route = f'/api/v1/claims/{claim["claim_id"]}/asset-selections'
+    original_save = repository.save_asset_selection
+
+    def conflicting_save(
+        updated_claim: WorkingClaim,
+        expected_revision: int,
+        snapshot: ClaimAssetSnapshot,
+        idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord,
+    ) -> None:
+        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+        repository._idempotency[lookup] = replace(
+            idempotency, request_fingerprint='concurrent-different-request'
+        )
+        original_save(
+            updated_claim,
+            expected_revision,
+            snapshot,
+            idempotency,
+            branch_evaluation,
+        )
+
+    monkeypatch.setattr(repository, 'save_asset_selection', conflicting_save)
+    response = client.post(
+        route,
+        headers={
+            **owner,
+            'Idempotency-Key': 'idempotency-race-selection',
+            'If-Match': str(claim['revision']),
+        },
+        json={'asset_id': asset['asset_id']},
+    )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'

@@ -32,7 +32,11 @@ from backend.domain.models import (
     ProposedFormChange,
     StructuredFormField,
 )
-from backend.repositories.assets import AssetRepository
+from backend.repositories.assets import (
+    AssetRepository,
+    AssetSelectionRevisionConflictError,
+    AssetSelectionUnavailableError,
+)
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -64,6 +68,22 @@ def _revision_conflict(current_revision: int) -> ApiError:
         status_code=409,
         code='REVISION_CONFLICT',
         message='The resource changed after this page was loaded.',
+        retryable=True,
+        current_revision=current_revision,
+    )
+
+
+def _asset_revision_conflict(current_revision: int) -> ApiError:
+    return ApiError(
+        status_code=409,
+        code='REVISION_CONFLICT',
+        message='The selected asset changed after it was loaded.',
+        details=[
+            ErrorDetail(
+                field='asset_id',
+                reason='Reload the asset and retry with its current details.',
+            )
+        ],
         retryable=True,
         current_revision=current_revision,
     )
@@ -213,8 +233,6 @@ def _prefill_values(asset: AssetRecord) -> dict[str, object]:
     elif asset.asset_type is AssetType.PROPERTY:
         property_details = cast(PropertyAssetDetails, asset.details)
         values['property.address'] = property_details.address
-    if asset.policy_reference is not None:
-        values['policy.policy_number'] = asset.policy_reference.policy_number
     return values
 
 
@@ -228,15 +246,21 @@ def select_claim_asset(
     if_match: str | None,
 ) -> ClaimAssetSelectionResponse:
     key = require_idempotency_key(idempotency_key)
+    expected_revision = parse_if_match(if_match)
     route = f'/api/v1/claims/{claim_id}/asset-selections'
-    fingerprint = request_fingerprint(payload.model_dump(mode='json'))
+    fingerprint = request_fingerprint(
+        {
+            'claim_id': claim_id,
+            'payload': payload.model_dump(mode='json'),
+            'expected_revision': expected_revision,
+        }
+    )
     replay = claim_repository.find_idempotency(principal.subject, route, key)
     if replay is not None:
         if replay.request_fingerprint != fingerprint or replay.response_payload is None:
             raise _idempotency_conflict()
         return ClaimAssetSelectionResponse.model_validate(replay.response_payload)
 
-    expected_revision = parse_if_match(if_match)
     claim = claim_repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _not_found('claim')
@@ -293,7 +317,6 @@ def select_claim_asset(
         asset_type=asset.asset_type,
         display_name=asset.display_name,
         details=asset.details,
-        policy_reference=asset.policy_reference,
         captured_at=timestamp,
         resulting_claim_revision=updated_claim.revision,
         source_refs=[source_ref, f'claim:{claim.claim_id}:revision:{updated_claim.revision}'],
@@ -330,6 +353,10 @@ def select_claim_asset(
         )
     except RevisionConflict as error:
         raise _revision_conflict(error.current_revision) from error
+    except AssetSelectionRevisionConflictError as error:
+        raise _asset_revision_conflict(error.current_revision) from error
+    except AssetSelectionUnavailableError as error:
+        raise _not_found('asset') from error
     except IdempotencyConflict as error:
         replay = claim_repository.find_idempotency(principal.subject, route, key)
         if (

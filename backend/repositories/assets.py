@@ -4,7 +4,19 @@ from typing import Protocol
 
 from backend.domain.assets import AssetRecord, ClaimAssetSnapshot
 from backend.domain.models import BranchEvaluationRecord, WorkingClaim
-from backend.repositories.protocols import IdempotencyRecord
+from backend.repositories.protocols import IdempotencyRecord, RepositoryConflict
+
+
+class AssetSelectionUnavailableError(RepositoryConflict):
+    """The selected asset is unavailable inside the authoritative write."""
+
+
+class AssetSelectionRevisionConflictError(RepositoryConflict):
+    """The selected asset changed before the authoritative write completed."""
+
+    def __init__(self, current_revision: int) -> None:
+        super().__init__(f'Current asset revision is {current_revision}.')
+        self.current_revision = current_revision
 
 
 class AssetRepository(Protocol):

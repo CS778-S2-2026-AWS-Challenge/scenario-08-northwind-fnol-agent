@@ -92,6 +92,10 @@ from backend.domain.staff_agent_tools import (
     build_staff_claim_search_projection,
 )
 from backend.domain.staff_identity import StaffPresenceRecord
+from backend.repositories.assets import (
+    AssetSelectionRevisionConflictError,
+    AssetSelectionUnavailableError,
+)
 from backend.repositories.protocols import (
     DemoSeedConflict,
     IdempotencyConflict,
@@ -477,14 +481,14 @@ class MongoDBRepository:
                 customer_id=claim.customer_id,
                 session=mongo_session,
             )
+            if asset is None or not asset.active:
+                raise AssetSelectionUnavailableError(snapshot.asset_id)
+            if asset.revision != snapshot.asset_revision:
+                raise AssetSelectionRevisionConflictError(asset.revision)
             if (
-                asset is None
-                or not asset.active
-                or asset.revision != snapshot.asset_revision
-                or asset.asset_type != snapshot.asset_type
+                asset.asset_type != snapshot.asset_type
                 or asset.display_name != snapshot.display_name
                 or asset.details != snapshot.details
-                or asset.policy_reference != snapshot.policy_reference
             ):
                 raise KeyError(snapshot.asset_id)
             self._save_child_mutation(

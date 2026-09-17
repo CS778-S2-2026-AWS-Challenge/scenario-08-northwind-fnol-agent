@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import Field, StringConstraints, model_validator
 
@@ -15,13 +15,6 @@ class AssetType(str, Enum):
     VEHICLE = 'vehicle'
     PROPERTY = 'property'
     CONTENTS = 'contents'
-
-
-class PolicyReference(ContractModel):
-    """Bounded policy association; it is not a coverage decision or provider record."""
-
-    policy_number: ShortText
-    product_family: Literal['motor', 'home', 'contents']
 
 
 class VehicleAssetDetails(ContractModel):
@@ -55,7 +48,6 @@ class AssetRecord(ContractModel):
     asset_type: AssetType
     display_name: ShortText
     details: AssetDetails
-    policy_reference: PolicyReference | None = None
     revision: int = Field(default=1, ge=1)
     active: bool = True
     created_at: datetime
@@ -70,16 +62,6 @@ class AssetRecord(ContractModel):
         }[self.asset_type]
         if not isinstance(self.details, expected):
             raise ValueError('Asset details must match asset_type.')
-        expected_family = {
-            AssetType.VEHICLE: 'motor',
-            AssetType.PROPERTY: 'home',
-            AssetType.CONTENTS: 'contents',
-        }[self.asset_type]
-        if (
-            self.policy_reference is not None
-            and self.policy_reference.product_family != expected_family
-        ):
-            raise ValueError('Policy product_family must match asset_type.')
         if self.updated_at < self.created_at:
             raise ValueError('An asset cannot be updated before it is created.')
         return self
@@ -90,7 +72,6 @@ class AssetProjection(ContractModel):
     asset_type: AssetType
     display_name: str
     details: AssetDetails
-    policy_reference: PolicyReference | None = None
     revision: int
     active: bool
     created_at: datetime
@@ -101,7 +82,6 @@ class CreateAssetRequest(ContractModel):
     asset_type: AssetType
     display_name: ShortText
     details: AssetDetails
-    policy_reference: PolicyReference | None = None
 
     @model_validator(mode='after')
     def validate_request(self) -> 'CreateAssetRequest':
@@ -121,7 +101,6 @@ class CreateAssetRequest(ContractModel):
 class UpdateAssetRequest(ContractModel):
     display_name: ShortText | None = None
     details: AssetDetails | None = None
-    policy_reference: PolicyReference | None = None
 
     @model_validator(mode='after')
     def require_change(self) -> 'UpdateAssetRequest':
@@ -144,7 +123,6 @@ class ClaimAssetSnapshot(ContractModel):
     asset_type: AssetType
     display_name: ShortText
     details: AssetDetails
-    policy_reference: PolicyReference | None = None
     captured_at: datetime
     resulting_claim_revision: int = Field(ge=1)
     source_refs: list[str] = Field(min_length=1, max_length=10)
@@ -158,7 +136,6 @@ class ClaimAssetSnapshotProjection(ContractModel):
     asset_type: AssetType
     display_name: str
     details: AssetDetails
-    policy_reference: PolicyReference | None = None
     captured_at: datetime
     resulting_claim_revision: int
     source_refs: list[str]
