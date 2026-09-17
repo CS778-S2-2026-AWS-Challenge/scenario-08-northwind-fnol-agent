@@ -1,12 +1,15 @@
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import mongomock
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
 from backend.domain.audit import AuditSubject, AuditSubjectType
+from backend.domain.policies import PolicySummaryRecord
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
 from backend.services.agent import ControlledAgent
@@ -57,6 +60,92 @@ def _create_vehicle(
     )
     assert response.status_code == 201, response.text
     return cast(dict[str, Any], response.json())
+
+
+def test_policy_summary_contract_rejects_inverted_timestamps() -> None:
+    created_at = datetime.now(UTC)
+
+    with pytest.raises(ValidationError, match='cannot be updated before it is created'):
+        PolicySummaryRecord(
+            policy_id='pol_0123456789abcdef0123',
+            customer_id='customer-one',
+            policy_number='NW-MOTOR-10001',
+            display_name='Synthetic motor policy',
+            product_family='motor',
+            created_at=created_at,
+            updated_at=created_at - timedelta(seconds=1),
+        )
+
+
+def test_mongodb_policy_summary_lifecycle_matches_the_http_contract() -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'policy_summary_lifecycle')
+    repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        repository,
+        ControlledAgent(),
+    )
+
+    with TestClient(app) as test_client:
+        owner = _login(test_client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        first = _create_policy(test_client, owner, key='mongo-policy-one')
+        second = _create_policy(
+            test_client,
+            owner,
+            key='mongo-policy-two',
+            number='NW-HOME-20001',
+            family='home',
+        )
+        fetched = test_client.get(
+            f'/api/v1/account/policies/{first["policy_id"]}',
+            headers=owner,
+        )
+        empty_patch = test_client.patch(
+            f'/api/v1/account/policies/{first["policy_id"]}',
+            headers={**owner, 'If-Match': '1'},
+            json={},
+        )
+        updated = test_client.patch(
+            f'/api/v1/account/policies/{first["policy_id"]}',
+            headers={**owner, 'If-Match': '1'},
+            json={'display_name': 'Updated Mongo policy'},
+        )
+        first_page = test_client.get('/api/v1/account/policies?limit=1', headers=owner)
+        second_page = test_client.get(
+            '/api/v1/account/policies',
+            headers=owner,
+            params={'limit': 1, 'cursor': first_page.json()['page']['next_cursor']},
+        )
+        removed = test_client.delete(
+            f'/api/v1/account/policies/{first["policy_id"]}',
+            headers={**owner, 'If-Match': '2'},
+        )
+        repeated = test_client.delete(
+            f'/api/v1/account/policies/{first["policy_id"]}',
+            headers={**owner, 'If-Match': '3'},
+        )
+        active = test_client.get('/api/v1/account/policies', headers=owner)
+        all_records = test_client.get(
+            '/api/v1/account/policies?include_inactive=true',
+            headers=owner,
+        )
+        missing = test_client.get(
+            '/api/v1/account/policies/pol_ffffffffffffffffffff',
+            headers=owner,
+        )
+
+    assert fetched.status_code == 200
+    assert fetched.json() == first
+    assert empty_patch.status_code == 422
+    assert updated.status_code == 200
+    assert updated.json()['revision'] == 2
+    assert first_page.json()['page']['next_cursor'] is not None
+    assert second_page.json()['page']['next_cursor'] is None
+    assert removed.status_code == 204
+    assert repeated.status_code == 204
+    assert [item['policy_id'] for item in active.json()['items']] == [second['policy_id']]
+    assert len(all_records.json()['items']) == 2
+    assert missing.status_code == 404
 
 
 def test_policy_summaries_are_owned_revisioned_paginated_and_audited(
@@ -321,6 +410,136 @@ def test_policy_revision_race_rejects_asset_create_without_partial_write(
         )
         is None
     )
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
+def test_policy_update_revision_race_preserves_the_newer_record(adapter: str) -> None:
+    repository: FixtureRepository | MongoDBRepository
+    if adapter == 'fixture':
+        repository = FixtureRepository()
+    else:
+        mongo = MongoDBRepository(mongomock.MongoClient(), f'policy_update_race_{adapter}')
+        mongo._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+        repository = mongo
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        repository,
+        ControlledAgent(),
+    )
+
+    with TestClient(app) as test_client:
+        owner = _login(test_client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        policy = _create_policy(test_client, owner, key=f'update-race-policy-{adapter}')
+        original_update = repository.update_policy_summary
+
+        def racing_update(*args: Any, **kwargs: Any) -> None:
+            if isinstance(repository, FixtureRepository):
+                stored = repository._policy_summaries[policy['policy_id']]
+                repository._policy_summaries[policy['policy_id']] = stored.model_copy(
+                    update={'revision': stored.revision + 1}
+                )
+            else:
+                repository._collection.update_one(
+                    {
+                        '_id': repository._record_id('policy_summary', policy['policy_id']),
+                        'record_type': 'policy_summary',
+                    },
+                    {'$inc': {'revision': 1}},
+                )
+            original_update(*args, **kwargs)
+
+        repository.update_policy_summary = racing_update  # type: ignore[method-assign]
+        response = test_client.patch(
+            f'/api/v1/account/policies/{policy["policy_id"]}',
+            headers={**owner, 'If-Match': '1'},
+            json={'display_name': 'Must not overwrite concurrent update'},
+        )
+        stored = test_client.get(
+            f'/api/v1/account/policies/{policy["policy_id"]}',
+            headers=owner,
+        )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert response.json()['error']['current_revision'] == 2
+    assert stored.status_code == 200
+    assert stored.json()['revision'] == 2
+    assert stored.json()['display_name'] == policy['display_name']
+    events = repository.list_audit_events_internal(
+        AuditSubject(
+            subject_type=AuditSubjectType.POLICY,
+            subject_id=policy['policy_id'],
+        )
+    )
+    assert len(events) == 1
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
+def test_asset_policy_reassociation_race_preserves_the_existing_asset(adapter: str) -> None:
+    repository: FixtureRepository | MongoDBRepository
+    if adapter == 'fixture':
+        repository = FixtureRepository()
+    else:
+        mongo = MongoDBRepository(mongomock.MongoClient(), f'asset_policy_update_race_{adapter}')
+        mongo._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+        repository = mongo
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        repository,
+        ControlledAgent(),
+    )
+
+    with TestClient(app) as test_client:
+        owner = _login(test_client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        original_policy = _create_policy(
+            test_client,
+            owner,
+            key=f'original-asset-policy-{adapter}',
+        )
+        replacement_policy = _create_policy(
+            test_client,
+            owner,
+            key=f'replacement-asset-policy-{adapter}',
+            number='NW-MOTOR-10002',
+        )
+        asset = _create_vehicle(test_client, owner, original_policy['policy_id'])
+        original_update = repository.update_asset
+
+        def racing_update(*args: Any, **kwargs: Any) -> None:
+            if isinstance(repository, FixtureRepository):
+                stored = repository._policy_summaries[replacement_policy['policy_id']]
+                repository._policy_summaries[replacement_policy['policy_id']] = stored.model_copy(
+                    update={'revision': stored.revision + 1}
+                )
+            else:
+                repository._collection.update_one(
+                    {
+                        '_id': repository._record_id(
+                            'policy_summary', replacement_policy['policy_id']
+                        ),
+                        'record_type': 'policy_summary',
+                    },
+                    {'$inc': {'revision': 1}},
+                )
+            original_update(*args, **kwargs)
+
+        repository.update_asset = racing_update  # type: ignore[method-assign]
+        response = test_client.patch(
+            f'/api/v1/account/assets/{asset["asset_id"]}',
+            headers={**owner, 'If-Match': '1'},
+            json={'policy_id': replacement_policy['policy_id']},
+        )
+        stored = test_client.get(
+            f'/api/v1/account/assets/{asset["asset_id"]}',
+            headers=owner,
+        )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert response.json()['error']['current_revision'] == 2
+    assert stored.status_code == 200
+    assert stored.json()['revision'] == 1
+    assert stored.json()['policy_id'] == original_policy['policy_id']
 
 
 @pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
