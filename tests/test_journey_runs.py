@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from journey_runs import motor_collision
 from journey_runs.__main__ import main as journey_main
+from journey_runs.assessor_failures import FAILURE_CASES, run_assessor_failure
 from journey_runs.engine import REPOSITORY_ROOT, PackMaterial
 from journey_runs.household import (
     CONTENTS,
@@ -147,6 +148,44 @@ def test_every_not_applicable_authority_quotes_a_real_document() -> None:
         text = ' '.join((REPOSITORY_ROOT / document).read_text(encoding='utf-8').split())
         for passage in passages:
             assert ' '.join(passage.split()) in text, (document, passage)
+
+
+_FAILURE_SEAMS = {
+    'failure.responsible_party',
+    'failure.staff_can_find_work',
+    'failure.staff_has_a_recovery_action',
+    'failure.request_matches_resend',
+}
+
+
+@pytest.mark.parametrize(
+    ('case_id', 'result_class', 'defect_refs'),
+    [
+        ('retryable-unavailable', ResultClass.PARTIAL, {'#934'}),
+        ('terminal-access-denied', ResultClass.PARTIAL, set()),
+        ('terminal-not-required', ResultClass.PARTIAL, set()),
+        ('unknown-outcome', ResultClass.FIXTURE_ONLY, set()),
+        ('interrupted-dispatch', ResultClass.FIXTURE_ONLY, set()),
+    ],
+)
+def test_an_assessor_failure_recovers_only_through_a_projected_action(
+    case_id: str, result_class: ResultClass, defect_refs: set[str]
+) -> None:
+    case = FAILURE_CASES[case_id]
+    record = run_assessor_failure(case, head='test')
+
+    assert JourneyRunRecord.model_validate_json(record.model_dump_json()) == record
+    assert all(check.holds for check in record.visibility_checks)
+    # Every recovery step went through an offered action; a refused one would not succeed.
+    assert {step.outcome for step in record.steps} == {StepOutcome.SUCCEEDED}
+    route = next(step for step in record.steps if step.name == 'route the assessor')
+    assert route.http_status == case.route_status
+    assert route.detail is not None and route.detail.startswith('Fixture oracle passed')
+    assert {check.seam for check in record.seam_checks} >= _FAILURE_SEAMS
+    # A disagreement nobody has reported must fail here, so it reaches its owner.
+    assert [check.seam for check in record.seam_checks if check.defect_ref == 'untracked'] == []
+    assert {check.defect_ref for check in record.seam_checks if check.defect_ref} == defect_refs
+    assert record.result_class is result_class
 
 
 def _assert_household_run(run: HouseholdRun, scenario: HouseholdScenario) -> None:
