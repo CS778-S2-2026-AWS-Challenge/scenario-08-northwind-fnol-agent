@@ -729,9 +729,12 @@ def test_subscriptions_before_during_and_after_gap_recovery_have_closed_semantic
 
         source.release_recovery.set()
         deadline = monotonic() + 1.0
-        while dispatcher.state is not RealtimeDispatcherState.READY and monotonic() < deadline:
+        while (
+            cast(RealtimeDispatcherState, dispatcher.state) is not RealtimeDispatcherState.READY
+            and monotonic() < deadline
+        ):
             sleep(0.01)
-        assert dispatcher.state is RealtimeDispatcherState.READY
+        assert cast(RealtimeDispatcherState, dispatcher.state) is RealtimeDispatcherState.READY
 
         after_recovery = dispatcher.subscribe(
             RealtimeScope(RealtimeAudience.STAFF, 'stf_after_recovery')
