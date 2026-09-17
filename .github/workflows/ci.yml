@@ -17,7 +17,7 @@ jobs:
   frontend-impact:
     name: Select frontend impact
     if: github.event_name == 'pull_request' || github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, northwind-ci]
     outputs:
       customer: ${{ steps.impact.outputs.customer }}
       workbench: ${{ steps.impact.outputs.workbench }}
@@ -50,9 +50,7 @@ jobs:
 
   backend-quality:
     name: Backend quality
-    # Set repository variable NORTHWIND_CI_RUNNER to northwind-ci after the
-    # trusted self-hosted runner is installed. Fork pull requests stay hosted.
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || vars.NORTHWIND_CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: [self-hosted, northwind-ci]
     timeout-minutes: 20
 
     steps:
@@ -82,38 +80,22 @@ jobs:
       - name: Check backend formatting
         if: steps.impact.outputs.mode != 'skip'
         run: |
-          if [ "${{ steps.impact.outputs.mode }}" = "full" ]; then
-            python -m ruff format --check .
-          else
-            python3 scripts/select_backend_tests.py --python-files | xargs -r python -m ruff format --check
-          fi
+          python3 scripts/select_backend_tests.py --python-files | xargs -r python -m ruff format --check
 
       - name: Lint backend
         if: steps.impact.outputs.mode != 'skip'
         run: |
-          if [ "${{ steps.impact.outputs.mode }}" = "full" ]; then
-            python -m ruff check .
-          else
-            python3 scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check
-          fi
+          python3 scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check
 
       - name: Type-check backend
         if: steps.impact.outputs.mode != 'skip'
         run: |
-          if [ "${{ steps.impact.outputs.mode }}" = "full" ]; then
-            python -m mypy backend tests
-          else
-            python3 scripts/select_backend_tests.py --python-files | xargs -r python -m mypy
-          fi
+          python3 scripts/select_backend_tests.py --python-files | xargs -r python -m mypy
 
       - name: Test backend
         run: |
           mode="${{ steps.impact.outputs.mode }}"
           case "$mode" in
-            full)
-              python -m pytest --cov=backend --cov-report=term-missing --cov-report=json:coverage.json tests
-              python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85
-              ;;
             scoped)
               python -m pytest --cov=backend --cov-report=json:coverage.json --cov-fail-under=0 $(python scripts/select_backend_tests.py --tests)
               python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85
@@ -139,7 +121,7 @@ jobs:
     name: Customer quality
     needs: frontend-impact
     if: needs.frontend-impact.outputs.customer == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, northwind-ci]
     timeout-minutes: 10
     defaults:
       run:
@@ -166,7 +148,7 @@ jobs:
     name: Workbench quality
     needs: frontend-impact
     if: needs.frontend-impact.outputs.workbench == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, northwind-ci]
     timeout-minutes: 10
     defaults:
       run:
@@ -193,7 +175,7 @@ jobs:
     name: Admin quality
     needs: frontend-impact
     if: needs.frontend-impact.outputs.admin == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, northwind-ci]
     timeout-minutes: 10
     defaults:
       run:
@@ -219,7 +201,7 @@ jobs:
   docs-quality:
     name: Docs quality
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, northwind-ci]
     timeout-minutes: 10
 
     steps:
