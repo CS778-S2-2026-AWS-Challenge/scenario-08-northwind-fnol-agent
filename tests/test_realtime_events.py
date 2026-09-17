@@ -263,7 +263,8 @@ def test_registered_mutation_projection_is_equivalent_across_adapters(
     claimant = delivery_for(event, RealtimeAudience.CLAIMANT)
     assert staff.data['resources'] == [resource.value for resource in event.resources]
     assert staff.data['operation_correlation'] == 'staff-operation'
-    assert set(claimant.data['resources']).isdisjoint({'queue', 'work_items'})
+    claimant_resources = cast(list[str], claimant.data['resources'])
+    assert set(claimant_resources).isdisjoint({'queue', 'work_items'})
     assert 'operation_correlation' not in claimant.data
 
 

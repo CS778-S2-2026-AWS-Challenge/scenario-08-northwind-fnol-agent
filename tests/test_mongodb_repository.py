@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime
 from threading import Barrier, Event, Lock, Thread, current_thread
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import mongomock
 import pytest
@@ -556,10 +556,12 @@ def test_mutation_publication_contract_is_equivalent_across_adapters(
     event = before_retry[-1]
     staff_delivery = delivery_for(event, RealtimeAudience.STAFF)
     claimant_delivery = delivery_for(event, RealtimeAudience.CLAIMANT)
-    assert tuple(staff_delivery.data['resources']) == tuple(
+    staff_resources = cast(list[str], staff_delivery.data['resources'])
+    claimant_resources = cast(list[str], claimant_delivery.data['resources'])
+    assert tuple(staff_resources) == tuple(
         resource.value for resource in REALTIME_MUTATION_RESOURCES[mutation]
     )
-    assert set(claimant_delivery.data['resources']).isdisjoint({'queue', 'work_items'})
+    assert set(claimant_resources).isdisjoint({'queue', 'work_items'})
     assert staff_delivery.data.get('operation_correlation') == expected_correlation
     assert 'operation_correlation' not in claimant_delivery.data
 
