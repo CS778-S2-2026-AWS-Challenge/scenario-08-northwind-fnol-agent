@@ -3847,13 +3847,18 @@ register another adapter against the same internal contract without changing cla
 or staff routes. Capability and failure semantics are documented in
 [Model Gateway](model-gateway.md).
 
-## Claimant Assets and Claim Snapshots
+## Claimant policy summaries, assets, and Claim snapshots
 
 Authenticated account sessions own reusable assets. A concealed `404` is returned for an asset
 or Claim outside the authenticated customer boundary.
 
 | Method and route | Contract |
 | --- | --- |
+| `POST /api/v1/account/policies` | Create a bounded Policy Summary. Requires `Idempotency-Key`; returns `201`. The input is account display data, not a coverage result. |
+| `GET /api/v1/account/policies` | Cursor-page active owned summaries; `include_inactive=true` includes soft-deactivated records. |
+| `GET /api/v1/account/policies/{policy_id}` | Read one owned claimant-safe Policy Summary. |
+| `PATCH /api/v1/account/policies/{policy_id}` | Update `policy_number` or `display_name` with numeric `If-Match`; product family and verification status are not claimant-editable through this route. |
+| `DELETE /api/v1/account/policies/{policy_id}` | Soft-deactivate with numeric `If-Match`; returns `204`. Existing Claim snapshots remain unchanged. |
 | `POST /api/v1/account/assets` | Create a typed vehicle, property, or contents asset. Requires `Idempotency-Key`; returns `201`. |
 | `GET /api/v1/account/assets` | Cursor-page active owned assets; `include_inactive=true` includes soft-deactivated records. |
 | `GET /api/v1/account/assets/{asset_id}` | Read one owned claimant-safe asset projection. |
@@ -3863,16 +3868,24 @@ or Claim outside the authenticated customer boundary.
 | `GET /api/v1/claims/{claim_id}/asset-snapshots` | Cursor-page claimant-safe immutable snapshots for an owned Claim. |
 | `GET /api/v1/workbench/claims/{claim_id}/asset-snapshots` | Cursor-page the same approved snapshot fields for authorised staff. |
 
-Asset identifiers use `ase_`; snapshots use `cas_`. Asset records contain `asset_type`,
-`display_name`, matching typed `details`, `revision`, `active`, and timestamps. The account-safe
-projection omits `customer_id` and all physical storage/provider metadata. Assets do not accept
-claimant-supplied policy text. A durable Policy association requires the future account-owned
-`pol_` Policy Summary contract and ownership/status validation; it is not implemented by these
-routes.
+Policy Summary identifiers use `pol_`; Asset identifiers use `ase_`; snapshots use `cas_`. A
+Policy Summary contains `policy_number`, `display_name`, `product_family`,
+`verification_status`, `revision`, `active`, and timestamps. It contains no coverage outcome,
+policy wording, provider credential, or payment data. The account-safe projection omits
+`customer_id` and physical storage/provider metadata.
+
+Asset records contain `asset_type`, `display_name`, matching typed `details`, optional
+`policy_id`, `revision`, `active`, and timestamps. An association is accepted only when `policy_id`
+resolves to an active Policy Summary owned by the same claimant and its product family matches the
+Asset type. Arbitrary policy text, cross-owner references, inactive summaries, and family
+mismatches are rejected. Clearing `policy_id` uses explicit `null` on Asset PATCH; other Asset
+fields remain non-null.
 
 Selection returns `claim_id`, resulting `revision`, the exact `proposed_fields`, and the
-immutable snapshot. It never silently confirms a field. A later asset update/deactivation does
-not alter a snapshot. The selection idempotency identity includes the Claim ID, request payload,
+immutable snapshot. A linked summary additionally proposes `policy.policy_number` from the Policy
+source reference and copies the bounded Policy association into the immutable snapshot. It never
+silently confirms a field or coverage. A later policy or Asset update/deactivation does not alter a
+snapshot. The selection idempotency identity includes the Claim ID, request payload,
 and accepted numeric `If-Match` revision. An exact retry replays the stored response even after
 the Claim advances; changing the Asset ID or `If-Match` while reusing the key returns `409
 IDEMPOTENCY_CONFLICT`. Missing or malformed `If-Match` returns `409 REVISION_REQUIRED` before a
@@ -3886,13 +3899,13 @@ Abandoned, closed, and completed Claims reject a new Asset selection with `409
 INVALID_STATE_TRANSITION`; no Claim, snapshot, Branch Evaluation, idempotency, or audit write is
 performed. Asset create, update, and soft-deactivate atomically persist one Asset-scoped audit
 fact. Selection atomically persists one Claim-scoped audit fact with the resulting revision. Audit
-facts retain only bounded identities and source references, not copied Asset details.
+facts retain only bounded identities and source references, not copied Asset or policy values.
 
 ### Target child-resource boundaries
 
 These governed target routes are owned by later #917 children and are not implementation claims
 for this PR: `/api/v1/account/identity-records`, `/api/v1/account/payment-destinations`,
-`/api/v1/account/policies`, `/api/v1/claims/{claim_id}/participants`,
+`/api/v1/claims/{claim_id}/participants`,
 `/api/v1/claims/{claim_id}/contents-items/{item_id}/evidence-associations`, and
 `/api/v1/claims/{claim_id}/mitigations`. Account resources require an authenticated account
 session; Claim resources require Claim ownership or staff task authority. Create operations use

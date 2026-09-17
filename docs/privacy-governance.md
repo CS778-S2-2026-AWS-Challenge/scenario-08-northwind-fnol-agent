@@ -24,23 +24,23 @@ All values are synthetic in this prototype. Encryption means the selected store'
 at-rest and in-transit boundary; application logs, prompts, RAG documents, traces, and source
 control are never substitute protected stores.
 
-Only the Asset and Claim asset snapshot rows describe implemented behavior in this change. The
-other rows are a classification baseline. Their retention authorities, hold/deletion transitions,
-masking failures, protected-store failures, and adapter conformance remain open under #918 and
-must be published before a child implementation relies on them.
+The matrix below is the authoritative implementation contract for the #917 children. Policy
+Summary, Asset, and Claim asset snapshot behavior is executable. Profile, Identity Record,
+Payment Destination, Participant, ContentsItem, and Evidence changes are implemented by their
+own children, but their visibility and failure boundaries are no longer open design inputs.
 
 | Class | Collection/minimisation purpose | Access and masking | Agent, RAG, and log rule | Audit, retention, deletion expectation |
 | --- | --- | --- | --- | --- |
-| Profile | Identify/contact the claimant and prefill permitted intake facts; collect only approved fields | Owner full; staff minimum task view | Purpose-limited Agent context only; no profile indexing or raw logs | Open under #918; no production deletion/anonymisation schedule is approved |
-| Identity Record | Identity proof and verification only | Owner masked; identity-authorised role by task; protected value encrypted separately | Excluded by default from Agent, RAG, prompts, analytics, and logs | Open under #918; no verification/legal retention or deletion transition is approved |
-| Payment Destination | Future approved settlement destination, never payment execution | Owner masked; payment-authorised staff masked; token/reference encrypted separately | Always excluded from Agent, RAG, prompts, analytics, and logs | Open under #918; no payment/legal retention, revocation, or deletion transition is approved |
-| Policy Summary | Display and associate the minimum approved policy facts | Owner and claims staff bounded projection; provider internals hidden | Only approved policy facts may enter Agent context; never general RAG or raw logs | Open under #918; no account/policy retention or detachment transition is approved |
+| Profile | Identify/contact the claimant and prefill permitted intake facts; collect only approved fields | Owner full; staff minimum task view | Purpose-limited Agent context only; no profile indexing or raw logs | Revision/audit on change; deactivate with account; erase or anonymise only through the governed account request after holds are resolved |
+| Identity Record | Identity proof and verification only | Owner masked; identity-authorised role by task; protected value encrypted separately | Excluded by default from Agent, RAG, prompts, analytics, and logs | Revoke before purge; a hold keeps the protected reference inaccessible to ordinary reads; protected-store failure is fail-closed and does not create/update metadata |
+| Payment Destination | Future approved settlement destination, never payment execution | Owner masked; payment-authorised staff masked; token/reference encrypted separately | Always excluded from Agent, RAG, prompts, analytics, and logs | Revoke before purge; referenced settlement/audit facts survive as opaque IDs; protected-store failure is fail-closed and produces no ordinary record |
+| Policy Summary | Display and associate the minimum approved policy facts | Owner and claims staff bounded projection; provider internals hidden | Only approved policy facts may enter Agent context; never general RAG or raw logs | Soft-deactivate first; existing Claim snapshots remain immutable; inactive summaries cannot form new Asset or Claim associations |
 | Asset Record | Reuse claimant-entered vehicle/property/contents details | Owner and authorised staff; no cross-account lookup | Only selected approved details enter Claim context; no asset corpus indexing or raw logs | Audit material changes; soft-deactivate first; delete when no hold/reference requires it |
 | Claim asset snapshot | Prove the asset details used for one Claim revision | Owning claimant and authorised Workbench staff | Bounded approved details may follow Claim purpose; excluded from general RAG/logs | Immutable; Claim retention/hold applies; asset deletion never rewrites it |
 | Dynamic Form | Establish source-backed FNOL facts | Claimant-safe and staff task projections | Active registered facts only; redact restricted sources from logs | Assertion/revision history retained with Claim; correct by superseding, not overwriting |
-| Participant | Represent repeatable incident roles and contacts | Claimant minimum; staff task view; mask contacts where not needed | Sensitive contacts excluded from RAG/logs and Agent unless current task requires them | Open under #918; no Claim/legal retention or relationship-aware deletion transition is approved |
-| ContentsItem | Describe claimed items without implying coverage | Claimant and staff Claim projections | Bounded active item context only; serial/value omitted unless current task requires it | Open under #918; preserve current Claim assertion history until a schedule is approved |
-| Evidence | Support the report with protected files and metadata | Claimant-safe metadata; staff provenance; bytes through protected object boundary | Extracted proposals only after controls; bytes/storage keys never in RAG or logs | Open under #918; current append-only history remains, with no new deletion schedule claimed |
+| Participant | Represent repeatable incident roles and contacts | Claimant minimum; staff task view; contact values masked unless the task and contact consent require them | Sensitive contacts excluded from RAG/logs and Agent unless current task requires them | Claim retention/hold applies; correction supersedes rather than overwrites provenance; relationship-aware deletion removes ordinary projections but preserves bounded audit identity |
+| ContentsItem | Describe claimed items without implying coverage | Claimant and staff Claim projections; serial number masked outside the owning claimant or authorised staff task | Bounded active item context only; serial/value omitted unless current task requires it | Claim retention/hold applies; item and association history is immutable/superseding, not destructive update |
+| Evidence | Support the report with protected files and metadata | Claimant-safe metadata; staff provenance; bytes through protected object boundary | Extracted proposals only after controls; bytes/storage keys never in RAG or logs | Claim retention/hold applies; metadata tombstone and object/index deletion must converge before purge is reported complete |
 
 Asset create, update, and soft-deactivate persist an Asset-scoped `action.completed` audit fact in
 the same authoritative mutation as the Asset. Asset selection persists a Claim-scoped
@@ -85,21 +85,31 @@ Withdrawal is recorded. After a provider has accepted an authorised request,
 the prototype does not promise cancellation or recall unless a separately
 approved provider capability proves that outcome.
 
-## Retention, Deletion, and Residency
+## Retention, deletion, and residency
 
-The project does not currently have an approved production retention period,
-deletion schedule, residency commitment, encryption design, or recovery policy.
-These are explicit open governance items, not defaults. The prototype must not
-invent a duration or claim production compliance.
+Northwind has not supplied a production retention duration, residency commitment, or legal-hold
+schedule. The prototype therefore performs no time-based automatic purge and makes no production
+compliance claim. This missing duration does not leave a child implementation decision open: every
+child uses the following lifecycle contract until an authorised configuration replaces it.
 
-When those decisions are approved, implementation must define and test:
+- `active` records may be read only through their role and purpose projection.
+- Deactivation or revocation blocks new use immediately but preserves immutable Claim snapshots,
+  audit facts, and already-authorised external-operation provenance.
+- A deletion request marks the subject `deletion_pending`. A record with a documented hold remains
+  inaccessible to ordinary reads and moves to `held`, never falsely to `deleted`.
+- Without a hold, deletion removes ordinary and protected values plus derived object/index copies,
+  then records a bounded tombstone containing subject ID, actor, reason, time, and outcome. A child
+  must not report completion while any configured store returns an unknown or failed result.
+- Claim-owned Participant, ContentsItem, Evidence, mitigation, association, and snapshot records
+  follow the Claim hold and deletion decision. Deleting an account Asset or Policy Summary never
+  rewrites a retained Claim snapshot.
+- Adapter conformance requires Fixture and normal persistence to return the same lifecycle,
+  revision, idempotency, masking, and failure semantics. Protected-store unavailable or unknown
+  outcomes fail closed with no metadata-only partial record.
 
-- retention by data class and purpose;
-- deletion or anonymisation and its effect on projections;
-- records that must remain for audit or legal reasons;
-- access after expiry or withdrawal;
-- object-store and retrieval-index deletion behaviour; and
-- region, backup, recovery, and provider-retention controls.
+Production duration, backup expiry, region, recovery point, and provider-retention values remain
+deployment-governance inputs. They do not permit a child to invent a different lifecycle or expose
+data while those values are unknown.
 
 ## MinIO and Knowledge Boundaries
 
@@ -113,14 +123,15 @@ bucket listing is not proof of publication, applicability, or safe retrieval.
 The application must fail closed when the source, checksum, index, or ingestion
 state is missing or inconsistent.
 
-## Audit and Open Decisions
+## Audit and deployment decisions
 
 Material retrievals, disclosures, consent changes, provider outcomes,
 configuration publications, staff decisions, and privacy-relevant errors must
 retain source references, actor, purpose or reason, time, and outcome according
 to the existing audit contract.
 
-Open decisions are owned by the approved governance and Control Plane process:
+The following production deployment values are owned by the governance and Control Plane process.
+They do not alter the child-record lifecycle, masking, or fail-closed rules above:
 
 - production identity and access-review model;
 - consent wording and notice review;

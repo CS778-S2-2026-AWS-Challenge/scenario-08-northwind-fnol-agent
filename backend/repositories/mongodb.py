@@ -59,6 +59,7 @@ from backend.domain.models import (
     StaffActionStatus,
     WorkingClaim,
 )
+from backend.domain.policies import PolicySummaryRecord
 from backend.domain.retrieval import (
     ClaimHistoryRetrievalRecord,
     PolicyRetrievalRecord,
@@ -96,10 +97,16 @@ from backend.repositories.assets import (
     AssetSelectionRevisionConflictError,
     AssetSelectionSnapshotConflictError,
     AssetSelectionUnavailableError,
+    PolicyAssociationMismatchError,
+    PolicyAssociationRevisionConflictError,
+    PolicyAssociationUnavailableError,
     asset_audit_matches,
     asset_matches_snapshot,
+    asset_policy_matches,
     asset_selection_audit_matches,
+    policy_matches_snapshot,
 )
+from backend.repositories.policies import policy_audit_matches
 from backend.repositories.protocols import (
     DemoSeedConflict,
     IdempotencyConflict,
@@ -256,6 +263,17 @@ class MongoDBRepository:
         self._collection.create_index(
             [
                 ('record_type', 1),
+                ('customer_id', 1),
+                ('active', 1),
+                ('updated_at', -1),
+                ('_id', -1),
+            ],
+            name='policy_summary_customer_active_updated',
+            partialFilterExpression={'record_type': 'policy_summary'},
+        )
+        self._collection.create_index(
+            [
+                ('record_type', 1),
                 ('subject.subject_type', 1),
                 ('subject.subject_id', 1),
                 ('subject.claim_id', 1),
@@ -380,21 +398,153 @@ class MongoDBRepository:
     def close(self) -> None:
         self._client.close()
 
+    def create_policy_summary(
+        self,
+        policy: PolicySummaryRecord,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        if (
+            policy.customer_id != idempotency.actor_id
+            or policy.policy_id != idempotency.claim_id
+            or not policy_audit_matches(policy, audit_event)
+            or audit_event.idempotency_key != idempotency.key
+        ):
+            raise KeyError(policy.policy_id)
+
+        def persist(mongo_session: Any) -> None:
+            self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
+            self._ensure_new_audit_event(audit_event, mongo_session=mongo_session)
+            self._put(
+                'policy_summary',
+                policy.policy_id,
+                policy,
+                customer_id=policy.customer_id,
+                session=mongo_session,
+            )
+            self._save_idempotency(idempotency, mongo_session)
+            self._insert_audit_event(audit_event, mongo_session=mongo_session)
+
+        self._atomic(persist)
+
+    def get_policy_summary(self, policy_id: str, customer_id: str) -> PolicySummaryRecord | None:
+        return self._get(
+            'policy_summary',
+            policy_id,
+            PolicySummaryRecord,
+            customer_id=customer_id,
+        )
+
+    def list_policy_summaries(
+        self,
+        customer_id: str,
+        *,
+        include_inactive: bool = False,
+        offset: int = 0,
+        limit: int = 25,
+    ) -> tuple[list[PolicySummaryRecord], bool]:
+        filters: dict[str, Any] = {'customer_id': customer_id}
+        if not include_inactive:
+            filters['active'] = True
+        documents = (
+            self._collection.find({'record_type': 'policy_summary', **filters})
+            .sort([('updated_at', -1), ('_id', -1)])
+            .skip(offset)
+            .limit(limit + 1)
+        )
+        records = [
+            record
+            for document in documents
+            if (record := self._model_from_document(document, PolicySummaryRecord)) is not None
+        ]
+        return records[:limit], len(records) > limit
+
+    def update_policy_summary(
+        self,
+        policy: PolicySummaryRecord,
+        expected_revision: int,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        if (
+            policy.revision != expected_revision + 1
+            or not policy_audit_matches(policy, audit_event)
+            or audit_event.idempotency_key is not None
+        ):
+            raise KeyError(policy.policy_id)
+
+        def persist(mongo_session: Any) -> None:
+            self._ensure_new_audit_event(audit_event, mongo_session=mongo_session)
+            document = policy.model_dump(mode='json')
+            document.update(
+                {
+                    '_id': self._record_id('policy_summary', policy.policy_id),
+                    'record_type': 'policy_summary',
+                    'customer_id': policy.customer_id,
+                    'claim_id': None,
+                }
+            )
+            result = self._collection.replace_one(
+                {
+                    '_id': document['_id'],
+                    'record_type': 'policy_summary',
+                    'customer_id': policy.customer_id,
+                    'revision': expected_revision,
+                },
+                document,
+                session=mongo_session,
+            )
+            if result.matched_count != 1:
+                current = self._collection.find_one(
+                    {
+                        '_id': document['_id'],
+                        'record_type': 'policy_summary',
+                        'customer_id': policy.customer_id,
+                    },
+                    projection={'revision': 1},
+                    session=mongo_session,
+                )
+                if current is None:
+                    raise KeyError(policy.policy_id)
+                raise RevisionConflict(int(current['revision']))
+            self._insert_audit_event(audit_event, mongo_session=mongo_session)
+
+        self._atomic(persist)
+
     def create_asset(
         self,
         asset: AssetRecord,
         idempotency: IdempotencyRecord,
         audit_event: AuditEventEnvelope,
+        policy: PolicySummaryRecord | None = None,
     ) -> None:
         if (
             asset.customer_id != idempotency.actor_id
             or asset.asset_id != idempotency.claim_id
+            or not asset_policy_matches(asset, policy)
             or not asset_audit_matches(asset, audit_event)
             or audit_event.idempotency_key != idempotency.key
         ):
             raise KeyError(asset.asset_id)
 
         def persist(mongo_session: Any) -> None:
+            current_policy = (
+                self._get(
+                    'policy_summary',
+                    policy.policy_id,
+                    PolicySummaryRecord,
+                    customer_id=asset.customer_id,
+                    session=mongo_session,
+                )
+                if policy is not None
+                else None
+            )
+            if policy is not None:
+                if current_policy is None or not current_policy.active:
+                    raise PolicyAssociationUnavailableError(policy.policy_id)
+                if current_policy.revision != policy.revision:
+                    raise PolicyAssociationRevisionConflictError(current_policy.revision)
+                if current_policy != policy:
+                    raise PolicyAssociationMismatchError(policy.policy_id)
             self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
             self._ensure_new_audit_event(audit_event, mongo_session=mongo_session)
             self._put(
@@ -441,15 +591,35 @@ class MongoDBRepository:
         asset: AssetRecord,
         expected_revision: int,
         audit_event: AuditEventEnvelope,
+        policy: PolicySummaryRecord | None = None,
     ) -> None:
         if (
             asset.revision != expected_revision + 1
+            or not asset_policy_matches(asset, policy)
             or not asset_audit_matches(asset, audit_event)
             or audit_event.idempotency_key is not None
         ):
             raise KeyError(asset.asset_id)
 
         def persist(mongo_session: Any) -> None:
+            current_policy = (
+                self._get(
+                    'policy_summary',
+                    policy.policy_id,
+                    PolicySummaryRecord,
+                    customer_id=asset.customer_id,
+                    session=mongo_session,
+                )
+                if policy is not None
+                else None
+            )
+            if policy is not None:
+                if current_policy is None or not current_policy.active:
+                    raise PolicyAssociationUnavailableError(policy.policy_id)
+                if current_policy.revision != policy.revision:
+                    raise PolicyAssociationRevisionConflictError(current_policy.revision)
+                if current_policy != policy:
+                    raise PolicyAssociationMismatchError(policy.policy_id)
             self._ensure_new_audit_event(audit_event, mongo_session=mongo_session)
             document = asset.model_dump(mode='json')
             document.update(
@@ -522,6 +692,27 @@ class MongoDBRepository:
                 raise AssetSelectionRevisionConflictError(asset.revision)
             if not asset_matches_snapshot(asset, snapshot):
                 raise AssetSelectionSnapshotConflictError(snapshot.asset_id)
+            policy = (
+                self._get(
+                    'policy_summary',
+                    asset.policy_id,
+                    PolicySummaryRecord,
+                    customer_id=claim.customer_id,
+                    session=mongo_session,
+                )
+                if asset.policy_id is not None
+                else None
+            )
+            if asset.policy_id is not None and (policy is None or not policy.active):
+                raise PolicyAssociationUnavailableError(asset.policy_id)
+            if (
+                policy is not None
+                and snapshot.policy is not None
+                and policy.revision != snapshot.policy.policy_revision
+            ):
+                raise PolicyAssociationRevisionConflictError(policy.revision)
+            if not policy_matches_snapshot(policy, snapshot):
+                raise PolicyAssociationMismatchError(asset.policy_id or snapshot.snapshot_id)
             prepared_audit = self._prepare_audit_events(
                 claim,
                 (audit_event,),

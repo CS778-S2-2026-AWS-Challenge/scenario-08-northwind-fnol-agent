@@ -46,6 +46,7 @@ from backend.domain.models import (
     StaffActionStatus,
     WorkingClaim,
 )
+from backend.domain.policies import PolicySummaryRecord
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 from backend.domain.runtime import (
     RuntimeTurnRecords,
@@ -71,10 +72,16 @@ from backend.repositories.assets import (
     AssetSelectionRevisionConflictError,
     AssetSelectionSnapshotConflictError,
     AssetSelectionUnavailableError,
+    PolicyAssociationMismatchError,
+    PolicyAssociationRevisionConflictError,
+    PolicyAssociationUnavailableError,
     asset_audit_matches,
     asset_matches_snapshot,
+    asset_policy_matches,
     asset_selection_audit_matches,
+    policy_matches_snapshot,
 )
+from backend.repositories.policies import policy_audit_matches
 from backend.repositories.protocols import (
     DemoSeedConflict,
     IdempotencyConflict,
@@ -96,6 +103,7 @@ class FixtureRepository(PersistenceRepository):
         self._validation_seed_lock = RLock()
         self._claim_mutation_lock = RLock()
         self._claims: dict[str, WorkingClaim] = {}
+        self._policy_summaries: dict[str, PolicySummaryRecord] = {}
         self._assets: dict[str, AssetRecord] = {}
         self._claim_asset_snapshots: dict[str, ClaimAssetSnapshot] = {}
         self._audit_events: dict[str, AuditEventEnvelope] = {}
@@ -141,17 +149,101 @@ class FixtureRepository(PersistenceRepository):
     def connection_status(self) -> str:
         return 'using_fixture'
 
+    def create_policy_summary(
+        self,
+        policy: PolicySummaryRecord,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+        with self._claim_mutation_lock:
+            if (
+                policy.customer_id != idempotency.actor_id
+                or policy.policy_id != idempotency.claim_id
+                or not policy_audit_matches(policy, audit_event)
+                or audit_event.idempotency_key != idempotency.key
+                or policy.policy_id in self._policy_summaries
+                or lookup in self._idempotency
+            ):
+                raise IdempotencyConflict(idempotency.key)
+            if audit_event.event_id in self._audit_events:
+                raise IdempotencyConflict(audit_event.event_id)
+            self._policy_summaries[policy.policy_id] = deepcopy(policy)
+            self._idempotency[lookup] = deepcopy(idempotency)
+            self._audit_events[audit_event.event_id] = deepcopy(audit_event)
+
+    def get_policy_summary(self, policy_id: str, customer_id: str) -> PolicySummaryRecord | None:
+        policy = self._policy_summaries.get(policy_id)
+        if policy is None or policy.customer_id != customer_id:
+            return None
+        return deepcopy(policy)
+
+    def list_policy_summaries(
+        self,
+        customer_id: str,
+        *,
+        include_inactive: bool = False,
+        offset: int = 0,
+        limit: int = 25,
+    ) -> tuple[list[PolicySummaryRecord], bool]:
+        records = sorted(
+            (
+                deepcopy(policy)
+                for policy in self._policy_summaries.values()
+                if policy.customer_id == customer_id and (include_inactive or policy.active)
+            ),
+            key=lambda policy: (policy.updated_at, policy.policy_id),
+            reverse=True,
+        )
+        page = records[offset : offset + limit + 1]
+        return page[:limit], len(page) > limit
+
+    def update_policy_summary(
+        self,
+        policy: PolicySummaryRecord,
+        expected_revision: int,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        with self._claim_mutation_lock:
+            current = self._policy_summaries.get(policy.policy_id)
+            if current is None or current.customer_id != policy.customer_id:
+                raise KeyError(policy.policy_id)
+            if current.revision != expected_revision:
+                raise RevisionConflict(current.revision)
+            if (
+                policy.revision != expected_revision + 1
+                or not policy_audit_matches(policy, audit_event)
+                or audit_event.idempotency_key is not None
+            ):
+                raise KeyError(policy.policy_id)
+            if audit_event.event_id in self._audit_events:
+                raise IdempotencyConflict(audit_event.event_id)
+            self._policy_summaries[policy.policy_id] = deepcopy(policy)
+            self._audit_events[audit_event.event_id] = deepcopy(audit_event)
+
     def create_asset(
         self,
         asset: AssetRecord,
         idempotency: IdempotencyRecord,
         audit_event: AuditEventEnvelope,
+        policy: PolicySummaryRecord | None = None,
     ) -> None:
         with self._claim_mutation_lock:
+            current_policy = (
+                self._policy_summaries.get(policy.policy_id) if policy is not None else None
+            )
+            if policy is not None:
+                if current_policy is None or current_policy.customer_id != asset.customer_id:
+                    raise PolicyAssociationUnavailableError(policy.policy_id)
+                if current_policy.revision != policy.revision:
+                    raise PolicyAssociationRevisionConflictError(current_policy.revision)
+                if current_policy != policy:
+                    raise PolicyAssociationMismatchError(policy.policy_id)
             lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
             if (
                 asset.customer_id != idempotency.actor_id
                 or asset.asset_id != idempotency.claim_id
+                or not asset_policy_matches(asset, policy)
                 or not asset_audit_matches(asset, audit_event)
                 or audit_event.idempotency_key != idempotency.key
                 or asset.asset_id in self._assets
@@ -196,6 +288,7 @@ class FixtureRepository(PersistenceRepository):
         asset: AssetRecord,
         expected_revision: int,
         audit_event: AuditEventEnvelope,
+        policy: PolicySummaryRecord | None = None,
     ) -> None:
         with self._claim_mutation_lock:
             current = self._assets.get(asset.asset_id)
@@ -203,9 +296,20 @@ class FixtureRepository(PersistenceRepository):
                 raise KeyError(asset.asset_id)
             if current.revision != expected_revision:
                 raise RevisionConflict(current.revision)
+            current_policy = (
+                self._policy_summaries.get(policy.policy_id) if policy is not None else None
+            )
+            if policy is not None:
+                if current_policy is None or current_policy.customer_id != asset.customer_id:
+                    raise PolicyAssociationUnavailableError(policy.policy_id)
+                if current_policy.revision != policy.revision:
+                    raise PolicyAssociationRevisionConflictError(current_policy.revision)
+                if current_policy != policy:
+                    raise PolicyAssociationMismatchError(policy.policy_id)
             if (
                 asset.revision != expected_revision + 1
                 or asset.created_at != current.created_at
+                or not asset_policy_matches(asset, policy)
                 or not asset_audit_matches(asset, audit_event)
                 or audit_event.idempotency_key is not None
             ):
@@ -238,6 +342,19 @@ class FixtureRepository(PersistenceRepository):
                 raise AssetSelectionRevisionConflictError(asset.revision)
             if not asset_matches_snapshot(asset, snapshot):
                 raise AssetSelectionSnapshotConflictError(snapshot.asset_id)
+            policy = (
+                self._policy_summaries.get(asset.policy_id) if asset.policy_id is not None else None
+            )
+            if asset.policy_id is not None and (policy is None or not policy.active):
+                raise PolicyAssociationUnavailableError(asset.policy_id)
+            if (
+                policy is not None
+                and snapshot.policy is not None
+                and policy.revision != snapshot.policy.policy_revision
+            ):
+                raise PolicyAssociationRevisionConflictError(policy.revision)
+            if not policy_matches_snapshot(policy, snapshot):
+                raise PolicyAssociationMismatchError(asset.policy_id or snapshot.snapshot_id)
             if (
                 snapshot.customer_id != claim.customer_id
                 or snapshot.claim_id != claim.claim_id
@@ -284,6 +401,7 @@ class FixtureRepository(PersistenceRepository):
         """Clear only records owned by this in-memory prototype repository."""
         cleared = {
             'claims': len(self._claims),
+            'policy_summaries': len(self._policy_summaries),
             'assets': len(self._assets),
             'claim_asset_snapshots': len(self._claim_asset_snapshots),
             'audit_events': len(self._audit_events),
@@ -315,6 +433,7 @@ class FixtureRepository(PersistenceRepository):
             'staff_presence': len(self._staff_presence),
         }
         self._claims.clear()
+        self._policy_summaries.clear()
         self._assets.clear()
         self._claim_asset_snapshots.clear()
         self._audit_events.clear()

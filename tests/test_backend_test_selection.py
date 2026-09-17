@@ -49,6 +49,20 @@ def test_asset_modules_select_asset_claim_branch_and_mongodb_contracts() -> None
     } <= set(selection.tests)
 
 
+def test_policy_summary_modules_select_policy_asset_contracts() -> None:
+    selection = select_tests(
+        [
+            'backend/api/policies.py',
+            'backend/domain/policies.py',
+            'backend/repositories/policies.py',
+            'backend/services/policies.py',
+        ]
+    )
+
+    assert selection.mode == 'scoped'
+    assert 'tests/test_policy_asset_api.py' in selection.tests
+
+
 def test_audit_contract_change_selects_audit_contract_tests() -> None:
     selection = select_tests(['backend/domain/audit.py'])
 

@@ -428,15 +428,17 @@ merely to make a Dynamic Form table appear complete.
   evidence status. Staff sees structured facts, sources, corrections, pending work,
   restricted review signals, and handoff context.
 
-## Open decisions
+## Remaining product decisions
 
-1. Approve additional catalogue candidates and enum values beyond the executable VP baseline.
-2. Confirm policy lookup and identity-match inputs without inventing provider schemas.
-3. Approve production `required_now` sets beyond the implemented VP claim-creation baseline.
-4. Approve retention/visibility for participant, Police, licence, serial, and value data.
-5. Decide whether contents uses one record per item, grouped records, or both with IDs.
-6. Define publication/rollback behavior for in-progress claims.
-7. Define professional-review thresholds and staff-authority decisions.
+The following decisions do not change the child-record contracts below and must not be invented by
+their implementations:
+
+1. Additional catalogue fields and enum values beyond the approved vocabulary.
+2. Provider-specific policy lookup or identity-match schemas.
+3. Production `required_now` sets beyond the implemented VP claim-creation baseline.
+4. Production retention durations, residency, and legal-hold authorities; children use the
+   lifecycle in `docs/privacy-governance.md` until an authorised configuration supplies values.
+5. Professional-review thresholds and staff-authority decisions.
 
 ## Current implementation statement
 
@@ -447,27 +449,22 @@ role-safe projections, and claim creation for each family. The broader catalogue
 input: a candidate is not implemented until its type, visibility, persistence boundary, Registry
 entry, consumers, and tests are approved together.
 
-## Claimant data classification baseline
+## Claimant data classification contract
 
-This section records the current classification baseline for #917. Only the Asset and Claim asset
-snapshot rows are implemented by this change. Profile, Identity Record, Payment Destination,
-Policy Summary, Participant, ContentsItem extension, Evidence association, mitigation, retention,
-and protected-store details remain open under #918 and their child issues. They are design inputs,
-not independently implementable contracts or closure evidence. Only Dynamic Form entries belong
-in the Field/Branch Registry; account, protected, repeatable, file, and operational data remain
-typed records even when a screen displays them beside Claim facts.
-The proposed ownership and delivery boundary was recorded in
-[Design Discussion #925](https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/discussions/925):
-it did not receive a maintainer/product decision for the open Policy, retention, protected-store,
-or transitional Profile rules. This change therefore leaves #918 open.
+This section is the authoritative classification consumed by the #917 implementation children.
+Policy Summary, Asset, and Claim asset snapshot are executable; the remaining classes define the
+exact contract their owning child must implement. Only Dynamic Form entries belong in the
+Field/Branch Registry. Account, protected, repeatable, file, and operational data remain typed
+records even when a screen displays them beside Claim facts. Design Discussion #925 records the
+ownership boundary; the rules below resolve the implementation inputs that remained open there.
 
 | Requested datum | Authoritative class | Shape and cardinality | Source and mutability | Role projection |
 | --- | --- | --- | --- | --- |
 | Legal name, preferred name, date of birth, phone, email, residential address | Profile | One account profile; preferred name and contact channels optional | Claimant or verified identity source; revisioned account update | Claimant full; staff minimum needed; Agent only for the current authorised purpose |
 | Driver licence or passport identifier and verification | Identity Record | Zero or more typed identity records; protected value plus type, issuer, verification state, dates, provenance | Claimant/provider; never an ordinary profile patch or Claim field | Claimant masked; identity-authorised staff masked/full by task; excluded from routine Agent/RAG/logs |
 | Bank account type and destination | Payment Destination | Zero or more tokenised destinations; display label, type, protected provider reference, last digits, status | Claimant/payment provider; revisioned, separately authorised | Claimant masked; payment-authorised staff masked; no Agent/RAG/log access; never executes payment |
-| Policy number and policy summary | Policy Summary | Account-owned list; policy number, product family, display status and approved asset associations | Approved structured lookup or synthetic fixture; provider detail is not copied | Claimant and authorised staff bounded projection; Agent receives only approved purpose-limited facts |
-| Vehicle, property, reusable contents item | Asset Record | Account-owned `ase_`; typed details, revision, active lifecycle; no Policy association until an owned `pol_` contract is implemented | Claimant/approved lookup; revisioned and soft-deactivated | Owner claimant and authorised staff only; no cross-account discovery |
+| Policy number and policy summary | Policy Summary | Account-owned `pol_`; policy number, display name, product family, verification status, revision, and active lifecycle | Claimant or approved structured lookup; provider detail is not copied | Claimant and authorised staff bounded projection; Agent receives only selected purpose-limited facts |
+| Vehicle, property, reusable contents item | Asset Record | Account-owned `ase_`; typed details, optional owned same-family `pol_` reference, revision, active lifecycle | Claimant/approved lookup; revisioned and soft-deactivated | Owner claimant and authorised staff only; no cross-account discovery |
 | Asset selected for FNOL | Claim asset snapshot | Immutable `cas_`; one record per selection, source asset/revision, copied approved details, resulting Claim revision | Server-captured in the Claim mutation; never changed by later asset edits | Owning claimant and authorised Workbench staff |
 | Incident time/location/description, damage description, affected areas, safety and police reference | Dynamic Form | Registered Claim facts with assertion history | Claimant, Evidence, provider, staff, or inference with explicit provenance/status | Claimant-safe and staff projections; Agent receives only active registered fields |
 | Owner, driver, other driver, witness and contact details | Participant | Repeatable typed `participant` records with role, contact/vehicle references and sensitive-field visibility | Claimant/staff/provider; revisioned under Claim authority | Claimant-safe minimum; staff task view; sensitive contacts excluded from RAG/logs |
@@ -491,16 +488,17 @@ Selecting an active owned asset proposes, but does not confirm, only these exist
 | Contents | `claim.product_family=contents` |
 
 Each proposal uses claimant source authority because the authenticated claimant selected the
-record, keeps `status=proposed`, and records `asset:{asset_id}:revision:{revision}`. Selection
-does not confirm ownership, coverage, liability, identity, payment eligibility, or loss.
+record and keeps `status=proposed`. Asset facts record
+`asset:{asset_id}:revision:{revision}`. A linked policy number records
+`policy:{policy_id}:revision:{revision}`. Selection does not confirm coverage, liability,
+identity, payment eligibility, or loss.
 
-### Candidate child-record vocabulary
+### Approved child-record vocabulary
 
-The Asset and Claim asset snapshot entries below are executable. The other entries remain
-candidate vocabulary under #918 and must not be implemented until their lifecycle, masking,
-failure, retention, protected-store, revision, idempotency, and migration rules are published.
-Candidate members do not override current Profile validity or create a production retention
-schedule.
+Policy Summary, Asset, and Claim asset snapshot entries below are executable. Other entries are
+the approved implementation contract for #919, #920, #922, and #923. Their owning child must
+deliver the listed lifecycle, masking, failure, revision, idempotency, and migration behavior; it
+must not rename members or flatten records into Claim fields.
 
 | Class / prefix | Exact approved members |
 | --- | --- |
@@ -508,9 +506,9 @@ schedule.
 | PostalAddress | `line1: string`, `line2: string?`, `suburb: string?`, `city: string`, `region: string?`, `postal_code: string?`, `country_code: ISO-3166 alpha-2` |
 | Identity Record / `idn_` | `identity_id`, `customer_id`, `document_type: driver_licence\|passport`, `protected_value_ref`, `masked_value`, `issuing_country?`, `expires_on?`, `verification_status: unverified\|verified\|rejected\|expired`, `verified_at?`, `verification_source?`; raw number is accepted only at the protected write boundary and is never returned |
 | Payment Destination / `pyd_` | `payment_destination_id`, `customer_id`, `account_type: transaction\|savings\|other`, `account_name`, `protected_account_ref`, `masked_account_number`, `verification_status: unverified\|verified\|rejected`, `verified_at?`; no balance, credential, or payment command |
-| Policy Summary / `pol_` | `policy_id`, `customer_id`, `policy_number`, `product_family: motor\|home\|contents`, `display_status: active\|inactive\|unknown`, `effective_from?`, `effective_to?`, `source_refs`; no coverage conclusion or provider secret |
-| Asset / `ase_` | Common members implemented by this change plus exactly one typed details object: vehicle `{registration, registered_owner?, make?, model?, year?}`; property `{address, owner_name?, property_type?}`; contents `{description, category?, brand?, model?, serial_number?}`; no Policy association is accepted until an owned `pol_` resource exists |
-| Claim asset snapshot / `cas_` | `snapshot_id`, `claim_id`, `customer_id`, `asset_id`, `asset_revision`, copied `asset_type`, `display_name`, typed `details`, `captured_at`, `resulting_claim_revision`, `source_refs`; immutable |
+| Policy Summary / `pol_` | `policy_id`, `customer_id`, `policy_number`, `display_name`, `product_family: motor\|home\|contents`, `verification_status: unverified\|verified`, `revision`, `active`, timestamps; no coverage conclusion, provider secret, schedule wording, or payment data |
+| Asset / `ase_` | Common members implemented by this change plus optional `policy_id` and exactly one typed details object: vehicle `{registration, registered_owner?, make?, model?, year?}`; property `{address, owner_name?, property_type?}`; contents `{description, category?, brand?, model?, serial_number?}`; `policy_id` must resolve to an active owned same-family `pol_` |
+| Claim asset snapshot / `cas_` | `snapshot_id`, `claim_id`, `customer_id`, `asset_id`, `asset_revision`, copied `asset_type`, `display_name`, typed `details`, optional copied Policy association `{policy_id, policy_revision, policy_number, product_family, verification_status}`, `captured_at`, `resulting_claim_revision`, `source_refs`; immutable |
 | Participant / `par_` | `participant_id`, `claim_id`, `role: insured_owner\|driver\|other_driver\|witness`, `legal_name?`, `relationship_to_claimant: self\|partner\|family\|employee\|other\|unknown`, `phone?`, `email?`, `vehicle_registration?`, `consent_to_contact: granted\|declined\|not_requested`, `source_refs`; repeatable and revisioned |
 | ContentsItem / existing `item_id` | Preserve existing members and add optional `brand`, `model`, `serial_number`, `purchase_date: date`, `purchase_source: retailer\|private_sale\|gift\|other\|unknown`, and `asset_snapshot_id?`; serial number is masked outside its owning claimant/staff task projection |
 | Item-Evidence association / `iea_` | `association_id`, `claim_id`, `item_id`, `evidence_id`, `purpose: item_photo\|proof_of_purchase\|receipt\|valuation\|repair_quote\|police_document\|other`, `source_refs`, `created_at`; immutable, same-Claim only |
@@ -520,10 +518,11 @@ Identity `protected_value_ref` and payment `protected_account_ref` are adapter-o
 references, not provider keys exposed through APIs. Contact fields on another participant are
 collected only for Claim handling and must not be reused as account identity or marketing consent.
 
-### Candidate next Field and Branch Registry versions
+### Approved next Field and Branch Registry versions
 
-The proposed registry release after the current version 5 is `vp-field-registry-v6`. It is not
-implemented or approved by this change. The proposal promotes only these genuine Claim facts:
+The next registry release after the current version 5 is `vp-field-registry-v6`. It is implemented
+by the family-specific child that first requires these genuine Claim facts, together with
+`vp-dynamic-form-branch-rules-v2`; this contract issue does not register them early:
 
 | Code | Type | Allowed values / validation | Family | Default selection |
 | --- | --- | --- | --- | --- |

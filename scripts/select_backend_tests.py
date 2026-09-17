@@ -31,9 +31,13 @@ BACKEND_CONSUMER_RULES = (
     (
         (
             'backend/api/assets.py',
+            'backend/api/policies.py',
             'backend/domain/assets.py',
+            'backend/domain/policies.py',
             'backend/repositories/assets.py',
+            'backend/repositories/policies.py',
             'backend/services/assets.py',
+            'backend/services/policies.py',
         ),
         (
             'tests/test_asset_api.py',
@@ -41,6 +45,7 @@ BACKEND_CONSUMER_RULES = (
             'tests/test_branch_registry.py',
             'tests/test_claim_api.py',
             'tests/test_mongodb_repository.py',
+            'tests/test_policy_asset_api.py',
         ),
     ),
     (

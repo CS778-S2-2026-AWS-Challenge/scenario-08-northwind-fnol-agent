@@ -8,6 +8,7 @@ from pydantic import Field, StringConstraints, model_validator
 from pydantic_core import PydanticUndefined
 
 from backend.domain.models import ContractModel, PageInfo, StructuredFormField
+from backend.domain.policies import PolicyAssociationSnapshot, PolicyId
 
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
@@ -51,12 +52,17 @@ def _omitted_asset_details() -> AssetDetails:
     return cast(AssetDetails, PydanticUndefined)
 
 
+def _omitted_policy_id() -> PolicyId | None:
+    return cast(PolicyId | None, PydanticUndefined)
+
+
 class AssetRecord(ContractModel):
     asset_id: str = Field(pattern=r'^ase_[a-f0-9]{20}$')
     customer_id: str = Field(min_length=1, max_length=200)
     asset_type: AssetType
     display_name: ShortText
     details: AssetDetails
+    policy_id: PolicyId | None = None
     revision: int = Field(default=1, ge=1)
     active: bool = True
     created_at: datetime
@@ -81,6 +87,7 @@ class AssetProjection(ContractModel):
     asset_type: AssetType
     display_name: str
     details: AssetDetails
+    policy_id: PolicyId | None = None
     revision: int
     active: bool
     created_at: datetime
@@ -91,6 +98,7 @@ class CreateAssetRequest(ContractModel):
     asset_type: AssetType
     display_name: ShortText
     details: AssetDetails
+    policy_id: PolicyId | None = None
 
     @model_validator(mode='after')
     def validate_request(self) -> 'CreateAssetRequest':
@@ -108,9 +116,10 @@ class CreateAssetRequest(ContractModel):
 
 
 class UpdateAssetRequest(ContractModel):
-    # A default factory keeps each PATCH field optional without making explicit null valid.
+    # Omitted fields remain unchanged; explicit null is allowed only to clear policy_id.
     display_name: ShortText = Field(default_factory=_omitted_short_text)
     details: AssetDetails = Field(default_factory=_omitted_asset_details)
+    policy_id: PolicyId | None = Field(default_factory=_omitted_policy_id)
 
     @model_validator(mode='after')
     def require_change(self) -> 'UpdateAssetRequest':
@@ -133,6 +142,7 @@ class ClaimAssetSnapshot(ContractModel):
     asset_type: AssetType
     display_name: ShortText
     details: AssetDetails
+    policy: PolicyAssociationSnapshot | None = None
     captured_at: datetime
     resulting_claim_revision: int = Field(ge=1)
     source_refs: list[str] = Field(min_length=1, max_length=10)
@@ -146,6 +156,7 @@ class ClaimAssetSnapshotProjection(ContractModel):
     asset_type: AssetType
     display_name: str
     details: AssetDetails
+    policy: PolicyAssociationSnapshot | None = None
     captured_at: datetime
     resulting_claim_revision: int
     source_refs: list[str]
