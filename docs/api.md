@@ -3847,6 +3847,60 @@ register another adapter against the same internal contract without changing cla
 or staff routes. Capability and failure semantics are documented in
 [Model Gateway](model-gateway.md).
 
+## Claimant Assets and Claim Snapshots
+
+Authenticated account sessions own reusable assets. A concealed `404` is returned for an asset
+or Claim outside the authenticated customer boundary.
+
+| Method and route | Contract |
+| --- | --- |
+| `POST /api/v1/account/assets` | Create a typed vehicle, property, or contents asset. Requires `Idempotency-Key`; returns `201`. |
+| `GET /api/v1/account/assets` | Cursor-page active owned assets; `include_inactive=true` includes soft-deactivated records. |
+| `GET /api/v1/account/assets/{asset_id}` | Read one owned claimant-safe asset projection. |
+| `PATCH /api/v1/account/assets/{asset_id}` | Update approved asset details with numeric `If-Match`; increments asset revision. Fields may be omitted but explicit `null` and details for another Asset type return `422 VALIDATION_ERROR` without changing the Asset. |
+| `DELETE /api/v1/account/assets/{asset_id}` | Soft-deactivate with numeric `If-Match`; returns `204`. |
+| `POST /api/v1/claims/{claim_id}/asset-selections` | Select one active owned asset with `Idempotency-Key` and Claim `If-Match`; atomically writes proposed facts, immutable snapshot, Branch Evaluation, Claim revision, and retry result. |
+| `GET /api/v1/claims/{claim_id}/asset-snapshots` | Cursor-page claimant-safe immutable snapshots for an owned Claim. |
+| `GET /api/v1/workbench/claims/{claim_id}/asset-snapshots` | Cursor-page the same approved snapshot fields for authorised staff. |
+
+Asset identifiers use `ase_`; snapshots use `cas_`. Asset records contain `asset_type`,
+`display_name`, matching typed `details`, `revision`, `active`, and timestamps. The account-safe
+projection omits `customer_id` and all physical storage/provider metadata. Assets do not accept
+claimant-supplied policy text. A durable Policy association requires the future account-owned
+`pol_` Policy Summary contract and ownership/status validation; it is not implemented by these
+routes.
+
+Selection returns `claim_id`, resulting `revision`, the exact `proposed_fields`, and the
+immutable snapshot. It never silently confirms a field. A later asset update/deactivation does
+not alter a snapshot. The selection idempotency identity includes the Claim ID, request payload,
+and accepted numeric `If-Match` revision. An exact retry replays the stored response even after
+the Claim advances; changing the Asset ID or `If-Match` while reusing the key returns `409
+IDEMPOTENCY_CONFLICT`. Missing or malformed `If-Match` returns `409 REVISION_REQUIRED` before a
+replay lookup. If an Asset changes during the authoritative write, the API returns `409
+REVISION_CONFLICT` with its current revision. If it becomes inactive, is removed, or is outside
+the owner boundary, the API returns the same concealed `404 RESOURCE_NOT_FOUND`. These outcomes
+leave the Claim revision, snapshot, Branch Evaluation, and idempotency result unchanged.
+An internal copied-detail mismatch is rejected consistently by every persistence adapter and maps
+to `409 RESOURCE_CONFLICT`; it cannot persist a snapshot that differs from the selected Asset.
+Abandoned, closed, and completed Claims reject a new Asset selection with `409
+INVALID_STATE_TRANSITION`; no Claim, snapshot, Branch Evaluation, idempotency, or audit write is
+performed. Asset create, update, and soft-deactivate atomically persist one Asset-scoped audit
+fact. Selection atomically persists one Claim-scoped audit fact with the resulting revision. Audit
+facts retain only bounded identities and source references, not copied Asset details.
+
+### Target child-resource boundaries
+
+These governed target routes are owned by later #917 children and are not implementation claims
+for this PR: `/api/v1/account/identity-records`, `/api/v1/account/payment-destinations`,
+`/api/v1/account/policies`, `/api/v1/claims/{claim_id}/participants`,
+`/api/v1/claims/{claim_id}/contents-items/{item_id}/evidence-associations`, and
+`/api/v1/claims/{claim_id}/mitigations`. Account resources require an authenticated account
+session; Claim resources require Claim ownership or staff task authority. Create operations use
+`Idempotency-Key`; mutations use numeric `If-Match`; lists are cursor-paginated. Protected writes
+accept sensitive values at a dedicated boundary, store only an adapter protected reference in
+the ordinary record, and return only the masked projection. Authorization occurs before
+existence disclosure.
+
 ## Persistence and Provider Boundary
 
 The public API does not expose physical keys, collection or table names, indexes, object-store keys, vector-index names, model-provider payloads, runtime-profile configuration, or external claims-system schemas.

@@ -29,6 +29,21 @@ TEST_SUPPORT_CONSUMERS: dict[str, tuple[str, ...]] = {
 }
 BACKEND_CONSUMER_RULES = (
     (
+        (
+            'backend/api/assets.py',
+            'backend/domain/assets.py',
+            'backend/repositories/assets.py',
+            'backend/services/assets.py',
+        ),
+        (
+            'tests/test_asset_api.py',
+            'tests/test_asset_repository.py',
+            'tests/test_branch_registry.py',
+            'tests/test_claim_api.py',
+            'tests/test_mongodb_repository.py',
+        ),
+    ),
+    (
         ('backend/api/claims.py', 'backend/services/claims.py'),
         (
             'tests/test_claim_api.py',
@@ -111,6 +126,7 @@ BACKEND_CONSUMER_RULES = (
     (
         ('backend/repositories/',),
         (
+            'tests/test_asset_repository.py',
             'tests/test_claim_save_transaction_boundary.py',
             'tests/test_claim_transaction_boundary.py',
             'tests/test_mongodb_repository.py',

@@ -42,6 +42,7 @@ class AuditSubjectType(str, Enum):
 
     CLAIM = 'claim'
     CUSTOMER = 'customer'
+    ASSET = 'asset'
     EXTERNAL_REQUEST = 'external_request'
     CONFIGURATION = 'configuration'
     ACCESS = 'access'
