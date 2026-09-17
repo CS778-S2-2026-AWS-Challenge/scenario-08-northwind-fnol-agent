@@ -638,6 +638,41 @@ def assert_request_matches_task(
             )
 
 
+def external_task_requires_reconciliation(
+    task: ExternalTaskRecord,
+    request: ExternalTaskRequest | None,
+) -> bool:
+    """Identify an external attempt that must be reconciled before another send.
+
+    An explicit unknown outcome and an interrupted held dispatch have the same safe
+    continuation: Northwind must establish what happened using the original operation
+    identity. The held request remains distinct from a sent request in persistence.
+
+    Args:
+        task: The external task whose continuation is being projected.
+        request: The prepared request associated with the task, when one exists.
+
+    Returns:
+        True when reconciliation must settle the existing operation before another send.
+
+    Raises:
+        ExternalRequestTaskMismatchError: The held request does not describe the task.
+    """
+
+    if task.status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
+        return True
+    if (
+        task.status is not ExternalTaskOperationStatus.PREPARED
+        or request is None
+        or request.dispatch_reserved_at is None
+        or request.sent_at is not None
+        or request.operation_id is None
+    ):
+        return False
+    assert_request_matches_task(request, task)
+    return True
+
+
 def assert_disclosure_within_consent(
     request: ExternalTaskRequest,
     consent: ExternalServiceConsent,
