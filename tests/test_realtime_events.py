@@ -8,6 +8,7 @@ from threading import Event, Thread
 from types import SimpleNamespace
 from typing import cast
 
+import mongomock
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
@@ -27,7 +28,8 @@ from backend.domain.realtime import (
     new_realtime_event,
 )
 from backend.repositories.fixture import FixtureRepository
-from backend.repositories.protocols import IdempotencyConflict
+from backend.repositories.mongodb import MongoDBRepository
+from backend.repositories.protocols import IdempotencyConflict, PersistenceRepository
 from backend.services.realtime import (
     RealtimeDispatcher,
     RealtimeScope,
@@ -197,6 +199,42 @@ def test_fixture_sequence_preserves_append_order_for_live_and_reconnect() -> Non
         repository.append_realtime_event(
             first.model_copy(update={'customer_id': 'cus_conflicting_duplicate'})
         )
+
+
+@pytest.fixture(params=('fixture', 'mongo'))
+def realtime_repository(request: pytest.FixtureRequest) -> PersistenceRepository:
+    if request.param == 'fixture':
+        return FixtureRepository()
+    repository = MongoDBRepository(mongomock.MongoClient(), 'realtime_contract')
+    repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    return repository
+
+
+def test_realtime_append_is_immutable_and_idempotent_across_adapters(
+    realtime_repository: PersistenceRepository,
+) -> None:
+    first = _event(1).model_copy(update={'event_id': 'rte_aaaaaaaaaaaaaaaaaaaa'})
+
+    realtime_repository.append_realtime_event(first)
+    stored_first = realtime_repository.replay_realtime_events(None, limit=10)[0]
+    first_cursor = cursor_for(stored_first)
+
+    realtime_repository.append_realtime_event(first)
+    assert realtime_repository.replay_realtime_events(None, limit=10) == [stored_first]
+    assert cursor_for(realtime_repository.replay_realtime_events(None, limit=10)[0]) == first_cursor
+
+    with pytest.raises(IdempotencyConflict):
+        realtime_repository.append_realtime_event(first.model_copy(update={'claim_revision': 99}))
+    assert realtime_repository.replay_realtime_events(None, limit=10) == [stored_first]
+
+    second = _event(2).model_copy(update={'event_id': 'rte_bbbbbbbbbbbbbbbbbbbb'})
+    realtime_repository.append_realtime_event(second)
+    stored = realtime_repository.replay_realtime_events(None, limit=10)
+    assert [event.sequence for event in stored] == [1, 2]
+    assert realtime_repository.replay_realtime_events(
+        RealtimeCursor.decode(first_cursor),
+        limit=10,
+    ) == [stored[1]]
 
 
 def test_claimant_scope_filters_customer_and_internal_message_resources() -> None:

@@ -80,7 +80,7 @@ records remain target contracts.
 | Configuration | versioned Agent Policy, Registry snapshots, model profiles, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
 | Branch evaluation | immutable branch/form calculation evidence, selected family, active branches, field selection states, and Claim revision precondition | `claim_id`, `evaluation_id` |
 | Audit | append-only claim, integration, configuration, account, and access events | event identity and subject |
-| Realtime invalidation | durable ordering cursor, Claim/customer identity, revision, correlation, resource hints, and audience-safe claimant hints | `event_id`, ordered by `occurred_at` then `event_id` |
+| Realtime invalidation | durable ordering cursor, Claim/customer identity, revision, correlation, resource hints, and audience-safe claimant hints | `event_id`, ordered by monotonic `sequence`; legacy records fall back to `occurred_at` then `event_id` |
 | Retention | expiry, hold, purge eligibility, deletion or anonymisation result | subject identity and retention job |
 
 Original evidence bytes, policy documents, and other large objects are stored through
@@ -159,6 +159,14 @@ adapter-owned physical key is never returned by the repository or API. This keep
 consistent with committed Mongo visibility instead of relying on a pre-commit wall-clock time.
 An acknowledged pre-sequence cursor remains valid when its durable event ID and timestamp still
 match; replay resolves that anchor to its stored sequence before selecting later events.
+
+Realtime event append is immutable and idempotent across runtime profiles. An exact retry with the
+same `event_id` and logical content is a no-op that preserves the original sequence and emits no
+second live notification. Reusing an `event_id` with different logical content raises an
+idempotency conflict and leaves the committed event unchanged. MongoDB resolves the stable event
+identity before allocating a sequence and inserts new events without replacement or upsert; a
+concurrent duplicate-key loser is read back after its transaction rolls back and follows the same
+exact-retry or conflict rule.
 
 Replay requires the exact durable cursor anchor and returns sequenced records in durable sequence
 order; pre-sequence records retain their timestamp/event-ID order. A missing anchor, replay-window

@@ -369,16 +369,76 @@ class MongoDBRepository:
         self._client.close()
 
     def append_realtime_event(self, event: RealtimeEvent) -> None:
-        self._atomic(
-            lambda mongo_session: self._put(
-                'realtime_event',
-                event.event_id,
-                event,
-                customer_id=event.customer_id,
-                claim_id=event.claim_id,
-                session=mongo_session,
+        try:
+            self._atomic(
+                lambda mongo_session: self._insert_realtime_event(
+                    event,
+                    mongo_session=mongo_session,
+                )
             )
+        except DuplicateKeyError as error:
+            # A concurrent transaction may commit the same identity first. The
+            # failed transaction rolls back its sequence allocation before this read.
+            stored = self._find_realtime_event(event.event_id, mongo_session=None)
+            if stored is None or not self._realtime_retry_matches(stored, event):
+                raise IdempotencyConflict(event.event_id) from error
+
+    @staticmethod
+    def _realtime_retry_matches(stored: RealtimeEvent, event: RealtimeEvent) -> bool:
+        comparable = (
+            event.model_copy(update={'sequence': stored.sequence})
+            if event.sequence is None
+            else event
         )
+        return stored == comparable
+
+    def _find_realtime_event(
+        self,
+        event_id: str,
+        *,
+        mongo_session: Any,
+    ) -> RealtimeEvent | None:
+        document = self._collection.find_one(
+            {
+                '_id': self._record_id('realtime_event', event_id),
+                'record_type': 'realtime_event',
+            },
+            session=mongo_session,
+        )
+        return self._model_from_document(document, RealtimeEvent)
+
+    def _insert_realtime_event(
+        self,
+        event: RealtimeEvent,
+        *,
+        mongo_session: Any,
+    ) -> None:
+        stored = self._find_realtime_event(event.event_id, mongo_session=mongo_session)
+        if stored is not None:
+            if not self._realtime_retry_matches(stored, event):
+                raise IdempotencyConflict(event.event_id)
+            return
+
+        prepared = event
+        if prepared.sequence is None:
+            prepared = prepared.model_copy(
+                update={'sequence': self._next_realtime_sequence(mongo_session)}
+            )
+        document = prepared.model_dump(mode='json')
+        document.update(
+            {
+                '_id': self._record_id('realtime_event', prepared.event_id),
+                'record_type': 'realtime_event',
+                'customer_id': prepared.customer_id,
+                'claim_id': prepared.claim_id,
+                'realtime_order': self._realtime_order(
+                    prepared.occurred_at,
+                    prepared.event_id,
+                    prepared.sequence,
+                ),
+            }
+        )
+        self._collection.insert_one(document, session=mongo_session)
 
     def _next_realtime_sequence(self, session: Any = None) -> int:
         counter = self._collection.find_one_and_update(
@@ -411,20 +471,12 @@ class MongoDBRepository:
             customer_id=claim.customer_id,
             occurred_at=datetime.now(UTC),
             claim_revision=claim.revision,
-            sequence=self._next_realtime_sequence(mongo_session),
             operation_correlation=operation_correlation,
             resources=tuple(dict.fromkeys(resources)),
             claimant_visible=claimant_visible,
             claimant_resources=claimant_resources,
         )
-        self._put(
-            'realtime_event',
-            event.event_id,
-            event,
-            customer_id=event.customer_id,
-            claim_id=event.claim_id,
-            session=mongo_session,
-        )
+        self._insert_realtime_event(event, mongo_session=mongo_session)
 
     def replay_realtime_events(
         self,
@@ -595,18 +647,9 @@ class MongoDBRepository:
         claim_id: str | None = None,
         session: Any = None,
     ) -> None:
-        document = model.model_dump(mode='json')
         if kind == 'realtime_event':
-            if not isinstance(model, RealtimeEvent):
-                raise TypeError('Realtime event records require RealtimeEvent.')
-            if model.sequence is None:
-                model = model.model_copy(update={'sequence': self._next_realtime_sequence(session)})
-                document = model.model_dump(mode='json')
-            document['realtime_order'] = self._realtime_order(
-                model.occurred_at,
-                model.event_id,
-                model.sequence,
-            )
+            raise TypeError('Realtime events must use the immutable append path.')
+        document = model.model_dump(mode='json')
         if kind == 'claim':
             if not isinstance(model, WorkingClaim):
                 raise TypeError('Claim records require WorkingClaim.')

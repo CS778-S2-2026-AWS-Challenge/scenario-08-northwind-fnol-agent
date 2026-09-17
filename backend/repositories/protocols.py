@@ -410,7 +410,20 @@ class PersistenceRepository(ClaimRepository, Protocol):
         raise NotImplementedError
 
     def append_realtime_event(self, event: RealtimeEvent) -> None:
-        """Append one immutable event outside a business mutation transaction."""
+        """Append one immutable event outside a business mutation transaction.
+
+        An exact retry is a no-op. Reusing an event identity with different
+        logical content raises ``IdempotencyConflict``.
+
+        Args:
+            event: Realtime event to append.
+
+        Returns:
+            None.
+
+        Raises:
+            IdempotencyConflict: The event identity exists with different content.
+        """
         raise NotImplementedError
 
     def replay_realtime_events(

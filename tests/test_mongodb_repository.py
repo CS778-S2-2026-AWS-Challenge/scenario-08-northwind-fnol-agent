@@ -8,7 +8,12 @@ from typing import Any, ClassVar
 import mongomock
 import pytest
 from pymongo import MongoClient
-from pymongo.errors import ConfigurationError, PyMongoError, ServerSelectionTimeoutError
+from pymongo.errors import (
+    ConfigurationError,
+    DuplicateKeyError,
+    PyMongoError,
+    ServerSelectionTimeoutError,
+)
 
 from backend.adapters.claims_service import (
     MockAssessorServiceAdapter,
@@ -61,7 +66,12 @@ from backend.domain.models import (
     StaffActionStatus,
     WorkingClaim,
 )
-from backend.domain.realtime import RealtimeAudience, RealtimeCursor, RealtimeResource
+from backend.domain.realtime import (
+    RealtimeAudience,
+    RealtimeCursor,
+    RealtimeResource,
+    new_realtime_event,
+)
 from backend.domain.retrieval import (
     PolicyFacts,
     PolicyRetrievalRecord,
@@ -2290,19 +2300,16 @@ def test_mongodb_realtime_sequence_serializes_production_transactions(
             )
 
         monkeypatch.setattr(repository, '_next_realtime_sequence', original_next_sequence)
-        original_put = repository._put
+        original_insert_realtime_event = repository._insert_realtime_event
 
-        def reject_event_put(
-            kind: str,
-            identifier: str,
-            model: Any,
-            **kwargs: Any,
+        def reject_event_insert(
+            event: Any,
+            *,
+            mongo_session: Any,
         ) -> None:
-            if kind == 'realtime_event':
-                raise RuntimeError('forced event write failure')
-            original_put(kind, identifier, model, **kwargs)
+            raise RuntimeError('forced event write failure')
 
-        monkeypatch.setattr(repository, '_put', reject_event_put)
+        monkeypatch.setattr(repository, '_insert_realtime_event', reject_event_insert)
         aborted_claim, aborted_session = claim_graph('aborted')
         with pytest.raises(RuntimeError, match='forced event write failure'):
             repository.create_claim(aborted_claim, aborted_session)
@@ -2323,7 +2330,11 @@ def test_mongodb_realtime_sequence_serializes_production_transactions(
             == 0
         )
 
-        monkeypatch.setattr(repository, '_put', original_put)
+        monkeypatch.setattr(
+            repository,
+            '_insert_realtime_event',
+            original_insert_realtime_event,
+        )
         after_abort_claim, after_abort_session = claim_graph('after_abort')
         repository.create_claim(after_abort_claim, after_abort_session)
         after_abort_event = repository.replay_realtime_events(
@@ -2364,6 +2375,140 @@ def test_mongodb_realtime_sequence_serializes_production_transactions(
         if connected:
             client.drop_database(database_name)
         client.close()
+
+
+@pytest.mark.integration
+def test_mongodb_realtime_exact_retry_is_one_durable_and_live_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent exact retries preserve one immutable event and cursor."""
+
+    uri = os.environ.get(
+        'NORTHWIND_MONGODB_TEST_URI',
+        'mongodb://localhost:27017/?replicaSet=rs0&directConnection=true',
+    )
+    client: MongoClient[Any] = MongoClient(uri, serverSelectionTimeoutMS=750)
+    database_name = f'northwind_realtime_retry_{datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")}'
+    connected = False
+    watcher_stop = Event()
+    watcher: Thread | None = None
+    try:
+        try:
+            hello = client.admin.command('hello')
+            connected = True
+        except (PyMongoError, ValueError) as error:
+            pytest.skip(f'real MongoDB replica set unavailable: {type(error).__name__}')
+        if not hello.get('isWritablePrimary', False):
+            pytest.skip('real MongoDB replica set has no writable primary')
+
+        repository = MongoDBRepository(client, database_name)
+        event = new_realtime_event(
+            claim_id='clm_realtime_retry',
+            customer_id='cus_realtime_retry',
+            occurred_at=datetime.now(UTC),
+            claim_revision=1,
+            resources=(RealtimeResource.CLAIM,),
+        )
+        watcher_ready = Event()
+        first_delivery = Event()
+        duplicate_delivery = Event()
+        observed: list[Any] = []
+        watcher_failures: list[BaseException] = []
+        collection_type = type(repository._collection)
+        original_watch = collection_type.watch
+
+        def notifying_watch(collection: Any, *args: Any, **kwargs: Any) -> Any:
+            stream = original_watch(collection, *args, **kwargs)
+            watcher_ready.set()
+            return stream
+
+        monkeypatch.setattr(collection_type, 'watch', notifying_watch)
+
+        def collect_live_events() -> None:
+            try:
+                for delivered in repository.watch_realtime_events(watcher_stop):
+                    observed.append(delivered)
+                    if len(observed) == 1:
+                        first_delivery.set()
+                    else:
+                        duplicate_delivery.set()
+            except BaseException as error:
+                watcher_failures.append(error)
+
+        watcher = Thread(target=collect_live_events, name='realtime-retry-change-stream')
+        watcher.start()
+        assert watcher_ready.wait(timeout=5)
+
+        start = Barrier(3)
+
+        def append_same_event() -> None:
+            start.wait(timeout=5)
+            repository.append_realtime_event(event)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(append_same_event) for _ in range(2)]
+            start.wait(timeout=5)
+            for future in futures:
+                future.result(timeout=10)
+
+        assert first_delivery.wait(timeout=5)
+        with pytest.raises(IdempotencyConflict):
+            repository.append_realtime_event(event.model_copy(update={'claim_revision': 99}))
+        assert not duplicate_delivery.wait(timeout=1.25)
+        watcher_stop.set()
+        watcher.join(timeout=3)
+        assert not watcher.is_alive()
+        assert watcher_failures == []
+        assert len(observed) == 1
+
+        stored = repository.replay_realtime_events(None, limit=10)
+        assert len(stored) == 1
+        assert stored[0] == event.model_copy(update={'sequence': 1})
+
+        following = new_realtime_event(
+            claim_id='clm_realtime_following',
+            customer_id='cus_realtime_following',
+            occurred_at=datetime.now(UTC),
+            claim_revision=1,
+            resources=(RealtimeResource.CLAIM,),
+        )
+        repository.append_realtime_event(following)
+        replay = repository.replay_realtime_events(None, limit=10)
+        assert [item.sequence for item in replay] == [1, 2]
+        assert replay[0] == stored[0]
+    finally:
+        watcher_stop.set()
+        if watcher is not None:
+            watcher.join(timeout=3)
+        if connected:
+            client.drop_database(database_name)
+        client.close()
+
+
+def test_mongodb_realtime_duplicate_key_winner_uses_retry_contract(
+    repository: MongoDBRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event = new_realtime_event(
+        claim_id='clm_realtime_duplicate_winner',
+        customer_id='cus_realtime_duplicate_winner',
+        occurred_at=datetime.now(UTC),
+        claim_revision=1,
+        resources=(RealtimeResource.CLAIM,),
+    )
+    repository._insert_realtime_event(event, mongo_session=None)
+
+    def lose_concurrent_insert(operation: Any) -> None:
+        raise DuplicateKeyError('concurrent realtime event winner')
+
+    monkeypatch.setattr(repository, '_atomic', lose_concurrent_insert)
+
+    repository.append_realtime_event(event)
+    with pytest.raises(IdempotencyConflict):
+        repository.append_realtime_event(event.model_copy(update={'claim_revision': 99}))
+
+    stored = repository.replay_realtime_events(None, limit=10)
+    assert stored == [event.model_copy(update={'sequence': 1})]
 
 
 @pytest.mark.parametrize('invalid_session', ['foreign', 'missing'])
