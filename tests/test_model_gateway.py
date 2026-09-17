@@ -14,6 +14,7 @@ from backend.adapters.model_gateway import (
     ModelGatewayConfig,
     ModelGatewayRegistry,
     OpenAICompatibleModelGateway,
+    _optional_cache_token_count,
 )
 from backend.app import create_app
 from backend.core.auth import Principal
@@ -450,6 +451,89 @@ def test_openai_compatible_endpoints_switch_through_configuration_only(
     assert response.usage.cache_write_input_tokens == 2
 
 
+@pytest.mark.parametrize(
+    ('value', 'expected'),
+    [
+        (None, None),
+        (-1, None),
+        (True, None),
+        (1.5, None),
+        ('4', None),
+        (0, 0),
+        (4, 4),
+    ],
+)
+def test_optional_cache_token_count_accepts_only_non_negative_integers(
+    value: object,
+    expected: int | None,
+) -> None:
+    assert _optional_cache_token_count(value) == expected
+
+
+def test_openai_compatible_ignores_malformed_optional_cache_telemetry() -> None:
+    gateway = OpenAICompatibleModelGateway(
+        gateway_config(),
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={
+                    'choices': [
+                        {
+                            'finish_reason': 'stop',
+                            'message': {'content': '{"answer":"ok"}'},
+                        }
+                    ],
+                    'usage': {
+                        'prompt_tokens': 10,
+                        'completion_tokens': 4,
+                        'total_tokens': 14,
+                        'prompt_tokens_details': ['not', 'an', 'object'],
+                        'cache_read_input_tokens': -1,
+                        'cache_creation_input_tokens': True,
+                    },
+                },
+            )
+        ),
+    )
+
+    response = gateway.complete(
+        ModelRequest(
+            messages=[ModelMessage(role=ModelRole.USER, content='Return a test object.')],
+            response_schema={
+                'type': 'object',
+                'properties': {'answer': {'type': 'string'}},
+                'required': ['answer'],
+            },
+        )
+    )
+
+    assert response.structured_output == {'answer': 'ok'}
+    assert response.usage is not None
+    assert response.usage.total_tokens == 14
+    assert response.usage.cache_read_input_tokens is None
+    assert response.usage.cache_write_input_tokens is None
+
+
+def test_openai_compatible_keeps_core_usage_validation_strict() -> None:
+    gateway = OpenAICompatibleModelGateway(
+        gateway_config(),
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={
+                    'choices': [{'finish_reason': 'stop', 'message': {'content': 'ok'}}],
+                    'usage': {'prompt_tokens': -1},
+                },
+            )
+        ),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(ModelRequest(messages=[]))
+
+    assert captured.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+
+
 def test_openai_compatible_translates_optional_fields_to_strict_schema() -> None:
     observed: dict[str, object] = {}
 
@@ -621,6 +705,48 @@ def test_bedrock_converse_normalises_structured_response_and_usage(
     assert response.usage.total_tokens == 20
     assert response.usage.cache_read_input_tokens == 8
     assert response.usage.cache_write_input_tokens == 3
+
+
+def test_bedrock_converse_ignores_malformed_optional_cache_telemetry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('TEST_BEDROCK_BEARER_TOKEN', 'synthetic-bedrock-token')
+    gateway = BedrockConverseModelGateway(
+        gateway_config(
+            base_url='https://bedrock-runtime.us-east-1.amazonaws.com',
+            model='amazon.nova-2-lite-v1:0',
+            credential_environment_variable='TEST_BEDROCK_BEARER_TOKEN',
+            tools=False,
+        ),
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={
+                    'output': {'message': {'content': [{'text': 'ok'}]}},
+                    'stopReason': 'end_turn',
+                    'usage': {
+                        'inputTokens': 15,
+                        'outputTokens': 5,
+                        'totalTokens': 20,
+                        'cacheReadInputTokens': 1.5,
+                        'cacheWriteInputTokens': '3',
+                    },
+                },
+            )
+        ),
+    )
+
+    response = gateway.complete(
+        ModelRequest(
+            messages=[ModelMessage(role=ModelRole.USER, content='Return a test response.')]
+        )
+    )
+
+    assert response.text == 'ok'
+    assert response.usage is not None
+    assert response.usage.total_tokens == 20
+    assert response.usage.cache_read_input_tokens is None
+    assert response.usage.cache_write_input_tokens is None
 
 
 @pytest.mark.parametrize(
