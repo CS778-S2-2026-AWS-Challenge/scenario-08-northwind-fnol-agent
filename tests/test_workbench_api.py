@@ -552,7 +552,7 @@ def test_staff_detail_preserves_unknown_external_outcome_as_an_uncertain_gap(
             ExternalTaskDelivery.NOT_SUBMITTED,
             ExternalTaskFailureCode.UNAVAILABLE,
             'failed_unverified',
-            True,
+            False,
             True,
         ),
         (

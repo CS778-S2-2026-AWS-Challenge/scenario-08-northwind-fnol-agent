@@ -2600,6 +2600,12 @@ response, and advances the Claim revision. An inconclusive check remains `unknow
 writes none of that bundle. Stale revision, unavailable staff, another owner, missing exact action,
 or changed idempotency input returns a structured conflict before settlement.
 
+A `retryable_failure` has no staff recovery action, because the claimant owns the retry. The
+claimant projection keeps `can_request` true with the claimant as the next-step responsible party,
+and the external-request lifecycle for that task agrees: `pending_owner` is `claimant` and
+`needs_attention` is false. The server projects neither `external.accept_review` nor
+`external.reconcile_response` for it, and the state requires no staff queue entry.
+
 ### `POST /api/v1/workbench/claims/{claim_id}/reopen`
 
 Executes only the exact non-blocked `claim.reopen` action from the current terminal Claim detail.
