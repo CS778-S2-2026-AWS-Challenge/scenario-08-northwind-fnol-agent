@@ -6,7 +6,9 @@ This status record maps the merged 100-run fixture baseline to the ten product-a
 categories in issue #733. It identifies evidence that can be reused, evidence that remains
 partial or unavailable, and the exact inputs required before the next ten-scenario run.
 
-The record observes `main@2f4e980a61c6c6e66ff99812ec948eeeb990821a` on 2026-09-16. It does not
+The record was first written against `main@2f4e980a61c6c6e66ff99812ec948eeeb990821a` on
+2026-09-16. It was revised on 2026-09-17 for issue #927, which reran the same 100 cases after
+correcting how the home and contents disclosure-consent records are classified. It does not
 freeze a new scenario oracle, redefine product acceptance, or claim that any target category is
 complete.
 
@@ -21,14 +23,18 @@ This record applies the following authority order:
 3. [Fixtures and Test Conventions](../fixtures_convention.md) separates scenario data,
    executable assertions, runtime doubles, and verification evidence.
 4. [Complete-journey runs](../../tests/journey_runs/README.md) defines the implemented
-   `northwind-journey-run/3` record and result classes.
+   `northwind-journey-run/4` record and result classes.
 5. [Pull request #894](https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/pull/894)
    and its [consolidated result](https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/issues/771#issuecomment-5696256792)
    provide the merged baseline evidence.
+6. [Third-party integration forms](../research/sprint4-third-party-integration-forms.md) select
+   the manual `P3-REPAIRER` and `P3-CONTENTS-EVIDENCE` forms, in which Northwind discloses
+   nothing, so the home and contents disclosure-consent records are not applicable (#927).
 
-The final source head exercised by the baseline was
-`969764c47985ceb3cf672dff4375b0880daae169`. The batch wrote 100 records outside the
-repository: 50 motor, 30 home, and 20 contents.
+The #894 baseline ran at source head `969764c47985ceb3cf672dff4375b0880daae169`. The #927
+rerun ran the same 100 cases at `9b8b58341fc504c907892d699382cc1c933c1473`, alongside a
+comparison run of the unchanged cases at `main@9ca3e339bba2e18451bfc36ffff0ed9846202e72`. Each
+batch wrote 100 records outside the repository: 50 motor, 30 home, and 20 contents.
 
 ## Baseline result
 
@@ -38,8 +44,15 @@ product gate.
 | Family | Runs | Result classes | Reusable evidence | Principal limitation |
 | --- | ---: | --- | --- | --- |
 | Motor | 50 | 10 `fixture-only`; 40 `partial` | 50 distinct claimant/staff input sequences; five typed material packs; executable AT-01, PRES-01, and PRES-02 oracles | Fixture runtime and simulated assessor; no deployed or live-provider evidence |
-| Home | 30 | 30 `partial` | Water-ingress Claim creation; registered home fields; received and invalid material conditions | The disclosure-consent record has no route; no burglary journey |
+| Home | 30 | 30 `fixture-only` | Water-ingress Claim creation; registered home fields; received and invalid material conditions | Fixture runtime only; no burglary journey. The disclosure-consent record is `not_applicable` under the selected `P3-REPAIRER` form |
 | Contents | 20 | 20 `unavailable` | Six material variants with received, invalid, expired, disputed, and unavailable conditions | Intake stops at `contents.items`; no contents Claim creation |
+
+The #927 rerun changed only the home row. Its 30 runs moved from `partial` to `fixture-only`
+because the disclosure-consent record is now `not_applicable` rather than `no_route`; the comparison
+run at `main@9ca3e33` still classified them `partial`. `no_route` arrivals fell from 74 to 24, and the
+50 removed are the home and contents consent records, now `not_applicable`. Motor and contents
+class counts, material conditions, final workflow states, and claimant effort are identical in both
+batches.
 
 Across all records, 426 recorded Agent turns equal 426 recorded claimant messages. The average
 claimant effort is 4.26 messages, 2.28 confirmations, 3.30 uploads, and 0.17 consents. The batch
@@ -59,9 +72,9 @@ variant is evidence only for the behavior it actually exercises.
 | M4 | Vehicle damage with assessor or repair | AT-01 assessor request/result and five motor material packs | `fixture-only` for the complete simulated-assessor path; variants can be `partial` | Live or truthfully unavailable provider evidence, unknown/retry behavior, repair responsibility, and browser state | #769 for provider/AWS boundary; #771 for claimant and Workbench projections | Provider mode and authority are fixed, failure states are observable, and both role projections consume the same external-task state |
 | M5 | Fact or evidence conflict and professional review | PRES-02 guided review and staff resolution; separate AT-01 records preserve disputed and superseded pack metadata | `partial` in all 16 PRES-02 runs; the consent and assessment materials remain undelivered after the professional-review path | Final conflict oracle, internal-versus-claimant visibility, revision/idempotency readback, and browser evidence; AT-01 pack metadata alone does not prove professional-review behavior | #733 and #770 for the behavior oracle; #771 for browser and cross-role evidence | The v7 proposal/Runtime contract is published and the professional-review action can be verified from both role projections |
 | H1 | Burglary | None; the home batch contains water ingress only | Not yet run | Burglary facts, Police/evidence boundary, safety state, handoff or next safe action, and Claim creation | #733 for the frozen scenario; #770 for behavior; #769 for required backend capability | A registered-field-compatible burglary scenario and executable oracle are published |
-| H2 | Weather, water, or other property damage | Home water-ingress base path | 30 `partial`; registered intake reaches Claim creation, but the consent record has `no_route` | Final H2 oracle, claims-adapter provenance, browser evidence, and an accepted disclosure/repair boundary | #769 for backend/external boundary; #771 for browser evidence | The consent or explicit unavailable path is authoritative and the exact scenario is selected for the ten-case suite |
-| H3 | Evidence, safety, repair, or review difference | Water-ingress path with ongoing-risk/habitable fields and an illegible attendance-note variant | `partial`; the invalid condition is recorded, but material content is not interpreted by the controlled Agent | Behavior that responds to the evidence condition, safety/review outcome, repair responsibility, and role projections | #733/#770 for the oracle; #769 for repair/provider state; #771 for cross-end evidence | The selected H3 difference has an executable expected state change rather than only typed material metadata |
-| C1 | Damaged items with ownership, value, and purchase evidence | Base damaged-laptop path with photos, receipt, and replacement assessment | `unavailable` at `contents.items` | Item capture, item-level ownership/value state, Evidence association, Claim creation, and claims-adapter result | #769 for the shared backend boundary; #770 for behavior; #771 for projections | `contents.items` is captured through the authoritative contract and the runner can reach the next safe action without a private schema |
+| H2 | Weather, water, or other property damage | Home water-ingress base path | 30 `fixture-only`; registered intake reaches Claim creation, and the disclosure-consent record is `not_applicable` under `P3-REPAIRER` | Final H2 oracle, claims-adapter provenance, and browser evidence | #769 for backend/external boundary; #771 for browser evidence | The exact scenario is selected for the ten-case suite |
+| H3 | Evidence, safety, repair, or review difference | Water-ingress path with ongoing-risk/habitable fields and an illegible attendance-note variant | `fixture-only`; the invalid condition is recorded, but material content is not interpreted by the controlled Agent | Behavior that responds to the evidence condition, safety/review outcome, repair responsibility, and role projections | #733/#770 for the oracle; #769 for repair/provider state; #771 for cross-end evidence | The selected H3 difference has an executable expected state change rather than only typed material metadata |
+| C1 | Damaged items with ownership, value, and purchase evidence | Base damaged-laptop path with photos, receipt, and replacement assessment; the disclosure-consent record is `not_applicable` under `P3-CONTENTS-EVIDENCE` | `unavailable` at `contents.items` | Item capture, item-level ownership/value state, Evidence association, Claim creation, and claims-adapter result | #769 for the shared backend boundary; #770 for behavior; #771 for projections | `contents.items` is captured through the authoritative contract and the runner can reach the next safe action without a private schema |
 | C2 | Item-level evidence or fact conflict | Theft, illegible receipt, expired valuation, conflicting ownership, and authority-not-held variants | `unavailable` at `contents.items`; material conditions are preserved but not consumed into item behavior | Executable item conflict/authority oracle, review or unavailable outcome, claimant/staff visibility, and Claim result | #733/#770 for the oracle; #769 for item/Evidence capability; #771 for cross-role evidence | C1 item capture exists and one selected conflict path has an authoritative expected Runtime and projection outcome |
 
 ## Cross-cutting gaps
@@ -99,7 +112,7 @@ following inputs in order:
    smoke records agree with their executable oracles.
 
 The bounded next validation slice is therefore a three-family exact-head smoke rerun after the
-first four inputs exist. It reuses `northwind-journey-run/3`, adds no private fields or behavior,
+first four inputs exist. It reuses `northwind-journey-run/4`, adds no private fields or behavior,
 and stops with an honest unavailable record when a required capability remains absent.
 
 ## Limitations

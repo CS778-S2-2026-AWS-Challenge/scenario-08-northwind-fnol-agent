@@ -84,6 +84,7 @@ from backend.domain.models import (
     SupportNeed,
     WorkingClaim,
 )
+from backend.domain.operations import OperationState
 from backend.prompts import (
     MOTOR_CLAIMANT_PROMPT_ID,
     load_motor_claimant_prompt,
@@ -416,6 +417,8 @@ def test_openai_compatible_endpoints_switch_through_configuration_only(
                     'prompt_tokens': 10,
                     'completion_tokens': 4,
                     'total_tokens': 14,
+                    'prompt_tokens_details': {'cached_tokens': 6},
+                    'cache_creation_input_tokens': 2,
                 },
             },
         )
@@ -441,7 +444,10 @@ def test_openai_compatible_endpoints_switch_through_configuration_only(
     assert cast(dict[str, object], payload['response_format'])['type'] == 'json_schema'
     assert response.structured_output == {'answer': 'ok'}
     assert response.provider_request_id == 'provider-request-1'
-    assert response.usage is not None and response.usage.total_tokens == 14
+    assert response.usage is not None
+    assert response.usage.total_tokens == 14
+    assert response.usage.cache_read_input_tokens == 6
+    assert response.usage.cache_write_input_tokens == 2
 
 
 def test_openai_compatible_translates_optional_fields_to_strict_schema() -> None:
@@ -552,7 +558,13 @@ def test_bedrock_converse_normalises_structured_response_and_usage(
                     }
                 },
                 'stopReason': 'tool_use',
-                'usage': {'inputTokens': 15, 'outputTokens': 5, 'totalTokens': 20},
+                'usage': {
+                    'inputTokens': 15,
+                    'outputTokens': 5,
+                    'totalTokens': 20,
+                    'cacheReadInputTokens': 8,
+                    'cacheWriteInputTokens': 3,
+                },
             },
         )
 
@@ -605,7 +617,10 @@ def test_bedrock_converse_normalises_structured_response_and_usage(
     assert response.provider_model == 'amazon.nova-2-lite-v1:0'
     assert response.provider_request_id == 'bedrock-request-1'
     assert response.finish_reason == 'tool_use'
-    assert response.usage is not None and response.usage.total_tokens == 20
+    assert response.usage is not None
+    assert response.usage.total_tokens == 20
+    assert response.usage.cache_read_input_tokens == 8
+    assert response.usage.cache_write_input_tokens == 3
 
 
 @pytest.mark.parametrize(
@@ -1630,11 +1645,16 @@ def test_gateway_agent_requires_a_turn_scoped_resolver_for_evidence() -> None:
     assert gateway.requests == []
 
 
-def test_gateway_runtime_handoff_proposal_remains_advisory() -> None:
+def test_gateway_runtime_handoff_proposal_remains_advisory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = iter([100.0, 100.01, 100.01, 100.03])
+    monkeypatch.setattr('backend.services.model_agent.perf_counter', lambda: next(clock))
     gateway = RuntimeSequenceGateway(
         [
             ModelResponse(
                 completion_status=ModelCompletionStatus.COMPLETE,
+                usage=ModelUsage(input_tokens=20, output_tokens=3, total_tokens=23),
                 tool_calls=[
                     ModelToolCall(
                         call_id='handoff-read',
@@ -1645,6 +1665,7 @@ def test_gateway_runtime_handoff_proposal_remains_advisory() -> None:
             ),
             ModelResponse(
                 completion_status=ModelCompletionStatus.COMPLETE,
+                usage=ModelUsage(input_tokens=35, output_tokens=8, total_tokens=43),
                 structured_output={
                     'action_code': 'human.create_handoff',
                     'runtime_action_code': 'runtime.pause_for_review',
@@ -1665,7 +1686,11 @@ def test_gateway_runtime_handoff_proposal_remains_advisory() -> None:
             ),
         ]
     )
-    proposal = GatewayAgent(gateway).propose_turn(
+    operations = OperationRepository()
+    proposal = GatewayAgent(
+        gateway,
+        operations=ModelOperationsRecorder(operations),
+    ).propose_turn(
         AgentTurnContext(
             claim=_working_claim(),
             session_id='ses-runtime-handoff',
@@ -1679,6 +1704,28 @@ def test_gateway_runtime_handoff_proposal_remains_advisory() -> None:
     assert proposal.action_code == 'human.create_handoff'
     assert proposal.controlled_rule_authorised is False
     assert validate_proposal(proposal).outcome is AuthorityOutcome.BLOCKED
+    records = operations.metrics_records()
+    assert [record.state for record in records] == [
+        OperationState.SUCCEEDED,
+        OperationState.SUCCEEDED,
+    ]
+    assert [record.result['total_tokens'] for record in records if record.result is not None] == [
+        23,
+        43,
+    ]
+    assert [record.result['latency_ms'] for record in records if record.result is not None] == [
+        10.0,
+        20.0,
+    ]
+    assert proposal.runtime_trace is not None
+    assert [
+        invocation.latency_ms for invocation in proposal.runtime_trace.invocations
+    ] == pytest.approx(
+        [
+            10.0,
+            20.0,
+        ]
+    )
 
 
 class FailingGateway:

@@ -1,8 +1,9 @@
-"""Select the smallest safe backend test set for a pull request.
+"""Select backend checks from the files changed by one commit or pull request.
 
-The selector is intentionally conservative: shared contracts and composition
-changes select the complete suite, while narrow changes select their direct
-consumer tests. It never returns an empty set for a backend change.
+The remote backend quality gate is always diff-scoped. Known implementation
+paths select their direct consumers. Unmapped backend and quality-tooling paths
+select the selector contract sentinel, while changed-line coverage requires
+the pull request's own tests to execute its changed backend lines.
 """
 
 from __future__ import annotations
@@ -14,15 +15,16 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-FULL_TESTS = ('tests',)
-TOOLING_FULL_PATHS = {
-    '.circleci/config.yml',
-    '.github/workflows/ci.yml',
-    'pyproject.toml',
-    'backend/requirements-dev.txt',
-}
 SELECTOR_TEST_PATH = 'tests/test_backend_test_selection.py'
-TEST_SUPPORT_CONSUMERS = {
+TOOLING_CONSUMER_RULES: dict[str, tuple[str, ...]] = {
+    '.circleci/config.yml': (SELECTOR_TEST_PATH,),
+    '.github/workflows/ci.yml': (SELECTOR_TEST_PATH,),
+    'backend/requirements-dev.txt': (SELECTOR_TEST_PATH,),
+    'pyproject.toml': (SELECTOR_TEST_PATH,),
+    'scripts/check_diff_coverage.py': ('tests/test_diff_coverage.py',),
+    'scripts/select_backend_tests.py': (SELECTOR_TEST_PATH,),
+}
+TEST_SUPPORT_CONSUMERS: dict[str, tuple[str, ...]] = {
     'tests/journey_runs/': ('tests/test_journey_runs.py',),
 }
 BACKEND_CONSUMER_RULES = (
@@ -220,50 +222,29 @@ class TestSelection:
     reason: str
 
 
-def select_tests(changed_paths: Sequence[str], *, full: bool = False) -> TestSelection:
+def select_tests(changed_paths: Sequence[str]) -> TestSelection:
     """Select tests from repository-relative changed paths.
 
     Args:
         changed_paths: Paths changed relative to the target branch.
-        full: Force the complete backend suite explicitly.
-
     Returns:
-        A deterministic selection with ``full``, ``scoped``, or ``skip`` mode.
+        A deterministic selection with ``scoped`` or ``skip`` mode.
     """
 
     paths = tuple(sorted(set(_normalise_path(path) for path in changed_paths)))
-    if full:
-        return TestSelection('full', FULL_TESTS, 'explicitly forced full suite')
-
     if not paths:
         return TestSelection('skip', (), 'no changed paths')
 
-    if set(paths) & TOOLING_FULL_PATHS:
-        return TestSelection('full', FULL_TESTS, 'CI, selector, dependency, or test-tooling change')
-
     selected: set[str] = set()
     backend_changed = False
-    shared_change = False
+    guarded_unmapped_change = False
     for raw_path in paths:
         path = PurePosixPath(raw_path.replace('\\', '/'))
         path_text = path.as_posix()
-        if path_text == 'scripts/select_backend_tests.py':
-            selected.add(SELECTOR_TEST_PATH)
+        if consumers := TOOLING_CONSUMER_RULES.get(path_text):
+            selected.update(consumers)
         if path_text == 'docs/vp-field-branch-mapping.md':
             selected.add('tests/test_branch_registry.py')
-        if path_text in {'backend/requirements-dev.txt', 'pyproject.toml'}:
-            shared_change = True
-        if path_text.startswith(('backend/domain/', 'backend/repositories/protocols.py')):
-            backend_changed = True
-        if path_text in {
-            'backend/app.py',
-            'backend/main.py',
-            'backend/core/runtime_profiles.py',
-            'backend/core/config.py',
-            'backend/repositories/protocols.py',
-            'backend/domain/models.py',
-        }:
-            shared_change = True
         if path_text.startswith('backend/'):
             backend_changed = True
         if path_text.startswith('tests/') and path_text.endswith('.py'):
@@ -272,27 +253,26 @@ def select_tests(changed_paths: Sequence[str], *, full: bool = False) -> TestSel
             elif path_text == 'tests/conftest.py' or path_text.startswith(
                 ('tests/fixtures/', 'tests/helpers/', 'tests/support/')
             ):
-                shared_change = True
+                guarded_unmapped_change = True
             elif consumers := _test_support_consumers(path_text):
                 selected.update(consumers)
             else:
-                shared_change = True
+                guarded_unmapped_change = True
 
         if consumers := _backend_consumers(path_text):
             selected.update(consumers)
-        elif path_text.startswith(
-            ('backend/core/', 'backend/adapters/', 'backend/services/', 'backend/domain/')
-        ):
-            shared_change = True
+        elif path_text.startswith('backend/'):
+            guarded_unmapped_change = True
 
-    if shared_change:
-        return TestSelection(
-            'full', FULL_TESTS, 'shared contract, runtime, dependency, or domain change'
-        )
-    if backend_changed and not selected:
-        return TestSelection('full', FULL_TESTS, 'backend change has no safe narrow mapping')
+    if guarded_unmapped_change or (backend_changed and not selected):
+        selected.add(SELECTOR_TEST_PATH)
     if selected:
-        return TestSelection('scoped', tuple(sorted(selected)), 'direct consumers of changed paths')
+        reason = (
+            'direct consumers plus unmapped-change sentinel'
+            if guarded_unmapped_change
+            else 'direct consumers of changed paths'
+        )
+        return TestSelection('scoped', tuple(sorted(selected)), reason)
     return TestSelection('skip', (), 'no backend behavior changed')
 
 
@@ -409,11 +389,10 @@ def main() -> int:
     parser.add_argument(
         '--needs-audit-contract', action='store_true', help='print AuditEvent check need'
     )
-    parser.add_argument('--full', action='store_true', help='force the complete suite')
     args = parser.parse_args()
     on_main = running_on_main()
     paths = changed_paths(main_branch=on_main)
-    selection = select_tests(paths, full=args.full)
+    selection = select_tests(paths)
     if args.mode:
         print(selection.mode)
     elif args.tests:

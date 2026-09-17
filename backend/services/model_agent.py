@@ -1,7 +1,7 @@
 import json
 import re
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, cast
@@ -83,6 +83,37 @@ _CONTEXT_TOOL_NAMES = frozenset(
 )
 
 _FIELD_DEFINITIONS = build_default_registry().field_by_code
+
+
+@dataclass(frozen=True, slots=True)
+class _ObservedModelInvocation:
+    request: ModelRequest
+    response: ModelResponse | None
+    latency_ms: float
+    request_stage: str
+
+
+def _model_context_size_metrics(
+    context: AgentTurnContext,
+    context_json: str,
+) -> dict[str, int]:
+    return {
+        'claim_context_chars': len(context_json),
+        'conversation_history_chars': sum(
+            len(message.content) for message in context.conversation_messages
+        ),
+        'knowledge_citation_chars': sum(len(item.text) for item in context.knowledge_results),
+        'tool_result_chars': len(
+            json.dumps(list(context.tool_results), separators=(',', ':'), sort_keys=True)
+        ),
+        'external_service_chars': len(
+            json.dumps(
+                [item.model_dump(mode='json') for item in context.external_services],
+                separators=(',', ':'),
+                sort_keys=True,
+            )
+        ),
+    }
 
 
 def _normalise_model_field_value(field_code: str, value: Any) -> Any:
@@ -486,6 +517,70 @@ class GatewayAgent:
             return cast(ModelResponse, cast(Any, complete_for_snapshot)(request, snapshot))
         return self._gateway.complete(request)
 
+    def _observed_complete(
+        self,
+        request: ModelRequest,
+        context: AgentTurnContext,
+        request_stage: str,
+        observations: list[_ObservedModelInvocation],
+    ) -> ModelResponse:
+        started_at = perf_counter()
+        try:
+            response = self._complete(request, context)
+        except ModelGatewayError:
+            observations.append(
+                _ObservedModelInvocation(
+                    request=request,
+                    response=None,
+                    latency_ms=(perf_counter() - started_at) * 1000,
+                    request_stage=request_stage,
+                )
+            )
+            raise
+        observations.append(
+            _ObservedModelInvocation(
+                request=request,
+                response=response,
+                latency_ms=(perf_counter() - started_at) * 1000,
+                request_stage=request_stage,
+            )
+        )
+        return response
+
+    def _record_observations(
+        self,
+        observations: list[_ObservedModelInvocation],
+        context_sizes: dict[str, int],
+        failure: ModelGatewayError | None = None,
+    ) -> None:
+        if self._operations is None:
+            return
+        invocation_count = len(observations)
+        for index, observation in enumerate(observations):
+            if failure is not None and index == invocation_count - 1:
+                self._operations.failed(
+                    observation.request,
+                    failure,
+                    observation.latency_ms,
+                    observation.response,
+                    request_stage=observation.request_stage,
+                    invocation_ordinal=index + 1,
+                    invocation_count=invocation_count,
+                    context_sizes=context_sizes,
+                )
+                continue
+            if observation.response is None:
+                continue
+            self._operations.succeeded(
+                observation.request,
+                observation.response,
+                observation.latency_ms,
+                request_stage=observation.request_stage,
+                invocation_ordinal=index + 1,
+                invocation_count=invocation_count,
+                context_sizes=context_sizes,
+            )
+
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         if context.evidence_refs != [item.evidence_id for item in context.evidence]:
             raise ModelGatewayError(ModelGatewayErrorCode.EVIDENCE_UNAVAILABLE)
@@ -590,19 +685,25 @@ class GatewayAgent:
             tools=[tool] if self._gateway.capabilities.tools else [],
             required_tool_name=claim_read.name if self._gateway.capabilities.tools else None,
         )
-        started_at = perf_counter()
+        context_sizes = _model_context_size_metrics(context, context_json)
+        observed_invocations: list[_ObservedModelInvocation] = []
         response: ModelResponse | None = None
         invocations: list[RuntimeInvocationTrace] = []
         tool_call_id: str | None = None
         tool_arguments: dict[str, object] = {}
         tool_output: dict[str, object] = {}
         try:
-            response = self._complete(request, context)
+            response = self._observed_complete(
+                request,
+                context,
+                'initial',
+                observed_invocations,
+            )
             invocations.append(
                 _runtime_invocation_trace(
                     1,
                     response,
-                    (perf_counter() - started_at) * 1000,
+                    observed_invocations[-1].latency_ms,
                 )
             )
 
@@ -656,12 +757,17 @@ class GatewayAgent:
                     messages=continuation_messages,
                     response_schema=_RUNTIME_PROPOSAL_ADAPTER.json_schema(),
                 )
-                response = self._complete(continuation, context)
+                response = self._observed_complete(
+                    continuation,
+                    context,
+                    'continuation',
+                    observed_invocations,
+                )
                 invocations.append(
                     _runtime_invocation_trace(
                         2,
                         response,
-                        (perf_counter() - started_at) * 1000,
+                        observed_invocations[-1].latency_ms,
                     )
                 )
             if response.completion_status is ModelCompletionStatus.INCOMPLETE:
@@ -789,20 +895,9 @@ class GatewayAgent:
                     prompt_id=prompt_version,
                 )
         except ModelGatewayError as error:
-            if self._operations is not None:
-                self._operations.failed(
-                    request.purpose,
-                    error,
-                    (perf_counter() - started_at) * 1000,
-                    response,
-                )
+            self._record_observations(observed_invocations, context_sizes, error)
             raise
-        if self._operations is not None:
-            self._operations.succeeded(
-                request.purpose,
-                response,
-                (perf_counter() - started_at) * 1000,
-            )
+        self._record_observations(observed_invocations, context_sizes)
         return result
 
 

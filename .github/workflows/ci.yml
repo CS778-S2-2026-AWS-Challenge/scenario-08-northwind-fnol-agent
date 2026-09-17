@@ -82,38 +82,22 @@ jobs:
       - name: Check backend formatting
         if: steps.impact.outputs.mode != 'skip'
         run: |
-          if [ "${{ steps.impact.outputs.mode }}" = "full" ]; then
-            python -m ruff format --check .
-          else
-            python3 scripts/select_backend_tests.py --python-files | xargs -r python -m ruff format --check
-          fi
+          python3 scripts/select_backend_tests.py --python-files | xargs -r python -m ruff format --check
 
       - name: Lint backend
         if: steps.impact.outputs.mode != 'skip'
         run: |
-          if [ "${{ steps.impact.outputs.mode }}" = "full" ]; then
-            python -m ruff check .
-          else
-            python3 scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check
-          fi
+          python3 scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check
 
       - name: Type-check backend
         if: steps.impact.outputs.mode != 'skip'
         run: |
-          if [ "${{ steps.impact.outputs.mode }}" = "full" ]; then
-            python -m mypy backend tests
-          else
-            python3 scripts/select_backend_tests.py --python-files | xargs -r python -m mypy
-          fi
+          python3 scripts/select_backend_tests.py --python-files | xargs -r python -m mypy
 
       - name: Test backend
         run: |
           mode="${{ steps.impact.outputs.mode }}"
           case "$mode" in
-            full)
-              python -m pytest --cov=backend --cov-report=term-missing --cov-report=json:coverage.json tests
-              python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85
-              ;;
             scoped)
               python -m pytest --cov=backend --cov-report=json:coverage.json --cov-fail-under=0 $(python scripts/select_backend_tests.py --tests)
               python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85

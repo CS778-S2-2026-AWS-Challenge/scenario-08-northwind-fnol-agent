@@ -23,7 +23,9 @@ normalise:
   adapter, so storage keys and object URLs never enter the model contract;
 - assistant text, provider-neutral completion status, raw finish reason, provider model and
   request identity; and
-- input, output, and total token usage when supplied by the endpoint.
+- input, output, total, cache-read, and cache-write token usage when supplied by the endpoint;
+  unavailable usage fields remain explicitly unknown rather than being reported as zero; and
+- optional first-token latency when a transport can report it.
 
 For the target model-backed claimant path, `GatewayAgent` performs a bounded two-stage
 turn: it advertises the read-only `claim.read` tool, validates and executes that tool against
@@ -100,9 +102,14 @@ presenting approval, rejection, liability, fraud, or emergency-service claims to
 Each persisted model-backed decision records `proposal_source: model_gateway` and bounded audit
 provenance containing the runtime profile, executable prompt identifier, provider-reported model
 identifier, and provider request identifier when supplied. These references are internal-only and
-are absent from claimant messages and decision projections. Token usage persistence remains a
-current limitation. A successful multimodal Runtime trace additionally records only the selected
-Evidence ID, media type, and `submitted` outcome; raw bytes and storage metadata are excluded.
+are absent from claimant messages and decision projections. Every provider invocation also emits a
+structured, size-only observation with its stage, ordinal, elapsed time, request composition, and
+provider-reported usage. Prompt text, claimant messages, tool contents, raw provider payloads,
+credentials, and unrestricted identifiers are never logged. The existing Control Plane operation
+projection retains its bounded result shape; cache usage, first-token latency, and request/context
+sizes are observation fields rather than a public API contract. A successful multimodal Runtime
+trace additionally records only the selected Evidence ID, media type, and `submitted` outcome; raw
+bytes and storage metadata are excluded.
 
 The model-facing schema does not contain the server-only `controlled_rule_authorised`
 marker, and rejects a response that tries to provide it. The target request exposes only the
@@ -345,9 +352,10 @@ idempotency records unchanged.
 - The Agent/Runtime path can consume authorised Evidence references supplied on a claimant
   message. The claimant client remains responsible for supplying the selected Evidence IDs; it
   cannot infer capability, visibility, or storage access.
-- Provider retries, fallback selection, circuit breaking, usage persistence, and model
-  evaluation thresholds are not yet implemented. A configured runtime never substitutes
-  a fixture or another provider silently.
+- Provider retries, fallback selection, circuit breaking, durable rich usage analytics, and model
+  evaluation thresholds are not yet implemented. Provider usage and bounded composition metrics
+  are observable when supplied, but structured logs are not a durable analytics store. A
+  configured runtime never substitutes a fixture or another provider silently.
 - Readiness reports `configured` after successful local composition. It does not claim
   that remote credentials, connectivity, model quality, or production readiness have
   been verified.

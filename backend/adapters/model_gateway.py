@@ -481,10 +481,21 @@ class OpenAICompatibleModelGateway:
             return None
         if not isinstance(value, dict):
             raise TypeError
+        prompt_details = value.get('prompt_tokens_details')
+        if prompt_details is not None and not isinstance(prompt_details, dict):
+            raise TypeError
+        cache_read_input_tokens = value.get('cache_read_input_tokens')
+        if cache_read_input_tokens is None and prompt_details is not None:
+            cache_read_input_tokens = prompt_details.get('cached_tokens')
+        cache_write_input_tokens = value.get('cache_write_input_tokens')
+        if cache_write_input_tokens is None:
+            cache_write_input_tokens = value.get('cache_creation_input_tokens')
         return ModelUsage(
             input_tokens=value.get('prompt_tokens'),
             output_tokens=value.get('completion_tokens'),
             total_tokens=value.get('total_tokens'),
+            cache_read_input_tokens=cache_read_input_tokens,
+            cache_write_input_tokens=cache_write_input_tokens,
         )
 
 
@@ -682,6 +693,8 @@ class BedrockConverseModelGateway:
                 input_tokens=usage_value.get('inputTokens'),
                 output_tokens=usage_value.get('outputTokens'),
                 total_tokens=usage_value.get('totalTokens'),
+                cache_read_input_tokens=usage_value.get('cacheReadInputTokens'),
+                cache_write_input_tokens=usage_value.get('cacheWriteInputTokens'),
             )
         metadata = payload.get('$metadata')
         request_id = headers.get('x-amzn-requestid')
