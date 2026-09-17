@@ -18,7 +18,7 @@ from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from backend.domain.agent_context_runtime import VerifiedConversationSummary
-from backend.domain.assets import AssetRecord, ClaimAssetSnapshot
+from backend.domain.assets import AssetRecord, AssetType, ClaimAssetSnapshot
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
 from backend.domain.evidence import assert_material_history_is_append_only
 from backend.domain.external_services import (
@@ -767,6 +767,12 @@ class MongoDBRepository:
         if document is None:
             return None
         payload = {key: value for key, value in document.items() if key in model_type.model_fields}
+        if model_type in {AssetRecord, ClaimAssetSnapshot}:
+            details = payload.get('details')
+            if payload.get('asset_type') == AssetType.CONTENTS.value and isinstance(details, dict):
+                payload['details'] = {
+                    key: value for key, value in details.items() if key != 'serial_number'
+                }
         return model_type.model_validate(payload)
 
     @staticmethod

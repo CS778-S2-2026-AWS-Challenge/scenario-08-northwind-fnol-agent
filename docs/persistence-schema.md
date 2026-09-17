@@ -249,9 +249,13 @@ the append-only audit collection through a bounded, filterable projection.
 - Fixture and MongoDB adapters implement the same port. MongoDB selection uses one transaction;
   Fixture uses one Claim mutation lock. No adapter may reconstruct a historical snapshot from
   the current asset.
-- Existing records require no backfill. Assets and snapshots are additive. A future provider
-  migration copies IDs, revisions, timestamps, lifecycle state, and snapshots exactly, then
-  verifies owner-scoped counts and snapshot hashes before cutover. It must not infer a Policy
+- Existing records require no bulk backfill. The MongoDB adapter recognises only the legacy
+  `serial_number` member inside pre-upgrade contents Asset and Claim asset snapshot details,
+  removes it from the validated in-memory representation, and never exposes it through claimant
+  or staff projections. The stored source document, including an immutable snapshot, is not
+  rewritten by a read. Every other unknown nested member continues to fail validation. A future
+  provider migration copies IDs, revisions, timestamps, lifecycle state, and snapshots exactly,
+  then verifies owner-scoped counts and snapshot hashes before cutover. It must not infer a Policy
   relationship from claimant text; that association requires an owned `pol_` record.
 - The proposed Profile migration is not executable while #918 remains open. Existing Profiles
   remain valid under the current contract; a later approved migration must define the
