@@ -20,8 +20,9 @@ The target object catalogue, FNOL problem mapping, and delivery levels are recor
 recorded in [Agent Runtime Migration](design/agent-runtime/agent-runtime-migration.md). Current
 implementation evidence is tracked in [Agent Runtime Progress](status/agent-runtime-progress.md).
 
-The current model-backed claimant path uses the namespaced proposal contract and begins each turn
-with a registered `claim.read` tool call. The legacy static eight-action schema remains only as a
+The current model-backed claimant path uses the v7 fragmented Prompt Pack, deterministic routing,
+budgeted context, stable Request Profiles, narrow schemas, and at most one bounded read-only
+`context.resolve` call. Ordinary turns make exactly one tool-free model call. The legacy static eight-action schema remains only as a
 rejected compatibility boundary; it cannot regain execution authority. The provider-neutral Model
 Gateway implements `ModelRequest` and `ModelResponse`, OpenAI-compatible and Bedrock adapters,
 strict structured proposal validation, bounded context projection, server-rendered claimant
@@ -74,10 +75,10 @@ The implemented Release Set policy boundary selects four closed configuration co
 
 | Domain | Runtime meaning | Required fields |
 | --- | --- | --- |
-| `agent_instruction` | Claimant system instruction compiled into the model request. | `prompt_version`, `purpose`, `system_prompt` |
-| `agent_tool_policy` | Restriction over server-registered action and tool capabilities. | `policy_version`, `allowed_action_codes`, `allowed_tool_names` |
-| `agent_rule` | Controlled overlays for registered branch rules. | `rules_version`, `disabled_rule_ids`, `observation_rule_ids` |
-| `feature` | Switches for non-safety model assistance and knowledge retrieval. | `feature_version`, `model_assisted_turns`, `knowledge_retrieval` |
+| `agent_instruction` | Immutable Prompt Pack and embedded fragment bodies. | `prompt_version`, `purpose`, `composition_mode`, `manifest_version`, `fragments` |
+| `agent_tool_policy` | Action/tool allow-list plus stable model request contracts. | `policy_version`, allow-lists, Request Profiles, provider capabilities, schema registry |
+| `agent_rule` | Controlled rules, deterministic responses, routing, catalogue, and context budget. | `rules_version`, protected overlays, route/catalogue versions, budget policy |
+| `feature` | Runtime feature set and cache layout. | `feature_version`, model/retrieval switches, v7 feature flags, `cache_layout_version` |
 
 One message turn resolves these components, the selected model, and selected knowledge from one
 immutable Runtime Snapshot. The same snapshot supplies the instruction, branch evaluator,
@@ -85,11 +86,14 @@ knowledge selection, model transport, action/tool restrictions, and persisted pr
 publication affects the next turn and cannot mutate the snapshot already selected for an active
 turn.
 
-The executable claimant instruction is `northwind-fnol-claimant-v6`. Its final provider response
-must contain a registered `action_code` and `runtime_action_code` pairing. The instruction may
-guide selection, but the `ModelRuntimeProposal` schema and Action Registry enforce membership,
-pairing, and authority. Deprecated flat actions, invented directives, and published-rule-only
-interrupts proposed by a model fail before Claim State mutation.
+The executable claimant instruction is `northwind-fnol-claimant-v7`. Runtime chooses a stable
+profile and schema, converts its narrow response into an internal proposal, and validates the
+result through the Action Registry and authority boundary. Model output cannot select a Release
+Set, construct arbitrary context references, enlarge a token budget, or perform a side effect.
+Deprecated flat actions, invented directives, stale references, incompatible provider/profile
+combinations, and published-rule-only interrupts fail before Claim State mutation. v6 remains an
+immutable explicit rollback target through its complete binding manifest and matching Release Set;
+an operator must select both, and Runtime never uses it as an automatic fallback.
 
 The configuration layer may restrict capabilities but cannot invent them. Action codes, tool
 names, and branch rule IDs must already exist in their server Registries. The policy must retain
@@ -109,9 +113,9 @@ Each persisted Agent decision records the Release Set, environment/runtime profi
 configuration IDs and revisions, and exact knowledge IDs, revisions, and versions used by the
 turn. It stores coordinates, not copied prompts, configuration values, or secrets.
 
-## Target policy bundle
+## Published policy bundle
 
-A future machine-readable policy bundle must identify at least:
+The v7 machine-readable bundle identifies at least:
 
 - `policy_id`, semantic version, lifecycle status, and effective time;
 - author, change reason, approver when required, and previous version;

@@ -83,6 +83,11 @@ def test_model_observation_records_bounded_sizes_and_provider_usage(
     assert record.state is OperationState.SUCCEEDED
     assert record.result == {
         'purpose': 'agent_turn',
+        'model_profile_id': 'qwen-local',
+        'prompt_version': 'northwind-fnol-claimant-v6',
+        'request_stage': 'continuation',
+        'invocation_ordinal': 2,
+        'invocation_count': 2,
         'provider_model': 'qwen3.8-27b',
         'input_tokens': 900,
         'output_tokens': 80,
@@ -126,7 +131,11 @@ def test_model_observation_keeps_missing_usage_explicit_for_success_and_failure(
         )
         recorder.failed(
             request,
-            ModelGatewayError(ModelGatewayErrorCode.TIMEOUT, retryable=True),
+            ModelGatewayError(
+                ModelGatewayErrorCode.TIMEOUT,
+                retryable=True,
+                provider_model='qwen3.8-27b',
+            ),
             40.0,
         )
 
@@ -136,6 +145,9 @@ def test_model_observation_keeps_missing_usage_explicit_for_success_and_failure(
         OperationState.FAILED,
     ]
     assert records[1].error_code == 'MODEL_TIMEOUT'
+    assert records[1].result is not None
+    assert records[1].result['model_profile_id'] == 'qwen-local'
+    assert records[1].result['provider_model'] == 'qwen3.8-27b'
     observations = [
         cast(dict[str, object], record.__dict__['model_observation']) for record in caplog.records
     ]
