@@ -36,32 +36,32 @@ def test_audit_contract_change_selects_audit_contract_tests() -> None:
     assert selection.tests == ('tests/test_audit_contract.py',)
 
 
-def test_shared_domain_model_change_runs_the_complete_suite() -> None:
+def test_shared_domain_model_change_uses_scoped_sentinel() -> None:
     selection = select_tests(['backend/domain/models.py'])
 
-    assert selection.mode == 'full'
-    assert selection.tests == ('tests',)
+    assert selection.mode == 'scoped'
+    assert selection.tests == ('tests/test_backend_test_selection.py',)
 
 
 def test_unmapped_backend_change_never_returns_an_empty_selection() -> None:
     selection = select_tests(['backend/unknown_component.py'])
 
-    assert selection.mode == 'full'
-    assert selection.tests == ('tests',)
+    assert selection.mode == 'scoped'
+    assert selection.tests == ('tests/test_backend_test_selection.py',)
 
 
-def test_explicit_flag_forces_the_complete_suite() -> None:
-    selection = select_tests(['docs/README.md'], full=True)
+def test_ci_change_selects_the_selector_contract_without_full_suite() -> None:
+    selection = select_tests(['.circleci/config.yml', '.github/workflows/ci.yml'])
 
-    assert selection.mode == 'full'
-    assert selection.tests == ('tests',)
+    assert selection.mode == 'scoped'
+    assert selection.tests == ('tests/test_backend_test_selection.py',)
 
 
-def test_shared_test_fixture_change_runs_the_complete_suite() -> None:
+def test_shared_test_fixture_change_uses_scoped_sentinel() -> None:
     selection = select_tests(['tests/conftest.py'])
 
-    assert selection.mode == 'full'
-    assert selection.tests == ('tests',)
+    assert selection.mode == 'scoped'
+    assert selection.tests == ('tests/test_backend_test_selection.py',)
 
 
 def test_branch_registry_contract_test_runs_the_focused_suite() -> None:
@@ -91,11 +91,11 @@ def test_journey_run_support_changes_select_their_consumer_suite() -> None:
     assert selection.tests == ('tests/test_journey_runs.py',)
 
 
-def test_unknown_test_support_module_runs_the_complete_suite() -> None:
+def test_unknown_test_support_module_uses_scoped_sentinel() -> None:
     selection = select_tests(['tests/custom_support/builders.py'])
 
-    assert selection.mode == 'full'
-    assert selection.tests == ('tests',)
+    assert selection.mode == 'scoped'
+    assert selection.tests == ('tests/test_backend_test_selection.py',)
 
 
 def test_vp_mapping_document_runs_the_focused_contract_suite() -> None:
@@ -252,15 +252,15 @@ def test_staff_agent_service_change_selects_staff_consumers() -> None:
     assert 'tests/test_mongodb_repository.py' in selection.tests
 
 
-def test_unknown_backend_module_still_runs_the_complete_suite() -> None:
+def test_unknown_backend_module_stays_scoped() -> None:
     selection = select_tests(['backend/services/new_unmapped_service.py'])
 
-    assert selection.mode == 'full'
-    assert selection.tests == ('tests',)
+    assert selection.mode == 'scoped'
+    assert selection.tests == ('tests/test_backend_test_selection.py',)
 
 
 def test_backend_file_rules_do_not_match_longer_similar_names() -> None:
     selection = select_tests(['backend/services/agent.py.backup'])
 
-    assert selection.mode == 'full'
-    assert selection.tests == ('tests',)
+    assert selection.mode == 'scoped'
+    assert selection.tests == ('tests/test_backend_test_selection.py',)

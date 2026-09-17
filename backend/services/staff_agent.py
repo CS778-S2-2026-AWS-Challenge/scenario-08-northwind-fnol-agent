@@ -178,7 +178,7 @@ class GatewayStaffAgent:
         except ModelGatewayError as error:
             if self._operations is not None:
                 self._operations.failed(
-                    request.purpose,
+                    request,
                     error,
                     (perf_counter() - started_at) * 1000,
                     response,
@@ -186,7 +186,7 @@ class GatewayStaffAgent:
             raise
         if self._operations is not None:
             self._operations.succeeded(
-                request.purpose,
+                request,
                 response,
                 (perf_counter() - started_at) * 1000,
             )

@@ -139,17 +139,19 @@ This profile uses normal claimant and staff authentication, durable MongoDB, Min
 volumes, and an idempotent governed-knowledge bootstrap. It still labels policy/history and the
 controlled assessor honestly as synthetic; it is not an AWS or production deployment claim.
 
-To check changed backend lines locally after a coverage run, use:
+To run the same changed-scope backend coverage check locally, use:
 
 ```powershell
-py -3.12 -m pytest --cov=backend --cov-report=term-missing --cov-report=json:coverage.json tests
+$selectedTests = py -3.12 scripts/select_backend_tests.py --tests
+py -3.12 -m pytest --cov=backend --cov-report=json:coverage.json --cov-fail-under=0 $selectedTests
 py -3.12 scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85
 ```
 
-The repository keeps two separate backend coverage signals. The full suite must continue to
-meet the existing 90% total coverage floor. The diff check requires at least 85% of executable
-lines added or modified under `backend/` to be covered by the current test run. Deleted lines,
-non-Python files, and non-executable lines are not part of the diff denominator.
+The remote backend quality gate requires at least 85% of executable lines added or modified
+under `backend/` to be covered by the selected consumer tests. Deleted lines, non-Python files,
+and non-executable lines are not part of the diff denominator. Remote CI does not run the full
+backend suite or enforce repository-wide total coverage; developers may still run the complete
+suite manually when diagnosing broad interactions.
 
 In another terminal, start the claimant client:
 
@@ -195,10 +197,11 @@ documentation, and GitHub-automation gates. Claimant, Workbench, and Control Pla
 run only when their package or shared frontend tokens change; unrelated pull requests complete
 their impact check without installing frontend dependencies. Each affected package runs its
 `npm ci`, lint, test, and build chain. Backend pull requests use impact-scoped tests selected by
-`scripts/select_backend_tests.py`; shared-contract and unmapped backend changes run the complete
-suite. Scoped PRs also limit Ruff and Mypy to changed Python files and run contract snapshot checks
-only when their inputs are affected. Documentation-only PRs skip the Python backend quality chain.
-The `main` branch retains the complete backend suite with coverage enforcement.
+`scripts/select_backend_tests.py`; known paths run mapped consumer tests, while shared or unmapped
+backend and quality-tooling changes run the selector contract sentinel and rely on diff coverage to
+require focused tests for changed executable lines. Ruff and Mypy inspect only changed Python files,
+and contract snapshot checks run only when their inputs are affected. Documentation-only changes
+skip the Python backend quality chain. Pull requests and `main` use the same diff-scoped policy.
 
 For focused local backend verification while developing, run the checks affected by the change:
 
