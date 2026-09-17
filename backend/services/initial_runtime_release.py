@@ -49,6 +49,7 @@ _REQUIRED_MODEL_PROFILES = frozenset({'qwen-local', 'nowcoding-gpt55'})
 _VALIDATION_EVIDENCE = (
     'Repository-defined initial Runtime release passed structural and binding validation.'
 )
+_MODEL_TIMEOUT_CEILING_SECONDS = 180.0
 
 
 def _model_values(
@@ -61,13 +62,7 @@ def _model_values(
         {
             'prompt_version': prompt_version,
             'evaluation_status': 'configured',
-            'timeout_seconds': (
-                120.0
-                if prompt_version == CLAIMANT_V7_PROMPT_ID and binding.profile_id == 'qwen-local'
-                else 90.0
-                if prompt_version == CLAIMANT_V7_PROMPT_ID
-                else 30.0
-            ),
+            'timeout_seconds': _MODEL_TIMEOUT_CEILING_SECONDS,
         }
     )
     return values

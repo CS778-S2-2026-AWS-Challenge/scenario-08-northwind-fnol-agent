@@ -166,6 +166,8 @@ export default function ExternalServiceAction({
   expanded = false,
   onToggle,
 }) {
+  if (!action) return null
+
   const isRecordingConsent = status === 'granting-service-consent'
   const isRequesting = status === 'requesting-assessor'
   const isBusy = isRecordingConsent || isRequesting

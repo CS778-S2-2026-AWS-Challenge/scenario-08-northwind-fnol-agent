@@ -272,10 +272,12 @@ They are operational records only; they cannot mutate Claim State, WorkItems, ha
 or configuration values. The operation list supports bounded filters and cursor-shaped responses.
 
 Each claimant or staff model call creates a `model_invocation` operation. Its bounded result contains
-the model purpose, provider-reported model identifier when available, nullable input/output/total
-token counts, and measured latency in milliseconds. Controlled failures use a stable `MODEL_*`
-error code. The record never contains prompts, credentials, provider request payloads, raw provider
-responses, or claimant message content.
+the model purpose, requested model profile, prompt version, request stage, invocation ordinal and
+count, configured or provider-reported model identifier, nullable input/output/total token counts,
+and measured latency in milliseconds. A transport failure records the configured model identifier
+even when the provider never returns usage or provenance. Controlled failures use a stable
+`MODEL_*` error code. The record never contains prompts, credentials, provider request payloads,
+raw provider responses, or claimant message content.
 
 `GET /internal/v1/admin/operations/metrics` aggregates the complete persisted operation ledger. Its
 response contains `total`, `by_state`, `by_kind`, model `usage`, `cost`, `rate_limit`, `alerts`, and

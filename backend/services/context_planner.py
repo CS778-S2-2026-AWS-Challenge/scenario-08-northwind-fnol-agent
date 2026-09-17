@@ -82,8 +82,19 @@ def _external_service_projection(context: AgentTurnContext, route: TurnRoute) ->
     matched: list[object] = []
     requested = {item.casefold() for item in route.capability_ids}
     for service in context.external_services:
-        identity = service.service_identity.casefold()
-        if requested and not any(capability in identity for capability in requested):
+        searchable_identity = ' '.join(
+            value
+            for value in (
+                service.service_identity,
+                service.catalogue_reference,
+                service.service_name,
+                service.purpose,
+                service.requested_action,
+                service.access_form,
+            )
+            if value
+        ).casefold()
+        if requested and not any(capability in searchable_identity for capability in requested):
             continue
         matched.append(
             {

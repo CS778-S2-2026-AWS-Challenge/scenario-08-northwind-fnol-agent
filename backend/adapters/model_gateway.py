@@ -174,16 +174,27 @@ class OpenAICompatibleModelGateway:
             ) as client:
                 response = client.post('chat/completions', json=self._request_payload(request))
         except httpx.TimeoutException:
-            raise ModelGatewayError(ModelGatewayErrorCode.TIMEOUT, retryable=True) from None
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.TIMEOUT,
+                retryable=True,
+                provider_model=self._config.model,
+            ) from None
         except httpx.RequestError:
-            raise ModelGatewayError(ModelGatewayErrorCode.PROVIDER, retryable=True) from None
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.PROVIDER,
+                retryable=True,
+                provider_model=self._config.model,
+            ) from None
 
         self._raise_for_status(response.status_code)
         try:
             payload = response.json()
             return self._normalise_response(payload, request, response.headers)
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                provider_model=self._config.model,
+            ) from None
 
     def _validate_capabilities(self, request: ModelRequest) -> None:
         _validate_request_profile(self._config, request)
@@ -357,17 +368,24 @@ class OpenAICompatibleModelGateway:
             normalised['additionalProperties'] = False
         return normalised
 
-    @staticmethod
-    def _raise_for_status(status_code: int) -> None:
+    def _raise_for_status(self, status_code: int) -> None:
         if status_code < 400:
             return
         if status_code in {401, 403}:
-            raise ModelGatewayError(ModelGatewayErrorCode.AUTHENTICATION)
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.AUTHENTICATION,
+                provider_model=self._config.model,
+            )
         if status_code == 429:
-            raise ModelGatewayError(ModelGatewayErrorCode.RATE_LIMIT, retryable=True)
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.RATE_LIMIT,
+                retryable=True,
+                provider_model=self._config.model,
+            )
         raise ModelGatewayError(
             ModelGatewayErrorCode.PROVIDER,
             retryable=status_code >= 500,
+            provider_model=self._config.model,
         )
 
     @staticmethod
@@ -565,16 +583,27 @@ class BedrockConverseModelGateway:
                     json=payload,
                 )
         except httpx.TimeoutException:
-            raise ModelGatewayError(ModelGatewayErrorCode.TIMEOUT, retryable=True) from None
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.TIMEOUT,
+                retryable=True,
+                provider_model=self._config.model,
+            ) from None
         except httpx.RequestError:
-            raise ModelGatewayError(ModelGatewayErrorCode.PROVIDER, retryable=True) from None
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.PROVIDER,
+                retryable=True,
+                provider_model=self._config.model,
+            ) from None
 
         self._raise_for_status(response.status_code)
         try:
             payload = response.json()
             return self._normalise_response(payload, request, response.headers)
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                provider_model=self._config.model,
+            ) from None
 
     def _validate_capabilities(self, request: ModelRequest) -> None:
         _validate_request_profile(self._config, request)
@@ -623,17 +652,24 @@ class BedrockConverseModelGateway:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
         return '\n\n'.join(system_parts), messages
 
-    @staticmethod
-    def _raise_for_status(status_code: int) -> None:
+    def _raise_for_status(self, status_code: int) -> None:
         if status_code < 400:
             return
         if status_code in {401, 403}:
-            raise ModelGatewayError(ModelGatewayErrorCode.AUTHENTICATION)
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.AUTHENTICATION,
+                provider_model=self._config.model,
+            )
         if status_code == 429:
-            raise ModelGatewayError(ModelGatewayErrorCode.RATE_LIMIT, retryable=True)
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.RATE_LIMIT,
+                retryable=True,
+                provider_model=self._config.model,
+            )
         raise ModelGatewayError(
             ModelGatewayErrorCode.PROVIDER,
             retryable=status_code >= 500,
+            provider_model=self._config.model,
         )
 
     def _normalise_response(

@@ -437,10 +437,17 @@ _ERROR_MESSAGES = {
 
 
 class ModelGatewayError(RuntimeError):
-    def __init__(self, code: ModelGatewayErrorCode, *, retryable: bool = False) -> None:
+    def __init__(
+        self,
+        code: ModelGatewayErrorCode,
+        *,
+        retryable: bool = False,
+        provider_model: str | None = None,
+    ) -> None:
         super().__init__(_ERROR_MESSAGES[code])
         self.code = code
         self.retryable = retryable
+        self.provider_model = provider_model
 
 
 class ModelGateway(Protocol):

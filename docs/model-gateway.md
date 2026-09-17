@@ -233,7 +233,10 @@ scope with no Release Set history installs that initial Release during applicati
 both `qwen-local` and `nowcoding-gpt55` are available through the capabilities APIs on a clean
 deployment. The initializer runs only for a never-initialised scope. Existing active, superseded,
 withdrawn, or otherwise inactive Release Set history remains authoritative and is never repaired or
-overwritten on startup.
+overwritten on startup. Initial model records use a 180-second transport ceiling so a slow provider
+can return a controlled result instead of failing at the former 30-second boundary. This ceiling is
+not a response-time target: ordinary v7 profiles retain their input and output budgets, one-call
+path, and deployment telemetry for measuring actual latency.
 
 For a later governed replacement, an operator supplies independent administrator bearer tokens
 through process environment variables and publishes the prompt and model slots while preserving

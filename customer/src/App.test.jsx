@@ -999,6 +999,49 @@ describe('claimant intake projection', () => {
     })).not.toBeInTheDocument()
   })
 
+  it('keeps a message-bound service offer when no legacy Claim action exists', async () => {
+    const user = userEvent.setup()
+    const messageAction = {
+      offer_id: 'offer-assessor-1',
+      agent_message_id: agentMessage.message_id,
+      service_identity: 'vehicle_damage_assessment_routing',
+      service_name: 'Vehicle damage assessment',
+      provider: 'Northwind assessment service',
+      purpose: 'Arrange a vehicle damage assessment.',
+      shared_data_summary: ['Your confirmed incident region'],
+      consent_status: 'not_recorded',
+      status: 'consent_required',
+      routing: null,
+      failure_code: null,
+      can_request: true,
+    }
+    api.createClaim.mockResolvedValue({
+      claim: { ...initialClaim, external_service_action: null },
+      session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
+    })
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      agent_message: { ...agentMessage, message_actions: [messageAction] },
+      primary_action: primaryAction({
+        actionCode: 'claimant.request_assessment',
+        actionType: 'external_service',
+        available: true,
+        requiredInputs: ['claimant_consent'],
+        revision: 2,
+        targetRef: 'vehicle_damage_assessment_routing',
+      }),
+    })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'Please arrange an assessor.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    expect(await screen.findByRole('button', {
+      name: /Vehicle damage assessment/i,
+    })).toBeInTheDocument()
+    expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
+  })
+
   it('uses backend-required items for the review action instead of local field counts', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage.mockResolvedValue({

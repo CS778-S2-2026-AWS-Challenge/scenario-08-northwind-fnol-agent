@@ -1027,6 +1027,8 @@ class GatewayAgent:
             )
             response = self._observed_complete(request, context, 'single', observations)
             invocations.append(_runtime_invocation_trace(1, response, observations[-1].latency_ms))
+            if plan.request_profile.requires_tool_continuation and not response.tool_calls:
+                raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
             if response.tool_calls:
                 if (
                     len(response.tool_calls) != 1
@@ -1053,13 +1055,18 @@ class GatewayAgent:
                     )
                 except (KeyError, TypeError, ValueError) as error:
                     raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from error
-                tool_output = {
+                continuation_tool_output = {
                     'ref': resolved.ref,
                     'selector': resolved.selector,
                     'content': resolved.content,
                     'next_cursor': resolved.next_cursor,
                     'truncated': resolved.truncated,
                     'actual_tokens': resolved.actual_tokens,
+                }
+                tool_output = {
+                    key: value
+                    for key, value in continuation_tool_output.items()
+                    if key != 'content'
                 }
                 continuation_messages = [
                     *messages,
@@ -1072,7 +1079,11 @@ class GatewayAgent:
                         role=ModelRole.TOOL,
                         name='context.resolve',
                         tool_call_id=tool_call.call_id,
-                        content=json.dumps(tool_output, separators=(',', ':'), sort_keys=True),
+                        content=json.dumps(
+                            continuation_tool_output,
+                            separators=(',', ':'),
+                            sort_keys=True,
+                        ),
                     ),
                 ]
                 continuation = self._v7_request(

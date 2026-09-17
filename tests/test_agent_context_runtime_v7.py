@@ -604,6 +604,10 @@ def test_external_support_offers_only_registry_candidates_pending_consent(
 
     proposal = GatewayAgent(gateway).propose_turn(context)
 
+    request_context = json.loads(gateway.requests[0].messages[1].content or '{}')
+    offered_services = request_context['external.services']
+    assert service_identity in {item['service_identity'] for item in offered_services}
+    assert 1 <= len(offered_services) <= 3
     assert proposal.customer_next_step.status == 'external_service_consent_required'
     assert proposal.external_service_intents == [
         {'service_identity': service_identity, 'requested_action': 'submit_request'}
@@ -1361,9 +1365,38 @@ def test_v7_lookup_allows_one_bounded_resolve_and_one_continuation() -> None:
     assert len(gateway.requests) == 2
     assert [tool.name for tool in gateway.requests[0].tools] == ['context.resolve']
     assert gateway.requests[1].tools == []
+    continuation_payload = json.loads(gateway.requests[1].messages[-1].content or '{}')
+    assert 'content' in continuation_payload
     assert proposal.runtime_trace is not None
     assert len(proposal.runtime_trace.invocations) == 2
+    assert set(proposal.runtime_trace.tool_output) == {
+        'ref',
+        'selector',
+        'next_cursor',
+        'truncated',
+        'actual_tokens',
+    }
+    assert proposal.runtime_trace.tool_output['ref'] == reference
+    assert proposal.runtime_trace.tool_output['selector'] == 'page'
+    assert proposal.runtime_trace.tool_output['actual_tokens'] > 0
+    assert 'content' not in proposal.runtime_trace.tool_output
     assert proposal.runtime_trace.request_budget['turn_cumulative_tokens'] <= 3000
+
+
+def test_v7_lookup_rejects_a_missing_required_context_continuation() -> None:
+    response = ModelResponse(
+        structured_output=_answer_output(),
+        completion_status=ModelCompletionStatus.COMPLETE,
+    )
+    gateway = _RecordingGateway([response])
+
+    with pytest.raises(ModelGatewayError) as error:
+        GatewayAgent(gateway).propose_turn(
+            _context('What is the status of my claim?', conversation_messages=_messages(6))
+        )
+
+    assert error.value.code is ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
+    assert len(gateway.requests) == 1
 
 
 def test_v7_lookup_rejects_a_recursive_tool_call() -> None:

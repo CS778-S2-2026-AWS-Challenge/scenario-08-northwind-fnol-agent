@@ -108,6 +108,13 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
         'qwen-local',
         'nowcoding-gpt55',
     }
+    assert {
+        str(record.values['profile_id']): record.values['timeout_seconds']
+        for record in configurations.list_configurations('model')
+    } == {
+        'qwen-local': 180.0,
+        'nowcoding-gpt55': 180.0,
+    }
     assert policy.controlled_rules.context_budget_policy is not None
     assert policy.features.verified_rolling_summary is True
     assert policy.features.isolated_execution is True

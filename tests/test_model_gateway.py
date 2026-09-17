@@ -747,6 +747,7 @@ def test_bedrock_converse_maps_provider_failures(
 
     assert captured.value.code is code
     assert captured.value.retryable is retryable
+    assert captured.value.provider_model == 'amazon.nova-2-lite-v1:0'
 
 
 @pytest.mark.parametrize(
@@ -893,6 +894,7 @@ def test_bedrock_converse_maps_transport_failures(
 
     assert captured.value.code is code
     assert captured.value.retryable is True
+    assert captured.value.provider_model == 'northwind-test-model'
 
 
 def test_bedrock_converse_normalises_plain_text_and_metadata_request_id(
@@ -1262,6 +1264,7 @@ def test_timeout_and_malformed_responses_are_normalised() -> None:
         timeout_gateway.complete(ModelRequest(messages=[]))
     assert timeout_error.value.code is ModelGatewayErrorCode.TIMEOUT
     assert timeout_error.value.retryable is True
+    assert timeout_error.value.provider_model == 'northwind-test-model'
 
     malformed_gateway = OpenAICompatibleModelGateway(
         gateway_config(),
@@ -1270,6 +1273,7 @@ def test_timeout_and_malformed_responses_are_normalised() -> None:
     with pytest.raises(ModelGatewayError) as malformed_error:
         malformed_gateway.complete(ModelRequest(messages=[]))
     assert malformed_error.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+    assert malformed_error.value.provider_model == 'northwind-test-model'
 
     oversized_provenance_gateway = OpenAICompatibleModelGateway(
         gateway_config(),
@@ -2519,6 +2523,11 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
     assert operation.result is not None
     assert operation.result == {
         'purpose': 'agent_turn',
+        'model_profile_id': 'qwen-local',
+        'prompt_version': 'northwind-fnol-claimant-v6',
+        'request_stage': 'initial',
+        'invocation_ordinal': 1,
+        'invocation_count': 1,
         'provider_model': 'provider-model-private',
         'input_tokens': 30,
         'output_tokens': 10,
