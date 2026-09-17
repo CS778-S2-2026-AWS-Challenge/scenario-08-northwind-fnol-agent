@@ -86,6 +86,7 @@ together.
 python -m tests.journey_runs --scenario motor --runs 50 --out ../journey-runs
 python -m tests.journey_runs --scenario home --runs 30 --out ../journey-runs
 python -m tests.journey_runs --scenario contents --runs 20 --out ../journey-runs
+python -m tests.journey_runs --scenario motor-failures --runs 5 --out ../journey-runs
 python -m tests.journey_runs --schema
 ```
 
@@ -108,6 +109,7 @@ record it there.
 | Runner | Journey | Evidence level |
 |---|---|---|
 | `motor_collision.py` | Run AT-01 creation/assessor routing, PRES-01 human handoff, or PRES-02 guided professional review and staff resolution; upload the selected claimant pack and validate the fixture oracle | API projections on the fixture runtime; not browser; no provider contacted |
+| `assessor_failures.py` (`motor-failures`) | Run AT-01 to assessor consent, route against an adapter scripted to fail one way, check both ends at the failure, then recover only through the claimant's retry or the projected Workbench `accept-review` or `reconcile` action | The same |
 | `household.py` (`home`, `contents`) | Create, describe, upload the claimant's pack, then answer each `dynamic_form.requirements.next_required_item` from a scripted claimant answer and confirm the proposals, until the requirements are `ready` and the claim is created | The same |
 
 The default motor pack (`motor-collision-provisional-2`) uses the `received` motor materials in
@@ -142,3 +144,13 @@ refusal is the evidence), or after 12 turns.
   states that external-send consent is not applicable because Northwind sends nothing
   (`P3-CONTENTS-EVIDENCE`). The theft-path Police report is excluded. On the controlled runtime `contents.items` is not captured, so the run is
   `unavailable` (`docs/model-gateway.md`; Discussion #847).
+
+The five assessor failure cases are a separate failure-path set, not part of the 50/30/20 baseline:
+`retryable-unavailable` (503, claimant retry), `terminal-access-denied` and `terminal-not-required`
+(502, staff accept the review), `unknown-outcome` (409, staff reconcile), and
+`interrupted-dispatch` (500, staff reconcile). Each routing step expects its documented status and
+records the error code as a fixture oracle. Four `failure.*` seam checks read both ends before any
+recovery: who acts next, whether staff can find the work and have a task action when either end
+names staff, and whether `can_request` matches what a resend does. The retryable case's
+disagreement is tracked by Discussion #934; any other disagreement is `untracked` and fails the
+suite.

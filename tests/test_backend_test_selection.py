@@ -29,6 +29,26 @@ def test_narrow_claim_api_change_selects_direct_consumers() -> None:
     assert 'tests/test_claim_creation_journey.py' in selection.tests
 
 
+def test_asset_modules_select_asset_claim_branch_and_mongodb_contracts() -> None:
+    selection = select_tests(
+        [
+            'backend/api/assets.py',
+            'backend/domain/assets.py',
+            'backend/repositories/assets.py',
+            'backend/services/assets.py',
+        ]
+    )
+
+    assert selection.mode == 'scoped'
+    assert {
+        'tests/test_asset_api.py',
+        'tests/test_asset_repository.py',
+        'tests/test_branch_registry.py',
+        'tests/test_claim_api.py',
+        'tests/test_mongodb_repository.py',
+    } <= set(selection.tests)
+
+
 def test_audit_contract_change_selects_audit_contract_tests() -> None:
     selection = select_tests(['backend/domain/audit.py'])
 

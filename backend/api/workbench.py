@@ -10,6 +10,7 @@ from backend.adapters.claims_service import AssessorServiceAdapter
 from backend.adapters.evidence_storage import EvidenceStorage, EvidenceStorageUnavailable
 from backend.core.auth import Principal, require_staff
 from backend.core.errors import ApiError
+from backend.domain.assets import ClaimAssetSnapshotListResponse, project_snapshot
 from backend.domain.models import (
     AcceptHandoffRequest,
     AgentAction,
@@ -21,6 +22,7 @@ from backend.domain.models import (
     DecideCollaborationRequest,
     ExternalTaskReconciliationResponse,
     HandoffMutationResponse,
+    PageInfo,
     ReopenClaimRequest,
     RequeueClaimRequest,
     ResolveHandoffRequest,
@@ -52,6 +54,7 @@ from backend.domain.workbench import (
     WorkbenchWorkItemsResponse,
     WorkPriorityLevel,
 )
+from backend.repositories.assets import AssetRepository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.ownership import (
     create_cowork_request,
@@ -73,6 +76,7 @@ from backend.services.staff_actions import (
     send_staff_message,
     update_staff_action,
 )
+from backend.services.support import decode_cursor, encode_cursor
 from backend.services.terminal_claims import reopen_claim
 from backend.services.workbench import (
     get_workbench_claim_filter_metadata,
@@ -212,6 +216,36 @@ def read_workbench_claim(
     principal: Principal = Depends(require_staff),
 ) -> WorkbenchClaimDetail:
     return get_review_connected_workbench_detail(repository_for(request), principal, claim_id)
+
+
+@router.get('/{claim_id}/asset-snapshots', response_model=ClaimAssetSnapshotListResponse)
+def read_workbench_claim_asset_snapshots(
+    claim_id: str,
+    request: Request,
+    principal: Principal = Depends(require_staff),
+    limit: int = Query(default=25, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+) -> ClaimAssetSnapshotListResponse:
+    del principal
+    repository = repository_for(request)
+    claim = repository.get_claim_internal(claim_id)
+    if claim is None:
+        raise ApiError(
+            status_code=404,
+            code='RESOURCE_NOT_FOUND',
+            message='The claim was not found.',
+        )
+    offset = decode_cursor(cursor)
+    records, has_more = cast(AssetRepository, repository).list_claim_asset_snapshots(
+        claim_id,
+        claim.customer_id,
+        offset=offset,
+        limit=limit,
+    )
+    page = PageInfo(next_cursor=encode_cursor(offset + len(records)) if has_more else None)
+    return ClaimAssetSnapshotListResponse(
+        items=[project_snapshot(item) for item in records], page=page
+    )
 
 
 @router.post('/{claim_id}/reopen', response_model=WorkbenchClaimDetail)

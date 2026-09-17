@@ -2,6 +2,7 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, Header, Request, Response, status
 
+from backend.api.assets import account_router as account_assets_router
 from backend.core.auth import Principal, require_claimant_session
 from backend.core.errors import ApiError
 from backend.domain.identity import (
@@ -25,6 +26,7 @@ from backend.services.identity import (
 )
 
 router = APIRouter(prefix='/api/v1', tags=['claimant identity'])
+router.include_router(account_assets_router)
 
 
 def identity_repository_for(request: Request) -> IdentityRepository:

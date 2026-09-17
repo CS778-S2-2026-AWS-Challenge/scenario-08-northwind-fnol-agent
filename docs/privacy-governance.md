@@ -18,6 +18,37 @@ interpretation.
 | Consent and authority records | Prove purpose-limited permission for an authorised action | Claimant projection as permitted, authorised staff, audit path | Record permission and send permission remain separate; no action may exceed the recorded scope |
 | Audit and operational records | Trace material access, retrieval, decisions, errors, and configuration changes | Restricted staff and governance/audit paths | Keep actor, purpose, source reference, time, outcome, and limitation without exposing secrets |
 
+## Claimant data privacy matrix
+
+All values are synthetic in this prototype. Encryption means the selected store's approved
+at-rest and in-transit boundary; application logs, prompts, RAG documents, traces, and source
+control are never substitute protected stores.
+
+Only the Asset and Claim asset snapshot rows describe implemented behavior in this change. The
+other rows are a classification baseline. Their retention authorities, hold/deletion transitions,
+masking failures, protected-store failures, and adapter conformance remain open under #918 and
+must be published before a child implementation relies on them.
+
+| Class | Collection/minimisation purpose | Access and masking | Agent, RAG, and log rule | Audit, retention, deletion expectation |
+| --- | --- | --- | --- | --- |
+| Profile | Identify/contact the claimant and prefill permitted intake facts; collect only approved fields | Owner full; staff minimum task view | Purpose-limited Agent context only; no profile indexing or raw logs | Open under #918; no production deletion/anonymisation schedule is approved |
+| Identity Record | Identity proof and verification only | Owner masked; identity-authorised role by task; protected value encrypted separately | Excluded by default from Agent, RAG, prompts, analytics, and logs | Open under #918; no verification/legal retention or deletion transition is approved |
+| Payment Destination | Future approved settlement destination, never payment execution | Owner masked; payment-authorised staff masked; token/reference encrypted separately | Always excluded from Agent, RAG, prompts, analytics, and logs | Open under #918; no payment/legal retention, revocation, or deletion transition is approved |
+| Policy Summary | Display and associate the minimum approved policy facts | Owner and claims staff bounded projection; provider internals hidden | Only approved policy facts may enter Agent context; never general RAG or raw logs | Open under #918; no account/policy retention or detachment transition is approved |
+| Asset Record | Reuse claimant-entered vehicle/property/contents details | Owner and authorised staff; no cross-account lookup | Only selected approved details enter Claim context; no asset corpus indexing or raw logs | Audit material changes; soft-deactivate first; delete when no hold/reference requires it |
+| Claim asset snapshot | Prove the asset details used for one Claim revision | Owning claimant and authorised Workbench staff | Bounded approved details may follow Claim purpose; excluded from general RAG/logs | Immutable; Claim retention/hold applies; asset deletion never rewrites it |
+| Dynamic Form | Establish source-backed FNOL facts | Claimant-safe and staff task projections | Active registered facts only; redact restricted sources from logs | Assertion/revision history retained with Claim; correct by superseding, not overwriting |
+| Participant | Represent repeatable incident roles and contacts | Claimant minimum; staff task view; mask contacts where not needed | Sensitive contacts excluded from RAG/logs and Agent unless current task requires them | Open under #918; no Claim/legal retention or relationship-aware deletion transition is approved |
+| ContentsItem | Describe claimed items without implying coverage | Claimant and staff Claim projections | Bounded active item context only; serial/value omitted unless current task requires it | Open under #918; preserve current Claim assertion history until a schedule is approved |
+| Evidence | Support the report with protected files and metadata | Claimant-safe metadata; staff provenance; bytes through protected object boundary | Extracted proposals only after controls; bytes/storage keys never in RAG or logs | Open under #918; current append-only history remains, with no new deletion schedule claimed |
+
+Asset create, update, and soft-deactivate persist an Asset-scoped `action.completed` audit fact in
+the same authoritative mutation as the Asset. Asset selection persists a Claim-scoped
+`action.completed` fact in the same mutation as the Claim revision, snapshot, Branch Evaluation,
+and idempotency response. These facts contain actor, time, outcome, revision/idempotency identity,
+and bounded source references only; they do not copy registration, address, contents details, or
+other Asset values.
+
 The prototype uses anonymous or synthetic data only. Real policyholder data,
 real credentials, private incidents, and production datasets must not be added
 to source control, MinIO, fixtures, logs, prompts, or evaluation material.
