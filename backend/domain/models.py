@@ -1044,6 +1044,12 @@ class RuntimeTraceRecord(ContractModel):
     prompt_bundle_id: str | None = Field(default=None, max_length=300)
     fragment_refs: list[str] = Field(default_factory=list, max_length=30)
     schema_id: str | None = Field(default=None, max_length=120)
+    field_contract_id: str | None = Field(default=None, max_length=120)
+    field_registry_version: str | None = Field(default=None, max_length=160)
+    branch_evaluation_revision: int | None = Field(default=None, ge=1)
+    field_contract_violations: list[dict[str, str]] = Field(default_factory=list, max_length=50)
+    repair_attempted: bool = False
+    repair_outcome: Literal['corrected', 'failed'] | None = None
     route: str | None = Field(default=None, max_length=160)
     context_sections: list[str] = Field(default_factory=list, max_length=100)
     context_load_decisions: list[dict[str, Any]] = Field(default_factory=list, max_length=100)

@@ -346,6 +346,29 @@ capabilities, and usage. It never prints the credential or full provider output.
 When the profile is not enabled or the provider call fails, it prints a bounded machine-readable
 failure status and exits non-zero without exposing a traceback or provider response.
 
+## Turn-scoped field contract
+
+For claimant intake, one `TurnFieldContract` is compiled from the exact branch evaluation and
+Field Registry snapshot used for the turn. It records a deterministic contract ID, Field Registry
+version, branch-rule version, evaluated Claim revision, and only active or candidate
+claimant-writable field definitions. The prompt projection, provider response schema, and Runtime
+validator consume this object. They do not rebuild field meaning independently or send the entire
+field catalogue.
+
+Provider constraints bind each allowed `field_code` to its boolean, enum, text, location,
+text-list, or temporal value contract. Fields with identical value shapes share one schema variant
+without limiting how many distinct fields can be proposed. Runtime performs only
+meaning-preserving normalization, such as canonical enum casing or an unambiguous boolean string.
+If the completed provider response violates the contract, Runtime permits one isolated repair
+request containing only the invalid field changes and their expected shapes. The repair has no
+tools, cannot alter response text, actions, offers, or valid field changes, and has separate input
+and output limits. A second failure aborts the turn before any Claim or Message mutation.
+
+The retained trace records contract identity, safe field/reason metadata, whether repair was
+attempted, its outcome, both invocation usage records, actual provider model, and latency. It does
+not retain claimant text, the complete model response, hidden reasoning, or credentials as repair
+diagnostics.
+
 ## Custom Protocols
 
 A non-compatible HTTP or local protocol implements the `ModelGateway` contract and is
@@ -404,9 +427,10 @@ idempotency records unchanged.
   evaluation thresholds are not yet implemented. Provider usage and bounded composition metrics
   are observable when supplied, but structured logs are not a durable analytics store. A
   configured runtime never substitutes a fixture or another provider silently.
-- Readiness reports `configured` after successful local composition. It does not claim
-  that remote credentials, connectivity, model quality, or production readiness have
-  been verified.
+- Model capability projection separates `published`, process-local `runtime_ready`, and nullable
+  `healthy`. A missing named credential makes the profile unavailable for selection without
+  preventing startup or silently selecting another provider. `healthy` does not claim remote
+  connectivity or model quality until a controlled health result exists.
 
 ## Target Runtime Relationship
 

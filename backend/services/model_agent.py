@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -76,6 +77,8 @@ from backend.domain.models import (
     RuntimeInvocationTrace,
     RuntimeTraceRecord,
 )
+from backend.domain.realtime import AgentTurnProgressStage
+from backend.domain.turn_field_contract import RepairOutcome, TurnFieldContractViolation
 from backend.prompts import (
     CLAIMANT_V7_PROMPT_ID,
     MOTOR_CLAIMANT_PROMPT_ID,
@@ -95,14 +98,51 @@ from backend.services.context_resolver import resolver_for_turn
 from backend.services.isolated_context_executor import execute_isolated_context_plan
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.model_request_planner import context_resolve_tool, plan_model_turn
+from backend.services.prompt_composer import load_response_schema
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationResolver,
 )
+from backend.services.turn_field_contract import bind_provider_schema, validate_field_changes
 from backend.services.turn_router import route_turn
+
+logger = logging.getLogger(__name__)
 
 _PROPOSAL_ADAPTER = TypeAdapter(ModelAgentProposal)
 _RUNTIME_PROPOSAL_ADAPTER = TypeAdapter(ModelRuntimeProposal)
+
+
+def _merge_field_contract_repair(
+    original: dict[str, object],
+    repaired: dict[str, object],
+    invalid_field_codes: set[str],
+) -> dict[str, object]:
+    repaired_changes = repaired.get('field_changes')
+    original_changes = original.get('field_changes')
+    if not isinstance(repaired_changes, list) or not isinstance(original_changes, list):
+        raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+    replacements: dict[str, dict[str, object]] = {}
+    for item in repaired_changes:
+        if not isinstance(item, dict):
+            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+        field_code = item.get('field_code')
+        if not isinstance(field_code, str) or field_code not in invalid_field_codes:
+            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+        if field_code in replacements:
+            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+        replacements[field_code] = item
+    if set(replacements) != invalid_field_codes:
+        raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+
+    merged_changes: list[object] = []
+    for item in original_changes:
+        if not isinstance(item, dict):
+            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+        field_code = item.get('field_code')
+        merged_changes.append(replacements.get(str(field_code), item))
+    return {**original, 'field_changes': merged_changes}
+
+
 _V7_ANSWER_ADAPTER = TypeAdapter(V7AnswerProposal)
 _V7_INTAKE_ADAPTER = TypeAdapter(V7IntakeProposal)
 _V7_EXTERNAL_ADAPTER = TypeAdapter(V7ExternalOfferProposal)
@@ -595,6 +635,8 @@ class GatewayAgent:
         observations: list[_ObservedModelInvocation],
         completion: Callable[[ModelRequest], ModelResponse] | None = None,
     ) -> ModelResponse:
+        if context.progress_reporter is not None:
+            context.progress_reporter(AgentTurnProgressStage.MODEL_WAITING, 'model.response')
         started_at = perf_counter()
         try:
             response = (
@@ -721,6 +763,9 @@ class GatewayAgent:
         tool_output: dict[str, object],
         started_at: datetime,
         request_budgets: list[ModelRequestBudget],
+        repair_attempted: bool = False,
+        repair_outcome: RepairOutcome | None = None,
+        field_contract_violations: list[dict[str, str]] | None = None,
     ) -> AgentProposal:
         if response.structured_output is None:
             raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
@@ -756,6 +801,16 @@ class GatewayAgent:
         source_claim_id: str | None = None
         removal_scope: str | None = None
         if isinstance(parsed, V7IntakeProposal):
+            if plan.field_contract is None:
+                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+            parsed = parsed.model_copy(
+                update={
+                    'field_changes': validate_field_changes(
+                        plan.field_contract,
+                        parsed.field_changes,
+                    )
+                }
+            )
             form_changes = [
                 _model_form_change(
                     item, message_text=context.message_text, evidence=context.evidence
@@ -777,6 +832,11 @@ class GatewayAgent:
         available_services = {item.service_identity for item in context.external_services}
         if any(service_id not in available_services for service_id in service_offer_ids):
             raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+        if service_offer_ids and context.progress_reporter is not None:
+            context.progress_reporter(
+                AgentTurnProgressStage.OFFER_PREPARING,
+                'external.support_options',
+            )
 
         action_code = 'conversation.answer'
         runtime_action = 'runtime.continue'
@@ -873,6 +933,20 @@ class GatewayAgent:
             prompt_bundle_id=plan.prompt_bundle_id,
             fragment_refs=plan.fragment_refs,
             schema_id=plan.schema_id,
+            field_contract_id=(
+                plan.field_contract.contract_id if plan.field_contract is not None else None
+            ),
+            field_registry_version=(
+                plan.field_contract.registry_version if plan.field_contract is not None else None
+            ),
+            branch_evaluation_revision=(
+                plan.field_contract.branch_evaluation_revision
+                if plan.field_contract is not None
+                else None
+            ),
+            field_contract_violations=field_contract_violations or [],
+            repair_attempted=repair_attempted,
+            repair_outcome=repair_outcome,
             route=f'{plan.route.product_family}:{plan.route.task.value}',
             context_sections=list(plan.context_plan.inline_context),
             context_load_decisions=[
@@ -1088,6 +1162,11 @@ class GatewayAgent:
                 tool_call_id = tool_call.call_id
                 tool_arguments = dict(tool_call.arguments)
                 try:
+                    if context.progress_reporter is not None:
+                        context.progress_reporter(
+                            AgentTurnProgressStage.TOOL_RUNNING,
+                            'context.resolve',
+                        )
                     ref = str(tool_call.arguments['ref'])
                     selector = str(tool_call.arguments['selector'])
                     raw_max_tokens = tool_call.arguments['max_tokens']
@@ -1177,17 +1256,203 @@ class GatewayAgent:
                 raise ModelGatewayError(ModelGatewayErrorCode.REFUSED_RESPONSE)
             if response.completion_status is not ModelCompletionStatus.COMPLETE:
                 raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
-            result = self._v7_proposal(
-                plan,
-                context,
-                response,
-                invocations,
-                tool_call_id=tool_call_id,
-                tool_arguments=tool_arguments,
-                tool_output=tool_output,
-                started_at=started_at,
-                request_budgets=request_budgets,
-            )
+            if context.progress_reporter is not None:
+                context.progress_reporter(
+                    AgentTurnProgressStage.TURN_VALIDATING,
+                    'field_contract.validate',
+                )
+            try:
+                result = self._v7_proposal(
+                    plan,
+                    context,
+                    response,
+                    invocations,
+                    tool_call_id=tool_call_id,
+                    tool_arguments=tool_arguments,
+                    tool_output=tool_output,
+                    started_at=started_at,
+                    request_budgets=request_budgets,
+                )
+            except TurnFieldContractViolation as contract_error:
+                violations = [item.model_dump(mode='json') for item in contract_error.violations]
+                logger.info(
+                    'agent.field_contract.validation',
+                    extra={
+                        'turn_id': context.trigger_message_id,
+                        'model_profile_id': context.model_profile_id,
+                        'field_contract_id': (
+                            plan.field_contract.contract_id
+                            if plan.field_contract is not None
+                            else None
+                        ),
+                        'violations': violations,
+                        'repair_attempted': True,
+                        'repair_outcome': 'started',
+                    },
+                )
+                if tool_call_id is not None or plan.field_contract is None:
+                    raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
+                original_output = response.structured_output
+                if not isinstance(original_output, dict):
+                    raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
+                invalid_field_codes = {violation['field_code'] for violation in violations}
+                original_changes = original_output.get('field_changes')
+                if not isinstance(original_changes, list):
+                    raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
+                invalid_changes = [
+                    item
+                    for item in original_changes
+                    if isinstance(item, dict) and item.get('field_code') in invalid_field_codes
+                ]
+                repair_contract = plan.field_contract.model_copy(
+                    update={
+                        'fields': [
+                            item
+                            for item in plan.field_contract.fields
+                            if item.field_code in invalid_field_codes
+                        ]
+                    }
+                )
+                bound_schema = bind_provider_schema(
+                    load_response_schema(plan.schema_id),
+                    repair_contract,
+                )
+                repair_properties = bound_schema.get('properties')
+                if not isinstance(repair_properties, dict):
+                    raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from None
+                repair_field_changes = repair_properties.get('field_changes')
+                if not isinstance(repair_field_changes, dict):
+                    raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from None
+                repair_schema: dict[str, object] = {
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': ['field_changes'],
+                    'properties': {'field_changes': repair_field_changes},
+                }
+                repair_messages = [
+                    ModelMessage(
+                        role=ModelRole.SYSTEM,
+                        content=(
+                            'Correct only the invalid field_changes. Preserve the response intent, '
+                            'use only the supplied field contract, and do not request tools.'
+                        ),
+                    ),
+                    ModelMessage(
+                        role=ModelRole.USER,
+                        content=json.dumps(
+                            {
+                                'invalid_fields': violations,
+                                'field_contract': {
+                                    item.field_code: {
+                                        'value_type': item.value_type,
+                                        'allowed_values': item.allowed_values,
+                                    }
+                                    for item in plan.field_contract.fields
+                                    if item.field_code in invalid_field_codes
+                                },
+                                'invalid_field_changes': invalid_changes,
+                            },
+                            separators=(',', ':'),
+                            sort_keys=True,
+                        ),
+                    ),
+                ]
+                repair_request = ModelRequest(
+                    model_profile_id=context.model_profile_id,
+                    purpose=CLAIMANT_AGENT_PURPOSE,
+                    prompt_version=CLAIMANT_V7_PROMPT_ID,
+                    privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
+                    required_capabilities=ModelCapabilities(structured_output=True),
+                    messages=repair_messages,
+                    response_schema=repair_schema,
+                    tools=[],
+                    max_output_tokens=80,
+                )
+                repair_profile = plan.request_profile.model_copy(
+                    update={
+                        'profile_id': 'field-contract-repair.v1',
+                        'input_hard_limit': 1200,
+                        'output_limit': 80,
+                        'isolated': True,
+                    }
+                )
+                repair_budget = build_request_budget(
+                    policy=(
+                        context.runtime_policy.controlled_rules.context_budget_policy
+                        if context.runtime_policy is not None
+                        and context.runtime_policy.controlled_rules.context_budget_policy
+                        is not None
+                        else ContextBudgetPolicy()
+                    ),
+                    profile=repair_profile,
+                    prompt='',
+                    schema=repair_schema,
+                    context={
+                        'messages': [item.model_dump(mode='json') for item in repair_messages]
+                    },
+                    tools=[],
+                    prior_turn_tokens=0,
+                )
+                request_budgets.append(repair_budget)
+                response = self._observed_complete(
+                    repair_request,
+                    context,
+                    'field_contract_repair',
+                    observations,
+                    exchange_completion,
+                )
+                invocations.append(
+                    _runtime_invocation_trace(2, response, observations[-1].latency_ms)
+                )
+                if (
+                    response.tool_calls
+                    or response.completion_status is not ModelCompletionStatus.COMPLETE
+                    or not isinstance(response.structured_output, dict)
+                ):
+                    raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
+                repaired_output = response.structured_output
+                response = response.model_copy(
+                    update={
+                        'structured_output': _merge_field_contract_repair(
+                            original_output,
+                            repaired_output,
+                            {violation['field_code'] for violation in violations},
+                        )
+                    }
+                )
+                if context.progress_reporter is not None:
+                    context.progress_reporter(
+                        AgentTurnProgressStage.TURN_VALIDATING,
+                        'field_contract.repair_validate',
+                    )
+                try:
+                    result = self._v7_proposal(
+                        plan,
+                        context,
+                        response,
+                        invocations,
+                        tool_call_id=None,
+                        tool_arguments={},
+                        tool_output={},
+                        started_at=started_at,
+                        request_budgets=request_budgets,
+                        repair_attempted=True,
+                        repair_outcome='corrected',
+                        field_contract_violations=violations,
+                    )
+                except TurnFieldContractViolation:
+                    logger.info(
+                        'agent.field_contract.validation',
+                        extra={
+                            'turn_id': context.trigger_message_id,
+                            'model_profile_id': context.model_profile_id,
+                            'field_contract_id': plan.field_contract.contract_id,
+                            'violations': violations,
+                            'repair_attempted': True,
+                            'repair_outcome': 'failed',
+                        },
+                    )
+                    raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
         except ModelGatewayError as error:
             self._record_observations(observations, context_sizes, error)
             raise

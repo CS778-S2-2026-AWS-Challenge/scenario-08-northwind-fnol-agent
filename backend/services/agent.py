@@ -29,6 +29,7 @@ from backend.domain.models import (
     StateChange,
     WorkingClaim,
 )
+from backend.domain.realtime import AgentTurnProgressStage
 from backend.domain.support_intent import (
     SupportIntent,
     detect_support_intent,
@@ -285,6 +286,7 @@ class AgentTurnContext:
     runtime_policy: RuntimeAgentPolicySnapshot | None = None
     external_services: tuple[ExternalServiceLifecycleProjection, ...] = ()
     tool_results: tuple[dict[str, object], ...] = ()
+    progress_reporter: Callable[[AgentTurnProgressStage, str | None], None] | None = None
 
 
 @dataclass(frozen=True, slots=True)

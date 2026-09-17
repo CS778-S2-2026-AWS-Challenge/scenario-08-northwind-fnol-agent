@@ -18,6 +18,29 @@ class RealtimeAudience(str, Enum):
     STAFF = 'staff'
 
 
+class AgentTurnProgressStage(str, Enum):
+    TURN_ACCEPTED = 'turn.accepted'
+    CONTEXT_LOADING = 'context.loading'
+    KNOWLEDGE_QUERYING = 'knowledge.querying'
+    TOOL_RUNNING = 'tool.running'
+    MODEL_WAITING = 'model.waiting'
+    OFFER_PREPARING = 'offer.preparing'
+    TURN_VALIDATING = 'turn.validating'
+    TURN_COMMITTING = 'turn.committing'
+    TURN_COMPLETED = 'turn.completed'
+    TURN_FAILED = 'turn.failed'
+
+
+class AgentTurnProgress(ContractModel):
+    turn_id: str = Field(min_length=1, max_length=200)
+    session_id: str = Field(min_length=1, max_length=120)
+    stage: AgentTurnProgressStage
+    state: str = Field(pattern=r'^(running|completed|failed)$')
+    ordinal: int = Field(ge=1)
+    safe_activity_code: str | None = Field(default=None, max_length=120)
+    retryable: bool | None = None
+
+
 class RealtimeResource(str, Enum):
     """Stable client refresh boundaries backed by documented public read APIs."""
 
@@ -334,6 +357,19 @@ class RealtimePublication(ContractModel):
         return self
 
 
+class AgentTurnProgressPublication(ContractModel):
+    claim_id: str = Field(min_length=1, max_length=120)
+    customer_id: str = Field(min_length=1, max_length=120)
+    progress: AgentTurnProgress
+    audiences: tuple[RealtimeAudience, ...] = (RealtimeAudience.CLAIMANT,)
+
+    @model_validator(mode='after')
+    def claimant_only(self) -> AgentTurnProgressPublication:
+        if self.audiences != (RealtimeAudience.CLAIMANT,):
+            raise ValueError('Agent turn progress is claimant-only.')
+        return self
+
+
 class RealtimeEvent(ContractModel):
     """Durable invalidation metadata; authoritative state remains in normal APIs."""
 
@@ -344,12 +380,27 @@ class RealtimeEvent(ContractModel):
     claim_revision: int | None = Field(default=None, ge=1)
     sequence: int | None = Field(default=None, ge=1)
     operation_correlation: str | None = Field(default=None, max_length=200)
-    resources: tuple[RealtimeResource, ...] = Field(min_length=1, max_length=11)
+    resources: tuple[RealtimeResource, ...] = Field(default=(), max_length=11)
     claimant_resources: tuple[RealtimeResource, ...] = Field(default=(), max_length=11)
     audiences: tuple[RealtimeAudience, ...] = Field(min_length=1, max_length=2)
+    event_type: str = Field(
+        default='resources.changed',
+        pattern=r'^(resources\.changed|agent\.turn\.progress)$',
+    )
+    progress: AgentTurnProgress | None = None
 
     @model_validator(mode='after')
     def validate_sets(self) -> RealtimeEvent:
+        if self.event_type == 'agent.turn.progress':
+            if self.progress is None or self.audiences != (RealtimeAudience.CLAIMANT,):
+                raise ValueError('Agent turn progress requires one claimant-only payload.')
+            if self.resources or self.claimant_resources:
+                raise ValueError('Agent turn progress cannot carry projection resources.')
+            return self
+        if self.progress is not None:
+            raise ValueError('Resource events cannot carry Agent turn progress.')
+        if not self.resources:
+            raise ValueError('Resource events require at least one projection resource.')
         _validate_visibility_sets(
             self.resources,
             self.claimant_resources,
@@ -512,11 +563,24 @@ def realtime_resources_for_records(
 
 
 def realtime_event_from_publication(
-    publication: RealtimePublication,
+    publication: RealtimePublication | AgentTurnProgressPublication,
     *,
     occurred_at: datetime,
     sequence: int,
 ) -> RealtimeEvent:
+    if isinstance(publication, AgentTurnProgressPublication):
+        return RealtimeEvent(
+            event_id=new_id('rte'),
+            occurred_at=occurred_at,
+            claim_id=publication.claim_id,
+            customer_id=publication.customer_id,
+            sequence=sequence,
+            resources=(),
+            claimant_resources=(),
+            audiences=publication.audiences,
+            event_type='agent.turn.progress',
+            progress=publication.progress,
+        )
     return RealtimeEvent(
         event_id=new_id('rte'),
         occurred_at=occurred_at,
@@ -528,4 +592,5 @@ def realtime_event_from_publication(
         resources=publication.resources,
         claimant_resources=publication.claimant_resources,
         audiences=publication.audiences,
+        event_type='resources.changed',
     )

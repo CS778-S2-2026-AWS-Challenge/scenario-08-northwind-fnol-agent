@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from backend.api import claims as claims_api
 from backend.api.realtime import realtime_stream
 from backend.core.auth import Principal
+from backend.core.errors import ApiError
 from backend.domain.realtime import (
     AUTHORITATIVE_RECORD_PROJECTION_IMPACTS,
     CLAIMANT_REALTIME_RESOURCES,
@@ -997,6 +998,7 @@ def test_legacy_claim_route_treats_last_event_id_as_revision(
         cast(Request, SimpleNamespace()),
         Principal(subject='cus_one', actor_type='claimant'),
         after_revision=0,
+        cursor=None,
         last_event_id='4',
     )
 
@@ -1004,6 +1006,69 @@ def test_legacy_claim_route_treats_last_event_id_as_revision(
     assert captured['cursor'] is None
     assert captured['legacy_after_revision'] == 4
     assert captured['legacy_current_revision'] == 4
+
+
+def test_legacy_claim_route_treats_opaque_last_event_id_as_realtime_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    opaque_cursor = cursor_for(_event(3))
+
+    monkeypatch.setattr(claims_api, 'repository_for', lambda request: object())
+    monkeypatch.setattr(
+        claims_api,
+        'claimant_event_revision',
+        lambda repository, principal, claim_id, session_id: 4,
+    )
+
+    def capture_stream(request: object, principal: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(claims_api, 'realtime_stream', capture_stream)
+
+    claims_api.read_claim_events(
+        'clm_one',
+        'ses_one',
+        cast(Request, SimpleNamespace()),
+        Principal(subject='cus_one', actor_type='claimant'),
+        after_revision=0,
+        cursor=None,
+        last_event_id=opaque_cursor,
+    )
+
+    assert captured['cursor'] == opaque_cursor
+    assert captured['legacy_after_revision'] == 0
+
+
+def test_legacy_claim_route_rejects_an_invalid_opaque_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = FixtureRepository()
+    dispatcher = RealtimeDispatcher(repository)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(realtime_dispatcher=dispatcher))
+    )
+    monkeypatch.setattr(claims_api, 'repository_for', lambda _request: repository)
+    monkeypatch.setattr(
+        claims_api,
+        'claimant_event_revision',
+        lambda repository, principal, claim_id, session_id: 0,
+    )
+
+    with pytest.raises(ApiError) as error:
+        claims_api.read_claim_events(
+            'clm_one',
+            'ses_one',
+            cast(Request, request),
+            Principal(subject='cus_one', actor_type='claimant'),
+            after_revision=0,
+            cursor=None,
+            last_event_id='not-a-realtime-cursor',
+        )
+
+    assert error.value.status_code == 409
+    assert error.value.code == 'INVALID_EVENT_CURSOR'
 
 
 class _LiveSubscription:

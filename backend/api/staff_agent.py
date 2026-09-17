@@ -22,6 +22,7 @@ from backend.services.knowledge_manifest import approved_version_for_product
 from backend.services.model_profiles import (
     default_model_profile_id,
     model_catalog,
+    model_runtime_status,
     select_model_profile,
 )
 from backend.services.staff_agent import (
@@ -42,6 +43,11 @@ class StaffAgentModelCapability(ContractModel):
     tools: bool
     image_input: bool
     document_input: bool
+    published: bool = True
+    runtime_ready: bool
+    healthy: bool | None = None
+    unavailable_reason: str | None = None
+    availability: str
 
 
 class StaffAgentCapabilitiesResponse(ContractModel):
@@ -109,19 +115,26 @@ def read_capabilities(
     if request.app.state.settings.agent_runtime_profile is not AgentRuntimeProfile.MODEL_GATEWAY:
         return StaffAgentCapabilitiesResponse(models=[])
     catalog = model_catalog(request)
-    models = [
-        StaffAgentModelCapability(
-            id=configuration.profile_id,
-            label=configuration.model_identifier,
-            protocol=configuration.protocol,
-            structured_output=configuration.structured_output,
-            tools=configuration.tools,
-            image_input=configuration.image_input,
-            document_input=configuration.document_input,
+    models: list[StaffAgentModelCapability] = []
+    for record in catalog:
+        configuration = ModelRuntimeConfiguration.model_validate(record.values)
+        runtime_status = model_runtime_status(configuration)
+        models.append(
+            StaffAgentModelCapability(
+                id=configuration.profile_id,
+                label=configuration.model_identifier,
+                protocol=configuration.protocol,
+                structured_output=configuration.structured_output,
+                tools=configuration.tools,
+                image_input=configuration.image_input,
+                document_input=configuration.document_input,
+                published=runtime_status.published,
+                runtime_ready=runtime_status.runtime_ready,
+                healthy=runtime_status.healthy,
+                unavailable_reason=runtime_status.unavailable_reason,
+                availability=('available' if runtime_status.runtime_ready else 'unavailable'),
+            )
         )
-        for record in catalog
-        if (configuration := ModelRuntimeConfiguration.model_validate(record.values))
-    ]
     return StaffAgentCapabilitiesResponse(
         models=models,
         default_model_profile_id=default_model_profile_id(request, catalog),

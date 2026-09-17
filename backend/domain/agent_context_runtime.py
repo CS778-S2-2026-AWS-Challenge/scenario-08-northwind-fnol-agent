@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import Field, model_validator
 
 from backend.domain.models import ContractModel
+from backend.domain.turn_field_contract import TurnFieldContract
 
 
 class ContextLoadMode(StrEnum):
@@ -221,6 +222,7 @@ class PlannedModelTurn(ContractModel):
     system_instruction: str = Field(min_length=1, max_length=50_000)
     context_payload: dict[str, Any]
     response_schema: dict[str, Any]
+    field_contract: TurnFieldContract | None = None
 
 
 class VerifiedConversationSummary(ContractModel):

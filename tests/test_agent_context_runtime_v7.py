@@ -1337,6 +1337,79 @@ def test_v7_timeout_stops_after_one_request_and_returns_no_proposal() -> None:
     assert len(gateway.requests) == 1
 
 
+def test_v7_field_contract_uses_one_bounded_repair_without_tools() -> None:
+    invalid = {
+        **_intake_output(),
+        'field_changes': [
+            {
+                'field_code': 'incident.injury_or_danger',
+                'value': 'maybe',
+                'reported_text': 'I am not injured.',
+            }
+        ],
+    }
+    corrected = {
+        **invalid,
+        'reply': 'An attempted rewrite that Runtime must ignore.',
+        'field_changes': [
+            {
+                'field_code': 'incident.injury_or_danger',
+                'value': False,
+                'reported_text': 'I am not injured.',
+            }
+        ],
+    }
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                structured_output=invalid,
+                completion_status=ModelCompletionStatus.COMPLETE,
+            ),
+            ModelResponse(
+                structured_output=corrected,
+                completion_status=ModelCompletionStatus.COMPLETE,
+            ),
+        ]
+    )
+
+    proposal = GatewayAgent(gateway).propose_turn(
+        _context('My car was rear-ended and I am not injured.')
+    )
+
+    assert len(gateway.requests) == 2
+    assert gateway.requests[1].tools == []
+    assert proposal.form_changes[0].value is False
+    assert proposal.customer_response == invalid['reply']
+    assert proposal.runtime_trace is not None
+    assert proposal.runtime_trace.repair_attempted is True
+    assert proposal.runtime_trace.repair_outcome == 'corrected'
+
+
+def test_v7_field_contract_fails_after_one_unsuccessful_repair() -> None:
+    invalid = {
+        **_intake_output(),
+        'field_changes': [{'field_code': 'incident.injury_or_danger', 'value': 'maybe'}],
+    }
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                structured_output=invalid,
+                completion_status=ModelCompletionStatus.COMPLETE,
+            ),
+            ModelResponse(
+                structured_output=invalid,
+                completion_status=ModelCompletionStatus.COMPLETE,
+            ),
+        ]
+    )
+
+    with pytest.raises(ModelGatewayError) as error:
+        GatewayAgent(gateway).propose_turn(_context('My car was rear-ended.'))
+
+    assert error.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+    assert len(gateway.requests) == 2
+
+
 def test_v7_lookup_allows_one_bounded_resolve_and_one_continuation() -> None:
     reference = 'ctxref:ses_v7:conversation.older'
     gateway = _RecordingGateway(

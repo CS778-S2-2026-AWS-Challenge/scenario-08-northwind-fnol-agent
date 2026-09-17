@@ -15,6 +15,7 @@ from backend.domain.agent_context_runtime import (
     VerifiedConversationSummary,
 )
 from backend.domain.models import MessageRecord, MessageVisibility, NeededFor
+from backend.domain.turn_field_contract import TurnFieldContract
 from backend.services.agent import AgentTurnContext
 from backend.services.context_budget import estimate_json_tokens
 
@@ -27,7 +28,11 @@ def _message_projection(message: MessageRecord) -> dict[str, object]:
     return {'actor': message.actor.value, 'content': message.content}
 
 
-def _claim_projection(context: AgentTurnContext, route: TurnRoute) -> dict[str, object]:
+def _claim_projection(
+    context: AgentTurnContext,
+    route: TurnRoute,
+    field_contract: TurnFieldContract | None = None,
+) -> dict[str, object]:
     claim = context.claim
     branch = context.branch_evaluation
     allowed_fields = (
@@ -67,14 +72,7 @@ def _claim_projection(context: AgentTurnContext, route: TurnRoute) -> dict[str, 
             if branch is not None
             else {}
         ),
-        'field_value_contracts': {
-            item.field_code: {
-                'selection_state': item.selection_state.value,
-                'value_state': item.value_state.value,
-            }
-            for item in (branch.field_selection if branch is not None else [])
-            if item.selection_state.value not in {'inactive', 'system_owned'}
-        },
+        'field_contract': field_contract.prompt_projection() if field_contract is not None else {},
     }
 
 
@@ -115,10 +113,11 @@ def _catalogue(
     context: AgentTurnContext,
     route: TurnRoute,
     summary: VerifiedConversationSummary | None,
+    field_contract: TurnFieldContract | None,
 ) -> tuple[list[ContextCatalogueEntry], dict[str, object], bool]:
     claim_scope = f'claim:{context.claim.claim_id}:revision:{context.claim.revision}'
     values: dict[str, object] = {
-        'claim.current': _claim_projection(context, route),
+        'claim.current': _claim_projection(context, route, field_contract),
         'message.latest': context.message_text or '',
     }
     entries = [
@@ -127,7 +126,9 @@ def _catalogue(
             resource_type='claim_projection',
             load_mode=ContextLoadMode.ALWAYS,
             priority=1,
-            estimated_tokens=estimate_json_tokens(_claim_projection(context, route)),
+            estimated_tokens=estimate_json_tokens(
+                _claim_projection(context, route, field_contract)
+            ),
             authority_scope=claim_scope,
             cache_segment='claim',
         ),
@@ -326,8 +327,11 @@ def plan_context(
     budget_limit: int,
     reserved_tokens: int,
     summary: VerifiedConversationSummary | None = None,
+    field_contract: TurnFieldContract | None = None,
 ) -> ContextPlan:
-    catalogue, resource_values, summary_state_mismatch = _catalogue(context, route, summary)
+    catalogue, resource_values, summary_state_mismatch = _catalogue(
+        context, route, summary, field_contract
+    )
     available = max(0, budget_limit - reserved_tokens)
     turn_focus = {
         'claim_revision': context.claim.revision,

@@ -1206,10 +1206,15 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 
 Returns the published claimant model catalog without endpoint credentials. The response includes
 `default_model_profile_id` (selected by the deployment `MODEL_PROFILE_ID` when that profile is
-published and configured, otherwise the first available published profile) and each
+published and runtime-ready, otherwise the first runtime-ready published profile) and each
 profile's stable ID, provider model label, protocol, structured-output capability, tool-call
-capability, image-input capability, document-input capability, and `availability`. The frontend uses the default when creating a Session, while a
-message may select another published and available profile in the same conversation.
+capability, image-input capability, document-input capability, `published`, `runtime_ready`,
+nullable `healthy`, and a nullable non-sensitive `unavailable_reason`. `availability` remains a
+compatibility projection of `runtime_ready`. Publication means that configuration belongs to the
+active Release Set; runtime readiness means this process has the required endpoint and named
+credential. Health remains `null` until a controlled provider check records a result and opening
+the page never invokes a paid provider. The frontend uses the default when creating a Session,
+while a message may select another published and runtime-ready profile in the same conversation.
 The repository initial catalogue publishes `qwen-local`, `nowcoding-gpt55`,
 `google-gemini35-flash-lite`, and the explicitly unavailable `bedrock-nova2-lite`; deployment
 selection keeps `qwen-local` as the default unless `MODEL_PROFILE_ID` changes.
@@ -1452,6 +1457,15 @@ Policy/RAG, claimant-owned Claim history, claimant-scoped Evidence history, and 
 separate bounded selectors. PDF, multi-Evidence, and cross-Claim review use one isolated,
 mutation-incapable request. Unknown, stale, cross-scope, recursive, or malformed references are
 rejected before Claim State mutation.
+For an intake proposal, Runtime compiles one `TurnFieldContract` from the exact branch evaluation
+and Field Registry snapshot used by that turn. Its contract identity, registry version, branch
+revision, allowed field codes, value types, and enum values drive the prompt projection, provider
+schema, and final Runtime validation. Inactive, hidden, and system-owned fields are excluded. The
+Runtime applies only deterministic normalization. If a provider still returns invalid field
+values, Runtime may make one isolated correction call containing only those fields and their narrow
+contract, with no tools or side effects. The correction can replace only the invalid
+`field_changes`; a second contract failure discards the complete turn and leaves the Claim and
+messages unchanged.
 The validated proposal is then applied through the ordinary revision-checked Claim transaction.
 The response includes the resulting Claim revision and compatibility decision projection, while
 the distinct TurnPlan, AgentProposal, ExecutionPlan, ActionEnvelope, ToolResult, TurnResult, and
@@ -1579,8 +1593,10 @@ anonymous claimant session. The Claim and session ownership checks are identical
 claimant read boundary. This compatibility route retains `after_revision` and the `claim.updated`
 wire shape for the current claimant client, but its event source is the process-level realtime
 dispatcher. It performs no per-connection repository polling. The server rejects a revision newer
-than the current Claim with `409 INVALID_EVENT_CURSOR` and the current revision. New clients use
-the multiplexed route below and reconnect with its opaque event cursor.
+than the current Claim with `409 INVALID_EVENT_CURSOR` and the current revision. It also accepts an
+opaque durable cursor through `cursor`; `Last-Event-ID` is interpreted as a non-negative legacy
+revision when numeric and as a durable cursor otherwise. The claimant client keeps numeric
+`claim.updated` IDs in `after_revision` and keeps only opaque IDs as durable replay cursors.
 
 When shared Claim State advances, the stream emits `claim.updated`:
 
@@ -1603,8 +1619,8 @@ Opens one claimant-scoped, multiplexed `text/event-stream` for all Claims owned 
 authenticated customer. `GET /api/v1/workbench/realtime/events` provides the corresponding staff
 stream. Both accept the last acknowledged opaque cursor in `Last-Event-ID` or the `cursor` query
 parameter; the header takes precedence. A connection without a cursor receives future events only.
-The legacy Claim stream above is separate: its `Last-Event-ID` is the emitted non-negative Claim
-revision, not this multiplexed opaque cursor.
+The legacy Claim stream above accepts both forms because it carries numeric compatibility
+`claim.updated` events and opaque durable progress events on one connection.
 
 The normal delivery is `resources.changed`:
 
@@ -1614,7 +1630,21 @@ event: resources.changed
 data: {"event_id":"rte_0123456789abcdef0123","claim_id":"clm_01J4Y7Q2AW","claim_revision":7,"operation_correlation":"submit-message-7","resources":["claim","messages"],"occurred_at":"2026-09-16T10:00:00Z"}
 ```
 
-The payload is invalidation metadata only. It never contains Claim fields, message content,
+A claimant Agent turn can also emit `agent.turn.progress` through the same durable stream:
+
+```text
+id: eyJvY2N1cnJlZF9hdCI6IjIwMjYtMDktMThUMDk6MDA6MDBaIiwiZXZlbnRfaWQiOiJydGVfYWJjIn0
+event: agent.turn.progress
+data: {"event_id":"rte_abc","claim_id":"clm_01J4Y7Q2AW","session_id":"ses_01J4Y7RPN8","turn_id":"mobile-7fce2f14","stage":"model.waiting","state":"running","ordinal":4,"safe_activity_code":"model.response","retryable":null,"occurred_at":"2026-09-18T09:00:00Z"}
+```
+
+Stable stages are `turn.accepted`, `context.loading`, `knowledge.querying`, `tool.running`,
+`model.waiting`, `offer.preparing`, `turn.validating`, `turn.committing`, `turn.completed`, and
+`turn.failed`. The event is claimant-only, monotonic within its `turn_id`, and contains stable safe
+codes rather than free-text reasoning. It is observational: authoritative messages, fields,
+consent, external tasks, and Claim revision remain in their existing APIs and transactions.
+
+The `resources.changed` payload is invalidation metadata only. Neither event type contains Claim fields, message content,
 Evidence bytes, handoff packets, external-provider payloads, model context, or secrets. A client
 refetches only the named resources through existing authoritative, visibility-filtered APIs. Staff
 receive all permitted resource hints. Claimants receive only their own customer events, and an

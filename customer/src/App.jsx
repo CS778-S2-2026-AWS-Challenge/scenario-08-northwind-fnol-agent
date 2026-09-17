@@ -39,6 +39,11 @@ import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
 import ClaimDocuments from './components/ClaimDocuments.jsx'
 import ConversationHistorySidebar from './components/ConversationHistorySidebar.jsx'
+import {
+  AgentTurnDisclosure,
+  AgentTurnPlaceholder,
+} from './components/AgentTurnActivity.jsx'
+import { completeTurnProgress, reduceTurnProgress } from './agentTurnProgress.js'
 import { documentAttentionCount } from './claimDocumentProjection.js'
 import {
   forgetAnonymousConversation,
@@ -397,12 +402,16 @@ function App() {
   const [offerErrors, setOfferErrors] = useState({})
   const [failedMessage, setFailedMessage] = useState(null)
   const [pendingMessage, setPendingMessage] = useState(null)
+  const [activeTurnProgress, setActiveTurnProgress] = useState(null)
+  const [messageActivities, setMessageActivities] = useState({})
+  const activeTurnProgressRef = useRef(null)
   const pendingSubmission = useRef(null)
   const pendingConfirmation = useRef(null)
   const pendingSupportRequest = useRef(null)
   const pendingClaimCreation = useRef(null)
   const pendingExternalService = useRef(null)
   const latestRevision = useRef(0)
+  const latestRealtimeCursor = useRef(null)
   const latestRevisionClaimId = useRef(null)
   const latestEvidenceRevision = useRef(0)
   const latestEvidenceItems = useRef([])
@@ -830,11 +839,13 @@ function App() {
     if (!claim?.claim_id) {
       latestRevisionClaimId.current = null
       latestRevision.current = 0
+      latestRealtimeCursor.current = null
       return
     }
     if (latestRevisionClaimId.current !== claim.claim_id) {
       latestRevisionClaimId.current = claim.claim_id
       latestRevision.current = Number(claim.revision || 0)
+      latestRealtimeCursor.current = null
       return
     }
     latestRevision.current = Math.max(latestRevision.current, Number(claim.revision || 0))
@@ -847,6 +858,21 @@ function App() {
     let reconnectDelay = 1000
 
     async function applyLiveUpdate(event) {
+      if (event.event_type === 'agent.turn.progress') {
+        if (!active || event.session_id !== sessionId) return
+        const expectedTurnId = pendingSubmission.current?.clientMessageId
+          || activeTurnProgressRef.current?.turnId
+        const next = reduceTurnProgress(
+          activeTurnProgressRef.current,
+          event,
+          expectedTurnId,
+        )
+        if (next !== activeTurnProgressRef.current) {
+          activeTurnProgressRef.current = next
+          setActiveTurnProgress(next)
+        }
+        return
+      }
       if (!active || event.claim_revision <= latestRevision.current) return
       const [currentClaim, conversation] = await Promise.all([
         getClaim(claim.claim_id),
@@ -871,8 +897,10 @@ function App() {
             claimId: claim.claim_id,
             sessionId,
             afterRevision: latestRevision.current,
+            cursor: latestRealtimeCursor.current,
             signal: controller.signal,
             onEvent: applyLiveUpdate,
+            onCursor: (cursor) => { latestRealtimeCursor.current = cursor },
           })
         } catch (streamFailure) {
           if (!active || controller.signal.aborted) return
@@ -882,6 +910,7 @@ function App() {
             && streamFailure.currentRevision
           ) {
             latestRevision.current = streamFailure.currentRevision
+            latestRealtimeCursor.current = null
           }
         }
         if (!active || controller.signal.aborted) return
@@ -1245,7 +1274,9 @@ function App() {
         }
       }
       const operation = pendingSubmission.current
-      setPendingMessage({ text })
+      activeTurnProgressRef.current = null
+      setActiveTurnProgress(null)
+      setPendingMessage({ text, turnId: operation.clientMessageId })
       let activeClaim = isWorkspaceActive ? claim : null
       let activeSessionId = isWorkspaceActive ? sessionId : null
       if (!activeClaim) {
@@ -1309,6 +1340,18 @@ function App() {
           messageId: turn.claimant_message.message_id,
         })
       }
+      const completedActivity = completeTurnProgress(
+        activeTurnProgressRef.current,
+        operation.clientMessageId,
+      )
+      if (turn.agent_message?.message_id) {
+        setMessageActivities((current) => ({
+          ...current,
+          [turn.agent_message.message_id]: completedActivity,
+        }))
+      }
+      activeTurnProgressRef.current = null
+      setActiveTurnProgress(null)
       pendingSubmission.current = null
       setPendingMessage(null)
       setFailedMessage(null)
@@ -1330,6 +1373,8 @@ function App() {
       if (stagedUploadsSucceeded) setStatus('idle')
     } catch (requestError) {
       if (isAssistanceReply) setAssistanceReplyReview(null)
+      activeTurnProgressRef.current = null
+      setActiveTurnProgress(null)
       setPendingMessage(null)
       if (messageWasSubmitted) {
         const serverConfirmedFailure = requestError instanceof ApiRequestError
@@ -1397,6 +1442,9 @@ function App() {
     setError('')
     setFailedMessage(null)
     setPendingMessage(null)
+    activeTurnProgressRef.current = null
+    setActiveTurnProgress(null)
+    setMessageActivities({})
     setStatus('idle')
     setPageState('home')
     if (globalThis.location?.pathname !== '/') {
@@ -2646,6 +2694,7 @@ function App() {
                     <div className="agent-bar" />
                     <div className="agent-body">
                       <div className="agent-label">Claims assistant</div>
+                      <AgentTurnDisclosure progress={messageActivities[message.message_id]} />
                       <div className="agent-text"><p>{messageText(message)}</p><button className="listen-message" type="button" onClick={() => { if (globalThis.speechSynthesis) { globalThis.speechSynthesis.cancel(); globalThis.speechSynthesis.speak(new SpeechSynthesisUtterance(messageText(message))) } }}>Listen</button></div>
                       {(message.message_actions || []).map((action) => (
                         <div className="conversation-agent-action" key={action.offer_id || action.service_identity}>
@@ -2680,12 +2729,19 @@ function App() {
                   {renderConversationAction()}
                 </div>
               )}
-              {status === 'sending' && pendingMessage && (
-                <article className="message message-claimant is-pending" aria-label="Message sending">
-                  <p className="message-author">You</p>
-                  <p>{pendingMessage.text}</p>
-                  <p className="message-state">Sending…</p>
-                </article>
+              {pendingMessage && (
+                <>
+                  <article className="msg-user is-pending" aria-label="Message sending">
+                    <div>
+                      <div className="user-bubble">{pendingMessage.text}</div>
+                      <div className="msg-meta">Sending…</div>
+                    </div>
+                  </article>
+                  <AgentTurnPlaceholder
+                    progress={activeTurnProgress}
+                    turnId={pendingMessage.turnId}
+                  />
+                </>
               )}
               {failedMessage && (
                 <article className="message message-claimant is-failed" role="alert">

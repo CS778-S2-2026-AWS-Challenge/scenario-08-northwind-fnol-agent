@@ -99,6 +99,26 @@ py -3.12 -m uvicorn backend.main:app --env-file .env --reload --host 127.0.0.1 -
 Deployment environments inject the same variable names through their secret and configuration
 mechanisms; they must not package the local `.env` file.
 
+On Windows, private model credentials can instead be stored outside the repository with the
+current-user Data Protection API vault:
+
+```powershell
+.\scripts\manage-local-secrets.ps1 set GEMINI_API_KEY
+.\scripts\manage-local-secrets.ps1 set NORTHWIND_MODEL_API_KEY
+.\scripts\manage-local-secrets.ps1 list
+.\scripts\manage-local-secrets.ps1 remove GEMINI_API_KEY
+```
+
+Start the native backend and all three frontends with:
+
+```powershell
+.\scripts\start-local.ps1
+```
+
+The launcher injects decrypted model credentials only into the backend process. The claimant,
+Workbench, and Admin processes do not inherit them. Docker remains optional for the native
+application processes and is used separately when MinIO is required.
+
 Multimodal model input is opt-in through `MODEL_SUPPORTS_IMAGE_INPUT` and
 `MODEL_SUPPORTS_DOCUMENT_INPUT`. These declarations only enable image or PDF Evidence blocks
 for a provider profile that has repeatable adapter evidence; they do not grant access to object

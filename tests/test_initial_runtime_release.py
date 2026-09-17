@@ -493,7 +493,10 @@ def test_published_prompt_content_is_runtime_authority_not_a_container_file_mirr
     )
 
 
-def test_capabilities_expose_the_repository_published_model_catalogue() -> None:
+def test_capabilities_expose_the_repository_published_model_catalogue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('GEMINI_API_KEY', 'test-only-gemini-key')
     client = TestClient(create_app(_settings()))
 
     response = client.get(
@@ -516,6 +519,9 @@ def test_capabilities_expose_the_repository_published_model_catalogue() -> None:
         item for item in response.json()['models'] if item['id'] == 'google-gemini35-flash-lite'
     )
     assert gemini['availability'] == 'available'
+    assert gemini['published'] is True
+    assert gemini['runtime_ready'] is True
+    assert gemini['healthy'] is None
     assert gemini['structured_output'] is True
     assert gemini['tools'] is True
     assert gemini['image_input'] is True

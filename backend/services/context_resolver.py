@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from backend.domain.agent_context_runtime import ContextPlan, ContextReference
 from backend.domain.models import MessageVisibility
+from backend.domain.realtime import AgentTurnProgressStage
 from backend.services.agent import AgentTurnContext
 from backend.services.prompt_composer import estimate_tokens
 
@@ -110,6 +111,11 @@ def resolver_for_turn(context: AgentTurnContext, plan: ContextPlan) -> TurnConte
             def load_policy_and_guidance(
                 limit: int = reference.max_resolve_tokens,
             ) -> dict[str, object]:
+                if context.progress_reporter is not None:
+                    context.progress_reporter(
+                        AgentTurnProgressStage.KNOWLEDGE_QUERYING,
+                        'policy.lookup',
+                    )
                 result: dict[str, object] = {}
                 if context.policy_context_loader is not None:
                     result['policy'] = context.policy_context_loader(limit)
