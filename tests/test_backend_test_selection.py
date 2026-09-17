@@ -122,6 +122,7 @@ def test_journey_run_support_changes_select_their_consumer_suite() -> None:
         'backend/api/evidence.py',
         'backend/api/workbench.py',
         'backend/domain/branch_registry.py',
+        'backend/domain/external_service_registry.py',
         'backend/services/messages.py',
         'backend/services/external_services.py',
         'backend/repositories/fixture.py',

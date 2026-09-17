@@ -40,6 +40,7 @@ JOURNEY_CRITICAL_PATHS = frozenset(
         'backend/api/workbench.py',
         'backend/domain/branch_registry.py',
         'backend/domain/evidence.py',
+        'backend/domain/external_service_registry.py',
         'backend/domain/external_services.py',
         'backend/domain/models.py',
         'backend/domain/runtime.py',
