@@ -151,6 +151,6 @@ The five assessor failure cases are a separate failure-path set, not part of the
 `interrupted-dispatch` (500, staff reconcile). Each routing step expects its documented status and
 records the error code as a fixture oracle. Four `failure.*` seam checks read both ends before any
 recovery: who acts next, whether staff can find the work and have a task action when either end
-names staff, and whether `can_request` matches what a resend does. The retryable case's
-disagreement is tracked by Discussion #934; any other disagreement is `untracked` and fails the
-suite.
+names staff, and whether `can_request` matches what a resend does. Both ends agree at every check
+in all five cases; the retryable case agrees since #942 made the claimant the staff-side owner, as
+decided in Discussion #934. Any disagreement is `untracked` and fails the suite.

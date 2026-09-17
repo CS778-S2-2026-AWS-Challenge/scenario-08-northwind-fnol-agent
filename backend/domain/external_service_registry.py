@@ -312,7 +312,7 @@ _DEFINITIONS = (
         ExternalLifecycleStatus.RETRYABLE_FAILURE,
         ExternalLifecycleStage.OPERATION,
         'The request did not complete and may be retried.',
-        'Correct the dependency and retry the same operation.',
+        'The claimant may retry the same operation; no staff action is required.',
         'Retry only when the contract permits.',
         next_statuses=(ExternalLifecycleStatus.SUBMITTING,),
         recovery='Retry the same operation identity.',
@@ -948,14 +948,15 @@ _PROJECTION_METADATA: Final = MappingProxyType(
         ExternalLifecycleStatus.RETRYABLE_FAILURE: ExternalProjectionMetadata(
             label='Failed',
             detail=(
-                'The request failed before a verified result; the same operation may be retried.'
+                'The request failed before a verified result; the claimant may retry the same '
+                'operation.'
             ),
             verification_state='failed_unverified',
-            pending_owner='claims_professional',
+            pending_owner='claimant',
             next_action=(
-                'Correct the dependency problem, then retry with the same operation identity.'
+                'The claimant may retry with the same operation identity; no staff action is '
+                'required.'
             ),
-            needs_attention=True,
         ),
         ExternalLifecycleStatus.TERMINAL_FAILURE: ExternalProjectionMetadata(
             label='Failed',
