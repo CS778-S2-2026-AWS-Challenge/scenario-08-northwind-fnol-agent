@@ -32,6 +32,7 @@ from backend.domain.models import (
     SessionStatus,
     WorkingClaim,
 )
+from backend.domain.realtime import RealtimeResource
 from backend.repositories.assets import (
     AssetSelectionRevisionConflictError,
     AssetSelectionSnapshotConflictError,
@@ -757,3 +758,12 @@ def test_concurrent_exact_asset_selection_retry_restores_one_persisted_response(
         )
     )
     assert len(claim_events) == 1
+    realtime_events = repository.replay_realtime_events(None, limit=10)
+    assert len(realtime_events) == 2
+    assert realtime_events[-1].claim_revision == claim.revision + 1
+    assert realtime_events[-1].resources == (
+        RealtimeResource.CLAIM,
+        RealtimeResource.ASSET_SNAPSHOTS,
+        RealtimeResource.QUEUE,
+    )
+    assert realtime_events[-1].operation_correlation == f'exact-retry-{adapter}'

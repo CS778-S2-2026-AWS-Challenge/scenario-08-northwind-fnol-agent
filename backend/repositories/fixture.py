@@ -1,7 +1,8 @@
+from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from threading import RLock
+from threading import Condition, Event, RLock
 from typing import Any
 
 from backend.domain.agent_context_runtime import VerifiedConversationSummary
@@ -39,6 +40,7 @@ from backend.domain.models import (
     FollowUpStatus,
     HandoffRecord,
     MessageRecord,
+    MessageVisibility,
     RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
@@ -46,6 +48,18 @@ from backend.domain.models import (
     StaffActionRecord,
     StaffActionStatus,
     WorkingClaim,
+)
+from backend.domain.realtime import (
+    MutationOutcome,
+    RealtimeCursor,
+    RealtimeEvent,
+    RealtimeMutation,
+    RealtimePublication,
+    RealtimeResource,
+    claimant_resources_for,
+    realtime_event_from_publication,
+    realtime_publication_for,
+    realtime_resources_for_records,
 )
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 from backend.domain.runtime import (
@@ -96,6 +110,7 @@ class FixtureRepository(PersistenceRepository):
     def __init__(self) -> None:
         self._validation_seed_lock = RLock()
         self._claim_mutation_lock = RLock()
+        self._realtime_condition = Condition(self._claim_mutation_lock)
         self._claims: dict[str, WorkingClaim] = {}
         self._assets: dict[str, AssetRecord] = {}
         self._claim_asset_snapshots: dict[str, ClaimAssetSnapshot] = {}
@@ -130,6 +145,8 @@ class FixtureRepository(PersistenceRepository):
         self._handoffs: dict[str, HandoffRecord] = {}
         self._idempotency: dict[tuple[str, str, str], IdempotencyRecord] = {}
         self._staff_presence: dict[str, StaffPresenceRecord] = {}
+        self._realtime_events: dict[str, RealtimeEvent] = {}
+        self._realtime_sequence = 0
         now = datetime.now(UTC)
         self._staff_presence['stf_demo'] = StaffPresenceRecord(
             staff_id='stf_demo',
@@ -142,6 +159,120 @@ class FixtureRepository(PersistenceRepository):
 
     def connection_status(self) -> str:
         return 'using_fixture'
+
+    def append_realtime_publication(self, publication: RealtimePublication) -> RealtimeEvent:
+        with self._realtime_condition:
+            prepared = self._prepare_realtime_publication(
+                publication,
+                MutationOutcome.CHANGED,
+            )
+            assert prepared is not None
+            self._commit_realtime_event(prepared)
+            return deepcopy(prepared)
+
+    def _prepare_realtime_publication(
+        self,
+        publication: RealtimePublication,
+        outcome: MutationOutcome,
+    ) -> RealtimeEvent | None:
+        """Prepare one repository-owned event while the mutation lock is held."""
+
+        if outcome is not MutationOutcome.CHANGED:
+            return None
+        return realtime_event_from_publication(
+            publication,
+            occurred_at=datetime.now(UTC),
+            sequence=self._next_realtime_sequence(),
+        )
+
+    def _prepare_realtime_mutation(
+        self,
+        mutation: RealtimeMutation,
+        claim: WorkingClaim,
+        outcome: MutationOutcome = MutationOutcome.CHANGED,
+        *,
+        operation_correlation: str | None = None,
+        claimant_visible: bool = True,
+        resources: tuple[RealtimeResource, ...] | None = None,
+        claimant_resources: tuple[RealtimeResource, ...] | None = None,
+    ) -> RealtimeEvent | None:
+        publication = realtime_publication_for(
+            mutation=mutation,
+            claim_id=claim.claim_id,
+            customer_id=claim.customer_id,
+            claim_revision=claim.revision,
+            operation_correlation=operation_correlation,
+            claimant_visible=claimant_visible,
+            resources=resources,
+            claimant_resources=claimant_resources,
+        )
+        return self._prepare_realtime_publication(publication, outcome)
+
+    def _next_realtime_sequence(self) -> int:
+        return self._realtime_sequence + 1
+
+    def _commit_realtime_event(self, event: RealtimeEvent) -> None:
+        """Commit one already-prepared event without another failure point."""
+
+        assert event.sequence is not None
+        self._realtime_events[event.event_id] = event
+        self._realtime_sequence = event.sequence
+        self._realtime_condition.notify_all()
+
+    @staticmethod
+    def _realtime_order(event: RealtimeEvent) -> tuple[int, object, str]:
+        if event.sequence is not None:
+            return (1, event.sequence, event.event_id)
+        return (0, event.occurred_at, event.event_id)
+
+    def replay_realtime_events(
+        self,
+        after: RealtimeCursor | None,
+        *,
+        limit: int,
+    ) -> list[RealtimeEvent]:
+        if not 1 <= limit <= 1000:
+            raise ValueError('Realtime replay limit must be between 1 and 1000.')
+        with self._claim_mutation_lock:
+            if after is not None:
+                stored = self._realtime_events.get(after.event_id)
+                if (
+                    stored is None
+                    or stored.occurred_at != after.occurred_at
+                    or (after.sequence is not None and stored.sequence != after.sequence)
+                ):
+                    raise ValueError('The realtime cursor is outside the available replay window.')
+            events = sorted(
+                self._realtime_events.values(),
+                key=self._realtime_order,
+            )
+            if after is not None:
+                assert stored is not None
+                anchor_order = self._realtime_order(stored)
+                events = [item for item in events if self._realtime_order(item) > anchor_order]
+            return deepcopy(events[:limit])
+
+    def realtime_high_watermark(self) -> RealtimeEvent | None:
+        with self._claim_mutation_lock:
+            if not self._realtime_events:
+                return None
+            return deepcopy(max(self._realtime_events.values(), key=self._realtime_order))
+
+    def watch_realtime_events(self, stop: Event) -> Iterator[RealtimeEvent]:
+        cursor: RealtimeCursor | None = None
+        while not stop.is_set():
+            with self._realtime_condition:
+                available = self.replay_realtime_events(cursor, limit=500)
+                if not available:
+                    self._realtime_condition.wait(timeout=1.0)
+                    continue
+            for event in available:
+                cursor = RealtimeCursor(
+                    occurred_at=event.occurred_at,
+                    event_id=event.event_id,
+                    sequence=event.sequence,
+                )
+                yield event
 
     def create_asset(
         self,
@@ -253,11 +384,22 @@ class FixtureRepository(PersistenceRepository):
             existing_audit = self._audit_events.get(audit_event.event_id)
             if snapshot.snapshot_id in self._claim_asset_snapshots or existing_audit is not None:
                 raise IdempotencyConflict(idempotency.key)
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.CLAIM_CHANGED,
+                claim,
+                operation_correlation=idempotency.key,
+                resources=realtime_resources_for_records(
+                    RealtimeMutation.CLAIM_CHANGED,
+                    ('claim_asset_snapshot', 'branch_evaluation'),
+                ),
+            )
+            assert realtime_event is not None
             self._claims[claim.claim_id] = deepcopy(claim)
             self._claim_asset_snapshots[snapshot.snapshot_id] = deepcopy(snapshot)
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
             self._idempotency[lookup] = deepcopy(idempotency)
             self._audit_events[audit_event.event_id] = deepcopy(audit_event)
+            self._commit_realtime_event(realtime_event)
 
     def list_claim_asset_snapshots(
         self,
@@ -316,6 +458,7 @@ class FixtureRepository(PersistenceRepository):
             'handoffs': len(self._handoffs),
             'idempotency_records': len(self._idempotency),
             'staff_presence': len(self._staff_presence),
+            'realtime_events': len(self._realtime_events),
         }
         self._claims.clear()
         self._assets.clear()
@@ -350,6 +493,8 @@ class FixtureRepository(PersistenceRepository):
         self._handoffs.clear()
         self._idempotency.clear()
         self._staff_presence.clear()
+        self._realtime_events.clear()
+        self._realtime_sequence = 0
         now = datetime.now(UTC)
         self._staff_presence['stf_demo'] = StaffPresenceRecord(
             staff_id='stf_demo',
@@ -483,8 +628,26 @@ class FixtureRepository(PersistenceRepository):
         return tuple(prepared.values())
 
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
-        self._claims[claim.claim_id] = deepcopy(claim)
-        self._store_session(session)
+        with self._claim_mutation_lock:
+            existing_claim = self._claims.get(claim.claim_id)
+            existing_session = self._sessions.get(session.session_id)
+            if existing_claim is not None or existing_session is not None:
+                if existing_claim == claim and existing_session == session:
+                    self._prepare_realtime_mutation(
+                        RealtimeMutation.CLAIM_CREATED,
+                        claim,
+                        MutationOutcome.EXACT_NOOP,
+                    )
+                    return
+                raise IdempotencyConflict(claim.claim_id)
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.CLAIM_CREATED,
+                claim,
+            )
+            assert realtime_event is not None
+            self._claims[claim.claim_id] = deepcopy(claim)
+            self._store_session(session)
+            self._commit_realtime_event(realtime_event)
 
     def _store_message(self, message: MessageRecord) -> None:
         """Store a message and maintain the bounded-search child index."""
@@ -526,7 +689,7 @@ class FixtureRepository(PersistenceRepository):
         snapshot = {
             key: deepcopy(value)
             for key, value in self.__dict__.items()
-            if key not in {'_validation_seed_lock', '_claim_mutation_lock'}
+            if key not in {'_validation_seed_lock', '_claim_mutation_lock', '_realtime_condition'}
         }
         try:
             existing = self.find_idempotency(
@@ -581,10 +744,12 @@ class FixtureRepository(PersistenceRepository):
         except Exception:
             validation_seed_lock = self._validation_seed_lock
             claim_mutation_lock = self._claim_mutation_lock
+            realtime_condition = self._realtime_condition
             self.__dict__.clear()
             self.__dict__.update(snapshot)
             self._validation_seed_lock = validation_seed_lock
             self._claim_mutation_lock = claim_mutation_lock
+            self._realtime_condition = realtime_condition
             raise
         return None
 
@@ -603,7 +768,13 @@ class FixtureRepository(PersistenceRepository):
         claim = self._claims.get(claim_id)
         if claim is None or claim.customer_id != anonymous_customer_id:
             return None
-        self._claims[claim_id] = claim.model_copy(update={'customer_id': customer_id})
+        promoted_claim = claim.model_copy(update={'customer_id': customer_id})
+        realtime_event = self._prepare_realtime_mutation(
+            RealtimeMutation.CLAIM_OWNER_CHANGED,
+            promoted_claim,
+        )
+        assert realtime_event is not None
+        self._claims[claim_id] = promoted_claim
         stores: tuple[dict[str, Any], ...] = (
             self._sessions,
             self._follow_ups,
@@ -633,6 +804,7 @@ class FixtureRepository(PersistenceRepository):
                 self._idempotency.pop(idempotency_key, None)
                 promoted_record = replace(record, actor_id=customer_id)
                 self._idempotency[(customer_id, record.route, record.key)] = promoted_record
+        self._commit_realtime_event(realtime_event)
         return deepcopy(self._claims[claim_id])
 
     def get_claim_internal(self, claim_id: str) -> WorkingClaim | None:
@@ -648,11 +820,17 @@ class FixtureRepository(PersistenceRepository):
         with self._claim_mutation_lock:
             self._validate_claim_mutation(claim, expected_revision)
             self._validate_branch_evaluation(claim, branch_evaluation)
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.CLAIM_CHANGED,
+                claim,
+            )
+            assert realtime_event is not None
             self._claims[claim.claim_id] = deepcopy(claim)
             if branch_evaluation is not None:
                 self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(
                     branch_evaluation
                 )
+            self._commit_realtime_event(realtime_event)
 
     def _validate_claim_mutation(
         self,
@@ -696,12 +874,19 @@ class FixtureRepository(PersistenceRepository):
             if lookup in self._idempotency:
                 raise IdempotencyConflict(idempotency.key)
 
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.CLAIM_CHANGED,
+                claim,
+                operation_correlation=idempotency.key,
+            )
+            assert realtime_event is not None
             self._claims[claim.claim_id] = deepcopy(claim)
             if branch_evaluation is not None:
                 self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(
                     branch_evaluation
                 )
             self._idempotency[lookup] = deepcopy(idempotency)
+            self._commit_realtime_event(realtime_event)
 
     def save_claim_mutation_with_audit(
         self,
@@ -740,6 +925,12 @@ class FixtureRepository(PersistenceRepository):
             if lookup in self._idempotency:
                 raise IdempotencyConflict(idempotency.key)
 
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.CLAIM_CHANGED,
+                claim,
+                operation_correlation=idempotency.key,
+            )
+            assert realtime_event is not None
             self._claims[claim.claim_id] = deepcopy(claim)
             if branch_evaluation is not None:
                 self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(
@@ -748,6 +939,7 @@ class FixtureRepository(PersistenceRepository):
             self._idempotency[lookup] = deepcopy(idempotency)
             for event in prepared:
                 self._audit_events[event.event_id] = deepcopy(event)
+            self._commit_realtime_event(realtime_event)
 
     def get_session(
         self,
@@ -871,11 +1063,18 @@ class FixtureRepository(PersistenceRepository):
             prepared_session = deepcopy(session)
             prepared_follow_up = deepcopy(follow_up)
             prepared_idempotency = deepcopy(idempotency)
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.SESSION_PAUSED,
+                claim,
+                operation_correlation=idempotency.key,
+            )
+            assert realtime_event is not None
 
             self._claims[claim.claim_id] = prepared_claim
             self._store_session(prepared_session)
             self._follow_ups[follow_up.follow_up_id] = prepared_follow_up
             self._idempotency[lookup] = prepared_idempotency
+            self._commit_realtime_event(realtime_event)
 
     def save_session_mutation(
         self,
@@ -977,6 +1176,12 @@ class FixtureRepository(PersistenceRepository):
                 raise IdempotencyConflict(idempotency.key)
             self._validate_branch_evaluation(claim, branch_evaluation)
 
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.SESSION_CHANGED,
+                claim,
+                operation_correlation=idempotency.key,
+            )
+            assert realtime_event is not None
             self._claims[claim.claim_id] = deepcopy(claim)
             if replaced_active_session is not None:
                 self._store_session(replaced_active_session)
@@ -988,6 +1193,7 @@ class FixtureRepository(PersistenceRepository):
                     branch_evaluation
                 )
             self._idempotency[lookup] = deepcopy(idempotency)
+            self._commit_realtime_event(realtime_event)
 
     def _validate_branch_evaluation(
         self,
@@ -1122,17 +1328,36 @@ class FixtureRepository(PersistenceRepository):
         return matches
 
     def save_message(self, message: MessageRecord, customer_id: str) -> None:
-        if (
-            self.get_claim(message.claim_id, customer_id) is None
-            or self.get_session(
-                message.claim_id,
-                message.session_id,
-                customer_id,
+        with self._claim_mutation_lock:
+            claim = self._claims.get(message.claim_id)
+            session = self._sessions.get(message.session_id)
+            if (
+                claim is None
+                or claim.customer_id != customer_id
+                or session is None
+                or session.claim_id != message.claim_id
+                or session.customer_id != customer_id
+            ):
+                raise KeyError(message.claim_id)
+            existing = self._messages.get(message.message_id)
+            if existing is not None:
+                if existing == message:
+                    self._prepare_realtime_mutation(
+                        RealtimeMutation.MESSAGE_CHANGED,
+                        claim,
+                        MutationOutcome.EXACT_NOOP,
+                        claimant_visible=message.visibility is not MessageVisibility.INTERNAL_ONLY,
+                    )
+                    return
+                raise IdempotencyConflict(message.message_id)
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.MESSAGE_CHANGED,
+                claim,
+                claimant_visible=message.visibility is not MessageVisibility.INTERNAL_ONLY,
             )
-            is None
-        ):
-            raise KeyError(message.claim_id)
-        self._store_message(message)
+            assert realtime_event is not None
+            self._store_message(message)
+            self._commit_realtime_event(realtime_event)
 
     def save_staff_agent_session(self, session: StaffAgentSession) -> None:
         existing = self._staff_agent_sessions.get(session.session_id)
@@ -1272,10 +1497,21 @@ class FixtureRepository(PersistenceRepository):
         existing = self._idempotency.get(lookup)
         if existing is not None and existing.request_fingerprint != idempotency.request_fingerprint:
             raise IdempotencyConflict(idempotency.key)
+        realtime_event = self._prepare_realtime_mutation(
+            RealtimeMutation.MESSAGE_MUTATION_COMMITTED,
+            claim,
+            operation_correlation=idempotency.key,
+            resources=realtime_resources_for_records(
+                RealtimeMutation.MESSAGE_MUTATION_COMMITTED,
+                ('message',),
+            ),
+        )
+        assert realtime_event is not None
         self._claims[claim.claim_id] = deepcopy(claim)
         self._store_session(session)
         self._store_message(message)
         self._idempotency[lookup] = deepcopy(idempotency)
+        self._commit_realtime_event(realtime_event)
 
     def get_message(
         self,
@@ -1615,6 +1851,17 @@ class FixtureRepository(PersistenceRepository):
             if held_request is None or held_request.claim_id != claim.claim_id:
                 raise KeyError(request.request_id)
 
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.ASSESSOR_RECONCILED,
+                claim,
+                operation_correlation=(idempotency.key if idempotency is not None else None),
+                resources=realtime_resources_for_records(
+                    RealtimeMutation.ASSESSOR_RECONCILED,
+                    ('staff_action',) if staff_action is not None else (),
+                ),
+            )
+            assert realtime_event is not None
+
             self._claims[claim.claim_id] = deepcopy(claim)
             self._external_tasks[task.task_id] = deepcopy(task)
             self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
@@ -1631,6 +1878,7 @@ class FixtureRepository(PersistenceRepository):
                     self._staff_presence[required_staff_id or ''] = deepcopy(
                         presence.model_copy(update={'revision': presence.revision + 1})
                     )
+            self._commit_realtime_event(realtime_event)
 
     def save_assessor_routing_preparation(
         self,
@@ -1889,6 +2137,40 @@ class FixtureRepository(PersistenceRepository):
         ):
             raise IdempotencyConflict(idempotency.key)
 
+        public_messages = all(
+            item.visibility is not MessageVisibility.INTERNAL_ONLY
+            for item in (claimant_message, agent_message)
+        )
+        changed_record_kinds = ['message', 'message']
+        if handoff is not None:
+            changed_record_kinds.append('handoff')
+        if evidence is not None:
+            changed_record_kinds.append('evidence')
+        if runtime_records is not None:
+            changed_record_kinds.extend('runtime_work_item' for _ in runtime_records.work_items)
+        resources = realtime_resources_for_records(
+            RealtimeMutation.AGENT_TURN_COMMITTED,
+            tuple(changed_record_kinds),
+        )
+        realtime_event = self._prepare_realtime_mutation(
+            RealtimeMutation.AGENT_TURN_COMMITTED,
+            claim,
+            operation_correlation=idempotency.key,
+            resources=resources,
+            claimant_resources=(
+                claimant_resources_for(
+                    RealtimeMutation.AGENT_TURN_COMMITTED,
+                    resources=resources,
+                )
+                if public_messages
+                else claimant_resources_for(
+                    RealtimeMutation.AGENT_TURN_COMMITTED,
+                    resources=resources,
+                    excluded=frozenset({RealtimeResource.MESSAGES}),
+                )
+            ),
+        )
+        assert realtime_event is not None
         self._claims[claim.claim_id] = deepcopy(claim)
         self._store_session(session)
         self._store_message(claimant_message)
@@ -1910,6 +2192,7 @@ class FixtureRepository(PersistenceRepository):
                 raise IdempotencyConflict(runtime_records.turn_plan.turn_id)
             self._runtime_turns[runtime_records.turn_plan.turn_id] = deepcopy(runtime_records)
         self._idempotency[lookup] = idempotency
+        self._commit_realtime_event(realtime_event)
 
     def save_runtime_turn(
         self,
@@ -1959,6 +2242,24 @@ class FixtureRepository(PersistenceRepository):
         )
         if not records_match:
             raise KeyError(claim.claim_id)
+        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+        existing_idempotency = self._idempotency.get(lookup)
+        if existing_idempotency is not None:
+            if (
+                existing_idempotency.request_fingerprint == idempotency.request_fingerprint
+                and stored_session == session
+                and self._messages.get(claimant_message.message_id) == claimant_message
+                and self._messages.get(agent_message.message_id) == agent_message
+                and self._runtime_traces.get(runtime_trace.trace_id) == runtime_trace
+            ):
+                self._prepare_realtime_mutation(
+                    RealtimeMutation.RUNTIME_TURN_COMMITTED,
+                    claim,
+                    MutationOutcome.EXACT_NOOP,
+                    operation_correlation=idempotency.key,
+                )
+                return
+            raise IdempotencyConflict(idempotency.key)
         if any(
             existing is not None
             for existing in (
@@ -1979,18 +2280,39 @@ class FixtureRepository(PersistenceRepository):
         )
         if duplicate_client_message is not None:
             raise IdempotencyConflict(claimant_message.client_message_id or '')
-        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
-        existing_idempotency = self._idempotency.get(lookup)
-        if (
-            existing_idempotency is not None
-            and existing_idempotency.request_fingerprint != idempotency.request_fingerprint
-        ):
-            raise IdempotencyConflict(idempotency.key)
+        public_messages = all(
+            item.visibility is not MessageVisibility.INTERNAL_ONLY
+            for item in (claimant_message, agent_message)
+        )
+        resources = realtime_resources_for_records(
+            RealtimeMutation.RUNTIME_TURN_COMMITTED,
+            ('message', 'message', 'runtime_trace'),
+        )
+        realtime_event = self._prepare_realtime_mutation(
+            RealtimeMutation.RUNTIME_TURN_COMMITTED,
+            claim,
+            operation_correlation=idempotency.key,
+            resources=resources,
+            claimant_resources=(
+                claimant_resources_for(
+                    RealtimeMutation.RUNTIME_TURN_COMMITTED,
+                    resources=resources,
+                )
+                if public_messages
+                else claimant_resources_for(
+                    RealtimeMutation.RUNTIME_TURN_COMMITTED,
+                    resources=resources,
+                    excluded=frozenset({RealtimeResource.MESSAGES}),
+                )
+            ),
+        )
+        assert realtime_event is not None
         self._store_session(session)
         self._store_message(claimant_message)
         self._store_message(agent_message)
         self._runtime_traces[runtime_trace.trace_id] = deepcopy(runtime_trace)
         self._idempotency[lookup] = deepcopy(idempotency)
+        self._commit_realtime_event(realtime_event)
 
     def get_runtime_trace(
         self,
@@ -2054,15 +2376,28 @@ class FixtureRepository(PersistenceRepository):
         return deepcopy(max(matches, key=lambda trace: (trace.created_at, trace.trace_id)))
 
     def save_evidence(self, evidence: EvidenceRecord, customer_id: str) -> None:
-        if self.get_claim(evidence.claim_id, customer_id) is None:
+        claim = self._claims.get(evidence.claim_id)
+        if claim is None or claim.customer_id != customer_id:
             raise KeyError(evidence.claim_id)
+        existing = self._evidence.get(evidence.evidence_id)
         try:
-            assert_material_history_is_append_only(
-                self._evidence.get(evidence.evidence_id), evidence
-            )
+            assert_material_history_is_append_only(existing, evidence)
         except ValueError as conflict:
             raise IdempotencyConflict(evidence.evidence_id) from conflict
+        if existing == evidence:
+            self._prepare_realtime_mutation(
+                RealtimeMutation.EVIDENCE_CHANGED,
+                claim,
+                MutationOutcome.EXACT_NOOP,
+            )
+            return
+        realtime_event = self._prepare_realtime_mutation(
+            RealtimeMutation.EVIDENCE_CHANGED,
+            claim,
+        )
+        assert realtime_event is not None
         self._evidence[evidence.evidence_id] = deepcopy(evidence)
+        self._commit_realtime_event(realtime_event)
 
     def get_evidence(
         self,
@@ -2164,6 +2499,23 @@ class FixtureRepository(PersistenceRepository):
             existing = self._idempotency.get(lookup)
             if existing is not None:
                 raise IdempotencyConflict(idempotency.key)
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.EVIDENCE_CLAIM_CHANGED,
+                claim,
+                operation_correlation=idempotency.key,
+                resources=realtime_resources_for_records(
+                    RealtimeMutation.EVIDENCE_CLAIM_CHANGED,
+                    tuple(
+                        kind
+                        for kind, present in (
+                            ('evidence', evidence is not None),
+                            ('evidence_claim_link', link is not None),
+                        )
+                        if present
+                    ),
+                ),
+            )
+            assert realtime_event is not None
             self._claims[claim.claim_id] = deepcopy(claim)
             if evidence is not None:
                 self._evidence[evidence.evidence_id] = deepcopy(evidence)
@@ -2175,6 +2527,7 @@ class FixtureRepository(PersistenceRepository):
             self._idempotency[lookup] = idempotency
             for event in prepared:
                 self._audit_events[event.event_id] = deepcopy(event)
+            self._commit_realtime_event(realtime_event)
 
     def save_evidence_mutation(
         self,
@@ -2207,11 +2560,22 @@ class FixtureRepository(PersistenceRepository):
         ):
             raise IdempotencyConflict(idempotency.key)
 
+        realtime_event = self._prepare_realtime_mutation(
+            RealtimeMutation.EVIDENCE_CLAIM_CHANGED,
+            claim,
+            operation_correlation=idempotency.key,
+            resources=realtime_resources_for_records(
+                RealtimeMutation.EVIDENCE_CLAIM_CHANGED,
+                ('evidence',),
+            ),
+        )
+        assert realtime_event is not None
         self._claims[claim.claim_id] = deepcopy(claim)
         self._evidence[evidence.evidence_id] = deepcopy(evidence)
         if branch_evaluation is not None:
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
         self._idempotency[lookup] = idempotency
+        self._commit_realtime_event(realtime_event)
 
     def save_external_task(self, task: ExternalTaskRecord, customer_id: str) -> None:
         """Create or advance one claim-owned external task.
@@ -2233,6 +2597,11 @@ class FixtureRepository(PersistenceRepository):
         if existing is not None and existing.claim_id != task.claim_id:
             raise IdempotencyConflict(task.task_id)
         if existing == task:
+            self._prepare_realtime_mutation(
+                RealtimeMutation.EXTERNAL_TASK_CHANGED,
+                self._claims[task.claim_id],
+                MutationOutcome.EXACT_NOOP,
+            )
             return
         immutable_identity = (
             'claim_id',
@@ -2248,7 +2617,13 @@ class FixtureRepository(PersistenceRepository):
             if changed_identity or task.updated_at <= existing.updated_at:
                 raise IdempotencyConflict(task.task_id)
         assert_external_task_registry_compatible(task)
+        realtime_event = self._prepare_realtime_mutation(
+            RealtimeMutation.EXTERNAL_TASK_CHANGED,
+            self._claims[task.claim_id],
+        )
+        assert realtime_event is not None
         self._external_tasks[task.task_id] = deepcopy(task)
+        self._commit_realtime_event(realtime_event)
 
     def reserve_external_dispatch(
         self,
@@ -2385,6 +2760,14 @@ class FixtureRepository(PersistenceRepository):
             if held.task_id == request.task_id and held.request_id != request.request_id:
                 raise IdempotencyConflict(request.task_id)
         existing = self._external_task_requests.get(request.request_id)
+        if existing == request:
+            self._prepare_realtime_mutation(
+                RealtimeMutation.EXTERNAL_REQUEST_CHANGED,
+                claim,
+                MutationOutcome.EXACT_NOOP,
+                operation_correlation=request.operation_id,
+            )
+            return
         if existing is not None and existing != request:
             immutable_identity = (
                 'request_id',
@@ -2411,7 +2794,14 @@ class FixtureRepository(PersistenceRepository):
             )
             if changed_identity or not first_send:
                 raise IdempotencyConflict(request.request_id)
+        realtime_event = self._prepare_realtime_mutation(
+            RealtimeMutation.EXTERNAL_REQUEST_CHANGED,
+            claim,
+            operation_correlation=request.operation_id,
+        )
+        assert realtime_event is not None
         self._external_task_requests[request.request_id] = deepcopy(request)
+        self._commit_realtime_event(realtime_event)
 
     def list_external_task_requests_internal(
         self,
@@ -2464,7 +2854,21 @@ class FixtureRepository(PersistenceRepository):
         existing = self._external_task_evidence_links.get(key)
         if existing is not None and existing != link:
             raise IdempotencyConflict(link.evidence_id)
+        claim = self._claims[link.claim_id]
+        if existing == link:
+            self._prepare_realtime_mutation(
+                RealtimeMutation.EXTERNAL_EVIDENCE_LINKED,
+                claim,
+                MutationOutcome.EXACT_NOOP,
+            )
+            return
+        realtime_event = self._prepare_realtime_mutation(
+            RealtimeMutation.EXTERNAL_EVIDENCE_LINKED,
+            claim,
+        )
+        assert realtime_event is not None
         self._external_task_evidence_links[key] = deepcopy(link)
+        self._commit_realtime_event(realtime_event)
 
     def save_external_task_result(self, result: ExternalTaskResult, customer_id: str) -> None:
         """Ingest one returned result, or advance its verification, after validating it.
@@ -2525,11 +2929,24 @@ class FixtureRepository(PersistenceRepository):
             if result.verification is not ExternalTaskResultVerification.UNVERIFIED:
                 raise IdempotencyConflict(result.result_id)
         else:
+            if held == result:
+                self._prepare_realtime_mutation(
+                    RealtimeMutation.EXTERNAL_RESULT_CHANGED,
+                    self._claims[result.claim_id],
+                    MutationOutcome.EXACT_NOOP,
+                )
+                return
             try:
                 assert_result_advance_is_permitted(held, result)
             except ValueError as conflict:
                 raise IdempotencyConflict(result.result_id) from conflict
+        realtime_event = self._prepare_realtime_mutation(
+            RealtimeMutation.EXTERNAL_RESULT_CHANGED,
+            self._claims[result.claim_id],
+        )
+        assert realtime_event is not None
         self._external_task_results[result.result_id] = deepcopy(result)
+        self._commit_realtime_event(realtime_event)
 
     def list_external_tasks_internal(self, claim_id: str) -> list[ExternalTaskRecord]:
         """List task records for an already-authorised internal claim read.
@@ -2733,6 +3150,12 @@ class FixtureRepository(PersistenceRepository):
         if existing_idempotency is not None:
             if existing_idempotency.request_fingerprint != idempotency.request_fingerprint:
                 raise IdempotencyConflict(idempotency.key)
+            self._prepare_realtime_mutation(
+                RealtimeMutation.OWNERSHIP_CHANGED,
+                claim,
+                MutationOutcome.EXACT_NOOP,
+                operation_correlation=idempotency.key,
+            )
             return
         existing_request = self._collaboration_requests.get(collaboration_request.request_id)
         if existing_request is not None and existing_request.claim_id != claim.claim_id:
@@ -2742,6 +3165,21 @@ class FixtureRepository(PersistenceRepository):
             and staff_agent_execution.execution_id in self._staff_agent_executions
         ):
             raise IdempotencyConflict(staff_agent_execution.execution_id)
+        realtime_event = self._prepare_realtime_mutation(
+            RealtimeMutation.OWNERSHIP_CHANGED,
+            claim,
+            operation_correlation=idempotency.key,
+            resources=realtime_resources_for_records(
+                RealtimeMutation.OWNERSHIP_CHANGED,
+                (
+                    'collaboration_request',
+                    *(('claim_coworker',) if coworker_records else ()),
+                    *(('handoff',) if handoff is not None else ()),
+                    *(('staff_agent_execution',) if staff_agent_execution is not None else ()),
+                ),
+            ),
+        )
+        assert realtime_event is not None
         self._claims[claim.claim_id] = deepcopy(claim)
         self._collaboration_requests[collaboration_request.request_id] = deepcopy(
             collaboration_request
@@ -2755,6 +3193,7 @@ class FixtureRepository(PersistenceRepository):
                 staff_agent_execution
             )
         self._idempotency[lookup] = deepcopy(idempotency)
+        self._commit_realtime_event(realtime_event)
 
     def save_staff_mutation(
         self,
@@ -2872,6 +3311,38 @@ class FixtureRepository(PersistenceRepository):
         existing = self._idempotency.get(lookup)
         if existing is not None and existing.request_fingerprint != idempotency.request_fingerprint:
             raise IdempotencyConflict(idempotency.key)
+        excluded = (
+            frozenset({RealtimeResource.MESSAGES})
+            if message is not None and message.visibility is MessageVisibility.INTERNAL_ONLY
+            else frozenset()
+        )
+        changed_record_kinds = tuple(
+            kind
+            for kind, present in (
+                ('staff_action', staff_action is not None),
+                ('customer_update', customer_update is not None),
+                ('signal_decision', signal_decision is not None),
+                ('handoff', handoff is not None),
+                ('message', message is not None),
+            )
+            if present
+        )
+        resources = realtime_resources_for_records(
+            RealtimeMutation.STAFF_MUTATION_COMMITTED,
+            changed_record_kinds,
+        )
+        realtime_event = self._prepare_realtime_mutation(
+            RealtimeMutation.STAFF_MUTATION_COMMITTED,
+            claim,
+            operation_correlation=idempotency.key,
+            resources=resources,
+            claimant_resources=claimant_resources_for(
+                RealtimeMutation.STAFF_MUTATION_COMMITTED,
+                resources=resources,
+                excluded=excluded,
+            ),
+        )
+        assert realtime_event is not None
         self._claims[claim.claim_id] = deepcopy(claim)
         if staff_action is not None:
             self._staff_actions[staff_action.action_id] = deepcopy(staff_action)
@@ -2888,11 +3359,27 @@ class FixtureRepository(PersistenceRepository):
                 staff_agent_execution
             )
         self._idempotency[lookup] = deepcopy(idempotency)
+        self._commit_realtime_event(realtime_event)
 
     def save_handoff(self, handoff: HandoffRecord, customer_id: str) -> None:
-        if self.get_claim(handoff.claim_id, customer_id) is None:
+        claim = self._claims.get(handoff.claim_id)
+        if claim is None or claim.customer_id != customer_id:
             raise KeyError(handoff.claim_id)
+        existing = self._handoffs.get(handoff.handoff_id)
+        if existing == handoff:
+            self._prepare_realtime_mutation(
+                RealtimeMutation.HANDOFF_CHANGED,
+                claim,
+                MutationOutcome.EXACT_NOOP,
+            )
+            return
+        realtime_event = self._prepare_realtime_mutation(
+            RealtimeMutation.HANDOFF_CHANGED,
+            claim,
+        )
+        assert realtime_event is not None
         self._handoffs[handoff.handoff_id] = deepcopy(handoff)
+        self._commit_realtime_event(realtime_event)
 
     def get_handoff(
         self,
@@ -2943,11 +3430,22 @@ class FixtureRepository(PersistenceRepository):
         ):
             raise IdempotencyConflict(idempotency.key)
 
+        realtime_event = self._prepare_realtime_mutation(
+            RealtimeMutation.HANDOFF_MUTATION_COMMITTED,
+            claim,
+            operation_correlation=idempotency.key,
+            resources=realtime_resources_for_records(
+                RealtimeMutation.HANDOFF_MUTATION_COMMITTED,
+                ('handoff',),
+            ),
+        )
+        assert realtime_event is not None
         self._claims[claim.claim_id] = deepcopy(claim)
         self._handoffs[handoff.handoff_id] = deepcopy(handoff)
         if branch_evaluation is not None:
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
         self._idempotency[lookup] = idempotency
+        self._commit_realtime_event(realtime_event)
 
 
 def _serialize_material_claim_mutation(method_name: str) -> None:
@@ -2970,9 +3468,15 @@ for _material_claim_mutation in (
     'save_message_mutation',
     'save_agent_turn',
     'save_runtime_turn',
+    'save_evidence',
     'save_evidence_mutation',
+    'save_external_task',
+    'save_external_task_request',
+    'save_external_task_evidence_link',
+    'save_external_task_result',
     'save_ownership_mutation',
     'save_staff_mutation',
+    'save_handoff',
     'save_handoff_mutation',
 ):
     _serialize_material_claim_mutation(_material_claim_mutation)

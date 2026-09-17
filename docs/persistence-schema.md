@@ -88,6 +88,7 @@ records remain target contracts.
 | Configuration | versioned Agent Policy, Registry snapshots, model profiles, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
 | Branch evaluation | immutable branch/form calculation evidence, selected family, active branches, field selection states, and Claim revision precondition | `claim_id`, `evaluation_id` |
 | Audit | append-only claim, integration, configuration, account, and access events | event identity and subject |
+| Realtime invalidation | durable ordering cursor, Claim/customer identity, revision, correlation, resource hints, and audience-safe claimant hints | `event_id`, ordered by monotonic `sequence`; legacy records fall back to `occurred_at` then `event_id` |
 | Retention | expiry, hold, purge eligibility, deletion or anonymisation result | subject identity and retention job |
 
 Original evidence bytes, policy documents, and other large objects are stored through
@@ -129,6 +130,112 @@ The existing configuration-only `backend.domain.configuration.AuditEvent` projec
 remains compatible with the Admin API and separate from this cross-domain repository
 envelope. #415 does not redefine that API projection or claim that every target action,
 failure, access, or configuration event is already wired.
+
+## Realtime Invalidation Contract
+
+`RealtimePublication` is the provider-neutral intent produced for one changed authoritative
+mutation. It contains Claim/customer scope, optional Claim revision and operation correlation,
+and audience-safe resource hints. It cannot contain a durable identity, timestamp, or ordering
+coordinate. `RealtimeEvent` is the repository-created durable record and adds `event_id`,
+`occurred_at`, and monotonic `sequence`. It is not an audit substitute or a second Claim, Message,
+Evidence, Handoff, WorkItem, or External Task projection. Business payloads, provider resume
+tokens, and adapter physical keys are excluded.
+
+The public projection-impact matrix below is the authority for publication. Resource names are
+stable client refresh boundaries backed by public read APIs; persistence record names do not define
+the vocabulary. Both adapters translate the authoritative records changed by a concrete mutation
+through this matrix. The domain validator requires the mutation's base projections, rejects
+resources outside its allowed set, and enforces canonical ordering. Claimant projection is derived
+from that concrete set through the visibility allowlist; an adapter may exclude a claimant-safe
+hint for an internal-only child but cannot invent or omit a public projection.
+
+| Mutation family | Conditional authoritative records | Public projections that can change | Realtime resources | Visibility |
+| --- | --- | --- | --- | --- |
+| Claim create/change and Session lifecycle | Claim, Session, Branch Evaluation | claimant Claim; Workbench Claim, fields, sessions, list/search/queue | `claim`, `queue` | claimant and staff; queue staff only |
+| Asset selection | Claim Asset Snapshot, Branch Evaluation | claimant and Workbench asset snapshots plus Claim/list | `claim`, `asset_snapshots`, `queue` | claimant and staff; queue staff only |
+| Message mutation and Runtime turn | Message, Runtime WorkItem, Claim | claimant/Workbench messages, WorkItems, Claim/list | `claim`, `messages`, `work_items`, `queue` as concretely changed | message visibility filters claimant delivery |
+| Agent turn | Message; optional Evidence, Handoff, Runtime WorkItem | Claim, messages, Evidence, handoffs, WorkItems, list/queue | matching concrete set from `claim`, `messages`, `evidence`, `handoffs`, `work_items`, `queue` | claimant-safe subset and staff |
+| Evidence mutation | Evidence and Evidence-Claim link | claimant/Workbench Evidence, Claim/list when the Claim revision changes | `evidence`, plus `claim` and `queue` for Claim mutations | claimant-safe Evidence and staff |
+| External operation | External Task, request, result, Evidence link | Workbench external requests, Evidence when linked, Claim/list when settled | `external_tasks`, optional `evidence`, `claim`, `queue` | bounded claimant task hints where approved; staff full |
+| Ownership/collaboration | Collaboration Request, Claim Coworker, optional Handoff | Workbench collaboration requests, Claim authorization/detail, handoffs, list/search/queue | `claim`, `collaboration_requests`, optional `handoffs`, `queue` | staff; claimant receives only approved Claim/handoff hints |
+| Staff mutation | optional Staff Action, Customer Update, Signal Decision, Handoff, Message | WorkItems, customer updates, signals, handoffs, messages, Claim/list/queue | `claim`, matching optional resource, `queue` | staff; claimant receives only approved Claim/message/handoff hints |
+| Assessor reconciliation | External Task/result/link, Evidence, completed Staff Action, Claim | external requests, Evidence, WorkItems, Claim/list/queue | `claim`, `external_tasks`, `evidence`, `work_items`, `queue` | staff plus approved claimant-safe subset |
+
+`branch_evaluation`, Agent decision/plan/trace records, and staff Agent execution records have no
+independent public read projection in this contract. Their externally observable effects are
+already represented by the enclosing Claim, message, WorkItem, Evidence, or queue boundary. Adding
+a public read API for one of those records requires adding a resource mapping in this table first.
+
+Every relevant authoritative mutation consumes that publication contract inside the same Fixture
+mutation lock or MongoDB transaction. The outcome is classified as `changed`, `exact_noop`, or
+conflict. Only `changed` creates an event, allocates a sequence, or wakes a live subscriber. An
+`exact_noop` preserves business state, event count, sequence state, and live delivery count. A
+conflict or failed publication leaves both business state and realtime state unchanged. Covered
+groups are Claim and Session state, Messages, Evidence metadata and external evidence links,
+Handoffs, Runtime WorkItems, External Tasks/requests/results, recovery WorkItems, ownership, and
+queue-affecting staff mutations. Fixture uses explicit publication at each mutation boundary;
+successful method return is not publication authority.
+
+Fixture allocates a process-local monotonic `sequence` while holding the Claim mutation lock,
+stores events in process state, and wakes one condition-backed watcher. MongoDB stores
+`record_type=realtime_event` in the repository collection, indexes the unique event cursor, and
+uses one collection Change Stream per application process. The Change Stream is only a low-latency
+wake-up hint. At startup, the process dispatcher reads the durable high watermark and begins after
+that tail; it does not replay the complete retained log. Browser reconnect replay remains separate
+and starts after the browser's acknowledged cursor. The dispatcher then drains sequenced events
+after every hint and on a bounded fallback interval. It advances its cursor only after offering an
+event to the current subscriptions.
+Consequently a commit before watcher readiness, during watcher failure, or between client replay
+and live observation is recovered from the durable store; repeated hint/replay observation is
+harmlessly deduplicated. The dispatcher performs role/customer/optional-Claim filtering and fans
+out to bounded transient subscriber queues. A subscriber queue is delivery state only and is never
+a persistence or authorization boundary.
+
+| Dispatcher state | New subscription behavior | Watermark and event behavior | Exit condition |
+| --- | --- | --- | --- |
+| `starting` | Return `resync_required: dispatcher_starting`; application readiness remains blocked | Read the durable high watermark; commits after that read are drained from the durable log | High watermark established, then `ready` |
+| `ready` | Accept | Deliver strictly after the processed cursor; Change Stream is only a wake-up hint | Source failure -> `source_degraded`; anchor/store failure -> `gap_recovering` |
+| `source_degraded` | Accept because bounded durable draining remains active | Preserve the processed cursor and drain on the fallback interval | Source observation resumes -> `ready`; durable failure -> `gap_recovering` |
+| `gap_recovering` | Return the current `resync_required` reason and do not register the subscription | Existing subscriptions receive resync; reset the process cursor and fast-forward retained history without publication | Suppressed scan reaches the durable tail -> `ready` |
+| `stopping` | Return `resync_required: dispatcher_stopping` | Reject new live delivery and close registered queues | Threads and source stop -> `stopped` |
+| `stopped` | Return `resync_required: dispatcher_unavailable` | No delivery | A new explicit `start()` enters `starting` |
+
+Setting the recovery state and snapshotting existing subscribers occur under one dispatcher lock.
+A subscription therefore cannot enter between the resync notification and the suppressed recovery
+scan without itself receiving resync. An event committed after recovery reaches the tail remains
+strictly after the retained processed cursor and is delivered by the next durable drain.
+MongoDB allocates a transaction-local monotonic `sequence` from the single durable
+`realtime_sequence:global` counter inside the same transaction that writes the event. This
+intentionally serializes realtime-producing MongoDB transactions. `with_transaction()` retries
+transient write conflicts, so a retry must not duplicate either the authoritative business write
+or its event, and an aborted transaction consumes no durable sequence. This global counter is
+accepted only for the current prototype throughput boundary: it is a known write hotspot and is
+not presented as a high-scale architecture. Real-replica-set integration tests cover bounded
+concurrent writes for independent Claims, transaction retry, abort rollback, and duplicate-free
+effects. The adapter derives a fixed-width
+`realtime_order` from that sequence and `event_id`; legacy records without a sequence retain the
+timestamp/event-id fallback. The sequence is included only inside the opaque cursor, while the
+adapter-owned physical key is never returned by the repository or API. This keeps replay order
+consistent with committed Mongo visibility instead of relying on a pre-commit wall-clock time.
+An acknowledged pre-sequence cursor remains valid when its durable event ID and timestamp still
+match; replay resolves that anchor to its stored sequence before selecting later events.
+
+Durable realtime events are immutable across runtime profiles. Callers cannot create or retry a
+persisted event identity; only a repository turns a changed publication into `event_id`,
+`occurred_at`, and `sequence`. Exact-retry detection occurs at the authoritative mutation boundary
+before publication. MongoDB inserts new event records without replacement or upsert, and Fixture
+commits one already-prepared event only after all business validation passes.
+
+Replay requires the exact durable cursor anchor and returns sequenced records in durable sequence
+order; pre-sequence records retain their timestamp/event-ID order. A temporary Change Stream
+failure does not itself force resynchronization because the dispatcher continues durable draining
+and restarts the hint source. A missing durable anchor, replay-window overflow, slow-subscriber
+overflow, or unavailable durable store requires an authoritative full resynchronization. After an
+internal anchor gap, the dispatcher emits `durable_replay_gap`, fast-forwards its process position
+from the retained durable history without publishing that recovery scan, and resumes only after the
+boundary is re-established. Delivery may repeat or arrive out of order; consumers compare opaque
+cursor coordinates and apply only strictly newer hints. Retention or purge of realtime records must
+preserve a detectable gap and must not silently reinterpret an expired cursor.
 
 Control Plane access policies are persisted as versioned `configuration` records with
 `domain=access`. Their values contain a role, actor type, scopes, visibility classes, and an

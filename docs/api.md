@@ -1184,6 +1184,7 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `POST` | `/claims/{claim_id}/sessions/{session_id}/messages` | Submit a message and execute one agent turn |
 | `GET` | `/claims/{claim_id}/sessions/{session_id}/messages` | Read paginated claimant-visible messages |
 | `GET` | `/claims/{claim_id}/sessions/{session_id}/events` | Stream claimant-safe Claim and conversation change notifications |
+| `GET` | `/realtime/events` | Open the claimant's multiplexed durable-event stream |
 | `PATCH` | `/claims/{claim_id}/form` | Correct or update structured fields |
 | `POST` | `/claims/{claim_id}/form/confirmations` | Confirm selected material fields |
 | `POST` | `/claims/{claim_id}/creation` | Create an external claim after deterministic validation |
@@ -1575,9 +1576,11 @@ Returns claimant-visible messages ordered newest-last by default. Supported quer
 
 Opens a `text/event-stream` connection for the authenticated claimant or the browser's current
 anonymous claimant session. The Claim and session ownership checks are identical to the ordinary
-claimant read boundary. `after_revision` is the last Claim revision already applied by the client;
-the server rejects a cursor newer than the current Claim with `409 INVALID_EVENT_CURSOR` and the
-current revision.
+claimant read boundary. This compatibility route retains `after_revision` and the `claim.updated`
+wire shape for the current claimant client, but its event source is the process-level realtime
+dispatcher. It performs no per-connection repository polling. The server rejects a revision newer
+than the current Claim with `409 INVALID_EVENT_CURSOR` and the current revision. New clients use
+the multiplexed route below and reconnect with its opaque event cursor.
 
 When shared Claim State advances, the stream emits `claim.updated`:
 
@@ -1590,9 +1593,67 @@ data: {"event_id":"4","claim_id":"clm_01J4Y7Q2AW","session_id":"ses_01J4Y7RPN8",
 This event is a resource hint, not a second Claim projection. It contains no messages, handoff
 packet, internal signals, staff identity, model metadata, or hidden reasoning. After receiving it,
 the claimant client reloads `GET /claims/{claim_id}` and the active session's message list through
-their existing visibility-filtered endpoints. Reconnection sends the last applied Claim revision,
-so changes missed while disconnected are recovered. The server sends comment-only keep-alives;
-clients ignore them and reconnect with bounded backoff if the transport closes.
+their existing visibility-filtered endpoints. The server sends comment-only keep-alives; clients
+ignore them and reconnect with bounded backoff if the transport closes. This route is a migration
+compatibility boundary, not a second event store.
+
+### `GET /api/v1/realtime/events`
+
+Opens one claimant-scoped, multiplexed `text/event-stream` for all Claims owned by the
+authenticated customer. `GET /api/v1/workbench/realtime/events` provides the corresponding staff
+stream. Both accept the last acknowledged opaque cursor in `Last-Event-ID` or the `cursor` query
+parameter; the header takes precedence. A connection without a cursor receives future events only.
+The legacy Claim stream above is separate: its `Last-Event-ID` is the emitted non-negative Claim
+revision, not this multiplexed opaque cursor.
+
+The normal delivery is `resources.changed`:
+
+```text
+id: eyJvY2N1cnJlZF9hdCI6IjIwMjYtMDktMTZUMTA6MDA6MDBaIiwiZXZlbnRfaWQiOiJydGVfMDEyMzQ1Njc4OWFiY2RlZjAxMjMifQ
+event: resources.changed
+data: {"event_id":"rte_0123456789abcdef0123","claim_id":"clm_01J4Y7Q2AW","claim_revision":7,"operation_correlation":"submit-message-7","resources":["claim","messages"],"occurred_at":"2026-09-16T10:00:00Z"}
+```
+
+The payload is invalidation metadata only. It never contains Claim fields, message content,
+Evidence bytes, handoff packets, external-provider payloads, model context, or secrets. A client
+refetches only the named resources through existing authoritative, visibility-filtered APIs. Staff
+receive all permitted resource hints. Claimants receive only their own customer events, and an
+`internal_only` message, queue/WorkItem hint, or operation correlation never appears in their
+delivery.
+
+`resources[]` uses public refresh boundaries, not persistence record names:
+
+| Resource | Authoritative reads to refresh |
+| --- | --- |
+| `claim` | claimant Claim; Workbench Claim, fields, and sessions |
+| `messages` | claimant or Workbench session messages |
+| `evidence` | claimant or Workbench Evidence |
+| `handoffs` | claimant `GET /api/v1/claims/{claim_id}`; staff `GET /api/v1/workbench/claims/{claim_id}/handoffs` |
+| `work_items` | Workbench staff actions and Runtime WorkItems |
+| `external_tasks` | claimant `GET /api/v1/claims/{claim_id}`; staff `GET /api/v1/workbench/claims/{claim_id}/external-requests` |
+| `asset_snapshots` | claimant or Workbench Claim Asset snapshots |
+| `collaboration_requests` | Workbench collaboration requests |
+| `customer_updates` | Workbench customer updates |
+| `signals` | Workbench signals and decisions |
+| `queue` | Workbench list, search, ownership, priority, and queue projection |
+
+The mapping is audience-specific: clients must use only the route listed for their authenticated
+role. The claimant Claim response is the visibility-filtered authoritative projection for both
+`handoffs` and `external_tasks`. When one event contains either or both hints, a claimant client
+deduplicates the route and performs one `GET /api/v1/claims/{claim_id}` refresh. Staff clients refresh
+the separate Workbench handoff and external-request routes named above.
+
+Reconnect replays events strictly after the acknowledged cursor. Duplicate or older deliveries are
+discarded. Process startup anchors at the current durable high watermark, while browser reconnect
+replay remains anchored at the browser's acknowledged cursor. The dispatcher drains the durable
+sequence across Change Stream restart, so a temporary wake-up-source failure does not by itself
+interrupt clients. During startup, gap recovery, stopping, or an unavailable dispatcher, a newly
+arriving stream receives `resync_required` instead of entering an uncovered live window. An invalid or
+unavailable client cursor returns `409 INVALID_EVENT_CURSOR`; a replay window larger than the
+bounded server window, subscriber queue overflow, unavailable durable store, or detected internal
+durable-anchor gap emits `resync_required` with a bounded reason and closes that stream. The client
+then reloads its authoritative snapshots before reconnecting without the stale cursor. A 15-second
+comment heartbeat keeps an otherwise idle transport open and carries no state.
 
 ### `PATCH /api/v1/claims/{claim_id}/form`
 
@@ -2193,6 +2254,7 @@ Returns staff and system updates visible to the claimant. Each update includes `
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/workbench/claims` | Query queue projections and filters |
+| `GET` | `/workbench/realtime/events` | Open the staff multiplexed durable-event stream |
 | `GET` | `/workbench/staff/online` | Read a paginated page of currently claimable online staff |
 | `GET` | `/workbench/staff/presence` | Read the authenticated staff member's presence lease |
 | `PATCH` | `/workbench/staff/presence` | Heartbeat or change the authenticated staff member's presence |

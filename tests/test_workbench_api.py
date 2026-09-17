@@ -309,7 +309,7 @@ def _create_claim_with_context(
     )
     repository.save_message(
         MessageRecord(
-            message_id='msg_internal_note',
+            message_id=f'msg_internal_note_{claim_id}',
             claim_id=claim_id,
             session_id=session_id,
             actor='staff',
@@ -371,7 +371,7 @@ def test_staff_reads_progressive_claim_detail_and_paged_resources(
     assert sessions['items'][0]['pending_items'] == ['police_report']
     assert evidence['items'][0]['provenance']['internal_object_ref'].startswith('fixture://')
     assert signals['items'][0]['code'] == 'HISTORY_INCONSISTENCY_REVIEW'
-    assert any(item['message_id'] == 'msg_internal_note' for item in messages['items'])
+    assert any(item['message_id'] == f'msg_internal_note_{claim_id}' for item in messages['items'])
 
 
 def test_staff_detail_projects_source_context_and_disputed_or_conflicting_gaps(

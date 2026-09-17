@@ -32,6 +32,7 @@ from backend.domain.models import (
     ResponsibleParty,
     RouteAssessorRequest,
 )
+from backend.domain.realtime import RealtimeResource
 from backend.repositories.fixture import FixtureRepository
 from backend.services.external_service_entry import MismatchedServiceAdapterError
 
@@ -1220,6 +1221,26 @@ def test_staff_reconciliation_settles_the_existing_operation_atomically(
     assert all(
         item['action_code'] != 'external.reconcile_response' for item in after['allowed_actions']
     )
+    reconciliation_events = [
+        event
+        for event in repository.replay_realtime_events(None, limit=100)
+        if event.claim_id == claim_id
+        and 'external_tasks' in {resource.value for resource in event.resources}
+    ]
+    assert reconciliation_events
+    assert reconciliation_events[-1].claim_revision == after['revision']
+    assert reconciliation_events[-1].resources == (
+        RealtimeResource.CLAIM,
+        RealtimeResource.EXTERNAL_TASKS,
+        RealtimeResource.EVIDENCE,
+        RealtimeResource.WORK_ITEMS,
+        RealtimeResource.QUEUE,
+    )
+    assert reconciliation_events[-1].claimant_resources == (
+        RealtimeResource.CLAIM,
+        RealtimeResource.EXTERNAL_TASKS,
+        RealtimeResource.EVIDENCE,
+    )
 
 
 def test_staff_reconciliation_requires_presence_and_current_revision() -> None:
@@ -1273,6 +1294,7 @@ def test_inconclusive_staff_reconciliation_preserves_unknown_state() -> None:
         detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH).json()
         task = repository.list_external_tasks_internal(claim_id)[0]
         before = repository.get_claim_internal(claim_id)
+        events_before = repository.replay_realtime_events(None, limit=100)
         client.patch(
             '/api/v1/workbench/staff/presence',
             headers=STAFF_AUTH,
@@ -1292,6 +1314,7 @@ def test_inconclusive_staff_reconciliation_preserves_unknown_state() -> None:
     assert adapter.routing_calls == 1
     assert adapter.reconciliation_calls == 1
     assert repository.get_claim_internal(claim_id) == before
+    assert repository.replay_realtime_events(None, limit=100) == events_before
     assert repository.list_external_tasks_internal(claim_id)[0].status.value == 'unknown_outcome'
     assert repository.list_staff_actions(claim_id) == []
 

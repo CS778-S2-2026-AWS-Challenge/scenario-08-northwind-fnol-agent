@@ -1,5 +1,7 @@
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from datetime import datetime
+from threading import Event
 from typing import Any, Protocol
 
 from backend.domain.agent_context_runtime import VerifiedConversationSummary
@@ -29,6 +31,7 @@ from backend.domain.models import (
     StaffActionRecord,
     WorkingClaim,
 )
+from backend.domain.realtime import RealtimeCursor, RealtimeEvent, RealtimePublication
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 from backend.domain.runtime import RuntimeTurnRecords, RuntimeWorkItemRecord
 from backend.domain.staff_agent import (
@@ -405,6 +408,34 @@ class PersistenceRepository(ClaimRepository, Protocol):
 
     def seed_validation_graph(self, graph: ValidationSeedGraph) -> IdempotencyRecord | None:
         """Persist the graph, returning an existing idempotent result on replay."""
+        raise NotImplementedError
+
+    def append_realtime_publication(self, publication: RealtimePublication) -> RealtimeEvent:
+        """Persist one provider-neutral publication outside a business mutation.
+
+        Args:
+            publication: Mutation intent without persistence-owned coordinates.
+
+        Returns:
+            The repository-created durable event.
+        """
+        raise NotImplementedError
+
+    def replay_realtime_events(
+        self,
+        after: RealtimeCursor | None,
+        *,
+        limit: int,
+    ) -> list[RealtimeEvent]:
+        """Return durable events in stable cursor order."""
+        raise NotImplementedError
+
+    def realtime_high_watermark(self) -> RealtimeEvent | None:
+        """Return the current durable tail without replaying retained history."""
+        raise NotImplementedError
+
+    def watch_realtime_events(self, stop: Event) -> Iterator[RealtimeEvent]:
+        """Yield newly appended events without per-client repository polling."""
         raise NotImplementedError
 
     def append_audit_event(self, event: AuditEventEnvelope) -> None:

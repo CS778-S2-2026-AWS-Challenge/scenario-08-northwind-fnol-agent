@@ -77,6 +77,28 @@ application instance. The example explicitly selects `NORTHWIND_IDENTITY_MODE=de
 enables only the synthetic local claimant, staff, and integration identities and cannot start in a
 non-development environment.
 
+The MongoDB replica set is also the realtime wake-up boundary. Relevant business writes and their
+`realtime_event` records commit in one transaction, and each Backend process opens one collection
+Change Stream as a low-latency wake-up hint. Before application startup completes, the dispatcher
+anchors its process-local position at the durable high watermark rather than replaying retained
+history. It then drains strictly newer events after every hint or bounded fallback interval. Browser
+reconnect replay remains anchored at each browser's acknowledged cursor. This closes watcher
+startup/restart gaps without making provider resume tokens part of the domain contract. Deployments
+that provide CRUD but not transactions or Change
+Streams do not satisfy the `local_mvp` contract. Browser connection count does not create
+additional MongoDB polling loops or Change Streams. The prototype uses one
+durable global realtime sequence, which deliberately serializes realtime-producing transactions;
+MongoDB retries transient conflicts through `with_transaction()`. This bounded-throughput write
+hotspot is accepted for the prototype and is not a high-scale deployment claim.
+
+Real MongoDB transaction and Change Stream checks are excluded from ordinary fast test runs. With
+the Compose replica set running, execute them explicitly from PowerShell:
+
+```powershell
+$env:NORTHWIND_RUN_INTEGRATION_TESTS = '1'
+py -3.12 -m pytest -m integration tests/test_mongodb_repository.py -q
+```
+
 Start or repeat the single-host bootstrap and Backend composition with:
 
 ```powershell

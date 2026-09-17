@@ -36,6 +36,10 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
         ('/api/v1/auth/accounts', 'POST'),
         ('/api/v1/staff/auth/sessions', 'POST'),
     }
+    claimant_session_routes = {
+        '/api/v1/claims/{claim_id}/asset-selections',
+        '/api/v1/claims/{claim_id}/asset-snapshots',
+    }
 
     for route in app.routes:
         if not isinstance(route, APIRoute) or route.path in health_paths:
@@ -49,9 +53,11 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
         expected: Callable[..., object] | None
         if route.path.startswith(('/api/v1/workbench/', '/api/v1/staff/')):
             expected = require_staff
-        elif route.path.startswith(('/api/v1/auth/', '/api/v1/account')):
+        elif route.path in claimant_session_routes or route.path.startswith(
+            ('/api/v1/auth/', '/api/v1/account')
+        ):
             expected = require_claimant_session
-        elif route.path.startswith(('/api/v1/claims', '/api/v1/evidence')):
+        elif route.path.startswith(('/api/v1/claims', '/api/v1/evidence', '/api/v1/realtime')):
             expected = require_claimant
         elif route.path.startswith('/internal/v1/admin/'):
             expected = require_administrator

@@ -30,6 +30,20 @@ TEST_SUPPORT_CONSUMERS: dict[str, tuple[str, ...]] = {
 BACKEND_CONSUMER_RULES = (
     (
         (
+            'backend/api/realtime.py',
+            'backend/domain/realtime.py',
+            'backend/services/realtime.py',
+        ),
+        (
+            'tests/test_api_boundaries.py',
+            'tests/test_asset_repository.py',
+            'tests/test_mongodb_repository.py',
+            'tests/test_realtime_events.py',
+            'tests/test_staff_mutation_actor_links.py',
+        ),
+    ),
+    (
+        (
             'backend/api/assets.py',
             'backend/domain/assets.py',
             'backend/repositories/assets.py',
@@ -132,6 +146,8 @@ BACKEND_CONSUMER_RULES = (
             'tests/test_mongodb_repository.py',
             'tests/test_persistence_integration.py',
             'tests/test_repository.py',
+            'tests/test_realtime_events.py',
+            'tests/test_staff_mutation_actor_links.py',
         ),
     ),
     (
