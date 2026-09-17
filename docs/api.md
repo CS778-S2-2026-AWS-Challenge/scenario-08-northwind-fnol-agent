@@ -2484,14 +2484,16 @@ large resources are loaded from the dedicated sub-resources below:
 A terminal external failure is classified `required_now` with `claims_professional` responsibility
 and the blocked requested action, so it becomes `work_summary.primary_blocker`: the contract
 requires Northwind to review such a request before another attempt, and waiting on the external
-party is not what happens next. Every other external state stays `follow_up` owned by the external
+party is not what happens next. A retryable external failure stays `follow_up` but is owned by the
+claimant, who owns the retry. Every other external state stays `follow_up` owned by the external
 party. No second item is created for the same task.
 
 `integration_summary.waiting_external_services`, and the `external_wait_count` derived from it,
 exclude a task whose provider result has been received. A result is separate from task status, so
 the task remains `accepted`; counting it as waiting would tell staff the claim is waiting on the
 external party while the same claim's external-request lifecycle reports that the result requires
-their review.
+their review. They also exclude a `retryable_failure` task: no answer is on its way, and the
+claimant owns the retry.
 
 On the Claim-detail response only, `integration_summary.claim_number` and
 `integration_summary.expected_by` project the authoritative persisted
@@ -2503,7 +2505,10 @@ invented from a client-side SLA or fixture convention. The queue-list response r
 staff must open Claim detail to read those two result fields. Claim creation remains owned by the
 existing integration boundary.
 
-`section_summaries` reports availability, counts, and attention totals. Complete records are loaded
+`section_summaries` reports availability, counts, and attention totals. The `external_services`
+attention total counts the tasks whose external-request lifecycle has `needs_attention` true, so it
+always agrees with the lifecycle rows. When those rows cannot be projected safely, the section is
+`unavailable` with the same limitation as the external-requests endpoint. Complete records are loaded
 only when staff opens a section:
 
 | Section | Endpoint |
@@ -2599,6 +2604,14 @@ completes a task-linked `external_reconciliation` StaffAction, stores the actor-
 response, and advances the Claim revision. An inconclusive check remains `unknown_outcome` and
 writes none of that bundle. Stale revision, unavailable staff, another owner, missing exact action,
 or changed idempotency input returns a structured conflict before settlement.
+
+A `retryable_failure` has no staff recovery action, because the claimant owns the retry. The
+claimant projection keeps `can_request` true with the claimant as the next-step responsible party,
+and the external-request lifecycle for that task agrees: `pending_owner` is `claimant` and
+`needs_attention` is false. The server projects neither `external.accept_review` nor
+`external.reconcile_response` for it, and the state requires no staff queue entry. The Claim detail
+agrees as well: the task adds nothing to the `external_services` attention total or to
+`waiting_external_services`, and its missing-information item names the claimant.
 
 ### `POST /api/v1/workbench/claims/{claim_id}/reopen`
 
