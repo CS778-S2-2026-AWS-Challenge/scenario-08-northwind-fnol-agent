@@ -1,6 +1,8 @@
 """Resolve the published claimant model catalog without exposing credentials."""
 
+import os
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from backend.core.config import AgentRuntimeProfile, Settings
@@ -14,6 +16,35 @@ from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationResolver,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ModelRuntimeStatus:
+    published: bool
+    runtime_ready: bool
+    healthy: bool | None
+    unavailable_reason: str | None
+
+
+def model_runtime_status(configuration: ModelRuntimeConfiguration) -> ModelRuntimeStatus:
+    """Project publication separately from this process's usable configuration."""
+
+    reason: str | None = None
+    if configuration.evaluation_status == 'unavailable':
+        reason = 'profile_unavailable'
+    elif not configuration.base_url.strip():
+        reason = 'endpoint_unavailable'
+    elif (
+        configuration.credential_environment_variable is not None
+        and not os.environ.get(configuration.credential_environment_variable, '').strip()
+    ):
+        reason = 'credential_unavailable'
+    return ModelRuntimeStatus(
+        published=True,
+        runtime_ready=reason is None,
+        healthy=None,
+        unavailable_reason=reason,
+    )
 
 
 def _settings_configuration(settings: Settings) -> ConfigurationRecord | None:
@@ -111,12 +142,11 @@ def default_model_profile_id(
     app = request.app  # type: ignore[attr-defined]
     settings: Settings = app.state.settings
     catalog = records if records is not None else model_catalog(request)
-    available = [
-        str(record.values['profile_id'])
-        for record in catalog
-        if record.values.get('profile_id')
-        and record.values.get('evaluation_status') == 'configured'
-    ]
+    available = []
+    for record in catalog:
+        configuration = ModelRuntimeConfiguration.model_validate(record.values)
+        if configuration.profile_id and model_runtime_status(configuration).runtime_ready:
+            available.append(configuration.profile_id)
     if settings.model_profile_id in available:
         return settings.model_profile_id
     return available[0] if available else None
@@ -131,10 +161,10 @@ def select_model_profile(request: object, requested: str | None) -> str:
         return selected
     catalog = model_catalog(request)
     available = {
-        str(record.values.get('profile_id'))
+        configuration.profile_id
         for record in catalog
-        if record.values.get('profile_id')
-        and record.values.get('evaluation_status') == 'configured'
+        if (configuration := ModelRuntimeConfiguration.model_validate(record.values)).profile_id
+        and model_runtime_status(configuration).runtime_ready
     }
     if requested is None:
         selected = default_model_profile_id(request, catalog) or selected
@@ -142,7 +172,7 @@ def select_model_profile(request: object, requested: str | None) -> str:
         raise ApiError(
             status_code=422,
             code='MODEL_PROFILE_UNAVAILABLE',
-            message='The requested model profile is not published for this Runtime.',
+            message='The requested model profile is not ready in this Runtime.',
             retryable=False,
         )
     return selected

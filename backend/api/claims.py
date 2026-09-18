@@ -13,6 +13,7 @@ from backend.api.realtime import realtime_stream
 from backend.core.auth import Principal, require_claimant
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.external_service_registry import capability_catalogue
+from backend.domain.model_gateway import ModelGatewayError
 from backend.domain.models import (
     ClaimantClaim,
     ClaimantExternalServiceResponse,
@@ -38,6 +39,7 @@ from backend.domain.models import (
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider
 from backend.services.agent_action_execution import ClaimantRuntimeActionDispatcher
+from backend.services.agent_turn_progress import AgentTurnProgressReporter
 from backend.services.claim_creation import create_claim_from_confirmed_report
 from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.claimant_events import claimant_event_revision
@@ -454,28 +456,47 @@ def create_message(
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> MessageTurnResponse:
+    reporter = AgentTurnProgressReporter(
+        repository_for(request),
+        claim_id=claim_id,
+        customer_id=principal.subject,
+        session_id=session_id,
+        turn_id=payload.client_message_id,
+    )
     runtime_policy_resolver = runtime_agent_policy_for(request)
     if payload.model_profile_id is not None:
         payload = payload.model_copy(
             update={'model_profile_id': select_model_profile(request, payload.model_profile_id)}
         )
-    result = submit_message(
-        repository=repository_for(request),
-        agent=agent_for(request),
-        policy_history_adapter=policy_history_adapter_for(request),
-        principal=principal,
-        claim_id=claim_id,
-        session_id=session_id,
-        payload=payload,
-        idempotency_key=idempotency_key,
-        if_match=if_match,
-        runtime_agent_policy_resolver=runtime_policy_resolver,
-        action_dispatcher=action_dispatcher_for(request),
-        evidence_storage=evidence_storage_for(request),
-        assessor_adapter=assessor_adapter_for(request),
-        assessor_entry=_assessor_entry_for(request),
-        external_capability_dispatcher=external_capability_dispatcher_for(request),
-    )
+    try:
+        result = submit_message(
+            repository=repository_for(request),
+            agent=agent_for(request),
+            policy_history_adapter=policy_history_adapter_for(request),
+            principal=principal,
+            claim_id=claim_id,
+            session_id=session_id,
+            payload=payload,
+            idempotency_key=idempotency_key,
+            if_match=if_match,
+            runtime_agent_policy_resolver=runtime_policy_resolver,
+            action_dispatcher=action_dispatcher_for(request),
+            evidence_storage=evidence_storage_for(request),
+            assessor_adapter=assessor_adapter_for(request),
+            assessor_entry=_assessor_entry_for(request),
+            external_capability_dispatcher=external_capability_dispatcher_for(request),
+            progress_reporter=reporter,
+        )
+    except ApiError as error:
+        reporter.failed(retryable=error.retryable)
+        raise
+    except ModelGatewayError as error:
+        reporter.failed(retryable=error.retryable)
+        raise
+    except Exception:
+        reporter.failed(retryable=True)
+        raise
+    reporter.completed()
     background_tasks.add_task(
         compact_conversation_after_response_if_enabled,
         repository_for(request),
@@ -524,6 +545,7 @@ def read_claim_events(
     request: Request,
     principal: Principal = Depends(require_claimant),
     after_revision: int = Query(default=0, ge=0),
+    cursor: str | None = Query(default=None),
     last_event_id: str | None = Header(default=None, alias='Last-Event-ID'),
 ) -> StreamingResponse:
     repository = repository_for(request)
@@ -537,22 +559,12 @@ def read_claim_events(
             current_revision=current_revision,
         )
     legacy_cursor_revision = after_revision
+    realtime_cursor = cursor
     if last_event_id is not None:
         try:
             legacy_cursor_revision = int(last_event_id)
-        except ValueError as error:
-            raise ApiError(
-                status_code=409,
-                code='INVALID_EVENT_CURSOR',
-                message='The legacy Claim event revision is invalid.',
-                retryable=True,
-                details=[
-                    ErrorDetail(
-                        field='Last-Event-ID',
-                        reason='Expected a Claim revision.',
-                    )
-                ],
-            ) from error
+        except ValueError:
+            realtime_cursor = last_event_id
         if legacy_cursor_revision < 0:
             raise ApiError(
                 status_code=409,
@@ -577,7 +589,7 @@ def read_claim_events(
     return realtime_stream(
         request,
         principal,
-        cursor=None,
+        cursor=realtime_cursor,
         claim_id=claim_id,
         legacy_session_id=session_id,
         legacy_after_revision=legacy_cursor_revision,

@@ -40,6 +40,11 @@ import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.j
 import ClaimDocuments from './components/ClaimDocuments.jsx'
 import ClaimReviewPanel from './components/ClaimReviewPanel.jsx'
 import ConversationHistorySidebar from './components/ConversationHistorySidebar.jsx'
+import {
+  AgentTurnDisclosure,
+  AgentTurnPlaceholder,
+} from './components/AgentTurnActivity.jsx'
+import { completeTurnProgress, reduceTurnProgress } from './agentTurnProgress.js'
 import { documentAttentionCount } from './claimDocumentProjection.js'
 import {
   forgetAnonymousConversation,
@@ -212,6 +217,14 @@ function buildConversationTimeline(messages, resumeContext) {
     })
   }
   return timeline
+}
+
+function mergeMessagesById(current, incoming) {
+  const merged = new Map(current.map((message) => [message.message_id, message]))
+  for (const message of incoming) {
+    if (message?.message_id) merged.set(message.message_id, message)
+  }
+  return [...merged.values()]
 }
 
 const CLAIMANT_ACTION_KINDS = Object.freeze({
@@ -397,6 +410,9 @@ function App() {
   const [offerErrors, setOfferErrors] = useState({})
   const [failedMessage, setFailedMessage] = useState(null)
   const [pendingMessage, setPendingMessage] = useState(null)
+  const [activeTurnProgress, setActiveTurnProgress] = useState(null)
+  const [messageActivities, setMessageActivities] = useState({})
+  const activeTurnProgressRef = useRef(null)
   const pendingSubmission = useRef(null)
   const pendingConfirmation = useRef(null)
   const pendingSupportRequest = useRef(null)
@@ -947,12 +963,12 @@ function App() {
           setClaimHistoryError('')
         }))
       }
-
       await Promise.all(refreshes)
     }
 
     async function applyRealtimeEvent(delivery) {
       if (!active) return
+
       if (delivery.type === 'resync_required') {
         needsResyncSnapshot = true
         realtimeCursor.current = null
@@ -961,13 +977,29 @@ function App() {
         degradedRefreshes = 0
         return
       }
-      if (delivery.type !== 'resources.changed') return
 
       const eventId = delivery.data?.event_id
-      if (eventId && realtimeSeenEventIds.current.has(eventId)) {
-        if (delivery.cursor) realtimeCursor.current = delivery.cursor
+      if (eventId && realtimeSeenEventIds.current.has(eventId)) return
+
+      if (delivery.type === 'agent.turn.progress') {
+        const activeSessionId = activeSessionIdRef.current
+        if (activeSessionId && delivery.data?.session_id === activeSessionId) {
+          const progressEvent = { ...delivery.data, event_type: 'agent.turn.progress', cursor: delivery.cursor }
+          const expectedTurnId = pendingSubmission.current?.clientMessageId
+            || activeTurnProgressRef.current?.turnId
+          const next = reduceTurnProgress(activeTurnProgressRef.current, progressEvent, expectedTurnId)
+          if (next !== activeTurnProgressRef.current) {
+            activeTurnProgressRef.current = next
+            setActiveTurnProgress(next)
+          }
+        }
+        rememberEvent(eventId)
+        reconnectDelay = 1000
+        degradedRefreshes = 0
         return
       }
+
+      if (delivery.type !== 'resources.changed') return
 
       const resources = new Set(delivery.data?.resources || [])
       const activeClaim = activeClaimRef.current
@@ -1021,7 +1053,6 @@ function App() {
       await Promise.all(refreshes)
       if (!active) return
       rememberEvent(eventId)
-      if (delivery.cursor) realtimeCursor.current = delivery.cursor
       reconnectDelay = 1000
       degradedRefreshes = 0
     }
@@ -1030,11 +1061,7 @@ function App() {
       if (degradedRefreshes >= maxDegradedRefreshes) return
       if (globalThis.document?.visibilityState === 'hidden') return
       degradedRefreshes += 1
-      try {
-        await refreshFullSnapshot()
-      } catch {
-        // A later bounded fallback attempt can recover once projections are reachable.
-      }
+      try { await refreshFullSnapshot() } catch { /* later bounded retry */ }
     }
 
     async function connect() {
@@ -1056,13 +1083,11 @@ function App() {
               }
               : undefined,
             onEvent: applyRealtimeEvent,
+            onCursor: (cursor) => { realtimeCursor.current = cursor },
           })
         } catch (streamFailure) {
           if (!active || controller.signal.aborted) return
-          if (
-            streamFailure instanceof ApiRequestError
-            && streamFailure.code === 'INVALID_EVENT_CURSOR'
-          ) {
+          if (streamFailure instanceof ApiRequestError && streamFailure.code === 'INVALID_EVENT_CURSOR') {
             needsResyncSnapshot = true
             realtimeCursor.current = null
             realtimeSeenEventIds.current.clear()
@@ -1400,7 +1425,9 @@ function App() {
         }
       }
       const operation = pendingSubmission.current
-      setPendingMessage({ text })
+      activeTurnProgressRef.current = null
+      setActiveTurnProgress(null)
+      setPendingMessage({ text, turnId: operation.clientMessageId })
       let activeClaim = isWorkspaceActive ? claim : null
       let activeSessionId = isWorkspaceActive ? sessionId : null
       if (!activeClaim) {
@@ -1439,11 +1466,10 @@ function App() {
         idempotencyKey: operation.turnKey,
         clientMessageId: operation.clientMessageId,
       })
-      commitMessages((current) => [
-        ...current,
+      commitMessages((current) => mergeMessagesById(current, [
         turn.claimant_message,
         ...(turn.agent_message ? [turn.agent_message] : []),
-      ])
+      ]))
       setForm((current) => mergeFields(current, turn.form_changes))
       setContentsItems((current) => mergeContentsItems(current, turn.contents_item_changes || []))
       setDynamicForm(turn.dynamic_form || null)
@@ -1464,6 +1490,18 @@ function App() {
           messageId: turn.claimant_message.message_id,
         })
       }
+      const completedActivity = completeTurnProgress(
+        activeTurnProgressRef.current,
+        operation.clientMessageId,
+      )
+      if (turn.agent_message?.message_id) {
+        setMessageActivities((current) => ({
+          ...current,
+          [turn.agent_message.message_id]: completedActivity,
+        }))
+      }
+      activeTurnProgressRef.current = null
+      setActiveTurnProgress(null)
       pendingSubmission.current = null
       setPendingMessage(null)
       setFailedMessage(null)
@@ -1485,6 +1523,8 @@ function App() {
       if (stagedUploadsSucceeded) setStatus('idle')
     } catch (requestError) {
       if (isAssistanceReply) setAssistanceReplyReview(null)
+      activeTurnProgressRef.current = null
+      setActiveTurnProgress(null)
       setPendingMessage(null)
       if (messageWasSubmitted) {
         const serverConfirmedFailure = requestError instanceof ApiRequestError
@@ -1552,6 +1592,9 @@ function App() {
     setError('')
     setFailedMessage(null)
     setPendingMessage(null)
+    activeTurnProgressRef.current = null
+    setActiveTurnProgress(null)
+    setMessageActivities({})
     setStatus('idle')
     setPageState('home')
     if (globalThis.location?.pathname !== '/') {
@@ -2801,6 +2844,7 @@ function App() {
                     <div className="agent-bar" />
                     <div className="agent-body">
                       <div className="agent-label">Claims assistant</div>
+                      <AgentTurnDisclosure progress={messageActivities[message.message_id]} />
                       <div className="agent-text"><p>{messageText(message)}</p><button className="listen-message" type="button" onClick={() => { if (globalThis.speechSynthesis) { globalThis.speechSynthesis.cancel(); globalThis.speechSynthesis.speak(new SpeechSynthesisUtterance(messageText(message))) } }}>Listen</button></div>
                       {(message.message_actions || []).map((action) => (
                         <div className="conversation-agent-action" key={action.offer_id || action.service_identity}>
@@ -2835,12 +2879,19 @@ function App() {
                   {renderConversationAction()}
                 </div>
               )}
-              {status === 'sending' && pendingMessage && (
-                <article className="message message-claimant is-pending" aria-label="Message sending">
-                  <p className="message-author">You</p>
-                  <p>{pendingMessage.text}</p>
-                  <p className="message-state">Sending…</p>
-                </article>
+              {pendingMessage && (
+                <>
+                  <article className="msg-user is-pending" aria-label="Message sending">
+                    <div>
+                      <div className="user-bubble">{pendingMessage.text}</div>
+                      <div className="msg-meta">Sending…</div>
+                    </div>
+                  </article>
+                  <AgentTurnPlaceholder
+                    progress={activeTurnProgress}
+                    turnId={pendingMessage.turnId}
+                  />
+                </>
               )}
               {failedMessage && (
                 <article className="message message-claimant is-failed" role="alert">

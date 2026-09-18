@@ -23,8 +23,9 @@ This record applies the following authority order:
 3. [Fixtures and Test Conventions](../fixtures_convention.md) separates scenario data,
    executable assertions, runtime doubles, and verification evidence.
 4. [Complete-journey runs](../../tests/journey_runs/README.md) defines the implemented
-   `northwind-journey-run/5` record and result classes. The historical #894/#927 baseline records
-   remain `/4`; new runs use `/5`, whose step evidence also records response-body validity.
+   `northwind-journey-run/6` record and result classes. The historical #894/#927 baseline records
+   remain `/4`; new runs use `/6`, which states Sprint 4 metric coverage per run and, since `/5`,
+   response-body validity per step.
 5. [Pull request #894](https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/pull/894)
    and its [consolidated result](https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/issues/771#issuecomment-5696256792)
    provide the merged baseline evidence.
@@ -113,8 +114,9 @@ following inputs in order:
    smoke records agree with their executable oracles.
 
 The bounded next validation slice is therefore a three-family exact-head smoke rerun after the
-first four inputs exist. It uses `northwind-journey-run/5`, including the shared
-`steps[].response_body_valid` evidence, adds no runner-private fields or behavior, and stops with
+first four inputs exist. It uses `northwind-journey-run/6`, including the per-run metric
+coverage and the shared `steps[].response_body_valid` evidence, adds no runner-private fields or
+behavior, and stops with
 an honest unavailable record when a required capability remains absent.
 
 ## Limitations

@@ -115,6 +115,8 @@ class ModelRuntimeConfiguration(BaseModel):
     tools: bool = False
     image_input: bool = False
     document_input: bool = False
+    structured_output_method: Literal['json_schema', 'json_object'] = 'json_schema'
+    reasoning_mode: Literal['provider_default', 'disabled'] = 'provider_default'
 
 
 class ModelRuntimeBinding(BaseModel):
@@ -136,6 +138,8 @@ class ModelRuntimeBinding(BaseModel):
     tools: bool = False
     image_input: bool = False
     document_input: bool = False
+    structured_output_method: Literal['json_schema', 'json_object'] = 'json_schema'
+    reasoning_mode: Literal['provider_default', 'disabled'] = 'provider_default'
 
 
 class ModelCostRate(BaseModel):

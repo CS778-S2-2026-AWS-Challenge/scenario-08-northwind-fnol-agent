@@ -9,11 +9,12 @@ written outside the repository and summarised on the delivery issue. They are ne
 
 ## The record
 
-`record.JourneyRunRecord`, schema `northwind-journey-run/5`:
+`record.JourneyRunRecord`, schema `northwind-journey-run/6`:
 
-Schema `/5` is a breaking evidence-contract revision from `/4`. It adds
-`steps[].response_body_valid` and changes successful-response classification as described below;
-consumers must select the model by `record_schema` rather than parse a `/5` record as `/4`.
+Schema `/6` is a breaking evidence-contract revision from `/5`. It adds `metrics`, the Sprint 4
+metric coverage every run must state. `/5` added `steps[].response_body_valid` and changed
+successful-response classification as described below. Consumers must select the model by
+`record_schema` rather than parse a newer record as an older one.
 
 | Field | Holds |
 |---|---|
@@ -28,6 +29,7 @@ consumers must select the model by `record_schema` rather than parse a `/5` reco
 | `unavailable_capabilities` | A capability the journey needs that this runtime does not provide: the capability, the step it was needed for, and the observation and document that establish it |
 | `final_state` | Claim number, expected timing, workflow and lifecycle state, queue, next step and its owner, session and active session, evidence, external-task and handoff status |
 | `effort` | Claimant messages, confirmations, uploads, consents |
+| `metrics` | Every metric `sprint/sprint4.md` section 2 requires, each `measured`, `partly_measured`, or `not_measured`, with what the run observed and, short of a full measurement, a limitation quoting the document that establishes it |
 | `result_class`, `result_reason` | One class, and why |
 
 The record rejects evidence that contradicts itself:

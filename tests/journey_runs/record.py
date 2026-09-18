@@ -19,7 +19,7 @@ from typing import Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-RECORD_SCHEMA: Final = 'northwind-journey-run/5'
+RECORD_SCHEMA: Final = 'northwind-journey-run/6'
 ORACLE_FAILURE: Final = 'Fixture oracle failed'
 
 
@@ -311,6 +311,62 @@ class ClaimantEffort(_Record):
     consents: int = Field(ge=0)
 
 
+class SprintMetric(StrEnum):
+    """The five metrics `sprint/sprint4.md` section 2 requires from every run."""
+
+    NO_FOLLOW_UP = 'completed_without_follow_up'
+    SEVERITY_BLIND_RATING = 'severity_blind_rating'
+    FRAUD_PRECISION = 'fraud_flag_precision'
+    CLAIMANT_EFFORT = 'claimant_effort'
+    CLAIM_RESULT = 'claim_result_and_evidence_chain'
+
+
+class MetricState(StrEnum):
+    MEASURED = 'measured'
+    PARTLY_MEASURED = 'partly_measured'
+    NOT_MEASURED = 'not_measured'
+
+
+class MetricCoverage(_Record):
+    """What one run can say about one required metric, and what it cannot.
+
+    A run on a rule-driven Agent cannot produce a severity or fraud judgement to rate, and
+    nothing here reports how long a claimant took. Leaving those metrics out of the record
+    reads the same as forgetting them, so every metric is stated: `observed` carries what this
+    run actually saw, and anything short of a full measurement carries a `limitation` that
+    cites the document establishing the boundary, as material arrival does.
+    """
+
+    metric: SprintMetric
+    state: MetricState
+    observed: str | None = Field(default=None, min_length=1)
+    limitation: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode='after')
+    def _state_matches_its_evidence(self) -> Self:
+        if self.state is MetricState.MEASURED:
+            if self.observed is None:
+                raise ValueError(f'{self.metric.value}: measured without an observation')
+            if self.limitation is not None:
+                raise ValueError(f'{self.metric.value}: measured but carries a limitation')
+            return self
+        if cited_authority(self.limitation) is None:
+            raise ValueError(
+                f'{self.metric.value}: {self.state.value} requires a limitation that starts '
+                'with a document path and quotes a passage from it'
+            )
+        if self.state is MetricState.PARTLY_MEASURED and self.observed is None:
+            raise ValueError(
+                f'{self.metric.value}: partly_measured without the part it did observe'
+            )
+        if self.state is MetricState.NOT_MEASURED and self.observed is not None:
+            raise ValueError(
+                f'{self.metric.value}: not_measured but reports an observation, which is a '
+                'measurement of something this metric does not cover'
+            )
+        return self
+
+
 def classify(
     *,
     steps: list[RunStep],
@@ -361,7 +417,7 @@ def classify(
 
 
 class JourneyRunRecord(_Record):
-    record_schema: Literal['northwind-journey-run/5'] = RECORD_SCHEMA
+    record_schema: Literal['northwind-journey-run/6'] = RECORD_SCHEMA
     run_id: str
     scenario_id: str
     family: Literal['motor', 'home', 'contents']
@@ -377,11 +433,17 @@ class JourneyRunRecord(_Record):
     unavailable_capabilities: list[UnavailableCapability] = Field(default_factory=list)
     final_state: FinalState
     effort: ClaimantEffort
+    metrics: list[MetricCoverage]
     result_class: ResultClass
     result_reason: str = Field(min_length=1)
 
     @model_validator(mode='after')
     def _class_follows_the_evidence(self) -> Self:
+        stated = sorted(item.metric for item in self.metrics)
+        if stated != sorted(SprintMetric):
+            raise ValueError(
+                f'every required metric must be stated exactly once; this record states {stated}'
+            )
         recorded = {step.name for step in self.steps}
         referenced = [turn.step for turn in self.agent_turns]
         referenced += [consent.step for consent in self.consents]

@@ -50,6 +50,7 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.domain.realtime import (
+    AgentTurnProgressPublication,
     MutationOutcome,
     RealtimeCursor,
     RealtimeEvent,
@@ -160,7 +161,10 @@ class FixtureRepository(PersistenceRepository):
     def connection_status(self) -> str:
         return 'using_fixture'
 
-    def append_realtime_publication(self, publication: RealtimePublication) -> RealtimeEvent:
+    def append_realtime_publication(
+        self,
+        publication: RealtimePublication | AgentTurnProgressPublication,
+    ) -> RealtimeEvent:
         with self._realtime_condition:
             prepared = self._prepare_realtime_publication(
                 publication,
@@ -172,7 +176,7 @@ class FixtureRepository(PersistenceRepository):
 
     def _prepare_realtime_publication(
         self,
-        publication: RealtimePublication,
+        publication: RealtimePublication | AgentTurnProgressPublication,
         outcome: MutationOutcome,
     ) -> RealtimeEvent | None:
         """Prepare one repository-owned event while the mutation lock is held."""

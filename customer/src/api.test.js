@@ -84,6 +84,47 @@ describe('claimant live-update stream', () => {
     expect(request.headers.Authorization).toBe('Bearer claimant-session-token')
     expect(request.headers['X-Northwind-Anonymous-Session']).toBeUndefined()
   })
+
+  it('tracks only opaque durable cursors while preserving legacy revision events', async () => {
+    fetch.mockResolvedValue(eventStreamResponse([
+      'id: 4\nevent: claim.updated\ndata: {"event_id":"4","claim_revision":4}\n\n',
+      'id: eyJldmVudF9pZCI6InJ0ZV8xIn0\nevent: agent.turn.progress\ndata: {"turn_id":"message-1","session_id":"ses_1","stage":"model.waiting","state":"running","ordinal":2}\n\n',
+    ]))
+    const onCursor = vi.fn()
+    const onEvent = vi.fn()
+
+    await streamClaimUpdates({
+      claimId: 'clm_1',
+      sessionId: 'ses_1',
+      afterRevision: 3,
+      signal: new AbortController().signal,
+      onEvent,
+      onCursor,
+    })
+
+    expect(onEvent).toHaveBeenCalledTimes(2)
+    expect(onCursor).toHaveBeenCalledOnce()
+    expect(onCursor).toHaveBeenCalledWith('eyJldmVudF9pZCI6InJ0ZV8xIn0')
+  })
+
+  it('does not advance an opaque cursor when the event handler fails', async () => {
+    fetch.mockResolvedValue(eventStreamResponse([
+      'id: eyJldmVudF9pZCI6InJ0ZV8yIn0\nevent: agent.turn.progress\ndata: {"turn_id":"message-2","session_id":"ses_1","stage":"model.waiting","state":"running","ordinal":2}\n\n',
+    ]))
+    const onCursor = vi.fn()
+    const handlerFailure = new Error('Authoritative readback failed.')
+
+    await expect(streamClaimUpdates({
+      claimId: 'clm_1',
+      sessionId: 'ses_1',
+      afterRevision: 3,
+      signal: new AbortController().signal,
+      onEvent: vi.fn().mockRejectedValue(handlerFailure),
+      onCursor,
+    })).rejects.toBe(handlerFailure)
+
+    expect(onCursor).not.toHaveBeenCalled()
+  })
 })
 
 describe('claim creation contract', () => {
@@ -213,6 +254,52 @@ describe('claimant multiplexed realtime stream', () => {
       retryable: true,
     })
   })
+  it('delivers Agent progress through the multiplexed stream and acknowledges only after handling', async () => {
+    fetch.mockResolvedValue(eventStreamResponse([
+      'id: cursor-progress\nevent: agent.turn.progress\ndata: {"event_id":"evt_progress","claim_id":"clm_1","session_id":"ses_1","turn_id":"message-1","stage":"model.waiting","state":"running","ordinal":2}\n\n',
+    ]))
+    const order = []
+    const onCursor = vi.fn((cursor) => order.push(`cursor:${cursor}`))
+
+    await streamRealtimeEvents({
+      cursor: null,
+      signal: new AbortController().signal,
+      onEvent: vi.fn(async (event) => {
+        expect(event).toMatchObject({
+          type: 'agent.turn.progress',
+          cursor: 'cursor-progress',
+          data: {
+            turn_id: 'message-1',
+            session_id: 'ses_1',
+            stage: 'model.waiting',
+          },
+        })
+        order.push('handler')
+      }),
+      onCursor,
+    })
+
+    expect(order).toEqual(['handler', 'cursor:cursor-progress'])
+    expect(onCursor).toHaveBeenCalledWith('cursor-progress')
+  })
+
+  it('does not acknowledge a multiplexed cursor when the applicable handler fails', async () => {
+    fetch.mockResolvedValue(eventStreamResponse([
+      'id: cursor-progress-fail\nevent: agent.turn.progress\ndata: {"event_id":"evt_progress_fail","claim_id":"clm_1","session_id":"ses_1","turn_id":"message-2","stage":"model.waiting","state":"running","ordinal":2}\n\n',
+    ]))
+    const handlerFailure = new Error('Progress handler failed.')
+    const onCursor = vi.fn()
+
+    await expect(streamRealtimeEvents({
+      cursor: null,
+      signal: new AbortController().signal,
+      onEvent: vi.fn().mockRejectedValue(handlerFailure),
+      onCursor,
+    })).rejects.toBe(handlerFailure)
+
+    expect(onCursor).not.toHaveBeenCalled()
+  })
+
 })
 
 

@@ -39,7 +39,7 @@ def provider_capability(configuration: ModelRuntimeConfiguration) -> ProviderCap
     return ProviderCapability(
         capability_version=f'{configuration.profile_id}@v1',
         protocol=configuration.protocol,
-        structured_output_method='json_schema',
+        structured_output_method=configuration.structured_output_method,
         tool_call_support=configuration.tools,
         tool_result_continuation=('assistant_tool_message' if configuration.tools else None),
         supported_media_types=media_types,

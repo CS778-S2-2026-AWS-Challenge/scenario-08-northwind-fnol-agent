@@ -396,11 +396,35 @@ def test_prompt_manifest_compiles_one_family_in_stable_order() -> None:
     refs = [item.fragment_id for item in first.fragment_refs]
     assert 'family.motor' in refs
     assert 'family.home' not in refs
+    assert 'capability.assessor' in refs
     assert (
         refs.index('core.authority')
         < refs.index('family.motor')
         < refs.index('task.external-support')
     )
+
+
+def test_prompt_composer_ignores_external_capability_terms_during_evidence_review() -> None:
+    route = route_turn(
+        _context(
+            'Please review this repair assessment PDF and summarise what it supports.',
+            evidence=(
+                AgentEvidenceReference(
+                    evidence_id='ev_assessment',
+                    media_type='application/pdf',
+                ),
+            ),
+        )
+    )
+
+    bundle = compose_prompt(route, load_prompt_manifest())
+
+    assert route.task is TurnTask.EVIDENCE_CURRENT
+    refs = [item.fragment_id for item in bundle.fragment_refs]
+    assert 'task.evidence-current' in refs
+    assert 'task.external-support' not in refs
+    assert 'capability.assessor' not in refs
+    assert 'capability.repair' not in refs
 
 
 def test_prompt_composer_rejects_a_selected_fragment_outside_its_applicability() -> None:
@@ -613,6 +637,26 @@ def test_external_support_offers_only_registry_candidates_pending_consent(
         {'service_identity': service_identity, 'requested_action': 'submit_request'}
     ]
     assert proposal.state_changes == []
+
+
+def test_image_review_does_not_load_unrelated_external_service_context() -> None:
+    context = replace(
+        _context(
+            'Please inspect this damage photo.',
+            evidence=(AgentEvidenceReference(evidence_id='ev_photo', media_type='image/jpeg'),),
+        ),
+        external_services=capability_context('motor'),
+    )
+
+    plan = plan_model_turn(context)
+
+    assert plan is not None
+    assert plan.route.task is TurnTask.EVIDENCE_CURRENT
+    assert plan.request_profile.output_limit == 400
+    assert 'external.services' not in plan.context_payload
+    assert all(
+        entry.resource_id != 'external.services' for entry in plan.context_plan.catalogue_entries
+    )
 
 
 def test_request_profiles_fail_closed_against_provider_capabilities() -> None:
@@ -1227,14 +1271,51 @@ def test_v7_claim_creation_route_keeps_readiness_under_runtime_control(
             )
         ]
     )
+    context = replace(_context('Proceed with this report.'), branch_evaluation=branch_evaluation)
 
-    proposal = GatewayAgent(gateway).propose_turn(
-        replace(_context('Proceed with this report.'), branch_evaluation=branch_evaluation)
-    )
+    proposal = GatewayAgent(gateway).propose_turn(context)
 
     assert proposal.action_code == expected_action
     assert proposal.customer_next_step.status == expected_status
     assert proposal.state_changes == []
+
+
+def test_intake_field_contract_uses_the_runtime_policy_registry() -> None:
+    context = _context('My car was rear-ended this morning.')
+    assert context.runtime_policy is not None
+    branch_evaluation = context.runtime_policy.branch_evaluator().evaluate(
+        context.claim,
+        latest_message=context.message_text,
+        recomputation_reason='test',
+    )
+    context = replace(context, branch_evaluation=branch_evaluation)
+
+    plan = plan_model_turn(context)
+
+    assert plan is not None
+    assert plan.route.task is TurnTask.INTAKE
+    assert plan.field_contract is not None
+    assert plan.field_contract.registry_version == branch_evaluation.field_registry_version
+    assert plan.field_contract.branch_rules_version == branch_evaluation.branch_rules_version
+
+
+def test_intake_field_contract_rejects_a_mismatched_branch_registry() -> None:
+    branch_evaluation = BranchEvaluationResult(
+        claim_id='clm_v7',
+        evaluated_against_claim_revision=1,
+        field_registry_version='5',
+        branch_rules_version='unrelated-branch-rules-v7',
+        selected_family='motor',
+        requirements=RequirementResolution(ready=False),
+        recomputation_reason='test',
+    )
+    context = replace(
+        _context('My car was rear-ended this morning.'),
+        branch_evaluation=branch_evaluation,
+    )
+
+    with pytest.raises(ValueError, match='branch-rule versions do not match'):
+        plan_model_turn(context)
 
 
 @pytest.mark.parametrize(
@@ -1335,6 +1416,79 @@ def test_v7_timeout_stops_after_one_request_and_returns_no_proposal() -> None:
 
     assert error.value.code is ModelGatewayErrorCode.TIMEOUT
     assert len(gateway.requests) == 1
+
+
+def test_v7_field_contract_uses_one_bounded_repair_without_tools() -> None:
+    invalid = {
+        **_intake_output(),
+        'field_changes': [
+            {
+                'field_code': 'incident.injury_or_danger',
+                'value': 'maybe',
+                'reported_text': 'I am not injured.',
+            }
+        ],
+    }
+    corrected = {
+        **invalid,
+        'reply': 'An attempted rewrite that Runtime must ignore.',
+        'field_changes': [
+            {
+                'field_code': 'incident.injury_or_danger',
+                'value': False,
+                'reported_text': 'I am not injured.',
+            }
+        ],
+    }
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                structured_output=invalid,
+                completion_status=ModelCompletionStatus.COMPLETE,
+            ),
+            ModelResponse(
+                structured_output=corrected,
+                completion_status=ModelCompletionStatus.COMPLETE,
+            ),
+        ]
+    )
+
+    proposal = GatewayAgent(gateway).propose_turn(
+        _context('My car was rear-ended and I am not injured.')
+    )
+
+    assert len(gateway.requests) == 2
+    assert gateway.requests[1].tools == []
+    assert proposal.form_changes[0].value is False
+    assert proposal.customer_response == invalid['reply']
+    assert proposal.runtime_trace is not None
+    assert proposal.runtime_trace.repair_attempted is True
+    assert proposal.runtime_trace.repair_outcome == 'corrected'
+
+
+def test_v7_field_contract_fails_after_one_unsuccessful_repair() -> None:
+    invalid = {
+        **_intake_output(),
+        'field_changes': [{'field_code': 'incident.injury_or_danger', 'value': 'maybe'}],
+    }
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                structured_output=invalid,
+                completion_status=ModelCompletionStatus.COMPLETE,
+            ),
+            ModelResponse(
+                structured_output=invalid,
+                completion_status=ModelCompletionStatus.COMPLETE,
+            ),
+        ]
+    )
+
+    with pytest.raises(ModelGatewayError) as error:
+        GatewayAgent(gateway).propose_turn(_context('My car was rear-ended.'))
+
+    assert error.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+    assert len(gateway.requests) == 2
 
 
 def test_v7_lookup_allows_one_bounded_resolve_and_one_continuation() -> None:
@@ -1632,4 +1786,5 @@ def test_v7_authority_budget_overflow_returns_model_free_safe_clarification() ->
     assert gateway.requests == []
     assert proposal.reason_codes == ['CONTEXT_BUDGET_EXCEEDED']
     assert proposal.proposal_source.value == 'controlled_agent'
+    assert proposal.action_code is None
     assert proposal.runtime_trace is None

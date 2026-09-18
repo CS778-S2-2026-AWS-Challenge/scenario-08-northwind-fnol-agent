@@ -7,6 +7,7 @@ from backend.domain.agent_context_runtime import (
     PlannedModelTurn,
     VerifiedConversationSummary,
 )
+from backend.domain.branch_registry import BranchRuleEvaluator
 from backend.domain.configuration import ModelRuntimeConfiguration
 from backend.domain.model_gateway import ModelTool
 from backend.domain.prompt_pack import PromptPackManifest
@@ -21,6 +22,7 @@ from backend.services.provider_capability_registry import (
     validate_profile_compatibility,
 )
 from backend.services.request_profile_registry import request_profile_for_task
+from backend.services.turn_field_contract import bind_provider_schema, compile_turn_field_contract
 from backend.services.turn_router import route_turn
 
 _CONTEXT_RESOLVE_TOOL = ModelTool(
@@ -117,6 +119,7 @@ def plan_model_turn(
         if required_type not in capability.supported_media_types:
             raise ValueError('The selected provider cannot consume the attached Evidence type.')
 
+    field_contract = None
     if runtime_policy is not None and runtime_policy.instruction.composition_mode == 'fragmented':
         instruction = runtime_policy.instruction
         assert instruction.manifest_version is not None
@@ -138,6 +141,22 @@ def plan_model_turn(
     else:
         bundle = compose_prompt(route)
         schema = load_response_schema(profile.schema_id)
+    if profile.schema_id == 'claimant.intake-patch.v1':
+        branch_evaluator = (
+            runtime_policy.branch_evaluator()
+            if runtime_policy is not None
+            else BranchRuleEvaluator()
+        )
+        branch_evaluation = context.branch_evaluation or branch_evaluator.evaluate(
+            context.claim,
+            latest_message=context.message_text,
+            recomputation_reason='model_turn_contract',
+        )
+        field_contract = compile_turn_field_contract(
+            branch_evaluation,
+            branch_evaluator.registry,
+        )
+        schema = bind_provider_schema(schema, field_contract)
     schema = json.loads(json.dumps(schema, separators=(',', ':'), sort_keys=True))
     tools: list[dict[str, object]] = (
         [context_resolve_tool().model_dump(mode='json')] if profile.tool_names else []
@@ -167,6 +186,7 @@ def plan_model_turn(
         ),
         reserved_tokens=reserved,
         summary=summary or context.rolling_summary,
+        field_contract=field_contract,
     )
     recent_history_tokens = next(
         (
@@ -224,4 +244,5 @@ def plan_model_turn(
         system_instruction=bundle.compiled_instruction,
         context_payload=context_plan.inline_context,
         response_schema=schema,
+        field_contract=field_contract,
     )

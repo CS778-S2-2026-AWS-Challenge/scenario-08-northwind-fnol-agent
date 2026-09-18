@@ -144,6 +144,7 @@ class ModelProfile(ModelContract):
     purpose: str = Field(min_length=1, max_length=100)
     privacy_class: str = Field(min_length=1, max_length=100)
     capabilities: ModelCapabilities
+    structured_output_method: Literal['json_schema', 'json_object'] = 'json_schema'
     timeout_seconds: float = Field(gt=0)
     prompt_version: str = Field(min_length=1, max_length=100)
     evaluation_status: ModelProfileStatus = ModelProfileStatus.CONFIGURED

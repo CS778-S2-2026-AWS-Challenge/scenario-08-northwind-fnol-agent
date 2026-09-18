@@ -29,6 +29,31 @@ from backend.domain.model_gateway import (
     ModelUsage,
 )
 
+_GOOGLE_PROVIDER_SCHEMA_CONSTRAINTS = frozenset(
+    {
+        'additionalProperties',
+        'maxItems',
+        'maxLength',
+        'maximum',
+        'minItems',
+        'minLength',
+        'minimum',
+        'pattern',
+    }
+)
+
+
+def _google_provider_schema(value: object) -> object:
+    if isinstance(value, list):
+        return [_google_provider_schema(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _google_provider_schema(item)
+            for key, item in value.items()
+            if key not in _GOOGLE_PROVIDER_SCHEMA_CONSTRAINTS
+        }
+    return value
+
 
 @dataclass(frozen=True, slots=True)
 class ModelGatewayConfig:
@@ -38,6 +63,8 @@ class ModelGatewayConfig:
     timeout_seconds: float
     capabilities: ModelCapabilities
     profile: ModelProfile
+    structured_output_method: str = 'json_schema'
+    reasoning_mode: str = 'provider_default'
     evidence_resolver: ModelEvidenceContentResolver | None = None
 
     def __post_init__(self) -> None:
@@ -49,6 +76,10 @@ class ModelGatewayConfig:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
         if not self.model.strip() or self.timeout_seconds <= 0:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        if self.reasoning_mode not in {'provider_default', 'disabled'}:
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        if self.structured_output_method not in {'json_schema', 'json_object'}:
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
         if self.credential_environment_variable is not None and not re.fullmatch(
             r'[A-Za-z_][A-Za-z0-9_]*', self.credential_environment_variable
         ):
@@ -57,6 +88,7 @@ class ModelGatewayConfig:
             self.profile.model_identifier != self.model
             or self.profile.credential_reference != self.credential_environment_variable
             or self.profile.capabilities != self.capabilities
+            or self.profile.structured_output_method != self.structured_output_method
             or self.profile.timeout_seconds != self.timeout_seconds
         ):
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
@@ -221,6 +253,13 @@ class OpenAICompatibleModelGateway:
     def _request_payload(self, request: ModelRequest) -> dict[str, object]:
         provider_tool_names = self._provider_tool_names(request)
         messages: list[dict[str, object]] = []
+        flatten_tool_history = (
+            self._config.structured_output_method == 'json_object'
+            and not request.tools
+            and any(
+                message.tool_calls or message.role is ModelRole.TOOL for message in request.messages
+            )
+        )
         for message in request.messages:
             # Preserve the legacy OpenAI-compatible string payload unless the
             # caller explicitly supplied multimodal content blocks.
@@ -251,11 +290,14 @@ class OpenAICompatibleModelGateway:
                                 }
                             )
                 provider_content = provider_blocks
-            item: dict[str, object] = {
-                'role': message.role.value,
-                'content': provider_content,
-            }
-            if message.tool_calls:
+            role = message.role.value
+            if flatten_tool_history and message.role is ModelRole.TOOL:
+                role = ModelRole.USER.value
+                provider_content = (
+                    f'Tool result ({message.name or "tool"}): {message.content or ""}'
+                )
+            item: dict[str, object] = {'role': role, 'content': provider_content}
+            if message.tool_calls and not flatten_tool_history:
                 item['tool_calls'] = [
                     {
                         'id': tool.call_id,
@@ -272,28 +314,57 @@ class OpenAICompatibleModelGateway:
                     }
                     for tool in message.tool_calls
                 ]
-            if message.tool_call_id is not None:
+            if message.tool_call_id is not None and not flatten_tool_history:
                 item['tool_call_id'] = message.tool_call_id
-            if message.name is not None:
+            if message.name is not None and not flatten_tool_history:
                 item['name'] = provider_tool_names.get(
                     message.name, self._provider_tool_name(message.name)
                 )
             messages.append(item)
+        if (
+            request.response_schema is not None
+            and self._config.structured_output_method == 'json_object'
+        ):
+            schema_instruction = (
+                'Return only one JSON object that matches this JSON Schema exactly: '
+                + json.dumps(request.response_schema, separators=(',', ':'), sort_keys=True)
+            )
+            system_message = next(
+                (
+                    item
+                    for item in messages
+                    if item.get('role') == ModelRole.SYSTEM.value
+                    and isinstance(item.get('content'), str)
+                ),
+                None,
+            )
+            if system_message is None:
+                messages.insert(
+                    0,
+                    {'role': ModelRole.SYSTEM.value, 'content': schema_instruction},
+                )
+            else:
+                system_message['content'] = f'{system_message["content"]}\n\n{schema_instruction}'
         payload: dict[str, object] = {
             'model': self._config.model,
             'messages': messages,
         }
         if request.max_output_tokens is not None:
             payload['max_tokens'] = request.max_output_tokens
+        if self._config.reasoning_mode == 'disabled':
+            payload['chat_template_kwargs'] = {'enable_thinking': False}
         if request.response_schema is not None:
-            payload['response_format'] = {
-                'type': 'json_schema',
-                'json_schema': {
-                    'name': 'northwind_agent_proposal',
-                    'strict': True,
-                    'schema': self._strict_response_schema(request.response_schema),
-                },
-            }
+            if self._config.structured_output_method == 'json_object':
+                payload['response_format'] = {'type': 'json_object'}
+            else:
+                payload['response_format'] = {
+                    'type': 'json_schema',
+                    'json_schema': {
+                        'name': 'northwind_agent_proposal',
+                        'strict': True,
+                        'schema': self._strict_response_schema(request.response_schema),
+                    },
+                }
         if request.tools:
             payload['tools'] = [
                 {
@@ -898,7 +969,7 @@ class GoogleGenerateContentModelGateway:
             generation_config.update(
                 {
                     'responseMimeType': 'application/json',
-                    'responseJsonSchema': request.response_schema,
+                    'responseJsonSchema': _google_provider_schema(request.response_schema),
                 }
             )
         if generation_config:

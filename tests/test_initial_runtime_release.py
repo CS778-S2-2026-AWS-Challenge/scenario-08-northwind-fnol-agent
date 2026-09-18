@@ -76,7 +76,8 @@ def _binding(
         structured_output=True,
         tools=not is_bedrock,
         image_input=is_bedrock or is_google,
-        document_input=False,
+        document_input=is_google,
+        structured_output_method='json_object' if is_qwen else 'json_schema',
     )
 
 
@@ -164,6 +165,12 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
     )
     assert bedrock.values['evaluation_status'] == 'unavailable'
     assert bedrock.values['image_input'] is True
+    qwen = next(
+        record
+        for record in configurations.list_configurations('model')
+        if record.values['profile_id'] == 'qwen-local'
+    )
+    assert qwen.values['structured_output_method'] == 'json_object'
     assert policy.controlled_rules.context_budget_policy is not None
     assert policy.features.verified_rolling_summary is True
     assert policy.features.isolated_execution is True
@@ -493,7 +500,10 @@ def test_published_prompt_content_is_runtime_authority_not_a_container_file_mirr
     )
 
 
-def test_capabilities_expose_the_repository_published_model_catalogue() -> None:
+def test_capabilities_expose_the_repository_published_model_catalogue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('GEMINI_API_KEY', 'test-only-gemini-key')
     client = TestClient(create_app(_settings()))
 
     response = client.get(
@@ -516,6 +526,9 @@ def test_capabilities_expose_the_repository_published_model_catalogue() -> None:
         item for item in response.json()['models'] if item['id'] == 'google-gemini35-flash-lite'
     )
     assert gemini['availability'] == 'available'
+    assert gemini['published'] is True
+    assert gemini['runtime_ready'] is True
+    assert gemini['healthy'] is None
     assert gemini['structured_output'] is True
     assert gemini['tools'] is True
     assert gemini['image_input'] is True

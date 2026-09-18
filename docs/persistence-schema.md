@@ -141,6 +141,15 @@ coordinate. `RealtimeEvent` is the repository-created durable record and adds `e
 Evidence, Handoff, WorkItem, or External Task projection. Business payloads, provider resume
 tokens, and adapter physical keys are excluded.
 
+`AgentTurnProgressPublication` is the bounded observational exception carried by the same durable
+event store and dispatcher. It creates `event_type=agent.turn.progress` with Claim/customer scope,
+`turn_id`, `session_id`, a stable stage, monotonic turn ordinal, state, optional safe activity code,
+and optional retryability. It is claimant-only and carries no resource hints, business payload,
+prompt, model output, provider payload, credential, or hidden reasoning. Progress persistence is
+best-effort and does not join or roll back the authoritative Claim transaction. It therefore
+cannot become a second Message, Claim, consent, or External Task record. Terminal progress ignores
+later stage attempts; duplicate or out-of-order delivery remains harmless at the consumer.
+
 The public projection-impact matrix below is the authority for publication. Resource names are
 stable client refresh boundaries backed by public read APIs; persistence record names do not define
 the vocabulary. Both adapters translate the authoritative records changed by a concrete mutation

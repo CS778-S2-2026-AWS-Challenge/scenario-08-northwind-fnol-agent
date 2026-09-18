@@ -865,7 +865,28 @@ Claim branch 与 Claim state branch 必须分开：
 - 字段、工具和动作必须声明所属 branch 及激活条件，避免 motor/home/contents 的字段互相泄漏；
 - branch 或字段冲突时，Agent 应解释冲突并请求澄清，Runtime 不得静默覆盖已确认事实。
 
-### 7.5 第三方服务生命周期
+每个模型 turn 的字段输入、provider schema 和最终 Runtime 校验必须来自同一个
+`TurnFieldContract`。该合同只包含本轮 branch 允许的 claimant 字段，并携带 registry
+版本和 branch evaluation revision。不能通过向 Prompt、schema 和 validator 分别复制字段
+表来模拟一致性。若 provider 输出仍不合法，只允许一次不带工具和副作用的字段级修正；
+修正不能改写 Agent 回复、动作、第三方 offer 或原本合法的字段。
+
+### 7.5 Claimant 等待进度
+
+Claimant 发送后，本地消息立即显示；在后端确认前使用 `Sending message` transport 状态。
+后端接受 turn 后，同一位置显示唯一 Agent 占位气泡。其弱提示只映射真实
+`agent.turn.progress` 阶段，不能用计时器轮播，也不能把准备候选写成外部服务已经执行。
+完成后，权威消息 readback 替换占位内容，并在 Agent 回复上方保留一行默认收起的活动
+摘要。摘要使用原生 `button`、`aria-expanded`、受控内容区以及 Enter/Space 行为；它不是
+卡片、弹窗或 chain-of-thought 展示。
+
+进度 reducer 按 `turn_id` 和单调 ordinal 去重。旧事件、重复事件和 terminal 之后的事件
+不能覆盖当前状态；刷新、Claim 切换和重连不能制造重复 claimant 消息或第二个 Agent
+占位气泡。进度只能显示 claimant-safe activity code，不显示 Prompt、模型推理、fraud 或
+权限信号、provider payload、内部异常或凭据。现有聊天滚动和第三方 consent 卡片必须保持
+可用。
+
+### 7.6 第三方服务生命周期
 
 第三方能力不是一个泛化的 `request()` 按钮，而是完整生命周期：
 
@@ -887,7 +908,7 @@ capability discovery
 
 fixture、仿真、configured service 和 verified production result 必须是不同的状态，不能只用 provider 名称区分。
 
-### 7.6 API、错误、并发和审计
+### 7.7 API、错误、并发和审计
 
 后端必须遵守：
 
@@ -904,7 +925,7 @@ fixture、仿真、configured service 和 verified production result 必须是�
 - 日志包含 correlation key 和 claim id，但不记录不必要的 PII、完整 prompt、token 或 raw provider response；
 - 状态、动作、来源、actor、时间和 resulting revision 可审计。
 
-### 7.7 认证与匿名 session
+### 7.8 认证与匿名 session
 
 Claimant 和 Staff 必须使用独立认证边界。匿名 Claim/session：
 
@@ -916,7 +937,7 @@ Claimant 和 Staff 必须使用独立认证边界。匿名 Claim/session：
 - 按既定 retention 规则过期或清理；
 - 上传文件、profile 和历史持久化能力必须明确区分匿名和认证状态。
 
-### 7.8 前端不得执行的业务逻辑
+### 7.9 前端不得执行的业务逻辑
 
 以下逻辑必须由后端/Runtime 计算并投影，前端只能展示、收集受控输入和提交动作：
 
@@ -931,7 +952,7 @@ Claimant 和 Staff 必须使用独立认证边界。匿名 Claim/session：
 
 前端可以做纯展示层排序（例如按后端返回的 rank 渲染）、本地输入校验、折叠/展开和 viewport 适配；不能把展示层方便实现误认为业务规则。
 
-### 7.9 真实 API 优先与能力诚实
+### 7.10 真实 API 优先与能力诚实
 
 新 main 的功能实现必须优先连接真实 API、Model Gateway 和 adapter：
 

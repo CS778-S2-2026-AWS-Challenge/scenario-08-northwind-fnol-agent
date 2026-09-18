@@ -163,15 +163,6 @@ def publish(args: argparse.Namespace) -> str:
         raise PublicationError('The deployment manifest must include bedrock-nova2-lite.')
     if not any(item.profile_id == 'google-gemini35-flash-lite' for item in bindings):
         raise PublicationError('The deployment manifest must include google-gemini35-flash-lite.')
-    for binding in bindings:
-        credential_name = binding.credential_environment_variable
-        if (
-            binding.evaluation_status == 'configured'
-            and credential_name
-            and not os.getenv(credential_name, '')
-        ):
-            raise PublicationError(f'{credential_name} is not available to the publishing process.')
-
     client = ControlPlaneClient(
         args.base_url,
         _required_token(args.author_token_env),

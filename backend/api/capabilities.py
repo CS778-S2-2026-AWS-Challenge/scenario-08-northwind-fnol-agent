@@ -4,7 +4,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.core.auth import Principal, require_claimant
 from backend.core.config import AgentRuntimeProfile
 from backend.domain.configuration import ModelRuntimeConfiguration
-from backend.services.model_profiles import default_model_profile_id, model_catalog
+from backend.services.model_profiles import (
+    default_model_profile_id,
+    model_catalog,
+    model_runtime_status,
+)
 
 
 class ModelCapability(BaseModel):
@@ -17,6 +21,10 @@ class ModelCapability(BaseModel):
     tools: bool
     image_input: bool
     document_input: bool
+    published: bool = True
+    runtime_ready: bool
+    healthy: bool | None = None
+    unavailable_reason: str | None = None
     availability: str = Field(default='available', pattern=r'^(available|unavailable)$')
 
 
@@ -43,6 +51,7 @@ def capabilities(
         catalog = model_catalog(request)
         for record in catalog:
             configuration = ModelRuntimeConfiguration.model_validate(record.values)
+            runtime_status = model_runtime_status(configuration)
             models.append(
                 ModelCapability(
                     id=configuration.profile_id,
@@ -52,11 +61,11 @@ def capabilities(
                     tools=configuration.tools,
                     image_input=configuration.image_input,
                     document_input=configuration.document_input,
-                    availability=(
-                        'available'
-                        if configuration.evaluation_status == 'configured'
-                        else 'unavailable'
-                    ),
+                    published=runtime_status.published,
+                    runtime_ready=runtime_status.runtime_ready,
+                    healthy=runtime_status.healthy,
+                    unavailable_reason=runtime_status.unavailable_reason,
+                    availability=('available' if runtime_status.runtime_ready else 'unavailable'),
                 )
             )
     return RuntimeCapabilitiesResponse(
