@@ -27,6 +27,7 @@ from journey_runs.household import (
     household_run_cases,
     run_household,
 )
+from journey_runs.metrics import metric_coverage
 from journey_runs.motor_collision import (
     MOTOR_COLLISION_PACK,
     MOTOR_PACKS,
@@ -37,13 +38,18 @@ from journey_runs.motor_collision import (
 from journey_runs.record import (
     AgentTurn,
     Arrival,
+    ClaimantEffort,
+    FinalState,
     InputMaterial,
     JourneyRunRecord,
+    MetricCoverage,
+    MetricState,
     ResultClass,
     RunConfiguration,
     RunStep,
     SeamCheck,
     SeamVerdict,
+    SprintMetric,
     StepOutcome,
     UnavailableCapability,
     VisibilityCheck,
@@ -68,6 +74,26 @@ def test_the_motor_collision_journey_reaches_its_end_and_reports_every_disagreem
     # The fixture runtime can never produce a completed run.
     assert record.result_class is not ResultClass.COMPLETED
     assert JourneyRunRecord.model_validate_json(record.model_dump_json()) == record
+
+
+def test_a_run_states_what_it_measured_of_every_sprint_metric() -> None:
+    record = run_motor_collision(head='test')
+
+    assert {item.metric: item.state for item in record.metrics} == {
+        SprintMetric.NO_FOLLOW_UP: MetricState.NOT_MEASURED,
+        SprintMetric.SEVERITY_BLIND_RATING: MetricState.NOT_MEASURED,
+        SprintMetric.FRAUD_PRECISION: MetricState.NOT_MEASURED,
+        SprintMetric.CLAIMANT_EFFORT: MetricState.PARTLY_MEASURED,
+        SprintMetric.CLAIM_RESULT: MetricState.MEASURED,
+    }
+    stated = {item.metric: item for item in record.metrics}
+    effort = stated[SprintMetric.CLAIMANT_EFFORT].observed
+    assert effort is not None and f'{record.effort.uploads} uploads' in effort
+    claim = stated[SprintMetric.CLAIM_RESULT].observed
+    assert record.final_state.claim_number is not None
+    assert claim is not None and record.final_state.claim_number in claim
+    # What prevents the first three is the runtime this record already declares.
+    assert record.configuration.agent_runtime_profile == 'controlled'
 
 
 @pytest.mark.parametrize('scenario', [HOME, CONTENTS], ids=['home', 'contents'])
@@ -256,6 +282,30 @@ def _step(http_status: int | None, outcome: str, name: str = 'step') -> dict[str
     }
 
 
+METRIC_5 = SprintMetric.CLAIM_RESULT
+_METRICS_STATE = FinalState(
+    claim_id='clm_1',
+    claim_number=None,
+    expected_by=None,
+    workflow_state=None,
+    lifecycle_state=None,
+    queue_key=None,
+    customer_next_step=None,
+    next_step_responsible_party=None,
+    session_id=None,
+    session_status=None,
+    active_session_id=None,
+    evidence_ids=[],
+    external_task_statuses=[],
+    handoff_status=None,
+)
+_METRICS = metric_coverage(
+    turns=[],
+    effort=ClaimantEffort(messages=0, confirmations=0, uploads=0, consents=0),
+    state=_METRICS_STATE,
+)
+
+
 def _record(**changes: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         'run_id': 'run-1',
@@ -287,6 +337,7 @@ def _record(**changes: Any) -> dict[str, Any]:
             'handoff_status': None,
         },
         'effort': {'messages': 0, 'confirmations': 0, 'uploads': 0, 'consents': 0},
+        'metrics': [item.model_dump(mode='json') for item in _METRICS],
         'result_class': 'completed',
         'result_reason': 'reason',
     }
@@ -501,6 +552,110 @@ def test_a_step_must_carry_response_body_validity_evidence() -> None:
 def test_the_run_step_schema_lists_response_body_valid_as_required() -> None:
     required = RunStep.model_json_schema().get('required', [])
     assert 'response_body_valid' in required
+
+
+_MEASURED_METRIC = {
+    'metric': 'claim_result_and_evidence_chain',
+    'state': 'measured',
+    'observed': 'claim NWF-1',
+}
+_CITED = 'docs/model-gateway.md: "The default `controlled` profile"'
+
+
+@pytest.mark.parametrize(
+    ('changes', 'message'),
+    [
+        ({'observed': None}, 'measured without an observation'),
+        ({'limitation': _CITED}, 'measured but carries a limitation'),
+        ({'state': 'not_measured', 'limitation': _CITED}, 'reports an observation'),
+        ({'state': 'not_measured', 'observed': None}, 'requires a limitation'),
+        (
+            {'state': 'not_measured', 'observed': None, 'limitation': 'no source'},
+            'quotes a passage',
+        ),
+        ({'state': 'partly_measured', 'limitation': _CITED}, None),
+        ({'state': 'partly_measured', 'observed': None, 'limitation': _CITED}, 'did observe'),
+    ],
+)
+def test_a_metric_is_stated_only_with_the_evidence_its_state_claims(
+    changes: dict[str, Any], message: str | None
+) -> None:
+    metrics = [item.model_dump(mode='json') for item in _METRICS if item.metric is not METRIC_5]
+    metrics.append(_MEASURED_METRIC | changes)
+    record = _record(metrics=metrics, result_class='completed')
+
+    if message is None:
+        assert JourneyRunRecord.model_validate(record)
+        return
+    with pytest.raises(ValidationError, match=message):
+        JourneyRunRecord.model_validate(record)
+
+
+@pytest.mark.parametrize(
+    ('metrics', 'message'),
+    [
+        ([item for item in _METRICS if item.metric is not METRIC_5], 'stated exactly once'),
+        ([*_METRICS, _METRICS[0]], 'stated exactly once'),
+    ],
+    ids=['missing', 'repeated'],
+)
+def test_a_record_states_every_required_metric_exactly_once(
+    metrics: list[MetricCoverage], message: str
+) -> None:
+    stated = [item.model_dump(mode='json') for item in metrics]
+    with pytest.raises(ValidationError, match=message):
+        JourneyRunRecord.model_validate(_record(metrics=stated, result_class='completed'))
+
+
+@pytest.mark.parametrize(
+    ('replies', 'expected'),
+    [
+        ([], 0),
+        (['Thanks, that is recorded.'], 0),
+        (['Where did it happen?'], 1),
+        (['Where did it happen? Was anyone hurt?'], 2),
+        (['Where did it happen?', None, 'Was anyone hurt?'], 2),
+    ],
+    ids=['none', 'statement', 'one', 'two-in-one-reply', 'across-replies'],
+)
+def test_claimant_effort_counts_every_question_mark_not_every_turn(
+    replies: list[str | None], expected: int
+) -> None:
+    """A reply asking twice counts twice; counting turns would report it once."""
+
+    turns = [
+        AgentTurn(
+            step='ask',
+            claimant_input='input',
+            agent_reply=reply,
+            proposed_action=None,
+            reason_codes=[],
+            next_step=None,
+            trace_limitation='the claimant route projects no trace',
+        )
+        for reply in replies
+    ]
+    effort = ClaimantEffort(messages=len(turns), confirmations=0, uploads=0, consents=0)
+    coverage = metric_coverage(turns=turns, effort=effort, state=_METRICS_STATE)
+
+    observed = next(
+        item.observed for item in coverage if item.metric is SprintMetric.CLAIMANT_EFFORT
+    )
+    assert observed is not None
+    assert f'{expected} question marks in Agent replies' in observed
+
+
+def test_every_metric_limitation_quotes_a_real_document() -> None:
+    limitations = {item.limitation for item in _METRICS if item.limitation is not None}
+
+    assert len(limitations) == 3
+    for limitation in limitations:
+        cited = cited_authority(limitation)
+        assert cited is not None, limitation
+        document, passages = cited
+        text = ' '.join((REPOSITORY_ROOT / document).read_text(encoding='utf-8').split())
+        for passage in passages:
+            assert ' '.join(passage.split()) in text, (document, passage)
 
 
 # --- Multi-turn motor journey fixtures (PRES-01 / PRES-02) -------------------------------
