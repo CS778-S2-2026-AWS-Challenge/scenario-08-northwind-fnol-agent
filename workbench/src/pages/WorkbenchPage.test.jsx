@@ -15,6 +15,8 @@ const api = vi.hoisted(() => ({
   conversations: vi.fn(),
   handoffs: vi.fn(),
   collaborationRequests: vi.fn(),
+  customerUpdates: vi.fn(),
+  signals: vi.fn(),
   externalRequests: vi.fn(),
   evidence: vi.fn(),
   workItems: vi.fn(),
@@ -221,6 +223,8 @@ describe('WorkbenchPage queue routing', () => {
     api.messages.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.handoffs.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.collaborationRequests.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.customerUpdates.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.signals.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.externalRequests.mockResolvedValue({ items: [], page: { next_cursor: null }, status: 'available' })
     api.evidence.mockResolvedValue({ items: [], page: { next_cursor: null }, status: 'available' })
     api.workItems.mockResolvedValue({ items: [], page: { next_cursor: null }, status: 'available' })
@@ -1396,6 +1400,102 @@ describe('WorkbenchPage queue routing', () => {
     expect(api.handoffs).toHaveBeenCalledTimes(handoffCalls)
   })
 
+  it('refreshes the named collaboration requests resource for an active Claim event', async () => {
+    let pushRealtime
+    api.realtimeEvents.mockImplementation((_token, { onEvent, signal }) => {
+      pushRealtime = onEvent
+      return new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+      })
+    })
+
+    renderPage('/workbench/claims/clm_route_1')
+    await waitFor(() => expect(api.collaborationRequests).toHaveBeenCalled())
+    await waitFor(() => expect(pushRealtime).toBeTypeOf('function'))
+
+    const collaborationCalls = api.collaborationRequests.mock.calls.length
+    const claimCalls = api.claim.mock.calls.length
+
+    await act(async () => {
+      await pushRealtime({
+        type: 'resources.changed',
+        cursor: 'evt-collaboration',
+        data: {
+          event_id: 'evt-collaboration',
+          claim_id: 'clm_route_1',
+          claim_revision: 2,
+          resources: ['collaboration_requests'],
+        },
+      })
+    })
+
+    expect(api.collaborationRequests).toHaveBeenCalledTimes(collaborationCalls + 1)
+    expect(api.claim).toHaveBeenCalledTimes(claimCalls)
+  })
+  it('refreshes the named customer updates resource for an active Claim event', async () => {
+    let pushRealtime
+    api.realtimeEvents.mockImplementation((_token, { onEvent, signal }) => {
+      pushRealtime = onEvent
+      return new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+      })
+    })
+
+    renderPage('/workbench/claims/clm_route_1/activity')
+    await waitFor(() => expect(api.customerUpdates).toHaveBeenCalled())
+    await waitFor(() => expect(pushRealtime).toBeTypeOf('function'))
+
+    const customerUpdateCalls = api.customerUpdates.mock.calls.length
+    const claimCalls = api.claim.mock.calls.length
+
+    await act(async () => {
+      await pushRealtime({
+        type: 'resources.changed',
+        cursor: 'evt-customer-updates',
+        data: {
+          event_id: 'evt-customer-updates',
+          claim_id: 'clm_route_1',
+          claim_revision: 2,
+          resources: ['customer_updates'],
+        },
+      })
+    })
+
+    expect(api.customerUpdates).toHaveBeenCalledTimes(customerUpdateCalls + 1)
+    expect(api.claim).toHaveBeenCalledTimes(claimCalls)
+  })
+  it('refreshes the named signals resource for an active Claim event', async () => {
+    let pushRealtime
+    api.realtimeEvents.mockImplementation((_token, { onEvent, signal }) => {
+      pushRealtime = onEvent
+      return new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+      })
+    })
+
+    renderPage('/workbench/claims/clm_route_1/signals')
+    await waitFor(() => expect(api.signals).toHaveBeenCalled())
+    await waitFor(() => expect(pushRealtime).toBeTypeOf('function'))
+
+    const signalCalls = api.signals.mock.calls.length
+    const claimCalls = api.claim.mock.calls.length
+
+    await act(async () => {
+      await pushRealtime({
+        type: 'resources.changed',
+        cursor: 'evt-signals',
+        data: {
+          event_id: 'evt-signals',
+          claim_id: 'clm_route_1',
+          claim_revision: 2,
+          resources: ['signals'],
+        },
+      })
+    })
+
+    expect(api.signals).toHaveBeenCalledTimes(signalCalls + 1)
+    expect(api.claim).toHaveBeenCalledTimes(claimCalls)
+  })
   it('propagates a failed conversation reload during realtime resync', async () => {
     let pushRealtime
     api.sessionsForTarget.mockResolvedValue({

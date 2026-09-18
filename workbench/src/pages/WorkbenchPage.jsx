@@ -920,6 +920,15 @@ export default function WorkbenchPage() {
         )
         return
       }
+      if (resource === 'collaboration_requests') {
+        await handlers.loadResource(
+          'collaborationRequests',
+          id,
+          () => workbenchApi.collaborationRequests(token, id),
+          { propagateError: true },
+        )
+        return
+      }
       if (resource === 'evidence') {
         await handlers.loadResource(
           'evidence',
@@ -934,6 +943,24 @@ export default function WorkbenchPage() {
           'workItems',
           id,
           () => workbenchApi.workItems(token, id),
+          { propagateError: true },
+        )
+        return
+      }
+      if (resource === 'customer_updates') {
+        await handlers.loadResource(
+          'customerUpdates',
+          id,
+          () => workbenchApi.customerUpdates(token, id),
+          { propagateError: true },
+        )
+        return
+      }
+      if (resource === 'signals') {
+        await handlers.loadResource(
+          'signals',
+          id,
+          () => workbenchApi.signals(token, id),
           { propagateError: true },
         )
         return
@@ -993,6 +1020,9 @@ export default function WorkbenchPage() {
         if (resources.has('handoffs')) {
           refreshes.push(refreshNamedResource('handoffs', openClaimId))
         }
+        if (resources.has('collaboration_requests')) {
+          refreshes.push(refreshNamedResource('collaboration_requests', openClaimId))
+        }
 
         const section = currentSectionRef.current
         if (resources.has('messages') && section === 'conversation') {
@@ -1003,6 +1033,12 @@ export default function WorkbenchPage() {
         }
         if (resources.has('work_items') && section === 'activity') {
           refreshes.push(refreshNamedResource('work_items', openClaimId))
+        }
+        if (resources.has('customer_updates') && section === 'activity') {
+          refreshes.push(refreshNamedResource('customer_updates', openClaimId))
+        }
+        if (resources.has('signals') && section === 'signals') {
+          refreshes.push(refreshNamedResource('signals', openClaimId))
         }
         if (resources.has('external_tasks') && section === 'external-services') {
           refreshes.push(refreshNamedResource('external_tasks', openClaimId))
