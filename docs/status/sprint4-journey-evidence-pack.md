@@ -134,7 +134,7 @@ lifecycle registry after #942. Every journey ends with `claims_professional` as 
 
 The poster needs the recorded states rendered in the claimant and Workbench applications. This
 record does not provide the screenshots; each can be produced by driving the named journey in a
-browser.
+browser, and #964 tracks capturing them.
 
 | Application | Screen | State to show | Journey that produces it |
 | --- | --- | --- | --- |
@@ -157,11 +157,11 @@ browser.
 | Gap | Effect on this evidence | Tracking | Owner |
 | --- | --- | --- | --- |
 | The journey runners cannot select the model-backed Agent runtime, and the journey environment has no model credential | Metrics 1 to 3 and real effort figures stay unmeasured; contents stays `unavailable` | #962 | @bdfa123 for the runners; @Ysoseri1224 for model access |
-| Contents item capture on the controlled runtime | All 20 contents runs stop before claim creation | Discussion #847 | @Ysoseri1224 |
+| Contents item capture needs the model-backed runtime | All 20 contents runs stop before claim creation | #962; Discussion #847 records that contents behaviour is model-backed, so contents is rerun on `model_gateway` | @bdfa123 for the runners; @Ysoseri1224 for model access |
 | No served source for elapsed claimant time | Metric 4 stays `partly_measured` | #953 | @Ysoseri1224 |
 | Real AWS access and calls | Definition of Done item 4 has no evidence | #786 | @liyang6620 |
 | An `unknown_outcome` missing-information item names `external_party` while its lifecycle names `claims_professional` | One Workbench projection disagrees for the unknown-outcome case | Raised on #945 | @liyang6620 |
 | Red tests on `main`: two `tests/test_backend_quality_profiles.py` cases and one `tests/test_demo_reset.py` case | Full-suite runs cannot be fully green | Reported on #903 and #915 | @Ysoseri1224, @liyang6620 |
 | The atomic initial claimant bootstrap changes intake | Every journey start must be rerun after merge | #816 | @liyang6620 |
-| Poster screenshots and replays | Definition of Done item 6 lacks screens | The list above | @LLL263, @jxu316-arch |
+| Poster screenshots of the recorded states | Definition of Done item 6 lacks screens | #964, which captures the list above | @bdfa123; @LLL263 and @jxu316-arch confirm their screens |
 | Ten rubric anchors with complete input, output, state, and metric evidence | Definition of Done item 2 is not started | #963 | @bdfa123 |
