@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ApiRequestError,
   confirmClaimFields,
+  createAccountAsset,
   createClaim,
   createExternalClaim,
   decideExternalServiceOffer,
@@ -12,6 +13,7 @@ import {
   getClaimMessages,
   getClaimEvidence,
   getRuntimeCapabilities,
+  listAccountAssets,
   listClaims,
   loginClaimant,
   logoutClaimant,
@@ -29,6 +31,7 @@ import {
   setClaimantAccessToken,
   updateAccountPreferences,
   updateAccountProfile,
+  updateAccountAsset,
   updateClaimField,
 } from './api.js'
 import './App.css'
@@ -45,6 +48,9 @@ import {
   AgentTurnPlaceholder,
 } from './components/AgentTurnActivity.jsx'
 import { completeTurnProgress, reduceTurnProgress } from './agentTurnProgress.js'
+import UserProfile from './components/UserProfile.jsx'
+import './styles/user-profile.css'
+import { profilePathForSection, profileSectionFromPath } from './profileRoutes.js'
 import { documentAttentionCount } from './claimDocumentProjection.js'
 import {
   forgetAnonymousConversation,
@@ -288,6 +294,28 @@ async function fetchClaimHistory({ signal } = {}) {
   return [...claimsById.values()]
 }
 
+async function fetchAccountAssets({ signal } = {}) {
+  const assetsById = new Map()
+  const seenCursors = new Set()
+  let cursor
+
+  do {
+    const response = await listAccountAssets({ cursor, signal })
+    for (const item of response.items) assetsById.set(item.asset_id, item)
+    const nextCursor = response.page?.next_cursor || null
+    if (nextCursor && seenCursors.has(nextCursor)) {
+      throw new ApiRequestError(
+        'Northwind returned an invalid asset page. Try loading your saved assets again.',
+        { code: 'INVALID_PAGINATION' },
+      )
+    }
+    if (nextCursor) seenCursors.add(nextCursor)
+    cursor = nextCursor
+  } while (cursor)
+
+  return [...assetsById.values()]
+}
+
 function mergeFields(current, changes) {
   return changes.reduce(
     (fields, change) => ({ ...fields, [change.field_code]: change.field }),
@@ -343,11 +371,14 @@ function claimProgress(nextStep, dynamicForm) {
 }
 
 function App() {
+  const initialProfileSection = profileSectionFromPath(globalThis.location?.pathname)
   const initialPage = (() => {
     const path = globalThis.location?.pathname || '/'
     if (path === '/auth/login') return 'login'
     if (path === '/auth/register') return 'register'
-    if (path === '/account') return 'account'
+    if (path === '/profile' || path === '/account' || initialProfileSection) {
+      return hasClaimantAccessToken() ? 'account' : 'login'
+    }
     if (/^\/account\/claims\/[^/]+\/evidence$/.test(path)) return 'claim-evidence'
     if (/^\/account\/claims\/[^/]+$/.test(path)) return 'claim-features'
     if (path === '/account/claims') return 'claim-history'
@@ -356,7 +387,11 @@ function App() {
     return 'home'
   })()
   const [page, setPageState] = useState(initialPage)
+  const [profileSection, setProfileSection] = useState(initialProfileSection)
   const [account, setAccount] = useState(null)
+  const [accountAssets, setAccountAssets] = useState(null)
+  const [accountAssetsError, setAccountAssetsError] = useState('')
+  const [assetStatus, setAssetStatus] = useState('idle')
   const [authStatus, setAuthStatus] = useState('idle')
   const [authError, setAuthError] = useState('')
   const [claimType, setClaimType] = useState('')
@@ -496,7 +531,11 @@ function App() {
       .catch(() => {
         setClaimantAccessToken(null)
         setClaimHistory(readAnonymousConversationHistory())
-        if (globalThis.location?.pathname === '/files' || globalThis.location?.pathname?.startsWith('/account/claims')) {
+        if (
+          ['/profile', '/account', '/files'].includes(globalThis.location?.pathname)
+          || globalThis.location?.pathname?.startsWith('/profile/')
+          || globalThis.location?.pathname?.startsWith('/account/claims')
+        ) {
           setPageState('login')
           globalThis.history?.replaceState({ northwindRoute: 'login' }, '', '/auth/login')
         }
@@ -510,6 +549,22 @@ function App() {
   // setPage is a stable local navigation helper; keep this guard tied to auth state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account, page])
+
+  useEffect(() => {
+    if (!account) return
+    const controller = new AbortController()
+    setAccountAssetsError('')
+    fetchAccountAssets({ signal: controller.signal })
+      .then((items) => setAccountAssets(items))
+      .catch((requestError) => {
+        if (requestError?.name === 'AbortError') return
+        setAccountAssets([])
+        setAccountAssetsError(
+          `${requestError.message || 'Northwind could not load your saved assets.'} Try loading them again.`,
+        )
+      })
+    return () => controller.abort()
+  }, [account])
 
   useEffect(() => {
     if (isWorkspaceActive || page !== 'home') setConversationHistoryOpen(false)
@@ -535,7 +590,7 @@ function App() {
   function routeForPage(nextPage) {
     if (nextPage === 'login') return '/auth/login'
     if (nextPage === 'register') return '/auth/register'
-    if (nextPage === 'account') return '/account'
+    if (nextPage === 'account') return profilePathForSection(profileSection)
     if (nextPage === 'claim-history') return '/account/claims'
     if (nextPage === 'claim-features' && selectedHistoryClaimId) return `/account/claims/${encodeURIComponent(selectedHistoryClaimId)}`
     if (nextPage === 'claim-evidence' && selectedHistoryClaimId) return `/account/claims/${encodeURIComponent(selectedHistoryClaimId)}/evidence`
@@ -547,7 +602,8 @@ function App() {
 
   function setPage(nextPage, { replace = false } = {}) {
     setPageState(nextPage)
-    const nextPath = routeForPage(nextPage)
+    if (nextPage === 'account') setProfileSection(null)
+    const nextPath = nextPage === 'account' ? '/profile' : routeForPage(nextPage)
     if (globalThis.location?.pathname !== nextPath) {
       globalThis.history?.[replace ? 'replaceState' : 'pushState']({ northwindRoute: nextPage }, '', nextPath)
     }
@@ -556,7 +612,7 @@ function App() {
   function pageForPath(pathname) {
     if (pathname === '/auth/login') return 'login'
     if (pathname === '/auth/register') return 'register'
-    if (pathname === '/account') return account ? 'account' : 'login'
+    if (pathname === '/profile' || pathname === '/account' || profileSectionFromPath(pathname)) return account ? 'account' : 'login'
     if (pathname === '/account/claims') return account ? 'claim-history' : 'login'
     if (/^\/account\/claims\/[^/]+\/evidence$/.test(pathname)) return account ? 'claim-evidence' : 'login'
     if (/^\/account\/claims\/[^/]+$/.test(pathname)) return account ? 'claim-features' : 'login'
@@ -569,16 +625,20 @@ function App() {
   useEffect(() => {
     const onPopState = () => {
       const path = globalThis.location?.pathname || '/'
+      const nextProfileSection = profileSectionFromPath(path)
       const nextPage = pageForPath(path)
       setWorkspaceActive(path.startsWith('/claims/') && Boolean(claim))
+      setProfileSection(nextProfileSection)
       const historyClaimMatch = path.match(/^\/account\/claims\/([^/]+)/)
       setSelectedHistoryClaimId(historyClaimMatch ? decodeURIComponent(historyClaimMatch[1]) : null)
       setPageState(nextPage)
       const canonicalPath = ['claim-history', 'claim-features', 'claim-evidence'].includes(nextPage)
         ? path
-        : nextPage === 'home' && path.startsWith('/claims/') && claim?.claim_id
-          ? `/claims/${claim.claim_id}`
-          : routeForPage(nextPage)
+        : nextPage === 'account'
+          ? profilePathForSection(nextProfileSection)
+          : nextPage === 'home' && path.startsWith('/claims/') && claim?.claim_id
+            ? `/claims/${claim.claim_id}`
+            : routeForPage(nextPage)
       if (path !== canonicalPath) {
         globalThis.history?.replaceState({ northwindRoute: nextPage }, '', canonicalPath)
       }
@@ -595,7 +655,7 @@ function App() {
       : page === 'register'
         ? '/auth/register'
         : page === 'account'
-          ? '/account'
+          ? profilePathForSection(profileSection)
           : page === 'claim-history'
             ? '/account/claims'
             : page === 'claim-features' && selectedHistoryClaimId
@@ -610,7 +670,7 @@ function App() {
     if (globalThis.location?.pathname !== expectedPath) {
       globalThis.history?.replaceState({ northwindRoute: page }, '', expectedPath)
     }
-  }, [isWorkspaceActive, page, claim?.claim_id, selectedHistoryClaimId])
+  }, [isWorkspaceActive, page, claim?.claim_id, profileSection, selectedHistoryClaimId])
 
   const isBusy = [
     'starting',
@@ -2096,6 +2156,9 @@ function App() {
     setAuthStatus('loading'); setAuthError('')
     try { await logoutClaimant() } catch (requestError) { setAuthError(requestError.message) }
     setAccount(null)
+    setAccountAssets(null)
+    setAccountAssetsError('')
+    setAssetStatus('idle')
     setClaimHistory(readAnonymousConversationHistory())
     setClaimHistoryError('')
     setSelectedHistoryClaimId(null)
@@ -2212,28 +2275,78 @@ function App() {
     }
   }
 
-  async function saveProfile(event) {
-    event.preventDefault()
-    const formData = new FormData(event.currentTarget)
-    setAuthStatus('saving'); setAuthError('')
-    try {
-      setAccount(await updateAccountProfile({
-        display_name: formData.get('display_name'), phone: formData.get('phone'),
-      }))
-    } catch (requestError) { setAuthError(requestError.message) }
-    finally { setAuthStatus('idle') }
+  function openProfileSection(section) {
+    setProfileSection(section)
+    setPageState('account')
+    const nextPath = profilePathForSection(section)
+    if (globalThis.location?.pathname !== nextPath) {
+      globalThis.history?.pushState({ northwindRoute: 'account', profileSection: section }, '', nextPath)
+    }
   }
 
-  async function savePreferences(event) {
-    event.preventDefault()
-    const formData = new FormData(event.currentTarget)
-    setAuthStatus('saving'); setAuthError('')
+  async function saveProfile(profile) {
+    setAuthStatus('saving')
     try {
-      setAccount(await updateAccountPreferences({
-        email: formData.get('email') === 'on', sms: formData.get('sms') === 'on',
-      }))
-    } catch (requestError) { setAuthError(requestError.message) }
-    finally { setAuthStatus('idle') }
+      const updated = await updateAccountProfile(profile)
+      setAccount(updated)
+      return updated
+    } finally {
+      setAuthStatus('idle')
+    }
+  }
+
+  async function savePreferences(preferences) {
+    setAuthStatus('saving')
+    try {
+      const updated = await updateAccountPreferences(preferences)
+      setAccount(updated)
+      return updated
+    } finally {
+      setAuthStatus('idle')
+    }
+  }
+
+  async function reloadAccountAssets() {
+    setAccountAssets(null)
+    setAccountAssetsError('')
+    try {
+      const items = await fetchAccountAssets()
+      setAccountAssets(items)
+      return items
+    } catch (requestError) {
+      setAccountAssets([])
+      setAccountAssetsError(
+        `${requestError.message || 'Northwind could not load your saved assets.'} Try loading them again.`,
+      )
+      throw requestError
+    }
+  }
+
+  async function addAccountAsset(asset) {
+    setAssetStatus('saving')
+    try {
+      const created = await createAccountAsset({ asset })
+      setAccountAssets((current) => [
+        created,
+        ...(current || []).filter((item) => item.asset_id !== created.asset_id),
+      ])
+      return created
+    } finally {
+      setAssetStatus('idle')
+    }
+  }
+
+  async function saveAccountAsset(assetId, revision, updates) {
+    setAssetStatus('saving')
+    try {
+      const updated = await updateAccountAsset({ assetId, revision, updates })
+      setAccountAssets((current) => (
+        (current || []).map((item) => item.asset_id === updated.asset_id ? updated : item)
+      ))
+      return updated
+    } finally {
+      setAssetStatus('idle')
+    }
   }
 
   function conversationPanelExpanded(panel) {
@@ -2313,9 +2426,10 @@ function App() {
   }
 
   const isUrgentSupport = handoff?.support_need === 'urgent'
+  const isProfilePage = page === 'account'
 
   return (
-    <div className={`customer-app ${!isWorkspaceActive && page === 'home' ? 'entry-shell' : ''}`}>
+    <div className={`customer-app ${!isWorkspaceActive && page === 'home' ? 'entry-shell' : ''} ${isProfilePage ? 'is-profile-page' : ''}`}>
       <header className={`product-header ${isWorkspaceActive && !['login', 'register'].includes(page) ? 'is-intake-header' : ''}`}>
         <div className="header-leading">
           <a className="brand" href="/" onClick={(event) => { event.preventDefault(); setPage('home') }} aria-label="Northwind home">
@@ -2338,7 +2452,7 @@ function App() {
         {!isWorkspaceActive && page === 'home' && (
           <nav className="entry-header-actions" aria-label="Account">
             <button className="entry-header-link" type="button" onClick={() => setPage(account ? 'account' : 'login')}>
-              {account ? 'My account' : 'Log in'}
+              {account ? 'Profile' : 'Log in'}
             </button>
             {!account && (
               <button className="entry-header-account" type="button" onClick={() => setPage('register')}>
@@ -2348,8 +2462,12 @@ function App() {
           </nav>
         )}
         {!isWorkspaceActive && page !== 'home' && page !== 'how-it-works' && (
-          <button className="login-button" type="button" onClick={() => setPage(account ? 'account' : 'login')}>
-            {account ? 'My account' : 'Log in'}
+          <button
+            className="login-button"
+            type="button"
+            onClick={() => setPage(isProfilePage ? 'home' : account ? 'account' : 'login')}
+          >
+            {isProfilePage ? 'Back' : account ? 'Profile' : 'Log in'}
           </button>
         )}
         {isWorkspaceActive && !['login', 'register'].includes(page) && (
@@ -2485,36 +2603,27 @@ function App() {
             <p className="evidence-history-state" role="status">Checking your account…</p>
           )}
         </main>
-      ) : !isWorkspaceActive && page === 'account' && account ? (
-        <main className="auth-page auth-page-account">
-          <section className="login-card account-card" aria-labelledby="account-title">
-            <button className="back-link" type="button" onClick={() => setPage('home')}>← Back to claims</button>
-            <p className="eyebrow">Northwind account</p>
-            <h1 id="account-title">Your account</h1>
-            <p className="prototype-note" role="note">Manage your profile and communication preferences.</p>
-            <form className="login-form" onSubmit={saveProfile}>
-              <label htmlFor="account-name">Display name</label>
-              <input id="account-name" name="display_name" defaultValue={account.profile.display_name} required />
-              <label htmlFor="account-email">Email address</label>
-              <input id="account-email" value={account.profile.email} readOnly />
-              <label htmlFor="account-phone">Phone</label>
-              <input id="account-phone" name="phone" defaultValue={account.profile.phone} />
-              <button className="primary-button" disabled={authStatus !== 'idle'}>Save profile</button>
-            </form>
-            <form className="login-form" onSubmit={savePreferences}>
-              <label><input name="email" type="checkbox" defaultChecked={account.preferences.email} /> Email updates</label>
-              <label><input name="sms" type="checkbox" defaultChecked={account.preferences.sms} /> SMS updates</label>
-              <button className="secondary-button" disabled={authStatus !== 'idle'}>Save preferences</button>
-            </form>
-            {authError && <p className="backend-status is-error" role="alert">{authError}</p>}
-            <button className="secondary-button" type="button" onClick={openSavedClaims} disabled={isBusy}>
-              View Claim history
-            </button>
-            <button className="secondary-button" type="button" onClick={() => setPage('files')}>
-              View evidence history
-            </button>
-            <button className="secondary-button" type="button" onClick={signOut} disabled={authStatus !== 'idle'}>Log out</button>
-          </section>
+      ) : !isWorkspaceActive && page === 'account' ? (
+        <main className="profile-page">
+          {account ? (
+            <UserProfile
+              account={account}
+              assets={accountAssets}
+              assetsError={accountAssetsError}
+              activeSection={profileSection}
+              busy={authStatus !== 'idle' || assetStatus !== 'idle'}
+              onCreateAsset={addAccountAsset}
+              onOpenClaims={openSavedClaims}
+              onReloadAssets={reloadAccountAssets}
+              onSaveProfile={saveProfile}
+              onSavePreferences={savePreferences}
+              onUpdateAsset={saveAccountAsset}
+              onSelectSection={openProfileSection}
+              onSignOut={signOut}
+            />
+          ) : (
+            <p className="profile-loading" role="status">Checking your account…</p>
+          )}
         </main>
       ) : (page === 'login' || page === 'register') ? (
         <main className="auth-page auth-page-login">
@@ -2681,7 +2790,7 @@ function App() {
                 <span className="intake-profile-avatar">{account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}</span>
                 <span className="intake-profile-copy">
                   <span>{account?.profile?.display_name || 'Log in to save your chat'}</span>
-                  <small>{account?.profile?.email || 'Account and preferences'}</small>
+                  <small>{account?.profile?.email || 'Profile and preferences'}</small>
                 </span>
               </button>
             </div>
@@ -2717,7 +2826,7 @@ function App() {
                       : workspaceView === 'external-services'
                         ? 'External services'
                         : workspaceView === 'account'
-                          ? 'Your account'
+                          ? 'Profile'
                           : 'Evidence history'}
               </h1>
               <p>
@@ -2730,7 +2839,7 @@ function App() {
                       : workspaceView === 'external-services'
                         ? 'See the external service currently recorded for this Claim, including what may be shared and what happens next.'
                         : workspaceView === 'account'
-                          ? 'Manage your profile and communication preferences.'
+                          ? 'Manage the account details Northwind currently supports and review unavailable profile capabilities.'
                           : workspaceView === 'claim-evidence'
                             ? 'Review the files and supporting material recorded for the selected Claim.'
                             : 'Review files retained across your Northwind Claims, including where they came from and their latest processing state.'}
@@ -2766,22 +2875,22 @@ function App() {
               )}
               {workspaceView === 'account' && account && (
                 <div className="workspace-account-content">
-                  <form className="login-form" onSubmit={saveProfile}>
-                    <label htmlFor="workspace-account-name">Display name</label>
-                    <input id="workspace-account-name" name="display_name" defaultValue={account.profile.display_name} required />
-                    <label htmlFor="workspace-account-email">Email address</label>
-                    <input id="workspace-account-email" value={account.profile.email} readOnly />
-                    <label htmlFor="workspace-account-phone">Phone</label>
-                    <input id="workspace-account-phone" name="phone" defaultValue={account.profile.phone} />
-                    <button className="primary-button" disabled={authStatus !== 'idle'}>Save profile</button>
-                  </form>
-                  <form className="login-form" onSubmit={savePreferences}>
-                    <label><input name="email" type="checkbox" defaultChecked={account.preferences.email} /> Email updates</label>
-                    <label><input name="sms" type="checkbox" defaultChecked={account.preferences.sms} /> SMS updates</label>
-                    <button className="secondary-button" disabled={authStatus !== 'idle'}>Save preferences</button>
-                  </form>
-                  <button className="secondary-button" type="button" onClick={signOut} disabled={authStatus !== 'idle'}>Log out</button>
-                  {authError && <p className="backend-status is-error" role="alert">{authError}</p>}
+                  <UserProfile
+                    account={account}
+                    assets={accountAssets}
+                    assetsError={accountAssetsError}
+                    activeSection={profileSection}
+                    embedded
+                    busy={authStatus !== 'idle' || assetStatus !== 'idle'}
+                    onCreateAsset={addAccountAsset}
+                    onOpenClaims={openClaimHistory}
+                    onReloadAssets={reloadAccountAssets}
+                    onSaveProfile={saveProfile}
+                    onSavePreferences={savePreferences}
+                    onUpdateAsset={saveAccountAsset}
+                    onSelectSection={openProfileSection}
+                    onSignOut={signOut}
+                  />
                 </div>
               )}
               {workspaceView === 'claim-evidence' && selectedHistoryClaim && (

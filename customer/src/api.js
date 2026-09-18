@@ -323,6 +323,28 @@ export function updateAccountPreferences(preferences) {
   })
 }
 
+export function listAccountAssets({ cursor, limit = 25, signal } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return apiRequest(`/api/v1/account/assets?${params}`, { signal })
+}
+
+export function createAccountAsset({ asset, idempotencyKey = requestId('asset') }) {
+  return apiRequest('/api/v1/account/assets', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(asset),
+  })
+}
+
+export function updateAccountAsset({ assetId, revision, updates }) {
+  return apiRequest(`/api/v1/account/assets/${assetId}`, {
+    method: 'PATCH',
+    headers: { 'If-Match': String(revision) },
+    body: JSON.stringify(updates),
+  })
+}
+
 export async function logoutClaimant() {
   try {
     await apiRequest('/api/v1/auth/session', { method: 'DELETE' })

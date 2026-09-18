@@ -2,13 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   applyEvidenceHistoryAction,
+  createAccountAsset,
   createClaim,
+  listAccountAssets,
   listEvidenceHistory,
   listClaims,
   requestEvidenceUpload,
   setClaimantAccessToken,
   streamClaimUpdates,
   streamRealtimeEvents,
+  updateAccountAsset,
 } from './api.js'
 
 
@@ -504,6 +507,81 @@ describe('Claim history contract', () => {
       expect.objectContaining({
         signal: controller.signal,
         headers: expect.objectContaining({ Authorization: 'Bearer claimant-session-token' }),
+      }),
+    )
+  })
+})
+
+describe('Claimant asset contract', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken('claimant-session-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('lists account assets with the bearer identity, opaque cursor, and abort signal', async () => {
+    const controller = new AbortController()
+    fetch.mockResolvedValue(new Response(JSON.stringify({
+      items: [],
+      page: { next_cursor: null },
+    }), { status: 200 }))
+
+    await listAccountAssets({ cursor: 'asset-cursor', limit: 10, signal: controller.signal })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/assets?limit=10&cursor=asset-cursor',
+      expect.objectContaining({
+        signal: controller.signal,
+        headers: expect.objectContaining({ Authorization: 'Bearer claimant-session-token' }),
+      }),
+    )
+  })
+
+  it('creates an account asset with the required idempotency identity', async () => {
+    const asset = {
+      asset_type: 'vehicle',
+      display_name: 'Family SUV',
+      details: { registration: 'ABC123' },
+    }
+    fetch.mockResolvedValue(new Response(JSON.stringify({ asset_id: 'ase_1' }), { status: 201 }))
+
+    await createAccountAsset({ asset, idempotencyKey: 'asset-create-1' })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/assets',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer claimant-session-token',
+          'Idempotency-Key': 'asset-create-1',
+        }),
+        body: JSON.stringify(asset),
+      }),
+    )
+  })
+
+  it('updates an account asset with its authoritative revision', async () => {
+    const updates = {
+      display_name: 'Family vehicle',
+      details: { registration: 'ABC123', make: 'Toyota', model: 'RAV4' },
+    }
+    fetch.mockResolvedValue(new Response(JSON.stringify({ asset_id: 'ase_1' }), { status: 200 }))
+
+    await updateAccountAsset({ assetId: 'ase_1', revision: 4, updates })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/assets/ase_1',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer claimant-session-token',
+          'If-Match': '4',
+        }),
+        body: JSON.stringify(updates),
       }),
     )
   })
