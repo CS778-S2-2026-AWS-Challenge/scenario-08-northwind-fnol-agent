@@ -22,7 +22,7 @@ concurrency:
 jobs:
   audit:
     name: Audit protected PR action
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, northwind-ci]
     timeout-minutes: 5
 
     steps:
