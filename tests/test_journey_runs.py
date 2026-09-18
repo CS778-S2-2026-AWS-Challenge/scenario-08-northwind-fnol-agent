@@ -27,7 +27,7 @@ from journey_runs.household import (
     household_run_cases,
     run_household,
 )
-from journey_runs.metrics import metric_coverage
+from journey_runs.metrics import QuestionEffort, metric_coverage
 from journey_runs.motor_collision import (
     MOTOR_COLLISION_PACK,
     MOTOR_PACKS,
@@ -300,9 +300,9 @@ _METRICS_STATE = FinalState(
     handoff_status=None,
 )
 _METRICS = metric_coverage(
-    turns=[],
     effort=ClaimantEffort(messages=0, confirmations=0, uploads=0, consents=0),
     state=_METRICS_STATE,
+    questions=None,
 )
 
 
@@ -608,41 +608,40 @@ def test_a_record_states_every_required_metric_exactly_once(
 
 
 @pytest.mark.parametrize(
-    ('replies', 'expected'),
+    ('questions', 'expected'),
     [
-        ([], 0),
-        (['Thanks, that is recorded.'], 0),
-        (['Where did it happen?'], 1),
-        (['Where did it happen? Was anyone hurt?'], 2),
-        (['Where did it happen?', None, 'Was anyone hurt?'], 2),
+        (QuestionEffort(turns=3, repeated=1), '3 Agent question turns, 1 of them repeated'),
+        (QuestionEffort(turns=0, repeated=0), '0 Agent question turns, 0 of them repeated'),
+        (None, 'Agent question turns not observed'),
     ],
-    ids=['none', 'statement', 'one', 'two-in-one-reply', 'across-replies'],
+    ids=['counted', 'none-asked', 'no-session'],
 )
-def test_claimant_effort_counts_every_question_mark_not_every_turn(
-    replies: list[str | None], expected: int
+def test_claimant_effort_reports_the_runtime_question_turns(
+    questions: QuestionEffort | None, expected: str
 ) -> None:
-    """A reply asking twice counts twice; counting turns would report it once."""
-
-    turns = [
-        AgentTurn(
-            step='ask',
-            claimant_input='input',
-            agent_reply=reply,
-            proposed_action=None,
-            reason_codes=[],
-            next_step=None,
-            trace_limitation='the claimant route projects no trace',
-        )
-        for reply in replies
-    ]
-    effort = ClaimantEffort(messages=len(turns), confirmations=0, uploads=0, consents=0)
-    coverage = metric_coverage(turns=turns, effort=effort, state=_METRICS_STATE)
+    effort = ClaimantEffort(messages=4, confirmations=0, uploads=0, consents=0)
+    coverage = metric_coverage(effort=effort, state=_METRICS_STATE, questions=questions)
 
     observed = next(
         item.observed for item in coverage if item.metric is SprintMetric.CLAIMANT_EFFORT
     )
-    assert observed is not None
-    assert f'{expected} question marks in Agent replies' in observed
+    assert observed is not None and expected in observed
+
+
+def test_a_question_without_a_question_mark_still_counts() -> None:
+    """#733 counts Agent question messages; the Runtime counts one per asking turn.
+
+    The contents journey asks for an item without a question mark, so counting question marks
+    would miss it; the Runtime's own count does not.
+    """
+
+    record = run_household(CONTENTS, head='test').record
+    replies = [turn.agent_reply or '' for turn in record.agent_turns]
+    effort = next(m for m in record.metrics if m.metric is SprintMetric.CLAIMANT_EFFORT)
+
+    assert any(reply.startswith('Tell me about one damaged') for reply in replies)
+    assert sum('?' in reply for reply in replies) == 1
+    assert effort.observed is not None and '2 Agent question turns' in effort.observed
 
 
 def test_every_metric_limitation_quotes_a_real_document() -> None:
