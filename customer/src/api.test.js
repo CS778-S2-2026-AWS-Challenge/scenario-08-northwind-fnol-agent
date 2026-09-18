@@ -26,6 +26,22 @@ function eventStreamResponse(frames, status = 200) {
 }
 
 
+function trackedOpenEventStreamResponse(frame, order, label) {
+  const encoder = new TextEncoder()
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(frame))
+      },
+      cancel() {
+        order.push(`${label}:cancel`)
+      },
+    }),
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+  )
+}
+
+
 describe('claimant live-update stream', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
@@ -107,10 +123,13 @@ describe('claimant live-update stream', () => {
     expect(onCursor).toHaveBeenCalledWith('eyJldmVudF9pZCI6InJ0ZV8xIn0')
   })
 
-  it('does not advance an opaque cursor when the event handler fails', async () => {
-    fetch.mockResolvedValue(eventStreamResponse([
+  it('does not advance an opaque cursor and cancels the legacy stream when the handler fails', async () => {
+    const order = []
+    fetch.mockResolvedValue(trackedOpenEventStreamResponse(
       'id: eyJldmVudF9pZCI6InJ0ZV8yIn0\nevent: agent.turn.progress\ndata: {"turn_id":"message-2","session_id":"ses_1","stage":"model.waiting","state":"running","ordinal":2}\n\n',
-    ]))
+      order,
+      'legacy',
+    ))
     const onCursor = vi.fn()
     const handlerFailure = new Error('Authoritative readback failed.')
 
@@ -119,11 +138,15 @@ describe('claimant live-update stream', () => {
       sessionId: 'ses_1',
       afterRevision: 3,
       signal: new AbortController().signal,
-      onEvent: vi.fn().mockRejectedValue(handlerFailure),
+      onEvent: vi.fn(async () => {
+        order.push('handler')
+        throw handlerFailure
+      }),
       onCursor,
     })).rejects.toBe(handlerFailure)
 
     expect(onCursor).not.toHaveBeenCalled()
+    expect(order).toEqual(['handler', 'legacy:cancel'])
   })
 })
 
@@ -298,6 +321,50 @@ describe('claimant multiplexed realtime stream', () => {
     })).rejects.toBe(handlerFailure)
 
     expect(onCursor).not.toHaveBeenCalled()
+  })
+
+  it('cancels a failed claimant stream before a reconnect can open', async () => {
+    const order = []
+    const handlerFailure = new Error('Authoritative claimant refetch failed.')
+
+    fetch
+      .mockImplementationOnce(async () => {
+        order.push('first:fetch')
+        return trackedOpenEventStreamResponse(
+          'id: cursor-refetch-fail\nevent: resources.changed\ndata: {"event_id":"evt_refetch_fail","claim_id":"clm_1","claim_revision":3,"resources":["claim"]}\n\n',
+          order,
+          'first',
+        )
+      })
+      .mockImplementationOnce(async () => {
+        order.push('second:fetch')
+        return eventStreamResponse([': connected\n\n'])
+      })
+
+    await expect(streamRealtimeEvents({
+      cursor: null,
+      signal: new AbortController().signal,
+      onEvent: vi.fn(async () => {
+        order.push('handler')
+        throw handlerFailure
+      }),
+    })).rejects.toBe(handlerFailure)
+
+    order.push('reconnect')
+
+    await streamRealtimeEvents({
+      cursor: null,
+      signal: new AbortController().signal,
+      onEvent: vi.fn(),
+    })
+
+    expect(order).toEqual([
+      'first:fetch',
+      'handler',
+      'first:cancel',
+      'reconnect',
+      'second:fetch',
+    ])
   })
 
 })

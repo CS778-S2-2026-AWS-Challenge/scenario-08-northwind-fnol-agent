@@ -26,6 +26,22 @@ function eventStreamResponse(frames, status = 200) {
   )
 }
 
+
+function trackedOpenEventStreamResponse(frame, order, label) {
+  const encoder = new TextEncoder()
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(frame))
+      },
+      cancel() {
+        order.push(`${label}:cancel`)
+      },
+    }),
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+  )
+}
+
 function staffMessageResponse(claimId, sessionId, claimRevision, messageId) {
   return {
     claim_id: claimId,
@@ -114,6 +130,52 @@ describe('Workbench realtime stream', () => {
       requestId: 'req_realtime_cursor',
       retryable: true,
     })
+  })
+
+  it('cancels a failed Workbench stream before a reconnect can open', async () => {
+    const order = []
+    const handlerFailure = new Error('Authoritative Workbench refetch failed.')
+
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => {
+        order.push('first:fetch')
+        return trackedOpenEventStreamResponse(
+          'id: staff-refetch-fail\nevent: resources.changed\ndata: {"event_id":"evt_staff_refetch_fail","claim_id":"clm_1","claim_revision":6,"resources":["claim"]}\n\n',
+          order,
+          'first',
+        )
+      })
+      .mockImplementationOnce(async () => {
+        order.push('second:fetch')
+        return eventStreamResponse([': connected\n\n'])
+      })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(workbenchApi.realtimeEvents('staff-token', {
+      cursor: null,
+      signal: new AbortController().signal,
+      onEvent: vi.fn(async () => {
+        order.push('handler')
+        throw handlerFailure
+      }),
+    })).rejects.toBe(handlerFailure)
+
+    order.push('reconnect')
+
+    await workbenchApi.realtimeEvents('staff-token', {
+      cursor: null,
+      signal: new AbortController().signal,
+      onEvent: vi.fn(),
+    })
+
+    expect(order).toEqual([
+      'first:fetch',
+      'handler',
+      'first:cancel',
+      'reconnect',
+      'second:fetch',
+    ])
   })
 })
 

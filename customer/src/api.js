@@ -93,6 +93,11 @@ function streamError(message, options) {
   return new ApiRequestError(message, options)
 }
 
+async function cancelReaderAfterFailure(reader, signal) {
+  if (signal?.aborted) return
+  try { await reader.cancel() } catch { /* preserve the original stream failure */ }
+}
+
 async function readRealtimeEventStream(response, signal, onEvent, onOpen) {
   if (!response.body) {
     throw streamError(
@@ -103,10 +108,8 @@ async function readRealtimeEventStream(response, signal, onEvent, onOpen) {
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-  let opened = false
   try {
     if (onOpen) await onOpen()
-    opened = true
     while (!signal?.aborted) {
       const { done, value } = await reader.read()
       buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
@@ -137,10 +140,10 @@ async function readRealtimeEventStream(response, signal, onEvent, onOpen) {
       }
       if (done) return
     }
+  } catch (error) {
+    await cancelReaderAfterFailure(reader, signal)
+    throw error
   } finally {
-    if (!opened) {
-      try { await reader.cancel() } catch { /* replacement stream cleanup */ }
-    }
     reader.releaseLock()
   }
 }
@@ -271,6 +274,9 @@ export async function streamClaimUpdates({
       }
       if (done) return
     }
+  } catch (error) {
+    await cancelReaderAfterFailure(reader, signal)
+    throw error
   } finally {
     reader.releaseLock()
   }
