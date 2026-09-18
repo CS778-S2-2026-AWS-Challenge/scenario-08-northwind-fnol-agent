@@ -38,6 +38,7 @@ import ExternalServiceAction, { ExternalServiceOverview } from './components/Ext
 import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
 import ClaimDocuments from './components/ClaimDocuments.jsx'
+import ClaimReviewPanel from './components/ClaimReviewPanel.jsx'
 import ConversationHistorySidebar from './components/ConversationHistorySidebar.jsx'
 import {
   AgentTurnDisclosure,
@@ -2904,92 +2905,27 @@ function App() {
               tabIndex="0"
               hidden={detailsTab !== 'summary'}
             >
-            <div className="claim-details-section-heading">
-              <h3>What we have so far</h3>
-              <p className="panel-subtitle">Review or correct anything here</p>
-            </div>
-            {Object.keys(form).length === 0 ? (
-              <p className="empty-details">Details from your conversation will appear here.</p>
-            ) : (
-              <div className="field-list">
-                {Object.entries(form).map(([fieldCode, field]) => (
-                  <div className="claim-field" key={fieldCode}>
-                    <div className="field-heading">
-                      <span>{fieldLabel(fieldCode)}</span>
-                      <span className={`field-status status-${field.status}`}>
-                        {fieldStatusLabel(field.status)}
-                      </span>
-                    </div>
-                    {editingField === fieldCode ? (
-                      <div className="field-editor">
-                        <textarea
-                          aria-label={`Correct ${fieldLabel(fieldCode)}`}
-                          value={editValue}
-                          onChange={(event) => setEditValue(event.target.value)}
-                          rows="3"
-                        />
-                        <div className="field-actions">
-                          <button
-                            className="secondary-button"
-                            type="button"
-                            onClick={() => setEditingField(null)}
-                            disabled={isBusy}
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            className="primary-button compact-button"
-                            type="button"
-                            onClick={() => saveFieldCorrection(fieldCode, field)}
-                            disabled={!editValue.trim() || isBusy}
-                          >
-                            {status === 'saving' ? 'Saving...' : 'Save correction'}
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <p className="field-value">{fieldValueText(field)}</p>
-                        <p className="field-source">{fieldSourceLabel(field.source)}</p>
-                        <button
-                          className="text-button"
-                          type="button"
-                          onClick={() => beginEdit(fieldCode, field.value)}
-                          disabled={isBusy}
-                        >
-                          Edit
-                        </button>
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {(proposedFields.length > 0 || proposedContentsItems.length > 0) && editingField === null && (
-              <section className="confirmation-bar" aria-labelledby="confirmation-title">
-                <p className="confirmation-kicker">Review before we continue</p>
-                <h2 id="confirmation-title">Check these details</h2>
-                <ul className="confirmation-list">
-                  {proposedFields.map(([fieldCode]) => (
-                    <li key={fieldCode}>{fieldLabel(fieldCode)} needs your review.</li>
-                  ))}
-                  {proposedContentsItems.map((item) => (
-                    <li key={item.item_id}>{item.description} needs your review.</li>
-                  ))}
-                </ul>
-                <p>Use the conversation to correct anything in your own words, or edit a detail here.</p>
-                <button
-                  className="primary-button"
-                  type="button"
-                  onClick={confirmProposedFields}
-                  disabled={isBusy}
-                >
-                  {status === 'confirming' ? 'Confirming...' : 'Confirm details'}
-                </button>
-              </section>
-            )}
-
+              <ClaimReviewPanel
+                form={form}
+                contentsItems={contentsItems}
+                dynamicForm={dynamicForm}
+                proposedFields={proposedFields}
+                proposedContentsItems={proposedContentsItems}
+                editingField={editingField}
+                editValue={editValue}
+                setEditValue={setEditValue}
+                beginEdit={beginEdit}
+                cancelEdit={() => setEditingField(null)}
+                saveFieldCorrection={saveFieldCorrection}
+                confirmProposedFields={confirmProposedFields}
+                fieldLabel={fieldLabel}
+                fieldStatusLabel={fieldStatusLabel}
+                fieldSourceLabel={fieldSourceLabel}
+                fieldValueText={fieldValueText}
+                busy={isBusy}
+                status={status}
+                stepActive={conversationActionKind === 'review-details'}
+              />
             </div>
             <div
               id="claim-details-documents-panel"
