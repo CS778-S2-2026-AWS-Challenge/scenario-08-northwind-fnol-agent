@@ -30,7 +30,7 @@ from fastapi.testclient import TestClient
 from backend.adapters.evidence_storage import MockEvidenceStorage
 from backend.core.config import Settings
 
-from .metrics import metric_coverage
+from .metrics import QuestionEffort, metric_coverage
 from .record import (
     ORACLE_FAILURE,
     AgentTurn,
@@ -528,7 +528,9 @@ def build_record(
         unavailable_capabilities=capabilities,
         final_state=state,
         effort=effort,
-        metrics=metric_coverage(turns=turns, effort=effort, state=state),
+        metrics=metric_coverage(
+            effort=effort, state=state, questions=_question_effort(journey, state)
+        ),
         result_class=classify(
             steps=steps,
             materials=materials,
@@ -541,6 +543,26 @@ def build_record(
             steps, materials, seam_checks, visibility_checks, capabilities, stop_note
         ),
     )
+
+
+def _question_effort(journey: Journey, state: FinalState) -> QuestionEffort | None:
+    """Read the question counts the Runtime keeps on the claimant session.
+
+    `docs/api.md` defines `question_turn_count` as the accepted Agent turns that asked for a
+    registered fact, and the Runtime counts one per turn however many questions it holds, which
+    is how #733 counts an Agent question message. Counting question marks in the replies instead
+    would count a turn asking twice as two.
+    """
+
+    session_id = state.active_session_id or state.session_id
+    if journey.claim_id is None or session_id is None:
+        return None
+    session = journey.read(f'/api/v1/claims/{journey.claim_id}/sessions/{session_id}', 'claimant')
+    resume = session.get('resume') or {}
+    turns, repeated = resume.get('question_turn_count'), resume.get('repeated_question_count')
+    if not isinstance(turns, int) or not isinstance(repeated, int):
+        return None
+    return QuestionEffort(turns=turns, repeated=repeated)
 
 
 def _reason(

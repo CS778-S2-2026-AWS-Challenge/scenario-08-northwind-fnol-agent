@@ -5,8 +5,8 @@ model's behaviour: whether the journey finished without follow-up, whether a sev
 classification survives blind rating, and whether fraud flags are precise. On this runtime the
 Agent is the rule-driven `ControlledAgent`, so a rate measured here would describe the rules
 rather than the Agent, and no severity or fraud judgement is produced to rate at all. Claimant
-effort is measured in part: the run counts what the claimant did and the question marks in the
-Agent's replies, a lower bound on questions asked, while the elapsed minutes have no served
+effort is measured in part: the run counts what the claimant did and reads the Agent question
+turns the Runtime itself counted for the session, while the elapsed minutes have no served
 source.
 
 Each shortfall names the document that establishes it, so the record states a boundary rather
@@ -17,10 +17,9 @@ final state, and evidence chain. Where a journey ends before claim creation, tha
 recorded result rather than a missing measurement; the result class says how far it reached.
 """
 
-from collections.abc import Sequence
+from typing import NamedTuple
 
 from .record import (
-    AgentTurn,
     ClaimantEffort,
     FinalState,
     MetricCoverage,
@@ -39,32 +38,41 @@ MODEL_PROFILE_AUTHORITY = (
     'signal exists to rate.'
 )
 CLAIMANT_TIME_AUTHORITY = (
-    'docs/api.md documents "median_time_to_next_action_seconds" and claimant question totals '
-    'on an aggregate metrics endpoint the application does not serve, so elapsed claimant time '
-    'has no source here. The observed question marks are a lower bound on questions asked: a '
-    'question mark is the only countable signal in a reply, and a question phrased without one '
-    'is not counted.'
+    'docs/api.md documents "median_time_to_next_action_seconds" on an aggregate metrics endpoint '
+    'the application does not serve, so elapsed claimant time has no source here. The question '
+    'count is the session count of "Accepted Agent turns that asked for a registered fact".'
 )
+
+
+class QuestionEffort(NamedTuple):
+    """The Runtime's question counts for the claimant session at the end of a run."""
+
+    turns: int
+    repeated: int
 
 
 def metric_coverage(
     *,
-    turns: Sequence[AgentTurn],
     effort: ClaimantEffort,
     state: FinalState,
+    questions: QuestionEffort | None,
 ) -> list[MetricCoverage]:
     """State every required metric for one run, measured or not.
 
     Args:
-        turns: Agent turns the run recorded, used to count questions put to the claimant.
         effort: Counts of what the claimant did during the run.
         state: Final Claim state, including the claim number and expected timeline.
+        questions: The session's Agent question turns and repeats, or None when the run had no
+            readable claimant session.
 
     Returns:
         One coverage entry per metric in `SprintMetric`.
     """
 
-    question_marks = sum((turn.agent_reply or '').count('?') for turn in turns)
+    if questions is None:
+        asked = 'Agent question turns not observed'
+    else:
+        asked = f'{questions.turns} Agent question turns, {questions.repeated} of them repeated'
     return [
         MetricCoverage(
             metric=SprintMetric.NO_FOLLOW_UP,
@@ -85,9 +93,8 @@ def metric_coverage(
             metric=SprintMetric.CLAIMANT_EFFORT,
             state=MetricState.PARTLY_MEASURED,
             observed=(
-                f'{effort.messages} claimant messages; {question_marks} question marks in Agent '
-                f'replies; {effort.confirmations} confirmations, {effort.uploads} uploads, '
-                f'{effort.consents} consents'
+                f'{effort.messages} claimant messages; {asked}; {effort.confirmations} '
+                f'confirmations, {effort.uploads} uploads, {effort.consents} consents'
             ),
             limitation=CLAIMANT_TIME_AUTHORITY,
         ),
