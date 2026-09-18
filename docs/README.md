@@ -117,6 +117,7 @@ documents remain authoritative for implemented behaviour.
 - [Agent Runtime Progress](status/agent-runtime-progress.md)
 - [Claim Data Readiness Inventory](status/claim-data-readiness.md)
 - [Sprint 4 Journey Acceptance Gap Record](status/sprint4-journey-acceptance-gaps.md)
+- [Sprint 4 Journey Evidence Pack](status/sprint4-journey-evidence-pack.md)
 - [Runtime Profile Validation Record](status/runtime-profile-validation.md)
 - [MVP Capability Register](status/mvp-capability-register.md)
 - [Control Plane Implementation Status](status/control-plane-progress.md)
