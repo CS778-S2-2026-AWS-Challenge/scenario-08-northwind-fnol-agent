@@ -12,11 +12,54 @@ $bindingPath = Join-Path $repoRoot 'config\model-runtime-bindings.json'
 $envPath = Join-Path $repoRoot '.env'
 Import-Module (Join-Path $PSScriptRoot 'Northwind.LocalSecrets.psm1') -Force
 
+function Get-DotEnvValue {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    $escapedName = [Regex]::Escape($Name)
+    $resolvedValue = $null
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        if ($line -notmatch "^\s*$escapedName\s*=\s*(.*)$") { continue }
+        $value = $Matches[1].Trim()
+        if (
+            $value.Length -ge 2 -and
+            ($value.StartsWith('"') -and $value.EndsWith('"')) -or
+            $value.Length -ge 2 -and
+            ($value.StartsWith("'") -and $value.EndsWith("'"))
+        ) {
+            $value = $value.Substring(1, $value.Length - 2)
+        }
+        $resolvedValue = $value
+    }
+    return $resolvedValue
+}
+
 $bindingVariable = 'MODEL_RUNTIME_BINDINGS_PATH'
 $previousBindingPath = [Environment]::GetEnvironmentVariable(
     $bindingVariable,
     [EnvironmentVariableTarget]::Process
 )
+$qwenEndpointVariable = 'NORTHWIND_QWEN_BASE_URL'
+$previousQwenEndpoint = [Environment]::GetEnvironmentVariable(
+    $qwenEndpointVariable,
+    [EnvironmentVariableTarget]::Process
+)
+$qwenEndpoint = $previousQwenEndpoint
+if ([string]::IsNullOrWhiteSpace($qwenEndpoint)) {
+    $qwenEndpoint = Get-DotEnvValue -Path $envPath -Name $qwenEndpointVariable
+}
+if ([string]::IsNullOrWhiteSpace($qwenEndpoint)) {
+    $qwenEndpoint = [Environment]::GetEnvironmentVariable(
+        'MODEL_BASE_URL',
+        [EnvironmentVariableTarget]::Process
+    )
+}
+if ([string]::IsNullOrWhiteSpace($qwenEndpoint)) {
+    $qwenEndpoint = Get-DotEnvValue -Path $envPath -Name 'MODEL_BASE_URL'
+}
 
 $credentialNames = @(
     Get-Content -Raw -LiteralPath $bindingPath |
@@ -36,6 +79,13 @@ try {
         $bindingPath,
         [EnvironmentVariableTarget]::Process
     )
+    if (-not [string]::IsNullOrWhiteSpace($qwenEndpoint)) {
+        [Environment]::SetEnvironmentVariable(
+            $qwenEndpointVariable,
+            $qwenEndpoint,
+            [EnvironmentVariableTarget]::Process
+        )
+    }
     foreach ($credentialName in $credentialNames) {
         $previousValues[$credentialName] = [Environment]::GetEnvironmentVariable(
             $credentialName,
@@ -67,6 +117,11 @@ try {
             [EnvironmentVariableTarget]::Process
         )
     }
+    [Environment]::SetEnvironmentVariable(
+        $qwenEndpointVariable,
+        $previousQwenEndpoint,
+        [EnvironmentVariableTarget]::Process
+    )
 
     $customer = Start-Process -FilePath 'npm.cmd' -ArgumentList @('run', 'dev', '--prefix', 'customer', '--', '--host', '127.0.0.1', '--port', [string]$CustomerPort) -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
     $workbench = Start-Process -FilePath 'npm.cmd' -ArgumentList @('run', 'dev', '--prefix', 'workbench', '--', '--host', '127.0.0.1', '--port', [string]$WorkbenchPort) -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
@@ -76,6 +131,11 @@ finally {
     [Environment]::SetEnvironmentVariable(
         $bindingVariable,
         $previousBindingPath,
+        [EnvironmentVariableTarget]::Process
+    )
+    [Environment]::SetEnvironmentVariable(
+        $qwenEndpointVariable,
+        $previousQwenEndpoint,
         [EnvironmentVariableTarget]::Process
     )
     foreach ($credentialName in $credentialNames) {
