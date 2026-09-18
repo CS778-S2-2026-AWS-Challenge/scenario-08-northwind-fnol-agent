@@ -49,6 +49,18 @@ def _start_motor_claim(client: TestClient, key: str) -> tuple[str, str]:
     return str(body['claim']['claim_id']), str(body['session']['session_id'])
 
 
+def _start_unresolved_claim(client: TestClient, key: str) -> tuple[str, str]:
+    response = client.post(
+        '/api/v1/claims',
+        headers={**AUTH, 'Idempotency-Key': f'claim-{key}'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ'},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body['claim']['incident_type'] is None
+    return str(body['claim']['claim_id']), str(body['session']['session_id'])
+
+
 def _send(
     client: TestClient,
     claim_id: str,
@@ -123,6 +135,19 @@ def test_assessment_request_keeps_safety_question_and_binds_offer_to_message(
         if item['message_id'] == turn['agent_message']['message_id']
     )
     assert restored['message_actions'] == actions
+
+
+def test_free_text_assessment_selects_motor_service_without_preselected_family(
+    client: TestClient,
+) -> None:
+    claim_id, session_id = _start_unresolved_claim(client, 'free-text-assessment')
+
+    turn = _send(client, claim_id, session_id, ASSESSMENT_REQUEST, 'free-text-assessment')
+
+    assert turn['claim_revision'] > 1
+    assert [action['service_identity'] for action in turn['agent_message']['message_actions']] == [
+        'vehicle_damage_assessment_routing'
+    ]
 
 
 def test_detected_service_intents_enforces_registry_family_deduplication_and_limit() -> None:
@@ -738,6 +763,136 @@ def test_registered_task_without_adapter_releases_dispatch_without_claiming_succ
     assert decided.status_code == 201
     task = repository.list_external_tasks_internal(claim_id)[0]
     request = repository.list_external_task_requests_internal(claim_id)[0]
-    assert task.status is ExternalTaskOperationStatus.PREPARED
+    assert task.status is ExternalTaskOperationStatus.RETRYABLE_FAILURE
+    assert task.failure_code is ExternalTaskFailureCode.UNAVAILABLE
     assert request.dispatch_reserved_at is None
     assert request.sent_at is None
+
+
+def test_registered_task_adapter_exception_isolated_from_consent_response(
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    claim_id, session_id = _start_motor_claim(client, 'adapter-exception')
+    turn = _send(
+        client,
+        claim_id,
+        session_id,
+        (
+            'My car was rear-ended on Symonds Street and the rear bumper is damaged. '
+            'Can you book a repair for me?'
+        ),
+        'adapter-exception',
+    )
+    offer = next(
+        action
+        for action in turn['agent_message']['message_actions']
+        if action['service_identity'] == 'vehicle_repairer_booking'
+    )
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    repository._claims[claim_id] = stored.model_copy(
+        update={
+            'form': {
+                **stored.form,
+                'incident.location': stored.form['incident.location'].model_copy(
+                    update={'status': FormStatus.CONFIRMED}
+                ),
+                'vehicle.damage_description': stored.form['vehicle.damage_description'].model_copy(
+                    update={'status': FormStatus.CONFIRMED}
+                ),
+            }
+        }
+    )
+
+    def fail_adapter(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise RuntimeError('provider transport failed')
+
+    cast(Any, client.app).state.external_capability_dispatcher = ExternalCapabilityDispatcher(
+        {'vehicle_repairer_booking': fail_adapter}
+    )
+
+    decided = client.post(
+        _offer_route(claim_id, offer['offer_id']),
+        headers={
+            **AUTH,
+            'Idempotency-Key': 'grant-adapter-exception',
+            'If-Match': str(turn['claim_revision']),
+        },
+        json={'decision': 'grant'},
+    )
+
+    assert decided.status_code == 201
+    task = repository.list_external_tasks_internal(claim_id)[0]
+    request = repository.list_external_task_requests_internal(claim_id)[0]
+    assert task.status is ExternalTaskOperationStatus.RETRYABLE_FAILURE
+    assert task.failure_code is ExternalTaskFailureCode.UNAVAILABLE
+    assert request.dispatch_reserved_at is None
+    assert request.sent_at is None
+
+
+def test_registered_task_unknown_outcome_preserves_operation_for_reconciliation(
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    claim_id, session_id = _start_motor_claim(client, 'adapter-unknown')
+    turn = _send(
+        client,
+        claim_id,
+        session_id,
+        (
+            'My car was rear-ended on Symonds Street and the rear bumper is damaged. '
+            'Can you book a repair for me?'
+        ),
+        'adapter-unknown',
+    )
+    offer = next(
+        action
+        for action in turn['agent_message']['message_actions']
+        if action['service_identity'] == 'vehicle_repairer_booking'
+    )
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    repository._claims[claim_id] = stored.model_copy(
+        update={
+            'form': {
+                **stored.form,
+                'incident.location': stored.form['incident.location'].model_copy(
+                    update={'status': FormStatus.CONFIRMED}
+                ),
+                'vehicle.damage_description': stored.form['vehicle.damage_description'].model_copy(
+                    update={'status': FormStatus.CONFIRMED}
+                ),
+            }
+        }
+    )
+
+    def unknown_adapter(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {
+            'status': 'unknown_outcome',
+            'failure_code': 'timeout',
+            'delivery_evidence': 'provider-connection-opened',
+        }
+
+    cast(Any, client.app).state.external_capability_dispatcher = ExternalCapabilityDispatcher(
+        {'vehicle_repairer_booking': unknown_adapter}
+    )
+
+    decided = client.post(
+        _offer_route(claim_id, offer['offer_id']),
+        headers={
+            **AUTH,
+            'Idempotency-Key': 'grant-adapter-unknown',
+            'If-Match': str(turn['claim_revision']),
+        },
+        json={'decision': 'grant'},
+    )
+
+    assert decided.status_code == 201
+    task = repository.list_external_tasks_internal(claim_id)[0]
+    request = repository.list_external_task_requests_internal(claim_id)[0]
+    assert task.status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME
+    assert task.failure_code is ExternalTaskFailureCode.TIMEOUT
+    assert task.delivery is ExternalTaskDelivery.SUBMITTED
+    assert request.dispatch_reserved_at is not None
+    assert request.sent_at is not None

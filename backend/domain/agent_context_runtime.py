@@ -39,9 +39,27 @@ class TurnTask(StrEnum):
     HUMAN_HANDOFF = 'human_handoff'
 
 
+class TurnFamilyResolution(ContractModel):
+    """One bounded product-family decision shared by every turn consumer."""
+
+    product_family: Literal['motor', 'home', 'contents'] | None = None
+    status: Literal['authoritative', 'inferred', 'unresolved', 'ambiguous', 'conflicting']
+    candidate_families: tuple[Literal['motor', 'home', 'contents'], ...] = ()
+
+    @model_validator(mode='after')
+    def validate_resolution(self) -> 'TurnFamilyResolution':
+        if self.status in {'authoritative', 'inferred'} and self.product_family is None:
+            raise ValueError('A resolved family requires one product family.')
+        if self.status in {'unresolved', 'ambiguous', 'conflicting'} and self.product_family:
+            raise ValueError('An unresolved family result cannot select a product family.')
+        return self
+
+
 class TurnRoute(ContractModel):
     product_family: Literal['motor', 'home', 'contents'] | None = None
-    family_resolution: Literal['authoritative', 'inferred', 'unresolved']
+    family_resolution: Literal[
+        'authoritative', 'inferred', 'unresolved', 'ambiguous', 'conflicting'
+    ]
     task: TurnTask
     capability_ids: list[str] = Field(default_factory=list, max_length=8)
     deterministic_response: str | None = Field(default=None, max_length=1000)
@@ -51,7 +69,9 @@ class TurnRoute(ContractModel):
     def validate_deterministic_route(self) -> 'TurnRoute':
         if not self.model_required and not self.deterministic_response:
             raise ValueError('A model-free route requires a deterministic response.')
-        if self.family_resolution == 'unresolved' and self.product_family is not None:
+        if self.family_resolution in {'unresolved', 'ambiguous', 'conflicting'} and (
+            self.product_family is not None
+        ):
             raise ValueError('An unresolved family route cannot select a product family.')
         return self
 

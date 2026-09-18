@@ -1106,7 +1106,9 @@ Design and implementation rules:
 1. Claimant is Agent-first. Let the claimant describe what happened in natural language. Use the
    Agent, registered fields, branch rules, retrieval, policy/history/database tools, evidence and
    runtime actions to progress the Claim. Do not turn the product into a fixed questionnaire,
-   landing-page card selector or Guided Motor flow.
+   landing-page card selector or Guided Motor flow. Do not expose a Claim-type selector: Runtime
+   resolves one bounded family from confirmed facts and the current message, and asks when it is
+   ambiguous or conflicts with the established Claim.
 
 2. Staff Workbench is task-first. The first viewport must answer what needs attention, why, who
    owns the next step, what is missing or risky, and what one primary action is available. Do not
@@ -1135,7 +1137,9 @@ Design and implementation rules:
 8. External services are lifecycles, not generic request buttons. Preserve purpose, data scope,
    consent, request type, submission, tracking, verification, reconciliation, retry, failure,
    limitation, pending owner and result unknown. Provider is not automatically the responsible
-   party. Northwind is the business organisation, not an inferred executor.
+   party. Northwind is the business organisation, not an inferred executor. Runtime selects the
+   registered service identity; model prose cannot create one. Optional dispatch failure must not
+   erase a committed conversation or claim that work was completed.
 
 9. Use React/Vite component boundaries, real routes, shared state containers and one shared token
    source. Do not continue a complex application in one static index.html, one global app.js,
