@@ -36,7 +36,7 @@ jobs:
   promote-ready-drafts:
     name: Promote ready repository drafts
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: [self-hosted, northwind-ci]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
@@ -411,7 +411,7 @@ jobs:
   sync-pull-request-status:
     name: Sync linked issue review status
     if: github.event_name == 'pull_request_target'
-    runs-on: [self-hosted, northwind-ci]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
