@@ -675,6 +675,14 @@ the registry contract, claimant-safe visibility, and server-side operation bound
 `claim_revision` is the Claim revision used to derive the projection and `projection_version` is
 currently `v1`.
 
+Until the server-owned staged progression contracts for Issue #926 and Issue #928 are implemented,
+`customer_next_step.status=ready_to_create` is not permission to invoke legacy claim creation. In
+that state the projection retains `action_code=claimant.create_claim` as the action identity but
+MUST set `available=false`. Claimant/browser consumers MUST NOT present or execute that unavailable
+action and MUST NOT infer permission from `ready_to_create`, `workflow_state`, `required_inputs`,
+or other supporting fields. Only the backend-owned `primary_action.available` value authorises
+presentation as actionable.
+
 The backend emits exactly one projection and gives external-service state precedence over Claim
 creation and conversation continuation. `terminal_failure` maps to staff review, while an unknown
 provider outcome maps to reconciliation; these states are not interchangeable. The frontend must
