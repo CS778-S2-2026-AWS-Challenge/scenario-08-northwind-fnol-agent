@@ -21,6 +21,7 @@ from backend.domain.release import (
     ReleaseSetCreate,
     ReleaseSetRecord,
     ReleaseSetState,
+    ReleaseSetValidationRequest,
 )
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.knowledge_admin import KnowledgeAdminRepository
@@ -254,6 +255,91 @@ def test_release_set_rejects_unpublished_configuration_reference() -> None:
         )
         assert validation.status_code == 422
         assert validation.json()['error']['code'] == 'RELEASE_SET_CONFIGURATION_NOT_PUBLISHED'
+
+
+def test_publish_rejects_when_the_expected_active_release_changed() -> None:
+    configurations = ConfigurationRepository()
+    releases = ReleaseSetRepository()
+    knowledge = KnowledgeAdminRepository()
+    configuration = ConfigurationRecord(
+        configuration_id='cfg_active_change',
+        domain='feature',
+        revision=1,
+        state=ConfigurationState.PUBLISHED,
+        impact=ConfigurationImpact.HIGH,
+        values={'feature_version': 'active-change-v1'},
+        author='test-admin',
+        reason='Exercise guarded publication.',
+        updated_at=datetime.now(UTC),
+    )
+    configurations.create(configuration)
+    reference = ConfigurationReference(
+        configuration_id=configuration.configuration_id,
+        revision=configuration.revision,
+    )
+
+    def validated_release(reason: str) -> ReleaseSetRecord:
+        draft = release_sets.create(
+            releases,
+            configurations,
+            knowledge,
+            ReleaseSetCreate(
+                environment='test',
+                runtime_profile='fixture',
+                configuration_refs={'feature': reference},
+                reason=reason,
+            ),
+            'test-admin',
+        )
+        return release_sets.validate(
+            releases,
+            configurations,
+            knowledge,
+            draft.release_set_id,
+            ReleaseSetValidationRequest(
+                scenario_results=[
+                    {
+                        'scenario_id': 'runtime-load',
+                        'outcome': 'passed',
+                        'evidence': 'passed',
+                    }
+                ]
+            ),
+            'test-admin',
+            draft.revision,
+        )
+
+    first = validated_release('Create the first release.')
+    first = release_sets.publish(
+        releases,
+        first.release_set_id,
+        'Publish the first release.',
+        'test-admin',
+        first.revision,
+    )
+    delayed = validated_release('Create a delayed release.')
+    replacement = validated_release('Create an operator replacement.')
+    replacement = release_sets.publish(
+        releases,
+        replacement.release_set_id,
+        'Publish the operator replacement.',
+        'test-admin',
+        replacement.revision,
+    )
+
+    with pytest.raises(ApiError) as captured:
+        release_sets.publish(
+            releases,
+            delayed.release_set_id,
+            'Reject a stale publication attempt.',
+            'test-admin',
+            delayed.revision,
+            expected_previous_release_set_id=first.release_set_id,
+        )
+
+    assert captured.value.status_code == 409
+    assert captured.value.code == 'ACTIVE_RELEASE_SET_CHANGED'
+    assert releases.active('test', 'fixture').release_set_id == replacement.release_set_id
 
 
 def test_release_set_rejects_unpublished_knowledge_reference() -> None:

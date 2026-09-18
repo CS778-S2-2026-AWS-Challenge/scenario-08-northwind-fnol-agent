@@ -213,6 +213,11 @@ profile registers it without making it selectable or allowing provider transport
 model identifier, endpoint, prompt, evaluation status, capability, or credential-reference mismatch
 fails validation with `PROVIDER_CONFIGURATION_UNAVAILABLE`.
 
+The native `scripts/start-local.ps1` launcher supplies the checked-in binding manifest path to the
+backend process and restores the caller's environment after launch. It does not construct or inject
+model records: the backend still validates, publishes, and resolves the version-controlled manifest
+through the same Control Plane release boundary used by other deployments.
+
 The published claimant profiles use this adapter contract:
 
 | Profile | Model | Role | Required capabilities |
@@ -244,9 +249,12 @@ and publishes the complete Agent policy plus every binding in this allow-list. A
 scope with no Release Set history installs that initial Release during application composition, so
 `qwen-local`, `nowcoding-gpt55`, and `google-gemini35-flash-lite` are available, while
 `bedrock-nova2-lite` is published with its explicit evaluation status through the capabilities
-APIs on a clean deployment. The initializer
-runs only for a never-initialised scope. Existing active, superseded,
-withdrawn, or otherwise inactive Release Set history remains authoritative and is never repaired or
+APIs on a clean deployment. The initializer installs a release for a never-initialised scope. It
+also replaces a stale active release only when that release was created by the repository
+initializer and uses the same Prompt generation as the checked-in bindings. The replacement is a
+new validated, published, and audited Release Set; prior configuration and release revisions remain
+immutable. An operator-authored active release, a different Prompt generation, or superseded,
+withdrawn, and otherwise inactive history remains authoritative and is never repaired or
 overwritten on startup. Initial model records use a 180-second transport ceiling so a slow provider
 can return a controlled result instead of failing at the former 30-second boundary. This ceiling is
 not a response-time target: ordinary v7 profiles retain their input and output budgets, one-call

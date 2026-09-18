@@ -12,6 +12,12 @@ $bindingPath = Join-Path $repoRoot 'config\model-runtime-bindings.json'
 $envPath = Join-Path $repoRoot '.env'
 Import-Module (Join-Path $PSScriptRoot 'Northwind.LocalSecrets.psm1') -Force
 
+$bindingVariable = 'MODEL_RUNTIME_BINDINGS_PATH'
+$previousBindingPath = [Environment]::GetEnvironmentVariable(
+    $bindingVariable,
+    [EnvironmentVariableTarget]::Process
+)
+
 $credentialNames = @(
     Get-Content -Raw -LiteralPath $bindingPath |
         ConvertFrom-Json |
@@ -25,6 +31,11 @@ $credentialNames = @(
 )
 $previousValues = @{}
 try {
+    [Environment]::SetEnvironmentVariable(
+        $bindingVariable,
+        $bindingPath,
+        [EnvironmentVariableTarget]::Process
+    )
     foreach ($credentialName in $credentialNames) {
         $previousValues[$credentialName] = [Environment]::GetEnvironmentVariable(
             $credentialName,
@@ -62,6 +73,11 @@ try {
     $admin = Start-Process -FilePath 'npm.cmd' -ArgumentList @('run', 'dev', '--prefix', 'admin', '--', '--host', '127.0.0.1', '--port', [string]$AdminPort) -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
 }
 finally {
+    [Environment]::SetEnvironmentVariable(
+        $bindingVariable,
+        $previousBindingPath,
+        [EnvironmentVariableTarget]::Process
+    )
     foreach ($credentialName in $credentialNames) {
         [Environment]::SetEnvironmentVariable(
             $credentialName,

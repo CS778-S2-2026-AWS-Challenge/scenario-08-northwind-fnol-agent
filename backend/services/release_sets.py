@@ -96,6 +96,8 @@ def publish(
     reason: str,
     actor: str,
     expected_revision: int,
+    *,
+    expected_previous_release_set_id: str | None = None,
 ) -> ReleaseSetRecord:
     current = read(releases, release_set_id)
     _assert_revision(releases, current, expected_revision, actor, 'publish')
@@ -110,6 +112,22 @@ def publish(
         }
     )
     previous = releases.active(current.environment, current.runtime_profile)
+    if expected_previous_release_set_id is not None and (
+        previous is None or previous.release_set_id != expected_previous_release_set_id
+    ):
+        _audit(
+            releases,
+            current,
+            actor,
+            'publish',
+            'The active release set changed before publication.',
+            'rejected',
+        )
+        raise _error(
+            409,
+            'ACTIVE_RELEASE_SET_CHANGED',
+            'The active release set changed before publication.',
+        )
     if previous is None:
         saved = releases.save(updated, expected_revision)
         _audit(releases, saved, actor, 'publish', reason, 'succeeded')
