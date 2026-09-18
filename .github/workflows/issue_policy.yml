@@ -18,7 +18,7 @@ concurrency:
 jobs:
   validate:
     name: Validate repository issue
-    runs-on: [self-hosted, northwind-ci]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:

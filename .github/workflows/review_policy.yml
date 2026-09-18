@@ -13,7 +13,7 @@ permissions:
 jobs:
   validate:
     name: Validate blocking review evidence
-    runs-on: [self-hosted, northwind-ci]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
