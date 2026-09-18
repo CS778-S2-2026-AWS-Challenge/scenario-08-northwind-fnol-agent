@@ -14,7 +14,7 @@ from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
 from backend.domain.models import AssessorLocation, CreateExternalClaimRequest, RouteAssessorRequest
 from backend.repositories.fixture import FixtureRepository
-from backend.repositories.protocols import PersistenceRepository
+from backend.repositories.handoff_guard import HandoffPersistenceGuard
 from scripts import reset_demo as reset_command
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
@@ -170,7 +170,7 @@ def test_reset_is_unavailable_outside_the_synthetic_environment() -> None:
     assert response.json()['error']['code'] == 'AUTHENTICATION_REQUIRED'
 
 
-def test_reset_refuses_unknown_persistence_without_touching_mock_results() -> None:
+def test_reset_refuses_non_resettable_persistence_without_touching_mock_results() -> None:
     claims_adapter = MockClaimsServiceAdapter()
     command = CreateExternalClaimRequest(
         working_claim_id='clm_out_of_scope',
@@ -181,7 +181,7 @@ def test_reset_refuses_unknown_persistence_without_touching_mock_results() -> No
     claims_adapter.create_claim(command, 'out-of-scope-fingerprint')
     app = create_app(
         DEVELOPER_SETTINGS,
-        repository=cast(PersistenceRepository, object()),
+        repository=HandoffPersistenceGuard(FixtureRepository()),
         claims_service_adapter=claims_adapter,
     )
 
