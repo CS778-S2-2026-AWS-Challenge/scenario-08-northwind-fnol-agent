@@ -1,3 +1,4 @@
+import logging
 import re
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -128,6 +129,7 @@ from backend.services.external_service_offers import (
     detected_service_intents,
     message_external_actions,
     offer_work_item,
+    select_registered_service_intents,
 )
 from backend.services.external_services import claimant_assessor_action, claimant_next_step
 from backend.services.fact_resolution import (
@@ -154,6 +156,9 @@ from backend.services.support import (
     request_fingerprint,
     require_idempotency_key,
 )
+from backend.services.turn_family_resolution import resolve_turn_family
+
+logger = logging.getLogger(__name__)
 
 INTERNAL_ONLY_REASON_CODES = frozenset(
     {
@@ -2086,6 +2091,11 @@ def submit_message(
         recomputation_reason='claimant_message',
         previous_evaluation=previous_evaluation,
     )
+    turn_family_resolution = resolve_turn_family(
+        claim,
+        branch_evaluation,
+        payload.content.text if payload.content is not None else None,
+    )
     conversation_messages = tuple(
         message
         for message in sorted(
@@ -2119,7 +2129,7 @@ def submit_message(
             repository,
             claim_id,
             claim.assessor_routing,
-            claim.incident_type,
+            turn_family_resolution.product_family,
         )
     except ExternalLifecycleContextError as error:
         raise ApiError(
@@ -2128,6 +2138,15 @@ def submit_message(
             message='The external-service lifecycle context cannot be represented safely.',
             retryable=error.retryable,
         ) from error
+    selected_external_service_intents = select_registered_service_intents(
+        payload.content.text if payload.content is not None else None,
+        product_family=turn_family_resolution.product_family,
+        available_service_ids={
+            item.service_identity
+            for item in external_services
+            if item.operation_status is ExternalLifecycleStatus.CONSENT_REQUIRED
+        },
+    )
     agent_context = AgentTurnContext(
         claim=claim,
         session_id=session_id,
@@ -2141,6 +2160,10 @@ def submit_message(
             signal.code == 'POLICY_RETRIEVAL_UNCERTAINTY' for signal in persisted_review_signals
         ),
         branch_evaluation=branch_evaluation,
+        turn_family_resolution=turn_family_resolution,
+        selected_external_service_ids=tuple(
+            item['service_identity'] for item in selected_external_service_intents
+        ),
         runtime_configuration_snapshot=(
             runtime_policy.runtime_snapshot if runtime_policy is not None else None
         ),
@@ -2755,10 +2778,14 @@ def submit_message(
         created_at=timestamp,
     )
     runtime_turn_id = new_id('turn')
-    external_service_intents = detected_service_intents(
-        payload.content.text if payload.content is not None else None,
-        proposal.external_service_intents,
-        product_family=updated_claim.incident_type,
+    external_service_intents = (
+        selected_external_service_intents
+        if proposal.proposal_source is AgentProposalSource.MODEL_GATEWAY
+        else detected_service_intents(
+            payload.content.text if payload.content is not None else None,
+            proposal.external_service_intents,
+            product_family=turn_family_resolution.product_family,
+        )
     )
     runtime_directive = (
         runtime_trace.runtime_action_code if runtime_trace is not None else 'runtime.continue'
@@ -3067,12 +3094,27 @@ def submit_message(
             ) from conflict
     current_claim = repository.get_claim(claim_id, principal.subject)
     if current_claim is not None:
-        continue_granted_service_offers(
-            repository,
-            principal,
-            current_claim,
-            assessor_adapter=assessor_adapter,
-            assessor_entry=assessor_entry,
-            capability_dispatcher=external_capability_dispatcher,
-        )
+        try:
+            continue_granted_service_offers(
+                repository,
+                principal,
+                current_claim,
+                assessor_adapter=assessor_adapter,
+                assessor_entry=assessor_entry,
+                capability_dispatcher=external_capability_dispatcher,
+            )
+        except Exception:
+            logger.exception(
+                'post_commit_external_dispatch_failed',
+                extra={
+                    'claim_id': claim_id,
+                    'session_id': session_id,
+                    'trigger_message_id': claimant_message.message_id,
+                    'model_profile_id': session.model_profile_id,
+                    'component': 'external_dispatch',
+                    'internal_error_code': 'EXTERNAL_DISPATCH_PERSISTENCE_FAILED',
+                    'retryable': False,
+                    'resulting_revision': updated_claim.revision,
+                },
+            )
     return _message_turn_response(repository, principal, claim_id, claimant_message, decision)

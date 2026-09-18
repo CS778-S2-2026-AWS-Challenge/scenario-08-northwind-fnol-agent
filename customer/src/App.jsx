@@ -359,7 +359,6 @@ function App() {
   const [account, setAccount] = useState(null)
   const [authStatus, setAuthStatus] = useState('idle')
   const [authError, setAuthError] = useState('')
-  const [claimType, setClaimType] = useState('')
   const [draft, setDraft] = useState('')
   const [claim, setClaim] = useState(null)
   const [sessionId, setSessionId] = useState(null)
@@ -1482,7 +1481,6 @@ function App() {
       if (!activeClaim) {
         const created = await createClaim({
           idempotencyKey: operation.claimKey,
-          incidentType: claimType || null,
           modelProfileId: selectedModel,
         })
         activeClaim = created.claim
@@ -1635,7 +1633,6 @@ function App() {
     setMobileView('chat')
     setWorkspaceActive(false)
     setDraft('')
-    setClaimType('')
     setError('')
     setFailedMessage(null)
     setPendingMessage(null)
@@ -2199,7 +2196,6 @@ function App() {
     clearComposerAttachments()
     pendingSubmission.current = null
     setDraft('')
-    setClaimType('')
     setError('')
     setFailedMessage(null)
     setPendingMessage(null)
@@ -2584,15 +2580,10 @@ function App() {
                   buttonLabel={status === 'starting' ? 'Starting claim...' : failedMessage ? 'Retry claim message' : 'Start claim'}
                   error={error}
                   placeholder="Tell us what happened…"
-                  showClaimTypeControl
                   showModelControl
-                  claimType={claimType}
-                  setClaimType={setClaimType}
-                  claimTypes={runtimeCapabilities.claim_types}
                   models={runtimeCapabilities.models}
                   selectedModel={selectedModel}
                   setSelectedModel={setSelectedModel}
-                  claimTypeLocked={isWorkspaceActive && Boolean(sessionId)}
                   attachments={attachments}
                   onFileSelected={handleFileSelected}
                   onRemoveAttachment={removeComposerAttachment}
@@ -3022,13 +3013,9 @@ function App() {
                     : 'Send'}
               error={failedMessage?.message || error}
               variant="workspace"
-              claimType={claimType}
-              setClaimType={setClaimType}
-              claimTypes={runtimeCapabilities.claim_types}
               models={runtimeCapabilities.models}
               selectedModel={selectedModel}
               setSelectedModel={setSelectedModel}
-              claimTypeLocked={Boolean(sessionId)}
               attachments={attachments}
               onFileSelected={handleFileSelected}
               onRemoveAttachment={removeComposerAttachment}

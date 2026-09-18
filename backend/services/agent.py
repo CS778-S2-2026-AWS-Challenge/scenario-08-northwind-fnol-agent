@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from backend.core.errors import ApiError
 from backend.domain.agent_action_registry import action_contract
-from backend.domain.agent_context_runtime import VerifiedConversationSummary
+from backend.domain.agent_context_runtime import TurnFamilyResolution, VerifiedConversationSummary
 from backend.domain.intake import infer_controlled_product_family, next_requirement_field
 from backend.domain.knowledge import KnowledgeChunk
 from backend.domain.models import (
@@ -271,6 +271,8 @@ class AgentTurnContext:
     model_profile_id: str = 'qwen-local'
     professional_review_required: bool = False
     branch_evaluation: BranchEvaluationResult | None = None
+    turn_family_resolution: TurnFamilyResolution | None = None
+    selected_external_service_ids: tuple[str, ...] = ()
     knowledge_results: tuple[KnowledgeChunk, ...] = ()
     knowledge_status: str = 'not_requested'
     knowledge_limitations: tuple[str, ...] = ()

@@ -108,6 +108,29 @@ from backend.services.turn_router import route_turn
 
 logger = logging.getLogger(__name__)
 
+_UNSUPPORTED_EXECUTIONAL_CLAIM = re.compile(
+    r'\b(?:I|we|Northwind)\s+(?:have\s+)?(?:arranged|booked|submitted|sent|contacted|'
+    r'approved|completed|scheduled)\b',
+    re.IGNORECASE,
+)
+
+
+def _truthful_external_reply(reply: str, service_offer_ids: list[str]) -> str:
+    """Prevent prose from claiming an external side effect without Runtime evidence."""
+
+    if not _UNSUPPORTED_EXECUTIONAL_CLAIM.search(reply):
+        return reply
+    if service_offer_ids:
+        return (
+            'I found a registered support option. Review what would be shared and give your '
+            'consent before Northwind sends anything.'
+        )
+    return (
+        'I could not prepare a registered support option yet. You can continue the Claim while '
+        'I clarify what support is available.'
+    )
+
+
 _PROPOSAL_ADAPTER = TypeAdapter(ModelAgentProposal)
 _RUNTIME_PROPOSAL_ADAPTER = TypeAdapter(ModelRuntimeProposal)
 
@@ -773,19 +796,26 @@ class GatewayAgent:
     ) -> AgentProposal:
         if response.structured_output is None:
             raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+        raw_output = dict(response.structured_output)
+        legacy_service_offer_ids = raw_output.pop('service_offer_ids', [])
+        model_service_offer_ids = (
+            [item for item in legacy_service_offer_ids if isinstance(item, str)]
+            if isinstance(legacy_service_offer_ids, list)
+            else []
+        )
         try:
             if plan.schema_id == 'claimant.intake-patch.v1':
-                parsed: object = _V7_INTAKE_ADAPTER.validate_python(response.structured_output)
+                parsed: object = _V7_INTAKE_ADAPTER.validate_python(raw_output)
             elif plan.schema_id == 'claimant.external-offer.v1':
-                parsed = _V7_EXTERNAL_ADAPTER.validate_python(response.structured_output)
+                parsed = _V7_EXTERNAL_ADAPTER.validate_python(raw_output)
             elif plan.schema_id == 'claimant.evidence-action.v1':
-                parsed = _V7_EVIDENCE_ADAPTER.validate_python(response.structured_output)
+                parsed = _V7_EVIDENCE_ADAPTER.validate_python(raw_output)
             elif plan.schema_id == 'claimant.claim-creation.v1':
-                parsed = _V7_CREATION_ADAPTER.validate_python(response.structured_output)
+                parsed = _V7_CREATION_ADAPTER.validate_python(raw_output)
             elif plan.schema_id == 'claimant.sourced-summary.v1':
-                parsed = _V7_SOURCED_SUMMARY_ADAPTER.validate_python(response.structured_output)
+                parsed = _V7_SOURCED_SUMMARY_ADAPTER.validate_python(raw_output)
             else:
-                parsed = _V7_ANSWER_ADAPTER.validate_python(response.structured_output)
+                parsed = _V7_ANSWER_ADAPTER.validate_python(raw_output)
         except ValidationError:
             raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
 
@@ -825,17 +855,33 @@ class GatewayAgent:
                 _model_contents_item_change(item, evidence=context.evidence)
                 for item in parsed.contents_item_changes
             ]
-            service_offer_ids = parsed.service_offer_ids
-        elif isinstance(parsed, V7ExternalOfferProposal):
-            service_offer_ids = parsed.service_offer_ids
         elif isinstance(parsed, V7EvidenceActionProposal):
             evidence_id = parsed.evidence_id
             source_claim_id = parsed.source_claim_id
             removal_scope = parsed.removal_scope
 
         available_services = {item.service_identity for item in context.external_services}
-        if any(service_id not in available_services for service_id in service_offer_ids):
-            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+        service_offer_ids = [
+            service_id
+            for service_id in context.selected_external_service_ids
+            if service_id in available_services
+        ]
+        rejected_optional_ids = sorted(set(model_service_offer_ids) - set(service_offer_ids))
+        if rejected_optional_ids:
+            logger.info(
+                'agent_optional_capability_rejected',
+                extra={
+                    'claim_id': context.claim.claim_id,
+                    'session_id': context.session_id,
+                    'component': 'capability_selector',
+                    'internal_error_code': 'OPTIONAL_CAPABILITY_REJECTED',
+                    'selected_services': service_offer_ids,
+                    'rejected_count': len(rejected_optional_ids),
+                },
+            )
+        answer = answer.model_copy(
+            update={'reply': _truthful_external_reply(answer.reply, service_offer_ids)}
+        )
         if service_offer_ids and context.progress_reporter is not None:
             context.progress_reporter(
                 AgentTurnProgressStage.OFFER_PREPARING,
@@ -845,7 +891,7 @@ class GatewayAgent:
         action_code = 'conversation.answer'
         runtime_action = 'runtime.continue'
         status = 'continue_current_report'
-        if plan.route.task is TurnTask.EXTERNAL_SUPPORT:
+        if plan.route.task is TurnTask.EXTERNAL_SUPPORT and service_offer_ids:
             runtime_action = 'runtime.wait_for_user'
             status = 'external_service_consent_required'
         elif plan.route.task is TurnTask.CLAIM_CREATION:

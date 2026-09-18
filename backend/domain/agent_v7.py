@@ -20,11 +20,10 @@ class V7IntakeProposal(V7AnswerProposal):
         default_factory=list,
         max_length=30,
     )
-    service_offer_ids: list[str] = Field(default_factory=list, max_length=3)
 
 
 class V7ExternalOfferProposal(V7AnswerProposal):
-    service_offer_ids: list[str] = Field(min_length=1, max_length=3)
+    pass
 
 
 class V7EvidenceActionProposal(V7AnswerProposal):
