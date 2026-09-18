@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 from collections.abc import Callable
@@ -11,10 +12,12 @@ from fastapi.testclient import TestClient
 
 from backend.adapters.model_gateway import (
     BedrockConverseModelGateway,
+    GoogleGenerateContentModelGateway,
     ModelGatewayConfig,
     ModelGatewayRegistry,
     OpenAICompatibleModelGateway,
     _optional_cache_token_count,
+    default_model_gateway_registry,
 )
 from backend.app import create_app
 from backend.core.auth import Principal
@@ -25,6 +28,7 @@ from backend.domain.configuration import (
     ConfigurationImpact,
     ConfigurationRecord,
     ConfigurationState,
+    ModelRuntimeBinding,
     now_utc,
 )
 from backend.domain.external_service_registry import (
@@ -104,6 +108,7 @@ from backend.services.agent import (
 )
 from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 from backend.services.model_operations import ModelOperationsRecorder
+from backend.services.prompt_composer import load_response_schemas
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationResolver,
@@ -613,6 +618,96 @@ def test_openai_compatible_translates_optional_fields_to_strict_schema() -> None
     assert forbidden_items['additionalProperties'] is False
 
 
+def test_every_v7_schema_materializes_for_openai_and_bedrock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('TEST_V7_BEDROCK_TOKEN', 'synthetic-token')
+    schemas = load_response_schemas()
+    assert len(schemas) == 7
+
+    for schema_id, schema in schemas.items():
+        openai_payload: dict[str, object] = {}
+
+        def openai_handler(
+            request: httpx.Request,
+            target: dict[str, object] = openai_payload,
+        ) -> httpx.Response:
+            target.update(cast(dict[str, object], json.loads(request.content)))
+            return httpx.Response(
+                200,
+                json={'choices': [{'finish_reason': 'stop', 'message': {'content': '{}'}}]},
+            )
+
+        OpenAICompatibleModelGateway(
+            gateway_config(),
+            transport=httpx.MockTransport(openai_handler),
+        ).complete(
+            ModelRequest(
+                messages=[ModelMessage(role=ModelRole.USER, content=schema_id)],
+                response_schema=schema,
+                max_output_tokens=287,
+            )
+        )
+        response_format = cast(dict[str, object], openai_payload['response_format'])
+        strict_wrapper = cast(dict[str, object], response_format['json_schema'])
+        strict_schema = cast(dict[str, object], strict_wrapper['schema'])
+        assert strict_schema['additionalProperties'] is False
+        assert strict_schema['required'] == list(
+            cast(dict[str, object], strict_schema['properties'])
+        )
+        assert openai_payload['max_tokens'] == 287
+
+        bedrock_payload: dict[str, object] = {}
+
+        def bedrock_handler(
+            request: httpx.Request,
+            target: dict[str, object] = bedrock_payload,
+            current_schema_id: str = schema_id,
+        ) -> httpx.Response:
+            target.update(cast(dict[str, object], json.loads(request.content)))
+            return httpx.Response(
+                200,
+                json={
+                    'output': {
+                        'message': {
+                            'content': [
+                                {
+                                    'toolUse': {
+                                        'toolUseId': f'out-{current_schema_id}',
+                                        'name': 'northwind_agent_proposal',
+                                        'input': {},
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    'stopReason': 'tool_use',
+                },
+            )
+
+        BedrockConverseModelGateway(
+            gateway_config(
+                protocol='bedrock_converse',
+                credential_environment_variable='TEST_V7_BEDROCK_TOKEN',
+                tools=False,
+            ),
+            transport=httpx.MockTransport(bedrock_handler),
+        ).complete(
+            ModelRequest(
+                messages=[ModelMessage(role=ModelRole.USER, content=schema_id)],
+                response_schema=schema,
+                max_output_tokens=287,
+            )
+        )
+        tool_config = cast(dict[str, object], bedrock_payload['toolConfig'])
+        tool_spec = cast(
+            dict[str, object],
+            cast(list[dict[str, object]], tool_config['tools'])[0]['toolSpec'],
+        )
+        assert tool_spec['inputSchema'] == {'json': schema}
+        assert bedrock_payload['inferenceConfig'] == {'maxTokens': 287}
+
+
 def test_bedrock_converse_normalises_structured_response_and_usage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -782,6 +877,7 @@ def test_bedrock_converse_maps_provider_failures(
 
     assert captured.value.code is code
     assert captured.value.retryable is retryable
+    assert captured.value.provider_model == 'amazon.nova-2-lite-v1:0'
 
 
 @pytest.mark.parametrize(
@@ -928,6 +1024,7 @@ def test_bedrock_converse_maps_transport_failures(
 
     assert captured.value.code is code
     assert captured.value.retryable is True
+    assert captured.value.provider_model == 'northwind-test-model'
 
 
 def test_bedrock_converse_normalises_plain_text_and_metadata_request_id(
@@ -1017,6 +1114,687 @@ def test_bedrock_converse_rejects_malformed_provider_payloads(
         )
 
     assert captured.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+
+
+def test_google_generate_content_maps_structured_multimodal_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+    resolver = EvidenceResolver(b'png-bytes')
+    observed: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed['url'] = str(request.url)
+        observed['credential'] = request.headers.get('x-goog-api-key')
+        observed['payload'] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                'candidates': [
+                    {
+                        'finishReason': 'STOP',
+                        'content': {
+                            'role': 'model',
+                            'parts': [{'text': '{"answer":"assessment offered"}'}],
+                        },
+                    }
+                ],
+                'usageMetadata': {
+                    'promptTokenCount': 12,
+                    'candidatesTokenCount': 4,
+                    'thoughtsTokenCount': 2,
+                    'totalTokenCount': 18,
+                    'cachedContentTokenCount': 3,
+                },
+                'modelVersion': 'gemini-3.5-flash-lite-001',
+                'responseId': 'google-response-1',
+            },
+        )
+
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            base_url='https://generativelanguage.googleapis.com/v1beta',
+            model='gemini-3.5-flash-lite',
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+            image_input=True,
+            evidence_resolver=resolver,
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    schema = {
+        'type': 'object',
+        'properties': {'answer': {'type': 'string'}},
+        'required': ['answer'],
+    }
+    response = gateway.complete(
+        ModelRequest(
+            messages=[
+                ModelMessage(role=ModelRole.SYSTEM, content='Follow Northwind authority.'),
+                ModelMessage(
+                    role=ModelRole.USER,
+                    content_blocks=[
+                        ModelTextContent(text='Review this damage.'),
+                        ModelEvidenceContent(
+                            evidence_id='evd_google_image',
+                            media_type='image/png',
+                        ),
+                    ],
+                ),
+            ],
+            response_schema=schema,
+            max_output_tokens=200,
+            required_capabilities=ModelCapabilities(
+                structured_output=True,
+                image_input=True,
+            ),
+        )
+    )
+
+    assert observed['url'] == (
+        'https://generativelanguage.googleapis.com/v1beta/'
+        'models/gemini-3.5-flash-lite:generateContent'
+    )
+    assert observed['credential'] == 'synthetic-google-key'
+    payload = cast(dict[str, object], observed['payload'])
+    assert payload['systemInstruction'] == {'parts': [{'text': 'Follow Northwind authority.'}]}
+    contents = cast(list[dict[str, object]], payload['contents'])
+    parts = cast(list[dict[str, object]], contents[0]['parts'])
+    assert parts[0] == {'text': 'Review this damage.'}
+    assert parts[1] == {'inlineData': {'mimeType': 'image/png', 'data': 'cG5nLWJ5dGVz'}}
+    assert payload['generationConfig'] == {
+        'maxOutputTokens': 200,
+        'responseMimeType': 'application/json',
+        'responseJsonSchema': schema,
+    }
+    assert resolver.requests == [('evd_google_image', 'image/png')]
+    assert response.structured_output == {'answer': 'assessment offered'}
+    assert response.completion_status is ModelCompletionStatus.COMPLETE
+    assert response.provider_model == 'gemini-3.5-flash-lite-001'
+    assert response.provider_request_id == 'google-response-1'
+    assert response.usage == ModelUsage(
+        input_tokens=12,
+        output_tokens=6,
+        total_tokens=18,
+        cache_read_input_tokens=3,
+    )
+
+
+def test_google_generate_content_maps_function_call_and_result_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+    observed: list[dict[str, object]] = []
+    thought_signature = 'provider-private-signature-' + ('x' * 500)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(cast(dict[str, object], json.loads(request.content)))
+        if len(observed) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    'candidates': [
+                        {
+                            'finishReason': 'STOP',
+                            'content': {
+                                'parts': [
+                                    {
+                                        'functionCall': {
+                                            'name': 'context_resolve',
+                                            'args': {
+                                                'ref': 'policy:motor',
+                                                'selector': 'summary',
+                                            },
+                                        },
+                                        'thoughtSignature': thought_signature,
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            headers={'x-request-id': 'google-header-request'},
+            json={
+                'candidates': [
+                    {
+                        'finishReason': 'STOP',
+                        'content': {'parts': [{'text': '{"answer":"covered"}'}]},
+                    }
+                ]
+            },
+        )
+
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    tool = ModelTool(
+        name='context.resolve',
+        description='Resolve one bounded context reference.',
+        input_schema={'type': 'object'},
+    )
+    first = gateway.complete(
+        ModelRequest(
+            messages=[ModelMessage(role=ModelRole.USER, content='Check my policy.')],
+            tools=[tool],
+            required_tool_name='context.resolve',
+        )
+    )
+
+    assert len(first.tool_calls) == 1
+    assert first.tool_calls[0].call_id.startswith('model-call-')
+    assert len(first.tool_calls[0].call_id) <= 120
+    assert thought_signature not in first.tool_calls[0].call_id
+    encoded_signature = base64.urlsafe_b64encode(thought_signature.encode()).decode().rstrip('=')
+    assert encoded_signature not in first.tool_calls[0].call_id
+    assert first.tool_calls[0].name == 'context.resolve'
+    assert first.tool_calls[0].arguments == {
+        'ref': 'policy:motor',
+        'selector': 'summary',
+    }
+    assert observed[0]['toolConfig'] == {
+        'functionCallingConfig': {
+            'mode': 'ANY',
+            'allowedFunctionNames': ['context_resolve'],
+        }
+    }
+    schema = {'type': 'object', 'properties': {'answer': {'type': 'string'}}}
+    continuation_request = ModelRequest(
+        messages=[
+            ModelMessage(role=ModelRole.USER, content='Check my policy.'),
+            ModelMessage(role=ModelRole.ASSISTANT, tool_calls=first.tool_calls),
+            ModelMessage(
+                role=ModelRole.TOOL,
+                name='context.resolve',
+                tool_call_id=first.tool_calls[0].call_id,
+                content='{"result":"covered"}',
+            ),
+        ],
+        response_schema=schema,
+    )
+    continuation = gateway.complete(continuation_request)
+
+    continuation_contents = cast(list[dict[str, object]], observed[1]['contents'])
+    assert continuation_contents[1]['parts'] == [
+        {
+            'functionCall': {
+                'name': 'context_resolve',
+                'args': {'ref': 'policy:motor', 'selector': 'summary'},
+            },
+            'thoughtSignature': thought_signature,
+        }
+    ]
+    assert continuation_contents[2]['parts'] == [
+        {
+            'functionResponse': {
+                'name': 'context_resolve',
+                'response': {'result': 'covered'},
+            }
+        }
+    ]
+    assert continuation.structured_output == {'answer': 'covered'}
+    assert continuation.provider_request_id == 'google-header-request'
+
+    with pytest.raises(ModelGatewayError) as stale:
+        gateway.complete(continuation_request)
+    assert stale.value.code is ModelGatewayErrorCode.CONFIGURATION
+
+    another_exchange = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(ModelGatewayError) as missing:
+        another_exchange.complete(continuation_request)
+    assert missing.value.code is ModelGatewayErrorCode.CONFIGURATION
+    assert len(observed) == 2
+
+
+def test_google_exchange_keeps_long_continuation_state_out_of_runtime_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+    # Keep the formal v7 manifest while isolating this persistence regression from token budgets.
+    monkeypatch.setattr(
+        'backend.services.initial_runtime_release.load_fragment_contents',
+        lambda manifest: {
+            item.fragment_id: f'Follow {item.fragment_id}.' for item in manifest.fragments
+        },
+    )
+    thought_signature = 'provider-private-signature-' + ('x' * 500)
+    provider_call_id = 'provider-private-call-' + ('y' * 300)
+    observed: list[dict[str, object]] = []
+    exchanges: list[GoogleGenerateContentModelGateway] = []
+
+    def strings(value: object) -> list[str]:
+        if isinstance(value, str):
+            try:
+                decoded = json.loads(value)
+            except json.JSONDecodeError:
+                return [value]
+            return [value, *strings(decoded)]
+        if isinstance(value, list):
+            return [item for child in value for item in strings(child)]
+        if isinstance(value, dict):
+            return [item for child in value.values() for item in strings(child)]
+        return []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = cast(dict[str, object], json.loads(request.content))
+        observed.append(payload)
+        if len(observed) == 1:
+            references = [
+                value
+                for value in strings(payload)
+                if value.startswith('ctxref:') and value.endswith(':claim-history.customer')
+            ]
+            assert len(references) == 1, [value for value in strings(payload) if 'ctxref:' in value]
+            return httpx.Response(
+                200,
+                json={
+                    'candidates': [
+                        {
+                            'finishReason': 'STOP',
+                            'content': {
+                                'parts': [
+                                    {
+                                        'functionCall': {
+                                            'id': provider_call_id,
+                                            'name': 'context_resolve',
+                                            'args': {
+                                                'ref': references[0],
+                                                'selector': 'relevant_claims',
+                                                'max_tokens': 80,
+                                            },
+                                        },
+                                        'thoughtSignature': thought_signature,
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                'candidates': [
+                    {
+                        'finishReason': 'STOP',
+                        'content': {
+                            'parts': [
+                                {
+                                    'text': json.dumps(
+                                        {
+                                            'reply': 'No prior claims are available.',
+                                            'next_step': 'Continue the current report.',
+                                            'reason_codes': ['CLAIM_HISTORY_REPORTED'],
+                                        }
+                                    )
+                                }
+                            ]
+                        },
+                    }
+                ]
+            },
+        )
+
+    def build_exchange(config: ModelGatewayConfig) -> ModelGateway:
+        exchange = GoogleGenerateContentModelGateway(
+            config,
+            transport=httpx.MockTransport(handler),
+        )
+        exchanges.append(exchange)
+        return exchange
+
+    registry = ModelGatewayRegistry()
+    registry.register('google_generate_content', build_exchange)
+    repository = FixtureRepository()
+    headers = {'Authorization': 'Bearer synthetic-claimant'}
+    bindings = tuple(
+        ModelRuntimeBinding(
+            profile_id=profile_id,
+            protocol='google_generate_content',
+            provider='synthetic-google',
+            model_identifier='gemini-3.5-flash-lite',
+            base_url='https://generativelanguage.googleapis.com/v1beta',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+            purpose='agent_turn',
+            privacy_class='synthetic_fnol',
+            prompt_version='northwind-fnol-claimant-v7',
+            structured_output=True,
+            tools=True,
+        )
+        for profile_id in (
+            'qwen-local',
+            'nowcoding-gpt55',
+            'google-gemini35-flash-lite',
+        )
+    )
+    settings = replace(
+        model_gateway_settings('google_generate_content'),
+        model_profile_id='google-gemini35-flash-lite',
+        model_supports_tools=True,
+        model_runtime_bindings=bindings,
+    )
+
+    with TestClient(
+        create_app(
+            settings,
+            repository=repository,
+            model_gateway_registry=registry,
+        ),
+        raise_server_exceptions=False,
+    ) as client:
+        created = client.post(
+            '/api/v1/claims',
+            headers={**headers, 'Idempotency-Key': 'google-exchange-claim'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+        )
+        assert created.status_code == 201
+        claim_id = created.json()['claim']['claim_id']
+        session_id = created.json()['session']['session_id']
+        claim = repository.get_claim(claim_id, 'cus_demo')
+        assert claim is not None
+        exchanges.clear()
+
+        response = client.post(
+            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+            headers={
+                **headers,
+                'Idempotency-Key': 'google-exchange-message',
+                'If-Match': str(claim.revision),
+            },
+            json={
+                'client_message_id': 'google-exchange-client-message',
+                'content': {
+                    'type': 'text',
+                    'text': 'Previous claims? Motor.',
+                },
+                'evidence_refs': [],
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    assert len(exchanges) == 1
+    assert len(observed) == 2
+    continuation_payload = json.dumps(observed[1], sort_keys=True)
+    assert thought_signature in continuation_payload
+    assert provider_call_id in continuation_payload
+    trigger_message_id = response.json()['claimant_message']['message_id']
+    trace = repository.find_runtime_trace_for_trigger(claim_id, trigger_message_id, 'cus_demo')
+    runtime_turn = repository.get_runtime_turn_for_trigger(
+        claim_id,
+        trigger_message_id,
+        'cus_demo',
+    )
+    assert trace is not None
+    assert runtime_turn is not None
+    assert len(runtime_turn.tool_results) == 1
+    tool_result = runtime_turn.tool_results[0]
+    assert trace.tool_call_id == tool_result.tool_call_id
+    assert trace.tool_call_id is not None
+    assert trace.tool_call_id.startswith('model-call-')
+    assert len(trace.tool_call_id) <= 120
+    persisted = json.dumps(
+        {
+            'trace': trace.model_dump(mode='json'),
+            'runtime_turn': runtime_turn.model_dump(mode='json'),
+        },
+        sort_keys=True,
+    )
+    assert thought_signature not in persisted
+    assert provider_call_id not in persisted
+    assert 'gemini-continuation.' not in persisted
+    encoded_signature = base64.urlsafe_b64encode(thought_signature.encode()).decode().rstrip('=')
+    assert encoded_signature not in persisted
+
+
+@pytest.mark.parametrize(
+    ('status_code', 'code', 'retryable'),
+    [
+        (401, ModelGatewayErrorCode.AUTHENTICATION, False),
+        (408, ModelGatewayErrorCode.TIMEOUT, True),
+        (429, ModelGatewayErrorCode.RATE_LIMIT, True),
+        (500, ModelGatewayErrorCode.PROVIDER, True),
+        (400, ModelGatewayErrorCode.PROVIDER, False),
+    ],
+)
+def test_google_generate_content_maps_provider_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+    code: ModelGatewayErrorCode,
+    retryable: bool,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+        transport=httpx.MockTransport(lambda _: httpx.Response(status_code)),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(messages=[ModelMessage(role=ModelRole.USER, content='Synthetic input.')])
+        )
+
+    assert captured.value.code is code
+    assert captured.value.retryable is retryable
+    assert captured.value.provider_model == 'northwind-test-model'
+
+
+def test_google_generate_content_normalises_a_blocked_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={
+                    'candidates': [],
+                    'promptFeedback': {'blockReason': 'SAFETY'},
+                    'modelVersion': 'gemini-3.5-flash-lite',
+                    'responseId': 'blocked-response',
+                },
+            )
+        ),
+    )
+
+    response = gateway.complete(
+        ModelRequest(messages=[ModelMessage(role=ModelRole.USER, content='Synthetic input.')])
+    )
+
+    assert response.completion_status is ModelCompletionStatus.REFUSED
+    assert response.finish_reason == 'SAFETY'
+    assert response.provider_request_id == 'blocked-response'
+
+
+@pytest.mark.parametrize(
+    'credential_name',
+    [None, 'MISSING_GEMINI_API_KEY'],
+    ids=['missing-reference', 'missing-environment-value'],
+)
+def test_google_generate_content_requires_an_environment_owned_credential(
+    monkeypatch: pytest.MonkeyPatch,
+    credential_name: str | None,
+) -> None:
+    monkeypatch.delenv('MISSING_GEMINI_API_KEY', raising=False)
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable=credential_name,
+        )
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(messages=[ModelMessage(role=ModelRole.USER, content='Synthetic input.')])
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
+    assert 'MISSING_GEMINI_API_KEY' not in str(captured.value)
+
+
+@pytest.mark.parametrize(
+    ('transport_error', 'code'),
+    [
+        (httpx.ReadTimeout('Synthetic timeout.'), ModelGatewayErrorCode.TIMEOUT),
+        (httpx.ConnectError('Synthetic connection failure.'), ModelGatewayErrorCode.PROVIDER),
+    ],
+    ids=['timeout', 'request-error'],
+)
+def test_google_generate_content_maps_transport_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    transport_error: httpx.RequestError,
+    code: ModelGatewayErrorCode,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        transport_error.request = request
+        raise transport_error
+
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(messages=[ModelMessage(role=ModelRole.USER, content='Synthetic input.')])
+        )
+
+    assert captured.value.code is code
+    assert captured.value.retryable is True
+    assert captured.value.provider_model == 'northwind-test-model'
+
+
+@pytest.mark.parametrize(
+    ('model_request', 'structured_output', 'tools'),
+    [
+        (
+            ModelRequest(
+                messages=[ModelMessage(role=ModelRole.USER, content='Return JSON.')],
+                response_schema={'type': 'object'},
+            ),
+            False,
+            True,
+        ),
+        (
+            ModelRequest(
+                messages=[ModelMessage(role=ModelRole.USER, content='Use a tool.')],
+                tools=[ModelTool(name='context.resolve', description='Resolve.', input_schema={})],
+            ),
+            True,
+            False,
+        ),
+    ],
+    ids=['structured-output', 'tools'],
+)
+def test_google_generate_content_rejects_undeclared_capabilities(
+    model_request: ModelRequest,
+    structured_output: bool,
+    tools: bool,
+) -> None:
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='UNUSED_GEMINI_API_KEY',
+            structured_output=structured_output,
+            tools=tools,
+        )
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(model_request)
+
+    assert captured.value.code is ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
+
+
+def test_google_generate_content_rejects_a_malformed_provider_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=[])),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(messages=[ModelMessage(role=ModelRole.USER, content='Synthetic input.')])
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+    assert captured.value.provider_model == 'northwind-test-model'
+
+
+@pytest.mark.parametrize(
+    'tool_content',
+    [None, 'not-json', '[]'],
+    ids=['missing-content', 'invalid-json', 'non-object-json'],
+)
+def test_google_generate_content_rejects_an_invalid_tool_result(
+    monkeypatch: pytest.MonkeyPatch,
+    tool_content: str | None,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+        transport=httpx.MockTransport(lambda _: httpx.Response(500)),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(
+                messages=[
+                    ModelMessage(
+                        role=ModelRole.TOOL,
+                        name='context.resolve',
+                        tool_call_id='provider-call-1',
+                        content=tool_content,
+                    )
+                ]
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
+
+
+def test_default_model_gateway_registry_constructs_google_adapter() -> None:
+    gateway = default_model_gateway_registry().create(
+        'google_generate_content',
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+    )
+
+    assert isinstance(gateway, GoogleGenerateContentModelGateway)
 
 
 def test_openai_compatible_gateway_normalises_tool_calls() -> None:
@@ -1297,6 +2075,7 @@ def test_timeout_and_malformed_responses_are_normalised() -> None:
         timeout_gateway.complete(ModelRequest(messages=[]))
     assert timeout_error.value.code is ModelGatewayErrorCode.TIMEOUT
     assert timeout_error.value.retryable is True
+    assert timeout_error.value.provider_model == 'northwind-test-model'
 
     malformed_gateway = OpenAICompatibleModelGateway(
         gateway_config(),
@@ -1305,6 +2084,7 @@ def test_timeout_and_malformed_responses_are_normalised() -> None:
     with pytest.raises(ModelGatewayError) as malformed_error:
         malformed_gateway.complete(ModelRequest(messages=[]))
     assert malformed_error.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+    assert malformed_error.value.provider_model == 'northwind-test-model'
 
     oversized_provenance_gateway = OpenAICompatibleModelGateway(
         gateway_config(),
@@ -2554,6 +3334,11 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
     assert operation.result is not None
     assert operation.result == {
         'purpose': 'agent_turn',
+        'model_profile_id': 'qwen-local',
+        'prompt_version': 'northwind-fnol-claimant-v6',
+        'request_stage': 'initial',
+        'invocation_ordinal': 1,
+        'invocation_count': 1,
         'provider_model': 'provider-model-private',
         'input_tokens': 30,
         'output_tokens': 10,

@@ -272,10 +272,12 @@ They are operational records only; they cannot mutate Claim State, WorkItems, ha
 or configuration values. The operation list supports bounded filters and cursor-shaped responses.
 
 Each claimant or staff model call creates a `model_invocation` operation. Its bounded result contains
-the model purpose, provider-reported model identifier when available, nullable input/output/total
-token counts, and measured latency in milliseconds. Controlled failures use a stable `MODEL_*`
-error code. The record never contains prompts, credentials, provider request payloads, raw provider
-responses, or claimant message content.
+the model purpose, requested model profile, prompt version, request stage, invocation ordinal and
+count, configured or provider-reported model identifier, nullable input/output/total token counts,
+and measured latency in milliseconds. A transport failure records the configured model identifier
+even when the provider never returns usage or provenance. Controlled failures use a stable
+`MODEL_*` error code. The record never contains prompts, credentials, provider request payloads,
+raw provider responses, or claimant message content.
 
 `GET /internal/v1/admin/operations/metrics` aggregates the complete persisted operation ledger. Its
 response contains `total`, `by_state`, `by_kind`, model `usage`, `cost`, `rate_limit`, `alerts`, and
@@ -323,10 +325,10 @@ AGENT_CONFIGURATION_INVALID`.
 
 | Component path | Configuration domain | Required `values` fields |
 | --- | --- | --- |
-| `instructions` | `agent_instruction` | `prompt_version`, `purpose` (`claimant_agent`), and `system_prompt` |
-| `tool_permissions` | `agent_tool_policy` | `policy_version`, `allowed_action_codes`, and `allowed_tool_names` |
-| `controlled_rules` | `agent_rule` | `rules_version`, `disabled_rule_ids`, and `observation_rule_ids` |
-| `features` | `feature` | `feature_version`, `model_assisted_turns`, and `knowledge_retrieval` |
+| `instructions` | `agent_instruction` | `prompt_version`, `purpose`, `composition_mode`, `manifest_version`, and embedded `fragments` for v7 |
+| `tool_permissions` | `agent_tool_policy` | `policy_version`, action/tool allow-lists, Request Profiles, provider capabilities, and schema registry |
+| `controlled_rules` | `agent_rule` | `rules_version`, protected overlays, route/catalogue versions, deterministic responses, and context budget |
+| `features` | `feature` | `feature_version`, model/retrieval switches, v7 feature flags, and cache layout version |
 
 The tool policy can only restrict server-registered actions and tools. It must retain
 `conversation.state_limitation`, `human.create_handoff`, `runtime.fail_safe`,
@@ -439,13 +441,15 @@ credential field contains only an
 environment-variable name; the secret itself remains outside the configuration record. Every
 model configuration must declare `impact=high`; an omitted or normal impact returns `422
 PROVIDER_CONFIGURATION_INVALID` and cannot enter the lifecycle. Model validation permits
-publication only when `evaluation_status` is `configured`; profile ID, provider, model identifier,
-protocol, base URL, credential environment-variable name, purpose, privacy class, executable
-prompt identifier, and capabilities match one exact entry in the deployment-owned model binding
-allow-list. The allow-list does not publish a model; the independently approved configuration and
-active Release Set remain the selectable-catalogue authority. The current executable prompt
-identifier is `northwind-fnol-claimant-v6`. A
-degraded, unavailable, deployment-mismatched, or Runtime-incompatible profile returns `422
+publication only when the complete configuration, including `evaluation_status`, matches one
+deployment-owned binding. A `configured` profile is selectable; a published `degraded` or
+`unavailable` profile remains visible but cannot be selected or sent to provider transport.
+Profile ID, provider, model identifier, protocol, base URL, credential environment-variable name,
+purpose, privacy class, executable prompt identifier, and capabilities must match one exact entry
+in the deployment-owned model binding allow-list. The allow-list does not publish a model; the
+independently approved configuration and active Release Set remain the selectable-catalogue
+authority. The current executable prompt identifier is `northwind-fnol-claimant-v7`. A
+deployment-mismatched, status-mismatched, or Runtime-incompatible profile returns `422
 PROVIDER_CONFIGURATION_UNAVAILABLE` and remains a draft. Other invalid or incomplete model values
 return `422 PROVIDER_CONFIGURATION_INVALID`.
 
@@ -1180,6 +1184,7 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `POST` | `/claims/{claim_id}/sessions/{session_id}/messages` | Submit a message and execute one agent turn |
 | `GET` | `/claims/{claim_id}/sessions/{session_id}/messages` | Read paginated claimant-visible messages |
 | `GET` | `/claims/{claim_id}/sessions/{session_id}/events` | Stream claimant-safe Claim and conversation change notifications |
+| `GET` | `/realtime/events` | Open the claimant's multiplexed durable-event stream |
 | `PATCH` | `/claims/{claim_id}/form` | Correct or update structured fields |
 | `POST` | `/claims/{claim_id}/form/confirmations` | Confirm selected material fields |
 | `POST` | `/claims/{claim_id}/creation` | Create an external claim after deterministic validation |
@@ -1205,6 +1210,9 @@ published and configured, otherwise the first available published profile) and e
 profile's stable ID, provider model label, protocol, structured-output capability, tool-call
 capability, image-input capability, document-input capability, and `availability`. The frontend uses the default when creating a Session, while a
 message may select another published and available profile in the same conversation.
+The repository initial catalogue publishes `qwen-local`, `nowcoding-gpt55`,
+`google-gemini35-flash-lite`, and the explicitly unavailable `bedrock-nova2-lite`; deployment
+selection keeps `qwen-local` as the default unless `MODEL_PROFILE_ID` changes.
 
 ### `POST /api/v1/claims`
 
@@ -1437,11 +1445,13 @@ structured form fact or contents item attributed to an attachment must name that
 ID. It is persisted with `image` or `document` provenance and remains `proposed` for claimant
 confirmation.
 
-On the target namespaced Runtime path the model must first call `claim.read`. The Runtime executes
-the read against the authenticated Claim, sends the assistant tool call and result back to the
-same model, and accepts only a registered `action_code` and `runtime_action_code` pairing. An
-unknown directive such as `runtime.confirm_claimant_facts`, a deprecated flat action, or an
-invalid pairing is rejected before Claim State mutation.
+On the v7 Runtime path, Runtime builds the current Claim projection before transport. Ordinary
+profiles make one tool-free call. A lookup profile can resolve one published turn-scoped
+`context.resolve` reference and make one continuation call; the continuation exposes no tools.
+Policy/RAG, claimant-owned Claim history, claimant-scoped Evidence history, and older messages use
+separate bounded selectors. PDF, multi-Evidence, and cross-Claim review use one isolated,
+mutation-incapable request. Unknown, stale, cross-scope, recursive, or malformed references are
+rejected before Claim State mutation.
 The validated proposal is then applied through the ordinary revision-checked Claim transaction.
 The response includes the resulting Claim revision and compatibility decision projection, while
 the distinct TurnPlan, AgentProposal, ExecutionPlan, ActionEnvelope, ToolResult, TurnResult, and
@@ -1566,9 +1576,11 @@ Returns claimant-visible messages ordered newest-last by default. Supported quer
 
 Opens a `text/event-stream` connection for the authenticated claimant or the browser's current
 anonymous claimant session. The Claim and session ownership checks are identical to the ordinary
-claimant read boundary. `after_revision` is the last Claim revision already applied by the client;
-the server rejects a cursor newer than the current Claim with `409 INVALID_EVENT_CURSOR` and the
-current revision.
+claimant read boundary. This compatibility route retains `after_revision` and the `claim.updated`
+wire shape for the current claimant client, but its event source is the process-level realtime
+dispatcher. It performs no per-connection repository polling. The server rejects a revision newer
+than the current Claim with `409 INVALID_EVENT_CURSOR` and the current revision. New clients use
+the multiplexed route below and reconnect with its opaque event cursor.
 
 When shared Claim State advances, the stream emits `claim.updated`:
 
@@ -1581,9 +1593,67 @@ data: {"event_id":"4","claim_id":"clm_01J4Y7Q2AW","session_id":"ses_01J4Y7RPN8",
 This event is a resource hint, not a second Claim projection. It contains no messages, handoff
 packet, internal signals, staff identity, model metadata, or hidden reasoning. After receiving it,
 the claimant client reloads `GET /claims/{claim_id}` and the active session's message list through
-their existing visibility-filtered endpoints. Reconnection sends the last applied Claim revision,
-so changes missed while disconnected are recovered. The server sends comment-only keep-alives;
-clients ignore them and reconnect with bounded backoff if the transport closes.
+their existing visibility-filtered endpoints. The server sends comment-only keep-alives; clients
+ignore them and reconnect with bounded backoff if the transport closes. This route is a migration
+compatibility boundary, not a second event store.
+
+### `GET /api/v1/realtime/events`
+
+Opens one claimant-scoped, multiplexed `text/event-stream` for all Claims owned by the
+authenticated customer. `GET /api/v1/workbench/realtime/events` provides the corresponding staff
+stream. Both accept the last acknowledged opaque cursor in `Last-Event-ID` or the `cursor` query
+parameter; the header takes precedence. A connection without a cursor receives future events only.
+The legacy Claim stream above is separate: its `Last-Event-ID` is the emitted non-negative Claim
+revision, not this multiplexed opaque cursor.
+
+The normal delivery is `resources.changed`:
+
+```text
+id: eyJvY2N1cnJlZF9hdCI6IjIwMjYtMDktMTZUMTA6MDA6MDBaIiwiZXZlbnRfaWQiOiJydGVfMDEyMzQ1Njc4OWFiY2RlZjAxMjMifQ
+event: resources.changed
+data: {"event_id":"rte_0123456789abcdef0123","claim_id":"clm_01J4Y7Q2AW","claim_revision":7,"operation_correlation":"submit-message-7","resources":["claim","messages"],"occurred_at":"2026-09-16T10:00:00Z"}
+```
+
+The payload is invalidation metadata only. It never contains Claim fields, message content,
+Evidence bytes, handoff packets, external-provider payloads, model context, or secrets. A client
+refetches only the named resources through existing authoritative, visibility-filtered APIs. Staff
+receive all permitted resource hints. Claimants receive only their own customer events, and an
+`internal_only` message, queue/WorkItem hint, or operation correlation never appears in their
+delivery.
+
+`resources[]` uses public refresh boundaries, not persistence record names:
+
+| Resource | Authoritative reads to refresh |
+| --- | --- |
+| `claim` | claimant Claim; Workbench Claim, fields, and sessions |
+| `messages` | claimant or Workbench session messages |
+| `evidence` | claimant or Workbench Evidence |
+| `handoffs` | claimant `GET /api/v1/claims/{claim_id}`; staff `GET /api/v1/workbench/claims/{claim_id}/handoffs` |
+| `work_items` | Workbench staff actions and Runtime WorkItems |
+| `external_tasks` | claimant `GET /api/v1/claims/{claim_id}`; staff `GET /api/v1/workbench/claims/{claim_id}/external-requests` |
+| `asset_snapshots` | claimant or Workbench Claim Asset snapshots |
+| `collaboration_requests` | Workbench collaboration requests |
+| `customer_updates` | Workbench customer updates |
+| `signals` | Workbench signals and decisions |
+| `queue` | Workbench list, search, ownership, priority, and queue projection |
+
+The mapping is audience-specific: clients must use only the route listed for their authenticated
+role. The claimant Claim response is the visibility-filtered authoritative projection for both
+`handoffs` and `external_tasks`. When one event contains either or both hints, a claimant client
+deduplicates the route and performs one `GET /api/v1/claims/{claim_id}` refresh. Staff clients refresh
+the separate Workbench handoff and external-request routes named above.
+
+Reconnect replays events strictly after the acknowledged cursor. Duplicate or older deliveries are
+discarded. Process startup anchors at the current durable high watermark, while browser reconnect
+replay remains anchored at the browser's acknowledged cursor. The dispatcher drains the durable
+sequence across Change Stream restart, so a temporary wake-up-source failure does not by itself
+interrupt clients. During startup, gap recovery, stopping, or an unavailable dispatcher, a newly
+arriving stream receives `resync_required` instead of entering an uncovered live window. An invalid or
+unavailable client cursor returns `409 INVALID_EVENT_CURSOR`; a replay window larger than the
+bounded server window, subscriber queue overflow, unavailable durable store, or detected internal
+durable-anchor gap emits `resync_required` with a bounded reason and closes that stream. The client
+then reloads its authoritative snapshots before reconnecting without the stale cursor. A 15-second
+comment heartbeat keeps an otherwise idle transport open and carries no state.
 
 ### `PATCH /api/v1/claims/{claim_id}/form`
 
@@ -2184,6 +2254,7 @@ Returns staff and system updates visible to the claimant. Each update includes `
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/workbench/claims` | Query queue projections and filters |
+| `GET` | `/workbench/realtime/events` | Open the staff multiplexed durable-event stream |
 | `GET` | `/workbench/staff/online` | Read a paginated page of currently claimable online staff |
 | `GET` | `/workbench/staff/presence` | Read the authenticated staff member's presence lease |
 | `PATCH` | `/workbench/staff/presence` | Heartbeat or change the authenticated staff member's presence |
@@ -2484,14 +2555,16 @@ large resources are loaded from the dedicated sub-resources below:
 A terminal external failure is classified `required_now` with `claims_professional` responsibility
 and the blocked requested action, so it becomes `work_summary.primary_blocker`: the contract
 requires Northwind to review such a request before another attempt, and waiting on the external
-party is not what happens next. Every other external state stays `follow_up` owned by the external
+party is not what happens next. A retryable external failure stays `follow_up` but is owned by the
+claimant, who owns the retry. Every other external state stays `follow_up` owned by the external
 party. No second item is created for the same task.
 
 `integration_summary.waiting_external_services`, and the `external_wait_count` derived from it,
 exclude a task whose provider result has been received. A result is separate from task status, so
 the task remains `accepted`; counting it as waiting would tell staff the claim is waiting on the
 external party while the same claim's external-request lifecycle reports that the result requires
-their review.
+their review. They also exclude a `retryable_failure` task: no answer is on its way, and the
+claimant owns the retry.
 
 On the Claim-detail response only, `integration_summary.claim_number` and
 `integration_summary.expected_by` project the authoritative persisted
@@ -2503,7 +2576,10 @@ invented from a client-side SLA or fixture convention. The queue-list response r
 staff must open Claim detail to read those two result fields. Claim creation remains owned by the
 existing integration boundary.
 
-`section_summaries` reports availability, counts, and attention totals. Complete records are loaded
+`section_summaries` reports availability, counts, and attention totals. The `external_services`
+attention total counts the tasks whose external-request lifecycle has `needs_attention` true, so it
+always agrees with the lifecycle rows. When those rows cannot be projected safely, the section is
+`unavailable` with the same limitation as the external-requests endpoint. Complete records are loaded
 only when staff opens a section:
 
 | Section | Endpoint |
@@ -2599,6 +2675,14 @@ completes a task-linked `external_reconciliation` StaffAction, stores the actor-
 response, and advances the Claim revision. An inconclusive check remains `unknown_outcome` and
 writes none of that bundle. Stale revision, unavailable staff, another owner, missing exact action,
 or changed idempotency input returns a structured conflict before settlement.
+
+A `retryable_failure` has no staff recovery action, because the claimant owns the retry. The
+claimant projection keeps `can_request` true with the claimant as the next-step responsible party,
+and the external-request lifecycle for that task agrees: `pending_owner` is `claimant` and
+`needs_attention` is false. The server projects neither `external.accept_review` nor
+`external.reconcile_response` for it, and the state requires no staff queue entry. The Claim detail
+agrees as well: the task adds nothing to the `external_services` attention total or to
+`waiting_external_services`, and its missing-information item names the claimant.
 
 ### `POST /api/v1/workbench/claims/{claim_id}/reopen`
 
@@ -3128,9 +3212,9 @@ A target `TurnPlan` may contain multiple detected intents, conversation moves,
 content-branch candidates, form-patch proposals, Claim-command proposals, tool requests,
 unresolved work, and limitations, with one primary Runtime control directive.
 
-The claimant message route implements the applied target slice: `claim.read` is executed against
-the authenticated Claim, the same model receives the tool result, and the final namespaced
-proposal is validated and persisted atomically with Claim State, messages, branch evaluation,
+The claimant message route implements the applied v7 slice: Runtime selects one published profile,
+composes the Prompt fragments and context under budget, optionally resolves one bounded read-only
+reference, and validates the resulting narrow proposal. The result is persisted atomically with Claim State, messages, branch evaluation,
 Runtime records, WorkItems, and idempotency. The public response remains claimant-safe and keeps
 the compatibility decision projection while internal target records are available only through
 authorised repository boundaries.
@@ -3852,6 +3936,10 @@ or staff routes. Capability and failure semantics are documented in
 Authenticated account sessions own reusable assets. A concealed `404` is returned for an asset
 or Claim outside the authenticated customer boundary.
 
+All account Asset routes and the claimant Claim selection/snapshot routes require a real
+authenticated claimant account session. Development-only synthetic claimant bearer identities
+cannot read or select account Assets. The Workbench snapshot route remains staff-authenticated.
+
 | Method and route | Contract |
 | --- | --- |
 | `POST /api/v1/account/assets` | Create a typed vehicle, property, or contents asset. Requires `Idempotency-Key`; returns `201`. |
@@ -3868,7 +3956,9 @@ Asset identifiers use `ase_`; snapshots use `cas_`. Asset records contain `asset
 projection omits `customer_id` and all physical storage/provider metadata. Assets do not accept
 claimant-supplied policy text. A durable Policy association requires the future account-owned
 `pol_` Policy Summary contract and ownership/status validation; it is not implemented by these
-routes.
+routes. Reusable contents details are limited to description, category, brand, and model. Serial
+number and value are not part of the Asset or Claim asset snapshot contract; any future restricted
+ContentsItem projection belongs to #922.
 
 Selection returns `claim_id`, resulting `revision`, the exact `proposed_fields`, and the
 immutable snapshot. It never silently confirms a field. A later asset update/deactivation does
@@ -3887,19 +3977,6 @@ INVALID_STATE_TRANSITION`; no Claim, snapshot, Branch Evaluation, idempotency, o
 performed. Asset create, update, and soft-deactivate atomically persist one Asset-scoped audit
 fact. Selection atomically persists one Claim-scoped audit fact with the resulting revision. Audit
 facts retain only bounded identities and source references, not copied Asset details.
-
-### Target child-resource boundaries
-
-These governed target routes are owned by later #917 children and are not implementation claims
-for this PR: `/api/v1/account/identity-records`, `/api/v1/account/payment-destinations`,
-`/api/v1/account/policies`, `/api/v1/claims/{claim_id}/participants`,
-`/api/v1/claims/{claim_id}/contents-items/{item_id}/evidence-associations`, and
-`/api/v1/claims/{claim_id}/mitigations`. Account resources require an authenticated account
-session; Claim resources require Claim ownership or staff task authority. Create operations use
-`Idempotency-Key`; mutations use numeric `If-Match`; lists are cursor-paginated. Protected writes
-accept sensitive values at a dedicated boundary, store only an adapter protected reference in
-the ordinary record, and return only the masked projection. Authorization occurs before
-existence disclosure.
 
 ## Persistence and Provider Boundary
 

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 from backend.core.errors import ApiError
 from backend.domain.agent_action_registry import action_contract
+from backend.domain.agent_context_runtime import VerifiedConversationSummary
 from backend.domain.intake import infer_controlled_product_family, next_requirement_field
 from backend.domain.knowledge import KnowledgeChunk
 from backend.domain.models import (
@@ -273,6 +275,12 @@ class AgentTurnContext:
     knowledge_limitations: tuple[str, ...] = ()
     provenance_messages: tuple[MessageRecord, ...] = ()
     conversation_messages: tuple[MessageRecord, ...] = ()
+    older_message_loader: Callable[[int], tuple[MessageRecord, ...]] | None = None
+    policy_context_loader: Callable[[int], dict[str, object]] | None = None
+    knowledge_context_loader: Callable[[int], dict[str, object]] | None = None
+    claim_history_context_loader: Callable[[int], dict[str, object]] | None = None
+    evidence_history_context_loader: Callable[[int], dict[str, object]] | None = None
+    rolling_summary: VerifiedConversationSummary | None = None
     runtime_configuration_snapshot: RuntimeConfigurationSnapshot | None = None
     runtime_policy: RuntimeAgentPolicySnapshot | None = None
     external_services: tuple[ExternalServiceLifecycleProjection, ...] = ()

@@ -117,6 +117,7 @@ services:
       MODEL_RUNTIME_BINDINGS_PATH: /app/config/model-runtime-bindings.json
       NORTHWIND_QWEN_BASE_URL: ${NORTHWIND_QWEN_BASE_URL:-}
       NORTHWIND_MODEL_API_KEY: ${NORTHWIND_MODEL_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     ports:
       - "8000:8000"
     volumes:

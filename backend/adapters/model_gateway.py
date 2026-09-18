@@ -5,6 +5,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import quote
+from uuid import uuid4
 
 import httpx
 
@@ -59,6 +60,14 @@ class ModelGatewayConfig:
             or self.profile.timeout_seconds != self.timeout_seconds
         ):
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+
+
+@dataclass(frozen=True, slots=True)
+class _GoogleToolContinuation:
+    """Provider-only state retained for one turn-scoped model exchange."""
+
+    provider_call_id: str | None
+    thought_signature: str | None
 
 
 ModelGatewayFactory = Callable[[ModelGatewayConfig], ModelGateway]
@@ -180,16 +189,27 @@ class OpenAICompatibleModelGateway:
             ) as client:
                 response = client.post('chat/completions', json=self._request_payload(request))
         except httpx.TimeoutException:
-            raise ModelGatewayError(ModelGatewayErrorCode.TIMEOUT, retryable=True) from None
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.TIMEOUT,
+                retryable=True,
+                provider_model=self._config.model,
+            ) from None
         except httpx.RequestError:
-            raise ModelGatewayError(ModelGatewayErrorCode.PROVIDER, retryable=True) from None
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.PROVIDER,
+                retryable=True,
+                provider_model=self._config.model,
+            ) from None
 
         self._raise_for_status(response.status_code)
         try:
             payload = response.json()
             return self._normalise_response(payload, request, response.headers)
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                provider_model=self._config.model,
+            ) from None
 
     def _validate_capabilities(self, request: ModelRequest) -> None:
         _validate_request_profile(self._config, request)
@@ -263,6 +283,8 @@ class OpenAICompatibleModelGateway:
             'model': self._config.model,
             'messages': messages,
         }
+        if request.max_output_tokens is not None:
+            payload['max_tokens'] = request.max_output_tokens
         if request.response_schema is not None:
             payload['response_format'] = {
                 'type': 'json_schema',
@@ -361,17 +383,24 @@ class OpenAICompatibleModelGateway:
             normalised['additionalProperties'] = False
         return normalised
 
-    @staticmethod
-    def _raise_for_status(status_code: int) -> None:
+    def _raise_for_status(self, status_code: int) -> None:
         if status_code < 400:
             return
         if status_code in {401, 403}:
-            raise ModelGatewayError(ModelGatewayErrorCode.AUTHENTICATION)
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.AUTHENTICATION,
+                provider_model=self._config.model,
+            )
         if status_code == 429:
-            raise ModelGatewayError(ModelGatewayErrorCode.RATE_LIMIT, retryable=True)
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.RATE_LIMIT,
+                retryable=True,
+                provider_model=self._config.model,
+            )
         raise ModelGatewayError(
             ModelGatewayErrorCode.PROVIDER,
             retryable=status_code >= 500,
+            provider_model=self._config.model,
         )
 
     @staticmethod
@@ -532,6 +561,8 @@ class BedrockConverseModelGateway:
 
         system, messages = self._request_messages(request)
         payload: dict[str, object] = {'messages': messages}
+        if request.max_output_tokens is not None:
+            payload['inferenceConfig'] = {'maxTokens': request.max_output_tokens}
         if system:
             payload['system'] = [{'text': system}]
         if request.response_schema is not None:
@@ -565,16 +596,27 @@ class BedrockConverseModelGateway:
                     json=payload,
                 )
         except httpx.TimeoutException:
-            raise ModelGatewayError(ModelGatewayErrorCode.TIMEOUT, retryable=True) from None
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.TIMEOUT,
+                retryable=True,
+                provider_model=self._config.model,
+            ) from None
         except httpx.RequestError:
-            raise ModelGatewayError(ModelGatewayErrorCode.PROVIDER, retryable=True) from None
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.PROVIDER,
+                retryable=True,
+                provider_model=self._config.model,
+            ) from None
 
         self._raise_for_status(response.status_code)
         try:
             payload = response.json()
             return self._normalise_response(payload, request, response.headers)
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                provider_model=self._config.model,
+            ) from None
 
     def _validate_capabilities(self, request: ModelRequest) -> None:
         _validate_request_profile(self._config, request)
@@ -623,17 +665,24 @@ class BedrockConverseModelGateway:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
         return '\n\n'.join(system_parts), messages
 
-    @staticmethod
-    def _raise_for_status(status_code: int) -> None:
+    def _raise_for_status(self, status_code: int) -> None:
         if status_code < 400:
             return
         if status_code in {401, 403}:
-            raise ModelGatewayError(ModelGatewayErrorCode.AUTHENTICATION)
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.AUTHENTICATION,
+                provider_model=self._config.model,
+            )
         if status_code == 429:
-            raise ModelGatewayError(ModelGatewayErrorCode.RATE_LIMIT, retryable=True)
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.RATE_LIMIT,
+                retryable=True,
+                provider_model=self._config.model,
+            )
         raise ModelGatewayError(
             ModelGatewayErrorCode.PROVIDER,
             retryable=status_code >= 500,
+            provider_model=self._config.model,
         )
 
     def _normalise_response(
@@ -732,8 +781,458 @@ class BedrockConverseModelGateway:
         return ModelCompletionStatus.UNKNOWN
 
 
+class GoogleGenerateContentModelGateway:
+    """HTTP adapter for the native Google Gemini GenerateContent API."""
+
+    def __init__(
+        self,
+        config: ModelGatewayConfig,
+        *,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self._config = config
+        self._transport = transport
+        self._tool_continuations: dict[str, _GoogleToolContinuation] = {}
+
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return self._config.capabilities
+
+    def complete(self, request: ModelRequest) -> ModelResponse:
+        self._validate_capabilities(request)
+        credential_name = self._config.credential_environment_variable
+        if not credential_name:
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        credential = os.getenv(credential_name)
+        if not credential:
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+
+        consumed_call_ids = self._continuation_call_ids(request)
+        try:
+            with httpx.Client(
+                base_url=f'{self._config.base_url.rstrip("/")}/',
+                timeout=self._config.timeout_seconds,
+                transport=self._transport,
+                headers={
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'x-goog-api-key': credential,
+                },
+            ) as client:
+                response = client.post(
+                    f'models/{quote(self._config.model, safe="")}:generateContent',
+                    json=self._request_payload(request),
+                )
+        except httpx.TimeoutException:
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.TIMEOUT,
+                retryable=True,
+                provider_model=self._config.model,
+            ) from None
+        except httpx.RequestError:
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.PROVIDER,
+                retryable=True,
+                provider_model=self._config.model,
+            ) from None
+        finally:
+            for call_id in consumed_call_ids:
+                self._tool_continuations.pop(call_id, None)
+
+        self._raise_for_status(response.status_code)
+        try:
+            payload = response.json()
+            return self._normalise_response(payload, request, response.headers)
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                provider_model=self._config.model,
+            ) from None
+
+    def _validate_capabilities(self, request: ModelRequest) -> None:
+        _validate_request_profile(self._config, request)
+        if request.response_schema is not None and not self.capabilities.structured_output:
+            raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+        if request.tools and not self.capabilities.tools:
+            raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+
+    def _request_payload(self, request: ModelRequest) -> dict[str, object]:
+        provider_tool_names = self._provider_tool_names(request)
+        system_parts: list[dict[str, str]] = []
+        contents: list[dict[str, object]] = []
+        for message in request.messages:
+            if message.role is ModelRole.SYSTEM:
+                if message.tool_calls or message.tool_call_id or message.name:
+                    raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+                for block in _content_blocks(message):
+                    if not isinstance(block, ModelTextContent):
+                        raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+                    system_parts.append({'text': block.text})
+                continue
+            if message.role is ModelRole.TOOL:
+                contents.append(self._tool_result_content(message, provider_tool_names))
+                continue
+
+            role = 'model' if message.role is ModelRole.ASSISTANT else 'user'
+            parts = self._message_parts(message)
+            if message.tool_calls:
+                if message.role is not ModelRole.ASSISTANT:
+                    raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+                parts.extend(
+                    self._function_call_part(call, provider_tool_names)
+                    for call in message.tool_calls
+                )
+            if not parts:
+                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+            contents.append({'role': role, 'parts': parts})
+
+        if not contents:
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        payload: dict[str, object] = {'contents': contents}
+        if system_parts:
+            payload['systemInstruction'] = {'parts': system_parts}
+        generation_config: dict[str, object] = {}
+        if request.max_output_tokens is not None:
+            generation_config['maxOutputTokens'] = request.max_output_tokens
+        if request.response_schema is not None:
+            generation_config.update(
+                {
+                    'responseMimeType': 'application/json',
+                    'responseJsonSchema': request.response_schema,
+                }
+            )
+        if generation_config:
+            payload['generationConfig'] = generation_config
+        if request.tools:
+            payload['tools'] = [
+                {
+                    'functionDeclarations': [
+                        {
+                            'name': provider_tool_names[tool.name],
+                            'description': tool.description,
+                            'parametersJsonSchema': tool.input_schema,
+                        }
+                        for tool in request.tools
+                    ]
+                }
+            ]
+            function_calling_config: dict[str, object] = {'mode': 'AUTO'}
+            if request.required_tool_name is not None:
+                if request.required_tool_name not in provider_tool_names:
+                    raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+                function_calling_config = {
+                    'mode': 'ANY',
+                    'allowedFunctionNames': [provider_tool_names[request.required_tool_name]],
+                }
+            payload['toolConfig'] = {'functionCallingConfig': function_calling_config}
+        elif request.required_tool_name is not None:
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        return payload
+
+    def _message_parts(self, message: ModelMessage) -> list[dict[str, object]]:
+        if message.tool_call_id is not None or message.name is not None:
+            raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+        parts: list[dict[str, object]] = []
+        for block in _content_blocks(message):
+            if isinstance(block, ModelTextContent):
+                parts.append({'text': block.text})
+                continue
+            _require_media_capability(block, self.capabilities)
+            encoded = base64.b64encode(
+                _resolve_evidence(block, self._config.evidence_resolver)
+            ).decode('ascii')
+            parts.append(
+                {
+                    'inlineData': {
+                        'mimeType': block.media_type,
+                        'data': encoded,
+                    }
+                }
+            )
+        return parts
+
+    def _tool_result_content(
+        self,
+        message: ModelMessage,
+        provider_tool_names: dict[str, str],
+    ) -> dict[str, object]:
+        if (
+            message.name is None
+            or message.tool_call_id is None
+            or message.content is None
+            or message.content_blocks
+            or message.tool_calls
+        ):
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        try:
+            result = json.loads(message.content)
+        except json.JSONDecodeError:
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from None
+        if not isinstance(result, dict):
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        continuation = self._continuation(message.tool_call_id)
+        function_response: dict[str, object] = {
+            'name': provider_tool_names.get(message.name, self._provider_tool_name(message.name)),
+            'response': result,
+        }
+        if continuation.provider_call_id is not None:
+            function_response['id'] = continuation.provider_call_id
+        return {
+            'role': 'user',
+            'parts': [
+                {
+                    'functionResponse': function_response,
+                }
+            ],
+        }
+
+    def _continuation_call_ids(self, request: ModelRequest) -> set[str]:
+        call_ids: set[str] = set()
+        for message in request.messages:
+            tool_call_id = message.tool_call_id
+            if tool_call_id is not None and tool_call_id in self._tool_continuations:
+                call_ids.add(tool_call_id)
+            call_ids.update(
+                call.call_id
+                for call in message.tool_calls
+                if call.call_id in self._tool_continuations
+            )
+        return call_ids
+
+    def _continuation(self, call_id: str) -> _GoogleToolContinuation:
+        continuation = self._tool_continuations.get(call_id)
+        if continuation is None:
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        return continuation
+
+    def _function_call_part(
+        self,
+        call: ModelToolCall,
+        provider_tool_names: dict[str, str],
+    ) -> dict[str, object]:
+        continuation = self._continuation(call.call_id)
+        function_call: dict[str, object] = {
+            'name': provider_tool_names.get(call.name, self._provider_tool_name(call.name)),
+            'args': call.arguments,
+        }
+        if continuation.provider_call_id is not None:
+            function_call['id'] = continuation.provider_call_id
+        part: dict[str, object] = {'functionCall': function_call}
+        if continuation.thought_signature is not None:
+            part['thoughtSignature'] = continuation.thought_signature
+        return part
+
+    def _register_tool_continuation(
+        self,
+        provider_call_id: str | None,
+        thought_signature: str | None,
+    ) -> str:
+        call_id = f'model-call-{uuid4().hex}'
+        self._tool_continuations[call_id] = _GoogleToolContinuation(
+            provider_call_id=provider_call_id,
+            thought_signature=thought_signature,
+        )
+        return call_id
+
+    @staticmethod
+    def _provider_tool_name(name: str) -> str:
+        return name.replace('.', '_')
+
+    @classmethod
+    def _provider_tool_names(cls, request: ModelRequest) -> dict[str, str]:
+        domain_names = (
+            {tool.name for tool in request.tools}
+            | {call.name for message in request.messages for call in message.tool_calls}
+            | {message.name for message in request.messages if message.name is not None}
+        )
+        if request.required_tool_name is not None:
+            domain_names.add(request.required_tool_name)
+        provider_names = {name: cls._provider_tool_name(name) for name in domain_names}
+        if len(set(provider_names.values())) != len(provider_names):
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        return provider_names
+
+    def _raise_for_status(self, status_code: int) -> None:
+        if status_code < 400:
+            return
+        if status_code in {401, 403}:
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.AUTHENTICATION,
+                provider_model=self._config.model,
+            )
+        if status_code == 408:
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.TIMEOUT,
+                retryable=True,
+                provider_model=self._config.model,
+            )
+        if status_code == 429:
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.RATE_LIMIT,
+                retryable=True,
+                provider_model=self._config.model,
+            )
+        raise ModelGatewayError(
+            ModelGatewayErrorCode.PROVIDER,
+            retryable=status_code >= 500,
+            provider_model=self._config.model,
+        )
+
+    def _normalise_response(
+        self,
+        payload: object,
+        request: ModelRequest,
+        headers: httpx.Headers,
+    ) -> ModelResponse:
+        if not isinstance(payload, dict):
+            raise TypeError
+        candidates = payload.get('candidates')
+        if not isinstance(candidates, list):
+            raise TypeError
+        if not candidates:
+            return self._normalise_blocked_response(payload, headers)
+        candidate = candidates[0]
+        if not isinstance(candidate, dict):
+            raise TypeError
+        finish_reason = candidate.get('finishReason')
+        if finish_reason is not None and not isinstance(finish_reason, str):
+            raise TypeError
+        completion_status = self._completion_status(finish_reason)
+        content = candidate.get('content')
+        if not isinstance(content, dict) or not isinstance(content.get('parts'), list):
+            raise TypeError
+
+        provider_to_domain = {
+            self._provider_tool_name(tool.name): tool.name for tool in request.tools
+        }
+        text_parts: list[str] = []
+        tool_calls: list[ModelToolCall] = []
+        for part in content['parts']:
+            if not isinstance(part, dict):
+                raise TypeError
+            if 'text' in part:
+                if not isinstance(part['text'], str):
+                    raise TypeError
+                text_parts.append(part['text'])
+                continue
+            function_call = part.get('functionCall')
+            if not isinstance(function_call, dict):
+                raise TypeError
+            provider_name = function_call.get('name')
+            arguments = function_call.get('args')
+            provider_call_id = function_call.get('id')
+            thought_signature = part.get('thoughtSignature')
+            if (
+                not isinstance(provider_name, str)
+                or provider_name not in provider_to_domain
+                or not isinstance(arguments, dict)
+                or (provider_call_id is not None and not isinstance(provider_call_id, str))
+                or (thought_signature is not None and not isinstance(thought_signature, str))
+            ):
+                raise TypeError
+            call_id = self._register_tool_continuation(provider_call_id, thought_signature)
+            tool_calls.append(
+                ModelToolCall(
+                    call_id=call_id,
+                    name=provider_to_domain[provider_name],
+                    arguments=arguments,
+                )
+            )
+
+        text = ''.join(text_parts)
+        structured_output: dict[str, object] | None = None
+        if (
+            request.response_schema is not None
+            and completion_status is ModelCompletionStatus.COMPLETE
+            and not tool_calls
+        ):
+            parsed = json.loads(text)
+            if not isinstance(parsed, dict):
+                raise TypeError
+            structured_output = parsed
+        usage = self._normalise_usage(payload.get('usageMetadata'))
+        model = payload.get('modelVersion', self._config.model)
+        if not isinstance(model, str):
+            raise TypeError
+        request_id = payload.get('responseId') or headers.get('x-request-id')
+        if request_id is not None and not isinstance(request_id, str):
+            raise TypeError
+        return ModelResponse(
+            text=text or None,
+            structured_output=structured_output,
+            tool_calls=tool_calls,
+            completion_status=completion_status,
+            finish_reason=finish_reason,
+            usage=usage,
+            provider_model=model,
+            provider_request_id=request_id,
+        )
+
+    def _normalise_blocked_response(
+        self,
+        payload: dict[str, object],
+        headers: httpx.Headers,
+    ) -> ModelResponse:
+        feedback = payload.get('promptFeedback')
+        if not isinstance(feedback, dict) or not isinstance(feedback.get('blockReason'), str):
+            raise TypeError
+        model = payload.get('modelVersion', self._config.model)
+        request_id = payload.get('responseId') or headers.get('x-request-id')
+        if not isinstance(model, str) or (
+            request_id is not None and not isinstance(request_id, str)
+        ):
+            raise TypeError
+        return ModelResponse(
+            completion_status=ModelCompletionStatus.REFUSED,
+            finish_reason=feedback['blockReason'],
+            usage=self._normalise_usage(payload.get('usageMetadata')),
+            provider_model=model,
+            provider_request_id=request_id,
+        )
+
+    @staticmethod
+    def _completion_status(finish_reason: str | None) -> ModelCompletionStatus:
+        if finish_reason == 'STOP':
+            return ModelCompletionStatus.COMPLETE
+        if finish_reason == 'MAX_TOKENS':
+            return ModelCompletionStatus.INCOMPLETE
+        if finish_reason in {
+            'SAFETY',
+            'RECITATION',
+            'BLOCKLIST',
+            'PROHIBITED_CONTENT',
+            'SPII',
+            'IMAGE_SAFETY',
+        }:
+            return ModelCompletionStatus.REFUSED
+        return ModelCompletionStatus.UNKNOWN
+
+    @staticmethod
+    def _normalise_usage(value: object) -> ModelUsage | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise TypeError
+        candidate_tokens = value.get('candidatesTokenCount')
+        thought_tokens = value.get('thoughtsTokenCount')
+        if candidate_tokens is not None and not isinstance(candidate_tokens, int):
+            raise TypeError
+        if thought_tokens is not None and not isinstance(thought_tokens, int):
+            raise TypeError
+        output_tokens = None
+        if candidate_tokens is not None or thought_tokens is not None:
+            output_tokens = (candidate_tokens or 0) + (thought_tokens or 0)
+        return ModelUsage(
+            input_tokens=value.get('promptTokenCount'),
+            output_tokens=output_tokens,
+            total_tokens=value.get('totalTokenCount'),
+            cache_read_input_tokens=value.get('cachedContentTokenCount'),
+        )
+
+
 def default_model_gateway_registry() -> ModelGatewayRegistry:
     registry = ModelGatewayRegistry()
     registry.register('openai_compatible', OpenAICompatibleModelGateway)
     registry.register('bedrock_converse', BedrockConverseModelGateway)
+    registry.register('google_generate_content', GoogleGenerateContentModelGateway)
     return registry

@@ -40,6 +40,8 @@ from backend.api.health import router as health_router
 from backend.api.identity import router as identity_router
 from backend.api.integrations import router as integrations_router
 from backend.api.legacy import router as legacy_router
+from backend.api.realtime import claimant_router as realtime_claimant_router
+from backend.api.realtime import workbench_router as realtime_workbench_router
 from backend.api.staff_agent import router as staff_agent_router
 from backend.api.staff_identity import router as staff_identity_router
 from backend.api.staff_presence import router as staff_presence_router
@@ -113,6 +115,7 @@ from backend.services.initial_runtime_release import install_initial_runtime_rel
 from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.model_profiles import model_configuration
+from backend.services.realtime import RealtimeDispatcher
 from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
@@ -238,11 +241,15 @@ def create_app(
     else:
         bundle = data_runtime_bundle or build_data_runtime_bundle(resolved_settings)
 
+    realtime_dispatcher = RealtimeDispatcher(bundle.repository)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        realtime_dispatcher.start()
         try:
             yield
         finally:
+            realtime_dispatcher.stop()
             bundle.close()
 
     app = FastAPI(
@@ -305,6 +312,7 @@ def create_app(
     # than by individual routers.  No router, service, seed path, or adapter
     # can reach an unguarded handoff write.
     app.state.claim_repository = guarded_handoff_repository(bundle.repository)
+    app.state.realtime_dispatcher = realtime_dispatcher
     app.state.claimant_runtime_action_dispatcher = ClaimantRuntimeActionDispatcher()
     if resolved_settings.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
         if agent_turn_provider is not None:
@@ -459,6 +467,8 @@ def create_app(
     app.include_router(legacy_router)
     app.include_router(capabilities_router)
     app.include_router(claims_router)
+    app.include_router(realtime_claimant_router)
+    app.include_router(realtime_workbench_router)
     app.include_router(integrations_router)
     app.include_router(evidence_router)
     app.include_router(evidence_account_router)

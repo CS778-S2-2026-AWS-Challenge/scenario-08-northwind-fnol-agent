@@ -26,7 +26,11 @@ The shared projection keeps three coordinates distinct:
   `inconsistent`, or `review_required` outcome.
 
 The registry also derives the effective status label, detail, verification state,
-pending owner, next action, and attention requirement. A received or checked result
+pending owner, next action, and attention requirement. The owner of an operation
+failure is whoever recovers it: `retryable_failure` is owned by the claimant, who may
+retry the same operation, and does not need staff attention; `terminal_failure` and
+`unknown_outcome` are owned by the claims professional and need attention, because
+staff review or reconcile them. A received or checked result
 replaces acknowledgement-only guidance because staff now own verification or an
 authorised Claim decision. `unknown_outcome` is the exception: a late result remains
 visible as a separate coordinate, but reconciliation guidance stays effective until

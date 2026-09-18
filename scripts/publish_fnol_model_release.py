@@ -18,9 +18,9 @@ sys.path.insert(0, str(ROOT))
 
 from backend.core.config import load_model_runtime_bindings  # noqa: E402
 from backend.domain.configuration import ModelRuntimeBinding  # noqa: E402
+from backend.services.initial_runtime_release import repository_v7_values  # noqa: E402
 
 DEFAULT_BINDINGS = ROOT / 'config' / 'model-runtime-bindings.json'
-DEFAULT_PROMPT = ROOT / 'backend' / 'prompts' / 'northwind_fnol_claimant_v6.md'
 
 
 class PublicationError(RuntimeError):
@@ -153,21 +153,23 @@ def _load_bindings(path: Path) -> list[ModelRuntimeBinding]:
     return list(bindings)
 
 
-def _model_values(binding: ModelRuntimeBinding) -> dict[str, object]:
-    values = binding.model_dump(mode='json')
-    values.update({'evaluation_status': 'configured', 'timeout_seconds': 30.0})
-    return values
-
-
 def publish(args: argparse.Namespace) -> str:
     bindings = _load_bindings(args.bindings)
     if not any(item.profile_id == 'qwen-local' for item in bindings):
         raise PublicationError('The deployment manifest must retain qwen-local.')
     if not any(item.profile_id == 'nowcoding-gpt55' for item in bindings):
         raise PublicationError('The deployment manifest must include nowcoding-gpt55.')
+    if not any(item.profile_id == 'bedrock-nova2-lite' for item in bindings):
+        raise PublicationError('The deployment manifest must include bedrock-nova2-lite.')
+    if not any(item.profile_id == 'google-gemini35-flash-lite' for item in bindings):
+        raise PublicationError('The deployment manifest must include google-gemini35-flash-lite.')
     for binding in bindings:
         credential_name = binding.credential_environment_variable
-        if credential_name and not os.getenv(credential_name, ''):
+        if (
+            binding.evaluation_status == 'configured'
+            and credential_name
+            and not os.getenv(credential_name, '')
+        ):
             raise PublicationError(f'{credential_name} is not available to the publishing process.')
 
     client = ControlPlaneClient(
@@ -178,42 +180,23 @@ def publish(args: argparse.Namespace) -> str:
     query = urlencode({'environment': args.environment, 'runtime_profile': args.runtime_profile})
     active = client.get(f'/internal/v1/admin/runtime-snapshots?{query}')
 
-    prompt = args.prompt.read_text(encoding='utf-8')
-    instruction = client.publish_configuration(
-        domain='agent_instruction',
-        values={
-            'prompt_version': 'northwind-fnol-claimant-v6',
-            'purpose': 'claimant_agent',
-            'system_prompt': prompt,
-        },
-        evidence=args.validation_evidence,
-    )
-    models = {
-        binding.profile_id: client.publish_configuration(
-            domain='model',
-            values=_model_values(binding),
+    release_values = repository_v7_values(bindings)
+    published = {
+        slot: client.publish_configuration(
+            domain='model' if slot.startswith('model:') else slot,
+            values=values,
             evidence=args.validation_evidence,
         )
-        for binding in bindings
+        for slot, values in release_values.items()
     }
 
     configuration_refs = {
-        key: {
+        slot: {
             'configuration_id': item['configuration_id'],
             'revision': item['revision'],
         }
-        for key, item in active['configurations'].items()
-        if not key.startswith('model:') and key != 'model' and key != 'agent_instruction'
+        for slot, item in published.items()
     }
-    configuration_refs['agent_instruction'] = {
-        'configuration_id': instruction['configuration_id'],
-        'revision': instruction['revision'],
-    }
-    for profile_id, record in models.items():
-        configuration_refs[f'model:{profile_id}'] = {
-            'configuration_id': record['configuration_id'],
-            'revision': record['revision'],
-        }
 
     release = client.request(
         'POST',
@@ -234,7 +217,7 @@ def publish(args: argparse.Namespace) -> str:
                 key: {'knowledge_id': item['knowledge_id'], 'revision': item['revision']}
                 for key, item in active.get('knowledge', {}).items()
             },
-            'reason': 'Publish Qwen-default FNOL catalogue with selectable nowcoding GPT-5.5.',
+            'reason': 'Publish the complete atomic Agent Context Runtime v7 Release Set.',
         },
         idempotent=True,
     )
@@ -247,7 +230,7 @@ def publish(args: argparse.Namespace) -> str:
         payload={
             'scenario_results': [
                 {
-                    'scenario_id': 'fnol-dual-model-release',
+                    'scenario_id': 'fnol-model-catalogue-release',
                     'outcome': 'passed',
                     'evidence': args.validation_evidence,
                 }
@@ -260,7 +243,7 @@ def publish(args: argparse.Namespace) -> str:
         f'/internal/v1/admin/release-sets/{release_id}/publish',
         token=client.author_token,
         revision=int(validated['revision']),
-        payload={'reason': 'Activate the validated FNOL dual-model Release Set.'},
+        payload={'reason': 'Activate the validated FNOL model-catalogue Release Set.'},
         idempotent=True,
     )
     verified = client.get(f'/internal/v1/admin/runtime-snapshots?{query}')
@@ -285,7 +268,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument('--environment', default='development')
     parser.add_argument('--runtime-profile', default='local_mvp')
     parser.add_argument('--bindings', type=Path, default=DEFAULT_BINDINGS)
-    parser.add_argument('--prompt', type=Path, default=DEFAULT_PROMPT)
     parser.add_argument('--author-token-env', default='NORTHWIND_CONTROL_PLANE_AUTHOR_TOKEN')
     parser.add_argument('--approver-token-env', default='NORTHWIND_CONTROL_PLANE_APPROVER_TOKEN')
     parser.add_argument('--validation-evidence', required=True)

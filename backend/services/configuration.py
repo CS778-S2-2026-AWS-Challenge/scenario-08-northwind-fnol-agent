@@ -793,17 +793,18 @@ def _validate_configuration_values(
             and configuration.purpose == binding.purpose
             and configuration.privacy_class == binding.privacy_class
             and configuration.prompt_version == binding.prompt_version
+            and configuration.evaluation_status == binding.evaluation_status
             and configuration.structured_output is binding.structured_output
             and configuration.tools is binding.tools
             and configuration.image_input is binding.image_input
             and configuration.document_input is binding.document_input
             for binding in model_runtime_bindings
         )
-        if configuration.evaluation_status != 'configured' or not binding_matches:
+        if not binding_matches:
             raise _error(
                 422,
                 'PROVIDER_CONFIGURATION_UNAVAILABLE',
-                'The model provider profile is not verified for this runtime and cannot '
+                'The model provider profile does not match deployment authority and cannot '
                 'be published.',
             )
         return

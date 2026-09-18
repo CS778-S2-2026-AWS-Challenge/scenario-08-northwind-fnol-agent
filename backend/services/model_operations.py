@@ -136,6 +136,7 @@ class ModelOperationsRecorder:
             state=OperationState.FAILED,
             latency_ms=latency_ms,
             response=response,
+            failure_provider_model=error.provider_model,
             error_code=f'MODEL_{error.code.value.upper()}',
             request_stage=request_stage,
             invocation_ordinal=invocation_ordinal,
@@ -150,6 +151,7 @@ class ModelOperationsRecorder:
         state: OperationState,
         latency_ms: float,
         response: ModelResponse | None,
+        failure_provider_model: str | None = None,
         error_code: str | None = None,
         request_stage: str,
         invocation_ordinal: int,
@@ -158,7 +160,7 @@ class ModelOperationsRecorder:
     ) -> None:
         now = datetime.now(UTC)
         usage = response.usage if response is not None else None
-        provider_model = response.provider_model if response is not None else None
+        provider_model = response.provider_model if response is not None else failure_provider_model
         safe_context_sizes = {
             key: value
             for key, value in (context_sizes or {}).items()
@@ -208,6 +210,11 @@ class ModelOperationsRecorder:
                 progress_percent=100,
                 result={
                     'purpose': request.purpose,
+                    'model_profile_id': request.model_profile_id,
+                    'prompt_version': request.prompt_version,
+                    'request_stage': request_stage,
+                    'invocation_ordinal': invocation_ordinal,
+                    'invocation_count': invocation_count,
                     'provider_model': provider_model,
                     'input_tokens': usage.input_tokens if usage is not None else None,
                     'output_tokens': usage.output_tokens if usage is not None else None,

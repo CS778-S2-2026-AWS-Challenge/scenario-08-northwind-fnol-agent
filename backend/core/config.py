@@ -359,10 +359,9 @@ class Settings:
                 if selected_binding
                 else os.getenv('MODEL_PROMPT_VERSION', 'northwind-fnol-claimant-v6').strip()
             ),
-            model_evaluation_status=os.getenv(
-                'MODEL_EVALUATION_STATUS',
-                'configured',
-            ).strip(),
+            model_evaluation_status=os.getenv('MODEL_EVALUATION_STATUS', 'configured').strip()
+            if selected_binding is None
+            else selected_binding.evaluation_status,
             model_base_url=(
                 selected_binding.base_url
                 if selected_binding

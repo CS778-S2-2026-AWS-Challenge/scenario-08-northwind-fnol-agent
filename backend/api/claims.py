@@ -1,19 +1,17 @@
-import asyncio
-import json
 import logging
-from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import cast
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from backend.adapters.claims_service import AssessorServiceAdapter, ClaimsServiceAdapter
 from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.api.assets import claim_router as claim_assets_router
+from backend.api.realtime import realtime_stream
 from backend.core.auth import Principal, require_claimant
-from backend.core.errors import ApiError
+from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.external_service_registry import capability_catalogue
 from backend.domain.models import (
     ClaimantClaim,
@@ -42,7 +40,7 @@ from backend.services.agent import AgentTurnProvider
 from backend.services.agent_action_execution import ClaimantRuntimeActionDispatcher
 from backend.services.claim_creation import create_claim_from_confirmed_report
 from backend.services.claimant_action_projection import project_claimant_primary_action
-from backend.services.claimant_events import claimant_change_after, claimant_event_revision
+from backend.services.claimant_events import claimant_event_revision
 from backend.services.claims import (
     confirm_form_fields,
     get_claim,
@@ -52,6 +50,9 @@ from backend.services.claims import (
     promote_anonymous_claim,
     start_claim,
     update_form,
+)
+from backend.services.conversation_compaction import (
+    compact_conversation_after_response_if_enabled,
 )
 from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
 from backend.services.external_service_entry import ExternalServiceEntryDecision
@@ -70,21 +71,6 @@ from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant'])
 router.include_router(claim_assets_router)
 logger = logging.getLogger(__name__)
-
-
-def _sse_event(event: str, data: dict[str, object], event_id: str | None = None) -> str:
-    lines = []
-    if event_id is not None:
-        lines.append(f'id: {event_id}')
-    lines.extend(
-        (
-            f'event: {event}',
-            f'data: {json.dumps(data, separators=(",", ":"))}',
-            '',
-            '',
-        )
-    )
-    return '\n'.join(lines)
 
 
 def repository_for(request: Request) -> PersistenceRepository:
@@ -463,15 +449,17 @@ def create_message(
     session_id: str,
     request: Request,
     payload: CreateMessageRequest,
+    background_tasks: BackgroundTasks,
     principal: Principal = Depends(require_claimant),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> MessageTurnResponse:
+    runtime_policy_resolver = runtime_agent_policy_for(request)
     if payload.model_profile_id is not None:
         payload = payload.model_copy(
             update={'model_profile_id': select_model_profile(request, payload.model_profile_id)}
         )
-    return submit_message(
+    result = submit_message(
         repository=repository_for(request),
         agent=agent_for(request),
         policy_history_adapter=policy_history_adapter_for(request),
@@ -481,13 +469,22 @@ def create_message(
         payload=payload,
         idempotency_key=idempotency_key,
         if_match=if_match,
-        runtime_agent_policy_resolver=runtime_agent_policy_for(request),
+        runtime_agent_policy_resolver=runtime_policy_resolver,
         action_dispatcher=action_dispatcher_for(request),
         evidence_storage=evidence_storage_for(request),
         assessor_adapter=assessor_adapter_for(request),
         assessor_entry=_assessor_entry_for(request),
         external_capability_dispatcher=external_capability_dispatcher_for(request),
     )
+    background_tasks.add_task(
+        compact_conversation_after_response_if_enabled,
+        repository_for(request),
+        runtime_policy_resolver,
+        principal.subject,
+        claim_id,
+        session_id,
+    )
+    return result
 
 
 @router.get(
@@ -527,44 +524,64 @@ def read_claim_events(
     request: Request,
     principal: Principal = Depends(require_claimant),
     after_revision: int = Query(default=0, ge=0),
+    last_event_id: str | None = Header(default=None, alias='Last-Event-ID'),
 ) -> StreamingResponse:
     repository = repository_for(request)
     current_revision = claimant_event_revision(repository, principal, claim_id, session_id)
     if after_revision > current_revision:
-        claimant_change_after(repository, principal, claim_id, session_id, after_revision)
-
-    async def stream() -> AsyncIterator[str]:
-        cursor = after_revision
-        heartbeat_at = asyncio.get_running_loop().time()
-        yield 'retry: 1500\n: connected\n\n'
-        while not await request.is_disconnected():
-            change = claimant_change_after(
-                repository,
-                principal,
-                claim_id,
-                session_id,
-                cursor,
+        raise ApiError(
+            status_code=409,
+            code='INVALID_EVENT_CURSOR',
+            message='The live-update revision is newer than the current claim.',
+            retryable=True,
+            current_revision=current_revision,
+        )
+    legacy_cursor_revision = after_revision
+    if last_event_id is not None:
+        try:
+            legacy_cursor_revision = int(last_event_id)
+        except ValueError as error:
+            raise ApiError(
+                status_code=409,
+                code='INVALID_EVENT_CURSOR',
+                message='The legacy Claim event revision is invalid.',
+                retryable=True,
+                details=[
+                    ErrorDetail(
+                        field='Last-Event-ID',
+                        reason='Expected a Claim revision.',
+                    )
+                ],
+            ) from error
+        if legacy_cursor_revision < 0:
+            raise ApiError(
+                status_code=409,
+                code='INVALID_EVENT_CURSOR',
+                message='The legacy Claim event revision is invalid.',
+                retryable=True,
+                details=[
+                    ErrorDetail(
+                        field='Last-Event-ID',
+                        reason='Expected a non-negative revision.',
+                    )
+                ],
             )
-            if change is not None:
-                cursor = change.claim_revision
-                yield _sse_event(
-                    'claim.updated',
-                    change.model_dump(mode='json'),
-                    change.event_id,
-                )
-            now = asyncio.get_running_loop().time()
-            if now - heartbeat_at >= 15:
-                yield ': keep-alive\n\n'
-                heartbeat_at = now
-            await asyncio.sleep(1)
-
-    return StreamingResponse(
-        stream(),
-        media_type='text/event-stream',
-        headers={
-            'Cache-Control': 'no-cache, no-transform',
-            'X-Accel-Buffering': 'no',
-        },
+    if legacy_cursor_revision > current_revision:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_EVENT_CURSOR',
+            message='The live-update revision is newer than the current claim.',
+            retryable=True,
+            current_revision=current_revision,
+        )
+    return realtime_stream(
+        request,
+        principal,
+        cursor=None,
+        claim_id=claim_id,
+        legacy_session_id=session_id,
+        legacy_after_revision=legacy_cursor_revision,
+        legacy_current_revision=current_revision,
     )
 
 

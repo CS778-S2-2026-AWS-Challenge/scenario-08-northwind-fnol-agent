@@ -1003,6 +1003,9 @@ class RuntimeInvocationTrace(ContractModel):
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
     total_tokens: int | None = Field(default=None, ge=0)
+    cache_read_input_tokens: int | None = Field(default=None, ge=0)
+    cache_write_input_tokens: int | None = Field(default=None, ge=0)
+    first_token_latency_ms: float | None = Field(default=None, ge=0)
     latency_ms: float = Field(ge=0)
 
 
@@ -1024,14 +1027,42 @@ class RuntimeTraceRecord(ContractModel):
     trigger_message_id: str
     evidence: list[RuntimeEvidenceTrace] = Field(default_factory=list, max_length=20)
     invocations: list[RuntimeInvocationTrace] = Field(min_length=1, max_length=2)
-    tool_call_id: str
-    tool_name: str = Field(pattern=r'^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$')
+    tool_call_id: str | None = None
+    tool_name: str | None = Field(
+        default=None,
+        pattern=r'^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$',
+    )
     tool_arguments: dict[str, Any] = Field(default_factory=dict)
     tool_output: dict[str, Any] = Field(default_factory=dict)
-    tool_result_status: Literal['succeeded', 'unavailable', 'failed']
+    tool_result_status: Literal['succeeded', 'unavailable', 'failed'] | None = None
     action_code: str
     runtime_action_code: str
     reason_codes: list[str] = Field(min_length=1)
+    release_set_id: str | None = Field(default=None, max_length=120)
+    request_profile_id: str | None = Field(default=None, max_length=120)
+    provider_capability_version: str | None = Field(default=None, max_length=120)
+    prompt_bundle_id: str | None = Field(default=None, max_length=300)
+    fragment_refs: list[str] = Field(default_factory=list, max_length=30)
+    schema_id: str | None = Field(default=None, max_length=120)
+    route: str | None = Field(default=None, max_length=160)
+    context_sections: list[str] = Field(default_factory=list, max_length=100)
+    context_load_decisions: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+    request_budget: dict[str, Any] = Field(default_factory=dict)
+    cache_layout_version: str | None = Field(default=None, max_length=120)
+    prefix_fingerprint: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
+    tool_manifest_id: str | None = Field(default=None, max_length=160)
+    resolved_ref_count: int = Field(default=0, ge=0, le=1)
+    model_invocations: int | None = Field(default=None, ge=0, le=2)
+    tool_calls: int | None = Field(default=None, ge=0, le=1)
+    output_tokens: int | None = Field(default=None, ge=0)
+    cache_read_tokens: int | None = Field(default=None, ge=0)
+    cache_write_tokens: int | None = Field(default=None, ge=0)
+    cache_miss_reason: str | None = Field(default=None, max_length=120)
+    first_token_latency_ms: float | None = Field(default=None, ge=0)
+    total_latency_ms: float | None = Field(default=None, ge=0)
+    summary_state_mismatch: bool = False
+    shadow_context_plan: dict[str, Any] = Field(default_factory=dict)
+    slo_met: bool | None = None
     status: Literal['succeeded', 'rejected', 'unavailable', 'failed']
     created_at: datetime
     finished_at: datetime

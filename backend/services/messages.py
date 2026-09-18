@@ -1284,6 +1284,109 @@ def _execute_policy_search(
     )
 
 
+def _policy_context_for_turn(
+    repository: PersistenceRepository,
+    adapter: PolicyHistoryAdapter,
+    claim: WorkingClaim,
+    customer_id: str,
+    question: str,
+    max_tokens: int,
+) -> dict[str, object]:
+    """Resolve policy facts from the current Claim's authoritative reference."""
+
+    policy_field = claim.form.get('policy.policy_number')
+    policy_reference = str(policy_field.value).strip() if policy_field is not None else ''
+    if not policy_reference:
+        return {
+            'status': RetrievalStatus.NO_EVIDENCE.value,
+            'source_refs': [],
+            'facts': None,
+            'uncertainty': [],
+            'limitations': ['The current Claim has no confirmed policy reference.'],
+        }
+    existing = next(
+        (
+            record
+            for record in reversed(repository.list_retrieval_records(claim.claim_id, customer_id))
+            if isinstance(record, PolicyRetrievalRecord)
+            and record.facts.policy_reference == policy_reference
+        ),
+        None,
+    )
+    if existing is not None:
+        return {
+            'status': (
+                RetrievalStatus.AMBIGUOUS.value
+                if existing.uncertainty
+                else RetrievalStatus.EVIDENCE_FOUND.value
+            ),
+            'source_refs': [existing.retrieval_id],
+            'facts': existing.facts.model_dump(mode='json'),
+            'uncertainty': [item.model_dump(mode='json') for item in existing.uncertainty],
+            'limitations': [],
+        }
+    result = search_policy(
+        repository,
+        adapter,
+        PolicySearchRequest(
+            claim_id=claim.claim_id,
+            policy_reference=policy_reference,
+            question=question[:500] or None,
+        ),
+    )
+    # The projection is already bounded; retain the argument so every loader
+    # shares the same turn-scoped resolver contract.
+    _ = max_tokens
+    return {
+        'status': result.status.value,
+        'source_refs': [result.result_id] if result.facts is not None else [],
+        'facts': result.facts.model_dump(mode='json') if result.facts is not None else None,
+        'uncertainty': [item.model_dump(mode='json') for item in result.uncertainty],
+        'limitations': list(result.limitations),
+    }
+
+
+def _claim_history_context_for_turn(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    customer_id: str,
+    max_tokens: int,
+) -> dict[str, object]:
+    """Return a bounded claimant-owned cross-Claim projection without internal fields."""
+
+    max_items = max(1, min(10, max_tokens // 80))
+    claims = sorted(
+        (
+            item
+            for item in repository.list_claims_for_customer(customer_id)
+            if item.claim_id != claim.claim_id
+        ),
+        key=lambda item: (item.updated_at, item.claim_id),
+        reverse=True,
+    )[:max_items]
+    return {
+        'status': (
+            RetrievalStatus.EVIDENCE_FOUND.value if claims else RetrievalStatus.NO_EVIDENCE.value
+        ),
+        'claims': [
+            {
+                'claim_id': item.claim_id,
+                'revision': item.revision,
+                'product_family': item.incident_type,
+                'workflow_state': item.claim_state.workflow_state.value,
+                'next_action': item.claim_state.next_action.value,
+                'created_at': item.created_at.isoformat(),
+                'updated_at': item.updated_at.isoformat(),
+            }
+            for item in claims
+        ],
+        'source_refs': [f'claim:{item.claim_id}:revision:{item.revision}' for item in claims],
+        'limitations': (
+            [] if claims else ['No other Claim is available in the authenticated customer scope.']
+        ),
+    }
+
+
 def _claim_history_search_tool(proposal: AgentProposal) -> dict[str, object] | None:
     return next(
         (
@@ -1976,11 +2079,30 @@ def submit_message(
     conversation_messages = tuple(
         message
         for message in sorted(
-            repository.list_messages(claim_id, session_id, principal.subject),
+            repository.list_recent_messages(claim_id, session_id, principal.subject, 14),
             key=lambda item: (item.created_at, item.message_id),
         )
         if message.visibility is not MessageVisibility.INTERNAL_ONLY
-    )[-12:]
+    )
+
+    def load_older_messages(limit: int) -> tuple[MessageRecord, ...]:
+        visible = [
+            message
+            for message in repository.list_messages(
+                claim_id,
+                session_id,
+                principal.subject,
+            )
+            if message.visibility is not MessageVisibility.INTERNAL_ONLY
+            and message.message_id != claimant_message.message_id
+        ]
+        return tuple(visible[:-4][-limit:])
+
+    rolling_summary = repository.get_latest_conversation_summary(
+        claim_id,
+        session_id,
+        principal.subject,
+    )
     persisted_review_signals = repository.list_review_signals(claim_id, principal.subject)
     try:
         external_services = build_agent_external_lifecycle_context(
@@ -2022,6 +2144,27 @@ def submit_message(
             )
         ),
         conversation_messages=conversation_messages,
+        older_message_loader=load_older_messages,
+        policy_context_loader=lambda max_tokens: _policy_context_for_turn(
+            repository,
+            policy_history_adapter,
+            claim,
+            principal.subject,
+            payload.content.text if payload.content is not None else '',
+            max_tokens,
+        ),
+        claim_history_context_loader=lambda max_tokens: _claim_history_context_for_turn(
+            repository,
+            claim,
+            principal.subject,
+            max_tokens,
+        ),
+        evidence_history_context_loader=lambda max_tokens: read_evidence_history_for_runtime(
+            repository,
+            claim,
+            {'limit': max(1, min(25, max_tokens // 40))},
+        ),
+        rolling_summary=rolling_summary,
         external_services=external_services,
     )
     proposal = agent.propose_turn(agent_context)
@@ -2720,7 +2863,12 @@ def submit_message(
             )
         )
     tool_records: list[ToolResultRecord] = []
-    if runtime_trace is not None:
+    if (
+        runtime_trace is not None
+        and runtime_trace.tool_call_id is not None
+        and runtime_trace.tool_name is not None
+        and runtime_trace.tool_result_status is not None
+    ):
         tool_records.append(
             ToolResultRecord(
                 result_id=new_id('toolres'),
