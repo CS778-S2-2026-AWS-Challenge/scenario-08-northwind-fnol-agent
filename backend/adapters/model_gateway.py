@@ -73,6 +73,12 @@ class _GoogleToolContinuation:
 ModelGatewayFactory = Callable[[ModelGatewayConfig], ModelGateway]
 
 
+def _optional_cache_token_count(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
 class ModelGatewayRegistry:
     def __init__(self) -> None:
         self._factories: dict[str, ModelGatewayFactory] = {}
@@ -511,10 +517,8 @@ class OpenAICompatibleModelGateway:
         if not isinstance(value, dict):
             raise TypeError
         prompt_details = value.get('prompt_tokens_details')
-        if prompt_details is not None and not isinstance(prompt_details, dict):
-            raise TypeError
         cache_read_input_tokens = value.get('cache_read_input_tokens')
-        if cache_read_input_tokens is None and prompt_details is not None:
+        if cache_read_input_tokens is None and isinstance(prompt_details, dict):
             cache_read_input_tokens = prompt_details.get('cached_tokens')
         cache_write_input_tokens = value.get('cache_write_input_tokens')
         if cache_write_input_tokens is None:
@@ -523,8 +527,8 @@ class OpenAICompatibleModelGateway:
             input_tokens=value.get('prompt_tokens'),
             output_tokens=value.get('completion_tokens'),
             total_tokens=value.get('total_tokens'),
-            cache_read_input_tokens=cache_read_input_tokens,
-            cache_write_input_tokens=cache_write_input_tokens,
+            cache_read_input_tokens=_optional_cache_token_count(cache_read_input_tokens),
+            cache_write_input_tokens=_optional_cache_token_count(cache_write_input_tokens),
         )
 
 
@@ -742,8 +746,12 @@ class BedrockConverseModelGateway:
                 input_tokens=usage_value.get('inputTokens'),
                 output_tokens=usage_value.get('outputTokens'),
                 total_tokens=usage_value.get('totalTokens'),
-                cache_read_input_tokens=usage_value.get('cacheReadInputTokens'),
-                cache_write_input_tokens=usage_value.get('cacheWriteInputTokens'),
+                cache_read_input_tokens=_optional_cache_token_count(
+                    usage_value.get('cacheReadInputTokens')
+                ),
+                cache_write_input_tokens=_optional_cache_token_count(
+                    usage_value.get('cacheWriteInputTokens')
+                ),
             )
         metadata = payload.get('$metadata')
         request_id = headers.get('x-amzn-requestid')
