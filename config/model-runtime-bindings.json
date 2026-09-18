@@ -12,7 +12,9 @@
     "structured_output": true,
     "tools": true,
     "image_input": false,
-    "document_input": false
+    "document_input": false,
+    "structured_output_method": "json_object",
+    "reasoning_mode": "disabled"
   },
   {
     "profile_id": "nowcoding-gpt55",
@@ -59,6 +61,6 @@
     "structured_output": true,
     "tools": true,
     "image_input": true,
-    "document_input": false
+    "document_input": true
   }
 ]

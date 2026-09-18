@@ -63,6 +63,7 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.domain.realtime import (
+    AgentTurnProgressPublication,
     MutationOutcome,
     RealtimeCursor,
     RealtimeEvent,
@@ -402,7 +403,10 @@ class MongoDBRepository:
     def close(self) -> None:
         self._client.close()
 
-    def append_realtime_publication(self, publication: RealtimePublication) -> RealtimeEvent:
+    def append_realtime_publication(
+        self,
+        publication: RealtimePublication | AgentTurnProgressPublication,
+    ) -> RealtimeEvent:
         event = self._atomic(
             lambda mongo_session: self._persist_realtime_publication(
                 publication,
@@ -415,7 +419,7 @@ class MongoDBRepository:
 
     def _persist_realtime_publication(
         self,
-        publication: RealtimePublication,
+        publication: RealtimePublication | AgentTurnProgressPublication,
         outcome: MutationOutcome,
         *,
         mongo_session: Any,

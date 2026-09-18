@@ -65,6 +65,7 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
+from backend.domain.realtime import AgentTurnProgressStage
 from backend.domain.retrieval import (
     ClaimHistoryRetrievalRecord,
     ClaimHistorySearchRequest,
@@ -111,6 +112,7 @@ from backend.services.agent_tools import (
     read_evidence_history_for_runtime,
     validate_evidence_proposal,
 )
+from backend.services.agent_turn_progress import AgentTurnProgressReporter
 from backend.services.branching import (
     claimant_dynamic_form_projection,
     latest_applied_branch_evaluation,
@@ -1739,6 +1741,7 @@ def submit_message(
     assessor_adapter: AssessorServiceAdapter | None = None,
     assessor_entry: ExternalServiceEntryDecision | None = None,
     external_capability_dispatcher: ExternalCapabilityDispatcher | None = None,
+    progress_reporter: AgentTurnProgressReporter | None = None,
 ) -> MessageTurnResponse:
     live_dispatcher = action_dispatcher or ClaimantRuntimeActionDispatcher()
     key = require_idempotency_key(idempotency_key)
@@ -1906,6 +1909,8 @@ def submit_message(
     )
     message_text = payload.content.text if payload.content is not None else ''
     if active_handoff is not None:
+        if progress_reporter is not None:
+            progress_reporter.accepted()
         timestamp = now_utc()
         claimant_message = MessageRecord(
             message_id=new_id('msg'),
@@ -2051,6 +2056,9 @@ def submit_message(
         evidence_refs=payload.evidence_refs,
         created_at=timestamp,
     )
+    if progress_reporter is not None:
+        progress_reporter.accepted()
+        progress_reporter.emit(AgentTurnProgressStage.CONTEXT_LOADING, 'claim.context')
     try:
         runtime_policy = (
             runtime_agent_policy_resolver.resolve_for_turn()
@@ -2164,6 +2172,7 @@ def submit_message(
             claim,
             {'limit': max(1, min(25, max_tokens // 40))},
         ),
+        progress_reporter=(progress_reporter.emit if progress_reporter is not None else None),
         rolling_summary=rolling_summary,
         external_services=external_services,
     )
@@ -3013,6 +3022,8 @@ def submit_message(
             resulting_revision=updated_claim.revision,
         )
 
+    if progress_reporter is not None:
+        progress_reporter.emit(AgentTurnProgressStage.TURN_COMMITTING, 'turn.commit')
     if live_mutation_command is not None:
         live_result = live_dispatcher.execute(
             repository,

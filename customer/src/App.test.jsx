@@ -243,6 +243,87 @@ describe('claimant intake projection', () => {
     expect(screen.queryByRole('listbox', { name: 'Model' })).not.toBeInTheDocument()
   })
 
+  it('shows one truthful Agent placeholder for the first claimant turn', async () => {
+    const user = userEvent.setup()
+    let pushLiveUpdate
+    let resolveTurn
+    api.streamClaimUpdates.mockImplementation(({ onEvent }) => {
+      pushLiveUpdate = onEvent
+      return new Promise(() => {})
+    })
+    api.submitClaimMessage.mockReturnValue(new Promise((resolve) => {
+      resolveTurn = resolve
+    }))
+
+    render(<App />)
+    await user.type(
+      screen.getByPlaceholderText('Tell us what happened…'),
+      'My car was rear-ended this morning.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    expect(await screen.findByLabelText('Message sending')).toHaveTextContent(
+      'My car was rear-ended this morning.',
+    )
+    expect(screen.getAllByLabelText('Claims assistant is working')).toHaveLength(1)
+    await waitFor(() => expect(pushLiveUpdate).toBeTypeOf('function'))
+    await act(async () => pushLiveUpdate({
+      event_type: 'agent.turn.progress',
+      turn_id: 'message-test',
+      session_id: 'ses_ui_vp',
+      stage: 'knowledge.querying',
+      state: 'running',
+      ordinal: 3,
+    }))
+    expect(screen.getByRole('status')).toHaveTextContent('Checking relevant policy information')
+
+    await act(async () => resolveTurn(initialTurn()))
+    expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
+    const activity = screen.getByRole('button', {
+      name: 'Checked relevant policy information',
+    })
+    expect(activity).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByLabelText('Claims assistant is working')).not.toBeInTheDocument()
+  })
+
+  it('does not duplicate messages when realtime readback finishes before the POST response', async () => {
+    const user = userEvent.setup()
+    let pushLiveUpdate
+    let resolveTurn
+    api.streamClaimUpdates.mockImplementation(({ onEvent }) => {
+      pushLiveUpdate = onEvent
+      return new Promise(() => {})
+    })
+    api.submitClaimMessage.mockReturnValue(new Promise((resolve) => {
+      resolveTurn = resolve
+    }))
+    api.getClaim.mockResolvedValue({
+      ...initialClaim,
+      revision: 2,
+      primary_action: primaryAction({ revision: 2 }),
+    })
+    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+
+    render(<App />)
+    await user.type(
+      screen.getByPlaceholderText('Tell us what happened…'),
+      claimantMessage.content.text,
+    )
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await waitFor(() => expect(pushLiveUpdate).toBeTypeOf('function'))
+
+    await act(async () => pushLiveUpdate({
+      event_type: 'claim.updated',
+      claim_revision: 2,
+    }))
+    await act(async () => resolveTurn(initialTurn()))
+
+    expect(screen.getAllByText(claimantMessage.content.text)).toHaveLength(1)
+    expect(screen.getAllByText(agentMessage.content.text)).toHaveLength(1)
+    expect(screen.queryByLabelText('Claims assistant is working')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Message sending')).not.toBeInTheDocument()
+  })
+
   it('returns from login to an empty local workspace without creating a Claim', async () => {
     const user = userEvent.setup()
     api.loginClaimant.mockResolvedValue({ access_token: 'claimant-token' })

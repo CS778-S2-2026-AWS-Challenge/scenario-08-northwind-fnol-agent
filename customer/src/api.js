@@ -97,10 +97,13 @@ export async function streamClaimUpdates({
   claimId,
   sessionId,
   afterRevision,
+  cursor,
   signal,
   onEvent,
+  onCursor,
 }) {
   const params = new URLSearchParams({ after_revision: String(afterRevision) })
+  if (cursor) params.set('cursor', cursor)
   let response
   try {
     response = await fetch(
@@ -151,13 +154,15 @@ export async function streamClaimUpdates({
         buffer = buffer.slice(boundary + 2)
         const lines = frame.split('\n')
         const event = lines.find((line) => line.startsWith('event:'))?.slice(6).trim()
+        const cursor = lines.find((line) => line.startsWith('id:'))?.slice(3).trim() || null
         const data = lines
           .filter((line) => line.startsWith('data:'))
           .map((line) => line.slice(5).trimStart())
           .join('\n')
-        if (event === 'claim.updated' && data) {
+        if (['claim.updated', 'agent.turn.progress'].includes(event) && data) {
           try {
-            await onEvent(JSON.parse(data))
+            await onEvent({ ...JSON.parse(data), event_type: event, cursor })
+            if (cursor && !/^\d+$/.test(cursor)) onCursor?.(cursor)
           } catch (error) {
             if (error instanceof SyntaxError) {
               throw streamError(

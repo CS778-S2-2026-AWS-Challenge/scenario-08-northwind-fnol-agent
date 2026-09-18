@@ -31,7 +31,12 @@ from backend.domain.models import (
     StaffActionRecord,
     WorkingClaim,
 )
-from backend.domain.realtime import RealtimeCursor, RealtimeEvent, RealtimePublication
+from backend.domain.realtime import (
+    AgentTurnProgressPublication,
+    RealtimeCursor,
+    RealtimeEvent,
+    RealtimePublication,
+)
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 from backend.domain.runtime import RuntimeTurnRecords, RuntimeWorkItemRecord
 from backend.domain.staff_agent import (
@@ -410,7 +415,10 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """Persist the graph, returning an existing idempotent result on replay."""
         raise NotImplementedError
 
-    def append_realtime_publication(self, publication: RealtimePublication) -> RealtimeEvent:
+    def append_realtime_publication(
+        self,
+        publication: RealtimePublication | AgentTurnProgressPublication,
+    ) -> RealtimeEvent:
         """Persist one provider-neutral publication outside a business mutation.
 
         Args:

@@ -47,6 +47,7 @@ def _model_gateway_config_from_runtime(
         purpose=configuration.purpose,
         privacy_class=configuration.privacy_class,
         capabilities=capabilities,
+        structured_output_method=configuration.structured_output_method,
         timeout_seconds=configuration.timeout_seconds,
         prompt_version=configuration.prompt_version,
         evaluation_status=ModelProfileStatus(configuration.evaluation_status),
@@ -58,6 +59,8 @@ def _model_gateway_config_from_runtime(
         timeout_seconds=configuration.timeout_seconds,
         capabilities=capabilities,
         profile=profile,
+        structured_output_method=configuration.structured_output_method,
+        reasoning_mode=configuration.reasoning_mode,
         evidence_resolver=evidence_resolver,
     )
 
@@ -102,6 +105,7 @@ def build_model_gateway(
         purpose=settings.model_purpose,
         privacy_class=settings.model_privacy_class,
         capabilities=capabilities,
+        structured_output_method=settings.model_structured_output_method,
         timeout_seconds=settings.model_timeout_seconds,
         prompt_version=settings.model_prompt_version,
         evaluation_status=ModelProfileStatus(settings.model_evaluation_status),
@@ -115,6 +119,8 @@ def build_model_gateway(
             timeout_seconds=settings.model_timeout_seconds,
             capabilities=capabilities,
             profile=profile,
+            structured_output_method=settings.model_structured_output_method,
+            reasoning_mode=settings.model_reasoning_mode,
             evidence_resolver=evidence_resolver,
         ),
     )
@@ -201,6 +207,11 @@ def build_scoped_model_gateway(
         purpose=purpose,
         privacy_class=privacy_class,
         capabilities=capabilities,
+        structured_output_method=(
+            runtime_configuration.structured_output_method
+            if runtime_configuration is not None
+            else settings.model_structured_output_method
+        ),
         timeout_seconds=(
             runtime_configuration.timeout_seconds
             if runtime_configuration is not None
@@ -226,6 +237,12 @@ def build_scoped_model_gateway(
             timeout_seconds=profile.timeout_seconds,
             capabilities=capabilities,
             profile=profile,
+            structured_output_method=profile.structured_output_method,
+            reasoning_mode=(
+                runtime_configuration.reasoning_mode
+                if runtime_configuration is not None
+                else settings.model_reasoning_mode
+            ),
             evidence_resolver=evidence_resolver,
         ),
     )

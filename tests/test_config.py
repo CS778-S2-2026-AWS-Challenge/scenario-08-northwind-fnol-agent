@@ -172,6 +172,7 @@ def test_model_binding_manifest_selects_qwen_without_exposing_a_secret(
     assert settings.model_identifier == 'qwen3.8-27b'
     assert settings.model_api_key_env is None
     assert settings.model_supports_tools is True
+    assert settings.model_reasoning_mode == 'disabled'
     assert [item.profile_id for item in settings.model_runtime_bindings] == [
         'qwen-local',
         'nowcoding-gpt55',
@@ -192,6 +193,7 @@ def test_model_binding_manifest_selects_qwen_without_exposing_a_secret(
     assert gemini.credential_environment_variable == 'GEMINI_API_KEY'
     assert gemini.tools is True
     assert gemini.image_input is True
+    assert gemini.document_input is True
 
 
 def test_model_binding_manifest_rejects_invalid_json(

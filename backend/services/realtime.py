@@ -112,6 +112,24 @@ def scope_for(principal: Principal, *, claim_id: str | None = None) -> RealtimeS
 
 
 def delivery_for(event: RealtimeEvent, audience: RealtimeAudience) -> RealtimeDelivery:
+    if event.event_type == 'agent.turn.progress':
+        assert event.progress is not None
+        return RealtimeDelivery(
+            event='agent.turn.progress',
+            cursor=cursor_for(event),
+            data={
+                'event_id': event.event_id,
+                'claim_id': event.claim_id,
+                'session_id': event.progress.session_id,
+                'turn_id': event.progress.turn_id,
+                'stage': event.progress.stage.value,
+                'state': event.progress.state,
+                'ordinal': event.progress.ordinal,
+                'safe_activity_code': event.progress.safe_activity_code,
+                'retryable': event.progress.retryable,
+                'occurred_at': event.occurred_at.isoformat(),
+            },
+        )
     resources = (
         event.claimant_resources if audience is RealtimeAudience.CLAIMANT else event.resources
     )
@@ -124,7 +142,7 @@ def delivery_for(event: RealtimeEvent, audience: RealtimeAudience) -> RealtimeDe
     }
     if audience is RealtimeAudience.STAFF:
         data['operation_correlation'] = event.operation_correlation
-    return RealtimeDelivery(event='resources.changed', cursor=cursor_for(event), data=data)
+    return RealtimeDelivery(event=event.event_type, cursor=cursor_for(event), data=data)
 
 
 class RealtimeDispatcher:

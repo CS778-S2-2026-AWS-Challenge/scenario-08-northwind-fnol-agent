@@ -50,6 +50,17 @@ password and, when `AGENT_RUNTIME_PROFILE=model_gateway`, the model endpoint, id
 `NORTHWIND_MODEL_API_KEY` and `GEMINI_API_KEY` through the deployment secret mechanism. Do not add
 those values to a committed environment file.
 
+For native Windows development, `scripts/manage-local-secrets.ps1` stores named model credentials
+with Data Protection API (DPAPI) under `%LOCALAPPDATA%\Northwind\secrets`, outside the repository
+and bound to the current Windows user. `set` reads a secure value; `list` returns only the name and
+update time; `remove` deletes one entry. `scripts/start-local.ps1` reads configured model binding
+names, decrypts only locally available values, and injects them while creating the backend child
+process. It clears those names before creating the claimant, Workbench, and Admin processes, then
+restores the invoking PowerShell process environment. The three frontends and MinIO never receive
+model credentials. Backend code still reads standard environment variables and therefore does not
+depend on DPAPI; an AWS deployment replaces this local provider with its approved secret provider
+without changing model bindings.
+
 ## Startup preflight
 
 The preflight is the provider-selection gate: invalid or mixed profile/adapter combinations are

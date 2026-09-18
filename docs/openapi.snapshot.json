@@ -9172,6 +9172,17 @@
             "title": "Document Input",
             "type": "boolean"
           },
+          "healthy": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Healthy"
+          },
           "id": {
             "minLength": 1,
             "title": "Id",
@@ -9191,6 +9202,15 @@
             "title": "Protocol",
             "type": "string"
           },
+          "published": {
+            "default": true,
+            "title": "Published",
+            "type": "boolean"
+          },
+          "runtime_ready": {
+            "title": "Runtime Ready",
+            "type": "boolean"
+          },
           "structured_output": {
             "title": "Structured Output",
             "type": "boolean"
@@ -9198,6 +9218,17 @@
           "tools": {
             "title": "Tools",
             "type": "boolean"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
           }
         },
         "required": [
@@ -9207,7 +9238,8 @@
           "structured_output",
           "tools",
           "image_input",
-          "document_input"
+          "document_input",
+          "runtime_ready"
         ],
         "title": "ModelCapability",
         "type": "object"
@@ -10148,6 +10180,7 @@
           "structured_output_method": {
             "enum": [
               "json_schema",
+              "json_object",
               "forced_tool"
             ],
             "title": "Structured Output Method",
@@ -12050,9 +12083,24 @@
       "StaffAgentModelCapability": {
         "additionalProperties": false,
         "properties": {
+          "availability": {
+            "title": "Availability",
+            "type": "string"
+          },
           "document_input": {
             "title": "Document Input",
             "type": "boolean"
+          },
+          "healthy": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Healthy"
           },
           "id": {
             "title": "Id",
@@ -12070,6 +12118,15 @@
             "title": "Protocol",
             "type": "string"
           },
+          "published": {
+            "default": true,
+            "title": "Published",
+            "type": "boolean"
+          },
+          "runtime_ready": {
+            "title": "Runtime Ready",
+            "type": "boolean"
+          },
           "structured_output": {
             "title": "Structured Output",
             "type": "boolean"
@@ -12077,6 +12134,17 @@
           "tools": {
             "title": "Tools",
             "type": "boolean"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
           }
         },
         "required": [
@@ -12086,7 +12154,9 @@
           "structured_output",
           "tools",
           "image_input",
-          "document_input"
+          "document_input",
+          "runtime_ready",
+          "availability"
         ],
         "title": "StaffAgentModelCapability",
         "type": "object"
@@ -19595,6 +19665,22 @@
               "minimum": 0,
               "title": "After Revision",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
             }
           },
           {
