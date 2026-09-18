@@ -93,7 +93,7 @@ function streamError(message, options) {
   return new ApiRequestError(message, options)
 }
 
-async function readEventStream(response, signal, onEvent) {
+async function readEventStream(response, signal, onEvent, onOpen) {
   if (!response.body) {
     throw streamError(
       'This browser could not keep the claim connected for live updates.',
@@ -104,7 +104,10 @@ async function readEventStream(response, signal, onEvent) {
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let opened = false
   try {
+    if (onOpen) await onOpen()
+    opened = true
     while (!signal?.aborted) {
       const { done, value } = await reader.read()
       buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
@@ -138,6 +141,9 @@ async function readEventStream(response, signal, onEvent) {
       if (done) return
     }
   } finally {
+    if (!opened) {
+      try { await reader.cancel() } catch { /* replacement stream cleanup */ }
+    }
     reader.releaseLock()
   }
 }
@@ -145,6 +151,7 @@ async function readEventStream(response, signal, onEvent) {
 export async function streamRealtimeEvents({
   cursor,
   signal,
+  onOpen,
   onEvent,
 }) {
   const params = new URLSearchParams()
@@ -184,7 +191,7 @@ export async function streamRealtimeEvents({
     if (event === 'resources.changed' || event === 'resync_required') {
       await onEvent({ type: event, cursor: eventCursor, data })
     }
-  })
+  }, onOpen)
 }
 
 export async function streamClaimUpdates({

@@ -1370,6 +1370,177 @@ describe('claimant intake projection', () => {
     })).toHaveAttribute('aria-expanded', 'false')
   })
 
+  it('rejects delayed realtime Claim and message readbacks after a newer claimant mutation', async () => {
+    const user = userEvent.setup()
+    let pushRealtime
+    let resolveClaimReadback
+    let resolveMessagesReadback
+    const delayedClaimReadback = new Promise((resolve) => {
+      resolveClaimReadback = resolve
+    })
+    const delayedMessagesReadback = new Promise((resolve) => {
+      resolveMessagesReadback = resolve
+    })
+    api.streamRealtimeEvents.mockImplementation(({ onEvent }) => {
+      pushRealtime = onEvent
+      return new Promise(() => {})
+    })
+
+    const newerClaimantMessage = {
+      ...claimantMessage,
+      message_id: 'msg_claimant_newer',
+      content: { type: 'text', text: 'The water is still running.' },
+      created_at: '2026-09-10T01:01:00Z',
+    }
+    const newerAgentMessage = {
+      ...agentMessage,
+      message_id: 'msg_agent_newer',
+      content: { type: 'text', text: 'I have kept that newer update.' },
+      created_at: '2026-09-10T01:01:01Z',
+    }
+    api.submitClaimMessage
+      .mockResolvedValueOnce(initialTurn())
+      .mockResolvedValueOnce({
+        ...initialTurn(),
+        claimant_message: newerClaimantMessage,
+        agent_message: newerAgentMessage,
+        claim_revision: 3,
+        decision: {
+          customer_next_step: {
+            status: 'confirmation_required',
+            summary: 'Review the newest details.',
+            required_items: ['incident.description'],
+          },
+        },
+        primary_action: primaryAction({
+          actionCode: 'claimant.review_details',
+          available: true,
+          requiredInputs: ['incident.description'],
+          revision: 3,
+        }),
+      })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    await waitFor(() => expect(pushRealtime).toBeTypeOf('function'))
+
+    api.getClaim.mockReturnValueOnce(delayedClaimReadback)
+    api.getClaimMessages.mockReturnValueOnce(delayedMessagesReadback)
+
+    let realtimeRefresh
+    await act(async () => {
+      realtimeRefresh = pushRealtime(realtimeChange(2))
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(api.getClaim).toHaveBeenCalledWith(initialClaim.claim_id))
+    await waitFor(() => expect(api.getClaimMessages).toHaveBeenCalledWith(
+      initialClaim.claim_id,
+      'ses_ui_vp',
+    ))
+
+    await user.type(
+      screen.getByPlaceholderText('Write the details you know...'),
+      newerClaimantMessage.content.text,
+    )
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(await screen.findByText(newerAgentMessage.content.text)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Review claim details/i })).toBeInTheDocument()
+
+    await act(async () => {
+      resolveClaimReadback({
+        ...initialClaim,
+        revision: 2,
+        primary_action: primaryAction({ revision: 2 }),
+      })
+      resolveMessagesReadback({ items: [claimantMessage, agentMessage] })
+      await realtimeRefresh
+    })
+
+    expect(screen.getByText(newerClaimantMessage.content.text)).toBeInTheDocument()
+    expect(screen.getByText(newerAgentMessage.content.text)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Review claim details/i })).toBeInTheDocument()
+  })
+
+  it('opens a replacement claimant stream before the resync snapshot and applies a buffered mutation', async () => {
+    const user = userEvent.setup()
+    let firstOnEvent
+    let finishFirstStream
+    let streamAttempt = 0
+    let replacementOpened = false
+
+    api.streamRealtimeEvents.mockImplementation(({ onEvent, onOpen, signal }) => {
+      streamAttempt += 1
+      if (streamAttempt === 1) {
+        firstOnEvent = onEvent
+        return new Promise((resolve) => {
+          finishFirstStream = resolve
+          signal.addEventListener('abort', resolve, { once: true })
+        })
+      }
+
+      replacementOpened = true
+      return (async () => {
+        await onOpen?.()
+        await onEvent(realtimeChange(3, ['claim']))
+        await new Promise((resolve) => {
+          signal.addEventListener('abort', resolve, { once: true })
+        })
+      })()
+    })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    await waitFor(() => expect(firstOnEvent).toBeTypeOf('function'))
+
+    const snapshotBeforeBufferedMutation = {
+      ...initialClaim,
+      revision: 2,
+      primary_action: primaryAction({ revision: 2 }),
+    }
+    const afterBufferedMutation = {
+      ...initialClaim,
+      revision: 3,
+      customer_next_step: {
+        status: 'confirmation_required',
+        summary: 'Review the buffered update.',
+        required_items: ['incident.description'],
+      },
+      primary_action: primaryAction({
+        actionCode: 'claimant.review_details',
+        available: true,
+        requiredInputs: ['incident.description'],
+        revision: 3,
+      }),
+    }
+    api.getClaim
+      .mockResolvedValueOnce(snapshotBeforeBufferedMutation)
+      .mockResolvedValueOnce(afterBufferedMutation)
+    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+
+    await act(async () => {
+      await firstOnEvent({
+        type: 'resync_required',
+        cursor: null,
+        data: { reason: 'replay_gap' },
+      })
+      finishFirstStream()
+    })
+
+    await waitFor(() => expect(replacementOpened).toBe(true))
+    await waitFor(() => expect(api.streamRealtimeEvents).toHaveBeenCalledTimes(2))
+    expect(api.streamRealtimeEvents.mock.calls[1][0]).toEqual(expect.objectContaining({
+      cursor: null,
+      onOpen: expect.any(Function),
+    }))
+    expect(await screen.findByRole('button', { name: /Review claim details/i })).toBeInTheDocument()
+    expect(api.getClaim).toHaveBeenCalledTimes(2)
+  })
+
   it('shows what to provide from the Evidence projection and supports keyboard tab navigation', async () => {
     const user = userEvent.setup()
     let pushEvidenceUpdate

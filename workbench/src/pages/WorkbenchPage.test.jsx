@@ -1496,32 +1496,76 @@ describe('WorkbenchPage queue routing', () => {
     expect(api.signals).toHaveBeenCalledTimes(signalCalls + 1)
     expect(api.claim).toHaveBeenCalledTimes(claimCalls)
   })
-  it('propagates a failed conversation reload during realtime resync', async () => {
-    let pushRealtime
-    api.sessionsForTarget.mockResolvedValue({
-      items: [{ session_id: 'ses_saved' }],
-      page: { next_cursor: null },
-      resolved_session: { session_id: 'ses_saved' },
+  it('opens a replacement Workbench stream before the resync snapshot and applies a buffered Claim event', async () => {
+    let firstOnEvent
+    let finishFirstStream
+    let streamAttempt = 0
+    let replacementOpened = false
+    let replacementWasOpenWhenSnapshotStarted = false
+    let claimReadCount = 0
+
+    const revisionTwo = {
+      ...claim,
+      revision: 2,
+    }
+    api.claim.mockImplementation(() => {
+      claimReadCount += 1
+      if (claimReadCount === 2) {
+        replacementWasOpenWhenSnapshotStarted = replacementOpened
+        return Promise.resolve(claim)
+      }
+      return Promise.resolve(claimReadCount >= 3 ? revisionTwo : claim)
     })
-    api.realtimeEvents.mockImplementation((_token, { onEvent, signal }) => {
-      pushRealtime = onEvent
-      return new Promise((resolve) => {
-        signal.addEventListener('abort', resolve, { once: true })
+    api.realtimeEvents.mockImplementation((_token, { onEvent, onOpen, signal }) => {
+      streamAttempt += 1
+      if (streamAttempt === 1) {
+        firstOnEvent = onEvent
+        return new Promise((resolve) => {
+          finishFirstStream = resolve
+          signal.addEventListener('abort', resolve, { once: true })
+        })
+      }
+
+      replacementOpened = true
+      return (async () => {
+        await onOpen?.()
+        await onEvent({
+          type: 'resources.changed',
+          cursor: 'evt-buffered-claim',
+          data: {
+            event_id: 'evt-buffered-claim',
+            claim_id: 'clm_route_1',
+            claim_revision: 2,
+            resources: ['claim'],
+          },
+        })
+        await new Promise((resolve) => {
+          signal.addEventListener('abort', resolve, { once: true })
+        })
+      })()
+    })
+
+    renderPage('/workbench/claims/clm_route_1')
+    expect(await screen.findByTestId('claim-revision')).toHaveTextContent('Claim revision 1')
+    await waitFor(() => expect(firstOnEvent).toBeTypeOf('function'))
+
+    await act(async () => {
+      await firstOnEvent({
+        type: 'resync_required',
+        cursor: null,
+        data: { reason: 'replay_gap' },
       })
+      finishFirstStream()
     })
 
-    renderPage('/workbench/claims/clm_route_1/conversation?session=ses_saved')
-    await waitFor(() => expect(api.messages).toHaveBeenCalled())
-    await waitFor(() => expect(pushRealtime).toBeTypeOf('function'))
-
-    const conversationFailure = new Error('Conversation resync failed.')
-    api.sessionsForTarget.mockRejectedValueOnce(conversationFailure)
-
-    await expect(pushRealtime({
-      type: 'resync_required',
+    await waitFor(() => expect(api.realtimeEvents).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 2'))
+    expect(replacementOpened).toBe(true)
+    expect(replacementWasOpenWhenSnapshotStarted).toBe(true)
+    expect(api.realtimeEvents.mock.calls[1][1]).toEqual(expect.objectContaining({
       cursor: null,
-      data: { reason: 'replay_gap' },
-    })).rejects.toBe(conversationFailure)
+      onOpen: expect.any(Function),
+    }))
   })
 
   it('uses one visible authoritative snapshot as degraded fallback when the stream fails', async () => {

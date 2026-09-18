@@ -863,6 +863,7 @@ export default function WorkbenchPage() {
     let active = true
     let reconnectDelay = 1000
     let degradedRefreshes = 0
+    let needsResyncSnapshot = false
     const maxDegradedRefreshes = 5
 
     function rememberEvent(eventId) {
@@ -978,10 +979,10 @@ export default function WorkbenchPage() {
     async function applyRealtimeEvent(delivery) {
       if (!active) return
       if (delivery.type === 'resync_required') {
-        await refreshFullSnapshot()
+        needsResyncSnapshot = true
         realtimeCursorRef.current = null
         realtimeSeenEventIdsRef.current.clear()
-        reconnectDelay = 1000
+        reconnectDelay = 0
         degradedRefreshes = 0
         return
       }
@@ -1066,23 +1067,34 @@ export default function WorkbenchPage() {
 
     async function connect() {
       while (active && !controller.signal.aborted) {
+        const recoverOnOpen = needsResyncSnapshot
         try {
           await workbenchApi.realtimeEvents(token, {
-            cursor: realtimeCursorRef.current,
+            cursor: recoverOnOpen ? null : realtimeCursorRef.current,
             signal: controller.signal,
+            onOpen: recoverOnOpen
+              ? async () => {
+                await refreshFullSnapshot()
+                if (!active || controller.signal.aborted) return
+                needsResyncSnapshot = false
+                realtimeCursorRef.current = null
+                realtimeSeenEventIdsRef.current.clear()
+                reconnectDelay = 1000
+                degradedRefreshes = 0
+              }
+              : undefined,
             onEvent: applyRealtimeEvent,
           })
         } catch (streamFailure) {
           if (!active || controller.signal.aborted) return
           if (streamFailure?.code === 'INVALID_EVENT_CURSOR') {
-            try {
-              await refreshFullSnapshot()
-              realtimeCursorRef.current = null
-              realtimeSeenEventIdsRef.current.clear()
-              degradedRefreshes = 0
-            } catch {
-              // The bounded reconnect loop retries the authoritative resync.
-            }
+            needsResyncSnapshot = true
+            realtimeCursorRef.current = null
+            realtimeSeenEventIdsRef.current.clear()
+            reconnectDelay = 0
+            degradedRefreshes = 0
+          } else if (needsResyncSnapshot) {
+            reconnectDelay = Math.max(reconnectDelay, 1000)
           } else {
             await runDegradedRefresh()
           }
@@ -1090,7 +1102,7 @@ export default function WorkbenchPage() {
         if (!active || controller.signal.aborted) return
         const jitter = Math.floor(Math.random() * Math.min(250, reconnectDelay / 4))
         await new Promise((resolve) => globalThis.setTimeout(resolve, reconnectDelay + jitter))
-        reconnectDelay = Math.min(reconnectDelay * 2, 8000)
+        reconnectDelay = Math.min(Math.max(reconnectDelay, 1000) * 2, 8000)
       }
     }
 

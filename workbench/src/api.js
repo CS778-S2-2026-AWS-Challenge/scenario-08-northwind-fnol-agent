@@ -92,7 +92,7 @@ async function request(path, { token, headers, ...options } = {}) {
   return payload
 }
 
-async function readEventStream(response, signal, onEvent) {
+async function readEventStream(response, signal, onEvent, onOpen) {
   if (!response.body) {
     throw new ApiError(
       'This browser could not keep the Workbench connected for live updates.',
@@ -103,7 +103,10 @@ async function readEventStream(response, signal, onEvent) {
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let opened = false
   try {
+    if (onOpen) await onOpen()
+    opened = true
     while (!signal?.aborted) {
       const { done, value } = await reader.read()
       buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
@@ -137,11 +140,14 @@ async function readEventStream(response, signal, onEvent) {
       if (done) return
     }
   } finally {
+    if (!opened) {
+      try { await reader.cancel() } catch { /* replacement stream cleanup */ }
+    }
     reader.releaseLock()
   }
 }
 
-async function streamRealtimeEvents(token, { cursor, signal, onEvent }) {
+async function streamRealtimeEvents(token, { cursor, signal, onOpen, onEvent }) {
   const params = new URLSearchParams()
   if (cursor) params.set('cursor', cursor)
   const query = params.size ? `?${params}` : ''
@@ -179,7 +185,7 @@ async function streamRealtimeEvents(token, { cursor, signal, onEvent }) {
     if (event === 'resources.changed' || event === 'resync_required') {
       await onEvent({ type: event, cursor: eventCursor, data })
     }
-  })
+  }, onOpen)
 }
 
 async function mutationRequest(path, { headers = {}, ...options }) {

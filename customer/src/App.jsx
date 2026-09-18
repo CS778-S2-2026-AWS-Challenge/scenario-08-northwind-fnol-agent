@@ -409,6 +409,7 @@ function App() {
   const accountRef = useRef(account)
   const realtimeCursor = useRef(null)
   const realtimeSeenEventIds = useRef(new Set())
+  const messagesRequestGeneration = useRef(0)
   const latestEvidenceRevision = useRef(0)
   const latestEvidenceItems = useRef([])
   const evidenceHasLocalMutation = useRef(false)
@@ -759,8 +760,35 @@ function App() {
       : current)
   }
 
-  function applyClaimSnapshot(currentClaim) {
-    rememberClaimRevision(currentClaim.revision)
+  function beginMessagesReadback() {
+    messagesRequestGeneration.current += 1
+    return messagesRequestGeneration.current
+  }
+
+  function commitMessages(nextMessages) {
+    messagesRequestGeneration.current += 1
+    setMessages(nextMessages)
+  }
+
+  function applyMessagesReadback(items, { generation, claimId, sessionId }) {
+    if (
+      generation !== messagesRequestGeneration.current
+      || activeClaimRef.current?.claim_id !== claimId
+      || activeSessionIdRef.current !== sessionId
+    ) return false
+    setMessages(items)
+    return true
+  }
+
+  function applyClaimSnapshot(currentClaim, { minimumRevision = 0 } = {}) {
+    const responseRevision = Number(currentClaim?.revision || 0)
+    const minimumAcceptedRevision = Math.max(
+      Number(activeClaimRef.current?.revision || 0),
+      latestRevision.current,
+      Number(minimumRevision || 0),
+    )
+    if (responseRevision < minimumAcceptedRevision) return false
+    rememberClaimRevision(responseRevision)
     activeClaimRef.current = currentClaim
     setClaim(currentClaim)
     setForm(currentClaim.form)
@@ -768,6 +796,7 @@ function App() {
     setDynamicForm(currentClaim.dynamic_form || null)
     setNextStep(currentClaim.customer_next_step)
     setHandoff(currentClaim.handoff || null)
+    return true
   }
 
   function attachmentForEvidence(evidence, current = {}) {
@@ -871,6 +900,7 @@ function App() {
     let active = true
     let reconnectDelay = 1000
     let degradedRefreshes = 0
+    let needsResyncSnapshot = false
     const maxDegradedRefreshes = 5
 
     function rememberEvent(eventId) {
@@ -890,6 +920,7 @@ function App() {
       if (activeClaim?.claim_id) {
         const claimId = activeClaim.claim_id
         refreshes.push((async () => {
+          const messagesGeneration = activeSessionId ? beginMessagesReadback() : null
           const [currentClaim, conversation, evidence] = await Promise.all([
             getClaim(claimId),
             activeSessionId ? getClaimMessages(claimId, activeSessionId) : Promise.resolve(null),
@@ -897,7 +928,13 @@ function App() {
           ])
           if (!active || activeClaimRef.current?.claim_id !== claimId) return
           applyClaimSnapshot(currentClaim)
-          if (conversation) setMessages(conversation.items)
+          if (conversation && messagesGeneration !== null) {
+            applyMessagesReadback(conversation.items, {
+              generation: messagesGeneration,
+              claimId,
+              sessionId: activeSessionId,
+            })
+          }
           if (syncEvidenceProjection(evidence)) setEvidenceSyncNotice('')
           setEvidenceLoadStatus('ready')
         })())
@@ -917,10 +954,10 @@ function App() {
     async function applyRealtimeEvent(delivery) {
       if (!active) return
       if (delivery.type === 'resync_required') {
-        await refreshFullSnapshot()
+        needsResyncSnapshot = true
         realtimeCursor.current = null
         realtimeSeenEventIds.current.clear()
-        reconnectDelay = 1000
+        reconnectDelay = 0
         degradedRefreshes = 0
         return
       }
@@ -935,6 +972,7 @@ function App() {
       const resources = new Set(delivery.data?.resources || [])
       const activeClaim = activeClaimRef.current
       const claimId = delivery.data?.claim_id
+      const eventRevision = Number(delivery.data?.claim_revision || 0)
       const refreshes = []
 
       if (activeClaim?.claim_id === claimId) {
@@ -947,19 +985,19 @@ function App() {
         ) {
           refreshes.push(getClaim(claimId).then((currentClaim) => {
             if (active && activeClaimRef.current?.claim_id === claimId) {
-              applyClaimSnapshot(currentClaim)
+              applyClaimSnapshot(currentClaim, { minimumRevision: eventRevision })
             }
           }))
         }
         if (resources.has('messages') && activeSessionId) {
+          const messagesGeneration = beginMessagesReadback()
           refreshes.push(getClaimMessages(claimId, activeSessionId).then((conversation) => {
-            if (
-              active
-              && activeClaimRef.current?.claim_id === claimId
-              && activeSessionIdRef.current === activeSessionId
-            ) {
-              setMessages(conversation.items)
-            }
+            if (!active) return
+            applyMessagesReadback(conversation.items, {
+              generation: messagesGeneration,
+              claimId,
+              sessionId: activeSessionId,
+            })
           }))
         }
         if (resources.has('evidence')) {
@@ -1001,10 +1039,22 @@ function App() {
 
     async function connect() {
       while (active && !controller.signal.aborted) {
+        const recoverOnOpen = needsResyncSnapshot
         try {
           await streamRealtimeEvents({
-            cursor: realtimeCursor.current,
+            cursor: recoverOnOpen ? null : realtimeCursor.current,
             signal: controller.signal,
+            onOpen: recoverOnOpen
+              ? async () => {
+                await refreshFullSnapshot()
+                if (!active || controller.signal.aborted) return
+                needsResyncSnapshot = false
+                realtimeCursor.current = null
+                realtimeSeenEventIds.current.clear()
+                reconnectDelay = 1000
+                degradedRefreshes = 0
+              }
+              : undefined,
             onEvent: applyRealtimeEvent,
           })
         } catch (streamFailure) {
@@ -1013,14 +1063,13 @@ function App() {
             streamFailure instanceof ApiRequestError
             && streamFailure.code === 'INVALID_EVENT_CURSOR'
           ) {
-            try {
-              await refreshFullSnapshot()
-              realtimeCursor.current = null
-              realtimeSeenEventIds.current.clear()
-              degradedRefreshes = 0
-            } catch {
-              // The reconnect loop retries the authoritative resync.
-            }
+            needsResyncSnapshot = true
+            realtimeCursor.current = null
+            realtimeSeenEventIds.current.clear()
+            reconnectDelay = 0
+            degradedRefreshes = 0
+          } else if (needsResyncSnapshot) {
+            reconnectDelay = Math.max(reconnectDelay, 1000)
           } else {
             await runDegradedRefresh()
           }
@@ -1033,7 +1082,7 @@ function App() {
         if (!active || controller.signal.aborted) return
         const jitter = Math.floor(Math.random() * Math.min(250, reconnectDelay / 4))
         await new Promise((resolve) => globalThis.setTimeout(resolve, reconnectDelay + jitter))
-        reconnectDelay = Math.min(reconnectDelay * 2, 8000)
+        reconnectDelay = Math.min(Math.max(reconnectDelay, 1000) * 2, 8000)
       }
     }
 
@@ -1370,7 +1419,7 @@ function App() {
         setContentsItems(created.claim.contents_items || [])
         setDynamicForm(created.claim.dynamic_form || null)
         setNextStep(created.claim.customer_next_step)
-        setMessages([])
+        commitMessages([])
         setHandoff(null)
         setEvidenceItems([])
         setResumeContext(null)
@@ -1390,7 +1439,7 @@ function App() {
         idempotencyKey: operation.turnKey,
         clientMessageId: operation.clientMessageId,
       })
-      setMessages((current) => [
+      commitMessages((current) => [
         ...current,
         turn.claimant_message,
         ...(turn.agent_message ? [turn.agent_message] : []),
@@ -1475,7 +1524,7 @@ function App() {
     evidenceClaimId.current = null
     setClaim(null)
     setSessionId(null)
-    setMessages([])
+    commitMessages([])
     setForm({})
     setContentsItems([])
     setDynamicForm(null)
@@ -1769,7 +1818,7 @@ function App() {
         revision: response.revision,
         primary_action: response.primary_action,
       }))
-      setMessages((current) => current.map((message) => (
+      commitMessages((current) => current.map((message) => (
         message.message_id === action.agent_message_id
           ? {
               ...message,
@@ -1828,7 +1877,7 @@ function App() {
       setClaim(current)
       setSessionId(session.session_id)
       if (session.model_profile_id) setSelectedModel(session.model_profile_id)
-      setMessages(conversation.items)
+      commitMessages(conversation.items)
       setForm(current.form)
       setContentsItems(current.contents_items || [])
       setDynamicForm(current.dynamic_form || null)
@@ -1970,7 +2019,7 @@ function App() {
     confirmedClaimProjections.current.clear()
     setClaim(null)
     setSessionId(null)
-    setMessages([])
+    commitMessages([])
     setForm({})
     setContentsItems([])
     setDynamicForm(null)
