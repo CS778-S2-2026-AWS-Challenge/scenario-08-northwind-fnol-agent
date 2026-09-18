@@ -156,7 +156,7 @@ browser.
 
 | Gap | Effect on this evidence | Tracking | Owner |
 | --- | --- | --- | --- |
-| A model-backed Agent runtime is not runnable for the journey suite | Metrics 1 to 3 and real effort figures stay unmeasured; contents stays `unavailable` | No issue yet; the runtime is delivered by #914 and #951 | @Ysoseri1224 |
+| The journey runners cannot select the model-backed Agent runtime, and the journey environment has no model credential | Metrics 1 to 3 and real effort figures stay unmeasured; contents stays `unavailable` | #962 | @bdfa123 for the runners; @Ysoseri1224 for model access |
 | Contents item capture on the controlled runtime | All 20 contents runs stop before claim creation | Discussion #847 | @Ysoseri1224 |
 | No served source for elapsed claimant time | Metric 4 stays `partly_measured` | #953 | @Ysoseri1224 |
 | Real AWS access and calls | Definition of Done item 4 has no evidence | #786 | @liyang6620 |
@@ -164,4 +164,4 @@ browser.
 | Red tests on `main`: two `tests/test_backend_quality_profiles.py` cases and one `tests/test_demo_reset.py` case | Full-suite runs cannot be fully green | Reported on #903 and #915 | @Ysoseri1224, @liyang6620 |
 | The atomic initial claimant bootstrap changes intake | Every journey start must be rerun after merge | #816 | @liyang6620 |
 | Poster screenshots and replays | Definition of Done item 6 lacks screens | The list above | @LLL263, @jxu316-arch |
-| Ten rubric anchors with complete input, output, state, and metric evidence | Definition of Done item 2 is not started | Not yet opened | @bdfa123 |
+| Ten rubric anchors with complete input, output, state, and metric evidence | Definition of Done item 2 is not started | #963 | @bdfa123 |
