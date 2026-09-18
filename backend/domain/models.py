@@ -537,6 +537,13 @@ class ContentsOwnership(str, Enum):
     OTHER = 'other'
 
 
+class ContentsEvidencePurpose(str, Enum):
+    PROOF_OF_PURCHASE = 'proof_of_purchase'
+    ITEM_CONDITION = 'item_condition'
+    REPAIR_ASSESSMENT = 'repair_assessment'
+    AUTHORITY_DOCUMENT = 'authority_document'
+
+
 class MoneyAmount(ContractModel):
     amount: float = Field(ge=0.0)
     currency: str = Field(min_length=3, max_length=3, pattern=r'^[A-Z]{3}$')
@@ -545,10 +552,12 @@ class MoneyAmount(ContractModel):
 class ProposedContentsItem(ContractModel):
     item_id: str | None = Field(default=None, min_length=1, max_length=100)
     description: str = Field(min_length=1, max_length=500)
-    category: str = Field(min_length=1, max_length=100)
+    category: str | None = Field(default=None, min_length=1, max_length=100)
     quantity: int = Field(default=1, ge=1)
-    loss_type: ContentsLossType
-    ownership: ContentsOwnership
+    brand: str | None = Field(default=None, min_length=1, max_length=200)
+    model: str | None = Field(default=None, min_length=1, max_length=200)
+    loss_type: ContentsLossType | None = None
+    ownership: ContentsOwnership | None = None
     estimated_value: MoneyAmount | None = None
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     relation: AssertionRelation | None = None
@@ -559,10 +568,12 @@ class ProposedContentsItem(ContractModel):
 class ContentsItemAssertion(ContractModel):
     assertion_id: str = Field(min_length=1, max_length=120)
     description: str = Field(min_length=1, max_length=500)
-    category: str = Field(min_length=1, max_length=100)
+    category: str | None = Field(default=None, min_length=1, max_length=100)
     quantity: int = Field(default=1, ge=1)
-    loss_type: ContentsLossType
-    ownership: ContentsOwnership
+    brand: str | None = Field(default=None, min_length=1, max_length=200)
+    model: str | None = Field(default=None, min_length=1, max_length=200)
+    loss_type: ContentsLossType | None = None
+    ownership: ContentsOwnership | None = None
     estimated_value: MoneyAmount | None = None
     reported_text: str | None = Field(default=None, max_length=5000)
     source_refs: list[str] = Field(default_factory=list)
@@ -576,10 +587,12 @@ class ContentsItem(ContractModel):
 
     item_id: str = Field(min_length=1, max_length=100)
     description: str = Field(min_length=1, max_length=500)
-    category: str = Field(min_length=1, max_length=100)
+    category: str | None = Field(default=None, min_length=1, max_length=100)
     quantity: int = Field(default=1, ge=1)
-    loss_type: ContentsLossType
-    ownership: ContentsOwnership
+    brand: str | None = Field(default=None, min_length=1, max_length=200)
+    model: str | None = Field(default=None, min_length=1, max_length=200)
+    loss_type: ContentsLossType | None = None
+    ownership: ContentsOwnership | None = None
     estimated_value: MoneyAmount | None = None
     source: FormSource
     source_refs: list[str] = Field(default_factory=list)
@@ -594,6 +607,12 @@ class ContentsItem(ContractModel):
 
     @model_validator(mode='after')
     def derive_legacy_resolution_state(self) -> 'ContentsItem':
+        if self.status is FormStatus.CONFIRMED and (
+            self.category is None or self.loss_type is None or self.ownership is None
+        ):
+            raise ValueError(
+                'A confirmed contents item requires category, loss_type, and ownership.'
+            )
         if self.resolution_state is None:
             self.resolution_state = {
                 FormStatus.CONFIRMED: FactResolutionState.RESOLVED,
@@ -609,17 +628,107 @@ class ClaimantContentsItem(ContractModel):
 
     item_id: str = Field(min_length=1, max_length=100)
     description: str = Field(min_length=1, max_length=500)
-    category: str = Field(min_length=1, max_length=100)
+    category: str | None = Field(default=None, min_length=1, max_length=100)
     quantity: int = Field(default=1, ge=1)
-    loss_type: ContentsLossType
-    ownership: ContentsOwnership
+    brand: str | None = Field(default=None, min_length=1, max_length=200)
+    model: str | None = Field(default=None, min_length=1, max_length=200)
+    loss_type: ContentsLossType | None = None
+    ownership: ContentsOwnership | None = None
     estimated_value: MoneyAmount | None = None
     source: FormSource
     source_refs: list[str] = Field(default_factory=list)
     status: FormStatus
     needed_for: NeededFor
     resolution_state: FactResolutionState
+    evidence_links: list['ContentsItemEvidenceAssociationProjection'] = Field(default_factory=list)
     updated_at: datetime
+
+
+class MotorOtherDriverRecord(ContractModel):
+    """One bounded other-driver record for a Motor Claim."""
+
+    participant_id: str = Field(pattern=r'^par_[a-f0-9]{20}$')
+    claim_id: str = Field(min_length=1, max_length=200)
+    customer_id: str = Field(min_length=1, max_length=200)
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    phone: str | None = Field(default=None, min_length=1, max_length=40)
+    email: str | None = Field(default=None, min_length=3, max_length=254)
+    vehicle_registration: str | None = Field(default=None, min_length=1, max_length=40)
+    source_refs: list[str] = Field(default_factory=list, max_length=10)
+    created_at: datetime
+    updated_at: datetime
+
+    @model_validator(mode='after')
+    def require_supplied_detail(self) -> 'MotorOtherDriverRecord':
+        if not any((self.name, self.phone, self.email, self.vehicle_registration)):
+            raise ValueError('An other-driver record requires at least one supplied detail.')
+        if self.updated_at < self.created_at:
+            raise ValueError('An other-driver record cannot be updated before it was created.')
+        return self
+
+
+class MotorOtherDriverProjection(ContractModel):
+    participant_id: str
+    claim_id: str
+    name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    vehicle_registration: str | None = None
+    updated_at: datetime
+
+
+class CreateMotorOtherDriverRequest(ContractModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    phone: str | None = Field(default=None, min_length=1, max_length=40)
+    email: str | None = Field(default=None, min_length=3, max_length=254)
+    vehicle_registration: str | None = Field(default=None, min_length=1, max_length=40)
+
+    @model_validator(mode='after')
+    def require_supplied_detail(self) -> 'CreateMotorOtherDriverRequest':
+        if not any((self.name, self.phone, self.email, self.vehicle_registration)):
+            raise ValueError('At least one other-driver detail is required.')
+        return self
+
+
+class MotorOtherDriverMutationResponse(ContractModel):
+    participant: MotorOtherDriverProjection
+    revision: int = Field(ge=1)
+
+
+class ContentsItemEvidenceAssociation(ContractModel):
+    """Immutable relationship between one ContentsItem and same-Claim Evidence."""
+
+    association_id: str = Field(pattern=r'^iea_[a-f0-9]{20}$')
+    claim_id: str = Field(min_length=1, max_length=200)
+    customer_id: str = Field(min_length=1, max_length=200)
+    item_id: str = Field(min_length=1, max_length=100)
+    evidence_id: str = Field(min_length=1, max_length=100)
+    purpose: ContentsEvidencePurpose
+    created_at: datetime
+
+
+class ContentsItemEvidenceAssociationProjection(ContractModel):
+    association_id: str
+    claim_id: str
+    item_id: str
+    evidence_id: str
+    purpose: ContentsEvidencePurpose
+    created_at: datetime
+
+
+class CreateContentsItemEvidenceAssociationRequest(ContractModel):
+    evidence_id: str = Field(min_length=1, max_length=100)
+    purpose: ContentsEvidencePurpose
+
+
+class ContentsItemEvidenceAssociationMutationResponse(ContractModel):
+    association: ContentsItemEvidenceAssociationProjection
+    revision: int = Field(ge=1)
+
+
+class ContentsItemEvidenceAssociationListResponse(ContractModel):
+    items: list[ContentsItemEvidenceAssociationProjection]
+    page: 'PageInfo'
 
 
 class EvidenceSummary(ContractModel):
@@ -1971,6 +2080,7 @@ class ClaimantClaim(ContractModel):
     workflow_state: WorkflowState
     form: dict[str, StructuredFormField]
     contents_items: list[ClaimantContentsItem] = Field(default_factory=list)
+    motor_other_driver: MotorOtherDriverProjection | None = None
     evidence_summary: EvidenceSummary
     external_claim: ExternalClaimResult | None = None
     external_service_action: ClaimantExternalServiceAction | None = None
@@ -2258,3 +2368,4 @@ class DynamicFormProjection(ContractModel):
 
 ClaimantClaim.model_rebuild()
 MessageTurnResponse.model_rebuild()
+ContentsItemEvidenceAssociationListResponse.model_rebuild()

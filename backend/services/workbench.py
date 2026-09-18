@@ -147,6 +147,10 @@ from backend.domain.workbench_action_registry import (
     work_item_defaults,
 )
 from backend.repositories.protocols import PersistenceRepository
+from backend.services.claim_data import (
+    project_contents_item_evidence_association,
+    project_motor_other_driver,
+)
 from backend.services.incomplete_claims import find_incomplete_recovery
 from backend.services.runtime_work_items import current_runtime_work_items
 from backend.services.support import decode_cursor, encode_cursor, now_utc
@@ -1898,11 +1902,23 @@ def _build_projection(
             )
         except (InvalidExternalLifecycleTransition, ValueError):
             external_section_limitation = _INCONSISTENT_EXTERNAL_LIFECYCLE
+    motor_other_driver = repository.get_motor_other_driver(claim.claim_id, claim.customer_id)
     return WorkbenchClaimDetail(
         **base,
         active_session_id=claim.active_session_id,
         claim_state=claim.claim_state,
         contents_items=claim.contents_items,
+        contents_item_evidence_associations=[
+            project_contents_item_evidence_association(item)
+            for item in repository.list_contents_item_evidence_associations(
+                claim.claim_id, claim.customer_id
+            )
+        ],
+        motor_other_driver=(
+            project_motor_other_driver(motor_other_driver)
+            if motor_other_driver is not None
+            else None
+        ),
         source_summary=_source_summary(
             claim,
             evidence,

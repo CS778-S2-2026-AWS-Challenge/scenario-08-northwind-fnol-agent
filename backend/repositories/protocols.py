@@ -18,12 +18,14 @@ from backend.domain.models import (
     BranchEvaluationRecord,
     ClaimCollaborationRequest,
     ClaimCoworkerRecord,
+    ContentsItemEvidenceAssociation,
     CustomerUpdateRecord,
     EvidenceClaimLink,
     EvidenceRecord,
     FollowUpRecord,
     HandoffRecord,
     MessageRecord,
+    MotorOtherDriverRecord,
     RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
@@ -848,6 +850,36 @@ class PersistenceRepository(ClaimRepository, Protocol):
 
     def list_evidence_for_customer(self, customer_id: str) -> list[EvidenceRecord]:
         """Return Evidence owned by a customer across all of their Claims."""
+        raise NotImplementedError
+
+    def get_motor_other_driver(
+        self, claim_id: str, customer_id: str
+    ) -> MotorOtherDriverRecord | None:
+        raise NotImplementedError
+
+    def save_motor_other_driver_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        participant: MotorOtherDriverRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        """Atomically create the sole bounded other-driver record for a Motor Claim."""
+        raise NotImplementedError
+
+    def list_contents_item_evidence_associations(
+        self, claim_id: str, customer_id: str
+    ) -> list[ContentsItemEvidenceAssociation]:
+        raise NotImplementedError
+
+    def save_contents_item_evidence_association_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        association: ContentsItemEvidenceAssociation,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        """Atomically persist one immutable same-Claim item-to-Evidence link."""
         raise NotImplementedError
 
     def get_evidence_claim_link(

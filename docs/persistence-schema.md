@@ -76,7 +76,7 @@ records remain target contracts.
 | Staff Agent execution | immutable readback evidence for one explicitly confirmed draft and its registered Workbench handler result | `execution_id = sax_{draft_id}`; linked to the owned assistant message, exact draft, Claim, action, target, expected/resulting revision, and idempotency record |
 | Agent turn | Target TurnPlan/AgentProposal/ExecutionPlan/ActionEnvelopes plus the implemented bounded Runtime Trace, ToolRequests and results, TurnResult, policy and Registry versions, selected external-service lifecycle coordinates, usage, latency, limitations | `turn_id`/`trace_id`, linked to session and optional Claim |
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
-| Participant | repeatable role, relationship, bounded contact/vehicle facts, contact consent, provenance, and revision | `participant_id` (`par_`), linked to `claim_id` and `customer_id` |
+| Motor other driver | zero-or-one bounded name, phone, email, and other-vehicle registration record; no generic participant lifecycle | `participant_id` (`par_`), linked to `claim_id` and `customer_id` |
 | Item-Evidence association | immutable same-Claim relationship and purpose connecting one ContentsItem to one Evidence record | `association_id` (`iea_`), linked to `claim_id`, `item_id`, and `evidence_id` |
 | Mitigation | typed emergency-repair state, bounded summary, responsibility, Evidence and WorkItem references, provenance, and revision | `mitigation_id` (`mit_`), linked to `claim_id` |
 | Retrieval | structured policy/history results, knowledge citations, limitations, source versions | `claim_id` and retrieval identity |
@@ -346,8 +346,9 @@ the append-only audit collection through a bounded, filterable projection.
     owner while resolving protected values only inside separately authorised adapters.
 45. List/select bounded Policy Summaries by account and product family without treating display
     status as a coverage decision or exposing provider credentials.
-46. Create/list/revise Participants by Claim and role after Claim authorization, with contact
-    masking and contact-consent enforcement before any external use.
+46. Create/read zero or one `MotorOtherDriverRecord` per authorised Motor Claim, containing only
+    supplied name, phone, email, and other-vehicle registration. Keep it outside model/RAG context
+    and reject a second record without advancing Claim revision.
 47. Append/list immutable same-Claim ContentsItem-to-Evidence associations and reject links when
     either side belongs to another Claim or customer.
 48. Create/revise/list emergency-repair mitigation records and their Evidence/WorkItem links in
@@ -362,6 +363,14 @@ the append-only audit collection through a bounded, filterable projection.
 - `claim_asset_snapshot:{snapshot_id}` stores immutable `ClaimAssetSnapshot`; `snapshot_id`
   uses `cas_`. Logical lookup/index: `(record_type, claim_id, captured_at, _id)` with
   `customer_id` retained for ownership enforcement.
+- `motor_other_driver:{participant_id}` stores the optional bounded Motor other-driver record;
+  `participant_id` uses `par_`. A unique `(record_type, claim_id)` index enforces zero or one even
+  under concurrent first writes. The record remains outside `WorkingClaim` and is joined only for
+  authorised claimant/Workbench detail projections.
+- `contents_item_evidence_association:{association_id}` stores an immutable same-Claim link;
+  `association_id` uses `iea_`. A unique `(record_type, claim_id, item_id, evidence_id)` index
+  rejects duplicate links. The authoritative write verifies Claim ownership, item membership,
+  Evidence ownership, Claim revision, and idempotency inside the same transaction/lock.
 - Fixture and MongoDB adapters implement the same port. MongoDB selection uses one transaction;
   Fixture uses one Claim mutation lock. No adapter may reconstruct a historical snapshot from
   the current asset.
@@ -483,8 +492,11 @@ the append-only audit collection through a bounded, filterable projection.
 - `WorkingClaim.contents_items` is an optional embedded list of source-aware `ContentsItem`
   records. `item_id` is unique within the Claim; the Claim revision remains the only optimistic
   concurrency token. The list is persisted by each provider through the existing Claim record
-  serialization boundary. Item-to-Evidence associations are not represented by this slice and
-  must use a separate immutable Evidence contract when added.
+  serialization boundary. Optional brand/model travel with the item and assertion history.
+  Asset-derived proposed items may leave category, loss type, and ownership unknown; confirmation
+  requires all three. Item-to-Evidence relationships use separate immutable
+  `ContentsItemEvidenceAssociation` child records rather than copying Evidence metadata into the
+  item.
 - A Branch Evaluation is evidence of a deterministic calculation, not a second Claim State. It
   records separate Field Registry and branch-rule versions, rule/source coordinates, the Claim
   revision it evaluated, and the resulting revision.

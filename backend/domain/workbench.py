@@ -21,6 +21,7 @@ from backend.domain.models import (
     ClaimState,
     ClaimTerminalDisposition,
     ContentsItem,
+    ContentsItemEvidenceAssociationProjection,
     ContractModel,
     CustomerNextStep,
     CustomerUpdateRecord,
@@ -29,6 +30,7 @@ from backend.domain.models import (
     EvidenceStatus,
     ExternalCapabilityProjection,
     MessageRecord,
+    MotorOtherDriverProjection,
     PageInfo,
     StaffActionRecord,
     StateChange,
@@ -503,6 +505,10 @@ class WorkbenchClaimDetail(WorkbenchClaimListItem):
     active_session_id: str | None = None
     claim_state: ClaimState
     contents_items: list[ContentsItem] = Field(default_factory=list)
+    contents_item_evidence_associations: list[ContentsItemEvidenceAssociationProjection] = Field(
+        default_factory=list
+    )
+    motor_other_driver: MotorOtherDriverProjection | None = None
     source_summary: WorkbenchSourceSummary
     allowed_actions: list[WorkbenchAllowedAction] = Field(default_factory=list)
     section_summaries: WorkbenchSectionSummaries

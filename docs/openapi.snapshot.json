@@ -1777,6 +1777,16 @@
             "title": "Claim Id",
             "type": "string"
           },
+          "proposed_contents_item": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantContentsItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "proposed_fields": {
             "additionalProperties": {
               "$ref": "#/components/schemas/StructuredFormField-Output"
@@ -2645,6 +2655,16 @@
               }
             ]
           },
+          "motor_other_driver": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MotorOtherDriverProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "primary_action": {
             "$ref": "#/components/schemas/ClaimantPrimaryAction"
           },
@@ -2689,11 +2709,31 @@
         "additionalProperties": false,
         "description": "Claimant-safe contents item projection without internal assessment metadata.",
         "properties": {
+          "brand": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand"
+          },
           "category": {
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Category",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
           },
           "description": {
             "maxLength": 500,
@@ -2711,6 +2751,13 @@
               }
             ]
           },
+          "evidence_links": {
+            "items": {
+              "$ref": "#/components/schemas/ContentsItemEvidenceAssociationProjection"
+            },
+            "title": "Evidence Links",
+            "type": "array"
+          },
           "item_id": {
             "maxLength": 100,
             "minLength": 1,
@@ -2718,13 +2765,40 @@
             "type": "string"
           },
           "loss_type": {
-            "$ref": "#/components/schemas/ContentsLossType"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContentsLossType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
           },
           "needed_for": {
             "$ref": "#/components/schemas/NeededFor"
           },
           "ownership": {
-            "$ref": "#/components/schemas/ContentsOwnership"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContentsOwnership"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "quantity": {
             "default": 1,
@@ -2757,9 +2831,6 @@
         "required": [
           "item_id",
           "description",
-          "category",
-          "loss_type",
-          "ownership",
           "source",
           "status",
           "needed_for",
@@ -4222,6 +4293,16 @@
         "title": "ContentsAssetDetails",
         "type": "object"
       },
+      "ContentsEvidencePurpose": {
+        "enum": [
+          "proof_of_purchase",
+          "item_condition",
+          "repair_assessment",
+          "authority_document"
+        ],
+        "title": "ContentsEvidencePurpose",
+        "type": "string"
+      },
       "ContentsItem": {
         "additionalProperties": false,
         "description": "One source-aware contents item; Evidence associations remain separate records.",
@@ -4233,11 +4314,31 @@
             "title": "Assertions",
             "type": "array"
           },
+          "brand": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand"
+          },
           "category": {
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Category",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
           },
           "confidence": {
             "anyOf": [
@@ -4287,13 +4388,40 @@
             "type": "string"
           },
           "loss_type": {
-            "$ref": "#/components/schemas/ContentsLossType"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContentsLossType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
           },
           "needed_for": {
             "$ref": "#/components/schemas/NeededFor"
           },
           "ownership": {
-            "$ref": "#/components/schemas/ContentsOwnership"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContentsOwnership"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "quantity": {
             "default": 1,
@@ -4336,9 +4464,6 @@
         "required": [
           "item_id",
           "description",
-          "category",
-          "loss_type",
-          "ownership",
           "source",
           "status",
           "needed_for",
@@ -4357,11 +4482,31 @@
             "title": "Assertion Id",
             "type": "string"
           },
+          "brand": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand"
+          },
           "category": {
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Category",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
           },
           "created_at": {
             "format": "date-time",
@@ -4385,10 +4530,37 @@
             ]
           },
           "loss_type": {
-            "$ref": "#/components/schemas/ContentsLossType"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContentsLossType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
           },
           "ownership": {
-            "$ref": "#/components/schemas/ContentsOwnership"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContentsOwnership"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "quantity": {
             "default": 1,
@@ -4426,13 +4598,89 @@
         "required": [
           "assertion_id",
           "description",
-          "category",
-          "loss_type",
-          "ownership",
           "status",
           "created_at"
         ],
         "title": "ContentsItemAssertion",
+        "type": "object"
+      },
+      "ContentsItemEvidenceAssociationListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ContentsItemEvidenceAssociationProjection"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "ContentsItemEvidenceAssociationListResponse",
+        "type": "object"
+      },
+      "ContentsItemEvidenceAssociationMutationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "association": {
+            "$ref": "#/components/schemas/ContentsItemEvidenceAssociationProjection"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "association",
+          "revision"
+        ],
+        "title": "ContentsItemEvidenceAssociationMutationResponse",
+        "type": "object"
+      },
+      "ContentsItemEvidenceAssociationProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "association_id": {
+            "title": "Association Id",
+            "type": "string"
+          },
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "evidence_id": {
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/ContentsEvidencePurpose"
+          }
+        },
+        "required": [
+          "association_id",
+          "claim_id",
+          "item_id",
+          "evidence_id",
+          "purpose",
+          "created_at"
+        ],
+        "title": "ContentsItemEvidenceAssociationProjection",
         "type": "object"
       },
       "ContentsLossType": {
@@ -4710,6 +4958,26 @@
         "title": "CreateClaimResponse",
         "type": "object"
       },
+      "CreateContentsItemEvidenceAssociationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/ContentsEvidencePurpose"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "purpose"
+        ],
+        "title": "CreateContentsItemEvidenceAssociationRequest",
+        "type": "object"
+      },
       "CreateCoworkRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4843,6 +5111,65 @@
           "client_message_id"
         ],
         "title": "CreateMessageRequest",
+        "type": "object"
+      },
+      "CreateMotorOtherDriverRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "vehicle_registration": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vehicle Registration"
+          }
+        },
+        "title": "CreateMotorOtherDriverRequest",
         "type": "object"
       },
       "CreateStaffActionRequest": {
@@ -9379,6 +9706,94 @@
         "title": "MoneyAmount",
         "type": "object"
       },
+      "MotorOtherDriverMutationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "participant": {
+            "$ref": "#/components/schemas/MotorOtherDriverProjection"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "participant",
+          "revision"
+        ],
+        "title": "MotorOtherDriverMutationResponse",
+        "type": "object"
+      },
+      "MotorOtherDriverProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "participant_id": {
+            "title": "Participant Id",
+            "type": "string"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "vehicle_registration": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vehicle Registration"
+          }
+        },
+        "required": [
+          "participant_id",
+          "claim_id",
+          "updated_at"
+        ],
+        "title": "MotorOtherDriverProjection",
+        "type": "object"
+      },
       "NeededFor": {
         "enum": [
           "current_action",
@@ -13600,6 +14015,13 @@
           "claimant": {
             "$ref": "#/components/schemas/WorkbenchClaimantSummary"
           },
+          "contents_item_evidence_associations": {
+            "items": {
+              "$ref": "#/components/schemas/ContentsItemEvidenceAssociationProjection"
+            },
+            "title": "Contents Item Evidence Associations",
+            "type": "array"
+          },
           "contents_items": {
             "items": {
               "$ref": "#/components/schemas/ContentsItem"
@@ -13634,6 +14056,16 @@
           },
           "lifecycle_state": {
             "$ref": "#/components/schemas/ClaimLifecycleState"
+          },
+          "motor_other_driver": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MotorOtherDriverProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "ownership": {
             "$ref": "#/components/schemas/WorkbenchOwnershipProjection"
@@ -17971,6 +18403,240 @@
         ]
       }
     },
+    "/api/v1/claims/{claim_id}/contents-items/{item_id}/evidence-associations": {
+      "get": {
+        "operationId": "read_claim_contents_item_evidence_associations_api_v1_claims__claim_id__contents_items__item_id__evidence_associations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Northwind-Anonymous-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Northwind-Anonymous-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentsItemEvidenceAssociationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Claim Contents Item Evidence Associations",
+        "tags": [
+          "claimant"
+        ]
+      },
+      "post": {
+        "operationId": "create_claim_contents_item_evidence_association_api_v1_claims__claim_id__contents_items__item_id__evidence_associations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Northwind-Anonymous-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Northwind-Anonymous-Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateContentsItemEvidenceAssociationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentsItemEvidenceAssociationMutationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Claim Contents Item Evidence Association",
+        "tags": [
+          "claimant"
+        ]
+      }
+    },
     "/api/v1/claims/{claim_id}/creation": {
       "post": {
         "operationId": "create_external_claim_api_v1_claims__claim_id__creation_post",
@@ -19372,6 +20038,194 @@
           }
         },
         "summary": "Confirm Form",
+        "tags": [
+          "claimant"
+        ]
+      }
+    },
+    "/api/v1/claims/{claim_id}/motor-other-driver": {
+      "get": {
+        "operationId": "read_claim_motor_other_driver_api_v1_claims__claim_id__motor_other_driver_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Northwind-Anonymous-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Northwind-Anonymous-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MotorOtherDriverProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Claim Motor Other Driver",
+        "tags": [
+          "claimant"
+        ]
+      },
+      "post": {
+        "operationId": "create_claim_motor_other_driver_api_v1_claims__claim_id__motor_other_driver_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Northwind-Anonymous-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Northwind-Anonymous-Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMotorOtherDriverRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MotorOtherDriverMutationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Claim Motor Other Driver",
         "tags": [
           "claimant"
         ]

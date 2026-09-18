@@ -46,6 +46,7 @@ from backend.domain.models import (
     BranchEvaluationStatus,
     ClaimCollaborationRequest,
     ClaimCoworkerRecord,
+    ContentsItemEvidenceAssociation,
     CustomerUpdateRecord,
     EvidenceClaimLink,
     EvidenceRecord,
@@ -54,6 +55,7 @@ from backend.domain.models import (
     HandoffRecord,
     MessageRecord,
     MessageVisibility,
+    MotorOtherDriverRecord,
     RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
@@ -243,6 +245,8 @@ IMMUTABLE_CHILD_RECORD_KINDS = frozenset(
         'runtime_work_item',
         'staff_agent_execution',
         'claim_asset_snapshot',
+        'motor_other_driver',
+        'contents_item_evidence_association',
     }
 )
 """Child records whose identity may never be rebound or rewritten once persisted.
@@ -295,6 +299,18 @@ class MongoDBRepository:
             [('record_type', 1), ('claim_id', 1), ('captured_at', 1), ('_id', 1)],
             name='claim_asset_snapshot_claim_captured',
             partialFilterExpression={'record_type': 'claim_asset_snapshot'},
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('claim_id', 1)],
+            unique=True,
+            name='motor_other_driver_claim_unique',
+            partialFilterExpression={'record_type': 'motor_other_driver'},
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('claim_id', 1), ('item_id', 1), ('evidence_id', 1)],
+            unique=True,
+            name='contents_item_evidence_unique',
+            partialFilterExpression={'record_type': 'contents_item_evidence_association'},
         )
         self._collection.create_index(
             [('record_type', 1), ('actor_id', 1), ('route', 1), ('key', 1)],
@@ -2617,6 +2633,129 @@ class MongoDBRepository:
             )
             if evidence is not None
         ]
+
+    def get_motor_other_driver(
+        self, claim_id: str, customer_id: str
+    ) -> MotorOtherDriverRecord | None:
+        if not self._claim_owned(claim_id, customer_id):
+            return None
+        records = self._list(
+            'motor_other_driver',
+            MotorOtherDriverRecord,
+            {'claim_id': claim_id, 'customer_id': customer_id},
+            'created_at',
+        )
+        return records[0] if records else None
+
+    def save_motor_other_driver_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        participant: MotorOtherDriverRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        if (
+            claim.incident_type != 'motor'
+            or participant.claim_id != claim.claim_id
+            or participant.customer_id != claim.customer_id
+            or idempotency.actor_id != claim.customer_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.session_id != (claim.active_session_id or '')
+        ):
+            raise KeyError(claim.claim_id)
+
+        def persist(mongo_session: Any) -> None:
+            existing = self._collection.find_one(
+                {'record_type': 'motor_other_driver', 'claim_id': claim.claim_id},
+                projection={'_id': 1},
+                session=mongo_session,
+            )
+            if existing is not None:
+                raise IdempotencyConflict(participant.participant_id)
+            self._save_child_mutation(
+                claim,
+                expected_revision,
+                idempotency,
+                mongo_session,
+                mutation=RealtimeMutation.CLAIM_CHANGED,
+                records=[('motor_other_driver', participant.participant_id, participant)],
+            )
+
+        try:
+            self._atomic(persist)
+        except DuplicateKeyError as error:
+            raise IdempotencyConflict(participant.participant_id) from error
+
+    def list_contents_item_evidence_associations(
+        self, claim_id: str, customer_id: str
+    ) -> list[ContentsItemEvidenceAssociation]:
+        if not self._claim_owned(claim_id, customer_id):
+            return []
+        return self._list(
+            'contents_item_evidence_association',
+            ContentsItemEvidenceAssociation,
+            {'claim_id': claim_id, 'customer_id': customer_id},
+            'created_at',
+        )
+
+    def save_contents_item_evidence_association_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        association: ContentsItemEvidenceAssociation,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        if (
+            association.claim_id != claim.claim_id
+            or association.customer_id != claim.customer_id
+            or not any(item.item_id == association.item_id for item in claim.contents_items)
+            or idempotency.actor_id != claim.customer_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.session_id != (claim.active_session_id or '')
+        ):
+            raise KeyError(claim.claim_id)
+
+        def persist(mongo_session: Any) -> None:
+            evidence = self._get(
+                'evidence',
+                association.evidence_id,
+                EvidenceRecord,
+                customer_id=claim.customer_id,
+                session=mongo_session,
+            )
+            if evidence is None or evidence.claim_id != claim.claim_id:
+                raise KeyError(association.evidence_id)
+            duplicate = self._collection.find_one(
+                {
+                    'record_type': 'contents_item_evidence_association',
+                    'claim_id': claim.claim_id,
+                    'item_id': association.item_id,
+                    'evidence_id': association.evidence_id,
+                },
+                projection={'_id': 1},
+                session=mongo_session,
+            )
+            if duplicate is not None:
+                raise IdempotencyConflict(association.association_id)
+            self._save_child_mutation(
+                claim,
+                expected_revision,
+                idempotency,
+                mongo_session,
+                mutation=RealtimeMutation.CLAIM_CHANGED,
+                records=[
+                    (
+                        'contents_item_evidence_association',
+                        association.association_id,
+                        association,
+                    )
+                ],
+            )
+
+        try:
+            self._atomic(persist)
+        except DuplicateKeyError as error:
+            raise IdempotencyConflict(association.association_id) from error
 
     def get_evidence_claim_link(
         self, target_claim_id: str, evidence_id: str, customer_id: str

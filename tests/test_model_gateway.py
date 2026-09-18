@@ -3765,6 +3765,8 @@ def test_gateway_agent_receives_bounded_branch_context() -> None:
         'description': 'Laptop computer',
         'category': 'electronics',
         'quantity': 1,
+        'brand': None,
+        'model': None,
         'loss_type': 'damaged',
         'ownership': 'owned',
         'estimated_value': None,

@@ -20,9 +20,13 @@ from backend.domain.models import (
     ClaimantSession,
     ClaimCreationResponse,
     ClaimListResponse,
+    ContentsItemEvidenceAssociationListResponse,
+    ContentsItemEvidenceAssociationMutationResponse,
     CreateClaimRequest,
     CreateClaimResponse,
+    CreateContentsItemEvidenceAssociationRequest,
     CreateMessageRequest,
+    CreateMotorOtherDriverRequest,
     ExternalCapabilityProjection,
     ExternalServiceOfferDecisionRequest,
     FormConfirmationRequest,
@@ -32,6 +36,8 @@ from backend.domain.models import (
     GrantAssessorConsentRequest,
     MessageListResponse,
     MessageTurnResponse,
+    MotorOtherDriverMutationResponse,
+    MotorOtherDriverProjection,
     PauseSessionResponse,
     StartSessionRequest,
     WorkflowState,
@@ -41,6 +47,12 @@ from backend.services.agent import AgentTurnProvider
 from backend.services.agent_action_execution import ClaimantRuntimeActionDispatcher
 from backend.services.agent_turn_progress import AgentTurnProgressReporter
 from backend.services.claim_creation import create_claim_from_confirmed_report
+from backend.services.claim_data import (
+    create_contents_item_evidence_association,
+    create_motor_other_driver,
+    get_motor_other_driver,
+    list_contents_item_evidence_associations,
+)
 from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.claimant_events import claimant_event_revision
 from backend.services.claims import (
@@ -165,6 +177,85 @@ def read_claim(
     principal: Principal = Depends(require_claimant),
 ) -> ClaimantClaim:
     return get_claim(repository_for(request), principal, claim_id)
+
+
+@router.post(
+    '/{claim_id}/motor-other-driver',
+    response_model=MotorOtherDriverMutationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_claim_motor_other_driver(
+    claim_id: str,
+    payload: CreateMotorOtherDriverRequest,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> MotorOtherDriverMutationResponse:
+    return create_motor_other_driver(
+        repository_for(request),
+        principal,
+        claim_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )
+
+
+@router.get('/{claim_id}/motor-other-driver', response_model=MotorOtherDriverProjection)
+def read_claim_motor_other_driver(
+    claim_id: str,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+) -> MotorOtherDriverProjection:
+    return get_motor_other_driver(repository_for(request), principal, claim_id)
+
+
+@router.post(
+    '/{claim_id}/contents-items/{item_id}/evidence-associations',
+    response_model=ContentsItemEvidenceAssociationMutationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_claim_contents_item_evidence_association(
+    claim_id: str,
+    item_id: str,
+    payload: CreateContentsItemEvidenceAssociationRequest,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> ContentsItemEvidenceAssociationMutationResponse:
+    return create_contents_item_evidence_association(
+        repository_for(request),
+        principal,
+        claim_id,
+        item_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )
+
+
+@router.get(
+    '/{claim_id}/contents-items/{item_id}/evidence-associations',
+    response_model=ContentsItemEvidenceAssociationListResponse,
+)
+def read_claim_contents_item_evidence_associations(
+    claim_id: str,
+    item_id: str,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+    limit: int = Query(default=25, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+) -> ContentsItemEvidenceAssociationListResponse:
+    return list_contents_item_evidence_associations(
+        repository_for(request),
+        principal,
+        claim_id,
+        item_id,
+        limit=limit,
+        cursor=cursor,
+    )
 
 
 @router.get('/{claim_id}/external-capabilities', response_model=list[ExternalCapabilityProjection])

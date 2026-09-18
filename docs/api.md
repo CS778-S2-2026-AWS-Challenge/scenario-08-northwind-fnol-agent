@@ -641,6 +641,7 @@ The canonical backend record has these fields. API projections omit fields the c
 | `claim_state` | `ClaimState` | Yes | Canonical internal multi-dimensional state |
 | `form` | field map | Yes | Registered field code to `StructuredFormField`; initially empty |
 | `contents_items` | object array | Yes | Optional source-aware `ContentsItem` records; empty unless the Claim is a contents path |
+| `motor_other_driver` | object/null | Yes | Optional bounded other-driver name/contact/vehicle projection on Claim detail only; never included in Claim lists or model/RAG context |
 | `evidence_summary` | `EvidenceSummary` | Yes | Authoritative aggregate over the full persisted evidence set; claimant projections recompute it from claimant-visible evidence only |
 | `route` | string | No | Configured processing route, not a decision outcome |
 | `active_session_id` | string | No | Current active session when one exists |
@@ -861,8 +862,8 @@ Initial common field codes:
 ### Contents items
 
 `contents_items` is an optional list on Claim projections. Each item is an independent,
-source-aware record and is not flattened into the Dynamic Form. Evidence associations remain
-separate Evidence records until the item-association contract is implemented.
+source-aware record and is not flattened into the Dynamic Form. Supporting material remains an
+Evidence record and is joined to an item only through an immutable same-Claim association.
 
 Claimant projections use a role-safe `ClaimantContentsItem` view: `confidence` and `updated_by`
 are internal assessment metadata and are omitted. `source_refs` is limited to public message and
@@ -873,14 +874,42 @@ internal references are omitted. Workbench projections retain the full authorise
 |---|---|---|
 | `item_id` | string | Stable identifier unique within a Claim |
 | `description` | string | Claimant- or staff-sourced item description |
-| `category` | string | Opaque display category; category vocabulary/bounding is a follow-up registry decision |
+| `category` | string/null | Opaque display category; may remain unknown on an Asset-derived proposal |
 | `quantity` | integer | At least 1 |
-| `loss_type` | enum | `damaged`, `lost`, `stolen`, or `destroyed` |
-| `ownership` | enum | `owned`, `leased`, `borrowed`, `gifted`, or `other` |
+| `brand` | string/null | Optional known brand; never required for initial capture |
+| `model` | string/null | Optional known model/style; never required for initial capture |
+| `loss_type` | enum/null | `damaged`, `lost`, `stolen`, or `destroyed`; may remain unknown on a proposal |
+| `ownership` | enum/null | `owned`, `leased`, `borrowed`, `gifted`, or `other`; may remain unknown on a proposal |
 | `estimated_value` | object/null | Non-negative `amount` plus ISO-4217-style three-letter `currency`; not a settlement value |
 | `source` / `source_refs` | enum / string array | Same provenance boundary as structured form fields |
 | `status` | enum | Existing `FormStatus`; `proposed` is used for inference and `disputed` for conflicts |
 | `needed_for` | enum | `current_action` or `later_action` |
+
+A `confirmed` ContentsItem requires category, loss type, and ownership. A selected contents Asset
+creates only a `proposed` item from its known description/category/brand/model and never invents
+damage, loss, theft, ownership, value, or coverage.
+
+### Motor other-driver and Contents Evidence associations
+
+| Method and route | Contract |
+| --- | --- |
+| `POST /api/v1/claims/{claim_id}/motor-other-driver` | Create the sole optional Motor other-driver record. Requires `Idempotency-Key` and numeric Claim `If-Match`; returns the resulting revision. |
+| `GET /api/v1/claims/{claim_id}/motor-other-driver` | Read the owned role-safe record; absent or inaccessible records return concealed `404`. |
+| `POST /api/v1/claims/{claim_id}/contents-items/{item_id}/evidence-associations` | Link one same-Claim Evidence record to a ContentsItem with a bounded purpose. Requires `Idempotency-Key` and Claim `If-Match`. |
+| `GET /api/v1/claims/{claim_id}/contents-items/{item_id}/evidence-associations` | Cursor-page the item's role-safe immutable associations. |
+
+The Motor record contains only supplied `name`, `phone`, `email`, and
+`vehicle_registration`; at least one value is required and each Motor Claim has zero or one
+record. Contact data appears only in authorised claimant and Workbench Claim detail projections.
+It is not embedded in WorkingClaim, model context, RAG context, unrelated lists, logs, or audit
+reasons. Missing other-driver data never blocks initial capture.
+
+Contents association purposes are `proof_of_purchase`, `item_condition`, `repair_assessment`, and
+`authority_document`. Both item and Evidence must belong to the same owned Claim. Cross-Claim or
+inaccessible Evidence returns concealed `404`; a duplicate association returns `409` and does not
+advance the Claim. Claimant and Workbench projections expose IDs, purpose, and creation time only,
+never storage/provider details. Both mutation types atomically advance the shared Claim revision,
+persist their child record and idempotency response, and publish Claim/queue refresh state.
 | `confidence` | number/null | Optional 0.0–1.0 confidence; never confirmation |
 | `resolution_state` | enum | Same resolution states as structured form fields |
 | `current_assertion_id` | string/null | Current item assertion selected from immutable item history |
@@ -3985,7 +4014,7 @@ cannot read or select account Assets. The Workbench snapshot route remains staff
 | `GET /api/v1/account/assets/{asset_id}` | Read one owned claimant-safe asset projection. |
 | `PATCH /api/v1/account/assets/{asset_id}` | Update approved asset details with numeric `If-Match`; increments asset revision. Fields may be omitted but explicit `null` and details for another Asset type return `422 VALIDATION_ERROR` without changing the Asset. |
 | `DELETE /api/v1/account/assets/{asset_id}` | Soft-deactivate with numeric `If-Match`; returns `204`. |
-| `POST /api/v1/claims/{claim_id}/asset-selections` | Select one active owned asset with `Idempotency-Key` and Claim `If-Match`; atomically writes proposed facts, immutable snapshot, Branch Evaluation, Claim revision, and retry result. |
+| `POST /api/v1/claims/{claim_id}/asset-selections` | Select one active owned asset with `Idempotency-Key` and Claim `If-Match`; atomically writes proposed facts, an optional proposed ContentsItem, immutable snapshot, Branch Evaluation, Claim revision, and retry result. |
 | `GET /api/v1/claims/{claim_id}/asset-snapshots` | Cursor-page claimant-safe immutable snapshots for an owned Claim. |
 | `GET /api/v1/workbench/claims/{claim_id}/asset-snapshots` | Cursor-page the same approved snapshot fields for authorised staff. |
 
@@ -3995,11 +4024,12 @@ projection omits `customer_id` and all physical storage/provider metadata. Asset
 claimant-supplied policy text. A durable Policy association requires the future account-owned
 `pol_` Policy Summary contract and ownership/status validation; it is not implemented by these
 routes. Reusable contents details are limited to description, category, brand, and model. Serial
-number and value are not part of the Asset or Claim asset snapshot contract; any future restricted
-ContentsItem projection belongs to #922.
+number and value are not part of the Asset or Claim asset snapshot contract.
 
-Selection returns `claim_id`, resulting `revision`, the exact `proposed_fields`, and the
-immutable snapshot. It never silently confirms a field. A later asset update/deactivation does
+Selection returns `claim_id`, resulting `revision`, the exact `proposed_fields`, optional
+`proposed_contents_item`, and the immutable snapshot. The optional item copies only approved
+contents Asset details and remains proposed. Selection never silently confirms a field. A later
+asset update/deactivation does
 not alter a snapshot. The selection idempotency identity includes the Claim ID, request payload,
 and accepted numeric `If-Match` revision. An exact retry replays the stored response even after
 the Claim advances; changing the Asset ID or `If-Match` while reusing the key returns `409

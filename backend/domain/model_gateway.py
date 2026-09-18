@@ -218,10 +218,12 @@ class ModelFieldSelectionContext(ModelContract):
 class ModelContentsItemContext(ModelContract):
     item_id: str
     description: str
-    category: str
+    category: str | None = None
     quantity: int
-    loss_type: ContentsLossType
-    ownership: ContentsOwnership
+    brand: str | None = None
+    model: str | None = None
+    loss_type: ContentsLossType | None = None
+    ownership: ContentsOwnership | None = None
     estimated_value: MoneyAmount | None = None
     source: FormSource
     source_refs: list[str] = Field(default_factory=list)
@@ -305,10 +307,12 @@ class ModelProposedFormChange(ModelContract):
 class ModelProposedContentsItem(ModelContract):
     item_id: str | None = Field(default=None, min_length=1, max_length=100)
     description: str = Field(min_length=1, max_length=500)
-    category: str = Field(min_length=1, max_length=100)
+    category: str | None = Field(default=None, min_length=1, max_length=100)
     quantity: int = Field(default=1, ge=1)
-    loss_type: ContentsLossType
-    ownership: ContentsOwnership
+    brand: str | None = Field(default=None, min_length=1, max_length=200)
+    model: str | None = Field(default=None, min_length=1, max_length=200)
+    loss_type: ContentsLossType | None = None
+    ownership: ContentsOwnership | None = None
     estimated_value: MoneyAmount | None = None
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     relation: AssertionRelation | None = None
