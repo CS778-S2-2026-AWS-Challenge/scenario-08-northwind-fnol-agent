@@ -426,6 +426,7 @@ function App() {
   const realtimeCursor = useRef(null)
   const realtimeSeenEventIds = useRef(new Set())
   const messagesRequestGeneration = useRef(0)
+  const claimTransitionRef = useRef(null)
   const latestEvidenceRevision = useRef(0)
   const latestEvidenceItems = useRef([])
   const evidenceHasLocalMutation = useRef(false)
@@ -796,7 +797,33 @@ function App() {
     return true
   }
 
+  function beginClaimTransition(claimId) {
+    let resolve
+    const completion = new Promise((next) => { resolve = next })
+    const transition = { claimId, completion, resolve }
+    claimTransitionRef.current = transition
+    return transition
+  }
+
+  function finishClaimTransition(transition) {
+    if (!transition) return
+    if (claimTransitionRef.current === transition) {
+      claimTransitionRef.current = null
+    }
+    transition.resolve()
+  }
+
+  function replaceActiveClaimContext(currentClaim, currentSessionId) {
+    activeClaimRef.current = currentClaim
+    activeSessionIdRef.current = currentSessionId
+    latestRevisionClaimId.current = currentClaim?.claim_id || null
+    latestRevision.current = Number(currentClaim?.revision || 0)
+    setClaim(currentClaim)
+    setSessionId(currentSessionId)
+  }
+
   function applyClaimSnapshot(currentClaim, { minimumRevision = 0 } = {}) {
+    if (activeClaimRef.current?.claim_id !== currentClaim?.claim_id) return false
     const responseRevision = Number(currentClaim?.revision || 0)
     const minimumAcceptedRevision = Math.max(
       Number(activeClaimRef.current?.revision || 0),
@@ -929,6 +956,12 @@ function App() {
     }
 
     async function refreshFullSnapshot() {
+      const transition = claimTransitionRef.current
+      if (transition) {
+        await transition.completion
+        if (!active) return
+      }
+
       const activeClaim = activeClaimRef.current
       const activeSessionId = activeSessionIdRef.current
       const refreshes = []
@@ -976,6 +1009,17 @@ function App() {
         reconnectDelay = 0
         degradedRefreshes = 0
         return
+      }
+
+      const deliveryClaimId = delivery.data?.claim_id
+      const transition = claimTransitionRef.current
+      if (
+        transition
+        && deliveryClaimId === transition.claimId
+        && activeClaimRef.current?.claim_id !== deliveryClaimId
+      ) {
+        await transition.completion
+        if (!active) return
       }
 
       const eventId = delivery.data?.event_id
@@ -1375,11 +1419,7 @@ function App() {
   async function refreshAfterConflict() {
     if (!claim) return
     const current = await getClaim(claim.claim_id)
-    setClaim(current)
-    setForm(current.form)
-    setContentsItems(current.contents_items || [])
-    setDynamicForm(current.dynamic_form || null)
-    setNextStep(current.customer_next_step)
+    applyClaimSnapshot(current)
   }
 
   function showError(requestError) {
@@ -1439,8 +1479,7 @@ function App() {
         activeClaim = created.claim
         activeSessionId = created.session.session_id
         rememberClaimInHistory(created.claim)
-        setClaim(created.claim)
-        setSessionId(activeSessionId)
+        replaceActiveClaimContext(created.claim, activeSessionId)
         if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
         setForm(created.claim.form)
         setContentsItems(created.claim.contents_items || [])
@@ -1562,8 +1601,7 @@ function App() {
     latestEvidenceItems.current = []
     evidenceHasLocalMutation.current = false
     evidenceClaimId.current = null
-    setClaim(null)
-    setSessionId(null)
+    replaceActiveClaimContext(null, null)
     commitMessages([])
     setForm({})
     setContentsItems([])
@@ -1899,6 +1937,7 @@ function App() {
     setError('')
     cancelComposerDraftAttachments()
     setStatus('resuming')
+    const transition = beginClaimTransition(claimId)
     try {
       const savedClaim = await getClaim(claimId)
       const canResume = savedClaim.can_resume ?? savedClaim.customer_next_step?.can_resume
@@ -1916,9 +1955,7 @@ function App() {
       const current = await getClaim(claimId)
       const conversation = await getClaimMessages(claimId, session.session_id)
       clearComposerAttachments()
-      latestRevision.current = current.revision
-      setClaim(current)
-      setSessionId(session.session_id)
+      replaceActiveClaimContext(current, session.session_id)
       if (session.model_profile_id) setSelectedModel(session.model_profile_id)
       commitMessages(conversation.items)
       setForm(current.form)
@@ -1946,6 +1983,8 @@ function App() {
       } else {
         showError(requestError)
       }
+    } finally {
+      finishClaimTransition(transition)
     }
   }
 
@@ -1990,11 +2029,7 @@ function App() {
       if (claim?.claim_id && !account) {
         try {
           const promoted = await promoteAnonymousClaim(claim.claim_id)
-          setClaim(promoted)
-          setForm(promoted.form)
-          setContentsItems(promoted.contents_items || [])
-          setDynamicForm(promoted.dynamic_form || null)
-          setNextStep(promoted.customer_next_step)
+          applyClaimSnapshot(promoted)
           forgetAnonymousConversation(claim.claim_id)
         } catch (promotionError) {
           if (!(promotionError instanceof ApiRequestError && promotionError.status === 404)) throw promotionError
@@ -2031,11 +2066,7 @@ function App() {
       if (claim?.claim_id && !account) {
         try {
           const promoted = await promoteAnonymousClaim(claim.claim_id)
-          setClaim(promoted)
-          setForm(promoted.form)
-          setContentsItems(promoted.contents_items || [])
-          setDynamicForm(promoted.dynamic_form || null)
-          setNextStep(promoted.customer_next_step)
+          applyClaimSnapshot(promoted)
           forgetAnonymousConversation(claim.claim_id)
         } catch (promotionError) {
           if (!(promotionError instanceof ApiRequestError && promotionError.status === 404)) throw promotionError
@@ -2060,8 +2091,7 @@ function App() {
     setClaimHistoryError('')
     setSelectedHistoryClaimId(null)
     confirmedClaimProjections.current.clear()
-    setClaim(null)
-    setSessionId(null)
+    replaceActiveClaimContext(null, null)
     commitMessages([])
     setForm({})
     setContentsItems([])

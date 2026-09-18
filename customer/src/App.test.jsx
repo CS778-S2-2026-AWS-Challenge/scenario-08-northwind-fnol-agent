@@ -136,13 +136,17 @@ function initialTurn() {
 }
 
 function realtimeChange(revision, resources = ['claim', 'messages']) {
-  const eventId = `evt-${revision}-${resources.join('-')}`
+  return realtimeChangeFor(initialClaim.claim_id, revision, resources)
+}
+
+function realtimeChangeFor(claimId, revision, resources = ['claim', 'messages']) {
+  const eventId = `evt-${claimId}-${revision}-${resources.join('-')}`
   return {
     type: 'resources.changed',
     cursor: eventId,
     data: {
       event_id: eventId,
-      claim_id: initialClaim.claim_id,
+      claim_id: claimId,
       claim_revision: revision,
       resources,
     },
@@ -1144,6 +1148,270 @@ describe('claimant intake projection', () => {
 
     await user.click(historyCards()[1])
     expect(api.resumeClaimSession).toHaveBeenCalledTimes(2)
+  })
+
+  it('holds a target Claim realtime event until an in-flight resume installs that Claim', async () => {
+    const user = userEvent.setup()
+    let pushRealtime
+    let resolveCurrentClaim
+
+    const report = {
+      ...initialClaim,
+      claim_id: 'clm_transition_target',
+      can_resume: true,
+      primary_action: primaryAction({ targetRef: 'clm_transition_target' }),
+    }
+
+    const currentReadback = new Promise((resolve) => {
+      resolveCurrentClaim = resolve
+    })
+
+    let claimReadCount = 0
+
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: {
+        display_name: 'Test claimant',
+        email: 'test@example.test',
+        phone: '',
+      },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({
+      items: [report],
+      page: { next_cursor: null },
+    })
+    api.streamRealtimeEvents.mockImplementation(({ onEvent }) => {
+      pushRealtime = onEvent
+      return new Promise(() => {})
+    })
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_transition_target',
+      model_profile_id: 'qwen-local',
+      started_at: '2026-09-18T02:35:00Z',
+      resume: {
+        customer_next_step: report.customer_next_step,
+        summary: null,
+        pending_items: [],
+        prior_commitments: [],
+      },
+    })
+
+    const revisionTwo = {
+      ...report,
+      revision: 2,
+      customer_next_step: {
+        status: 'confirmation_required',
+        summary: 'Review the transition update.',
+        required_items: ['incident.description'],
+      },
+      primary_action: primaryAction({
+        actionCode: 'claimant.review_details',
+        available: true,
+        requiredInputs: ['incident.description'],
+        revision: 2,
+        targetRef: report.claim_id,
+      }),
+    }
+
+    api.getClaim.mockImplementation(() => {
+      claimReadCount += 1
+      if (claimReadCount === 1) return Promise.resolve(report)
+      if (claimReadCount === 2) return currentReadback
+      return Promise.resolve(revisionTwo)
+    })
+    api.getClaimMessages.mockResolvedValue({ items: [] })
+
+    render(<App />)
+
+    await waitFor(() => expect(pushRealtime).toBeTypeOf('function'))
+
+    await user.click(
+      screen.getByRole('button', { name: 'Expand conversation history' }),
+    )
+    await user.click(
+      await screen.findByRole('button', { name: /Open Home claim/ }),
+    )
+
+    await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(2))
+
+    let realtimeRefresh
+    await act(async () => {
+      realtimeRefresh = pushRealtime(
+        realtimeChangeFor(report.claim_id, 2, ['claim']),
+      )
+      await Promise.resolve()
+    })
+
+    // The realtime handler is waiting for the target Claim transition
+    // instead of acknowledging and dropping the event.
+    expect(api.getClaim).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      resolveCurrentClaim(report)
+      await realtimeRefresh
+    })
+
+    expect(api.getClaim).toHaveBeenCalledTimes(3)
+    expect(
+      await screen.findByRole('button', { name: /Review claim details/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('does not let an old Claim event resurrect the workspace while starting a new chat', async () => {
+    const user = userEvent.setup()
+    let pushRealtime
+    let eventDuringReset
+
+    api.streamRealtimeEvents.mockImplementation(({ onEvent }) => {
+      pushRealtime = onEvent
+      return new Promise(() => {})
+    })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    render(<App />)
+
+    await user.type(
+      screen.getByRole('textbox', { name: 'Incident description' }),
+      'A pipe burst in the kitchen.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    await waitFor(() => expect(pushRealtime).toBeTypeOf('function'))
+
+    api.getClaim.mockResolvedValue({
+      ...initialClaim,
+      revision: 3,
+      primary_action: primaryAction({ revision: 3 }),
+    })
+    api.getClaim.mockClear()
+
+    globalThis.history.replaceState(
+      {},
+      '',
+      `/claims/${initialClaim.claim_id}`,
+    )
+
+    const originalPushState = globalThis.history.pushState.bind(
+      globalThis.history,
+    )
+
+    const pushState = vi
+      .spyOn(globalThis.history, 'pushState')
+      .mockImplementation((...args) => {
+        eventDuringReset = pushRealtime(realtimeChange(3, ['claim']))
+        return originalPushState(...args)
+      })
+
+    try {
+
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+
+    await act(async () => {
+      await eventDuringReset
+    })
+
+    expect(
+      screen.getByRole('textbox', { name: 'Incident description' }),
+    ).toBeVisible()
+    expect(screen.queryByText(initialClaim.claim_id)).not.toBeInTheDocument()
+    expect(api.getClaim).not.toHaveBeenCalled()
+
+    } finally {
+      pushState.mockRestore()
+    }
+  })
+
+  it('does not let a stale conflict refresh roll back a newer installed Claim projection', async () => {
+    const user = userEvent.setup()
+
+    const newerClaimantMessage = {
+      ...claimantMessage,
+      message_id: 'msg_conflict_newer',
+      content: {
+        type: 'text',
+        text: 'The water has stopped now.',
+      },
+    }
+
+    const newerAgentMessage = {
+      ...agentMessage,
+      message_id: 'msg_conflict_agent_newer',
+      content: {
+        type: 'text',
+        text: 'I recorded the newer state.',
+      },
+    }
+
+    api.submitClaimMessage
+      .mockResolvedValueOnce(initialTurn())
+      .mockResolvedValueOnce({
+        ...initialTurn(),
+        claimant_message: newerClaimantMessage,
+        agent_message: newerAgentMessage,
+        claim_revision: 3,
+        primary_action: primaryAction({
+          actionCode: 'claimant.review_details',
+          available: true,
+          requiredInputs: ['incident.description'],
+          revision: 3,
+        }),
+      })
+
+    render(<App />)
+
+    await user.type(
+      screen.getByRole('textbox', { name: 'Incident description' }),
+      'A pipe burst in the kitchen.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+
+    await user.type(
+      screen.getByPlaceholderText('Write the details you know...'),
+      newerClaimantMessage.content.text,
+    )
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(
+      await screen.findByRole('button', { name: /Review claim details/i }),
+    ).toBeInTheDocument()
+
+    const conflict = Object.assign(
+      new api.ApiRequestError('The Claim revision changed.'),
+      {
+        code: 'REVISION_CONFLICT',
+        status: 409,
+        retryable: false,
+      },
+    )
+
+    api.submitClaimMessage.mockRejectedValueOnce(conflict)
+    api.getClaim.mockResolvedValueOnce({
+      ...initialClaim,
+      revision: 2,
+      primary_action: primaryAction({ revision: 2 }),
+    })
+
+    await user.type(
+      screen.getByPlaceholderText('Write the details you know...'),
+      'One more conflicting update.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(1))
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(
+      screen.getByRole('button', { name: /Review claim details/i }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(newerAgentMessage.content.text),
+    ).toBeInTheDocument()
   })
 
   it('keeps creation and assessment actions in the Agent message flow', async () => {
