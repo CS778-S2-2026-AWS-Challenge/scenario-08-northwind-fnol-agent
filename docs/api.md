@@ -1722,7 +1722,11 @@ then discards the stale cursor, establishes a replacement subscription without i
 authoritative snapshots before consuming buffered live deliveries. Mutations committed before the
 replacement subscription are covered by the snapshot; mutations committed after subscription are
 buffered by the replacement stream and consumed after the snapshot, so recovery has no unobserved
-event window. A 15-second comment heartbeat keeps an otherwise idle transport open and carries no state.
+event window. The same subscribe-before-snapshot ordering applies whenever a browser has no
+acknowledged cursor, including the initial connection and reconnects before the first successful
+acknowledgement. A change of claimant or staff authentication context discards browser replay state
+from the previous principal. A 15-second comment heartbeat keeps an otherwise idle transport open and
+carries no state.
 
 Claimant and Workbench browsers keep one multiplexed stream for the current authentication context;
 ordinary Claim navigation does not create a stream per Claim or session. Browser polling is not part
