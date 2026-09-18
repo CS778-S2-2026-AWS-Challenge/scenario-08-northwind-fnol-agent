@@ -246,6 +246,7 @@ def test_asset_selection_prefills_proposals_and_snapshot_remains_immutable(
     assert changed.json()['details']['registration'] == 'NEW456'
     assert snapshots.status_code == 200
     assert snapshots.json()['items'][0]['details']['registration'] == 'SYN123'
+    assert snapshots.json()['items'][0]['details']['registered_owner'] == 'Synthetic Claimant'
     assert 'policy_reference' not in snapshots.json()['items'][0]
     assert staff_snapshots.status_code == 200
     assert staff_snapshots.json()['items'] == snapshots.json()['items']
@@ -413,13 +414,21 @@ def test_asset_patch_rejects_null_and_cross_type_content_without_mutation(
     [
         (
             'property',
-            {'address': '1 Synthetic Street, Wellington'},
+            {
+                'address': '1 Synthetic Street, Wellington',
+                'owner_name': 'Synthetic Property Owner',
+            },
             'home',
             {'claim.product_family', 'property.address'},
         ),
         (
             'contents',
-            {'description': 'Synthetic laptop', 'brand': 'Example'},
+            {
+                'description': 'Synthetic laptop',
+                'category': 'electronics',
+                'brand': 'Example',
+                'model': 'Model One',
+            },
             'contents',
             {'claim.product_family'},
         ),
@@ -461,6 +470,42 @@ def test_property_and_contents_assets_prefill_only_their_approved_claim_facts(
     assert selected.status_code == 201, selected.text
     assert set(selected.json()['proposed_fields']) == expected_fields
     assert selected.json()['proposed_fields']['claim.product_family']['value'] == family
+    if asset_type == 'contents':
+        proposal = selected.json()['proposed_contents_item']
+        assert proposal['description'] == details['description']
+        assert proposal['category'] == details['category']
+        assert proposal['brand'] == details['brand']
+        assert proposal['model'] == details['model']
+        assert proposal['status'] == 'proposed'
+        assert proposal['loss_type'] is None
+        assert proposal['ownership'] is None
+        assert proposal['estimated_value'] is None
+        read_claim = client.get(
+            f'/api/v1/claims/{claim["claim_id"]}',
+            headers=owner,
+        )
+        assert read_claim.json()['contents_items'] == [proposal]
+        rejected_confirmation = client.post(
+            f'/api/v1/claims/{claim["claim_id"]}/form/confirmations',
+            headers={
+                **owner,
+                'Idempotency-Key': 'confirm-incomplete-contents-asset',
+                'If-Match': str(selected.json()['revision']),
+            },
+            json={'field_codes': ['contents.items']},
+        )
+        assert rejected_confirmation.status_code == 422
+        assert rejected_confirmation.json()['error']['code'] == 'VALIDATION_ERROR'
+        unchanged = client.get(f'/api/v1/claims/{claim["claim_id"]}', headers=owner)
+        assert unchanged.json()['revision'] == selected.json()['revision']
+        assert unchanged.json()['contents_items'][0]['status'] == 'proposed'
+    else:
+        assert selected.json()['proposed_contents_item'] is None
+        snapshots = client.get(
+            f'/api/v1/claims/{claim["claim_id"]}/asset-snapshots',
+            headers=owner,
+        )
+        assert snapshots.json()['items'][0]['details']['owner_name'] == details['owner_name']
 
 
 def test_asset_selection_errors_are_concealed_and_revision_safe(client: TestClient) -> None:

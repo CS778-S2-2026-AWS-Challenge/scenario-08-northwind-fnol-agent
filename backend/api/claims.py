@@ -1,6 +1,7 @@
 import logging
+from collections.abc import Callable
 from datetime import datetime
-from typing import cast
+from typing import Protocol, TypeVar, cast
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
@@ -20,9 +21,13 @@ from backend.domain.models import (
     ClaimantSession,
     ClaimCreationResponse,
     ClaimListResponse,
+    ContentsItemEvidenceAssociationListResponse,
+    ContentsItemEvidenceAssociationMutationResponse,
     CreateClaimRequest,
     CreateClaimResponse,
+    CreateContentsItemEvidenceAssociationRequest,
     CreateMessageRequest,
+    CreateMotorOtherDriverRequest,
     ExternalCapabilityProjection,
     ExternalServiceOfferDecisionRequest,
     FormConfirmationRequest,
@@ -32,6 +37,8 @@ from backend.domain.models import (
     GrantAssessorConsentRequest,
     MessageListResponse,
     MessageTurnResponse,
+    MotorOtherDriverMutationResponse,
+    MotorOtherDriverProjection,
     PauseSessionResponse,
     StartSessionRequest,
     WorkflowState,
@@ -41,6 +48,12 @@ from backend.services.agent import AgentTurnProvider
 from backend.services.agent_action_execution import ClaimantRuntimeActionDispatcher
 from backend.services.agent_turn_progress import AgentTurnProgressReporter
 from backend.services.claim_creation import create_claim_from_confirmed_report
+from backend.services.claim_data import (
+    create_contents_item_evidence_association,
+    create_motor_other_driver,
+    get_motor_other_driver,
+    list_contents_item_evidence_associations,
+)
 from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.claimant_events import claimant_event_revision
 from backend.services.claims import (
@@ -73,6 +86,52 @@ from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant'])
 router.include_router(claim_assets_router)
 logger = logging.getLogger(__name__)
+
+
+class RevisionedClaimDataMutation(Protocol):
+    revision: int
+
+
+ClaimDataMutationT = TypeVar('ClaimDataMutationT', bound=RevisionedClaimDataMutation)
+
+
+def _execute_logged_claim_data_mutation(
+    *,
+    operation: str,
+    request: Request,
+    claim_id: str,
+    item_id: str | None = None,
+    mutate: Callable[[], ClaimDataMutationT],
+) -> ClaimDataMutationT:
+    context = {
+        'request_id': str(getattr(request.state, 'request_id', 'unavailable')),
+        'claim_id': claim_id,
+    }
+    if item_id is not None:
+        context['item_id'] = item_id
+    try:
+        result = mutate()
+    except ApiError as error:
+        logger.info(
+            operation,
+            extra={**context, 'outcome': 'rejected', 'error_code': error.code},
+        )
+        raise
+    except Exception:
+        logger.exception(
+            operation,
+            extra={**context, 'outcome': 'failed', 'error_code': 'INTERNAL_ERROR'},
+        )
+        raise
+    logger.info(
+        operation,
+        extra={
+            **context,
+            'outcome': 'succeeded',
+            'claim_revision': result.revision,
+        },
+    )
+    return result
 
 
 def repository_for(request: Request) -> PersistenceRepository:
@@ -165,6 +224,96 @@ def read_claim(
     principal: Principal = Depends(require_claimant),
 ) -> ClaimantClaim:
     return get_claim(repository_for(request), principal, claim_id)
+
+
+@router.post(
+    '/{claim_id}/motor-other-driver',
+    response_model=MotorOtherDriverMutationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_claim_motor_other_driver(
+    claim_id: str,
+    payload: CreateMotorOtherDriverRequest,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> MotorOtherDriverMutationResponse:
+    return _execute_logged_claim_data_mutation(
+        operation='claim_data.motor_other_driver.create',
+        request=request,
+        claim_id=claim_id,
+        mutate=lambda: create_motor_other_driver(
+            repository_for(request),
+            principal,
+            claim_id,
+            payload,
+            idempotency_key,
+            if_match,
+        ),
+    )
+
+
+@router.get('/{claim_id}/motor-other-driver', response_model=MotorOtherDriverProjection)
+def read_claim_motor_other_driver(
+    claim_id: str,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+) -> MotorOtherDriverProjection:
+    return get_motor_other_driver(repository_for(request), principal, claim_id)
+
+
+@router.post(
+    '/{claim_id}/contents-items/{item_id}/evidence-associations',
+    response_model=ContentsItemEvidenceAssociationMutationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_claim_contents_item_evidence_association(
+    claim_id: str,
+    item_id: str,
+    payload: CreateContentsItemEvidenceAssociationRequest,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> ContentsItemEvidenceAssociationMutationResponse:
+    return _execute_logged_claim_data_mutation(
+        operation='claim_data.contents_item_evidence.create',
+        request=request,
+        claim_id=claim_id,
+        item_id=item_id,
+        mutate=lambda: create_contents_item_evidence_association(
+            repository_for(request),
+            principal,
+            claim_id,
+            item_id,
+            payload,
+            idempotency_key,
+            if_match,
+        ),
+    )
+
+
+@router.get(
+    '/{claim_id}/contents-items/{item_id}/evidence-associations',
+    response_model=ContentsItemEvidenceAssociationListResponse,
+)
+def read_claim_contents_item_evidence_associations(
+    claim_id: str,
+    item_id: str,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+    limit: int = Query(default=25, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+) -> ContentsItemEvidenceAssociationListResponse:
+    return list_contents_item_evidence_associations(
+        repository_for(request),
+        principal,
+        claim_id,
+        item_id,
+        limit=limit,
+        cursor=cursor,
+    )
 
 
 @router.get('/{claim_id}/external-capabilities', response_model=list[ExternalCapabilityProjection])

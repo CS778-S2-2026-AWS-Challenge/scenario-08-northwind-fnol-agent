@@ -947,6 +947,8 @@ def _claimant_contents_item(item: ContentsItem) -> ClaimantContentsItem:
         description=item.description,
         category=item.category,
         quantity=item.quantity,
+        brand=item.brand,
+        model=item.model,
         loss_type=item.loss_type,
         ownership=item.ownership,
         estimated_value=item.estimated_value,

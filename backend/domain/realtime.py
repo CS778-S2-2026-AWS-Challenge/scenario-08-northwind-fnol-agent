@@ -293,6 +293,8 @@ REALTIME_MUTATION_REQUIRED_RESOURCES: dict[RealtimeMutation, tuple[RealtimeResou
 
 AUTHORITATIVE_RECORD_PROJECTION_IMPACTS: dict[str, tuple[RealtimeResource, ...]] = {
     'claim_asset_snapshot': (RealtimeResource.ASSET_SNAPSHOTS,),
+    'motor_other_driver': (RealtimeResource.CLAIM,),
+    'contents_item_evidence_association': (RealtimeResource.CLAIM,),
     'branch_evaluation': (),
     'collaboration_request': (RealtimeResource.COLLABORATION_REQUESTS,),
     'claim_coworker': (

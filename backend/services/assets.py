@@ -37,10 +37,13 @@ from backend.domain.ids import new_id
 from backend.domain.models import (
     ActorReference,
     ActorType,
+    ClaimantContentsItem,
+    ContentsItem,
     FormSource,
     FormStatus,
     NeededFor,
     PageInfo,
+    ProposedContentsItem,
     ProposedFormChange,
     StructuredFormField,
     WorkingClaim,
@@ -58,7 +61,7 @@ from backend.repositories.protocols import (
     RevisionConflict,
 )
 from backend.services.branching import build_applied_branch_evaluation
-from backend.services.fact_resolution import resolve_form_change
+from backend.services.fact_resolution import resolve_contents_item_change, resolve_form_change
 from backend.services.support import (
     decode_cursor,
     encode_cursor,
@@ -464,9 +467,58 @@ def select_claim_asset(
             updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id=principal.subject),
         )
 
+    proposed_contents_item: ContentsItem | None = None
+    if asset.asset_type is AssetType.CONTENTS:
+        contents = cast(ContentsAssetDetails, asset.details)
+        proposed_contents_item = resolve_contents_item_change(
+            existing=None,
+            proposal=ProposedContentsItem(
+                description=contents.description,
+                category=contents.category,
+                brand=contents.brand,
+                model=contents.model,
+                reported_text=f'Selected registered asset {asset.display_name}.',
+            ),
+            item_id=new_id('itm'),
+            source_ref=source_ref,
+            message_text=None,
+            timestamp=timestamp,
+            accepted_status=FormStatus.PROPOSED,
+            updated_by=ActorReference(
+                actor_type=ActorType.CLAIMANT,
+                actor_id=principal.subject,
+            ),
+        )
+
+    projected_contents_item = (
+        ClaimantContentsItem(
+            item_id=proposed_contents_item.item_id,
+            description=proposed_contents_item.description,
+            category=proposed_contents_item.category,
+            quantity=proposed_contents_item.quantity,
+            brand=proposed_contents_item.brand,
+            model=proposed_contents_item.model,
+            loss_type=proposed_contents_item.loss_type,
+            ownership=proposed_contents_item.ownership,
+            estimated_value=proposed_contents_item.estimated_value,
+            source=proposed_contents_item.source,
+            source_refs=[],
+            status=proposed_contents_item.status,
+            needed_for=proposed_contents_item.needed_for,
+            resolution_state=proposed_contents_item.resolution_state,
+            updated_at=proposed_contents_item.updated_at,
+        )
+        if proposed_contents_item is not None
+        else None
+    )
+
     updated_claim = claim.model_copy(
         update={
             'form': {**claim.form, **proposed_fields},
+            'contents_items': [
+                *claim.contents_items,
+                *([proposed_contents_item] if proposed_contents_item is not None else []),
+            ],
             'revision': claim.revision + 1,
             'updated_at': timestamp,
         }
@@ -488,6 +540,7 @@ def select_claim_asset(
         claim_id=claim.claim_id,
         revision=updated_claim.revision,
         proposed_fields=proposed_fields,
+        proposed_contents_item=projected_contents_item,
         snapshot=project_snapshot(snapshot),
     )
     idempotency = IdempotencyRecord(
