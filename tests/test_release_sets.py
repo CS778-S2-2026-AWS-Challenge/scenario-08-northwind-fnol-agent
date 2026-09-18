@@ -339,7 +339,9 @@ def test_publish_rejects_when_the_expected_active_release_changed() -> None:
 
     assert captured.value.status_code == 409
     assert captured.value.code == 'ACTIVE_RELEASE_SET_CHANGED'
-    assert releases.active('test', 'fixture').release_set_id == replacement.release_set_id
+    active = releases.active('test', 'fixture')
+    assert active is not None
+    assert active.release_set_id == replacement.release_set_id
 
 
 def test_release_set_rejects_unpublished_knowledge_reference() -> None:

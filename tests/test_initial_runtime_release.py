@@ -241,7 +241,9 @@ def test_repository_managed_v7_release_upgrades_to_current_catalogue() -> None:
     assert upgraded.release_set_id != original.release_set_id
     assert repeated.release_set_id == upgraded.release_set_id
     assert set(upgraded.configuration_refs) == set(original.configuration_refs)
-    assert releases.get(original.release_set_id).state is ReleaseSetState.SUPERSEDED
+    superseded = releases.get(original.release_set_id)
+    assert superseded is not None
+    assert superseded.state is ReleaseSetState.SUPERSEDED
     assert len(releases.list_release_sets('test', 'fixture')) == 2
     assert len(configurations.list_configurations()) == 8
     policy = RuntimeAgentPolicyResolver(
