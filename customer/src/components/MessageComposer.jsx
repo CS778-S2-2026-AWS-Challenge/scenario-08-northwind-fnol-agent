@@ -163,12 +163,7 @@ export default function MessageComposer({
   error,
   placeholder = 'Write the details you know...',
   variant = 'default',
-  showClaimTypeControl = false,
   showModelControl = false,
-  claimType = '',
-  setClaimType,
-  claimTypes = ['motor', 'home', 'contents'],
-  claimTypeLocked = false,
   models = [],
   selectedModel = '',
   setSelectedModel,
@@ -226,18 +221,6 @@ export default function MessageComposer({
   const selectedModelOption = models.find((model) => model.id === selectedModel)
   const modelLabel = modelDisplayName(selectedModelOption) || selectedModel || modelDisplayName(models[0]) || 'Choose model'
   const modelSelectionDisabled = busy || disabled || models.length === 0
-  const claimTypeOptions = [
-    {
-      value: '',
-      label: 'Let Agent identify',
-      disabled: claimTypeLocked && claimType !== '',
-    },
-    ...claimTypes.map((type) => ({
-      value: type,
-      label: `${type[0].toUpperCase()}${type.slice(1)}`,
-      disabled: claimTypeLocked && type !== claimType,
-    })),
-  ]
   const modelOptions = models.map((model) => ({
     value: model.id,
     label: modelDisplayName(model),
@@ -354,17 +337,6 @@ export default function MessageComposer({
               <path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" />
             </svg>
           </button>
-          {(isWorkspace || showClaimTypeControl) && setClaimType && (
-            <OptionMenu
-              value={claimType}
-              options={claimTypeOptions}
-              onChange={setClaimType}
-              disabled={busy || disabled}
-              label="Claim type (optional)"
-              className="claim-type-control"
-              placement={isWorkspace ? 'top' : 'bottom'}
-            />
-          )}
           {(isWorkspace || showModelControl) && setSelectedModel && (
             <div className="model-control">
               <OptionMenu

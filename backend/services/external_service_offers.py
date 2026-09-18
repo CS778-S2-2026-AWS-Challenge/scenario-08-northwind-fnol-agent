@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from contextlib import suppress
 from datetime import datetime, timedelta
@@ -24,9 +25,11 @@ from backend.domain.external_service_registry import REGISTRY_VERSION, service_r
 from backend.domain.external_services import (
     ExternalTaskAuthorisation,
     ExternalTaskDelivery,
+    ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
     ExternalTaskRequest,
+    classify_external_task_failure,
 )
 from backend.domain.models import (
     ActorReference,
@@ -61,6 +64,8 @@ from backend.services.support import (
     request_fingerprint,
     require_idempotency_key,
 )
+
+logger = logging.getLogger(__name__)
 
 _INTENT_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
@@ -119,6 +124,24 @@ def detected_service_intents(
         if len(result) == 3:
             break
     return result
+
+
+def select_registered_service_intents(
+    message_text: str | None,
+    *,
+    product_family: str | None,
+    available_service_ids: set[str],
+) -> list[dict[str, str]]:
+    """Select exact offer identities from Runtime-owned text rules and registry context."""
+
+    if product_family is None:
+        return []
+    detected = detected_service_intents(
+        message_text,
+        [],
+        product_family=product_family,
+    )
+    return [intent for intent in detected if intent['service_identity'] in available_service_ids]
 
 
 def build_offer_metadata(
@@ -797,22 +820,115 @@ def _dispatch_generic_offer(
         return
 
     payload = {source: _source_value(claim, source) for source in entry.disclosure_fields}
-    result = dispatcher.execute(
-        offer.service_identity,
-        'submit_request',
-        {
-            **payload,
-            'claim_id': claim.claim_id,
-            'claim_revision': claim.revision,
-            'operation_id': operation_id,
-            'idempotency_key': offer.offer_id,
-            'consent_ref': consent.consent_ref,
-            'northwind_authority_ref': authority_ref,
-        },
-        product_family=claim.incident_type or entry.product_families[0],
-    )
-    if result.status != 'accepted':
+    try:
+        result = dispatcher.execute(
+            offer.service_identity,
+            'submit_request',
+            {
+                **payload,
+                'claim_id': claim.claim_id,
+                'claim_revision': claim.revision,
+                'operation_id': operation_id,
+                'idempotency_key': offer.offer_id,
+                'consent_ref': consent.consent_ref,
+                'northwind_authority_ref': authority_ref,
+            },
+            product_family=claim.incident_type or entry.product_families[0],
+        )
+    except Exception:
+        failed_at = now_utc()
+        if failed_at <= task.updated_at:
+            failed_at = task.updated_at + timedelta(microseconds=1)
+        repository.save_external_task(
+            task.model_copy(
+                update={
+                    'status': ExternalTaskOperationStatus.RETRYABLE_FAILURE,
+                    'failure_code': ExternalTaskFailureCode.UNAVAILABLE,
+                    'updated_at': failed_at,
+                }
+            ),
+            claim.customer_id,
+        )
         repository.release_external_dispatch(claim.claim_id, request_id, claim.customer_id)
+        logger.exception(
+            'external_capability_dispatch_failed',
+            extra={
+                'claim_id': claim.claim_id,
+                'operation_id': operation_id,
+                'service_identity': offer.service_identity,
+                'component': 'external_dispatch',
+                'internal_error_code': 'EXTERNAL_SERVICE_UNAVAILABLE',
+                'retryable': True,
+            },
+        )
+        return
+    if result.status != 'accepted':
+        delivery_evidence = result.payload.get('delivery_evidence')
+        delivery = (
+            ExternalTaskDelivery.SUBMITTED
+            if isinstance(delivery_evidence, str) and delivery_evidence.strip()
+            else ExternalTaskDelivery.NOT_SUBMITTED
+        )
+        raw_failure_code = result.payload.get('failure_code')
+        try:
+            failure_code = ExternalTaskFailureCode(str(raw_failure_code))
+        except ValueError:
+            failure_code = (
+                ExternalTaskFailureCode.ACCESS_DENIED
+                if result.status == 'rejected'
+                else (
+                    ExternalTaskFailureCode.TIMEOUT
+                    if result.status == 'unknown_outcome'
+                    and delivery is ExternalTaskDelivery.SUBMITTED
+                    else ExternalTaskFailureCode.UNAVAILABLE
+                )
+            )
+        classification = classify_external_task_failure(
+            failure_code=failure_code,
+            delivery=delivery,
+        )
+        failed_at = now_utc()
+        if failed_at <= task.updated_at:
+            failed_at = task.updated_at + timedelta(microseconds=1)
+        if delivery is ExternalTaskDelivery.SUBMITTED:
+            repository.save_external_task_request(
+                reserved.model_copy(update={'sent_at': failed_at}),
+                claim.customer_id,
+            )
+        repository.save_external_task(
+            task.model_copy(
+                update={
+                    'status': classification.operation_status,
+                    'delivery': delivery,
+                    'delivery_evidence': delivery_evidence if delivery_evidence else None,
+                    'failure_code': failure_code,
+                    'updated_at': failed_at,
+                }
+            ),
+            claim.customer_id,
+        )
+        if classification.operation_status is not ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
+            repository.release_external_dispatch(claim.claim_id, request_id, claim.customer_id)
+        logger.info(
+            'external_capability_dispatch_settled_without_acceptance',
+            extra={
+                'claim_id': claim.claim_id,
+                'operation_id': operation_id,
+                'service_identity': offer.service_identity,
+                'component': 'external_dispatch',
+                'internal_error_code': (
+                    'EXTERNAL_SERVICE_UNKNOWN_OUTCOME'
+                    if classification.operation_status
+                    is ExternalTaskOperationStatus.UNKNOWN_OUTCOME
+                    else (
+                        'EXTERNAL_SERVICE_REJECTED'
+                        if result.status == 'rejected'
+                        else 'EXTERNAL_SERVICE_UNAVAILABLE'
+                    )
+                ),
+                'retryable': classification.retryable,
+            },
+        )
         return
     sent_at = now_utc()
     if sent_at <= task.updated_at:

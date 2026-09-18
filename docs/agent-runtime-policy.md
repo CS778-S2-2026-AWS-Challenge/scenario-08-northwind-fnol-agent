@@ -55,6 +55,30 @@ Product requirements and approved operating rules
 Changing the model provider, compatible API, relay, custom endpoint, or local model must
 not change this sequence or the namespaced Agent action semantics.
 
+### One turn, one family and capability decision
+
+The claimant starts with a natural-language description; the claimant UI does not expose a
+product-family selector. A working Claim may therefore remain unresolved until the first useful
+message. At the message boundary Runtime resolves one `TurnFamilyResolution` and gives that same
+result to routing, context planning, field-contract compilation, and capability selection.
+Confirmed Claim facts take precedence. One clear current-turn candidate may be inferred;
+ambiguous or conflicting candidates produce a controlled clarification and no external offer.
+Runtime never invents a default family.
+
+The model does not select external-service identities. Runtime recognizes a bounded intent, then
+selects exact identities from the published external-service registry for the resolved family and
+current lifecycle. The model may write conversational prose around the selected option, but an
+unknown or model-invented service ID is ignored as optional data and cannot reject an otherwise
+safe reply. Consent, disclosure, authority, idempotency, and lifecycle checks still run before any
+side effect.
+
+Conversation persistence and external dispatch have separate outcomes. Once the claimant and
+Agent messages are committed, an unavailable, rejected, or failing optional adapter is recorded
+on the external-task lifecycle and in privacy-safe structured diagnostics; it does not turn the
+committed chat response into a transport failure. Claimant prose may say that an option is
+available or awaiting consent, but it may not claim that Northwind arranged, submitted,
+contacted, approved, or completed external work without matching Runtime evidence.
+
 ## Policy Layers
 
 | Layer | Examples | Primary enforcement | Change authority |

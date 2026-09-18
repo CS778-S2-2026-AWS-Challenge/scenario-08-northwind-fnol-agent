@@ -31,6 +31,18 @@ when no adapter is configured. Adapter output is returned as provider evidence;
 the model cannot turn an unavailable, acknowledged or unverified response into a
 Claim fact or a completed booking.
 
+Service selection is a Runtime responsibility. One shared per-turn family resolution filters the
+registry, and bounded intent recognition selects the exact service identity before model output is
+validated. The model does not echo or authorise service IDs. If no registered capability matches,
+the conversation may continue without an offer and without executional wording.
+
+Conversation commit and external dispatch are separate outcomes. An adapter rejection,
+unavailability, or exception is recorded as the corresponding external-task failure and emits a
+privacy-safe diagnostic containing correlation IDs and controlled codes, not claimant text or
+provider payloads. It must not convert a committed message turn into a failed chat request. An
+unknown outcome still uses the canonical reconciliation rule and the same operation identity; it
+is never automatically retried.
+
 The claimant projection is intentionally limited to service purpose, public
 contact, disclosure requirements and the current server-declared action. The
 Workbench receives the same catalogue plus its existing staff-only operation,

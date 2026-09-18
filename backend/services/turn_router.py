@@ -4,21 +4,8 @@ import re
 
 from backend.domain.agent_context_runtime import TurnRoute, TurnTask
 from backend.services.agent import AgentTurnContext
+from backend.services.turn_family_resolution import resolve_turn_family
 
-_FAMILY_TERMS = {
-    'motor': re.compile(
-        r'\b(?:car|vehicle|driv(?:e|ing|able)|road|collision|crash|rear[- ]?end|windscreen)\b',
-        re.IGNORECASE,
-    ),
-    'home': re.compile(
-        r'\b(?:home|house|building|roof|wall|floor|room|pipe|plumb|flood)\b',
-        re.IGNORECASE,
-    ),
-    'contents': re.compile(
-        r'\b(?:contents?|belongings?|laptop|phone|jewellery|furniture|stolen item)\b',
-        re.IGNORECASE,
-    ),
-}
 _CORRECTION = re.compile(
     r'\b(?:correct|correction|actually|instead|not what|change that|update (?:this|that))\b',
     re.I,
@@ -40,23 +27,6 @@ _EXTERNAL = re.compile(
 )
 
 
-def _authoritative_family(context: AgentTurnContext) -> str | None:
-    candidates = [
-        context.claim.incident_type,
-        context.branch_evaluation.selected_family if context.branch_evaluation else None,
-        (
-            str(context.claim.form['claim.product_family'].value)
-            if 'claim.product_family' in context.claim.form
-            else None
-        ),
-    ]
-    for value in candidates:
-        normalized = {'property': 'home'}.get(value or '', value)
-        if normalized in {'motor', 'home', 'contents'}:
-            return normalized
-    return None
-
-
 def _capabilities(message: str) -> list[str]:
     capabilities: list[str] = []
     for capability, pattern in (
@@ -74,34 +44,37 @@ def _capabilities(message: str) -> list[str]:
 
 def route_turn(context: AgentTurnContext) -> TurnRoute:
     message = (context.message_text or '').strip()
-    authoritative_family = _authoritative_family(context)
-    if authoritative_family is not None:
-        family = authoritative_family
-        family_resolution = 'authoritative'
-    else:
-        candidates = [
-            family for family, pattern in _FAMILY_TERMS.items() if pattern.search(message)
-        ]
-        if len(candidates) != 1:
-            configured_response = (
-                context.runtime_policy.controlled_rules.deterministic_responses.get(
-                    'unresolved_family'
+    resolution = context.turn_family_resolution or resolve_turn_family(
+        context.claim,
+        context.branch_evaluation,
+        message,
+    )
+    if resolution.product_family is None:
+        configured_response = (
+            context.runtime_policy.controlled_rules.deterministic_responses.get('unresolved_family')
+            if context.runtime_policy is not None
+            else None
+        )
+        reason = {
+            'ambiguous': 'I found more than one kind of loss in that message.',
+            'conflicting': 'That description conflicts with the Claim type already confirmed.',
+        }.get(resolution.status)
+        return TurnRoute(
+            family_resolution=resolution.status,
+            task=TurnTask.INTAKE,
+            deterministic_response=configured_response
+            or ' '.join(
+                part
+                for part in (
+                    reason,
+                    'Please choose the single loss to continue: motor, home, or contents.',
                 )
-                if context.runtime_policy is not None
-                else None
-            )
-            return TurnRoute(
-                family_resolution='unresolved',
-                task=TurnTask.INTAKE,
-                deterministic_response=configured_response
-                or (
-                    'Please choose the single loss you want to report first: motor, home, or '
-                    'contents.'
-                ),
-                model_required=False,
-            )
-        family = candidates[0]
-        family_resolution = 'inferred'
+                if part
+            ),
+            model_required=False,
+        )
+    family = resolution.product_family
+    family_resolution = resolution.status
 
     capabilities = _capabilities(message)
     if {'policy-search', 'claim-history'} & set(capabilities):

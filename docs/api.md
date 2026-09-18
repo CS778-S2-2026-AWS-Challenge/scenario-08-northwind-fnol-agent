@@ -1264,12 +1264,14 @@ Request:
 ```json
 {
   "channel": "web_agent",
-  "locale": "en-NZ",
-  "incident_type": "motor"
+  "locale": "en-NZ"
 }
 ```
 
-`incident_type` MAY be omitted when it is not yet known.
+`incident_type` MAY be supplied by compatible clients, but the claimant application does not ask
+the user to choose it. A working Claim may remain unresolved until the first message. The message
+Runtime then derives one shared bounded family result from confirmed facts and the current text;
+ambiguous or conflicting input asks for clarification and creates no external-service offer.
 
 Response `201`:
 
@@ -1524,6 +1526,13 @@ before model execution or Claim mutation. `retryable` is `true` only for a tempo
 read failure. Cross-Claim records, contradictory capability provenance, invalid task/result
 relationships, unsupported registry mappings, invalid result-verification combinations, and
 context overflow return the same bounded code with `retryable: false`.
+
+For a third-party support turn, Runtime selects service identities from the published registry;
+model output cannot add them. Failure to assemble an optional offer leaves a safe conversation
+valid and creates no service action. After a message turn is committed, a later adapter failure is
+projected through the external-task lifecycle and does not change this endpoint into a failed
+chat response. The response must not claim that external work was arranged or submitted unless
+the corresponding Runtime lifecycle evidence exists.
 
 Response `200`:
 

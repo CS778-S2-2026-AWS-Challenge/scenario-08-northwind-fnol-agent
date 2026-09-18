@@ -31,7 +31,6 @@ function ComposerHarness({ onRemoved = vi.fn(), initialStatus = 'uploading' }) {
 
 function ControlHarness() {
   const [draft, setDraft] = useState('')
-  const [claimType, setClaimType] = useState('')
   const [selectedModel, setSelectedModel] = useState('qwen-local')
 
   return (
@@ -43,8 +42,6 @@ function ControlHarness() {
       busy={false}
       buttonLabel="Send"
       variant="workspace"
-      claimType={claimType}
-      setClaimType={setClaimType}
       models={[{ id: 'qwen-local', label: 'Qwen Local', availability: 'available' }]}
       selectedModel={selectedModel}
       setSelectedModel={setSelectedModel}
@@ -90,25 +87,17 @@ it('does not present a local remove action for server-persisted Evidence', () =>
   expect(screen.queryByRole('button', { name: 'Select kitchen-damage.jpg' })).not.toBeInTheDocument()
 })
 
-it('keeps the claimant selectors keyboard operable with clear control sizing hooks', async () => {
+it('keeps the claimant model selector keyboard operable', async () => {
   const user = userEvent.setup()
   render(<ControlHarness />)
 
-  const claimType = screen.getByRole('button', { name: 'Claim type (optional)' })
-  expect(claimType).toHaveTextContent('Let Agent identify')
-
-  claimType.focus()
+  const model = screen.getByRole('button', { name: 'Model' })
+  expect(model).toHaveTextContent('Qwen Local')
+  model.focus()
   await user.keyboard('{ArrowDown}')
-  const automaticOption = screen.getByRole('option', { name: 'Let Agent identify' })
-  await waitFor(() => expect(automaticOption).toHaveFocus())
-  await user.keyboard('{ArrowDown}')
+  await waitFor(() => expect(screen.getByRole('option', { name: /Qwen Local/ })).toHaveFocus())
   await user.keyboard('{Enter}')
-
-  expect(claimType).toHaveTextContent('Motor')
-  expect(claimType).toHaveFocus()
-  expect(screen.queryByRole('listbox', { name: 'Claim type (optional)' })).not.toBeInTheDocument()
-
-  expect(screen.getByRole('button', { name: 'Model' })).toHaveTextContent('Qwen Local')
+  expect(model).toHaveFocus()
 })
 
 it('uses recognizable icons and accessible names for attachment and voice controls', () => {

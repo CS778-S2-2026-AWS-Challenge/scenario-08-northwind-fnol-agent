@@ -254,8 +254,7 @@ describe('claimant intake projection', () => {
     const model = await screen.findByRole('button', { name: 'Model' })
     expect(model).toBeEnabled()
     expect(model).toHaveTextContent('qwen3.8-27b')
-    const claimType = screen.getByRole('button', { name: 'Claim type (optional)' })
-    expect(claimType).toHaveTextContent('Let Agent identify')
+    expect(screen.queryByRole('button', { name: 'Claim type (optional)' })).not.toBeInTheDocument()
 
     await user.click(model)
     expect(screen.getByRole('listbox', { name: 'Model' })).toBeInTheDocument()
@@ -440,7 +439,7 @@ describe('claimant intake projection', () => {
     await user.type(input, 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    expect(api.createClaim).toHaveBeenCalledWith(expect.objectContaining({ incidentType: null }))
+    expect(api.createClaim).toHaveBeenCalledWith(expect.not.objectContaining({ incidentType: expect.anything() }))
 
     const failure = await screen.findByText(
       'The model service is temporarily unavailable. The claim is unchanged. Try again in a moment.',

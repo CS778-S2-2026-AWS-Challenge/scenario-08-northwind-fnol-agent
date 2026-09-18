@@ -35,6 +35,14 @@ review run in a mutation-incapable isolated request. The model never executes a 
 State, grants consent, creates a claim, or authorises a handoff by itself; Runtime performs those
 checks.
 
+The third-party offer schema contains conversation fields only. Exact service identities are
+selected before transport by Runtime from the shared turn-family resolution and published service
+registry. Older provider responses that still include `service_offer_ids` are accepted only as a
+compatibility input: Runtime removes and ignores that field before validating the conversation.
+It never becomes execution authority. This keeps provider wording replaceable while
+GPT-compatible and Gemini transports produce the same registered service option for the same
+bounded intent.
+
 When a claimant message explicitly carries `evidence_refs`, the message boundary resolves only
 claimant-visible records on that claimant's Claim whose lifecycle and media type permit model
 input. Staff and external-system Evidence remains internal-only even when it belongs to the same

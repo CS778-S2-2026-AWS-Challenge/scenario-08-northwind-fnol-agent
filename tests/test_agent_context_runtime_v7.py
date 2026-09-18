@@ -613,6 +613,7 @@ def test_external_support_offers_only_registry_candidates_pending_consent(
     context = replace(
         _context(message),
         external_services=capability_context('motor'),
+        selected_external_service_ids=(service_identity,),
     )
     gateway = _RecordingGateway(
         [
@@ -1321,7 +1322,6 @@ def test_intake_field_contract_rejects_a_mismatched_branch_registry() -> None:
 @pytest.mark.parametrize(
     ('case', 'expected_code'),
     [
-        ('unknown_service', ModelGatewayErrorCode.MALFORMED_RESPONSE),
         ('unsupported_tool', ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY),
         ('invalid_resolver_limit', ModelGatewayErrorCode.MALFORMED_RESPONSE),
         ('incomplete', ModelGatewayErrorCode.INCOMPLETE_RESPONSE),
@@ -1340,16 +1340,7 @@ def test_v7_provider_failures_do_not_escape_the_published_turn_contract(
         structured_output=_intake_output(),
         completion_status=ModelCompletionStatus.COMPLETE,
     )
-    if case == 'unknown_service':
-        context = replace(
-            _context('Please arrange a damage assessment.'),
-            external_services=capability_context('motor'),
-        )
-        response = ModelResponse(
-            structured_output={**_answer_output(), 'service_offer_ids': ['not_registered']},
-            completion_status=ModelCompletionStatus.COMPLETE,
-        )
-    elif case == 'unsupported_tool':
+    if case == 'unsupported_tool':
         response = ModelResponse(
             tool_calls=[ModelToolCall(call_id='call_wrong', name='claim.read', arguments={})],
             completion_status=ModelCompletionStatus.COMPLETE,
@@ -1392,6 +1383,49 @@ def test_v7_provider_failures_do_not_escape_the_published_turn_contract(
         GatewayAgent(_RecordingGateway([response])).propose_turn(context)
 
     assert error.value.code is expected_code
+
+
+def test_v7_rejects_an_unregistered_optional_offer_without_rejecting_safe_prose() -> None:
+    context = replace(
+        _context('Please arrange a damage assessment.'),
+        external_services=capability_context('motor'),
+    )
+    response = ModelResponse(
+        structured_output={**_answer_output(), 'service_offer_ids': ['not_registered']},
+        completion_status=ModelCompletionStatus.COMPLETE,
+    )
+
+    proposal = GatewayAgent(_RecordingGateway([response])).propose_turn(context)
+
+    assert proposal.customer_response == _answer_output()['reply']
+    assert proposal.external_service_intents == []
+    assert proposal.customer_next_step.status == 'continue_current_report'
+
+
+def test_v7_replaces_executional_prose_before_consent_with_runtime_owned_copy() -> None:
+    service_identity = 'vehicle_damage_assessment_routing'
+    context = replace(
+        _context('Please arrange a damage assessment.'),
+        external_services=capability_context('motor'),
+        selected_external_service_ids=(service_identity,),
+    )
+    response = ModelResponse(
+        structured_output={
+            **_answer_output(),
+            'reply': 'I have arranged a damage assessment for you.',
+        },
+        completion_status=ModelCompletionStatus.COMPLETE,
+    )
+
+    proposal = GatewayAgent(_RecordingGateway([response])).propose_turn(context)
+
+    assert proposal.customer_response == (
+        'I found a registered support option. Review what would be shared and give your '
+        'consent before Northwind sends anything.'
+    )
+    assert proposal.external_service_intents == [
+        {'service_identity': service_identity, 'requested_action': 'submit_request'}
+    ]
 
 
 def test_v7_human_handoff_interrupts_before_any_provider_invocation() -> None:
