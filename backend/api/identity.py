@@ -2,6 +2,7 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, Header, Request, Response, status
 
+from backend.api.account_data import account_router as account_data_router
 from backend.api.assets import account_router as account_assets_router
 from backend.core.auth import Principal, require_claimant_session
 from backend.core.errors import ApiError
@@ -27,6 +28,7 @@ from backend.services.identity import (
 
 router = APIRouter(prefix='/api/v1', tags=['claimant identity'])
 router.include_router(account_assets_router)
+router.include_router(account_data_router)
 
 
 def identity_repository_for(request: Request) -> IdentityRepository:
@@ -93,8 +95,9 @@ def patch_account_profile(
     request: Request,
     payload: ProfilePatchRequest,
     principal: Principal = Depends(require_claimant_session),
+    if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> AccountProjection:
-    return update_profile(identity_repository_for(request), principal, payload)
+    return update_profile(identity_repository_for(request), principal, payload, if_match)
 
 
 @router.patch('/account/preferences', response_model=AccountProjection)

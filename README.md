@@ -99,6 +99,27 @@ py -3.12 -m uvicorn backend.main:app --env-file .env --reload --host 127.0.0.1 -
 Deployment environments inject the same variable names through their secret and configuration
 mechanisms; they must not package the local `.env` file.
 
+### Configure protected account data
+
+The backend uses the maintained `cryptography` package's Fernet authenticated-encryption
+implementation for bank-account and identity-document numbers. Python's standard library does not
+provide an equivalent authenticated-encryption primitive. Development and test profiles derive a
+stable synthetic-only key so local persistence remains repeatable; that key is not suitable for
+deployed customer data.
+
+Every non-development runtime that accepts protected account writes must inject a dedicated
+`NORTHWIND_PROTECTED_DATA_KEY` through its approved secret mechanism. Generate a valid key with:
+
+```powershell
+py -3.12 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Do not commit or log the generated value. A configured but invalid key stops application startup.
+When the key is absent outside development and test, ordinary API startup remains available but
+protected writes fail closed with `503 PROTECTED_DATA_UNAVAILABLE`; the backend never stores the
+plaintext as a fallback. Key custody, rotation, recovery, and retention remain deployment-security
+responsibilities.
+
 On Windows, private model credentials can instead be stored outside the repository with the
 current-user Data Protection API vault:
 

@@ -1,7 +1,7 @@
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import TypeVar
+from typing import NoReturn, TypeVar
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
@@ -47,6 +47,25 @@ from backend.services.admin_action_projection import (
 from backend.services.support import decode_cursor, encode_cursor
 
 RecordT = TypeVar('RecordT')
+PROFILE_INVARIANT_ERRORS = frozenset(
+    {
+        'invalid_legal_name',
+        'invalid_preferred_name',
+        'invalid_residential_address',
+        'invalid_phone',
+        'invalid_name_projection',
+    }
+)
+
+
+def _raise_profile_validation_error(error: ValueError) -> NoReturn:
+    if str(error) not in PROFILE_INVARIANT_ERRORS:
+        raise error
+    raise ApiError(
+        status_code=422,
+        code='VALIDATION_ERROR',
+        message='The customer profile is invalid.',
+    ) from error
 
 
 def _page[T](
@@ -112,13 +131,30 @@ def update_customer(
             code='VALIDATION_ERROR',
             message='At least one account field must change.',
         )
+    if 'display_name' in updates:
+        if 'legal_name' in updates or 'preferred_name' in updates:
+            raise ApiError(
+                status_code=422,
+                code='VALIDATION_ERROR',
+                message='Use display_name or canonical name fields, not both.',
+            )
+        alias = str(updates.pop('display_name')).strip()
+        target = 'preferred_name' if account.preferred_name is not None else 'legal_name'
+        updates[target] = alias
+    if 'legal_name' in updates or 'preferred_name' in updates:
+        legal_name = str(updates.get('legal_name', account.legal_name)).strip()
+        preferred_name = updates.get('preferred_name', account.preferred_name)
+        updates['display_name'] = preferred_name or legal_name
     updated = replace(
         account,
         **updates,
         revision=account.revision + 1,
         updated_at=datetime.now(UTC),
     )
-    repository.save_account(updated, expected_revision)
+    try:
+        repository.save_account(updated, expected_revision)
+    except ValueError as error:
+        _raise_profile_validation_error(error)
     return customer_account_projection(customer_projection(updated))
 
 
@@ -170,12 +206,15 @@ def create_customer(
     repository: IdentityRepository,
     payload: AdminCustomerAccountCreate,
 ) -> AdminCustomerAccountProjection:
-    account = repository.create_account(
-        payload.email,
-        payload.initial_password,
-        payload.display_name,
-        payload.phone,
-    )
+    try:
+        account = repository.create_account(
+            payload.email,
+            payload.initial_password,
+            payload.display_name,
+            payload.phone,
+        )
+    except ValueError as error:
+        _raise_profile_validation_error(error)
     if account is None:
         raise ApiError(
             status_code=409,
@@ -330,6 +369,8 @@ def customer_projection(account: CustomerAccountRecord) -> AdminCustomerAccountP
         customer_id=account.customer_id,
         email=account.email,
         display_name=account.display_name,
+        legal_name=account.legal_name,
+        preferred_name=account.preferred_name,
         phone=account.phone,
         active=account.active,
         communication_preferences=account.communication_preferences,

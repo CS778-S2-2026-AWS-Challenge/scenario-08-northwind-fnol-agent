@@ -87,6 +87,28 @@ def test_shared_domain_model_change_uses_sentinel_and_complete_journey() -> None
     )
 
 
+@pytest.mark.parametrize(
+    'path',
+    [
+        'backend/adapters/identity.py',
+        'backend/domain/identity.py',
+        'backend/services/admin_accounts.py',
+    ],
+)
+def test_customer_identity_changes_select_admin_account_contract(path: str) -> None:
+    selection = select_tests([path])
+
+    assert selection.mode == 'scoped'
+    assert 'tests/test_admin_accounts.py' in selection.tests
+
+
+def test_unrelated_identity_change_does_not_select_admin_account_contract() -> None:
+    selection = select_tests(['backend/services/staff_identity.py'])
+
+    assert selection.mode == 'scoped'
+    assert 'tests/test_admin_accounts.py' not in selection.tests
+
+
 def test_unmapped_backend_change_never_returns_an_empty_selection() -> None:
     selection = select_tests(['backend/unknown_component.py'])
 

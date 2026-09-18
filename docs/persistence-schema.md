@@ -17,6 +17,12 @@ verifies real multi-document writes, restart recovery, and stale-revision refusa
 shared transaction-boundary hardening in PR #288 remains a merge dependency and is not duplicated
 here.
 
+The account-data slice also persists account-owned `pol_`, `idn_`, and `pyd_` records with
+Fixture/MongoDB parity. Policy selection is an authoritative Claim transaction containing the
+proposed registered fact, Branch Evaluation, Claim revision, idempotency result, and value-free
+audit event. Protected records persist authenticated ciphertext and a last-four mask; plaintext
+bank and identity-document numbers never cross the protected-value adapter into repositories.
+
 The adapter owns bounded environment parsing and verified client construction through
 `MongoDBConnectionConfig` and `connect_mongodb_repository`. A connection is exposed to the
 repository only after `ping` and index initialisation succeed; failure closes the client and
@@ -342,10 +348,13 @@ the append-only audit collection through a bounded, filterable projection.
     persists one bounded Claim-scoped audit fact in the same authoritative mutation.
 43. List Claim asset snapshots in stable `(captured_at, snapshot_id)` order after claimant
     ownership or Workbench staff authority has been established.
-44. Create, revise, list, mask, and retire account Identity Records and Payment Destinations by
-    owner while resolving protected values only inside separately authorised adapters.
-45. List/select bounded Policy Summaries by account and product family without treating display
-    status as a coverage decision or exposing provider credentials.
+44. Create, revise, cursor-page, mask, and retire account Identity Records and Payment
+    Destinations by owner while resolving protected values only inside separately authorised
+    adapters. The bounded records contain only document type/number or bank account type/number;
+    no verification or payment state is inferred.
+45. Create, revise, cursor-page, and retire bounded Policy Number records by account. Select one
+    active owned record into the existing `policy.policy_number` Claim field without treating it
+    as a coverage decision or exposing/inventing provider data.
 46. Create/read zero or one `MotorOtherDriverRecord` per authorised Motor Claim, containing only
     supplied name, phone, email, and other-vehicle registration. Keep it outside model/RAG context
     and reject a second record without advancing Claim revision.
@@ -353,6 +362,37 @@ the append-only audit collection through a bounded, filterable projection.
     either side belongs to another Claim or customer.
 48. Create/revise/list emergency-repair mitigation records and their Evidence/WorkItem links in
     the same authoritative Claim mutation when Claim State also changes.
+
+## Account Profile and Protected Record Mapping
+
+- Existing identity rows migrate `legal_name` from the previous `display_name`. No date of birth,
+  address, preferred name, policy, bank, or identity-document value is guessed. After migration,
+  `display_name` is a compatibility projection derived from preferred name or legal name and is
+  updated atomically with the canonical names.
+- `policy:{policy_id}` stores one active/retired account policy-number record. It has no provider,
+  product-family, coverage, entitlement, or Policy-to-Asset association.
+- `identity_document:{identity_id}` stores document type, authenticated ciphertext, last-four
+  mask, ownership, revision, active state, and timestamps. Document type is exactly
+  `driver_licence` or `passport`.
+- `payment_destination:{payment_destination_id}` stores account type, authenticated ciphertext,
+  last-four mask, ownership, revision, active state, and timestamps. It is not a payment command.
+- Fixture and MongoDB adapters enforce the same owner-first access, create idempotency, optimistic
+  revision, stable descending `(created_at, resource_id)` keyset pagination, soft retirement, and
+  value-free audit contract. Cursors bind the owner digest, record type, and active-record filter.
+  MongoDB uses separate active-only and include-inactive partial compound indexes ordered by
+  `(record_type, customer_id, created_at DESC, _id DESC)`, applies a bounded keyset predicate plus
+  `limit + 1`, and never uses offset/skip for these resources.
+  Protected plaintext
+  is accepted only at the API/protected-adapter boundary and is not stored in repository records,
+  idempotency responses, audit values, errors, Claim State, Agent context, or RAG.
+- Account-record retirement returns the durable resulting revision to the API logging boundary while
+  preserving the public `204` response. Repeated retirement is idempotent at the resource state and
+  logs the already-retired revision; Policy selection reports a distinct conflict when its selected
+  Policy changes or becomes unavailable during the Claim transaction.
+- Outside development/test, protected writes fail closed until
+  `NORTHWIND_PROTECTED_DATA_KEY` supplies a valid Fernet key. Key custody, production rotation,
+  recovery, and retention schedules remain deployment/security decisions and are not claimed by
+  this prototype.
 
 ## Asset Record Mapping
 
@@ -385,11 +425,9 @@ the append-only audit collection through a bounded, filterable projection.
   provider migration copies IDs, revisions, timestamps, lifecycle state, and snapshots exactly,
   then verifies owner-scoped counts and snapshot hashes before cutover. It must not infer a Policy
   relationship from claimant text; that association requires an owned `pol_` record.
-- The proposed Profile migration is not executable while #918 remains open. Existing Profiles
-  remain valid under the current contract; a later approved migration must define the
-  transitional validity state before it can make `legal_name` required. It must never guess date
-  of birth, address, identity, payment, policy, Participant, ContentsItem metadata, or Evidence
-  associations.
+- Profile migration backfills `legal_name` from the existing required `display_name`, preserving
+  every existing account. It does not guess date of birth, address, preferred name, identity,
+  payment, policy, Participant, ContentsItem metadata, or Evidence associations.
 - Protected values migrate through the approved encryption/tokenisation adapter; raw values,
   provider credentials, and protected references never enter migration logs or verification
   reports. Failed verification leaves the old source authoritative and performs no cutover.
