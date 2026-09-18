@@ -3,6 +3,8 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from backend.adapters.identity import (
     FixtureIdentityRepository,
     SQLiteIdentityRepository,
@@ -15,6 +17,7 @@ from backend.adapters.staff_identity import (
 )
 from backend.domain.identity import ClaimantAuthSessionRecord
 from backend.domain.staff_identity import StaffAuthSessionRecord
+from backend.repositories.protocols import RevisionConflict
 
 
 def test_fixture_claimant_identity_covers_account_and_session_lifecycle() -> None:
@@ -235,6 +238,11 @@ def test_sqlite_identity_adapters_upgrade_legacy_account_and_session_tables(
     claimant = claimant_repository.get_account('cus_legacy')
     claimant_sessions = claimant_repository.list_sessions('cus_legacy')
     assert claimant is not None
+    assert claimant.legal_name == 'Legacy'
+    assert claimant.display_name == claimant.legal_name
+    assert claimant.preferred_name is None
+    assert claimant.date_of_birth is None
+    assert claimant.residential_address is None
     assert claimant.active is True
     assert claimant.revision == 1
     assert claimant.updated_at.tzinfo is not None
@@ -308,3 +316,38 @@ def test_sqlite_identity_adapters_upgrade_legacy_account_and_session_tables(
         ).revision
         == 2
     )
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'sqlite'])
+def test_claimant_identity_save_separates_profile_invariants_from_revision_conflicts(
+    repository_kind: str, tmp_path: Path
+) -> None:
+    repository = (
+        FixtureIdentityRepository()
+        if repository_kind == 'fixture'
+        else SQLiteIdentityRepository(str(tmp_path / 'profile-boundary.sqlite'))
+    )
+    if repository_kind == 'sqlite':
+        repository.create_account('profile@example.invalid', 'secret', 'Profile Owner')
+    account = repository.list_accounts()[0]
+    invalid = replace(
+        account,
+        legal_name='   ',
+        display_name='   ',
+        revision=account.revision + 1,
+        updated_at=datetime.now(UTC),
+    )
+    with pytest.raises(ValueError, match='invalid_legal_name'):
+        repository.save_account(invalid, account.revision)
+
+    valid = replace(
+        account,
+        phone='021 555 0199',
+        revision=account.revision + 1,
+        updated_at=datetime.now(UTC),
+    )
+    with pytest.raises(RevisionConflict) as conflict:
+        repository.save_account(valid, 0)
+
+    assert conflict.value.current_revision == account.revision
+    assert repository.get_account(account.customer_id) == account

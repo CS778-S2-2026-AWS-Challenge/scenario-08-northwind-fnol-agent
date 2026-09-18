@@ -77,6 +77,16 @@ JOURNEY_CRITICAL_PATHS = frozenset(
 BACKEND_CONSUMER_RULES = (
     (
         (
+            'backend/api/account_data.py',
+            'backend/domain/account_data.py',
+            'backend/repositories/account_data.py',
+            'backend/services/account_data.py',
+            'backend/services/protected_values.py',
+        ),
+        ('tests/test_account_data_api.py', 'tests/test_protected_values.py'),
+    ),
+    (
+        (
             'backend/api/realtime.py',
             'backend/domain/realtime.py',
             'backend/services/realtime.py',
@@ -157,10 +167,22 @@ BACKEND_CONSUMER_RULES = (
     (
         (
             'backend/adapters/identity.py',
+            'backend/domain/identity.py',
+            'backend/services/admin_accounts.py',
+        ),
+        ('tests/test_admin_accounts.py',),
+    ),
+    (
+        (
+            'backend/adapters/identity.py',
             'backend/api/identity.py',
             'backend/services/identity.py',
         ),
-        ('tests/test_identity_api.py', 'tests/test_identity_runtime.py'),
+        (
+            'tests/test_identity_adapters.py',
+            'tests/test_identity_api.py',
+            'tests/test_identity_runtime.py',
+        ),
     ),
     (
         (

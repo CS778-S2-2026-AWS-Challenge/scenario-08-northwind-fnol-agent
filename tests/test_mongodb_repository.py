@@ -525,6 +525,28 @@ def repository() -> MongoDBRepository:
     return repository
 
 
+def test_account_record_indexes_match_owner_keyset_queries() -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'account_index_contract')
+
+    indexes = repository._collection.index_information()
+    expected_keys = [
+        ('record_type', 1),
+        ('customer_id', 1),
+        ('created_at', -1),
+        ('_id', -1),
+    ]
+    record_types = ['identity_document', 'payment_destination', 'policy']
+    assert indexes['account_record_customer_active_created']['key'] == expected_keys
+    assert indexes['account_record_customer_active_created']['partialFilterExpression'] == {
+        'record_type': {'$in': record_types},
+        'active': True,
+    }
+    assert indexes['account_record_customer_all_created']['key'] == expected_keys
+    assert indexes['account_record_customer_all_created']['partialFilterExpression'] == {
+        'record_type': {'$in': record_types}
+    }
+
+
 @pytest.fixture(params=('fixture', 'mongo'))
 def mutation_contract_repository(request: pytest.FixtureRequest) -> PersistenceRepository:
     if request.param == 'fixture':

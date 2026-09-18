@@ -1,7 +1,13 @@
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
 from fastapi.testclient import TestClient
 
+from backend.adapters.identity import FixtureIdentityRepository, SQLiteIdentityRepository
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
+from backend.domain.identity import CustomerAccountRecord
 
 
 def _client() -> TestClient:
@@ -17,6 +23,184 @@ def _headers(key: str | None = None, revision: int | None = None) -> dict[str, s
     if revision is not None:
         headers['If-Match'] = f'"{revision}"'
     return headers
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'sqlite'])
+def test_admin_customer_profile_validation_is_normalized_and_atomic(
+    repository_kind: str, tmp_path: Path
+) -> None:
+    repository = (
+        FixtureIdentityRepository()
+        if repository_kind == 'fixture'
+        else SQLiteIdentityRepository(str(tmp_path / 'admin-profile.sqlite'))
+    )
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        identity_repository=repository,
+    )
+    with TestClient(app) as client:
+        created = client.post(
+            '/internal/v1/admin/accounts/customers',
+            headers=_headers(f'normalized-create-{repository_kind}'),
+            json={
+                'email': f'normalized-{repository_kind}@example.invalid',
+                'initial_password': 'normalized-password',
+                'display_name': '  Normalized Claimant  ',
+                'phone': '  021 555 0142  ',
+            },
+        )
+        assert created.status_code == 201, created.text
+        assert created.json()['display_name'] == 'Normalized Claimant'
+        assert created.json()['phone'] == '021 555 0142'
+
+        rejected_create = client.post(
+            '/internal/v1/admin/accounts/customers',
+            headers=_headers(f'blank-create-{repository_kind}'),
+            json={
+                'email': f'blank-{repository_kind}@example.invalid',
+                'initial_password': 'normalized-password',
+                'display_name': '   ',
+            },
+        )
+        assert rejected_create.status_code == 422
+        assert rejected_create.json()['error']['code'] == 'VALIDATION_ERROR'
+        assert not any(
+            account.email == f'blank-{repository_kind}@example.invalid'
+            for account in repository.list_accounts()
+        )
+
+        customer_id = created.json()['customer_id']
+        revision = created.json()['revision']
+        rejected_patch = client.patch(
+            f'/internal/v1/admin/accounts/customers/{customer_id}',
+            headers=_headers(f'blank-patch-{repository_kind}', revision),
+            json={'display_name': '   '},
+        )
+        assert rejected_patch.status_code == 422
+        assert rejected_patch.json()['error']['code'] == 'VALIDATION_ERROR'
+        unchanged = repository.get_account(customer_id)
+        assert unchanged is not None
+        assert unchanged.display_name == 'Normalized Claimant'
+        assert unchanged.revision == revision
+
+        updated = client.patch(
+            f'/internal/v1/admin/accounts/customers/{customer_id}',
+            headers=_headers(f'normalized-patch-{repository_kind}', revision),
+            json={'display_name': '  Renamed Claimant  ', 'phone': '  021 555 0177  '},
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()['display_name'] == 'Renamed Claimant'
+        assert updated.json()['phone'] == '021 555 0177'
+        assert updated.json()['revision'] == revision + 1
+
+
+def test_admin_maps_persisted_profile_invariant_failures_to_validation_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = FixtureIdentityRepository()
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        identity_repository=repository,
+    )
+
+    def reject_create(
+        email: str, password: str, display_name: str, phone: str = ''
+    ) -> CustomerAccountRecord | None:
+        raise ValueError('invalid_name_projection')
+
+    monkeypatch.setattr(repository, 'create_account', reject_create)
+    with TestClient(app) as client:
+        rejected_create = client.post(
+            '/internal/v1/admin/accounts/customers',
+            headers=_headers('defensive-create-validation'),
+            json={
+                'email': 'defensive-create@example.invalid',
+                'initial_password': 'normalized-password',
+                'display_name': 'Valid Request Name',
+            },
+        )
+        assert rejected_create.status_code == 422
+        assert rejected_create.json()['error']['code'] == 'VALIDATION_ERROR'
+
+    repository = FixtureIdentityRepository()
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        identity_repository=repository,
+    )
+
+    def reject_save(account: CustomerAccountRecord, expected_revision: int) -> None:
+        raise ValueError('invalid_legal_name')
+
+    monkeypatch.setattr(repository, 'save_account', reject_save)
+    before = repository.get_account('cus_demo')
+    assert before is not None
+    with TestClient(app) as client:
+        rejected_patch = client.patch(
+            '/internal/v1/admin/accounts/customers/cus_demo',
+            headers=_headers('defensive-patch-validation', before.revision),
+            json={'display_name': 'Valid Request Name'},
+        )
+        assert rejected_patch.status_code == 422
+        assert rejected_patch.json()['error']['code'] == 'VALIDATION_ERROR'
+
+    after = repository.get_account('cus_demo')
+    assert after is not None
+    assert after.display_name == before.display_name
+    assert after.revision == before.revision
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'sqlite'])
+def test_admin_display_name_alias_updates_visible_canonical_name(
+    repository_kind: str, tmp_path: Path
+) -> None:
+    repository = (
+        FixtureIdentityRepository()
+        if repository_kind == 'fixture'
+        else SQLiteIdentityRepository(str(tmp_path / 'admin-canonical.sqlite'))
+    )
+    account = (
+        repository.get_account('cus_demo')
+        if repository_kind == 'fixture'
+        else repository.create_account(
+            'canonical@example.invalid', 'canonical-password', 'Original Name'
+        )
+    )
+    assert account is not None
+    customer_id = account.customer_id
+    repository.save_account(
+        replace(
+            account,
+            legal_name='Legal Before',
+            preferred_name='Preferred Before',
+            display_name='Preferred Before',
+            revision=2,
+        ),
+        account.revision,
+    )
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        identity_repository=repository,
+    )
+    with TestClient(app) as client:
+        alias = client.patch(
+            f'/internal/v1/admin/accounts/customers/{customer_id}',
+            headers=_headers(f'canonical-alias-{repository_kind}', 2),
+            json={'display_name': '  Preferred After  '},
+        )
+        explicit = client.patch(
+            f'/internal/v1/admin/accounts/customers/{customer_id}',
+            headers=_headers(f'canonical-legal-{repository_kind}', 3),
+            json={'legal_name': '  Legal After  '},
+        )
+
+    assert alias.status_code == 200, alias.text
+    assert alias.json()['display_name'] == 'Preferred After'
+    assert alias.json()['preferred_name'] == 'Preferred After'
+    assert alias.json()['legal_name'] == 'Legal Before'
+    assert explicit.status_code == 200, explicit.text
+    assert explicit.json()['display_name'] == 'Preferred After'
+    assert explicit.json()['preferred_name'] == 'Preferred After'
+    assert explicit.json()['legal_name'] == 'Legal After'
 
 
 def test_admin_can_read_and_update_customer_account_through_identity_repository() -> None:

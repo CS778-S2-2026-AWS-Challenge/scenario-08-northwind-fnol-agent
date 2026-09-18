@@ -18,6 +18,11 @@ from pymongo import MongoClient, ReturnDocument
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
+from backend.domain.account_data import (
+    IdentityDocumentRecord,
+    PaymentDestinationRecord,
+    PolicyNumberRecord,
+)
 from backend.domain.agent_context_runtime import VerifiedConversationSummary
 from backend.domain.assets import AssetRecord, AssetType, ClaimAssetSnapshot
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
@@ -110,6 +115,14 @@ from backend.domain.staff_agent_tools import (
     build_staff_claim_search_projection,
 )
 from backend.domain.staff_identity import StaffPresenceRecord
+from backend.repositories.account_data import (
+    AccountCursorKey,
+    AccountRecord,
+    PolicySelectionConflict,
+    account_record_audit_matches,
+    account_record_identity,
+    policy_selection_audit_matches,
+)
 from backend.repositories.assets import (
     AssetSelectionRevisionConflictError,
     AssetSelectionSnapshotConflictError,
@@ -284,6 +297,20 @@ class MongoDBRepository:
             ]
         )
         self._collection.create_index([('record_type', 1), ('customer_id', 1), ('updated_at', -1)])
+        account_record_types = ['identity_document', 'payment_destination', 'policy']
+        self._collection.create_index(
+            [('record_type', 1), ('customer_id', 1), ('created_at', -1), ('_id', -1)],
+            name='account_record_customer_active_created',
+            partialFilterExpression={
+                'record_type': {'$in': account_record_types},
+                'active': True,
+            },
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('customer_id', 1), ('created_at', -1), ('_id', -1)],
+            name='account_record_customer_all_created',
+            partialFilterExpression={'record_type': {'$in': account_record_types}},
+        )
         self._collection.create_index(
             [
                 ('record_type', 1),
@@ -585,6 +612,242 @@ class MongoDBRepository:
                 event = self._model_from_document(change.get('fullDocument', {}), RealtimeEvent)
                 if event is not None:
                     yield event
+
+    def create_account_record(
+        self,
+        record: AccountRecord,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        kind, identifier, _ = account_record_identity(record)
+        if (
+            record.customer_id != idempotency.actor_id
+            or identifier != idempotency.claim_id
+            or not account_record_audit_matches(
+                record, audit_event, idempotency_key=idempotency.key
+            )
+        ):
+            raise KeyError(identifier)
+
+        def persist(mongo_session: Any) -> None:
+            self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
+            self._ensure_new_audit_event(audit_event, mongo_session=mongo_session)
+            self._put(
+                kind,
+                identifier,
+                record,
+                customer_id=record.customer_id,
+                session=mongo_session,
+            )
+            self._save_idempotency(idempotency, mongo_session)
+            self._insert_audit_event(audit_event, mongo_session=mongo_session)
+
+        self._atomic(persist)
+
+    def get_policy(self, policy_id: str, customer_id: str) -> PolicyNumberRecord | None:
+        return self._get('policy', policy_id, PolicyNumberRecord, customer_id=customer_id)
+
+    def get_payment_destination(
+        self, payment_destination_id: str, customer_id: str
+    ) -> PaymentDestinationRecord | None:
+        return self._get(
+            'payment_destination',
+            payment_destination_id,
+            PaymentDestinationRecord,
+            customer_id=customer_id,
+        )
+
+    def get_identity_document(
+        self, identity_id: str, customer_id: str
+    ) -> IdentityDocumentRecord | None:
+        return self._get(
+            'identity_document', identity_id, IdentityDocumentRecord, customer_id=customer_id
+        )
+
+    def _list_account_records(
+        self,
+        kind: str,
+        model: type[ModelT],
+        customer_id: str,
+        *,
+        include_inactive: bool,
+        after: AccountCursorKey | None,
+        limit: int,
+    ) -> tuple[list[ModelT], bool]:
+        filters: dict[str, Any] = {'record_type': kind, 'customer_id': customer_id}
+        if not include_inactive:
+            filters['active'] = True
+        if after is not None:
+            created_at, identifier = after
+            stored_created_at = self._audit_timestamp(created_at)
+            filters['$or'] = [
+                {'created_at': {'$lt': stored_created_at}},
+                {
+                    'created_at': stored_created_at,
+                    '_id': {'$lt': self._record_id(kind, identifier)},
+                },
+            ]
+        documents = (
+            self._collection.find(filters).sort([('created_at', -1), ('_id', -1)]).limit(limit + 1)
+        )
+        records = [
+            record
+            for document in documents
+            if (record := self._model_from_document(document, model)) is not None
+        ]
+        return records[:limit], len(records) > limit
+
+    def list_policies(
+        self,
+        customer_id: str,
+        *,
+        include_inactive: bool,
+        after: AccountCursorKey | None,
+        limit: int,
+    ) -> tuple[list[PolicyNumberRecord], bool]:
+        return self._list_account_records(
+            'policy',
+            PolicyNumberRecord,
+            customer_id,
+            include_inactive=include_inactive,
+            after=after,
+            limit=limit,
+        )
+
+    def list_payment_destinations(
+        self,
+        customer_id: str,
+        *,
+        include_inactive: bool,
+        after: AccountCursorKey | None,
+        limit: int,
+    ) -> tuple[list[PaymentDestinationRecord], bool]:
+        return self._list_account_records(
+            'payment_destination',
+            PaymentDestinationRecord,
+            customer_id,
+            include_inactive=include_inactive,
+            after=after,
+            limit=limit,
+        )
+
+    def list_identity_documents(
+        self,
+        customer_id: str,
+        *,
+        include_inactive: bool,
+        after: AccountCursorKey | None,
+        limit: int,
+    ) -> tuple[list[IdentityDocumentRecord], bool]:
+        return self._list_account_records(
+            'identity_document',
+            IdentityDocumentRecord,
+            customer_id,
+            include_inactive=include_inactive,
+            after=after,
+            limit=limit,
+        )
+
+    def update_account_record(
+        self,
+        record: AccountRecord,
+        expected_revision: int,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        kind, identifier, _ = account_record_identity(record)
+        if record.revision != expected_revision + 1 or not account_record_audit_matches(
+            record, audit_event, idempotency_key=None
+        ):
+            raise KeyError(identifier)
+
+        def persist(mongo_session: Any) -> None:
+            self._ensure_new_audit_event(audit_event, mongo_session=mongo_session)
+            document = record.model_dump(mode='json')
+            document.update(
+                {
+                    '_id': self._record_id(kind, identifier),
+                    'record_type': kind,
+                    'customer_id': record.customer_id,
+                    'claim_id': None,
+                }
+            )
+            result = self._collection.replace_one(
+                {
+                    '_id': document['_id'],
+                    'record_type': kind,
+                    'customer_id': record.customer_id,
+                    'revision': expected_revision,
+                },
+                document,
+                session=mongo_session,
+            )
+            if result.matched_count != 1:
+                current = self._collection.find_one(
+                    {
+                        '_id': document['_id'],
+                        'record_type': kind,
+                        'customer_id': record.customer_id,
+                    },
+                    projection={'revision': 1},
+                    session=mongo_session,
+                )
+                if current is None:
+                    raise KeyError(identifier)
+                raise RevisionConflict(int(current['revision']))
+            self._insert_audit_event(audit_event, mongo_session=mongo_session)
+
+        self._atomic(persist)
+
+    def save_policy_selection(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        policy_id: str,
+        policy_revision: int,
+        idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        if (
+            idempotency.actor_id != claim.customer_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.session_id != (claim.active_session_id or '')
+            or not policy_selection_audit_matches(
+                claim, policy_id, policy_revision, idempotency, audit_event
+            )
+        ):
+            raise KeyError(claim.claim_id)
+        self._validate_branch_evaluation(claim, branch_evaluation)
+
+        def persist(mongo_session: Any) -> None:
+            policy = self._get(
+                'policy',
+                policy_id,
+                PolicyNumberRecord,
+                customer_id=claim.customer_id,
+                session=mongo_session,
+            )
+            if policy is None or not policy.active:
+                raise PolicySelectionConflict(policy_id, reason='unavailable')
+            if policy.revision != policy_revision:
+                raise PolicySelectionConflict(
+                    policy_id, reason='changed', current_revision=policy.revision
+                )
+            prepared_audit = self._prepare_audit_events(
+                claim, (audit_event,), mongo_session=mongo_session
+            )
+            self._save_child_mutation(
+                claim,
+                expected_revision,
+                idempotency,
+                mongo_session,
+                mutation=RealtimeMutation.CLAIM_CHANGED,
+                records=[('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation)],
+            )
+            for event in prepared_audit:
+                self._insert_audit_event(event, mongo_session=mongo_session)
+
+        self._atomic(persist)
 
     def create_asset(
         self,

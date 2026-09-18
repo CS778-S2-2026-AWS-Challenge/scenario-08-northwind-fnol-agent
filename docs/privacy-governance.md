@@ -24,16 +24,16 @@ All values are synthetic in this prototype. Encryption means the selected store'
 at-rest and in-transit boundary; application logs, prompts, RAG documents, traces, and source
 control are never substitute protected stores.
 
-Issue #918 defines classification and the minimum privacy boundary only. Detailed API, lifecycle,
-migration, protected-store, and failure contracts belong to the bounded child implementation.
-Only the Asset and Claim asset snapshot rows describe implemented behavior in #921.
+Issue #918 defines classification and the minimum privacy boundary. The Profile, Identity Record,
+bank-account, and policy-number rows now describe the bounded #923 implementation; Asset and Claim
+asset snapshot rows describe #921.
 
 | Class | Collection/minimisation purpose | Access and masking | Agent, RAG, and log rule | Audit, retention, deletion expectation |
 | --- | --- | --- | --- | --- |
-| Profile | Identify/contact the claimant and prefill permitted intake facts; collect only approved fields | Owner full; staff minimum task view | Purpose-limited Agent context only; no profile indexing or raw logs | Detailed lifecycle belongs to #923; no production schedule is inferred here |
-| Identity Record | Identity proof only | Owner and identity-authorised staff receive masked values through a protected boundary | Excluded from Agent, RAG, prompts, analytics, and logs | Detailed protected-store and lifecycle contract belongs to #923 |
-| Bank account | Future approved settlement destination, never payment execution | Owner and payment-authorised staff receive masked values through a protected boundary | Excluded from Agent, RAG, prompts, analytics, and logs | Detailed protected-store and lifecycle contract belongs to #923 |
-| Policy number | Reusable minimum policy identifier; no coverage or status inference | Owner and authorised claims staff bounded projection | Purpose-limited Agent context only; never general RAG or raw logs | Reusable account projection belongs to #923; no Policy-to-Asset contract is created here |
+| Profile | Identify/contact the claimant and prefill permitted intake facts; collect only approved fields | Owner full; no general staff Profile route | Purpose-limited Agent context only; no profile indexing or raw logs | Revisioned identity store; legacy name migrates without guessing optional values; no production schedule is inferred |
+| Identity Record | Store one supplied driver-licence or passport number; no verification | Owner ordinary reads are masked; no staff route exists without a later identity-authorised task | Plaintext excluded from Agent, RAG, prompts, analytics, logs, Claim, audit, errors, and idempotency responses | Encrypted protected record, revision, value-free audit, soft retirement; production retention remains undecided |
+| Bank account | Store a future settlement destination, never execute payment | Owner ordinary reads are masked; no staff route exists without a later payment-authorised task | Plaintext excluded from Agent, RAG, prompts, analytics, logs, Claim, audit, errors, and idempotency responses | Encrypted protected record, revision, value-free audit, soft retirement; production retention remains undecided |
+| Policy number | Reusable minimum policy identifier; no coverage or status inference | Owner account projection; selected value may enter the owned Claim and its authorised staff projection | Purpose-limited Claim/Agent context only after selection; never general RAG or raw logs | Revisioned account record and value-free audit; no Policy-to-Asset contract |
 | Asset Record | Reuse claimant-entered vehicle/property/contents details | Owner and authorised staff; no cross-account lookup; reusable contents details exclude serial number and value | Only selected approved details enter Claim context; no asset corpus indexing or raw logs | Audit material changes; soft-deactivate first; delete when no hold/reference requires it |
 | Claim asset snapshot | Prove the asset details used for one Claim revision | Owning claimant and authorised Workbench staff | Bounded approved details may follow Claim purpose; excluded from general RAG/logs | Immutable; Claim retention/hold applies; asset deletion never rewrites it |
 | Dynamic Form | Establish source-backed FNOL facts | Claimant-safe and staff task projections | Active registered facts only; redact restricted sources from logs | Assertion/revision history retained with Claim; correct by superseding, not overwriting |
