@@ -14,6 +14,7 @@ from backend.domain.models import (
     MotorOtherDriverProjection,
     MotorOtherDriverRecord,
 )
+from backend.repositories.pagination import InvalidRepositoryCursorError
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -22,7 +23,6 @@ from backend.repositories.protocols import (
 )
 from backend.services.support import (
     now_utc,
-    paginate,
     parse_if_match,
     request_fingerprint,
     require_idempotency_key,
@@ -304,10 +304,22 @@ def list_contents_item_evidence_associations(
         raise _not_found('Claim')
     if not any(item.item_id == item_id for item in claim.contents_items):
         raise _not_found('Contents item')
-    records = [
-        project_contents_item_evidence_association(item)
-        for item in repository.list_contents_item_evidence_associations(claim_id, principal.subject)
-        if item.item_id == item_id
-    ]
-    items, page = paginate(records, limit, cursor)
-    return ContentsItemEvidenceAssociationListResponse(items=items, page=page)
+    try:
+        records, next_cursor = repository.list_contents_item_evidence_association_page(
+            claim_id,
+            principal.subject,
+            item_id,
+            limit=limit,
+            cursor=cursor,
+        )
+    except InvalidRepositoryCursorError as error:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The pagination cursor is invalid.',
+            details=[ErrorDetail(field='cursor', reason='Use a cursor returned by this API.')],
+        ) from error
+    return ContentsItemEvidenceAssociationListResponse(
+        items=[project_contents_item_evidence_association(item) for item in records],
+        page={'next_cursor': next_cursor},
+    )

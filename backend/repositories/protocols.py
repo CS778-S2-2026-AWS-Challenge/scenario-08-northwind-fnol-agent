@@ -872,6 +872,32 @@ class PersistenceRepository(ClaimRepository, Protocol):
     ) -> list[ContentsItemEvidenceAssociation]:
         raise NotImplementedError
 
+    def list_contents_item_evidence_association_page(
+        self,
+        claim_id: str,
+        customer_id: str,
+        item_id: str,
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> tuple[list[ContentsItemEvidenceAssociation], str | None]:
+        """Return one stable page without loading the Claim-level collection.
+
+        Args:
+            claim_id: The owning Claim identifier.
+            customer_id: The authenticated Claim owner.
+            item_id: The ContentsItem whose associations are requested.
+            limit: The maximum records returned in this page.
+            cursor: The opaque continuation cursor from the prior page, if any.
+
+        Returns:
+            The item-scoped records and the next opaque cursor, or ``None`` at the end.
+
+        Raises:
+            InvalidRepositoryCursorError: The cursor is malformed or has another scope.
+        """
+        raise NotImplementedError
+
     def save_contents_item_evidence_association_mutation(
         self,
         claim: WorkingClaim,

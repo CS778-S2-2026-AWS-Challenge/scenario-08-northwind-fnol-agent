@@ -313,6 +313,18 @@ class MongoDBRepository:
             partialFilterExpression={'record_type': 'contents_item_evidence_association'},
         )
         self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('claim_id', 1),
+                ('customer_id', 1),
+                ('item_id', 1),
+                ('created_at', 1),
+                ('association_id', 1),
+            ],
+            name='contents_item_evidence_page',
+            partialFilterExpression={'record_type': 'contents_item_evidence_association'},
+        )
+        self._collection.create_index(
             [('record_type', 1), ('actor_id', 1), ('route', 1), ('key', 1)],
             unique=True,
             partialFilterExpression={'record_type': 'idempotency'},
@@ -2697,6 +2709,72 @@ class MongoDBRepository:
             {'claim_id': claim_id, 'customer_id': customer_id},
             'created_at',
         )
+
+    def list_contents_item_evidence_association_page(
+        self,
+        claim_id: str,
+        customer_id: str,
+        item_id: str,
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> tuple[list[ContentsItemEvidenceAssociation], str | None]:
+        from backend.repositories.pagination import (
+            ContentsEvidenceAssociationCursor,
+            decode_contents_evidence_association_cursor,
+            encode_contents_evidence_association_cursor,
+            repository_datetime_value,
+        )
+
+        if not self._claim_owned(claim_id, customer_id):
+            return [], None
+        after = (
+            decode_contents_evidence_association_cursor(
+                cursor,
+                claim_id=claim_id,
+                customer_id=customer_id,
+                item_id=item_id,
+            )
+            if cursor is not None
+            else None
+        )
+        query: dict[str, Any] = {
+            'record_type': 'contents_item_evidence_association',
+            'claim_id': claim_id,
+            'customer_id': customer_id,
+            'item_id': item_id,
+        }
+        if after is not None:
+            timestamp = repository_datetime_value(after.created_at)
+            query['$or'] = [
+                {'created_at': {'$gt': timestamp}},
+                {'created_at': timestamp, 'association_id': {'$gt': after.association_id}},
+            ]
+        documents = (
+            self._collection.find(query)
+            .sort([('created_at', 1), ('association_id', 1)])
+            .limit(limit + 1)
+        )
+        records = [
+            record
+            for document in documents
+            if (record := self._model_from_document(document, ContentsItemEvidenceAssociation))
+            is not None
+        ]
+        selected = records[:limit]
+        next_cursor = None
+        if len(records) > limit:
+            final = selected[-1]
+            next_cursor = encode_contents_evidence_association_cursor(
+                ContentsEvidenceAssociationCursor(
+                    claim_id=claim_id,
+                    customer_id=customer_id,
+                    item_id=item_id,
+                    created_at=final.created_at,
+                    association_id=final.association_id,
+                )
+            )
+        return selected, next_cursor
 
     def save_contents_item_evidence_association_mutation(
         self,

@@ -370,7 +370,10 @@ the append-only audit collection through a bounded, filterable projection.
 - `contents_item_evidence_association:{association_id}` stores an immutable same-Claim link;
   `association_id` uses `iea_`. A unique `(record_type, claim_id, item_id, evidence_id)` index
   rejects duplicate links. The authoritative write verifies Claim ownership, item membership,
-  Evidence ownership, Claim revision, and idempotency inside the same transaction/lock.
+  Evidence ownership, Claim revision, and idempotency inside the same transaction/lock. The
+  claimant item-association List access pattern uses
+  `(record_type, claim_id, customer_id, item_id, created_at, association_id)`, keyset pagination,
+  and a bounded `limit + 1` read; its opaque cursor is scoped to the same Claim, owner, and item.
 - Fixture and MongoDB adapters implement the same port. MongoDB selection uses one transaction;
   Fixture uses one Claim mutation lock. No adapter may reconstruct a historical snapshot from
   the current asset.

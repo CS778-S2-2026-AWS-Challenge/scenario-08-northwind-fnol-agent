@@ -618,6 +618,90 @@ def test_contents_evidence_link_rejects_cross_claim_and_stale_revision(
     assert repository.list_contents_item_evidence_associations(target['claim_id'], 'cus_demo') == []
 
 
+def test_contents_evidence_association_list_uses_stable_item_scoped_pages(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = _create_claim(
+        client,
+        auth_headers,
+        incident_type='contents',
+        key='contents-paged-associations-claim',
+    )
+    claim = repository.get_claim_internal(created['claim_id'])
+    assert claim is not None
+    timestamp = datetime(2026, 9, 18, 1, 30, tzinfo=UTC)
+    target_item = _contents_item(timestamp)
+    other_item = target_item.model_copy(update={'item_id': 'itm_00000000000000000002'})
+    repository.save_claim(
+        claim.model_copy(
+            update={
+                'revision': claim.revision + 1,
+                'contents_items': [target_item, other_item],
+                'updated_at': timestamp,
+            }
+        ),
+        expected_revision=claim.revision,
+    )
+    records = [
+        ContentsItemEvidenceAssociation(
+            association_id=f'iea_0000000000000000000{index}',
+            claim_id=claim.claim_id,
+            customer_id=claim.customer_id,
+            item_id=target_item.item_id if index < 4 else other_item.item_id,
+            evidence_id=f'evd_0000000000000000000{index}',
+            purpose=ContentsEvidencePurpose.PROOF_OF_PURCHASE,
+            created_at=timestamp,
+        )
+        for index in range(1, 5)
+    ]
+    repository._contents_item_evidence_associations.update(
+        {record.association_id: record for record in reversed(records)}
+    )
+    route = (
+        f'/api/v1/claims/{claim.claim_id}/contents-items/'
+        f'{target_item.item_id}/evidence-associations'
+    )
+
+    first = client.get(route, headers=auth_headers, params={'limit': 2})
+    assert first.status_code == 200, first.text
+    first_payload = first.json()
+    cursor = first_payload['page']['next_cursor']
+    assert cursor is not None
+    assert [item['association_id'] for item in first_payload['items']] == [
+        records[0].association_id,
+        records[1].association_id,
+    ]
+
+    second = client.get(route, headers=auth_headers, params={'limit': 2, 'cursor': cursor})
+    assert second.status_code == 200, second.text
+    second_payload = second.json()
+    assert [item['association_id'] for item in second_payload['items']] == [
+        records[2].association_id
+    ]
+    assert second_payload['page']['next_cursor'] is None
+    assert {
+        item['association_id'] for item in first_payload['items'] + second_payload['items']
+    } == {record.association_id for record in records[:3]}
+    assert records[3].association_id not in first.text + second.text
+
+    invalid = client.get(route, headers=auth_headers, params={'cursor': 'not-a-cursor'})
+    assert invalid.status_code == 422
+    assert invalid.json()['error']['code'] == 'VALIDATION_ERROR'
+
+    wrong_scope = client.get(
+        (
+            f'/api/v1/claims/{claim.claim_id}/contents-items/'
+            f'{other_item.item_id}/evidence-associations'
+        ),
+        headers=auth_headers,
+        params={'cursor': cursor},
+    )
+    assert wrong_scope.status_code == 422
+    assert wrong_scope.json()['error']['code'] == 'VALIDATION_ERROR'
+
+
 def _repository_claim() -> tuple[WorkingClaim, SessionRecord]:
     timestamp = datetime(2026, 9, 18, tzinfo=UTC)
     claim = WorkingClaim(
@@ -702,6 +786,65 @@ def test_claim_data_child_records_have_fixture_mongodb_parity(adapter: str) -> N
                 session_id=session.session_id,
             ),
         )
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
+def test_contents_evidence_association_pages_have_fixture_mongodb_parity(adapter: str) -> None:
+    repository: FixtureRepository | MongoDBRepository
+    if adapter == 'fixture':
+        repository = FixtureRepository()
+    else:
+        mongo = MongoDBRepository(mongomock.MongoClient(), f'claim_data_page_{adapter}')
+        mongo._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+        repository = mongo
+    claim, session = _repository_claim()
+    other_item = claim.contents_items[0].model_copy(update={'item_id': 'itm_00000000000000000002'})
+    claim = claim.model_copy(update={'contents_items': [*claim.contents_items, other_item]})
+    repository.create_claim(claim, session)
+    associations = [
+        ContentsItemEvidenceAssociation(
+            association_id=f'iea_0000000000000000000{index}',
+            claim_id=claim.claim_id,
+            customer_id=claim.customer_id,
+            item_id=claim.contents_items[0].item_id if index < 4 else other_item.item_id,
+            evidence_id=f'evd_0000000000000000000{index}',
+            purpose=ContentsEvidencePurpose.PROOF_OF_PURCHASE,
+            created_at=claim.created_at,
+        )
+        for index in range(1, 5)
+    ]
+    if isinstance(repository, FixtureRepository):
+        repository._contents_item_evidence_associations.update(
+            {record.association_id: record for record in reversed(associations)}
+        )
+    else:
+        for record in reversed(associations):
+            repository._put(
+                'contents_item_evidence_association',
+                record.association_id,
+                record,
+                customer_id=claim.customer_id,
+                claim_id=claim.claim_id,
+            )
+
+    first, cursor = repository.list_contents_item_evidence_association_page(
+        claim.claim_id,
+        claim.customer_id,
+        claim.contents_items[0].item_id,
+        limit=2,
+        cursor=None,
+    )
+    assert first == associations[:2]
+    assert cursor is not None
+    second, final_cursor = repository.list_contents_item_evidence_association_page(
+        claim.claim_id,
+        claim.customer_id,
+        claim.contents_items[0].item_id,
+        limit=2,
+        cursor=cursor,
+    )
+    assert second == associations[2:3]
+    assert final_cursor is None
 
 
 @pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])

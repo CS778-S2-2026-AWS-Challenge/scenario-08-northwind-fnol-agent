@@ -2505,6 +2505,64 @@ class FixtureRepository(PersistenceRepository):
             key=lambda record: (record.created_at, record.association_id),
         )
 
+    def list_contents_item_evidence_association_page(
+        self,
+        claim_id: str,
+        customer_id: str,
+        item_id: str,
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> tuple[list[ContentsItemEvidenceAssociation], str | None]:
+        from backend.repositories.pagination import (
+            ContentsEvidenceAssociationCursor,
+            decode_contents_evidence_association_cursor,
+            encode_contents_evidence_association_cursor,
+        )
+
+        if self.get_claim(claim_id, customer_id) is None:
+            return [], None
+        after = (
+            decode_contents_evidence_association_cursor(
+                cursor,
+                claim_id=claim_id,
+                customer_id=customer_id,
+                item_id=item_id,
+            )
+            if cursor is not None
+            else None
+        )
+        records = sorted(
+            (
+                deepcopy(record)
+                for record in self._contents_item_evidence_associations.values()
+                if record.claim_id == claim_id
+                and record.customer_id == customer_id
+                and record.item_id == item_id
+                and (
+                    after is None
+                    or (record.created_at, record.association_id)
+                    > (after.created_at, after.association_id)
+                )
+            ),
+            key=lambda record: (record.created_at, record.association_id),
+        )
+        page = records[: limit + 1]
+        selected = page[:limit]
+        next_cursor = None
+        if len(page) > limit:
+            final = selected[-1]
+            next_cursor = encode_contents_evidence_association_cursor(
+                ContentsEvidenceAssociationCursor(
+                    claim_id=claim_id,
+                    customer_id=customer_id,
+                    item_id=item_id,
+                    created_at=final.created_at,
+                    association_id=final.association_id,
+                )
+            )
+        return selected, next_cursor
+
     def save_contents_item_evidence_association_mutation(
         self,
         claim: WorkingClaim,
