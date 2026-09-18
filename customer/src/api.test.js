@@ -8,6 +8,7 @@ import {
   requestEvidenceUpload,
   setClaimantAccessToken,
   streamClaimUpdates,
+  streamRealtimeEvents,
 } from './api.js'
 
 
@@ -21,6 +22,22 @@ function eventStreamResponse(frames, status = 200) {
       },
     }),
     { status, headers: { 'Content-Type': 'text/event-stream' } },
+  )
+}
+
+
+function trackedOpenEventStreamResponse(frame, order, label) {
+  const encoder = new TextEncoder()
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(frame))
+      },
+      cancel() {
+        order.push(`${label}:cancel`)
+      },
+    }),
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
   )
 }
 
@@ -106,10 +123,13 @@ describe('claimant live-update stream', () => {
     expect(onCursor).toHaveBeenCalledWith('eyJldmVudF9pZCI6InJ0ZV8xIn0')
   })
 
-  it('does not advance an opaque cursor when the event handler fails', async () => {
-    fetch.mockResolvedValue(eventStreamResponse([
+  it('does not advance an opaque cursor and cancels the legacy stream when the handler fails', async () => {
+    const order = []
+    fetch.mockResolvedValue(trackedOpenEventStreamResponse(
       'id: eyJldmVudF9pZCI6InJ0ZV8yIn0\nevent: agent.turn.progress\ndata: {"turn_id":"message-2","session_id":"ses_1","stage":"model.waiting","state":"running","ordinal":2}\n\n',
-    ]))
+      order,
+      'legacy',
+    ))
     const onCursor = vi.fn()
     const handlerFailure = new Error('Authoritative readback failed.')
 
@@ -118,11 +138,15 @@ describe('claimant live-update stream', () => {
       sessionId: 'ses_1',
       afterRevision: 3,
       signal: new AbortController().signal,
-      onEvent: vi.fn().mockRejectedValue(handlerFailure),
+      onEvent: vi.fn(async () => {
+        order.push('handler')
+        throw handlerFailure
+      }),
       onCursor,
     })).rejects.toBe(handlerFailure)
 
     expect(onCursor).not.toHaveBeenCalled()
+    expect(order).toEqual(['handler', 'legacy:cancel'])
   })
 })
 
@@ -161,6 +185,190 @@ describe('claim creation contract', () => {
     )
   })
 })
+
+describe('claimant multiplexed realtime stream', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken(null)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('parses resource and resync frames from one claimant-scoped stream', async () => {
+    fetch.mockResolvedValue(eventStreamResponse([
+      ': connected\n\n',
+      'id: cursor-2\nevent: resources.changed\ndata: {"event_id":"evt_2","claim_id":"clm_1","claim_revision":2,"resources":["messages"]}\n\n',
+      'event: resync_required\ndata: {"reason":"replay_window_exceeded"}\n\n',
+    ]))
+    const received = []
+
+    await streamRealtimeEvents({
+      cursor: 'cursor-1',
+      signal: new AbortController().signal,
+      onEvent: async (event) => received.push(event),
+    })
+
+    expect(received).toEqual([
+      {
+        type: 'resources.changed',
+        cursor: 'cursor-2',
+        data: expect.objectContaining({
+          event_id: 'evt_2',
+          claim_id: 'clm_1',
+          resources: ['messages'],
+        }),
+      },
+      {
+        type: 'resync_required',
+        cursor: null,
+        data: { reason: 'replay_window_exceeded' },
+      },
+    ])
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/realtime/events?cursor=cursor-1',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Accept: 'text/event-stream',
+          'X-Northwind-Anonymous-Session': expect.any(String),
+        }),
+      }),
+    )
+  })
+
+  it('keeps claimant bearer credentials out of the realtime URL', async () => {
+    setClaimantAccessToken('claimant-realtime-token')
+    fetch.mockResolvedValue(eventStreamResponse([': connected\n\n']))
+
+    await streamRealtimeEvents({
+      cursor: null,
+      signal: new AbortController().signal,
+      onEvent: vi.fn(),
+    })
+
+    const [url, request] = fetch.mock.calls[0]
+    expect(url).toBe('/api/v1/realtime/events')
+    expect(url).not.toContain('claimant-realtime-token')
+    expect(request.headers.Authorization).toBe('Bearer claimant-realtime-token')
+    expect(request.headers['X-Northwind-Anonymous-Session']).toBeUndefined()
+  })
+
+  it('surfaces an unavailable replay cursor for authoritative resync', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({
+      error: {
+        code: 'INVALID_EVENT_CURSOR',
+        message: 'The realtime cursor is no longer available.',
+        retryable: true,
+      },
+    }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    await expect(streamRealtimeEvents({
+      cursor: 'expired-cursor',
+      signal: new AbortController().signal,
+      onEvent: vi.fn(),
+    })).rejects.toMatchObject({
+      status: 409,
+      code: 'INVALID_EVENT_CURSOR',
+      retryable: true,
+    })
+  })
+  it('delivers Agent progress through the multiplexed stream and acknowledges only after handling', async () => {
+    fetch.mockResolvedValue(eventStreamResponse([
+      'id: cursor-progress\nevent: agent.turn.progress\ndata: {"event_id":"evt_progress","claim_id":"clm_1","session_id":"ses_1","turn_id":"message-1","stage":"model.waiting","state":"running","ordinal":2}\n\n',
+    ]))
+    const order = []
+    const onCursor = vi.fn((cursor) => order.push(`cursor:${cursor}`))
+
+    await streamRealtimeEvents({
+      cursor: null,
+      signal: new AbortController().signal,
+      onEvent: vi.fn(async (event) => {
+        expect(event).toMatchObject({
+          type: 'agent.turn.progress',
+          cursor: 'cursor-progress',
+          data: {
+            turn_id: 'message-1',
+            session_id: 'ses_1',
+            stage: 'model.waiting',
+          },
+        })
+        order.push('handler')
+      }),
+      onCursor,
+    })
+
+    expect(order).toEqual(['handler', 'cursor:cursor-progress'])
+    expect(onCursor).toHaveBeenCalledWith('cursor-progress')
+  })
+
+  it('does not acknowledge a multiplexed cursor when the applicable handler fails', async () => {
+    fetch.mockResolvedValue(eventStreamResponse([
+      'id: cursor-progress-fail\nevent: agent.turn.progress\ndata: {"event_id":"evt_progress_fail","claim_id":"clm_1","session_id":"ses_1","turn_id":"message-2","stage":"model.waiting","state":"running","ordinal":2}\n\n',
+    ]))
+    const handlerFailure = new Error('Progress handler failed.')
+    const onCursor = vi.fn()
+
+    await expect(streamRealtimeEvents({
+      cursor: null,
+      signal: new AbortController().signal,
+      onEvent: vi.fn().mockRejectedValue(handlerFailure),
+      onCursor,
+    })).rejects.toBe(handlerFailure)
+
+    expect(onCursor).not.toHaveBeenCalled()
+  })
+
+  it('cancels a failed claimant stream before a reconnect can open', async () => {
+    const order = []
+    const handlerFailure = new Error('Authoritative claimant refetch failed.')
+
+    fetch
+      .mockImplementationOnce(async () => {
+        order.push('first:fetch')
+        return trackedOpenEventStreamResponse(
+          'id: cursor-refetch-fail\nevent: resources.changed\ndata: {"event_id":"evt_refetch_fail","claim_id":"clm_1","claim_revision":3,"resources":["claim"]}\n\n',
+          order,
+          'first',
+        )
+      })
+      .mockImplementationOnce(async () => {
+        order.push('second:fetch')
+        return eventStreamResponse([': connected\n\n'])
+      })
+
+    await expect(streamRealtimeEvents({
+      cursor: null,
+      signal: new AbortController().signal,
+      onEvent: vi.fn(async () => {
+        order.push('handler')
+        throw handlerFailure
+      }),
+    })).rejects.toBe(handlerFailure)
+
+    order.push('reconnect')
+
+    await streamRealtimeEvents({
+      cursor: null,
+      signal: new AbortController().signal,
+      onEvent: vi.fn(),
+    })
+
+    expect(order).toEqual([
+      'first:fetch',
+      'handler',
+      'first:cancel',
+      'reconnect',
+      'second:fetch',
+    ])
+  })
+
+})
+
 
 describe('Evidence history contract', () => {
   beforeEach(() => {

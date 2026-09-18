@@ -24,7 +24,7 @@ import {
   uploadEvidenceContent,
   completeEvidenceUpload,
   resumeClaimSession,
-  streamClaimUpdates,
+  streamRealtimeEvents,
   submitClaimMessage,
   setClaimantAccessToken,
   updateAccountPreferences,
@@ -398,7 +398,6 @@ function App() {
   const [evidenceItems, setEvidenceItems] = useState([])
   const [evidenceLoadStatus, setEvidenceLoadStatus] = useState('idle')
   const [evidenceSyncNotice, setEvidenceSyncNotice] = useState('')
-  const [evidencePollingKey, setEvidencePollingKey] = useState(0)
   const [resumeContext, setResumeContext] = useState(null)
   const [expandedConversationPanels, setExpandedConversationPanels] = useState({})
   const [externalCapabilitiesOpen, setExternalCapabilitiesOpen] = useState(false)
@@ -420,8 +419,14 @@ function App() {
   const pendingClaimCreation = useRef(null)
   const pendingExternalService = useRef(null)
   const latestRevision = useRef(0)
-  const latestRealtimeCursor = useRef(null)
   const latestRevisionClaimId = useRef(null)
+  const activeClaimRef = useRef(claim)
+  const activeSessionIdRef = useRef(sessionId)
+  const accountRef = useRef(account)
+  const realtimeCursor = useRef(null)
+  const realtimeSeenEventIds = useRef(new Set())
+  const messagesRequestGeneration = useRef(0)
+  const claimTransitionRef = useRef(null)
   const latestEvidenceRevision = useRef(0)
   const latestEvidenceItems = useRef([])
   const evidenceHasLocalMutation = useRef(false)
@@ -439,6 +444,10 @@ function App() {
   const followLatestMessages = useRef(true)
   const forceLatestMessages = useRef(false)
   const confirmedClaimProjections = useRef(new Map())
+  activeClaimRef.current = claim
+  activeSessionIdRef.current = sessionId
+  accountRef.current = account
+  const realtimePrincipal = account ? 'authenticated' : claim?.claim_id ? 'anonymous' : 'none'
   const hasStarted = claim !== null
   const isWorkspaceActive = hasStarted && workspaceActive
   const savedReports = claimHistory === null
@@ -768,6 +777,71 @@ function App() {
       : current)
   }
 
+  function beginMessagesReadback() {
+    messagesRequestGeneration.current += 1
+    return messagesRequestGeneration.current
+  }
+
+  function commitMessages(nextMessages) {
+    messagesRequestGeneration.current += 1
+    setMessages(nextMessages)
+  }
+
+  function applyMessagesReadback(items, { generation, claimId, sessionId }) {
+    if (
+      generation !== messagesRequestGeneration.current
+      || activeClaimRef.current?.claim_id !== claimId
+      || activeSessionIdRef.current !== sessionId
+    ) return false
+    setMessages(items)
+    return true
+  }
+
+  function beginClaimTransition(claimId) {
+    let resolve
+    const completion = new Promise((next) => { resolve = next })
+    const transition = { claimId, completion, resolve }
+    claimTransitionRef.current = transition
+    return transition
+  }
+
+  function finishClaimTransition(transition) {
+    if (!transition) return
+    if (claimTransitionRef.current === transition) {
+      claimTransitionRef.current = null
+    }
+    transition.resolve()
+  }
+
+  function replaceActiveClaimContext(currentClaim, currentSessionId) {
+    activeClaimRef.current = currentClaim
+    activeSessionIdRef.current = currentSessionId
+    latestRevisionClaimId.current = currentClaim?.claim_id || null
+    latestRevision.current = Number(currentClaim?.revision || 0)
+    setClaim(currentClaim)
+    setSessionId(currentSessionId)
+  }
+
+  function applyClaimSnapshot(currentClaim, { minimumRevision = 0 } = {}) {
+    if (activeClaimRef.current?.claim_id !== currentClaim?.claim_id) return false
+    const responseRevision = Number(currentClaim?.revision || 0)
+    const minimumAcceptedRevision = Math.max(
+      Number(activeClaimRef.current?.revision || 0),
+      latestRevision.current,
+      Number(minimumRevision || 0),
+    )
+    if (responseRevision < minimumAcceptedRevision) return false
+    rememberClaimRevision(responseRevision)
+    activeClaimRef.current = currentClaim
+    setClaim(currentClaim)
+    setForm(currentClaim.form)
+    setContentsItems(currentClaim.contents_items || [])
+    setDynamicForm(currentClaim.dynamic_form || null)
+    setNextStep(currentClaim.customer_next_step)
+    setHandoff(currentClaim.handoff || null)
+    return true
+  }
+
   function attachmentForEvidence(evidence, current = {}) {
     const fileStatus = evidence.file_status || evidence.status
     const status = fileStatus === 'awaiting_upload'
@@ -799,7 +873,7 @@ function App() {
 
   function syncEvidenceProjection(response) {
     const responseRevision = Number(response.revision || 0)
-    const currentClaimRevision = Math.max(Number(claim?.revision || 0), latestRevision.current)
+    const currentClaimRevision = Math.max(Number(activeClaimRef.current?.revision || 0), latestRevision.current)
     const minimumRevision = Math.max(latestEvidenceRevision.current, currentClaimRevision)
     if (responseRevision < minimumRevision) return false
     if (!response.items?.length && (latestEvidenceItems.current.length || evidenceHasLocalMutation.current)) return false
@@ -848,83 +922,245 @@ function App() {
     if (!claim?.claim_id) {
       latestRevisionClaimId.current = null
       latestRevision.current = 0
-      latestRealtimeCursor.current = null
       return
     }
     if (latestRevisionClaimId.current !== claim.claim_id) {
       latestRevisionClaimId.current = claim.claim_id
       latestRevision.current = Number(claim.revision || 0)
-      latestRealtimeCursor.current = null
       return
     }
     latestRevision.current = Math.max(latestRevision.current, Number(claim.revision || 0))
   }, [claim?.claim_id, claim?.revision])
 
   useEffect(() => {
-    if (!claim?.claim_id || !sessionId) return undefined
+    if (realtimePrincipal === 'none') {
+      realtimeCursor.current = null
+      realtimeSeenEventIds.current.clear()
+      return undefined
+    }
+
+    // A new claimant authentication context must not reuse replay state from
+    // the previous principal. Starting without an acknowledged cursor is
+    // recovered by subscribing first and taking an authoritative snapshot.
+    realtimeCursor.current = null
+    realtimeSeenEventIds.current.clear()
+
     const controller = new AbortController()
     let active = true
     let reconnectDelay = 1000
+    let degradedRefreshes = 0
+    let needsResyncSnapshot = false
+    const maxDegradedRefreshes = 5
 
-    async function applyLiveUpdate(event) {
-      if (event.event_type === 'agent.turn.progress') {
-        if (!active || event.session_id !== sessionId) return
-        const expectedTurnId = pendingSubmission.current?.clientMessageId
-          || activeTurnProgressRef.current?.turnId
-        const next = reduceTurnProgress(
-          activeTurnProgressRef.current,
-          event,
-          expectedTurnId,
-        )
-        if (next !== activeTurnProgressRef.current) {
-          activeTurnProgressRef.current = next
-          setActiveTurnProgress(next)
-        }
+    function rememberEvent(eventId) {
+      if (!eventId) return
+      realtimeSeenEventIds.current.add(eventId)
+      while (realtimeSeenEventIds.current.size > 100) {
+        const oldest = realtimeSeenEventIds.current.values().next().value
+        realtimeSeenEventIds.current.delete(oldest)
+      }
+    }
+
+    async function refreshFullSnapshot() {
+      const transition = claimTransitionRef.current
+      if (transition) {
+        await transition.completion
+        if (!active) return
+      }
+
+      const activeClaim = activeClaimRef.current
+      const activeSessionId = activeSessionIdRef.current
+      const refreshes = []
+
+      if (activeClaim?.claim_id) {
+        const claimId = activeClaim.claim_id
+        refreshes.push((async () => {
+          const messagesGeneration = activeSessionId ? beginMessagesReadback() : null
+          const [currentClaim, conversation, evidence] = await Promise.all([
+            getClaim(claimId),
+            activeSessionId ? getClaimMessages(claimId, activeSessionId) : Promise.resolve(null),
+            getClaimEvidence(claimId),
+          ])
+          if (!active || activeClaimRef.current?.claim_id !== claimId) return
+          applyClaimSnapshot(currentClaim)
+          if (conversation && messagesGeneration !== null) {
+            applyMessagesReadback(conversation.items, {
+              generation: messagesGeneration,
+              claimId,
+              sessionId: activeSessionId,
+            })
+          }
+          if (syncEvidenceProjection(evidence)) setEvidenceSyncNotice('')
+          setEvidenceLoadStatus('ready')
+        })())
+      }
+
+      if (accountRef.current) {
+        refreshes.push(fetchClaimHistory({ signal: controller.signal }).then((items) => {
+          if (!active) return
+          replaceClaimHistory(items)
+          setClaimHistoryError('')
+        }))
+      }
+      await Promise.all(refreshes)
+    }
+
+    async function applyRealtimeEvent(delivery) {
+      if (!active) return
+
+      if (delivery.type === 'resync_required') {
+        needsResyncSnapshot = true
+        realtimeCursor.current = null
+        realtimeSeenEventIds.current.clear()
+        reconnectDelay = 0
+        degradedRefreshes = 0
         return
       }
-      if (!active || event.claim_revision <= latestRevision.current) return
-      const [currentClaim, conversation] = await Promise.all([
-        getClaim(claim.claim_id),
-        getClaimMessages(claim.claim_id, sessionId),
-      ])
+
+      const deliveryClaimId = delivery.data?.claim_id
+      const transition = claimTransitionRef.current
+      if (
+        transition
+        && deliveryClaimId === transition.claimId
+        && activeClaimRef.current?.claim_id !== deliveryClaimId
+      ) {
+        await transition.completion
+        if (!active) return
+      }
+
+      const eventId = delivery.data?.event_id
+      if (eventId && realtimeSeenEventIds.current.has(eventId)) return
+
+      if (delivery.type === 'agent.turn.progress') {
+        const activeSessionId = activeSessionIdRef.current
+        if (activeSessionId && delivery.data?.session_id === activeSessionId) {
+          const progressEvent = { ...delivery.data, event_type: 'agent.turn.progress', cursor: delivery.cursor }
+          const expectedTurnId = pendingSubmission.current?.clientMessageId
+            || activeTurnProgressRef.current?.turnId
+          const next = reduceTurnProgress(activeTurnProgressRef.current, progressEvent, expectedTurnId)
+          if (next !== activeTurnProgressRef.current) {
+            activeTurnProgressRef.current = next
+            setActiveTurnProgress(next)
+          }
+        }
+        rememberEvent(eventId)
+        reconnectDelay = 1000
+        degradedRefreshes = 0
+        return
+      }
+
+      if (delivery.type !== 'resources.changed') return
+
+      const resources = new Set(delivery.data?.resources || [])
+      const activeClaim = activeClaimRef.current
+      const claimId = delivery.data?.claim_id
+      const eventRevision = Number(delivery.data?.claim_revision || 0)
+      const refreshes = []
+
+      if (activeClaim?.claim_id === claimId) {
+        const activeSessionId = activeSessionIdRef.current
+        if (
+          resources.has('claim')
+          || resources.has('handoffs')
+          || resources.has('work_items')
+          || resources.has('external_tasks')
+        ) {
+          refreshes.push(getClaim(claimId).then((currentClaim) => {
+            if (active && activeClaimRef.current?.claim_id === claimId) {
+              applyClaimSnapshot(currentClaim, { minimumRevision: eventRevision })
+            }
+          }))
+        }
+        if (resources.has('messages') && activeSessionId) {
+          const messagesGeneration = beginMessagesReadback()
+          refreshes.push(getClaimMessages(claimId, activeSessionId).then((conversation) => {
+            if (!active) return
+            applyMessagesReadback(conversation.items, {
+              generation: messagesGeneration,
+              claimId,
+              sessionId: activeSessionId,
+            })
+          }))
+        }
+        if (resources.has('evidence')) {
+          refreshes.push(getClaimEvidence(claimId).then((evidence) => {
+            if (active && activeClaimRef.current?.claim_id === claimId) {
+              if (syncEvidenceProjection(evidence)) setEvidenceSyncNotice('')
+              setEvidenceLoadStatus('ready')
+            }
+          }))
+        }
+      }
+
+      if (accountRef.current && (resources.has('claim') || resources.has('queue'))) {
+        refreshes.push(fetchClaimHistory({ signal: controller.signal }).then((items) => {
+          if (!active) return
+          replaceClaimHistory(items)
+          setClaimHistoryError('')
+        }))
+      }
+
+      await Promise.all(refreshes)
       if (!active) return
-      latestRevision.current = currentClaim.revision
-      setClaim(currentClaim)
-      setForm(currentClaim.form)
-      setContentsItems(currentClaim.contents_items || [])
-      setDynamicForm(currentClaim.dynamic_form || null)
-      setNextStep(currentClaim.customer_next_step)
-      setHandoff(currentClaim.handoff || null)
-      setMessages(conversation.items)
+      rememberEvent(eventId)
       reconnectDelay = 1000
+      degradedRefreshes = 0
+    }
+
+    async function runDegradedRefresh() {
+      if (degradedRefreshes >= maxDegradedRefreshes) return
+      if (globalThis.document?.visibilityState === 'hidden') return
+      degradedRefreshes += 1
+      try { await refreshFullSnapshot() } catch { /* later bounded retry */ }
     }
 
     async function connect() {
       while (active && !controller.signal.aborted) {
+        const recoverOnOpen = (
+          needsResyncSnapshot
+          || realtimeCursor.current === null
+        )
         try {
-          await streamClaimUpdates({
-            claimId: claim.claim_id,
-            sessionId,
-            afterRevision: latestRevision.current,
-            cursor: latestRealtimeCursor.current,
+          await streamRealtimeEvents({
+            cursor: recoverOnOpen ? null : realtimeCursor.current,
             signal: controller.signal,
-            onEvent: applyLiveUpdate,
-            onCursor: (cursor) => { latestRealtimeCursor.current = cursor },
+            onOpen: recoverOnOpen
+              ? async () => {
+                await refreshFullSnapshot()
+                if (!active || controller.signal.aborted) return
+                needsResyncSnapshot = false
+                realtimeCursor.current = null
+                realtimeSeenEventIds.current.clear()
+                reconnectDelay = 1000
+                degradedRefreshes = 0
+              }
+              : undefined,
+            onEvent: applyRealtimeEvent,
+            onCursor: (cursor) => { realtimeCursor.current = cursor },
           })
         } catch (streamFailure) {
           if (!active || controller.signal.aborted) return
-          if (
-            streamFailure instanceof ApiRequestError
-            && streamFailure.code === 'INVALID_EVENT_CURSOR'
-            && streamFailure.currentRevision
-          ) {
-            latestRevision.current = streamFailure.currentRevision
-            latestRealtimeCursor.current = null
+          if (streamFailure instanceof ApiRequestError && streamFailure.code === 'INVALID_EVENT_CURSOR') {
+            needsResyncSnapshot = true
+            realtimeCursor.current = null
+            realtimeSeenEventIds.current.clear()
+            reconnectDelay = 0
+            degradedRefreshes = 0
+          } else if (needsResyncSnapshot) {
+            reconnectDelay = Math.max(reconnectDelay, 1000)
+          } else {
+            await runDegradedRefresh()
+          }
+          if (latestEvidenceItems.current.some((item) => item.file_status === 'processing')) {
+            setEvidenceSyncNotice(
+              'Live file status updates are temporarily disconnected. We are reconnecting; use Check status if you need to verify the file now.',
+            )
           }
         }
         if (!active || controller.signal.aborted) return
-        await new Promise((resolve) => globalThis.setTimeout(resolve, reconnectDelay))
-        reconnectDelay = Math.min(reconnectDelay * 2, 8000)
+        const jitter = Math.floor(Math.random() * Math.min(250, reconnectDelay / 4))
+        await new Promise((resolve) => globalThis.setTimeout(resolve, reconnectDelay + jitter))
+        reconnectDelay = Math.min(Math.max(reconnectDelay, 1000) * 2, 8000)
       }
     }
 
@@ -933,7 +1169,10 @@ function App() {
       active = false
       controller.abort()
     }
-  }, [claim?.claim_id, sessionId])
+  // Realtime callbacks read the current Claim, session, and account from refs so one
+  // browser-scoped stream survives ordinary navigation without reconnect churn.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [realtimePrincipal])
 
   useEffect(() => {
     if (!account) return undefined
@@ -983,7 +1222,6 @@ function App() {
       setEvidenceItems([])
       setEvidenceLoadStatus('idle')
       setAttachments([])
-      setEvidencePollingKey(0)
       return undefined
     }
     if (evidenceClaimId.current !== claim.claim_id) {
@@ -1002,9 +1240,6 @@ function App() {
         if (active) {
           if (syncEvidenceProjection(response)) setEvidenceSyncNotice('')
           setEvidenceLoadStatus('ready')
-          if ((response.items || []).some((item) => item.file_status === 'processing')) {
-            setEvidencePollingKey((current) => current + 1)
-          }
         }
       })
       .catch(() => {
@@ -1014,42 +1249,6 @@ function App() {
   // The projection updater only uses stable React setters and is intentionally local to this view.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claim?.claim_id])
-
-  useEffect(() => {
-    if (!claim?.claim_id || !evidencePollingKey) {
-      return undefined
-    }
-    let active = true
-    let timer
-    let delay = 1500
-    const maxDelay = 12000
-    const schedule = () => {
-      timer = globalThis.setTimeout(sync, delay)
-    }
-    async function sync() {
-      try {
-        const response = await getClaimEvidence(claim.claim_id)
-        if (!active) return
-        const applied = syncEvidenceProjection(response)
-        if (applied) setEvidenceSyncNotice('')
-        setEvidenceLoadStatus('ready')
-        delay = 1500
-        if (!applied || (response.items || []).some((item) => item.file_status === 'processing')) schedule()
-      } catch {
-        if (!active) return
-        setEvidenceSyncNotice('We could not check the latest file status because the connection was interrupted. We will keep trying to reconnect.')
-        delay = Math.min(delay * 2, maxDelay)
-        schedule()
-      }
-    }
-    schedule()
-    return () => {
-      active = false
-      globalThis.clearTimeout(timer)
-    }
-  // The projection updater only uses stable React setters and is intentionally local to this view.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [claim?.claim_id, evidencePollingKey])
 
   async function uploadAttachment(
     file,
@@ -1081,9 +1280,6 @@ function App() {
           (item) => item.evidence_id === attempt.evidenceId,
         )
         if (observed && observed.file_status !== 'awaiting_upload') {
-          if (observed.file_status === 'processing') {
-            setEvidencePollingKey((current) => current + 1)
-          }
           setAttachments((current) => current.map((item) => item.id === localId
             ? attachmentForEvidence(observed, {
               ...item,
@@ -1129,7 +1325,6 @@ function App() {
       latestEvidenceRevision.current = completed.revision
       attempt.evidenceId = completed.evidence.evidence_id
       latestEvidenceItems.current = [completed.evidence]
-      setEvidencePollingKey((current) => current + 1)
       setClaimRevision(completed.revision)
       setEvidenceItems((current) => [...current.filter((item) => item.evidence_id !== completed.evidence.evidence_id), completed.evidence])
       setAttachments((current) => current.map((item) => item.id === localId
@@ -1233,11 +1428,7 @@ function App() {
   async function refreshAfterConflict() {
     if (!claim) return
     const current = await getClaim(claim.claim_id)
-    setClaim(current)
-    setForm(current.form)
-    setContentsItems(current.contents_items || [])
-    setDynamicForm(current.dynamic_form || null)
-    setNextStep(current.customer_next_step)
+    applyClaimSnapshot(current)
   }
 
   function showError(requestError) {
@@ -1297,14 +1488,13 @@ function App() {
         activeClaim = created.claim
         activeSessionId = created.session.session_id
         rememberClaimInHistory(created.claim)
-        setClaim(created.claim)
-        setSessionId(activeSessionId)
+        replaceActiveClaimContext(created.claim, activeSessionId)
         if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
         setForm(created.claim.form)
         setContentsItems(created.claim.contents_items || [])
         setDynamicForm(created.claim.dynamic_form || null)
         setNextStep(created.claim.customer_next_step)
-        setMessages([])
+        commitMessages([])
         setHandoff(null)
         setEvidenceItems([])
         setResumeContext(null)
@@ -1324,7 +1514,7 @@ function App() {
         idempotencyKey: operation.turnKey,
         clientMessageId: operation.clientMessageId,
       })
-      setMessages((current) => mergeMessagesById(current, [
+      commitMessages((current) => mergeMessagesById(current, [
         turn.claimant_message,
         ...(turn.agent_message ? [turn.agent_message] : []),
       ]))
@@ -1420,9 +1610,8 @@ function App() {
     latestEvidenceItems.current = []
     evidenceHasLocalMutation.current = false
     evidenceClaimId.current = null
-    setClaim(null)
-    setSessionId(null)
-    setMessages([])
+    replaceActiveClaimContext(null, null)
+    commitMessages([])
     setForm({})
     setContentsItems([])
     setDynamicForm(null)
@@ -1719,7 +1908,7 @@ function App() {
         revision: response.revision,
         primary_action: response.primary_action,
       }))
-      setMessages((current) => current.map((message) => (
+      commitMessages((current) => current.map((message) => (
         message.message_id === action.agent_message_id
           ? {
               ...message,
@@ -1757,6 +1946,7 @@ function App() {
     setError('')
     cancelComposerDraftAttachments()
     setStatus('resuming')
+    const transition = beginClaimTransition(claimId)
     try {
       const savedClaim = await getClaim(claimId)
       const canResume = savedClaim.can_resume ?? savedClaim.customer_next_step?.can_resume
@@ -1774,11 +1964,9 @@ function App() {
       const current = await getClaim(claimId)
       const conversation = await getClaimMessages(claimId, session.session_id)
       clearComposerAttachments()
-      latestRevision.current = current.revision
-      setClaim(current)
-      setSessionId(session.session_id)
+      replaceActiveClaimContext(current, session.session_id)
       if (session.model_profile_id) setSelectedModel(session.model_profile_id)
-      setMessages(conversation.items)
+      commitMessages(conversation.items)
       setForm(current.form)
       setContentsItems(current.contents_items || [])
       setDynamicForm(current.dynamic_form || null)
@@ -1804,6 +1992,8 @@ function App() {
       } else {
         showError(requestError)
       }
+    } finally {
+      finishClaimTransition(transition)
     }
   }
 
@@ -1848,11 +2038,7 @@ function App() {
       if (claim?.claim_id && !account) {
         try {
           const promoted = await promoteAnonymousClaim(claim.claim_id)
-          setClaim(promoted)
-          setForm(promoted.form)
-          setContentsItems(promoted.contents_items || [])
-          setDynamicForm(promoted.dynamic_form || null)
-          setNextStep(promoted.customer_next_step)
+          applyClaimSnapshot(promoted)
           forgetAnonymousConversation(claim.claim_id)
         } catch (promotionError) {
           if (!(promotionError instanceof ApiRequestError && promotionError.status === 404)) throw promotionError
@@ -1889,11 +2075,7 @@ function App() {
       if (claim?.claim_id && !account) {
         try {
           const promoted = await promoteAnonymousClaim(claim.claim_id)
-          setClaim(promoted)
-          setForm(promoted.form)
-          setContentsItems(promoted.contents_items || [])
-          setDynamicForm(promoted.dynamic_form || null)
-          setNextStep(promoted.customer_next_step)
+          applyClaimSnapshot(promoted)
           forgetAnonymousConversation(claim.claim_id)
         } catch (promotionError) {
           if (!(promotionError instanceof ApiRequestError && promotionError.status === 404)) throw promotionError
@@ -1918,9 +2100,8 @@ function App() {
     setClaimHistoryError('')
     setSelectedHistoryClaimId(null)
     confirmedClaimProjections.current.clear()
-    setClaim(null)
-    setSessionId(null)
-    setMessages([])
+    replaceActiveClaimContext(null, null)
+    commitMessages([])
     setForm({})
     setContentsItems([])
     setDynamicForm(null)

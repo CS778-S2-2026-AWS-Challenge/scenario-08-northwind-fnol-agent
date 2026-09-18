@@ -53,6 +53,11 @@ export default function WorkbenchPage() {
   currentClaimIdRef.current = claimId
   const detailRequestId = useRef(0)
   const backgroundRefreshId = useRef(0)
+  const realtimeCursorRef = useRef(null)
+  const realtimeSeenEventIdsRef = useRef(new Set())
+  const realtimeHandlersRef = useRef({})
+  const currentSectionRef = useRef('summary')
+  const isConversationsRef = useRef(false)
   const resourceRequestIds = useRef({})
   const conversationRequestId = useRef(0)
   const deliveryReadbacksRef = useRef(new Map())
@@ -76,6 +81,8 @@ export default function WorkbenchPage() {
   const currentSection = CLAIM_SECTIONS.has(routeSection)
     ? routeSection
     : currentTab?.section || 'summary'
+  currentSectionRef.current = currentSection
+  isConversationsRef.current = isConversations
   const deliveryReadbackScope = currentSection === 'conversation' && claimId
     ? JSON.stringify([
         claimId,
@@ -296,13 +303,16 @@ export default function WorkbenchPage() {
     }
   }, [applyDetailProjection, token])
 
-  const refreshDetail = useCallback(async (id, { announceRevision = true } = {}) => {
-    if (!id) return
+  const refreshDetail = useCallback(async (
+    id,
+    { announceRevision = true, propagateError = false } = {},
+  ) => {
+    if (!id) return null
     const refreshId = ++backgroundRefreshId.current
     const detailGeneration = detailRequestId.current
     try {
       const response = await workbenchApi.claim(token, id)
-      applyDetailProjection(response, {
+      return applyDetailProjection(response, {
         expectedClaimId: id,
         requestId: detailGeneration,
         announceRevision,
@@ -312,7 +322,10 @@ export default function WorkbenchPage() {
         currentClaimIdRef.current !== id
         || detailRequestId.current !== detailGeneration
         || backgroundRefreshId.current !== refreshId
-      ) return
+      ) {
+        if (propagateError) throw readbackSupersededError('Claim', id)
+        return null
+      }
       if (isInaccessibleError(error)) {
         detailRef.current = null
         setDetail(null)
@@ -321,6 +334,8 @@ export default function WorkbenchPage() {
         setDetailStale(true)
       }
       setDetailError(error)
+      if (propagateError) throw error
+      return null
     }
   }, [applyDetailProjection, token])
 
@@ -624,11 +639,14 @@ export default function WorkbenchPage() {
       ],
     }
     if (section === 'conversation') {
-      await loadConversationResources(
+      const result = await loadConversationResources(
         id,
         selectedSessionId || detail?.active_session_id || null,
       )
-      return
+      if (propagateError && result?.status !== 'applied') {
+        throw result?.error || readbackSupersededError('messages', id)
+      }
+      return result
     }
     return Promise.all((loaders[section] || []).map(([name, loader]) => (
       loadResource(name, id, loader, { propagateError })
@@ -830,11 +848,317 @@ export default function WorkbenchPage() {
       loadSectionResources(claimId, currentSection)
     }
   }, [claimId, currentSection, detail?.claim_id, detail?.revision, loadSectionResources])
+  realtimeHandlersRef.current = {
+    loadClaims,
+    loadConversationResources,
+    loadConversations,
+    loadDetail,
+    loadResource,
+    loadSectionResources,
+    refreshDetail,
+  }
+
   useEffect(() => {
-    if (!claimId) return undefined
-    const timer = window.setInterval(() => refreshDetail(claimId), 20000)
-    return () => window.clearInterval(timer)
-  }, [claimId, refreshDetail])
+    // A token change defines a new staff authentication context. Never reuse
+    // replay state that was acknowledged under a previous principal.
+    realtimeCursorRef.current = null
+    realtimeSeenEventIdsRef.current.clear()
+
+    const controller = new AbortController()
+    let active = true
+    let reconnectDelay = 1000
+    let degradedRefreshes = 0
+    let needsResyncSnapshot = false
+    const maxDegradedRefreshes = 5
+
+    function rememberEvent(eventId) {
+      if (!eventId) return
+      realtimeSeenEventIdsRef.current.add(eventId)
+      while (realtimeSeenEventIdsRef.current.size > 100) {
+        const oldest = realtimeSeenEventIdsRef.current.values().next().value
+        realtimeSeenEventIdsRef.current.delete(oldest)
+      }
+    }
+
+    async function refreshFullSnapshot() {
+      const handlers = realtimeHandlersRef.current
+      await handlers.loadClaims({ propagateError: true })
+      if (!active) return
+
+      if (isConversationsRef.current) {
+        await handlers.loadConversations({ propagateError: true })
+      }
+
+      const id = currentClaimIdRef.current
+      if (!id) return
+      await handlers.loadDetail(id, { propagateError: true })
+      if (!active || currentClaimIdRef.current !== id) return
+      await handlers.loadSectionResources(
+        id,
+        currentSectionRef.current,
+        { propagateError: true },
+      )
+    }
+
+    async function refreshConversation(id) {
+      const requestedSessionId = selectedConversationSessionIdRef.current
+        || detailRef.current?.active_session_id
+        || null
+      const result = await realtimeHandlersRef.current.loadConversationResources(
+        id,
+        requestedSessionId,
+      )
+      if (result?.status === 'failed') throw result.error
+    }
+
+    async function refreshClaimResource(id, minimumRevision = null) {
+      const handlers = realtimeHandlersRef.current
+      await handlers.refreshDetail(id, { propagateError: true })
+
+      if (!active || currentClaimIdRef.current !== id) {
+        throw readbackSupersededError('Claim', id)
+      }
+
+      const current = detailRef.current
+      if (!current || current.claim_id !== id) {
+        throw readbackSupersededError('Claim', id)
+      }
+      if (
+        minimumRevision !== null
+        && (!Number.isInteger(current.revision) || current.revision < minimumRevision)
+      ) {
+        throw readbackRevisionError(id, minimumRevision, current.revision)
+      }
+
+      await Promise.all([
+        handlers.loadResource(
+          'fields',
+          id,
+          () => workbenchApi.fields(token, id),
+          { propagateError: true },
+        ),
+        handlers.loadResource(
+          'sessions',
+          id,
+          () => workbenchApi.sessions(token, id),
+          { propagateError: true },
+        ),
+      ])
+    }
+
+    async function refreshNamedResource(resource, id, minimumRevision = null) {
+      const handlers = realtimeHandlersRef.current
+      if (resource === 'claim') {
+        await refreshClaimResource(id, minimumRevision)
+        return
+      }
+      if (resource === 'handoffs') {
+        await handlers.loadResource(
+          'handoffs',
+          id,
+          () => workbenchApi.handoffs(token, id),
+          { propagateError: true },
+        )
+        return
+      }
+      if (resource === 'collaboration_requests') {
+        await handlers.loadResource(
+          'collaborationRequests',
+          id,
+          () => workbenchApi.collaborationRequests(token, id),
+          { propagateError: true },
+        )
+        return
+      }
+      if (resource === 'evidence') {
+        await handlers.loadResource(
+          'evidence',
+          id,
+          () => workbenchApi.evidence(token, id),
+          { propagateError: true },
+        )
+        return
+      }
+      if (resource === 'work_items') {
+        await handlers.loadResource(
+          'workItems',
+          id,
+          () => workbenchApi.workItems(token, id),
+          { propagateError: true },
+        )
+        return
+      }
+      if (resource === 'customer_updates') {
+        await handlers.loadResource(
+          'customerUpdates',
+          id,
+          () => workbenchApi.customerUpdates(token, id),
+          { propagateError: true },
+        )
+        return
+      }
+      if (resource === 'signals') {
+        await handlers.loadResource(
+          'signals',
+          id,
+          () => workbenchApi.signals(token, id),
+          { propagateError: true },
+        )
+        return
+      }
+      if (resource === 'external_tasks') {
+        await handlers.loadResource(
+          'externalRequests',
+          id,
+          () => workbenchApi.externalRequests(token, id),
+          { propagateError: true },
+        )
+      }
+    }
+
+    async function applyRealtimeEvent(delivery) {
+      if (!active) return
+      if (delivery.type === 'resync_required') {
+        needsResyncSnapshot = true
+        realtimeCursorRef.current = null
+        realtimeSeenEventIdsRef.current.clear()
+        reconnectDelay = 0
+        degradedRefreshes = 0
+        return
+      }
+      if (delivery.type !== 'resources.changed') return
+
+      const eventId = delivery.data?.event_id
+      if (eventId && realtimeSeenEventIdsRef.current.has(eventId)) {
+        if (delivery.cursor) realtimeCursorRef.current = delivery.cursor
+        return
+      }
+
+      const resources = new Set(delivery.data?.resources || [])
+      const eventClaimId = delivery.data?.claim_id
+      const rawEventRevision = Number(delivery.data?.claim_revision)
+      const eventRevision = Number.isInteger(rawEventRevision) ? rawEventRevision : null
+      const openClaimId = currentClaimIdRef.current
+      const refreshes = []
+
+      if (resources.has('queue')) {
+        refreshes.push(
+          realtimeHandlersRef.current.loadClaims({ propagateError: true }),
+        )
+      }
+
+      if (
+        isConversationsRef.current
+        && ['claim', 'messages', 'handoffs', 'queue'].some((resource) => resources.has(resource))
+      ) {
+        refreshes.push(
+          realtimeHandlersRef.current.loadConversations({ propagateError: true }),
+        )
+      }
+
+      if (openClaimId && eventClaimId === openClaimId) {
+        if (resources.has('claim')) {
+          refreshes.push(
+            refreshNamedResource('claim', openClaimId, eventRevision),
+          )
+        }
+        if (resources.has('handoffs')) {
+          refreshes.push(refreshNamedResource('handoffs', openClaimId))
+        }
+        if (resources.has('collaboration_requests')) {
+          refreshes.push(refreshNamedResource('collaboration_requests', openClaimId))
+        }
+
+        const section = currentSectionRef.current
+        if (resources.has('messages') && section === 'conversation') {
+          refreshes.push(refreshConversation(openClaimId))
+        }
+        if (resources.has('evidence') && section === 'evidence') {
+          refreshes.push(refreshNamedResource('evidence', openClaimId))
+        }
+        if (resources.has('work_items') && section === 'activity') {
+          refreshes.push(refreshNamedResource('work_items', openClaimId))
+        }
+        if (resources.has('customer_updates') && section === 'activity') {
+          refreshes.push(refreshNamedResource('customer_updates', openClaimId))
+        }
+        if (resources.has('signals') && section === 'signals') {
+          refreshes.push(refreshNamedResource('signals', openClaimId))
+        }
+        if (resources.has('external_tasks') && section === 'external-services') {
+          refreshes.push(refreshNamedResource('external_tasks', openClaimId))
+        }
+      }
+
+      await Promise.all(refreshes)
+      if (!active) return
+      rememberEvent(eventId)
+      if (delivery.cursor) realtimeCursorRef.current = delivery.cursor
+      reconnectDelay = 1000
+      degradedRefreshes = 0
+    }
+
+    async function runDegradedRefresh() {
+      if (degradedRefreshes >= maxDegradedRefreshes) return
+      if (globalThis.document?.visibilityState === 'hidden') return
+      degradedRefreshes += 1
+      try {
+        await refreshFullSnapshot()
+      } catch {
+        // The next bounded attempt can recover once projections are reachable again.
+      }
+    }
+
+    async function connect() {
+      while (active && !controller.signal.aborted) {
+        const recoverOnOpen = (
+          needsResyncSnapshot
+          || realtimeCursorRef.current === null
+        )
+        try {
+          await workbenchApi.realtimeEvents(token, {
+            cursor: recoverOnOpen ? null : realtimeCursorRef.current,
+            signal: controller.signal,
+            onOpen: recoverOnOpen
+              ? async () => {
+                await refreshFullSnapshot()
+                if (!active || controller.signal.aborted) return
+                needsResyncSnapshot = false
+                realtimeCursorRef.current = null
+                realtimeSeenEventIdsRef.current.clear()
+                reconnectDelay = 1000
+                degradedRefreshes = 0
+              }
+              : undefined,
+            onEvent: applyRealtimeEvent,
+          })
+        } catch (streamFailure) {
+          if (!active || controller.signal.aborted) return
+          if (streamFailure?.code === 'INVALID_EVENT_CURSOR') {
+            needsResyncSnapshot = true
+            realtimeCursorRef.current = null
+            realtimeSeenEventIdsRef.current.clear()
+            reconnectDelay = 0
+            degradedRefreshes = 0
+          } else if (needsResyncSnapshot) {
+            reconnectDelay = Math.max(reconnectDelay, 1000)
+          } else {
+            await runDegradedRefresh()
+          }
+        }
+        if (!active || controller.signal.aborted) return
+        const jitter = Math.floor(Math.random() * Math.min(250, reconnectDelay / 4))
+        await new Promise((resolve) => globalThis.setTimeout(resolve, reconnectDelay + jitter))
+        reconnectDelay = Math.min(Math.max(reconnectDelay, 1000) * 2, 8000)
+      }
+    }
+
+    connect()
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [token])
   useEffect(() => {
     if (filterMetadata && claimId && routeSection && !CLAIM_SECTIONS.has(routeSection)) {
       navigate(queueRoute(`/workbench/claims/${claimId}`, queueFilters), { replace: true })

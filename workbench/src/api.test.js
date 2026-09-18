@@ -13,6 +13,35 @@ function jsonResponse(status, payload) {
   }
 }
 
+function eventStreamResponse(frames, status = 200) {
+  const encoder = new TextEncoder()
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const frame of frames) controller.enqueue(encoder.encode(frame))
+        controller.close()
+      },
+    }),
+    { status, headers: { 'Content-Type': 'text/event-stream' } },
+  )
+}
+
+
+function trackedOpenEventStreamResponse(frame, order, label) {
+  const encoder = new TextEncoder()
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(frame))
+      },
+      cancel() {
+        order.push(`${label}:cancel`)
+      },
+    }),
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+  )
+}
+
 function staffMessageResponse(claimId, sessionId, claimRevision, messageId) {
   return {
     claim_id: claimId,
@@ -29,6 +58,126 @@ function staffMessageResponse(claimId, sessionId, claimRevision, messageId) {
     },
   }
 }
+
+
+describe('Workbench realtime stream', () => {
+  beforeEach(() => {
+    clearStoredSession()
+    sessionStorage.clear()
+    vi.unstubAllGlobals()
+  })
+
+  it('parses multiplexed resource hints and sends the staff token in the header', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(eventStreamResponse([
+      ': connected\n\n',
+      'id: staff-cursor-2\nevent: resources.changed\ndata: {"event_id":"evt_staff_2","claim_id":"clm_1","claim_revision":5,"resources":["claim","queue"]}\n\n',
+      'event: resync_required\ndata: {"reason":"subscriber_overflow"}\n\n',
+    ]))
+    vi.stubGlobal('fetch', fetchMock)
+    const received = []
+
+    await workbenchApi.realtimeEvents('staff-token', {
+      cursor: 'staff-cursor-1',
+      signal: new AbortController().signal,
+      onEvent: async (event) => received.push(event),
+    })
+
+    expect(received).toEqual([
+      {
+        type: 'resources.changed',
+        cursor: 'staff-cursor-2',
+        data: expect.objectContaining({
+          event_id: 'evt_staff_2',
+          claim_id: 'clm_1',
+          resources: ['claim', 'queue'],
+        }),
+      },
+      {
+        type: 'resync_required',
+        cursor: null,
+        data: { reason: 'subscriber_overflow' },
+      },
+    ])
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/workbench/realtime/events?cursor=staff-cursor-1',
+      expect.objectContaining({
+        headers: {
+          Accept: 'text/event-stream',
+          Authorization: 'Bearer staff-token',
+        },
+      }),
+    )
+  })
+
+  it('surfaces an invalid Workbench cursor for full resynchronization', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(409, {
+      error: {
+        code: 'INVALID_EVENT_CURSOR',
+        message: 'The realtime cursor is unavailable.',
+        request_id: 'req_realtime_cursor',
+        retryable: true,
+      },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(workbenchApi.realtimeEvents('staff-token', {
+      cursor: 'expired',
+      signal: new AbortController().signal,
+      onEvent: vi.fn(),
+    })).rejects.toMatchObject({
+      status: 409,
+      code: 'INVALID_EVENT_CURSOR',
+      requestId: 'req_realtime_cursor',
+      retryable: true,
+    })
+  })
+
+  it('cancels a failed Workbench stream before a reconnect can open', async () => {
+    const order = []
+    const handlerFailure = new Error('Authoritative Workbench refetch failed.')
+
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => {
+        order.push('first:fetch')
+        return trackedOpenEventStreamResponse(
+          'id: staff-refetch-fail\nevent: resources.changed\ndata: {"event_id":"evt_staff_refetch_fail","claim_id":"clm_1","claim_revision":6,"resources":["claim"]}\n\n',
+          order,
+          'first',
+        )
+      })
+      .mockImplementationOnce(async () => {
+        order.push('second:fetch')
+        return eventStreamResponse([': connected\n\n'])
+      })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(workbenchApi.realtimeEvents('staff-token', {
+      cursor: null,
+      signal: new AbortController().signal,
+      onEvent: vi.fn(async () => {
+        order.push('handler')
+        throw handlerFailure
+      }),
+    })).rejects.toBe(handlerFailure)
+
+    order.push('reconnect')
+
+    await workbenchApi.realtimeEvents('staff-token', {
+      cursor: null,
+      signal: new AbortController().signal,
+      onEvent: vi.fn(),
+    })
+
+    expect(order).toEqual([
+      'first:fetch',
+      'handler',
+      'first:cancel',
+      'reconnect',
+      'second:fetch',
+    ])
+  })
+})
 
 
 describe('Workbench API failures', () => {
