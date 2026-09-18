@@ -939,6 +939,12 @@ function App() {
       return undefined
     }
 
+    // A new claimant authentication context must not reuse replay state from
+    // the previous principal. Starting without an acknowledged cursor is
+    // recovered by subscribing first and taking an authoritative snapshot.
+    realtimeCursor.current = null
+    realtimeSeenEventIds.current.clear()
+
     const controller = new AbortController()
     let active = true
     let reconnectDelay = 1000
@@ -1110,7 +1116,10 @@ function App() {
 
     async function connect() {
       while (active && !controller.signal.aborted) {
-        const recoverOnOpen = needsResyncSnapshot
+        const recoverOnOpen = (
+          needsResyncSnapshot
+          || realtimeCursor.current === null
+        )
         try {
           await streamRealtimeEvents({
             cursor: recoverOnOpen ? null : realtimeCursor.current,
