@@ -7,7 +7,12 @@ from typing import Annotated, cast
 from pydantic import Field, StringConstraints, model_validator
 from pydantic_core import PydanticUndefined
 
-from backend.domain.models import ContractModel, PageInfo, StructuredFormField
+from backend.domain.models import (
+    ClaimantContentsItem,
+    ContractModel,
+    PageInfo,
+    StructuredFormField,
+)
 
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
@@ -158,6 +163,7 @@ class ClaimAssetSelectionResponse(ContractModel):
     claim_id: str
     revision: int
     proposed_fields: dict[str, StructuredFormField]
+    proposed_contents_item: ClaimantContentsItem | None = None
     snapshot: ClaimAssetSnapshotProjection
 
 

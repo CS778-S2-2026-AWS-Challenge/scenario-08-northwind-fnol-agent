@@ -689,6 +689,9 @@ def _source_value(claim: WorkingClaim, source: str) -> Any:
             }
             for item in claim.contents_items
             if item.status.value == 'confirmed'
+            and item.category is not None
+            and item.loss_type is not None
+            and item.ownership is not None
         ]
         return values or None
     field = claim.form.get(source)
