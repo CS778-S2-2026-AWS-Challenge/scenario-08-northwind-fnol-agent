@@ -28,7 +28,7 @@ _PROFILES = {
         max_model_invocations=1,
         max_model_selected_tools=0,
         input_hard_limit=3000,
-        output_limit=180,
+        output_limit=400,
         requires_media_types=['image/*', 'application/pdf'],
     ),
     'claimant.lookup.v1': RequestProfile(

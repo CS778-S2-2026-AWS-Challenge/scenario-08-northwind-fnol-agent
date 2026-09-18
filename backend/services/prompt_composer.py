@@ -4,7 +4,7 @@ import json
 from importlib.resources import files
 from math import ceil
 
-from backend.domain.agent_context_runtime import TurnRoute
+from backend.domain.agent_context_runtime import ContextLoadMode, TurnRoute
 from backend.domain.prompt_pack import (
     PromptBundle,
     PromptFragmentDefinition,
@@ -69,7 +69,10 @@ def load_fragment_contents(
     }
 
 
-def _initial_fragment_ids(route: TurnRoute) -> set[str]:
+def _initial_fragment_ids(
+    route: TurnRoute,
+    definitions: dict[str, PromptFragmentDefinition],
+) -> set[str]:
     family = route.product_family or 'unresolved-family'
     fragment_ids = {
         'core.authority',
@@ -79,7 +82,17 @@ def _initial_fragment_ids(route: TurnRoute) -> set[str]:
         f'family.{family}',
         f'task.{route.task.value.replace("_", "-")}',
     }
-    fragment_ids.update(f'capability.{item}' for item in route.capability_ids)
+    for capability_id in route.capability_ids:
+        fragment_id = f'capability.{capability_id}'
+        definition = definitions.get(fragment_id)
+        if (
+            definition is not None
+            and definition.load_mode == ContextLoadMode.AUTO_CANDIDATE
+            and definition.applies_when.tasks
+            and route.task.value not in definition.applies_when.tasks
+        ):
+            continue
+        fragment_ids.add(fragment_id)
     return fragment_ids
 
 
@@ -112,7 +125,7 @@ def compose_prompt(
 ) -> PromptBundle:
     selected_manifest = manifest or load_prompt_manifest()
     by_id = {item.fragment_id: item for item in selected_manifest.fragments}
-    selected_ids = _initial_fragment_ids(route)
+    selected_ids = _initial_fragment_ids(route, by_id)
     missing = selected_ids - set(by_id)
     if missing:
         raise ValueError(f'Prompt route references unknown fragments: {sorted(missing)}.')

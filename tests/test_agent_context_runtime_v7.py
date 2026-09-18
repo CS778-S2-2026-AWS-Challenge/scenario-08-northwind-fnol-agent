@@ -396,11 +396,35 @@ def test_prompt_manifest_compiles_one_family_in_stable_order() -> None:
     refs = [item.fragment_id for item in first.fragment_refs]
     assert 'family.motor' in refs
     assert 'family.home' not in refs
+    assert 'capability.assessor' in refs
     assert (
         refs.index('core.authority')
         < refs.index('family.motor')
         < refs.index('task.external-support')
     )
+
+
+def test_prompt_composer_ignores_external_capability_terms_during_evidence_review() -> None:
+    route = route_turn(
+        _context(
+            'Please review this repair assessment PDF and summarise what it supports.',
+            evidence=(
+                AgentEvidenceReference(
+                    evidence_id='ev_assessment',
+                    media_type='application/pdf',
+                ),
+            ),
+        )
+    )
+
+    bundle = compose_prompt(route, load_prompt_manifest())
+
+    assert route.task is TurnTask.EVIDENCE_CURRENT
+    refs = [item.fragment_id for item in bundle.fragment_refs]
+    assert 'task.evidence-current' in refs
+    assert 'task.external-support' not in refs
+    assert 'capability.assessor' not in refs
+    assert 'capability.repair' not in refs
 
 
 def test_prompt_composer_rejects_a_selected_fragment_outside_its_applicability() -> None:
@@ -613,6 +637,26 @@ def test_external_support_offers_only_registry_candidates_pending_consent(
         {'service_identity': service_identity, 'requested_action': 'submit_request'}
     ]
     assert proposal.state_changes == []
+
+
+def test_image_review_does_not_load_unrelated_external_service_context() -> None:
+    context = replace(
+        _context(
+            'Please inspect this damage photo.',
+            evidence=(AgentEvidenceReference(evidence_id='ev_photo', media_type='image/jpeg'),),
+        ),
+        external_services=capability_context('motor'),
+    )
+
+    plan = plan_model_turn(context)
+
+    assert plan is not None
+    assert plan.route.task is TurnTask.EVIDENCE_CURRENT
+    assert plan.request_profile.output_limit == 400
+    assert 'external.services' not in plan.context_payload
+    assert all(
+        entry.resource_id != 'external.services' for entry in plan.context_plan.catalogue_entries
+    )
 
 
 def test_request_profiles_fail_closed_against_provider_capabilities() -> None:
@@ -1227,14 +1271,36 @@ def test_v7_claim_creation_route_keeps_readiness_under_runtime_control(
             )
         ]
     )
+    context = replace(_context('Proceed with this report.'), branch_evaluation=branch_evaluation)
 
-    proposal = GatewayAgent(gateway).propose_turn(
-        replace(_context('Proceed with this report.'), branch_evaluation=branch_evaluation)
-    )
+    proposal = GatewayAgent(gateway).propose_turn(context)
 
     assert proposal.action_code == expected_action
     assert proposal.customer_next_step.status == expected_status
     assert proposal.state_changes == []
+
+
+def test_intake_field_contract_uses_the_published_branch_rule_version() -> None:
+    branch_evaluation = BranchEvaluationResult(
+        claim_id='clm_v7',
+        evaluated_against_claim_revision=1,
+        field_registry_version='5',
+        branch_rules_version='published-branch-rules-v7',
+        selected_family='motor',
+        requirements=RequirementResolution(ready=False),
+        recomputation_reason='test',
+    )
+    context = replace(
+        _context('My car was rear-ended this morning.'),
+        branch_evaluation=branch_evaluation,
+    )
+
+    plan = plan_model_turn(context)
+
+    assert plan is not None
+    assert plan.route.task is TurnTask.INTAKE
+    assert plan.field_contract is not None
+    assert plan.field_contract.branch_rules_version == branch_evaluation.branch_rules_version
 
 
 @pytest.mark.parametrize(
@@ -1705,4 +1771,5 @@ def test_v7_authority_budget_overflow_returns_model_free_safe_clarification() ->
     assert gateway.requests == []
     assert proposal.reason_codes == ['CONTEXT_BUDGET_EXCEEDED']
     assert proposal.proposal_source.value == 'controlled_agent'
+    assert proposal.action_code is None
     assert proposal.runtime_trace is None

@@ -121,7 +121,7 @@ class ContextPlan(ContractModel):
 class ProviderCapability(ContractModel):
     capability_version: str = Field(min_length=1, max_length=120)
     protocol: str = Field(min_length=1, max_length=50)
-    structured_output_method: Literal['json_schema', 'forced_tool']
+    structured_output_method: Literal['json_schema', 'json_object', 'forced_tool']
     tool_call_support: bool
     tool_result_continuation: Literal['assistant_tool_message', 'tool_result_block'] | None = None
     supported_media_types: list[str] = Field(default_factory=list, max_length=20)

@@ -191,6 +191,7 @@ model and Runtime authority validation before it can affect Claim State.
 | `MODEL_SUPPORTS_DOCUMENT_INPUT` | Declared endpoint capability for PDF Evidence blocks; default `false` |
 | `MODEL_RUNTIME_BINDINGS_PATH` | Path to the deployment-owned, non-secret list of model bindings that Control Plane publication is allowed to reference |
 | `NORTHWIND_QWEN_BASE_URL` | Environment-owned Qwen endpoint resolved by the checked-in binding manifest |
+| `MODEL_REASONING_MODE` | Bootstrap-only reasoning policy: `provider_default` or `disabled`; published bindings override it |
 | `GEMINI_API_KEY` | Environment-owned Google AI Studio credential referenced by the Gemini binding |
 
 For an unauthenticated local server, leave `MODEL_API_KEY_ENV` empty. For an
@@ -216,10 +217,16 @@ The published claimant profiles use this adapter contract:
 
 | Profile | Model | Role | Required capabilities |
 | --- | --- | --- | --- |
-| `qwen-local` | `qwen3.8-27b` through the environment-owned Qwen endpoint | deployment default through `MODEL_PROFILE_ID` | structured output and tools |
+| `qwen-local` | `qwen3.8-27b` through the environment-owned Qwen endpoint | deployment default through `MODEL_PROFILE_ID` | structured output (`json_object`) and tools |
 | `nowcoding-gpt55` | `gpt-5.5` through the existing nowcoding endpoint | selectable | structured output and tools |
 | `bedrock-nova2-lite` | `global.amazon.nova-2-lite-v1:0` through Bedrock Sydney | published but unavailable until AWS account verification completes | structured output and image input |
-| `google-gemini35-flash-lite` | `gemini-3.5-flash-lite` through Google AI Studio | selectable | structured output, tools, and image input |
+| `google-gemini35-flash-lite` | `gemini-3.5-flash-lite` through Google AI Studio | selectable | structured output, tools, image input, and PDF document input |
+
+The local Qwen deployment uses the OpenAI-compatible transport with `json_object` structured
+output. Its llama.cpp endpoint cannot compile the larger claimant JSON Schema grammar used by
+the other providers during continuation. The Runtime still validates every returned object
+against the exact claimant schema before applying a proposal; this changes only the wire-level
+grammar and does not weaken field, permission, or state validation.
 
 The nowcoding `gpt-5.5` endpoint was verified on 15 September 2026 with live strict
 structured-output and forced tool-call requests. That verifies provider compatibility, not a
@@ -258,10 +265,10 @@ py -3.12 scripts/publish_fnol_model_release.py `
   --validation-evidence 'Live strict schema and forced tool-call probes passed.'
 ```
 
-The replacement command never accepts or prints the provider credential. It refuses publication when the
-credential environment variable named by an available configured profile is unavailable, when there is no
-active complete Release Set to extend, or when the resulting active snapshot does not contain the
-exact manifest-defined catalogue.
+The replacement command never accepts or prints the provider credential. Publication stores only the
+credential environment-variable name; runtime startup resolves the secret through the deployment-owned
+secret mechanism. The command refuses publication when there is no active complete Release Set to extend,
+or when the resulting active snapshot does not contain the exact manifest-defined catalogue.
 
 The Workbench Staff Agent uses the same published profile catalog under its separate
 `staff_assistant` purpose and `staff_internal_fnol` privacy class. Its selected profile is
@@ -305,11 +312,20 @@ boundary can hold equivalent provider-private continuation metadata for another 
 changing the Runtime contract. Text, structured output, completion status, usage, cache-read usage,
 model version, and response identity are normalised into `ModelResponse`.
 
-The `google-gemini35-flash-lite` profile was verified on 2026-09-17 with a live image plus
-structured-output request and a live forced `context.resolve` call followed by structured
-continuation. This verifies transport compatibility for synthetic FNOL data. PDF input remains
-disabled, and provider availability and latency remain deployment observations rather than a
-permanent guarantee.
+Gemini rejects the complete claimant JSON Schema when provider-side scalar and collection
+constraints make the schema exceed its accepted complexity. The adapter therefore removes
+`additionalProperties`, string and collection length bounds, numeric bounds, and `pattern` only
+from the Gemini wire schema. It retains the field structure, required properties, types, enums,
+and union branches. The original schema and the domain validators remain authoritative after the
+response, so this compatibility projection cannot make an invalid Agent proposal executable.
+
+The `google-gemini35-flash-lite` profile was verified on 2026-09-17 with live image and PDF
+`inlineData` requests, a structured-output request, and a live forced `context.resolve` call followed
+by structured continuation. This verifies transport compatibility for synthetic FNOL data. Provider
+availability and latency remain deployment observations rather than a permanent guarantee. The
+NowCoding GPT profile remains text/tool-only until its endpoint accepts the same authorised image and
+document blocks with a successful structured response; the local Qwen profile remains text-only until a
+vision-capable deployment is qualified.
 
 The executable claimant Prompt Pack is `northwind-fnol-claimant-v7`, authored under
 `backend/prompts/v7/` and embedded immutably in the published `agent_instruction` configuration.

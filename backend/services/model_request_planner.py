@@ -1,13 +1,14 @@
 """Compose one fully validated v7 model turn before transport."""
 
 import json
+from dataclasses import replace
 
 from backend.domain.agent_context_runtime import (
     ContextBudgetPolicy,
     PlannedModelTurn,
     VerifiedConversationSummary,
 )
-from backend.domain.branch_registry import BranchRuleEvaluator
+from backend.domain.branch_registry import BranchRuleEvaluator, build_default_registry
 from backend.domain.configuration import ModelRuntimeConfiguration
 from backend.domain.model_gateway import ModelTool
 from backend.domain.prompt_pack import PromptPackManifest
@@ -147,7 +148,13 @@ def plan_model_turn(
             latest_message=context.message_text,
             recomputation_reason='model_turn_contract',
         )
-        field_contract = compile_turn_field_contract(branch_evaluation)
+        field_contract = compile_turn_field_contract(
+            branch_evaluation,
+            replace(
+                build_default_registry(),
+                branch_rules_version=branch_evaluation.branch_rules_version,
+            ),
+        )
         schema = bind_provider_schema(schema, field_contract)
     schema = json.loads(json.dumps(schema, separators=(',', ':'), sort_keys=True))
     tools: list[dict[str, object]] = (

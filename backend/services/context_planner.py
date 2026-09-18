@@ -12,6 +12,7 @@ from backend.domain.agent_context_runtime import (
     ContextPlan,
     ContextReference,
     TurnRoute,
+    TurnTask,
     VerifiedConversationSummary,
 )
 from backend.domain.models import MessageRecord, MessageVisibility, NeededFor
@@ -77,6 +78,8 @@ def _claim_projection(
 
 
 def _external_service_projection(context: AgentTurnContext, route: TurnRoute) -> list[object]:
+    if route.task is not TurnTask.EXTERNAL_SUPPORT:
+        return []
     matched: list[object] = []
     requested = {item.casefold() for item in route.capability_ids}
     for service in context.external_services:

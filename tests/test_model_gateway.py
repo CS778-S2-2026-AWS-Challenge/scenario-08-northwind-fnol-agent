@@ -131,6 +131,8 @@ def gateway_config(
     privacy_class: str = 'synthetic_fnol',
     prompt_version: str = 'current',
     evaluation_status: ModelProfileStatus = ModelProfileStatus.CONFIGURED,
+    structured_output_method: str = 'json_schema',
+    reasoning_mode: str = 'provider_default',
 ) -> ModelGatewayConfig:
     capabilities = ModelCapabilities(
         structured_output=structured_output,
@@ -144,6 +146,7 @@ def gateway_config(
         credential_environment_variable=credential_environment_variable,
         timeout_seconds=5.0,
         capabilities=capabilities,
+        structured_output_method=structured_output_method,
         profile=ModelProfile(
             profile_id='test-profile',
             protocol=protocol,
@@ -153,10 +156,12 @@ def gateway_config(
             purpose=purpose,
             privacy_class=privacy_class,
             capabilities=capabilities,
+            structured_output_method=structured_output_method,
             timeout_seconds=5.0,
             prompt_version=prompt_version,
             evaluation_status=evaluation_status,
         ),
+        reasoning_mode=reasoning_mode,
         evidence_resolver=evidence_resolver,  # type: ignore[arg-type]
     )
 
@@ -240,6 +245,119 @@ def test_openai_compatible_preserves_legacy_text_wire_shape() -> None:
     payload = cast(dict[str, object], observed['payload'])
     message = cast(list[dict[str, object]], payload['messages'])[0]
     assert message['content'] == 'Return plain text.'
+
+
+def test_openai_compatible_disables_provider_thinking_from_binding() -> None:
+    observed: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed['payload'] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={'choices': [{'finish_reason': 'stop', 'message': {'content': 'ok'}}]},
+        )
+
+    gateway = OpenAICompatibleModelGateway(
+        gateway_config(reasoning_mode='disabled'),
+        transport=httpx.MockTransport(handler),
+    )
+    gateway.complete(ModelRequest(messages=[ModelMessage(role=ModelRole.USER, content='Answer.')]))
+
+    payload = cast(dict[str, object], observed['payload'])
+    assert payload['chat_template_kwargs'] == {'enable_thinking': False}
+
+
+def test_openai_compatible_json_object_mode_avoids_provider_grammar_schema() -> None:
+    observed: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed['payload'] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                'choices': [
+                    {
+                        'finish_reason': 'stop',
+                        'message': {'content': '{"answer":"ok"}'},
+                    }
+                ]
+            },
+        )
+
+    gateway = OpenAICompatibleModelGateway(
+        gateway_config(structured_output_method='json_object'),
+        transport=httpx.MockTransport(handler),
+    )
+    response = gateway.complete(
+        ModelRequest(
+            messages=[ModelMessage(role=ModelRole.USER, content='Answer.')],
+            response_schema={
+                'type': 'object',
+                'properties': {'answer': {'type': 'string'}},
+                'required': ['answer'],
+            },
+        )
+    )
+
+    payload = cast(dict[str, object], observed['payload'])
+    assert payload['response_format'] == {'type': 'json_object'}
+    messages = cast(list[dict[str, object]], payload['messages'])
+    assert messages[0]['role'] == 'system'
+    assert '"answer":{"type":"string"}' in str(messages[0]['content'])
+    assert response.structured_output == {'answer': 'ok'}
+
+
+def test_qwen_json_object_mode_flattens_consumed_tool_history() -> None:
+    observed: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed['payload'] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                'choices': [
+                    {
+                        'finish_reason': 'stop',
+                        'message': {'content': '{"answer":"ok"}'},
+                    }
+                ]
+            },
+        )
+
+    gateway = OpenAICompatibleModelGateway(
+        gateway_config(
+            structured_output_method='json_object',
+            model='qwen3.8-27b',
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    gateway.complete(
+        ModelRequest(
+            messages=[
+                ModelMessage(role=ModelRole.USER, content='Read the Claim.'),
+                ModelMessage(
+                    role=ModelRole.ASSISTANT,
+                    content='',
+                    tool_calls=[ModelToolCall(call_id='call-1', name='claim.read', arguments={})],
+                ),
+                ModelMessage(
+                    role=ModelRole.TOOL,
+                    name='claim.read',
+                    tool_call_id='call-1',
+                    content='{"claim_id":"clm_test"}',
+                ),
+            ],
+            response_schema={'type': 'object'},
+        )
+    )
+
+    payload = cast(dict[str, object], observed['payload'])
+    messages = cast(list[dict[str, object]], payload['messages'])
+    assert messages[2] == {'role': 'assistant', 'content': ''}
+    assert messages[3] == {
+        'role': 'user',
+        'content': 'Tool result (claim.read): {"claim_id":"clm_test"}',
+    }
 
 
 def test_bedrock_converse_maps_authorised_document_block(
@@ -1092,6 +1210,91 @@ def test_google_generate_content_maps_structured_multimodal_turn(
         total_tokens=18,
         cache_read_input_tokens=3,
     )
+
+
+def test_google_generate_content_uses_provider_compatible_schema_constraints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('TEST_GEMINI_API_KEY', 'synthetic-google-key')
+    observed: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed['payload'] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                'candidates': [
+                    {
+                        'finishReason': 'STOP',
+                        'content': {
+                            'role': 'model',
+                            'parts': [{'text': '{"items":[]}'}],
+                        },
+                    }
+                ]
+            },
+        )
+
+    schema = {
+        'type': 'object',
+        'additionalProperties': False,
+        'required': ['items'],
+        'properties': {
+            'items': {
+                'type': 'array',
+                'minItems': 0,
+                'maxItems': 3,
+                'items': {
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': ['code', 'score'],
+                    'properties': {
+                        'code': {
+                            'type': 'string',
+                            'enum': ['damage'],
+                            'minLength': 1,
+                            'maxLength': 100,
+                            'pattern': '^[a-z]+$',
+                        },
+                        'score': {'type': 'number', 'minimum': 0, 'maximum': 1},
+                    },
+                },
+            }
+        },
+    }
+    gateway = GoogleGenerateContentModelGateway(
+        gateway_config(
+            protocol='google_generate_content',
+            credential_environment_variable='TEST_GEMINI_API_KEY',
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    gateway.complete(
+        ModelRequest(
+            messages=[ModelMessage(role=ModelRole.USER, content='Return a bounded result.')],
+            response_schema=schema,
+        )
+    )
+
+    payload = cast(dict[str, object], observed['payload'])
+    generation_config = cast(dict[str, object], payload['generationConfig'])
+    provider_schema = cast(dict[str, object], generation_config['responseJsonSchema'])
+    serialised = json.dumps(provider_schema)
+    for omitted in (
+        'additionalProperties',
+        'maxItems',
+        'maxLength',
+        'maximum',
+        'minItems',
+        'minLength',
+        'minimum',
+        'pattern',
+    ):
+        assert omitted not in serialised
+    assert provider_schema['required'] == ['items']
+    assert '"enum": ["damage"]' in serialised
+    assert schema['additionalProperties'] is False
 
 
 def test_google_generate_content_maps_function_call_and_result_continuation(

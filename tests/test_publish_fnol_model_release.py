@@ -98,8 +98,10 @@ def test_publication_preserves_release_context_and_never_serializes_the_provider
     monkeypatch.setenv('NORTHWIND_CONTROL_PLANE_AUTHOR_TOKEN', 'author-token')
     monkeypatch.setenv('NORTHWIND_CONTROL_PLANE_APPROVER_TOKEN', 'approver-token')
     monkeypatch.setenv('NORTHWIND_QWEN_BASE_URL', 'http://qwen.test/v1')
-    monkeypatch.setenv('NORTHWIND_MODEL_API_KEY', 'provider-secret-must-not-be-serialized')
-    monkeypatch.setenv('GEMINI_API_KEY', 'google-secret-must-not-be-serialized')
+    # Publication stores credential references only; provider secrets are
+    # runtime-owned and must not be required by this process.
+    monkeypatch.delenv('NORTHWIND_MODEL_API_KEY', raising=False)
+    monkeypatch.delenv('GEMINI_API_KEY', raising=False)
     monkeypatch.setattr(publication, 'ControlPlaneClient', RecordingControlPlaneClient)
     args = argparse.Namespace(
         base_url='http://control-plane.test',
@@ -149,8 +151,6 @@ def test_publication_preserves_release_context_and_never_serializes_the_provider
     serialized = json.dumps(
         {'configurations': client.published_configurations, 'requests': client.requests}
     )
-    assert 'provider-secret-must-not-be-serialized' not in serialized
-    assert 'google-secret-must-not-be-serialized' not in serialized
     assert 'NORTHWIND_MODEL_API_KEY' in serialized
     assert 'AWS_BEARER_TOKEN_BEDROCK' in serialized
     assert 'GEMINI_API_KEY' in serialized

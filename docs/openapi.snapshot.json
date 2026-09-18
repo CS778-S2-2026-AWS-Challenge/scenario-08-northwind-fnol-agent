@@ -10180,6 +10180,7 @@
           "structured_output_method": {
             "enum": [
               "json_schema",
+              "json_object",
               "forced_tool"
             ],
             "title": "Structured Output Method",

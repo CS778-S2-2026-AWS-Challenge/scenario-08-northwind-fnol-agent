@@ -1022,7 +1022,6 @@ class GatewayAgent:
             ) or 'Please provide one shorter detail so I can continue this report safely.'
             return AgentProposal(
                 action=AgentAction.UPDATE,
-                action_code='conversation.answer',
                 reason_codes=['CONTEXT_BUDGET_EXCEEDED'],
                 customer_reason='Authority-critical context exceeded the published request budget.',
                 customer_response=budget_response,

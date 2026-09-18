@@ -163,6 +163,8 @@ class Settings:
     model_supports_tools: bool = False
     model_supports_image_input: bool = False
     model_supports_document_input: bool = False
+    model_structured_output_method: str = 'json_schema'
+    model_reasoning_mode: str = 'provider_default'
     model_runtime_bindings: tuple[ModelRuntimeBinding, ...] = ()
     object_storage_adapter: ObjectStorageAdapter = ObjectStorageAdapter.FIXTURE
 
@@ -225,6 +227,12 @@ class Settings:
             }:
                 raise ValueError(
                     'MODEL_EVALUATION_STATUS must be configured, degraded, or unavailable.'
+                )
+            if self.model_reasoning_mode not in {'provider_default', 'disabled'}:
+                raise ValueError('MODEL_REASONING_MODE must be provider_default or disabled.')
+            if self.model_structured_output_method not in {'json_schema', 'json_object'}:
+                raise ValueError(
+                    'MODEL_STRUCTURED_OUTPUT_METHOD must be json_schema or json_object.'
                 )
 
     @property
@@ -393,6 +401,16 @@ class Settings:
                 selected_binding.document_input
                 if selected_binding
                 else _boolean_setting('MODEL_SUPPORTS_DOCUMENT_INPUT', False)
+            ),
+            model_structured_output_method=(
+                selected_binding.structured_output_method
+                if selected_binding
+                else os.getenv('MODEL_STRUCTURED_OUTPUT_METHOD', 'json_schema').strip()
+            ),
+            model_reasoning_mode=(
+                selected_binding.reasoning_mode
+                if selected_binding
+                else os.getenv('MODEL_REASONING_MODE', 'provider_default').strip()
             ),
             model_runtime_bindings=model_runtime_bindings,
             object_storage_adapter=object_storage_adapter,
