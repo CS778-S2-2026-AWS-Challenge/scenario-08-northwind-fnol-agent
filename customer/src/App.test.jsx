@@ -1814,6 +1814,59 @@ describe('claimant intake projection', () => {
     expect(screen.getByRole('button', { name: /Review claim details/i })).toBeInTheDocument()
   })
 
+  it('opens a no-cursor claimant stream before taking the startup snapshot', async () => {
+    const user = userEvent.setup()
+    let streamOpened = false
+    let snapshotObservedOpen = false
+
+    api.streamRealtimeEvents.mockImplementation(({ cursor, onOpen, signal }) => {
+      expect(cursor).toBeNull()
+      streamOpened = true
+      return (async () => {
+        await onOpen?.()
+        await new Promise((resolve) => {
+          signal.addEventListener('abort', resolve, { once: true })
+        })
+      })()
+    })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.getClaim.mockImplementation(async () => {
+      snapshotObservedOpen = streamOpened
+      return {
+        ...initialClaim,
+        revision: 2,
+        primary_action: primaryAction({ revision: 2 }),
+      }
+    })
+    api.getClaimMessages.mockResolvedValue({
+      items: [claimantMessage, agentMessage],
+    })
+
+    render(<App />)
+
+    const incidentInput = screen.getByLabelText('Incident description')
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Model' })).toBeEnabled()
+    })
+
+    await user.type(
+      incidentInput,
+      'A pipe burst in the kitchen.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    await waitFor(() => expect(api.streamRealtimeEvents).toHaveBeenCalled())
+    await waitFor(() => expect(api.getClaim).toHaveBeenCalledWith(initialClaim.claim_id))
+
+    expect(snapshotObservedOpen).toBe(true)
+    expect(api.streamRealtimeEvents.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        cursor: null,
+        onOpen: expect.any(Function),
+      }),
+    )
+  })
+
   it('opens a replacement claimant stream before the resync snapshot and applies a buffered mutation', async () => {
     const user = userEvent.setup()
     let firstOnEvent
