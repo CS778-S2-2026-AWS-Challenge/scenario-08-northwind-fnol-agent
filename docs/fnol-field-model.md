@@ -139,8 +139,8 @@ make their boundary explicit.
 | `collision.occurred` | Collision branch fact | enum/no | C/y/y/y | routing/y/candidate | Branch registry, not lifecycle | C/S; privacy |
 | `collision.impact_area` | Front/rear/side/other impact | enum/list/yes | C,E/y/y/y | evidence/c/candidate | Registry/list validation | C/S; privacy |
 | `collision.movement` | Direction/manoeuvre at impact | object/no | C/y/y/y | review/c/candidate | Domain object; no liability inference | S; review |
-| `other_vehicle.identity` | Other vehicle reference/details | object/yes | C,E/y/y/y | provider/pending/candidate | Participant structure + consent | S; privacy/consent |
-| `other_party.contact` | Other party contact | object/no | C/y/y/y | external/pending/candidate | Consent-scoped participant record | S; privacy/consent |
+| `other_vehicle.identity` | Other vehicle reference/details | object/yes | C,E/y/y/y | provider/pending/record | Bounded `MotorOtherDriverRecord.vehicle_registration`; zero or one per Motor Claim | C/S; privacy |
+| `other_party.contact` | Other party name, phone, and email | object/no | C/y/y/y | external/pending/record | Bounded `MotorOtherDriverRecord`; excluded from model/RAG context | C/S; privacy |
 | `witness.details` | Witness existence/contact | object/yes | C/y/y/y | evidence/pending/candidate | Participant record + consent | S; privacy/consent |
 | `road.conditions` | Surface, intersection, controls | object/no | C,E/y/y/y | review/c/candidate | Registry/domain/API | S; review |
 | `weather.visibility` | Weather, lighting, visibility | object/no | C,E/y/y/y | safety/c/candidate | Registry/domain/API | S; privacy |
@@ -183,8 +183,8 @@ coverage. Repeated item facts belong to item records, not a flat claim form.
 | `contents.item.description` | Item description | scalar/no | C,E/y/y/y | evidence/y/record | Typed item field and role-safe projection | C/S; privacy |
 | `contents.item.category` | Item category | scalar/no | C,E/y/y/y | routing/c/record | Opaque display category; bounded vocabulary remains a follow-up decision | C/S; privacy |
 | `contents.item.quantity` | Count of similar items | scalar/no | C/y/y/y | evidence/c/record | Typed item field with minimum-one validation | C/S; privacy |
-| `contents.item.brand` | Brand | scalar/no | C,E/y/y/y | n/c/candidate | Item schema | C/S; privacy |
-| `contents.item.model` | Model/style | scalar/no | C,E/y/y/y | n/c/candidate | Item schema | C/S; privacy |
+| `contents.item.brand` | Brand | scalar/no | C,E/y/y/y | n/c/record | Optional typed item/assertion/Asset proposal member | C/S; privacy |
+| `contents.item.model` | Model/style | scalar/no | C,E/y/y/y | n/c/record | Optional typed item/assertion/Asset proposal member | C/S; privacy |
 | `contents.item.serial_number` | Serial/unique identifier | scalar/no | C,E/y/y/y | evidence/pending/candidate | Masked restricted field | S; privacy |
 | `contents.item.ownership` | Owned, leased, borrowed, gifted, other | enum/no | C,E/y/y/y | authority/c/record | Typed item enum; wider authority rules remain follow-up work | C/S; privacy |
 | `contents.item.purchase_date` | Approximate/exact purchase date | date-time/no | C,E/y/y/y | evidence/pending/candidate | Item schema | C/S; privacy |
@@ -407,10 +407,10 @@ merely to make a Dynamic Form table appear complete.
 | Common subset | 22 executable registered codes; bounded form | Claim, message-turn, form, confirmation, and Dynamic Form projections | Generic `WorkingClaim.form` with assertion history | Agent, claimant, staff | Implemented VP baseline |
 | Motor extensions | Registration, damage, drivable state, and common fields | Role-safe Dynamic Form and Claim projections | Generic registered fields | Agent, claimant, staff | Implemented VP baseline |
 | Home extensions | Address, affected areas, ongoing risk, habitability, and common fields | Role-safe Dynamic Form and Claim projections | Generic registered fields | Agent, claimant, staff | Implemented VP baseline |
-| Contents extensions | Typed source-aware item records plus common fields | Role-safe item, Dynamic Form, confirmation, and Claim projections | Embedded item and assertion records | Dynamic Form, claimant, staff | Implemented VP baseline; item-to-Evidence mapping remains open |
+| Contents extensions | Typed source-aware item records plus optional brand/model and common fields | Role-safe item, Dynamic Form, confirmation, Claim, and Evidence-link projections | Embedded item/assertion records plus immutable item-to-Evidence associations | Dynamic Form, claimant, staff | Implemented bounded journey baseline |
 | Branch registry | Mutually exclusive families plus registered conditional branches | Embedded versioned Dynamic Form projection; no standalone public branch endpoint | Immutable applied Branch Evaluation history | Agent/runtime/projections | Implemented VP baseline |
 | Required-now projection | Deterministic current-action requirements and next-item selection | `requirements` on Dynamic Form responses | Selection and requirement result retained in Branch Evaluation | Agent, Dynamic Form, UI | Implemented VP baseline |
-| Item/evidence provenance | Evidence API exists | Item links absent | New immutable mapping | Evidence, claimant, staff | `bdfa123` + `liyang6620` |
+| Item/evidence provenance | Evidence API plus same-Claim association validation | Item links on claimant and staff detail | Immutable `ContentsItemEvidenceAssociation` | Evidence, claimant, staff | Implemented bounded journey baseline |
 | Consent/declaration | External consent exists; declaration absent | Route-specific only | Consent record; catalogue scopes absent | Agent/integrations/UI | `liyang6620` + backend owner |
 | Registry versioning | Constant exists | No publication API | Claim version not retained | Agent/audit/staff | `liyang6620` + Control Plane owner |
 
@@ -476,9 +476,9 @@ file, and operational data remain typed records.
 | Motor account of what happened | Reuse `incident.description` | Existing registry |
 | Vehicle damage | Reuse `vehicle.damage_description` | Existing registry |
 | Vehicle damage photos | Reuse Evidence | Existing Evidence baseline |
-| Other driver name | Missing typed Motor participant member | #919 |
-| Other driver contact | Missing typed Motor participant member | #919 |
-| Other vehicle registration | Missing typed Motor participant/vehicle member | #919 |
+| Other driver name | Optional member of the bounded zero-or-one `MotorOtherDriverRecord` | #919 implemented |
+| Other driver contact | Optional phone/email members on the role-safe Motor other-driver projection; excluded from model/RAG context | #919 implemented |
+| Other vehicle registration | Optional `vehicle_registration` on the bounded Motor other-driver record | #919 implemented |
 | Motor Police reference | Reuse `authorities.police_report_reference` | Existing registry |
 | Motor repair quote, invoice, or estimate | Reuse Evidence | Existing Evidence baseline |
 | Reusable insured property | Existing property Asset and immutable Claim asset snapshot | #921 |
@@ -488,18 +488,18 @@ file, and operational data remain typed records.
 | Home account of what happened | Reuse `incident.description` | Existing registry |
 | Damaged property areas | Reuse `property.affected_areas` | Existing registry |
 | Home damage photos | Reuse Evidence | Existing Evidence baseline |
-| Emergency repair receipt | Reuse Evidence; Home verification remains missing | #920 |
+| Emergency repair receipt | Reuse receipt Evidence with Claim ownership and claimant/staff metadata readback | #920 verified |
 | Home Police reference | Reuse `authorities.police_report_reference` | Existing registry |
 | Reusable contents asset | Existing contents Asset and immutable Claim asset snapshot | #921 |
 | Damaged, lost, or stolen item description | Existing ContentsItem and `loss.description` | Existing baseline |
-| Contents brand | Missing optional ContentsItem member | #922 |
-| Contents model | Missing optional ContentsItem member | #922 |
-| Receipt or proof of purchase | Reuse Evidence; item-specific link remains missing | #922 |
+| Contents brand | Optional `brand` on ContentsItem, assertion history, Asset proposal, and role-safe projections | #922 implemented |
+| Contents model | Optional `model` on ContentsItem, assertion history, Asset proposal, and role-safe projections | #922 implemented |
+| Receipt or proof of purchase | Evidence linked to one same-Claim ContentsItem through an immutable association | #922 implemented |
 | Contents incident time | Reuse `incident.occurred_at` | Existing registry |
 | Contents incident location | Reuse `incident.location` | Existing registry |
-| Contents repair quote | Reuse Evidence; item-specific link remains missing | #922 |
+| Contents repair quote | Evidence linked to one same-Claim ContentsItem through an immutable association | #922 implemented |
 | Contents Police reference | Reuse `authorities.police_report_reference` | Existing registry |
-| Contents serial number or value | Not part of the reusable Asset contract; any future restricted ContentsItem members and role-safe projection belong to #922 | #922 |
+| Contents serial number or value | Serial number remains out of scope; existing optional claimant estimate remains distinct from settlement authority | Deferred / existing baseline |
 
 No executable registry field is added by #918 or #921. Aliases such as `police_reference` are
 not registered, and requested files are Evidence rather than Dynamic Form strings.
@@ -512,8 +512,9 @@ Selecting an active owned asset proposes, but does not confirm, only these exist
 | --- | --- |
 | Vehicle | `claim.product_family=motor`, `vehicle.registration` |
 | Property | `claim.product_family=home`, `property.address` |
-| Contents | `claim.product_family=contents` |
+| Contents | `claim.product_family=contents`; also one proposed ContentsItem from Asset description/category/brand/model |
 
 Each proposal uses claimant source authority because the authenticated claimant selected the
 record, keeps `status=proposed`, and records `asset:{asset_id}:revision:{revision}`. Selection
-does not confirm ownership, coverage, liability, identity, payment eligibility, or loss.
+does not confirm ownership, coverage, liability, identity, payment eligibility, value, damage,
+loss, or theft.

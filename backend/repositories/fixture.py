@@ -33,6 +33,7 @@ from backend.domain.models import (
     BranchEvaluationStatus,
     ClaimCollaborationRequest,
     ClaimCoworkerRecord,
+    ContentsItemEvidenceAssociation,
     CustomerUpdateRecord,
     EvidenceClaimLink,
     EvidenceRecord,
@@ -41,6 +42,7 @@ from backend.domain.models import (
     HandoffRecord,
     MessageRecord,
     MessageVisibility,
+    MotorOtherDriverRecord,
     RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
@@ -132,6 +134,8 @@ class FixtureRepository(PersistenceRepository):
         self._assessor_routing_operations: dict[str, AssessorRoutingOperation] = {}
         self._evidence: dict[str, EvidenceRecord] = {}
         self._evidence_claim_links: dict[tuple[str, str], EvidenceClaimLink] = {}
+        self._motor_other_drivers: dict[str, MotorOtherDriverRecord] = {}
+        self._contents_item_evidence_associations: dict[str, ContentsItemEvidenceAssociation] = {}
         self._external_tasks: dict[str, ExternalTaskRecord] = {}
         self._external_task_requests: dict[str, ExternalTaskRequest] = {}
         self._external_task_evidence_links: dict[tuple[str, str], ExternalTaskEvidenceLink] = {}
@@ -448,6 +452,8 @@ class FixtureRepository(PersistenceRepository):
             'assessor_routing_operations': len(self._assessor_routing_operations),
             'evidence': len(self._evidence),
             'evidence_claim_links': len(self._evidence_claim_links),
+            'motor_other_drivers': len(self._motor_other_drivers),
+            'contents_item_evidence_associations': len(self._contents_item_evidence_associations),
             'external_tasks': len(self._external_tasks),
             'external_task_requests': len(self._external_task_requests),
             'external_task_evidence_links': len(self._external_task_evidence_links),
@@ -483,6 +489,8 @@ class FixtureRepository(PersistenceRepository):
         self._assessor_routing_operations.clear()
         self._evidence.clear()
         self._evidence_claim_links.clear()
+        self._motor_other_drivers.clear()
+        self._contents_item_evidence_associations.clear()
         self._external_tasks.clear()
         self._external_task_requests.clear()
         self._external_task_evidence_links.clear()
@@ -786,6 +794,8 @@ class FixtureRepository(PersistenceRepository):
             self._decisions,
             self._assessor_routing_operations,
             self._evidence,
+            self._motor_other_drivers,
+            self._contents_item_evidence_associations,
             self._retrievals,
             self._review_signals,
             self._staff_actions,
@@ -2439,6 +2449,163 @@ class FixtureRepository(PersistenceRepository):
             evidence_records,
             key=lambda evidence: (evidence.created_at, evidence.evidence_id),
         )
+
+    def get_motor_other_driver(
+        self, claim_id: str, customer_id: str
+    ) -> MotorOtherDriverRecord | None:
+        if self.get_claim(claim_id, customer_id) is None:
+            return None
+        record = self._motor_other_drivers.get(claim_id)
+        return deepcopy(record) if record is not None else None
+
+    def save_motor_other_driver_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        participant: MotorOtherDriverRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        with self._claim_mutation_lock:
+            self._validate_claim_mutation(claim, expected_revision)
+            if (
+                claim.incident_type != 'motor'
+                or participant.claim_id != claim.claim_id
+                or participant.customer_id != claim.customer_id
+                or idempotency.actor_id != claim.customer_id
+                or idempotency.claim_id != claim.claim_id
+                or idempotency.session_id != (claim.active_session_id or '')
+                or claim.claim_id in self._motor_other_drivers
+            ):
+                raise IdempotencyConflict(participant.participant_id)
+            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            if lookup in self._idempotency:
+                raise IdempotencyConflict(idempotency.key)
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.CLAIM_CHANGED,
+                claim,
+                operation_correlation=idempotency.key,
+            )
+            assert realtime_event is not None
+            self._claims[claim.claim_id] = deepcopy(claim)
+            self._motor_other_drivers[claim.claim_id] = deepcopy(participant)
+            self._idempotency[lookup] = deepcopy(idempotency)
+            self._commit_realtime_event(realtime_event)
+
+    def list_contents_item_evidence_associations(
+        self, claim_id: str, customer_id: str
+    ) -> list[ContentsItemEvidenceAssociation]:
+        if self.get_claim(claim_id, customer_id) is None:
+            return []
+        return sorted(
+            (
+                deepcopy(record)
+                for record in self._contents_item_evidence_associations.values()
+                if record.claim_id == claim_id and record.customer_id == customer_id
+            ),
+            key=lambda record: (record.created_at, record.association_id),
+        )
+
+    def list_contents_item_evidence_association_page(
+        self,
+        claim_id: str,
+        customer_id: str,
+        item_id: str,
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> tuple[list[ContentsItemEvidenceAssociation], str | None]:
+        from backend.repositories.pagination import (
+            ContentsEvidenceAssociationCursor,
+            decode_contents_evidence_association_cursor,
+            encode_contents_evidence_association_cursor,
+        )
+
+        if self.get_claim(claim_id, customer_id) is None:
+            return [], None
+        after = (
+            decode_contents_evidence_association_cursor(
+                cursor,
+                claim_id=claim_id,
+                customer_id=customer_id,
+                item_id=item_id,
+            )
+            if cursor is not None
+            else None
+        )
+        records = sorted(
+            (
+                deepcopy(record)
+                for record in self._contents_item_evidence_associations.values()
+                if record.claim_id == claim_id
+                and record.customer_id == customer_id
+                and record.item_id == item_id
+                and (
+                    after is None
+                    or (record.created_at, record.association_id)
+                    > (after.created_at, after.association_id)
+                )
+            ),
+            key=lambda record: (record.created_at, record.association_id),
+        )
+        page = records[: limit + 1]
+        selected = page[:limit]
+        next_cursor = None
+        if len(page) > limit:
+            final = selected[-1]
+            next_cursor = encode_contents_evidence_association_cursor(
+                ContentsEvidenceAssociationCursor(
+                    claim_id=claim_id,
+                    customer_id=customer_id,
+                    item_id=item_id,
+                    created_at=final.created_at,
+                    association_id=final.association_id,
+                )
+            )
+        return selected, next_cursor
+
+    def save_contents_item_evidence_association_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        association: ContentsItemEvidenceAssociation,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        with self._claim_mutation_lock:
+            self._validate_claim_mutation(claim, expected_revision)
+            evidence = self._evidence.get(association.evidence_id)
+            if (
+                association.claim_id != claim.claim_id
+                or association.customer_id != claim.customer_id
+                or not any(item.item_id == association.item_id for item in claim.contents_items)
+                or evidence is None
+                or evidence.claim_id != claim.claim_id
+                or idempotency.actor_id != claim.customer_id
+                or idempotency.claim_id != claim.claim_id
+                or idempotency.session_id != (claim.active_session_id or '')
+                or association.association_id in self._contents_item_evidence_associations
+                or any(
+                    held.claim_id == claim.claim_id
+                    and held.item_id == association.item_id
+                    and held.evidence_id == association.evidence_id
+                    for held in self._contents_item_evidence_associations.values()
+                )
+            ):
+                raise IdempotencyConflict(association.association_id)
+            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            if lookup in self._idempotency:
+                raise IdempotencyConflict(idempotency.key)
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.CLAIM_CHANGED,
+                claim,
+                operation_correlation=idempotency.key,
+            )
+            assert realtime_event is not None
+            self._claims[claim.claim_id] = deepcopy(claim)
+            self._contents_item_evidence_associations[association.association_id] = deepcopy(
+                association
+            )
+            self._idempotency[lookup] = deepcopy(idempotency)
+            self._commit_realtime_event(realtime_event)
 
     def get_evidence_claim_link(
         self, target_claim_id: str, evidence_id: str, customer_id: str

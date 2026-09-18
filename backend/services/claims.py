@@ -68,6 +68,10 @@ from backend.services.branching import (
     build_applied_branch_evaluation,
     claimant_dynamic_form_projection,
 )
+from backend.services.claim_data import (
+    project_contents_item_evidence_association,
+    project_motor_other_driver,
+)
 from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.claimant_form_projection import project_claimant_form_fields
 from backend.services.evidence_visibility import claimant_visible_evidence
@@ -191,6 +195,9 @@ def _claimant_contents_items(
         record.retrieval_id
         for record in repository.list_retrieval_records(claim.claim_id, claim.customer_id)
     }
+    associations = repository.list_contents_item_evidence_associations(
+        claim.claim_id, claim.customer_id
+    )
     projected: list[ClaimantContentsItem] = []
     for item in claim.contents_items:
         visible_refs = [
@@ -204,6 +211,8 @@ def _claimant_contents_items(
                 description=item.description,
                 category=item.category,
                 quantity=item.quantity,
+                brand=item.brand,
+                model=item.model,
                 loss_type=item.loss_type,
                 ownership=item.ownership,
                 estimated_value=item.estimated_value,
@@ -212,6 +221,11 @@ def _claimant_contents_items(
                 status=item.status,
                 needed_for=item.needed_for,
                 resolution_state=item.resolution_state,
+                evidence_links=[
+                    project_contents_item_evidence_association(link)
+                    for link in associations
+                    if link.item_id == item.item_id
+                ],
                 updated_at=item.updated_at,
             )
         )
@@ -308,6 +322,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
                     else None,
                 )
     next_step = claimant_next_step(repository, claim, legacy_external_service_action)
+    motor_other_driver = repository.get_motor_other_driver(claim.claim_id, claim.customer_id)
     return ClaimantClaim(
         claim_id=claim.claim_id,
         revision=claim.revision,
@@ -315,6 +330,11 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         workflow_state=claim.claim_state.workflow_state,
         form=_claimant_form(repository, claim),
         contents_items=_claimant_contents_items(repository, claim),
+        motor_other_driver=(
+            project_motor_other_driver(motor_other_driver)
+            if motor_other_driver is not None
+            else None
+        ),
         evidence_summary=evidence_summary_for(claimant_evidence),
         external_claim=claim.external_claim,
         external_service_action=legacy_external_service_action,
@@ -1208,7 +1228,14 @@ def confirm_form_fields(
         for field_code in payload.field_codes
         if (
             field_code == 'contents.items'
-            and not any(item.status is FormStatus.PROPOSED for item in claim.contents_items)
+            and (
+                not any(item.status is FormStatus.PROPOSED for item in claim.contents_items)
+                or any(
+                    item.status is FormStatus.PROPOSED
+                    and (item.category is None or item.loss_type is None or item.ownership is None)
+                    for item in claim.contents_items
+                )
+            )
         )
         or (
             field_code != 'contents.items'
