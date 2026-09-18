@@ -136,7 +136,7 @@ def test_external_service_is_the_authoritative_primary_action(
     assert claimant_action_contract(projection.action_code).action_code == projection.action_code
 
 
-def test_ready_to_create_projects_claim_creation_action() -> None:
+def test_ready_to_create_keeps_legacy_claim_creation_unavailable_until_progression_exists() -> None:
     projection = project_claimant_primary_action(
         claim_id='clm_2',
         claim_revision=3,
@@ -148,9 +148,10 @@ def test_ready_to_create_projects_claim_creation_action() -> None:
     assert projection.action_code == 'claimant.create_claim'
     assert projection.action_id == 'customer-next-step:ready_to_create'
     assert projection.target_ref == 'clm_2'
-    assert projection.available is True
+    assert projection.available is False
     assert projection.required_inputs == ['claimant_confirmation']
     assert projection.claim_revision == 3
+    assert projection.execution_boundary == 'claimant_api'
 
 
 def test_confirmation_required_projects_review_details() -> None:
