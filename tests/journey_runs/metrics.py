@@ -5,8 +5,9 @@ model's behaviour: whether the journey finished without follow-up, whether a sev
 classification survives blind rating, and whether fraud flags are precise. On this runtime the
 Agent is the rule-driven `ControlledAgent`, so a rate measured here would describe the rules
 rather than the Agent, and no severity or fraud judgement is produced to rate at all. Claimant
-effort is measured in part: the run counts what the claimant did, while the elapsed minutes and
-the question total have no served source.
+effort is measured in part: the run counts what the claimant did and the question marks in the
+Agent's replies, a lower bound on questions asked, while the elapsed minutes have no served
+source.
 
 Each shortfall names the document that establishes it, so the record states a boundary rather
 than an opinion, and the suite fails if the quoted passage leaves that document.
@@ -40,7 +41,9 @@ MODEL_PROFILE_AUTHORITY = (
 CLAIMANT_TIME_AUTHORITY = (
     'docs/api.md documents "median_time_to_next_action_seconds" and claimant question totals '
     'on an aggregate metrics endpoint the application does not serve, so elapsed claimant time '
-    'and the question total have no source here; the counts below are what the run observed.'
+    'has no source here. The observed question marks are a lower bound on questions asked: a '
+    'question mark is the only countable signal in a reply, and a question phrased without one '
+    'is not counted.'
 )
 
 
@@ -61,7 +64,7 @@ def metric_coverage(
         One coverage entry per metric in `SprintMetric`.
     """
 
-    questions = sum('?' in (turn.agent_reply or '') for turn in turns)
+    question_marks = sum((turn.agent_reply or '').count('?') for turn in turns)
     return [
         MetricCoverage(
             metric=SprintMetric.NO_FOLLOW_UP,
@@ -82,9 +85,9 @@ def metric_coverage(
             metric=SprintMetric.CLAIMANT_EFFORT,
             state=MetricState.PARTLY_MEASURED,
             observed=(
-                f'{effort.messages} claimant messages, {questions} of which the Agent answered '
-                f'with a question; {effort.confirmations} confirmations, {effort.uploads} '
-                f'uploads, {effort.consents} consents'
+                f'{effort.messages} claimant messages; {question_marks} question marks in Agent '
+                f'replies; {effort.confirmations} confirmations, {effort.uploads} uploads, '
+                f'{effort.consents} consents'
             ),
             limitation=CLAIMANT_TIME_AUTHORITY,
         ),

@@ -283,25 +283,26 @@ def _step(http_status: int | None, outcome: str, name: str = 'step') -> dict[str
 
 
 METRIC_5 = SprintMetric.CLAIM_RESULT
+_METRICS_STATE = FinalState(
+    claim_id='clm_1',
+    claim_number=None,
+    expected_by=None,
+    workflow_state=None,
+    lifecycle_state=None,
+    queue_key=None,
+    customer_next_step=None,
+    next_step_responsible_party=None,
+    session_id=None,
+    session_status=None,
+    active_session_id=None,
+    evidence_ids=[],
+    external_task_statuses=[],
+    handoff_status=None,
+)
 _METRICS = metric_coverage(
     turns=[],
     effort=ClaimantEffort(messages=0, confirmations=0, uploads=0, consents=0),
-    state=FinalState(
-        claim_id='clm_1',
-        claim_number=None,
-        expected_by=None,
-        workflow_state=None,
-        lifecycle_state=None,
-        queue_key=None,
-        customer_next_step=None,
-        next_step_responsible_party=None,
-        session_id=None,
-        session_status=None,
-        active_session_id=None,
-        evidence_ids=[],
-        external_task_statuses=[],
-        handoff_status=None,
-    ),
+    state=_METRICS_STATE,
 )
 
 
@@ -604,6 +605,44 @@ def test_a_record_states_every_required_metric_exactly_once(
     stated = [item.model_dump(mode='json') for item in metrics]
     with pytest.raises(ValidationError, match=message):
         JourneyRunRecord.model_validate(_record(metrics=stated, result_class='completed'))
+
+
+@pytest.mark.parametrize(
+    ('replies', 'expected'),
+    [
+        ([], 0),
+        (['Thanks, that is recorded.'], 0),
+        (['Where did it happen?'], 1),
+        (['Where did it happen? Was anyone hurt?'], 2),
+        (['Where did it happen?', None, 'Was anyone hurt?'], 2),
+    ],
+    ids=['none', 'statement', 'one', 'two-in-one-reply', 'across-replies'],
+)
+def test_claimant_effort_counts_every_question_mark_not_every_turn(
+    replies: list[str | None], expected: int
+) -> None:
+    """A reply asking twice counts twice; counting turns would report it once."""
+
+    turns = [
+        AgentTurn(
+            step='ask',
+            claimant_input='input',
+            agent_reply=reply,
+            proposed_action=None,
+            reason_codes=[],
+            next_step=None,
+            trace_limitation='the claimant route projects no trace',
+        )
+        for reply in replies
+    ]
+    effort = ClaimantEffort(messages=len(turns), confirmations=0, uploads=0, consents=0)
+    coverage = metric_coverage(turns=turns, effort=effort, state=_METRICS_STATE)
+
+    observed = next(
+        item.observed for item in coverage if item.metric is SprintMetric.CLAIMANT_EFFORT
+    )
+    assert observed is not None
+    assert f'{expected} question marks in Agent replies' in observed
 
 
 def test_every_metric_limitation_quotes_a_real_document() -> None:
