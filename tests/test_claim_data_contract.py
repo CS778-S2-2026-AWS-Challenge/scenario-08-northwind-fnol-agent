@@ -1,4 +1,7 @@
+import logging
+from copy import deepcopy
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any, cast
 
 import mongomock
@@ -54,12 +57,20 @@ def _create_claim(
     return cast(dict[str, Any], response.json()['claim'])
 
 
+def _login(client: TestClient, email: str, password: str) -> dict[str, str]:
+    response = client.post('/api/v1/auth/sessions', json={'email': email, 'password': password})
+    assert response.status_code == 201, response.text
+    return {'Authorization': f'Bearer {response.json()["access_token"]}'}
+
+
 def test_motor_other_driver_is_bounded_idempotent_and_role_safe(
     client: TestClient,
     auth_headers: dict[str, str],
     staff_auth_headers: dict[str, str],
     repository: FixtureRepository,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    caplog.set_level(logging.INFO, logger='backend.api.claims')
     claim = _create_claim(
         client,
         auth_headers,
@@ -112,6 +123,59 @@ def test_motor_other_driver_is_bounded_idempotent_and_role_safe(
     assert stored_claim is not None
     assert payload['email'] not in stored_claim.model_dump_json()
     assert len(repository._motor_other_drivers) == 1
+    mutation_logs = [
+        record
+        for record in caplog.records
+        if record.getMessage() == 'claim_data.motor_other_driver.create'
+    ]
+    assert {record.__dict__['outcome'] for record in mutation_logs} == {'succeeded', 'rejected'}
+    assert mutation_logs[0].__dict__['claim_id'] == claim_id
+    assert mutation_logs[0].__dict__['claim_revision'] == claim['revision'] + 1
+    serialized_logs = repr([record.__dict__ for record in mutation_logs])
+    assert payload['name'] not in serialized_logs
+    assert payload['phone'] not in serialized_logs
+    assert payload['email'] not in serialized_logs
+    assert payload['vehicle_registration'] not in serialized_logs
+
+
+@pytest.mark.parametrize('field', ['name', 'phone', 'email', 'vehicle_registration'])
+def test_motor_other_driver_rejects_blank_text_without_any_mutation(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    field: str,
+) -> None:
+    claim = _create_claim(
+        client,
+        auth_headers,
+        incident_type='motor',
+        key=f'motor-blank-{field}-claim',
+    )
+    claim_id = claim['claim_id']
+    route = f'/api/v1/claims/{claim_id}/motor-other-driver'
+    idempotency_key = f'motor-blank-{field}'
+    before_claim = repository.get_claim_internal(claim_id)
+    before_children = deepcopy(repository._motor_other_drivers)
+    before_idempotency = deepcopy(repository._idempotency)
+    before_events = repository.replay_realtime_events(None, limit=1000)
+
+    response = client.post(
+        route,
+        headers={
+            **auth_headers,
+            'Idempotency-Key': idempotency_key,
+            'If-Match': str(claim['revision']),
+        },
+        json={field: '   '},
+    )
+
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert repository.get_claim_internal(claim_id) == before_claim
+    assert repository._motor_other_drivers == before_children
+    assert repository._idempotency == before_idempotency
+    assert repository.replay_realtime_events(None, limit=1000) == before_events
+    assert repository.find_idempotency('cus_demo', route, idempotency_key) is None
 
 
 def test_motor_other_driver_is_optional_and_rejected_outside_motor(
@@ -266,53 +330,99 @@ def _evidence(claim_id: str, evidence_id: str, timestamp: datetime) -> EvidenceR
     )
 
 
-def test_contents_asset_metadata_and_same_claim_evidence_link_are_readable(
+def test_contents_asset_upload_and_evidence_association_public_journey(
     client: TestClient,
-    auth_headers: dict[str, str],
     staff_auth_headers: dict[str, str],
     repository: FixtureRepository,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    claim = _create_claim(
-        client,
-        auth_headers,
-        incident_type='contents',
-        key='contents-association-claim',
+    caplog.set_level(logging.INFO, logger='backend.api.claims')
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    asset_response = client.post(
+        '/api/v1/account/assets',
+        headers={**owner, 'Idempotency-Key': 'contents-public-asset'},
+        json={
+            'asset_type': 'contents',
+            'display_name': 'Synthetic laptop',
+            'details': {
+                'description': 'Synthetic laptop',
+                'category': 'electronics',
+                'brand': 'Example Brand',
+                'model': 'Model One',
+            },
+        },
     )
+    assert asset_response.status_code == 201, asset_response.text
+    claim = _create_claim(client, owner, incident_type='contents', key='contents-public-claim')
     claim_id = claim['claim_id']
-    stored = repository.get_claim_internal(claim_id)
-    assert stored is not None
-    timestamp = datetime.now(UTC)
-    item = _contents_item(timestamp)
-    repository.save_claim(
-        stored.model_copy(
-            update={
-                'revision': stored.revision + 1,
-                'contents_items': [item],
-                'updated_at': timestamp,
-            }
-        ),
-        expected_revision=stored.revision,
+    selected = client.post(
+        f'/api/v1/claims/{claim_id}/asset-selections',
+        headers={
+            **owner,
+            'Idempotency-Key': 'contents-public-select',
+            'If-Match': str(claim['revision']),
+        },
+        json={'asset_id': asset_response.json()['asset_id']},
     )
-    evidence = _evidence(claim_id, 'evd_contents_same_claim', timestamp)
-    repository.save_evidence(evidence, 'cus_demo')
+    assert selected.status_code == 201, selected.text
+    item = selected.json()['proposed_contents_item']
+    item_id = item['item_id']
 
-    route = f'/api/v1/claims/{claim_id}/contents-items/{item.item_id}/evidence-associations'
+    content = b'synthetic receipt'
+    upload = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/uploads',
+        headers={
+            **owner,
+            'Idempotency-Key': 'contents-public-upload',
+            'If-Match': str(selected.json()['revision']),
+        },
+        json={
+            'kind': 'receipt',
+            'original_filename': 'synthetic-receipt.pdf',
+            'media_type': 'application/pdf',
+            'size_bytes': len(content),
+        },
+    )
+    assert upload.status_code == 201, upload.text
+    evidence_id = upload.json()['evidence_id']
+    uploaded = client.put(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/content',
+        headers={**owner, 'Content-Type': 'application/pdf'},
+        content=content,
+    )
+    assert uploaded.status_code == 204, uploaded.text
+    completed = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
+        headers={
+            **owner,
+            'Idempotency-Key': 'contents-public-complete',
+            'If-Match': str(upload.json()['revision']),
+        },
+        json={'upload_checksum': f'sha256:{sha256(content).hexdigest()}'},
+    )
+    assert completed.status_code == 202, completed.text
+
+    events_before_association = repository.replay_realtime_events(None, limit=1000)
+    route = f'/api/v1/claims/{claim_id}/contents-items/{item_id}/evidence-associations'
     headers = {
-        **auth_headers,
+        **owner,
         'Idempotency-Key': 'contents-association-create',
-        'If-Match': str(stored.revision + 1),
+        'If-Match': str(completed.json()['revision']),
     }
     payload = {
-        'evidence_id': evidence.evidence_id,
+        'evidence_id': evidence_id,
         'purpose': 'proof_of_purchase',
     }
     created = client.post(route, headers=headers, json=payload)
     replay = client.post(route, headers=headers, json=payload)
-    listed = client.get(route, headers=auth_headers)
-    claimant = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
+    listed = client.get(route, headers=owner)
+    claimant = client.get(f'/api/v1/claims/{claim_id}', headers=owner)
     staff = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers)
+    events_after_association = repository.replay_realtime_events(None, limit=1000)
 
     assert created.status_code == 201, created.text
+    assert created.json()['revision'] == completed.json()['revision'] + 1
     assert replay.status_code == 201
     assert replay.json() == created.json()
     assert listed.status_code == 200
@@ -328,6 +438,121 @@ def test_contents_asset_metadata_and_same_claim_evidence_link_are_readable(
     assert staff.json()['contents_item_evidence_associations'] == [created.json()['association']]
     assert 'customer_id' not in claimant.text
     assert 'storage' not in created.text.casefold()
+    assert len(events_after_association) == len(events_before_association) + 1
+    association_event = events_after_association[-1]
+    assert association_event.claim_id == claim_id
+    assert association_event.claim_revision == created.json()['revision']
+    assert {resource.value for resource in association_event.resources} >= {'claim', 'queue'}
+    association_logs = [
+        record
+        for record in caplog.records
+        if record.getMessage() == 'claim_data.contents_item_evidence.create'
+    ]
+    assert association_logs[-1].__dict__['claim_id'] == claim_id
+    assert association_logs[-1].__dict__['item_id'] == item_id
+    assert association_logs[-1].__dict__['claim_revision'] == created.json()['revision']
+    assert evidence_id not in repr([record.__dict__ for record in association_logs])
+
+    def authoritative_state() -> tuple[object, object, object, object]:
+        return (
+            repository.get_claim_internal(claim_id),
+            deepcopy(repository._contents_item_evidence_associations),
+            deepcopy(repository._idempotency),
+            repository.replay_realtime_events(None, limit=1000),
+        )
+
+    unchanged = authoritative_state()
+    stale = client.post(
+        route,
+        headers={
+            **owner,
+            'Idempotency-Key': 'contents-association-stale',
+            'If-Match': str(completed.json()['revision']),
+        },
+        json=payload,
+    )
+    duplicate = client.post(
+        route,
+        headers={
+            **owner,
+            'Idempotency-Key': 'contents-association-duplicate',
+            'If-Match': str(created.json()['revision']),
+        },
+        json=payload,
+    )
+    assert stale.status_code == 409
+    assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert duplicate.status_code == 409
+    assert duplicate.json()['error']['code'] == 'RESOURCE_CONFLICT'
+    assert authoritative_state() == unchanged
+
+    foreign_claim = _create_claim(
+        client,
+        owner,
+        incident_type='contents',
+        key='contents-public-foreign-claim',
+    )
+    foreign_evidence = client.post(
+        f'/api/v1/claims/{foreign_claim["claim_id"]}/evidence',
+        headers={
+            **owner,
+            'Idempotency-Key': 'contents-public-foreign-evidence',
+            'If-Match': str(foreign_claim['revision']),
+        },
+        json={'kind': 'receipt', 'status': 'pending'},
+    )
+    assert foreign_evidence.status_code == 201, foreign_evidence.text
+    unchanged = authoritative_state()
+    cross_claim = client.post(
+        route,
+        headers={
+            **owner,
+            'Idempotency-Key': 'contents-association-cross-claim',
+            'If-Match': str(created.json()['revision']),
+        },
+        json={
+            'evidence_id': foreign_evidence.json()['evidence']['evidence_id'],
+            'purpose': 'proof_of_purchase',
+        },
+    )
+    assert cross_claim.status_code == 404
+    assert cross_claim.json()['error']['code'] == 'RESOURCE_NOT_FOUND'
+    assert authoritative_state() == unchanged
+
+    second_evidence = client.post(
+        f'/api/v1/claims/{claim_id}/evidence',
+        headers={
+            **owner,
+            'Idempotency-Key': 'contents-public-second-evidence',
+            'If-Match': str(created.json()['revision']),
+        },
+        json={'kind': 'item_photo', 'status': 'pending'},
+    )
+    assert second_evidence.status_code == 201, second_evidence.text
+    unchanged = authoritative_state()
+
+    def fail_event(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError('event construction failed')
+
+    with monkeypatch.context() as event_patch:
+        event_patch.setattr(
+            'backend.repositories.fixture.realtime_event_from_publication',
+            fail_event,
+        )
+        with pytest.raises(RuntimeError, match='event construction failed'):
+            client.post(
+                route,
+                headers={
+                    **owner,
+                    'Idempotency-Key': 'contents-association-atomic-failure',
+                    'If-Match': str(second_evidence.json()['revision']),
+                },
+                json={
+                    'evidence_id': second_evidence.json()['evidence']['evidence_id'],
+                    'purpose': 'item_condition',
+                },
+            )
+    assert authoritative_state() == unchanged
 
 
 def test_contents_evidence_link_rejects_cross_claim_and_stale_revision(

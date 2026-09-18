@@ -307,12 +307,12 @@ class ModelProposedFormChange(ModelContract):
 class ModelProposedContentsItem(ModelContract):
     item_id: str | None = Field(default=None, min_length=1, max_length=100)
     description: str = Field(min_length=1, max_length=500)
-    category: str | None = Field(default=None, min_length=1, max_length=100)
+    category: str = Field(min_length=1, max_length=100)
     quantity: int = Field(default=1, ge=1)
     brand: str | None = Field(default=None, min_length=1, max_length=200)
     model: str | None = Field(default=None, min_length=1, max_length=200)
-    loss_type: ContentsLossType | None = None
-    ownership: ContentsOwnership | None = None
+    loss_type: ContentsLossType
+    ownership: ContentsOwnership
     estimated_value: MoneyAmount | None = None
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     relation: AssertionRelation | None = None

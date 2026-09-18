@@ -884,6 +884,11 @@ internal references are omitted. Workbench projections retain the full authorise
 | `source` / `source_refs` | enum / string array | Same provenance boundary as structured form fields |
 | `status` | enum | Existing `FormStatus`; `proposed` is used for inference and `disputed` for conflicts |
 | `needed_for` | enum | `current_action` or `later_action` |
+| `confidence` | number/null | Optional 0.0–1.0 confidence; never confirmation |
+| `resolution_state` | enum | Same resolution states as structured form fields |
+| `current_assertion_id` | string/null | Current item assertion selected from immutable item history |
+| `assertions` | object array | Immutable item assertion history with relation, status, and source references |
+| `updated_at` / `updated_by` | timestamp / actor reference | Server-maintained provenance |
 
 A `confirmed` ContentsItem requires category, loss type, and ownership. A selected contents Asset
 creates only a `proposed` item from its known description/category/brand/model and never invents
@@ -910,12 +915,6 @@ inaccessible Evidence returns concealed `404`; a duplicate association returns `
 advance the Claim. Claimant and Workbench projections expose IDs, purpose, and creation time only,
 never storage/provider details. Both mutation types atomically advance the shared Claim revision,
 persist their child record and idempotency response, and publish Claim/queue refresh state.
-| `confidence` | number/null | Optional 0.0–1.0 confidence; never confirmation |
-| `resolution_state` | enum | Same resolution states as structured form fields |
-| `current_assertion_id` | string/null | Current item assertion selected from immutable item history |
-| `assertions` | object array | Immutable item assertion history with relation, status, and source references |
-| `updated_at` / `updated_by` | timestamp / actor reference | Server-maintained provenance |
-
 The backend MUST maintain a versioned field registry with validation and display metadata. New product fields require a registry change; clients MUST NOT invent arbitrary field codes.
 
 Every claimant Dynamic Form projection includes deterministic `requirements`: `satisfied`,

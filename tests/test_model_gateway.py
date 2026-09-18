@@ -3164,6 +3164,26 @@ def assert_model_message_failure_is_atomic(
     assert repository.find_idempotency('cus_demo', route, f'{protocol}-message') is None
 
 
+def test_incomplete_model_contents_proposal_is_rejected_before_runtime_mutation() -> None:
+    protocol = 'incomplete_model_contents_item'
+    output = _model_proposal_output()
+    output['contents_item_changes'] = [{'description': 'Laptop'}]
+    response, repository, before_claim, claim_id, session_id = submit_model_message(
+        StaticGateway(ModelResponse(structured_output=output)),
+        protocol=protocol,
+    )
+
+    assert response.status_code == 502
+    assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
+    assert_model_message_failure_is_atomic(
+        repository,
+        before_claim,
+        claim_id,
+        session_id,
+        protocol,
+    )
+
+
 @pytest.mark.parametrize(
     ('adapter', 'provider_reason', 'expected_status'),
     [

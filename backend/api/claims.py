@@ -1,6 +1,7 @@
 import logging
+from collections.abc import Callable
 from datetime import datetime
-from typing import cast
+from typing import Protocol, TypeVar, cast
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
@@ -85,6 +86,52 @@ from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant'])
 router.include_router(claim_assets_router)
 logger = logging.getLogger(__name__)
+
+
+class RevisionedClaimDataMutation(Protocol):
+    revision: int
+
+
+ClaimDataMutationT = TypeVar('ClaimDataMutationT', bound=RevisionedClaimDataMutation)
+
+
+def _execute_logged_claim_data_mutation(
+    *,
+    operation: str,
+    request: Request,
+    claim_id: str,
+    item_id: str | None = None,
+    mutate: Callable[[], ClaimDataMutationT],
+) -> ClaimDataMutationT:
+    context = {
+        'request_id': str(getattr(request.state, 'request_id', 'unavailable')),
+        'claim_id': claim_id,
+    }
+    if item_id is not None:
+        context['item_id'] = item_id
+    try:
+        result = mutate()
+    except ApiError as error:
+        logger.info(
+            operation,
+            extra={**context, 'outcome': 'rejected', 'error_code': error.code},
+        )
+        raise
+    except Exception:
+        logger.exception(
+            operation,
+            extra={**context, 'outcome': 'failed', 'error_code': 'INTERNAL_ERROR'},
+        )
+        raise
+    logger.info(
+        operation,
+        extra={
+            **context,
+            'outcome': 'succeeded',
+            'claim_revision': result.revision,
+        },
+    )
+    return result
 
 
 def repository_for(request: Request) -> PersistenceRepository:
@@ -192,13 +239,18 @@ def create_claim_motor_other_driver(
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> MotorOtherDriverMutationResponse:
-    return create_motor_other_driver(
-        repository_for(request),
-        principal,
-        claim_id,
-        payload,
-        idempotency_key,
-        if_match,
+    return _execute_logged_claim_data_mutation(
+        operation='claim_data.motor_other_driver.create',
+        request=request,
+        claim_id=claim_id,
+        mutate=lambda: create_motor_other_driver(
+            repository_for(request),
+            principal,
+            claim_id,
+            payload,
+            idempotency_key,
+            if_match,
+        ),
     )
 
 
@@ -225,14 +277,20 @@ def create_claim_contents_item_evidence_association(
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> ContentsItemEvidenceAssociationMutationResponse:
-    return create_contents_item_evidence_association(
-        repository_for(request),
-        principal,
-        claim_id,
-        item_id,
-        payload,
-        idempotency_key,
-        if_match,
+    return _execute_logged_claim_data_mutation(
+        operation='claim_data.contents_item_evidence.create',
+        request=request,
+        claim_id=claim_id,
+        item_id=item_id,
+        mutate=lambda: create_contents_item_evidence_association(
+            repository_for(request),
+            principal,
+            claim_id,
+            item_id,
+            payload,
+            idempotency_key,
+            if_match,
+        ),
     )
 
 

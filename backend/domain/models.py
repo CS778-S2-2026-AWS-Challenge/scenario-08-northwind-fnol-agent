@@ -11,6 +11,9 @@ class ContractModel(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
+StrippedNonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
 class AgentAction(str, Enum):
     ASK = 'ASK'
     CLARIFY = 'CLARIFY'
@@ -650,10 +653,10 @@ class MotorOtherDriverRecord(ContractModel):
     participant_id: str = Field(pattern=r'^par_[a-f0-9]{20}$')
     claim_id: str = Field(min_length=1, max_length=200)
     customer_id: str = Field(min_length=1, max_length=200)
-    name: str | None = Field(default=None, min_length=1, max_length=200)
-    phone: str | None = Field(default=None, min_length=1, max_length=40)
-    email: str | None = Field(default=None, min_length=3, max_length=254)
-    vehicle_registration: str | None = Field(default=None, min_length=1, max_length=40)
+    name: StrippedNonEmptyText | None = Field(default=None, max_length=200)
+    phone: StrippedNonEmptyText | None = Field(default=None, max_length=40)
+    email: StrippedNonEmptyText | None = Field(default=None, min_length=3, max_length=254)
+    vehicle_registration: StrippedNonEmptyText | None = Field(default=None, max_length=40)
     source_refs: list[str] = Field(default_factory=list, max_length=10)
     created_at: datetime
     updated_at: datetime
@@ -678,10 +681,10 @@ class MotorOtherDriverProjection(ContractModel):
 
 
 class CreateMotorOtherDriverRequest(ContractModel):
-    name: str | None = Field(default=None, min_length=1, max_length=200)
-    phone: str | None = Field(default=None, min_length=1, max_length=40)
-    email: str | None = Field(default=None, min_length=3, max_length=254)
-    vehicle_registration: str | None = Field(default=None, min_length=1, max_length=40)
+    name: StrippedNonEmptyText | None = Field(default=None, max_length=200)
+    phone: StrippedNonEmptyText | None = Field(default=None, max_length=40)
+    email: StrippedNonEmptyText | None = Field(default=None, min_length=3, max_length=254)
+    vehicle_registration: StrippedNonEmptyText | None = Field(default=None, max_length=40)
 
     @model_validator(mode='after')
     def require_supplied_detail(self) -> 'CreateMotorOtherDriverRequest':
