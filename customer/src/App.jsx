@@ -218,6 +218,14 @@ function buildConversationTimeline(messages, resumeContext) {
   return timeline
 }
 
+function mergeMessagesById(current, incoming) {
+  const merged = new Map(current.map((message) => [message.message_id, message]))
+  for (const message of incoming) {
+    if (message?.message_id) merged.set(message.message_id, message)
+  }
+  return [...merged.values()]
+}
+
 const CLAIMANT_ACTION_KINDS = Object.freeze({
   'claimant.create_claim': 'create-claim',
   'claimant.review_details': 'review-details',
@@ -1315,11 +1323,10 @@ function App() {
         idempotencyKey: operation.turnKey,
         clientMessageId: operation.clientMessageId,
       })
-      setMessages((current) => [
-        ...current,
+      setMessages((current) => mergeMessagesById(current, [
         turn.claimant_message,
         ...(turn.agent_message ? [turn.agent_message] : []),
-      ])
+      ]))
       setForm((current) => mergeFields(current, turn.form_changes))
       setContentsItems((current) => mergeContentsItems(current, turn.contents_item_changes || []))
       setDynamicForm(turn.dynamic_form || null)

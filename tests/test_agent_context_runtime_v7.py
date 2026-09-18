@@ -1280,12 +1280,31 @@ def test_v7_claim_creation_route_keeps_readiness_under_runtime_control(
     assert proposal.state_changes == []
 
 
-def test_intake_field_contract_uses_the_published_branch_rule_version() -> None:
+def test_intake_field_contract_uses_the_runtime_policy_registry() -> None:
+    context = _context('My car was rear-ended this morning.')
+    assert context.runtime_policy is not None
+    branch_evaluation = context.runtime_policy.branch_evaluator().evaluate(
+        context.claim,
+        latest_message=context.message_text,
+        recomputation_reason='test',
+    )
+    context = replace(context, branch_evaluation=branch_evaluation)
+
+    plan = plan_model_turn(context)
+
+    assert plan is not None
+    assert plan.route.task is TurnTask.INTAKE
+    assert plan.field_contract is not None
+    assert plan.field_contract.registry_version == branch_evaluation.field_registry_version
+    assert plan.field_contract.branch_rules_version == branch_evaluation.branch_rules_version
+
+
+def test_intake_field_contract_rejects_a_mismatched_branch_registry() -> None:
     branch_evaluation = BranchEvaluationResult(
         claim_id='clm_v7',
         evaluated_against_claim_revision=1,
         field_registry_version='5',
-        branch_rules_version='published-branch-rules-v7',
+        branch_rules_version='unrelated-branch-rules-v7',
         selected_family='motor',
         requirements=RequirementResolution(ready=False),
         recomputation_reason='test',
@@ -1295,12 +1314,8 @@ def test_intake_field_contract_uses_the_published_branch_rule_version() -> None:
         branch_evaluation=branch_evaluation,
     )
 
-    plan = plan_model_turn(context)
-
-    assert plan is not None
-    assert plan.route.task is TurnTask.INTAKE
-    assert plan.field_contract is not None
-    assert plan.field_contract.branch_rules_version == branch_evaluation.branch_rules_version
+    with pytest.raises(ValueError, match='branch-rule versions do not match'):
+        plan_model_turn(context)
 
 
 @pytest.mark.parametrize(

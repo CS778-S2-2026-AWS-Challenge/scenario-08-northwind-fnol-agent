@@ -1,14 +1,13 @@
 """Compose one fully validated v7 model turn before transport."""
 
 import json
-from dataclasses import replace
 
 from backend.domain.agent_context_runtime import (
     ContextBudgetPolicy,
     PlannedModelTurn,
     VerifiedConversationSummary,
 )
-from backend.domain.branch_registry import BranchRuleEvaluator, build_default_registry
+from backend.domain.branch_registry import BranchRuleEvaluator
 from backend.domain.configuration import ModelRuntimeConfiguration
 from backend.domain.model_gateway import ModelTool
 from backend.domain.prompt_pack import PromptPackManifest
@@ -143,17 +142,19 @@ def plan_model_turn(
         bundle = compose_prompt(route)
         schema = load_response_schema(profile.schema_id)
     if profile.schema_id == 'claimant.intake-patch.v1':
-        branch_evaluation = context.branch_evaluation or BranchRuleEvaluator().evaluate(
+        branch_evaluator = (
+            runtime_policy.branch_evaluator()
+            if runtime_policy is not None
+            else BranchRuleEvaluator()
+        )
+        branch_evaluation = context.branch_evaluation or branch_evaluator.evaluate(
             context.claim,
             latest_message=context.message_text,
             recomputation_reason='model_turn_contract',
         )
         field_contract = compile_turn_field_contract(
             branch_evaluation,
-            replace(
-                build_default_registry(),
-                branch_rules_version=branch_evaluation.branch_rules_version,
-            ),
+            branch_evaluator.registry,
         )
         schema = bind_provider_schema(schema, field_contract)
     schema = json.loads(json.dumps(schema, separators=(',', ':'), sort_keys=True))

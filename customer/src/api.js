@@ -161,8 +161,8 @@ export async function streamClaimUpdates({
           .join('\n')
         if (['claim.updated', 'agent.turn.progress'].includes(event) && data) {
           try {
-            if (cursor && !/^\d+$/.test(cursor)) onCursor?.(cursor)
             await onEvent({ ...JSON.parse(data), event_type: event, cursor })
+            if (cursor && !/^\d+$/.test(cursor)) onCursor?.(cursor)
           } catch (error) {
             if (error instanceof SyntaxError) {
               throw streamError(
