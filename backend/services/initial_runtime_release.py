@@ -194,6 +194,20 @@ def _published_exact(
     return None
 
 
+def _published_prompt_version(
+    repository: ConfigurationRepository,
+    release: ReleaseSetRecord,
+) -> str | None:
+    reference = release.configuration_refs.get('agent_instruction')
+    if reference is None:
+        return None
+    record = repository.get(reference.configuration_id, reference.revision)
+    if record is None or record.state is not ConfigurationState.PUBLISHED:
+        return None
+    prompt_version = record.values.get('prompt_version')
+    return prompt_version if isinstance(prompt_version, str) else None
+
+
 def _publish_configuration(
     repository: ConfigurationRepository,
     *,
@@ -255,10 +269,11 @@ def install_initial_runtime_release(
     releases: ReleaseSetRepository,
     knowledge: KnowledgeAdminRepository,
 ) -> ReleaseSetRecord | None:
-    """Install the reviewed initial Release Set only for a never-initialised scope.
+    """Install or safely refresh the repository-defined Agent Runtime release.
 
-    Existing Release Set history is authoritative, including an intentionally withdrawn
-    or inactive history. This function never repairs or overrides that history.
+    A never-initialised scope receives the reviewed initial release. An active release created by
+    this initializer may advance to the current checked-in configuration within the same Prompt
+    generation. Operator-authored, inactive, or different-generation history remains authoritative.
 
     Args:
         settings: Runtime scope and repository-approved model bindings.
@@ -267,8 +282,8 @@ def install_initial_runtime_release(
         knowledge: Control Plane knowledge repository used to validate release references.
 
     Returns:
-        The active initial release, the existing active release, or ``None`` when the
-        scope has inactive Release Set history that must remain under operator control.
+        The installed or upgraded release, the untouched active release, or ``None`` when inactive
+        Release Set history remains under operator control.
 
     Raises:
         ValueError: If the repository model catalogue omits a required current profile.
@@ -278,8 +293,22 @@ def install_initial_runtime_release(
         environment=settings.environment,
         runtime_profile=settings.data_runtime_profile.value,
     )
+    active_release = releases.active(
+        settings.environment,
+        settings.data_runtime_profile.value,
+    )
     if existing:
-        return releases.active(settings.environment, settings.data_runtime_profile.value)
+        if active_release is None or active_release.author != _AUTHOR:
+            return active_release
+
+        desired_prompt_versions = {
+            binding.prompt_version for binding in settings.model_runtime_bindings
+        }
+        if len(desired_prompt_versions) != 1:
+            return active_release
+        desired_prompt_version = next(iter(desired_prompt_versions))
+        if _published_prompt_version(configurations, active_release) != desired_prompt_version:
+            return active_release
 
     bindings = settings.model_runtime_bindings
     prompt_versions = {binding.prompt_version for binding in bindings}
@@ -310,6 +339,16 @@ def install_initial_runtime_release(
             bindings=bindings,
         )
 
+    configuration_refs = {
+        slot: ConfigurationReference(
+            configuration_id=record.configuration_id,
+            revision=record.revision,
+        )
+        for slot, record in records.items()
+    }
+    if active_release is not None and active_release.configuration_refs == configuration_refs:
+        return active_release
+
     created = release_set_service.create(
         releases,
         configurations,
@@ -317,13 +356,9 @@ def install_initial_runtime_release(
         ReleaseSetCreate(
             environment=settings.environment,
             runtime_profile=settings.data_runtime_profile.value,
-            configuration_refs={
-                slot: ConfigurationReference(
-                    configuration_id=record.configuration_id,
-                    revision=record.revision,
-                )
-                for slot, record in records.items()
-            },
+            configuration_refs=configuration_refs,
+            integration_refs=(active_release.integration_refs if active_release else {}),
+            knowledge_refs=(active_release.knowledge_refs if active_release else {}),
             reason='Install the repository-defined initial Agent Runtime release.',
         ),
         _AUTHOR,
@@ -351,4 +386,7 @@ def install_initial_runtime_release(
         'Activate the repository-defined initial Agent Runtime release.',
         _AUTHOR,
         validated.revision,
+        expected_previous_release_set_id=(
+            active_release.release_set_id if active_release is not None else None
+        ),
     )

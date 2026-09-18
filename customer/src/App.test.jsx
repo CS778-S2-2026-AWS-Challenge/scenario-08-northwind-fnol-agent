@@ -206,6 +206,16 @@ describe('claimant intake projection', () => {
       models: [
         { id: 'qwen-local', label: 'qwen3.8-27b', availability: 'available' },
         { id: 'nowcoding-gpt55', label: 'gpt-5.5', availability: 'available' },
+        {
+          id: 'bedrock-nova2-lite',
+          label: 'global.amazon.nova-2-lite-v1:0',
+          availability: 'unavailable',
+        },
+        {
+          id: 'google-gemini35-flash-lite',
+          label: 'gemini-3.5-flash-lite',
+          availability: 'available',
+        },
       ],
       default_model_profile_id: 'qwen-local',
     })
@@ -229,6 +239,15 @@ describe('claimant intake projection', () => {
 
     await user.click(model)
     expect(screen.getByRole('listbox', { name: 'Model' })).toBeInTheDocument()
+    expect(screen.getByRole('option', {
+      name: 'global.amazon.nova-2-lite-v1:0',
+    })).toBeDisabled()
+    await user.click(screen.getByRole('option', {
+      name: 'gemini-3.5-flash-lite',
+    }))
+    expect(model).toHaveTextContent('gemini-3.5-flash-lite')
+
+    await user.click(model)
     await user.click(screen.getByRole('option', { name: 'gpt-5.5' }))
     expect(model).toHaveTextContent('gpt-5.5')
 

@@ -203,6 +203,122 @@ def test_existing_release_history_is_never_repaired_or_overwritten() -> None:
     ]
 
 
+def test_repository_managed_v7_release_upgrades_to_current_catalogue() -> None:
+    configurations = ConfigurationRepository()
+    releases = ReleaseSetRepository()
+    knowledge = KnowledgeAdminRepository()
+    original = install_initial_runtime_release(_settings(), configurations, releases, knowledge)
+    assert original is not None
+    stale_refs = {
+        slot: reference
+        for slot, reference in original.configuration_refs.items()
+        if slot not in {'model:bedrock-nova2-lite', 'model:google-gemini35-flash-lite'}
+    }
+    stale = original.model_copy(
+        update={
+            'revision': original.revision + 1,
+            'configuration_refs': stale_refs,
+            'updated_at': original.updated_at + timedelta(seconds=1),
+        }
+    )
+    releases.save(stale, original.revision)
+
+    with pytest.raises(RuntimeConfigurationResolutionError, match='model catalogue'):
+        RuntimeAgentPolicyResolver(
+            RuntimeConfigurationResolver(
+                configurations,
+                releases,
+                environment='test',
+                runtime_profile='fixture',
+            )
+        ).resolve_for_turn()
+
+    upgraded = install_initial_runtime_release(_settings(), configurations, releases, knowledge)
+    repeated = install_initial_runtime_release(_settings(), configurations, releases, knowledge)
+
+    assert upgraded is not None
+    assert repeated is not None
+    assert upgraded.release_set_id != original.release_set_id
+    assert repeated.release_set_id == upgraded.release_set_id
+    assert set(upgraded.configuration_refs) == set(original.configuration_refs)
+    superseded = releases.get(original.release_set_id)
+    assert superseded is not None
+    assert superseded.state is ReleaseSetState.SUPERSEDED
+    assert len(releases.list_release_sets('test', 'fixture')) == 2
+    assert len(configurations.list_configurations()) == 8
+    policy = RuntimeAgentPolicyResolver(
+        RuntimeConfigurationResolver(
+            configurations,
+            releases,
+            environment='test',
+            runtime_profile='fixture',
+        )
+    ).resolve_for_turn()
+    assert policy is not None
+    assert set(policy.tool_policy.provider_capabilities) == {
+        'qwen-local',
+        'nowcoding-gpt55',
+        'bedrock-nova2-lite',
+        'google-gemini35-flash-lite',
+    }
+
+
+def test_repository_managed_release_does_not_cross_prompt_generations() -> None:
+    v6_bindings = (
+        _binding('qwen-local', prompt_version='northwind-fnol-claimant-v6'),
+        _binding('nowcoding-gpt55', prompt_version='northwind-fnol-claimant-v6'),
+    )
+    v6_settings = replace(
+        _settings(),
+        model_runtime_bindings=v6_bindings,
+        model_base_url=v6_bindings[0].base_url,
+        model_identifier=v6_bindings[0].model_identifier,
+    )
+    configurations = ConfigurationRepository()
+    releases = ReleaseSetRepository()
+    knowledge = KnowledgeAdminRepository()
+    v6_release = install_initial_runtime_release(
+        v6_settings,
+        configurations,
+        releases,
+        knowledge,
+    )
+    assert v6_release is not None
+
+    result = install_initial_runtime_release(_settings(), configurations, releases, knowledge)
+
+    assert result is not None
+    assert result.release_set_id == v6_release.release_set_id
+    assert len(releases.list_release_sets('test', 'fixture')) == 1
+    assert len(configurations.list_configurations()) == 6
+
+
+def test_operator_owned_active_release_is_not_replaced() -> None:
+    configurations = ConfigurationRepository()
+    releases = ReleaseSetRepository()
+    knowledge = KnowledgeAdminRepository()
+    releases.create(
+        ReleaseSetRecord(
+            release_set_id='rel_operator_active',
+            environment='test',
+            runtime_profile='fixture',
+            revision=1,
+            state=ReleaseSetState.PUBLISHED,
+            configuration_refs={},
+            author='operator',
+            reason='The operator owns this active release.',
+            updated_at=datetime.now(UTC),
+        )
+    )
+
+    result = install_initial_runtime_release(_settings(), configurations, releases, knowledge)
+
+    assert result is not None
+    assert result.release_set_id == 'rel_operator_active'
+    assert configurations.list_configurations() == []
+    assert len(releases.list_release_sets('test', 'fixture')) == 1
+
+
 def test_initial_release_rejects_missing_or_mixed_model_catalogues() -> None:
     base = _settings()
     missing_model = replace(
