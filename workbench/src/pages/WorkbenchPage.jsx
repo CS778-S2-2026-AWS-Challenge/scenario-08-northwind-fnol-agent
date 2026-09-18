@@ -859,6 +859,11 @@ export default function WorkbenchPage() {
   }
 
   useEffect(() => {
+    // A token change defines a new staff authentication context. Never reuse
+    // replay state that was acknowledged under a previous principal.
+    realtimeCursorRef.current = null
+    realtimeSeenEventIdsRef.current.clear()
+
     const controller = new AbortController()
     let active = true
     let reconnectDelay = 1000
@@ -906,10 +911,45 @@ export default function WorkbenchPage() {
       if (result?.status === 'failed') throw result.error
     }
 
-    async function refreshNamedResource(resource, id) {
+    async function refreshClaimResource(id, minimumRevision = null) {
+      const handlers = realtimeHandlersRef.current
+      await handlers.refreshDetail(id, { propagateError: true })
+
+      if (!active || currentClaimIdRef.current !== id) {
+        throw readbackSupersededError('Claim', id)
+      }
+
+      const current = detailRef.current
+      if (!current || current.claim_id !== id) {
+        throw readbackSupersededError('Claim', id)
+      }
+      if (
+        minimumRevision !== null
+        && (!Number.isInteger(current.revision) || current.revision < minimumRevision)
+      ) {
+        throw readbackRevisionError(id, minimumRevision, current.revision)
+      }
+
+      await Promise.all([
+        handlers.loadResource(
+          'fields',
+          id,
+          () => workbenchApi.fields(token, id),
+          { propagateError: true },
+        ),
+        handlers.loadResource(
+          'sessions',
+          id,
+          () => workbenchApi.sessions(token, id),
+          { propagateError: true },
+        ),
+      ])
+    }
+
+    async function refreshNamedResource(resource, id, minimumRevision = null) {
       const handlers = realtimeHandlersRef.current
       if (resource === 'claim') {
-        await handlers.refreshDetail(id, { propagateError: true })
+        await refreshClaimResource(id, minimumRevision)
         return
       }
       if (resource === 'handoffs') {
@@ -996,6 +1036,8 @@ export default function WorkbenchPage() {
 
       const resources = new Set(delivery.data?.resources || [])
       const eventClaimId = delivery.data?.claim_id
+      const rawEventRevision = Number(delivery.data?.claim_revision)
+      const eventRevision = Number.isInteger(rawEventRevision) ? rawEventRevision : null
       const openClaimId = currentClaimIdRef.current
       const refreshes = []
 
@@ -1016,7 +1058,9 @@ export default function WorkbenchPage() {
 
       if (openClaimId && eventClaimId === openClaimId) {
         if (resources.has('claim')) {
-          refreshes.push(refreshNamedResource('claim', openClaimId))
+          refreshes.push(
+            refreshNamedResource('claim', openClaimId, eventRevision),
+          )
         }
         if (resources.has('handoffs')) {
           refreshes.push(refreshNamedResource('handoffs', openClaimId))
@@ -1067,7 +1111,10 @@ export default function WorkbenchPage() {
 
     async function connect() {
       while (active && !controller.signal.aborted) {
-        const recoverOnOpen = needsResyncSnapshot
+        const recoverOnOpen = (
+          needsResyncSnapshot
+          || realtimeCursorRef.current === null
+        )
         try {
           await workbenchApi.realtimeEvents(token, {
             cursor: recoverOnOpen ? null : realtimeCursorRef.current,
