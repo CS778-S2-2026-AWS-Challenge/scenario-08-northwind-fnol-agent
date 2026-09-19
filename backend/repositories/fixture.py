@@ -3318,9 +3318,7 @@ class FixtureRepository(PersistenceRepository):
         ):
             raise KeyError(claim.claim_id)
         prepared_audit = (
-            self._prepare_audit_events(claim, (audit_event,))
-            if audit_event is not None
-            else ()
+            self._prepare_audit_events(claim, (audit_event,)) if audit_event is not None else ()
         )
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
         existing_idempotency = self._idempotency.get(lookup)
@@ -3487,9 +3485,7 @@ class FixtureRepository(PersistenceRepository):
         if existing is not None and existing.request_fingerprint != idempotency.request_fingerprint:
             raise IdempotencyConflict(idempotency.key)
         prepared_audit = (
-            self._prepare_audit_events(claim, (audit_event,))
-            if audit_event is not None
-            else ()
+            self._prepare_audit_events(claim, (audit_event,)) if audit_event is not None else ()
         )
         excluded = (
             frozenset({RealtimeResource.MESSAGES})
