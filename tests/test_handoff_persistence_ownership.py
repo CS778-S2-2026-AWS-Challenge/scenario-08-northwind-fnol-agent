@@ -13,7 +13,14 @@ from backend.api import workbench as workbench_api
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.domain.audit import AuditEventEnvelope, AuditSubject, AuditSubjectType
-from backend.domain.models import HandoffRecord, HandoffStatus, WorkingClaim
+from backend.domain.models import (
+    ClaimCollaborationRequest,
+    CollaborationRequestKind,
+    CollaborationRequestStatus,
+    HandoffRecord,
+    HandoffStatus,
+    WorkingClaim,
+)
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.handoff_guard import (
     HandoffPersistenceConflict,
@@ -135,6 +142,88 @@ def handoff_audit_events(
         for event in repository.list_audit_events_internal(subject)
         if event.event_id.startswith('aud_handoff_')
     ]
+
+
+def test_handoff_guard_fails_closed_without_matching_atomic_audit(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, handoff_id = create_claim_and_handoff(
+        client,
+        auth_headers,
+        key_prefix='handoff-audit-guard',
+    )
+    claim = repository.get_claim_internal(claim_id)
+    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    assert claim is not None
+    assert handoff is not None
+
+    guarded = HandoffPersistenceGuard(repository)
+    updated_claim = claim.model_copy(update={'revision': claim.revision + 1})
+    accepted_handoff = handoff.model_copy(
+        update={
+            'status': HandoffStatus.ACCEPTED,
+            'assigned_to': 'stf_demo',
+            'accepted_at': claim.updated_at,
+        }
+    )
+    staff_idempotency = handoff_retry(
+        claim_id,
+        handoff_id,
+        key='handoff-audit-guard-staff',
+    )
+
+    with pytest.raises(HandoffPersistenceConflict):
+        guarded.save_staff_mutation(
+            updated_claim,
+            claim.revision,
+            staff_idempotency,
+            handoff=accepted_handoff,
+        )
+
+    malformed_audit = handoff_audit(
+        updated_claim,
+        accepted_handoff,
+        staff_idempotency,
+    ).model_copy(update={'claim_revision': updated_claim.revision + 10})
+    with pytest.raises(HandoffPersistenceConflict):
+        guarded.save_staff_mutation(
+            updated_claim,
+            claim.revision,
+            staff_idempotency,
+            handoff=accepted_handoff,
+            audit_event=malformed_audit,
+        )
+
+    ownership_request = ClaimCollaborationRequest(
+        request_id='col_handoff_audit_guard',
+        claim_id=claim_id,
+        kind=CollaborationRequestKind.REQUEUE,
+        status=CollaborationRequestStatus.ACCEPTED,
+        requested_by='stf_demo',
+        primary_owner_id='stf_demo',
+        reason='Return the synthetic Claim to the queue.',
+        created_at=claim.updated_at,
+        resolved_by='stf_demo',
+        resolved_at=claim.updated_at,
+    )
+    ownership_idempotency = handoff_retry(
+        claim_id,
+        handoff_id,
+        key='handoff-audit-guard-ownership',
+    )
+    with pytest.raises(HandoffPersistenceConflict):
+        guarded.save_ownership_mutation(
+            updated_claim,
+            claim.revision,
+            ownership_idempotency,
+            ownership_request,
+            handoff=handoff,
+        )
+
+    assert repository.get_claim_internal(claim_id) == claim
+    assert repository.get_handoff(claim_id, handoff_id, 'cus_demo') == handoff
 
 
 def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
