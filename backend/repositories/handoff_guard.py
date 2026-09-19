@@ -258,9 +258,6 @@ class HandoffPersistenceGuard:
         if handoff is not None:
             if not isinstance(handoff, HandoffRecord):
                 raise _conflict('The handoff mutation payload is invalid.')
-            audit_event = records.get('audit_event')
-            if not isinstance(audit_event, AuditEventEnvelope):
-                raise _conflict('A handoff staff mutation requires its atomic audit fact.')
             _validate_staff_update(
                 self._repository,
                 claim,
@@ -268,6 +265,9 @@ class HandoffPersistenceGuard:
                 handoff,
                 idempotency,
             )
+            audit_event = records.get('audit_event')
+            if not isinstance(audit_event, AuditEventEnvelope):
+                raise _conflict('A handoff staff mutation requires its atomic audit fact.')
             _validate_handoff_audit(claim, handoff, idempotency, audit_event)
         self._repository.save_staff_mutation(
             claim,
