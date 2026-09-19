@@ -10,8 +10,10 @@ from backend.api import evidence as evidence_api
 from backend.api import handoffs as handoffs_api
 from backend.api import integrations as integrations_api
 from backend.api import workbench as workbench_api
+from backend.core.auth import Principal
 from backend.core.errors import ApiError
-from backend.domain.models import HandoffStatus
+from backend.domain.audit import AuditEventEnvelope, AuditSubject, AuditSubjectType
+from backend.domain.models import HandoffRecord, HandoffStatus, WorkingClaim
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.handoff_guard import (
     HandoffPersistenceConflict,
@@ -21,6 +23,7 @@ from backend.repositories.handoff_guard import (
 )
 from backend.repositories.protocols import IdempotencyRecord, RevisionConflict
 from backend.services.demo_reset import reset_demo_components
+from backend.services.handoff_audit import build_handoff_audit_event
 
 
 def create_claim_and_handoff(
@@ -93,6 +96,45 @@ def handoff_retry(
         session_id='',
         handoff_id=handoff_id,
     )
+
+
+def handoff_audit(
+    claim: WorkingClaim,
+    handoff: HandoffRecord,
+    idempotency: IdempotencyRecord,
+    *,
+    actor_type: str = 'staff',
+) -> AuditEventEnvelope:
+    return build_handoff_audit_event(
+        principal=Principal(
+            subject=idempotency.actor_id,
+            actor_type=actor_type,
+            auth_source=f'test:{actor_type}',
+        ),
+        claim=claim,
+        handoff=handoff,
+        route=idempotency.route,
+        idempotency_key=idempotency.key,
+        required_permission='test.handoff',
+        reason='Test handoff mutation.',
+        created_at=claim.updated_at,
+    )
+
+
+def handoff_audit_events(
+    repository: FixtureRepository,
+    claim_id: str,
+) -> list[AuditEventEnvelope]:
+    subject = AuditSubject(
+        subject_type=AuditSubjectType.CLAIM,
+        subject_id=claim_id,
+        claim_id=claim_id,
+    )
+    return [
+        event
+        for event in repository.list_audit_events_internal(subject)
+        if event.event_id.startswith('aud_handoff_')
+    ]
 
 
 def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
@@ -592,29 +634,37 @@ def test_guard_rejects_invalid_handoff_creation_records(
     guarded = guarded_handoff_repository(repository)
     next_claim = claim.model_copy(update={'revision': claim.revision + 1})
     fresh = stored.model_copy(update={'handoff_id': 'hnd_fresh'})
+    wrong_retry = handoff_retry(claim_id, 'hnd_wrong')
+    fresh_retry = handoff_retry(claim_id, 'hnd_fresh')
+    stored_retry = handoff_retry(claim_id, handoff_id)
 
     with pytest.raises(HandoffPersistenceConflict):
         guarded.save_handoff_mutation(
             next_claim,
             claim.revision,
             fresh,
-            handoff_retry(claim_id, 'hnd_wrong'),
+            wrong_retry,
+            handoff_audit(next_claim, fresh, wrong_retry),
         )
 
+    assigned = fresh.model_copy(update={'assigned_to': 'stf_demo'})
     with pytest.raises(HandoffPersistenceConflict):
         guarded.save_handoff_mutation(
             next_claim,
             claim.revision,
-            fresh.model_copy(update={'assigned_to': 'stf_demo'}),
-            handoff_retry(claim_id, 'hnd_fresh'),
+            assigned,
+            fresh_retry,
+            handoff_audit(next_claim, assigned, fresh_retry),
         )
 
+    accepted_without_owner = fresh.model_copy(update={'status': HandoffStatus.ACCEPTED})
     with pytest.raises(HandoffPersistenceConflict):
         guarded.save_handoff_mutation(
             next_claim,
             claim.revision,
-            fresh.model_copy(update={'status': HandoffStatus.ACCEPTED}),
-            handoff_retry(claim_id, 'hnd_fresh'),
+            accepted_without_owner,
+            fresh_retry,
+            handoff_audit(next_claim, accepted_without_owner, fresh_retry),
         )
 
     with pytest.raises(HandoffPersistenceConflict):
@@ -622,7 +672,8 @@ def test_guard_rejects_invalid_handoff_creation_records(
             next_claim,
             claim.revision,
             stored,
-            handoff_retry(claim_id, handoff_id),
+            stored_retry,
+            handoff_audit(next_claim, stored, stored_retry),
         )
 
 
