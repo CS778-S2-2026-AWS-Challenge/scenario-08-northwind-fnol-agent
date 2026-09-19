@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 import pytest
 
 from backend.core.auth import Principal
+from backend.domain.audit import AuditEventEnvelope
 from backend.domain.models import (
     ActorType,
     AgentAction,
@@ -90,7 +91,7 @@ def _handoff_audit(
     claim: WorkingClaim,
     handoff: HandoffRecord,
     idempotency: IdempotencyRecord,
-):
+) -> AuditEventEnvelope:
     return build_handoff_audit_event(
         principal=Principal(
             subject=idempotency.actor_id,
