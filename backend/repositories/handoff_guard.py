@@ -1,11 +1,22 @@
 from typing import Any, Protocol, cast, runtime_checkable
 
+from backend.domain.audit import (
+    AuditEventEnvelope,
+    AuditEventType,
+    AuditOutcome,
+    AuditPermissionOutcome,
+    AuditSubjectType,
+    AuditVisibility,
+)
 from backend.domain.models import (
     BranchEvaluationRecord,
+    ClaimCollaborationRequest,
+    ClaimCoworkerRecord,
     HandoffRecord,
     HandoffStatus,
     WorkingClaim,
 )
+from backend.domain.staff_agent import StaffAgentExecutionRecord
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -74,6 +85,30 @@ def _validate_parent_revision(
         raise KeyError(claim.claim_id)
     if claim.revision != expected_revision + 1:
         raise _conflict('A handoff mutation must advance the parent claim revision exactly once.')
+
+
+def _validate_handoff_audit(
+    claim: WorkingClaim,
+    handoff: HandoffRecord,
+    idempotency: IdempotencyRecord,
+    audit_event: AuditEventEnvelope,
+) -> None:
+    if (
+        audit_event.event_type is not AuditEventType.ACTION_COMPLETED
+        or audit_event.outcome is not AuditOutcome.SUCCEEDED
+        or audit_event.subject.subject_type is not AuditSubjectType.CLAIM
+        or audit_event.subject.subject_id != claim.claim_id
+        or audit_event.subject.claim_id != claim.claim_id
+        or audit_event.claim_revision != claim.revision
+        or audit_event.actor.actor_id != idempotency.actor_id
+        or audit_event.idempotency_key != idempotency.key
+        or audit_event.correlation_id != idempotency.key
+        or handoff.handoff_id not in audit_event.source_refs
+        or audit_event.permission is None
+        or audit_event.permission.outcome is not AuditPermissionOutcome.AUTHORISED
+        or audit_event.visibility not in {AuditVisibility.INTERNAL_ONLY, AuditVisibility.AUDIT_ONLY}
+    ):
+        raise _conflict('The handoff audit fact does not match the authorised mutation.')
 
 
 def _validate_creation(
@@ -198,14 +233,17 @@ class HandoffPersistenceGuard:
         expected_revision: int,
         handoff: HandoffRecord,
         idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
         branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         _validate_creation(self._repository, claim, expected_revision, handoff, idempotency)
+        _validate_handoff_audit(claim, handoff, idempotency, audit_event)
         self._repository.save_handoff_mutation(
             claim,
             expected_revision,
             handoff,
             idempotency,
+            audit_event,
             branch_evaluation,
         )
 
@@ -227,11 +265,49 @@ class HandoffPersistenceGuard:
                 handoff,
                 idempotency,
             )
+            audit_event = records.get('audit_event')
+            if not isinstance(audit_event, AuditEventEnvelope):
+                raise _conflict('A handoff staff mutation requires its atomic audit fact.')
+            _validate_handoff_audit(claim, handoff, idempotency, audit_event)
         self._repository.save_staff_mutation(
             claim,
             expected_revision,
             idempotency,
             **records,
+        )
+
+    def save_ownership_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+        collaboration_request: ClaimCollaborationRequest,
+        coworkers: list[ClaimCoworkerRecord] | None = None,
+        handoff: HandoffRecord | None = None,
+        audit_event: AuditEventEnvelope | None = None,
+        staff_agent_execution: StaffAgentExecutionRecord | None = None,
+    ) -> None:
+        if handoff is not None:
+            _validate_parent_revision(self._repository, claim, expected_revision)
+            stored = self._repository.get_handoff(
+                claim.claim_id,
+                handoff.handoff_id,
+                claim.customer_id,
+            )
+            if stored is None or handoff.claim_id != claim.claim_id:
+                raise _conflict('An ownership mutation can change only an existing Claim handoff.')
+            if audit_event is None:
+                raise _conflict('A handoff ownership mutation requires its atomic audit fact.')
+            _validate_handoff_audit(claim, handoff, idempotency, audit_event)
+        self._repository.save_ownership_mutation(
+            claim,
+            expected_revision,
+            idempotency,
+            collaboration_request,
+            coworkers=coworkers,
+            handoff=handoff,
+            audit_event=audit_event,
+            staff_agent_execution=staff_agent_execution,
         )
 
 
