@@ -19,8 +19,10 @@ from backend.adapters.claims_service import (
     MockAssessorServiceAdapter,
     ScriptedAssessorFailure,
 )
+from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.core.runtime_profiles import RuntimeCapabilityStatus
+from backend.domain.audit import AuditSubject, AuditSubjectType
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
     ASSESSOR_REQUESTED_ACTION,
@@ -122,6 +124,7 @@ from backend.repositories.protocols import (
     with_staff_agent_source,
 )
 from backend.services.external_service_entry import resolve_external_service_entry
+from backend.services.handoff_audit import build_handoff_audit_event
 from backend.services.integrations import (
     assessor_operation_id,
     reconcile_assessor_routing,
@@ -532,6 +535,70 @@ def mutation_contract_repository(request: pytest.FixtureRequest) -> PersistenceR
     repository = MongoDBRepository(mongomock.MongoClient(), 'mutation_contract')
     repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
     return repository
+
+
+def test_handoff_mutation_persists_atomic_audit_for_fixture_and_mongo(
+    mutation_contract_repository: PersistenceRepository,
+) -> None:
+    repository = mutation_contract_repository
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    updated = claim.model_copy(update={'revision': 2})
+    handoff = _handoff(updated)
+    route = f'/api/v1/claims/{claim.claim_id}/support-requests'
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route=route,
+        key='handoff-audit-parity',
+        request_fingerprint='handoff-audit-parity',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        handoff_id=handoff.handoff_id,
+    )
+    audit_event = build_handoff_audit_event(
+        principal=Principal(
+            subject=claim.customer_id,
+            actor_type='claimant',
+            auth_source='test:claimant',
+        ),
+        claim=updated,
+        handoff=handoff,
+        route=route,
+        idempotency_key=idempotency.key,
+        required_permission='claimant_support_request',
+        reason='Claimant support handoff queued.',
+        created_at=claim.created_at,
+    )
+
+    repository.save_handoff_mutation(
+        updated,
+        1,
+        handoff,
+        idempotency,
+        audit_event,
+    )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == updated
+    assert repository.get_handoff(claim.claim_id, handoff.handoff_id, claim.customer_id) == handoff
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        == idempotency
+    )
+    subject = AuditSubject(
+        subject_type=AuditSubjectType.CLAIM,
+        subject_id=claim.claim_id,
+        claim_id=claim.claim_id,
+    )
+    assert repository.list_audit_events_internal(subject) == [audit_event]
+    realtime_event = repository.replay_realtime_events(None, limit=20)[-1]
+    assert realtime_event.claim_revision == updated.revision
+    assert realtime_event.operation_correlation == idempotency.key
+    assert RealtimeResource.HANDOFFS in realtime_event.resources
 
 
 @pytest.mark.parametrize(
@@ -3457,3 +3524,112 @@ def test_mongodb_admits_one_dispatch_reserver_for_one_request(
         repository.reserve_external_dispatch(
             'clm_missing', request.request_id, claim.customer_id, taken_at, operation_id
         )
+
+
+@pytest.mark.integration
+def test_mongodb_handoff_audit_insert_failure_rolls_back_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uri = os.environ.get(
+        'NORTHWIND_MONGODB_TEST_URI',
+        'mongodb://localhost:27017/?replicaSet=rs0&directConnection=true',
+    )
+    client: MongoClient[Any] = MongoClient(uri, serverSelectionTimeoutMS=750)
+    database_name = (
+        f'northwind_handoff_audit_rollback_{datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")}'
+    )
+    connected = False
+    try:
+        try:
+            hello = client.admin.command('hello')
+            connected = True
+        except (PyMongoError, ValueError) as error:
+            pytest.skip(f'real MongoDB replica set unavailable: {type(error).__name__}')
+        if not hello.get('isWritablePrimary', False):
+            pytest.skip('real MongoDB replica set has no writable primary')
+
+        repository = MongoDBRepository(client, database_name)
+        claim = _claim().model_copy(update={'claim_id': 'clm_handoff_audit_rollback'})
+        session = _session(claim).model_copy(
+            update={
+                'claim_id': claim.claim_id,
+                'customer_id': claim.customer_id,
+                'session_id': claim.active_session_id,
+            }
+        )
+        repository.create_claim(claim, session)
+        events_before = repository.replay_realtime_events(None, limit=20)
+        updated = claim.model_copy(update={'revision': 2})
+        handoff = _handoff(updated).model_copy(update={'handoff_id': 'hnd_audit_rollback'})
+        route = f'/api/v1/claims/{claim.claim_id}/support-requests'
+        idempotency = IdempotencyRecord(
+            actor_id=claim.customer_id,
+            route=route,
+            key='handoff-audit-rollback',
+            request_fingerprint='handoff-audit-rollback',
+            claim_id=claim.claim_id,
+            session_id=session.session_id,
+            handoff_id=handoff.handoff_id,
+        )
+        audit_event = build_handoff_audit_event(
+            principal=Principal(
+                subject=claim.customer_id,
+                actor_type='claimant',
+                auth_source='test:claimant',
+            ),
+            claim=updated,
+            handoff=handoff,
+            route=route,
+            idempotency_key=idempotency.key,
+            required_permission='claimant_support_request',
+            reason='Claimant support handoff queued.',
+            created_at=claim.created_at,
+        )
+
+        def reject_audit_insert(
+            _event: object,
+            *,
+            mongo_session: object,
+        ) -> None:
+            del mongo_session
+            raise RuntimeError('forced handoff audit insert failure')
+
+        monkeypatch.setattr(repository, '_insert_audit_event', reject_audit_insert)
+
+        with pytest.raises(RuntimeError, match='forced handoff audit insert failure'):
+            repository.save_handoff_mutation(
+                updated,
+                1,
+                handoff,
+                idempotency,
+                audit_event,
+            )
+
+        assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+        assert (
+            repository.get_handoff(
+                claim.claim_id,
+                handoff.handoff_id,
+                claim.customer_id,
+            )
+            is None
+        )
+        assert (
+            repository.find_idempotency(
+                idempotency.actor_id,
+                idempotency.route,
+                idempotency.key,
+            )
+            is None
+        )
+        subject = AuditSubject(
+            subject_type=AuditSubjectType.CLAIM,
+            subject_id=claim.claim_id,
+            claim_id=claim.claim_id,
+        )
+        assert repository.list_audit_events_internal(subject) == []
+        assert repository.replay_realtime_events(None, limit=20) == events_before
+    finally:
+        if connected:
+            client.drop_database(database_name)
+        client.close()

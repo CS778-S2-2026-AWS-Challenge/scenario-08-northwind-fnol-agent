@@ -43,6 +43,7 @@ from backend.services.evidence_handoff import (
     default_handoff_visibility,
 )
 from backend.services.external_services import claimant_assessor_action, claimant_next_step
+from backend.services.handoff_audit import build_handoff_audit_event
 from backend.services.handoff_context import build_handoff_transfer_context
 from backend.services.runtime_integrations import RuntimeIntegrationPolicy
 from backend.services.support import (
@@ -447,12 +448,24 @@ def create_support_request(
         session_id=claim.active_session_id or '',
         handoff_id=handoff.handoff_id,
     )
+    audit_event = build_handoff_audit_event(
+        principal=principal,
+        claim=updated_claim,
+        handoff=handoff,
+        route=route,
+        idempotency_key=key,
+        required_permission='claimant_support_request',
+        reason='Claimant support handoff queued.',
+        created_at=handoff.created_at,
+        source_refs=handoff.packet.source_refs,
+    )
     try:
         repository.save_handoff_mutation(
             updated_claim,
             expected_revision,
             handoff,
             idempotency,
+            audit_event,
             branch_evaluation=build_applied_branch_evaluation(
                 updated_claim,
                 repository=repository,

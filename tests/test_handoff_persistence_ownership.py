@@ -10,8 +10,10 @@ from backend.api import evidence as evidence_api
 from backend.api import handoffs as handoffs_api
 from backend.api import integrations as integrations_api
 from backend.api import workbench as workbench_api
+from backend.core.auth import Principal
 from backend.core.errors import ApiError
-from backend.domain.models import HandoffStatus
+from backend.domain.audit import AuditEventEnvelope, AuditSubject, AuditSubjectType
+from backend.domain.models import HandoffRecord, HandoffStatus, WorkingClaim
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.handoff_guard import (
     HandoffPersistenceConflict,
@@ -19,8 +21,9 @@ from backend.repositories.handoff_guard import (
     ResettableHandoffPersistenceGuard,
     guarded_handoff_repository,
 )
-from backend.repositories.protocols import IdempotencyRecord, RevisionConflict
+from backend.repositories.protocols import IdempotencyConflict, IdempotencyRecord, RevisionConflict
 from backend.services.demo_reset import reset_demo_components
+from backend.services.handoff_audit import build_handoff_audit_event
 
 
 def create_claim_and_handoff(
@@ -93,6 +96,45 @@ def handoff_retry(
         session_id='',
         handoff_id=handoff_id,
     )
+
+
+def handoff_audit(
+    claim: WorkingClaim,
+    handoff: HandoffRecord,
+    idempotency: IdempotencyRecord,
+    *,
+    actor_type: str = 'staff',
+) -> AuditEventEnvelope:
+    return build_handoff_audit_event(
+        principal=Principal(
+            subject=idempotency.actor_id,
+            actor_type=actor_type,
+            auth_source=f'test:{actor_type}',
+        ),
+        claim=claim,
+        handoff=handoff,
+        route=idempotency.route,
+        idempotency_key=idempotency.key,
+        required_permission='test.handoff',
+        reason='Test handoff mutation.',
+        created_at=claim.updated_at,
+    )
+
+
+def handoff_audit_events(
+    repository: FixtureRepository,
+    claim_id: str,
+) -> list[AuditEventEnvelope]:
+    subject = AuditSubject(
+        subject_type=AuditSubjectType.CLAIM,
+        subject_id=claim_id,
+        claim_id=claim_id,
+    )
+    return [
+        event
+        for event in repository.list_audit_events_internal(subject)
+        if event.event_id.startswith('aud_handoff_')
+    ]
 
 
 def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
@@ -185,6 +227,23 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
     assert stored_handoff.resolved_at is not None
     assert stored_claim.claim_state.workflow_state.value == 'collecting'
     assert stored_claim.claim_state.next_action.value == 'ASK'
+
+    audits = handoff_audit_events(repository, claim_id)
+    assert [event.claim_revision for event in audits] == [2, 3, 4, 5]
+    assert [event.idempotency_key for event in audits] == [
+        'handoff-lifecycle-support',
+        'handoff-lifecycle-accept',
+        'handoff-lifecycle-message',
+        'handoff-lifecycle-resolve',
+    ]
+    assert [event.actor.actor_id for event in audits] == [
+        'cus_demo',
+        'stf_demo',
+        'stf_demo',
+        'stf_demo',
+    ]
+    assert all(handoff_id in event.source_refs for event in audits)
+    assert all(event.permission is not None for event in audits)
 
 
 def test_legacy_support_resolution_without_continuation_preserves_claim_state(
@@ -292,6 +351,7 @@ def test_handoff_mutations_require_the_exact_current_projected_action(
         {'field': 'action_code', 'reason': 'human.accept_handoff'},
         {'field': 'target_ref', 'reason': handoff_id},
     ]
+    assert [event.claim_revision for event in handoff_audit_events(repository, claim_id)] == [2]
 
     repository._claims[claim_id] = queued_claim
     accepted = accept_handoff(
@@ -348,6 +408,7 @@ def test_handoff_mutations_require_the_exact_current_projected_action(
         {'field': 'action_code', 'reason': 'human.resolve_handoff'},
         {'field': 'target_ref', 'reason': handoff_id},
     ]
+    assert [event.claim_revision for event in handoff_audit_events(repository, claim_id)] == [2, 3]
 
 
 def test_staff_message_requires_handoff_owner_and_same_session_reply_reference(
@@ -461,6 +522,101 @@ def test_repeated_support_request_reuses_owned_handoff_without_conflict(
     assert len(handoffs) == 1
     assert handoffs[0].assigned_to == 'stf_demo'
     assert handoffs[0].status is HandoffStatus.ACCEPTED
+    assert [event.claim_revision for event in handoff_audit_events(repository, claim_id)] == [2, 3]
+
+
+def test_exact_support_request_replay_keeps_one_audit_fact(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'handoff-replay-claim'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+    assert created.status_code == 201
+    claim_id = created.json()['claim']['claim_id']
+    payload = {
+        'reason': 'I want a person to continue this synthetic claim.',
+        'support_need': 'human_requested',
+        'preferred_channel': 'phone',
+    }
+    headers = {
+        **auth_headers,
+        'Idempotency-Key': 'handoff-replay-support',
+        'If-Match': '1',
+    }
+
+    first = client.post(
+        f'/api/v1/claims/{claim_id}/support-requests',
+        headers=headers,
+        json=payload,
+    )
+    replay = client.post(
+        f'/api/v1/claims/{claim_id}/support-requests',
+        headers=headers,
+        json=payload,
+    )
+
+    assert first.status_code == 201
+    assert replay.status_code == 201
+    assert replay.json()['handoff']['handoff_id'] == first.json()['handoff']['handoff_id']
+    assert replay.json()['revision'] == 2
+    audits = handoff_audit_events(repository, claim_id)
+    assert len(audits) == 1
+    assert audits[0].idempotency_key == 'handoff-replay-support'
+    assert audits[0].claim_revision == 2
+
+
+def test_audit_preparation_failure_leaves_no_handoff_partial_write(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'handoff-audit-failure-claim'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+    assert created.status_code == 201
+    claim_id = created.json()['claim']['claim_id']
+    realtime_before = repository.replay_realtime_events(None, limit=1000)
+
+    def reject_audit(*_args: object, **_kwargs: object) -> tuple[AuditEventEnvelope, ...]:
+        raise IdempotencyConflict('forced-audit-failure')
+
+    monkeypatch.setattr(repository, '_prepare_audit_events', reject_audit)
+    failed = client.post(
+        f'/api/v1/claims/{claim_id}/support-requests',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'handoff-audit-failure-support',
+            'If-Match': '1',
+        },
+        json={
+            'reason': 'I want a person to continue this synthetic claim.',
+            'support_need': 'human_requested',
+            'preferred_channel': 'phone',
+        },
+    )
+
+    assert failed.status_code == 409
+    stored_claim = repository.get_claim_internal(claim_id)
+    assert stored_claim is not None
+    assert stored_claim.revision == 1
+    assert repository.list_handoffs(claim_id, stored_claim.customer_id) == []
+    assert (
+        repository.find_idempotency(
+            stored_claim.customer_id,
+            f'/api/v1/claims/{claim_id}/support-requests',
+            'handoff-audit-failure-support',
+        )
+        is None
+    )
+    assert handoff_audit_events(repository, claim_id) == []
+    assert repository.replay_realtime_events(None, limit=1000) == realtime_before
 
 
 def test_persistence_guard_rejects_owner_bypass_and_non_owner_write(
@@ -592,29 +748,37 @@ def test_guard_rejects_invalid_handoff_creation_records(
     guarded = guarded_handoff_repository(repository)
     next_claim = claim.model_copy(update={'revision': claim.revision + 1})
     fresh = stored.model_copy(update={'handoff_id': 'hnd_fresh'})
+    wrong_retry = handoff_retry(claim_id, 'hnd_wrong')
+    fresh_retry = handoff_retry(claim_id, 'hnd_fresh')
+    stored_retry = handoff_retry(claim_id, handoff_id)
 
     with pytest.raises(HandoffPersistenceConflict):
         guarded.save_handoff_mutation(
             next_claim,
             claim.revision,
             fresh,
-            handoff_retry(claim_id, 'hnd_wrong'),
+            wrong_retry,
+            handoff_audit(next_claim, fresh, wrong_retry),
         )
 
+    assigned = fresh.model_copy(update={'assigned_to': 'stf_demo'})
     with pytest.raises(HandoffPersistenceConflict):
         guarded.save_handoff_mutation(
             next_claim,
             claim.revision,
-            fresh.model_copy(update={'assigned_to': 'stf_demo'}),
-            handoff_retry(claim_id, 'hnd_fresh'),
+            assigned,
+            fresh_retry,
+            handoff_audit(next_claim, assigned, fresh_retry),
         )
 
+    accepted_without_owner = fresh.model_copy(update={'status': HandoffStatus.ACCEPTED})
     with pytest.raises(HandoffPersistenceConflict):
         guarded.save_handoff_mutation(
             next_claim,
             claim.revision,
-            fresh.model_copy(update={'status': HandoffStatus.ACCEPTED}),
-            handoff_retry(claim_id, 'hnd_fresh'),
+            accepted_without_owner,
+            fresh_retry,
+            handoff_audit(next_claim, accepted_without_owner, fresh_retry),
         )
 
     with pytest.raises(HandoffPersistenceConflict):
@@ -622,7 +786,8 @@ def test_guard_rejects_invalid_handoff_creation_records(
             next_claim,
             claim.revision,
             stored,
-            handoff_retry(claim_id, handoff_id),
+            stored_retry,
+            handoff_audit(next_claim, stored, stored_retry),
         )
 
 
