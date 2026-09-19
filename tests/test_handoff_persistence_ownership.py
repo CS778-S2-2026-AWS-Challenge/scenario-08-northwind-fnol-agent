@@ -246,6 +246,58 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
     assert all(event.permission is not None for event in audits)
 
 
+def test_requeue_mutates_handoff_with_same_atomic_audit_bundle(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, handoff_id = create_claim_and_handoff(
+        client,
+        auth_headers,
+        key_prefix='handoff-requeue-audit',
+    )
+    accepted = accept_handoff(
+        client,
+        staff_auth_headers,
+        claim_id,
+        handoff_id,
+        key='handoff-requeue-audit-accept',
+    )
+    assert accepted['revision'] == 3
+
+    requeued = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/requeue',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'handoff-requeue-audit-release',
+            'If-Match': '3',
+        },
+        json={'reason': 'Return this Claim to the shared queue.'},
+    )
+
+    assert requeued.status_code == 200, requeued.text
+    assert requeued.json()['revision'] == 4
+    stored_claim = repository.get_claim_internal(claim_id)
+    stored_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    assert stored_claim is not None
+    assert stored_handoff is not None
+    assert stored_claim.assignee_id is None
+    assert stored_handoff.status is HandoffStatus.QUEUED
+    assert stored_handoff.assigned_to is None
+    assert stored_handoff.accepted_at is None
+
+    audits = handoff_audit_events(repository, claim_id)
+    assert [event.claim_revision for event in audits] == [2, 3, 4]
+    assert [event.idempotency_key for event in audits] == [
+        'handoff-requeue-audit-support',
+        'handoff-requeue-audit-accept',
+        'handoff-requeue-audit-release',
+    ]
+    assert audits[-1].actor.actor_id == 'stf_demo'
+    assert handoff_id in audits[-1].source_refs
+
+
 def test_legacy_support_resolution_without_continuation_preserves_claim_state(
     client: TestClient,
     auth_headers: dict[str, str],
