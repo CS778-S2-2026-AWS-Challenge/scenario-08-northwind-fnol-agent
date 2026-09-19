@@ -3536,8 +3536,7 @@ def test_mongodb_handoff_audit_insert_failure_rolls_back_transaction(
     )
     client: MongoClient[Any] = MongoClient(uri, serverSelectionTimeoutMS=750)
     database_name = (
-        'northwind_handoff_audit_rollback_'
-        f'{datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")}'
+        f'northwind_handoff_audit_rollback_{datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")}'
     )
     connected = False
     try:
@@ -3607,11 +3606,14 @@ def test_mongodb_handoff_audit_insert_failure_rolls_back_transaction(
             )
 
         assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
-        assert repository.get_handoff(
-            claim.claim_id,
-            handoff.handoff_id,
-            claim.customer_id,
-        ) is None
+        assert (
+            repository.get_handoff(
+                claim.claim_id,
+                handoff.handoff_id,
+                claim.customer_id,
+            )
+            is None
+        )
         assert (
             repository.find_idempotency(
                 idempotency.actor_id,
