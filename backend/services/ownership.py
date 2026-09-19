@@ -2,6 +2,7 @@
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
+from backend.domain.audit import AuditEventEnvelope
 from backend.domain.ids import new_id
 from backend.domain.models import (
     ClaimCollaborationRequest,
@@ -29,6 +30,7 @@ from backend.repositories.protocols import (
     staff_agent_execution_for,
     with_staff_agent_source,
 )
+from backend.services.handoff_audit import build_handoff_audit_event
 from backend.services.support import (
     now_utc,
     parse_if_match,
@@ -103,6 +105,7 @@ def _save(
     source: StaffAgentDraftSource | None = None,
     coworkers: list[ClaimCoworkerRecord] | None = None,
     handoff: HandoffRecord | None = None,
+    audit_event: AuditEventEnvelope | None = None,
 ) -> None:
     try:
         linked_idempotency = with_staff_agent_source(idempotency, source)
@@ -113,6 +116,7 @@ def _save(
             request,
             coworkers=coworkers,
             handoff=handoff,
+            audit_event=audit_event,
             staff_agent_execution=staff_agent_execution_for(
                 claim, expected, linked_idempotency, source
             ),
@@ -429,17 +433,45 @@ def decide_collaboration_request(
     response = CollaborationMutationResponse(
         request=decided, revision=updated_claim.revision, coworker=coworker
     )
+    idempotency = _idempotency(
+        principal,
+        route,
+        key,
+        fingerprint,
+        claim,
+        response,
+        projected_action,
+    )
+    handoff_mutation = (
+        handoff
+        if request.kind is CollaborationRequestKind.TRANSFER
+        and payload.decision is CollaborationRequestStatus.ACCEPTED
+        else None
+    )
+    audit_event = (
+        build_handoff_audit_event(
+            principal=principal,
+            claim=updated_claim,
+            handoff=handoff_mutation,
+            route=route,
+            idempotency_key=key,
+            required_permission=projected_action.action_code,
+            reason='Handoff ownership transferred with the Claim.',
+            created_at=timestamp,
+            source_refs=(decided.request_id,),
+        )
+        if handoff_mutation is not None
+        else None
+    )
     _save(
         repository,
         updated_claim,
         expected,
-        _idempotency(principal, route, key, fingerprint, claim, response, projected_action),
+        idempotency,
         decided,
         coworkers=coworkers,
-        handoff=handoff
-        if request.kind is CollaborationRequestKind.TRANSFER
-        and payload.decision is CollaborationRequestStatus.ACCEPTED
-        else None,
+        handoff=handoff_mutation,
+        audit_event=audit_event,
         source=source,
     )
     return response
@@ -520,14 +552,39 @@ def requeue_claim(
         update={'assignee_id': None, 'revision': claim.revision + 1, 'updated_at': timestamp}
     )
     response = CollaborationMutationResponse(request=request, revision=updated.revision)
+    idempotency = _idempotency(
+        principal,
+        route,
+        key,
+        fingerprint,
+        claim,
+        response,
+        projected_action,
+    )
+    audit_event = (
+        build_handoff_audit_event(
+            principal=principal,
+            claim=updated,
+            handoff=handoff,
+            route=route,
+            idempotency_key=key,
+            required_permission=projected_action.action_code,
+            reason='Claim returned to the queue with its handoff context.',
+            created_at=timestamp,
+            source_refs=(request.request_id,),
+        )
+        if handoff is not None
+        else None
+    )
     _save(
         repository,
         updated,
         expected,
-        _idempotency(principal, route, key, fingerprint, claim, response, projected_action),
+        idempotency,
         request,
         coworkers=coworkers,
         handoff=handoff,
+        audit_event=audit_event,
         source=source,
     )
     return response
