@@ -3530,6 +3530,11 @@ class FixtureRepository(PersistenceRepository):
             ),
         )
         assert realtime_event is not None
+        if required_staff_id is not None and required_staff_revision is not None:
+            assert presence is not None
+            self._staff_presence[required_staff_id] = deepcopy(
+                presence.model_copy(update={'revision': presence.revision + 1})
+            )
         self._claims[claim.claim_id] = deepcopy(claim)
         if staff_action is not None:
             self._staff_actions[staff_action.action_id] = deepcopy(staff_action)
@@ -3635,7 +3640,9 @@ class FixtureRepository(PersistenceRepository):
         self._handoffs[handoff.handoff_id] = deepcopy(handoff)
         if branch_evaluation is not None:
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
-        self._idempotency[lookup] = idempotency
+        self._idempotency[lookup] = deepcopy(idempotency)
+        for event in prepared_audit:
+            self._audit_events[event.event_id] = deepcopy(event)
         self._commit_realtime_event(realtime_event)
 
 
