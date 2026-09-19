@@ -36,7 +36,7 @@ jobs:
           name: Check backend formatting
           command: |
             if [ "$BACKEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
-            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff format --check
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff format --check --diff
       - run:
           name: Lint backend
           command: |
