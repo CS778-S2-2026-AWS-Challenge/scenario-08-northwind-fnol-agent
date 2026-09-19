@@ -595,9 +595,10 @@ def test_handoff_mutation_persists_atomic_audit_for_fixture_and_mongo(
         claim_id=claim.claim_id,
     )
     assert repository.list_audit_events_internal(subject) == [audit_event]
-    assert repository.replay_realtime_events(None, limit=20)[-1].mutation is (
-        RealtimeMutation.HANDOFF_MUTATION_COMMITTED
-    )
+    realtime_event = repository.replay_realtime_events(None, limit=20)[-1]
+    assert realtime_event.claim_revision == updated.revision
+    assert realtime_event.operation_correlation == idempotency.key
+    assert RealtimeResource.HANDOFFS in realtime_event.resources
 
 
 @pytest.mark.parametrize(
