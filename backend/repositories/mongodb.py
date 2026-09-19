@@ -600,7 +600,6 @@ class MongoDBRepository:
         ):
             raise KeyError(asset.asset_id)
 
-
         def persist(mongo_session: Any) -> None:
             self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
             self._ensure_new_audit_event(audit_event, mongo_session=mongo_session)
@@ -655,7 +654,6 @@ class MongoDBRepository:
             or audit_event.idempotency_key is not None
         ):
             raise KeyError(asset.asset_id)
-
 
         def persist(mongo_session: Any) -> None:
             self._ensure_new_audit_event(audit_event, mongo_session=mongo_session)
@@ -715,7 +713,6 @@ class MongoDBRepository:
         ):
             raise KeyError(claim.claim_id)
         self._validate_branch_evaluation(claim, branch_evaluation)
-
 
         def persist(mongo_session: Any) -> None:
             asset = self._get(
@@ -2292,7 +2289,6 @@ class MongoDBRepository:
             KeyError: A record is missing, belongs elsewhere, or is malformed.
         """
 
-
         def persist(mongo_session: Any) -> None:
             self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
             if claim.revision != expected_revision + 1 or claim.customer_id != customer_id:
@@ -2520,7 +2516,6 @@ class MongoDBRepository:
         ):
             raise KeyError(operation.claim_id)
 
-
         def persist(mongo_session: Any) -> None:
             prepared_audit = self._prepare_audit_events(
                 claim,
@@ -2681,7 +2676,6 @@ class MongoDBRepository:
         ):
             raise KeyError(claim.claim_id)
 
-
         def persist(mongo_session: Any) -> None:
             existing = self._collection.find_one(
                 {'record_type': 'motor_other_driver', 'claim_id': claim.claim_id},
@@ -2798,7 +2792,6 @@ class MongoDBRepository:
             or idempotency.session_id != (claim.active_session_id or '')
         ):
             raise KeyError(claim.claim_id)
-
 
         def persist(mongo_session: Any) -> None:
             evidence = self._get(
@@ -4657,7 +4650,6 @@ class MongoDBRepository:
                 )
             )
         records.append(('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation))
-
 
         def persist(mongo_session: Any) -> None:
             if link is not None:
