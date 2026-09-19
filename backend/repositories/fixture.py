@@ -1521,6 +1521,11 @@ class FixtureRepository(PersistenceRepository):
             ),
         )
         assert realtime_event is not None
+        if required_staff_id is not None and required_staff_revision is not None:
+            assert presence is not None
+            self._staff_presence[required_staff_id] = deepcopy(
+                presence.model_copy(update={'revision': presence.revision + 1})
+            )
         self._claims[claim.claim_id] = deepcopy(claim)
         self._store_session(session)
         self._store_message(message)
@@ -2205,7 +2210,9 @@ class FixtureRepository(PersistenceRepository):
             if existing_runtime is not None and existing_runtime != runtime_records:
                 raise IdempotencyConflict(runtime_records.turn_plan.turn_id)
             self._runtime_turns[runtime_records.turn_plan.turn_id] = deepcopy(runtime_records)
-        self._idempotency[lookup] = idempotency
+        self._idempotency[lookup] = deepcopy(idempotency)
+        for event in prepared_audit:
+            self._audit_events[event.event_id] = deepcopy(event)
         self._commit_realtime_event(realtime_event)
 
     def save_runtime_turn(
@@ -3298,6 +3305,7 @@ class FixtureRepository(PersistenceRepository):
         collaboration_request: ClaimCollaborationRequest,
         coworkers: list[ClaimCoworkerRecord] | None = None,
         handoff: HandoffRecord | None = None,
+        audit_event: AuditEventEnvelope | None = None,
         staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
         try:
@@ -3316,6 +3324,11 @@ class FixtureRepository(PersistenceRepository):
             or idempotency.claim_id != claim.claim_id
         ):
             raise KeyError(claim.claim_id)
+        prepared_audit = (
+            self._prepare_audit_events(claim, (audit_event,))
+            if audit_event is not None
+            else ()
+        )
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
         existing_idempotency = self._idempotency.get(lookup)
         if existing_idempotency is not None:
@@ -3364,6 +3377,8 @@ class FixtureRepository(PersistenceRepository):
                 staff_agent_execution
             )
         self._idempotency[lookup] = deepcopy(idempotency)
+        for event in prepared_audit:
+            self._audit_events[event.event_id] = deepcopy(event)
         self._commit_realtime_event(realtime_event)
 
     def save_staff_mutation(
@@ -3379,6 +3394,7 @@ class FixtureRepository(PersistenceRepository):
         message: MessageRecord | None = None,
         required_staff_id: str | None = None,
         required_staff_revision: int | None = None,
+        audit_event: AuditEventEnvelope | None = None,
         staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
         try:
@@ -3471,17 +3487,17 @@ class FixtureRepository(PersistenceRepository):
             and staff_agent_execution.execution_id in self._staff_agent_executions
         ):
             raise IdempotencyConflict(staff_agent_execution.execution_id)
-        if required_staff_id is not None and required_staff_revision is not None:
-            assert presence is not None
-            self._staff_presence[required_staff_id] = deepcopy(
-                presence.model_copy(update={'revision': presence.revision + 1})
-            )
         if existing_message is not None:
             raise IdempotencyConflict(message.message_id if message is not None else '')
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
         existing = self._idempotency.get(lookup)
         if existing is not None and existing.request_fingerprint != idempotency.request_fingerprint:
             raise IdempotencyConflict(idempotency.key)
+        prepared_audit = (
+            self._prepare_audit_events(claim, (audit_event,))
+            if audit_event is not None
+            else ()
+        )
         excluded = (
             frozenset({RealtimeResource.MESSAGES})
             if message is not None and message.visibility is MessageVisibility.INTERNAL_ONLY
@@ -3530,6 +3546,8 @@ class FixtureRepository(PersistenceRepository):
                 staff_agent_execution
             )
         self._idempotency[lookup] = deepcopy(idempotency)
+        for event in prepared_audit:
+            self._audit_events[event.event_id] = deepcopy(event)
         self._commit_realtime_event(realtime_event)
 
     def save_handoff(self, handoff: HandoffRecord, customer_id: str) -> None:
@@ -3579,10 +3597,12 @@ class FixtureRepository(PersistenceRepository):
         expected_revision: int,
         handoff: HandoffRecord,
         idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
         branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         self._validate_claim_mutation(claim, expected_revision)
         self._validate_branch_evaluation(claim, branch_evaluation)
+        prepared_audit = self._prepare_audit_events(claim, (audit_event,))
         existing_handoff = self._handoffs.get(handoff.handoff_id)
         if (
             handoff.claim_id != claim.claim_id
