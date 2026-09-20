@@ -906,8 +906,8 @@ class BranchRuleEvaluator:
             required.add('parties.other_parties')
         return code in required
 
-    @staticmethod
     def _requirements(
+        self,
         claim: WorkingClaim,
         *,
         selected_family: str | None,
