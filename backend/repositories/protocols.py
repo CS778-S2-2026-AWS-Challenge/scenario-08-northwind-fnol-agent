@@ -5,7 +5,15 @@ from threading import Event
 from typing import Any, Protocol
 
 from backend.domain.agent_context_runtime import VerifiedConversationSummary
-from backend.domain.audit import AuditEventEnvelope, AuditSubject
+from backend.domain.audit import (
+    AuditEventEnvelope,
+    AuditEventType,
+    AuditOutcome,
+    AuditPermissionOutcome,
+    AuditSubject,
+    AuditSubjectType,
+    AuditVisibility,
+)
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
@@ -111,6 +119,35 @@ class IdempotencyRecord:
     staff_agent_draft_id: str | None = None
     staff_agent_execution_id: str | None = None
     response_payload: dict[str, Any] | None = None
+
+
+def validate_handoff_audit_link(
+    claim: WorkingClaim,
+    handoff: HandoffRecord,
+    idempotency: IdempotencyRecord,
+    audit_event: AuditEventEnvelope,
+) -> None:
+    """Validate the cross-record identity for an audited Handoff mutation."""
+
+    if (
+        handoff.claim_id != claim.claim_id
+        or idempotency.claim_id != claim.claim_id
+        or idempotency.handoff_id != handoff.handoff_id
+        or audit_event.event_type is not AuditEventType.ACTION_COMPLETED
+        or audit_event.outcome is not AuditOutcome.SUCCEEDED
+        or audit_event.subject.subject_type is not AuditSubjectType.CLAIM
+        or audit_event.subject.subject_id != claim.claim_id
+        or audit_event.subject.claim_id != claim.claim_id
+        or audit_event.claim_revision != claim.revision
+        or audit_event.actor.actor_id != idempotency.actor_id
+        or audit_event.idempotency_key != idempotency.key
+        or audit_event.correlation_id != idempotency.key
+        or handoff.handoff_id not in audit_event.source_refs
+        or audit_event.permission is None
+        or audit_event.permission.outcome is not AuditPermissionOutcome.AUTHORISED
+        or audit_event.visibility not in {AuditVisibility.INTERNAL_ONLY, AuditVisibility.AUDIT_ONLY}
+    ):
+        raise ValueError('The Handoff audit fact does not match the persisted mutation.')
 
 
 def with_staff_agent_source(
