@@ -158,6 +158,7 @@ from backend.services.support import (
     require_idempotency_key,
 )
 from backend.services.turn_family_resolution import resolve_turn_family
+from backend.services.turn_reducer import recompute_progress
 
 logger = logging.getLogger(__name__)
 
@@ -1968,6 +1969,33 @@ def submit_message(
                 'response_payload': response.model_dump(mode='json'),
             }
         )
+        progress_evaluation = branch_evaluator.evaluate(
+            updated_claim,
+            latest_message=message_text,
+            trigger_source_refs=[claimant_message.message_id],
+            current_action=next_action,
+            recomputation_reason='agent_turn_progress_commit',
+            previous_evaluation=previous_evaluation,
+        )
+        progress_state, progress_next_step = recompute_progress(
+            updated_claim,
+            progress_evaluation,
+            open_handoffs=tuple(
+                item
+                for item in repository.list_handoffs(claim_id, principal.subject)
+                if item.status.value not in {'resolved', 'cancelled'}
+            ),
+            proposed_next_step=effective_next_step,
+        )
+        updated_claim = updated_claim.model_copy(
+            update={
+                'claim_state': updated_claim.claim_state.model_copy(
+                    update={'workflow_state': progress_state}
+                ),
+                'customer_next_step': progress_next_step,
+            }
+        )
+        effective_next_step = progress_next_step
         try:
             repository.save_message_mutation(
                 updated_claim, expected_revision, updated_session, claimant_message, idempotency
