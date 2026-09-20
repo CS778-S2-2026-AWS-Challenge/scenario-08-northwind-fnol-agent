@@ -252,6 +252,13 @@ where that client-visible contract is absent. The mutation endpoint independentl
 identity and state, plus revision when exposed, so the projection is guidance rather than delegated
 authority.
 
+Admin customer create and patch requests use the same whitespace-normalized name and phone
+constraints as claimant Profile writes. Customer projections expose canonical `legal_name` and
+`preferred_name` in addition to the derived `display_name`. New writes should use the canonical
+fields; the transitional `display_name` alias updates the visible canonical name (preferred name
+when one exists, otherwise legal name). A blank display name returns `422 VALIDATION_ERROR`; the
+account is not created or mutated and an existing account revision does not advance.
+
 `GET /internal/v1/admin/integrations` is a read-only projection of the adapters assembled by the
 composition root. It reports only bounded health states (`using_fixture`, `verified`,
 `configured_service`, `pending_confirmation`, `unavailable`, or `unknown`), implementation type,
@@ -499,6 +506,13 @@ version with another published version.
 | `GET` | `/account` | Read the authenticated claimant's profile and communication preferences |
 | `PATCH` | `/account/profile` | Update the authenticated claimant's approved profile fields |
 | `PATCH` | `/account/preferences` | Update the authenticated claimant's communication preferences |
+| `POST`, `GET` | `/account/policies` | Idempotently create or cursor-page reusable account policy numbers |
+| `PATCH`, `DELETE` | `/account/policies/{policy_id}` | Revision-update or soft-retire one owned policy number |
+| `POST`, `GET` | `/account/payment-destinations` | Idempotently create or cursor-page masked bank-account destinations |
+| `PATCH`, `DELETE` | `/account/payment-destinations/{payment_destination_id}` | Revision-update or soft-retire one owned destination |
+| `POST`, `GET` | `/account/identity-documents` | Idempotently create or cursor-page masked identity documents |
+| `PATCH`, `DELETE` | `/account/identity-documents/{identity_id}` | Revision-update or soft-retire one owned identity document |
+| `POST` | `/claims/{claim_id}/policy-selections` | Propose one active owned policy number into the registered Claim field |
 
 `POST /api/v1/auth/sessions` is the only development/test authentication exception to the
 general bearer requirement. It accepts `email` and `password`, returns `201` with
@@ -509,9 +523,43 @@ password. The request cannot supply `customer_id`, role, scopes, or claim owners
 All other routes above require the issued bearer token. Expired, invalid, and revoked tokens
 return `401`. Logout revokes the server-side session and returns `204`. Account responses are
 derived from the authenticated principal and never accept a customer identifier in their path
-or payload. Profile updates accept `display_name` and `phone`; preference updates accept the
-boolean `email` and `sms` fields. These fixture records contain anonymous `.invalid` addresses
-only and must not be represented as real Northwind customer data.
+or payload. The Profile projection contains `legal_name`, optional `preferred_name`, optional
+`date_of_birth`, email, phone, and optional `residential_address`, plus `revision` and
+`updated_at`. `display_name` remains a transitional projection only: it is always derived from
+preferred name when present and otherwise legal name. A legacy PATCH may send `display_name` as
+the legal-name alias; it cannot disagree with `legal_name`. New clients send the projected
+revision in `If-Match`; a stale revision returns `409 REVISION_CONFLICT`.
+Profile text is whitespace-normalized before validation. Blank legal name, compatibility display
+name, preferred name, or residential address returns `422 VALIDATION_ERROR` and does not change
+the stored profile or revision.
+
+Create requests for the three account resources require `Idempotency-Key`. List routes use the
+standard opaque cursor and default to active records. Their stable descending keyset is
+`(created_at, resource_id)`; a cursor is bound to its authenticated owner, resource collection,
+and `include_inactive` filter, so reuse by another claimant or in another list returns
+`422 VALIDATION_ERROR`. The owner binding is a one-way digest and does not disclose the customer
+identifier in the opaque cursor. `limit`
+defaults to 25 and values above 100 are truncated to 100. PATCH and DELETE require `If-Match`;
+DELETE soft-retires the record. Repository reads scope by the authenticated owner before
+disclosing existence, so another claimant receives the same `404 RESOURCE_NOT_FOUND` as an unknown
+ID.
+Policy records contain only `policy_number`: they do not imply provider, status, coverage, or
+entitlement. Policy selection requires Claim `If-Match` and `Idempotency-Key`, writes a proposed
+`policy.policy_number` assertion plus Branch Evaluation in the authoritative Claim transaction,
+and makes no coverage decision. If the selected Policy changes or is retired while the Claim
+transaction is being committed, the API returns `409 POLICY_SELECTION_CONFLICT` with the
+`policy_id` and instructs the client to reload Policy state; it does not expose the Policy
+revision as the Claim revision.
+
+Payment destinations accept only `account_type` and account number. Identity documents accept
+only `driver_licence` or `passport` plus document number. Their full numbers are encrypted through
+the protected-value adapter before repository persistence. Ordinary create/list/update responses
+return only `masked_account_number` or `masked_document_number`; they never return ciphertext or
+plaintext. These routes do not execute payments, verify bank accounts, or verify identity. A
+non-development runtime without `NORTHWIND_PROTECTED_DATA_KEY` returns a bounded fail-closed
+unavailable response for protected writes. The synthetic development key is local-only. Fixture
+records contain anonymous `.invalid` addresses only and must not be represented as real Northwind
+customer data.
 
 ## Staff Identity API
 
