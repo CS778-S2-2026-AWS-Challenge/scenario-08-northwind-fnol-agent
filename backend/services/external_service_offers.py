@@ -344,6 +344,7 @@ def message_external_actions(
                 catalogue_reference=entry.catalogue_reference,
                 capability_provenance=entry.provenance.value,
                 access_form=entry.access_form,
+                presentation=entry.presentation,
                 status_label=status_labels[status],
                 status_detail=(
                     'Review and confirm the exact information Northwind may share.'

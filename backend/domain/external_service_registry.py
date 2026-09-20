@@ -7,7 +7,7 @@ supplies the stable vocabulary and projection metadata consumed by adapters and 
 
 from enum import Enum
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Literal
 
 from pydantic import Field, model_validator
 
@@ -112,6 +112,10 @@ class ExternalServiceRegistryEntry(ContractModel):
     catalogue_reference: str | None = Field(default=None, min_length=1, max_length=100)
     provenance: ExternalCapabilityProvenance
     access_form: str = Field(min_length=1, max_length=200)
+    presentation: Literal[
+        'info_link', 'action_button', 'consent_request', 'tracked_task',
+        'agent_assisted', 'status_update'
+    ] = 'consent_request'
     uses_external_task: bool = True
     projectable_statuses: tuple[ExternalLifecycleStatus, ...] = (
         ExternalLifecycleStatus.PREPARED,
@@ -611,6 +615,7 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
         purpose='Help the claimant find an appropriate repairer.',
         requested_action='open_repairer_information',
         adapter_kind='official_link',
+        presentation='info_link',
         official_url='https://www.aa.co.nz/cars/repair-and-maintenance/',
         result_semantics=(
             'The claimant follows the official link; Northwind does not claim a booking.'
@@ -630,6 +635,7 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
         purpose='Provide the official non-emergency reporting channel.',
         requested_action='open_police_105_guidance',
         adapter_kind='official_link_or_phone',
+        presentation='info_link',
         official_url='https://105.police.govt.nz/',
         official_phone='105',
         result_semantics='The Police website or phone service owns the report and its status.',
@@ -648,6 +654,7 @@ REGISTRY_ENTRIES: Final[tuple[ExternalServiceRegistryEntry, ...]] = (
         purpose='Provide the official traffic crash reporting guidance.',
         requested_action='open_traffic_crash_guidance',
         adapter_kind='official_link_or_phone',
+        presentation='info_link',
         official_url=(
             'https://www.police.govt.nz/advice/driving-and-road-safety/traffic-crash-reporting'
         ),

@@ -294,6 +294,7 @@ def claimant_assessor_action(
         catalogue_reference=canonical_projection.catalogue_reference,
         capability_provenance=canonical_projection.provenance.value,
         access_form=canonical_projection.access_form,
+        presentation='tracked_task',
         status_label=canonical_projection.status_label,
         status_detail=canonical_projection.status_detail,
         pending_owner=canonical_projection.pending_owner,
