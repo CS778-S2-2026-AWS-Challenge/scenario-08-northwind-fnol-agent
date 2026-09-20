@@ -15,9 +15,10 @@ import argparse
 import json
 from collections import Counter
 from pathlib import Path
+from sys import stderr
 
 from .assessor_failures import FAILURE_CASES, FailureCase, run_assessor_failure
-from .engine import current_head
+from .engine import PROFILE_ENV, current_head, journey_settings
 from .household import (
     SCENARIOS,
     HouseholdScenario,
@@ -72,6 +73,14 @@ def main(argv: list[str] | None = None) -> int:
             f'--runs {arguments.runs} exceeds the {len(cases)} unique cases available '
             f'for {arguments.scenario}'
         )
+
+    try:
+        journey_settings()
+    except ValueError as error:
+        # The suite never runs a journey on the controlled Agent while a model runtime was
+        # asked for: a record of that run would name a profile it did not use.
+        print(f'{PROFILE_ENV} is set to a runtime this suite cannot reach: {error}', file=stderr)
+        return 2
 
     for case in cases[: arguments.runs]:
         if isinstance(case, FailureCase):
