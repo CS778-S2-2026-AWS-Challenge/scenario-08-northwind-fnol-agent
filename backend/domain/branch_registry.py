@@ -931,6 +931,7 @@ class BranchRuleEvaluator:
 
         selection_by_code = {item.field_code: item for item in selections}
         satisfied: list[str] = []
+        recorded: list[str] = []
         missing: list[str] = []
         pending: list[str] = []
         for requirement in REQUIREMENT_PRIORITY:
@@ -952,18 +953,24 @@ class BranchRuleEvaluator:
                 pending.append(requirement)
             elif selection.value_state is FormStatus.CONFIRMED:
                 satisfied.append(requirement)
+            elif selection.value_state is FormStatus.PROPOSED:
+                recorded.append(requirement)
             else:
                 missing.append(requirement)
 
         if selected_family is None and 'claim.product_family' not in missing:
             missing.insert(0, 'claim.product_family')
-        ready = not missing and not unresolved_family_conflict and selected_family is not None
+        ready = not missing and not recorded and not unresolved_family_conflict and selected_family is not None
         return RequirementResolution(
             satisfied=satisfied,
+            recorded=recorded,
             missing_required_now=missing,
             pending_later=pending,
             next_required_item=missing[0] if missing else None,
             ready=ready,
+            ready_pending_confirmation=(
+                not missing and bool(recorded) and not unresolved_family_conflict and selected_family is not None
+            ),
             current_action_total=len(satisfied) + len(missing),
             current_action_satisfied=len(satisfied),
         )

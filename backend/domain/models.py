@@ -2286,10 +2286,13 @@ class RequirementResolution(ContractModel):
     """Deterministic information needed for the current safe action."""
 
     satisfied: list[str] = Field(default_factory=list)
+    recorded: list[str] = Field(default_factory=list)
     missing_required_now: list[str] = Field(default_factory=list)
+    missing_by_branch: list[dict[str, object]] = Field(default_factory=list)
     pending_later: list[str] = Field(default_factory=list)
     next_required_item: str | None = None
     ready: bool = False
+    ready_pending_confirmation: bool = False
     current_action_total: int = Field(default=0, ge=0)
     current_action_satisfied: int = Field(default=0, ge=0)
 
