@@ -92,6 +92,14 @@ python -m tests.journey_runs --scenario motor-failures --runs 5 --out ../journey
 python -m tests.journey_runs --schema
 ```
 
+The Agent runtime comes from `AGENT_RUNTIME_PROFILE`, the variable the backend reads. Unset or
+`controlled` runs the rule-driven `ControlledAgent`, which is what every record so far declares
+and why three Sprint 4 metrics are recorded as not measured. `model_gateway` runs the same
+journeys on a configured model, and the record's `configuration` names the profile and model
+profile it used. A `model_gateway` run without transport configuration refuses with exit code 2
+and names the missing variable: it never falls back to the controlled Agent, because a record
+naming a runtime the run did not use would be the one claim this evidence must not make.
+
 Each run starts a fresh fixture runtime and writes one `<run_id>.json`; `--schema` prints the
 record's JSON Schema. `--runs` selects from a bounded matrix of distinct input/material pairs and
 rejects a number larger than the matrix instead of silently repeating an identical input. For

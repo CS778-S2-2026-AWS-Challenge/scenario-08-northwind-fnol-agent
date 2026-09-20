@@ -24,7 +24,6 @@ from backend.adapters.claims_service import (
     ScriptedAssessorFailure,
 )
 from backend.app import create_app
-from backend.core.config import IdentityMode, Settings
 from backend.domain.external_services import ExternalTaskDelivery
 from backend.domain.models import AssessorRoutingResult, AssessorRoutingStatus, RouteAssessorRequest
 from backend.repositories.fixture import FixtureRepository
@@ -34,6 +33,7 @@ from .engine import (
     build_record,
     delivered_materials,
     final_state,
+    journey_settings,
     read_both_ends,
     seam_check,
 )
@@ -206,7 +206,7 @@ def _failure_point_checks(journey: Journey, case: FailureCase) -> tuple[list[Sea
 def run_assessor_failure(case: FailureCase, *, head: str) -> JourneyRunRecord:
     """Run one assessor failure and its recovery on a fresh fixture runtime."""
 
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = journey_settings()
     started_at = datetime.now(UTC)
     app = create_app(
         settings, repository=FixtureRepository(), assessor_service_adapter=case.adapter()

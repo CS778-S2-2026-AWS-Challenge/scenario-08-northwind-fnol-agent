@@ -28,7 +28,6 @@ from typing import Any, Literal
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
 
 from .engine import (
@@ -39,6 +38,7 @@ from .engine import (
     build_record,
     delivered_materials,
     final_state,
+    journey_settings,
     read_both_ends,
     upload_pack,
 )
@@ -469,7 +469,7 @@ def _with_input_variant(scenario: HouseholdScenario, variant_index: int) -> Hous
 def run_household(scenario: HouseholdScenario, *, head: str) -> HouseholdRun:
     """Run one home or contents journey on a fresh fixture runtime."""
 
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = journey_settings()
     started_at = datetime.now(UTC)
     with TestClient(create_app(settings, repository=FixtureRepository())) as client:
         journey = Journey(client)

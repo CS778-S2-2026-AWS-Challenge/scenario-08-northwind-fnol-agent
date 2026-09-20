@@ -26,7 +26,6 @@ from fastapi.testclient import TestClient
 
 from backend.adapters.claims_service import MockAssessorServiceAdapter
 from backend.app import create_app
-from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
 
 from .engine import (
@@ -39,6 +38,7 @@ from .engine import (
     build_record,
     delivered_materials,
     final_state,
+    journey_settings,
     read_both_ends,
     seam_check,
     upload_pack,
@@ -543,7 +543,7 @@ def run_motor_journey(
     scenario_id = f'{scenario_id}-input-{input_variant + 1:02d}'
     is_multi_turn = bool(journey_input.get('turns'))
 
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = journey_settings()
     started_at = datetime.now(UTC)
     app = create_app(
         settings,
