@@ -960,11 +960,20 @@ class BranchRuleEvaluator:
 
         if selected_family is None and 'claim.product_family' not in missing:
             missing.insert(0, 'claim.product_family')
+        missing_by_branch: list[dict[str, object]] = []
+        for branch_id in active_branches:
+            branch = self.registry.branch_by_id.get(branch_id)
+            if branch is None:
+                continue
+            branch_missing = [field for field in branch.fields if field in missing]
+            if branch_missing:
+                missing_by_branch.append({'branch': branch_id, 'fields': sorted(branch_missing)})
         ready = not missing and not recorded and not unresolved_family_conflict and selected_family is not None
         return RequirementResolution(
             satisfied=satisfied,
             recorded=recorded,
             missing_required_now=missing,
+            missing_by_branch=missing_by_branch,
             pending_later=pending,
             next_required_item=missing[0] if missing else None,
             ready=ready,
