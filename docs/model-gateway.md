@@ -192,7 +192,7 @@ model and Runtime authority validation before it can affect Claim State.
 | `MODEL_BASE_URL` | Endpoint root, including a compatible version prefix when required |
 | `MODEL_IDENTIFIER` | Model identifier sent to the endpoint |
 | `MODEL_API_KEY_ENV` | Name of the environment variable containing the credential, not the credential |
-| `MODEL_TIMEOUT_SECONDS` | Positive request timeout; default `30` |
+| `MODEL_TIMEOUT_SECONDS` | Positive request timeout; default `130` |
 | `MODEL_SUPPORTS_STRUCTURED_OUTPUT` | Declared endpoint capability required by `GatewayAgent` |
 | `MODEL_SUPPORTS_TOOLS` | Declared endpoint tool-call capability |
 | `MODEL_SUPPORTS_IMAGE_INPUT` | Declared endpoint capability for image Evidence blocks; default `false` |
@@ -231,7 +231,7 @@ The published claimant profiles use this adapter contract:
 | Profile | Model | Role | Required capabilities |
 | --- | --- | --- | --- |
 | `qwen-local` | `qwen3.8-27b` through the environment-owned Qwen endpoint | deployment default through `MODEL_PROFILE_ID` | structured output (`json_object`) and tools |
-| `nowcoding-gpt55` | `gpt-5.5` through the existing nowcoding endpoint | selectable | structured output and tools |
+| `openrouter-gpt4o-mini` | `openai/gpt-4o-mini` through OpenRouter | deployment default | structured output, tools, and image input |
 | `bedrock-nova2-lite` | `global.amazon.nova-2-lite-v1:0` through Bedrock Sydney | published but unavailable until AWS account verification completes | structured output and image input |
 | `google-gemini35-flash-lite` | `gemini-3.5-flash-lite` through Google AI Studio | selectable | structured output, tools, image input, and PDF document input |
 
