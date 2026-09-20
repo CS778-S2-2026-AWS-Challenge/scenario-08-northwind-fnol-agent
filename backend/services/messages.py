@@ -21,6 +21,7 @@ from backend.domain.branch_registry import (
 from backend.domain.external_service_registry import ExternalLifecycleStatus
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
+from backend.domain.model_gateway import ModelGatewayError
 from backend.domain.intake import intake_field_for_requirement, next_requirement_step
 from backend.domain.models import (
     ActorReference,
@@ -2205,7 +2206,59 @@ def submit_message(
         rolling_summary=rolling_summary,
         external_services=external_services,
     )
-    proposal = agent.propose_turn(agent_context)
+    try:
+        proposal = agent.propose_turn(agent_context)
+    except ModelGatewayError:
+        # Preserve the claimant's accepted input and revision when the provider
+        # fails before any Claim mutation.  The existing message entrypoint is
+        # the recovery boundary; no retry endpoint or duplicate inbound record
+        # is introduced here.
+        recovery_timestamp = now_utc()
+        recovery_claim = claim.model_copy(
+            update={'revision': claim.revision + 1, 'updated_at': recovery_timestamp}
+        )
+        recovery_session = session.model_copy(
+            update={
+                'last_active_at': recovery_timestamp,
+                'context_revision': recovery_claim.revision,
+            }
+        )
+        recovery_response = _message_only_response(
+            repository,
+            principal,
+            claim_id,
+            session_id,
+            recovery_claim.revision,
+            claimant_message,
+            claim=recovery_claim,
+        )
+        recovery_idempotency = IdempotencyRecord(
+            actor_id=principal.subject,
+            route=route,
+            key=key,
+            request_fingerprint=fingerprint,
+            claim_id=claim_id,
+            session_id=session_id,
+            message_id=claimant_message.message_id,
+            response_payload=recovery_response.model_dump(mode='json'),
+        )
+        try:
+            repository.save_message_mutation(
+                recovery_claim,
+                expected_revision,
+                recovery_session,
+                claimant_message,
+                recovery_idempotency,
+            )
+        except RevisionConflict as conflict:
+            raise ApiError(
+                status_code=409,
+                code='REVISION_CONFLICT',
+                message='The claim changed after this page was loaded.',
+                retryable=True,
+                current_revision=conflict.current_revision,
+            ) from conflict
+        return recovery_response
     if runtime_policy is not None:
         enforce_agent_proposal(runtime_policy, proposal)
     preliminary_authority = validate_proposal(proposal)

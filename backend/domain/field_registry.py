@@ -22,7 +22,13 @@ REGISTERED_FIELD_CODES = frozenset(
         'property.affected_areas',
         'property.ongoing_risk',
         'property.habitable',
+        'injury.persons_affected',
+        'injury.severity_reported',
+        'injury.medical_attention',
+        'incident.discovered_at',
+        'theft.entry_context',
+        'contents.police_reference',
     }
 )
 
-FIELD_REGISTRY_VERSION = '5'
+FIELD_REGISTRY_VERSION = '6'

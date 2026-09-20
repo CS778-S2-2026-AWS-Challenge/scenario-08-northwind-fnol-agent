@@ -25,7 +25,7 @@ from backend.domain.support_intent import (
     support_need_for_intent,
 )
 
-BRANCH_RULES_VERSION = 'vp-dynamic-form-branch-rules-v1'
+BRANCH_RULES_VERSION = 'vp-dynamic-form-branch-rules-v2'
 FAMILY_NAMES = ('motor', 'home', 'contents')
 FAMILY_RULE_IDS = {
     'motor': 'BR-FAMILY-MOTOR-001',
@@ -170,6 +170,18 @@ FIELD_VALUE_CONTRACTS: dict[str, tuple[str, frozenset[str]]] = {
         frozenset({'none', 'active_leak', 'fire', 'collapse', 'exposure', 'other'}),
     ),
     'property.habitable': ('boolean', frozenset()),
+    'injury.persons_affected': ('text_list', frozenset()),
+    'injury.severity_reported': (
+        'enum', frozenset({'minor', 'needs_medical_attention', 'serious', 'unknown'})
+    ),
+    'injury.medical_attention': (
+        'enum', frozenset({'none', 'self_treated', 'gp_or_clinic', 'ambulance_called', 'hospitalised', 'unknown'})
+    ),
+    'incident.discovered_at': ('temporal', frozenset()),
+    'theft.entry_context': (
+        'enum', frozenset({'forced_entry', 'unlocked', 'unknown', 'not_applicable'})
+    ),
+    'contents.police_reference': ('text', frozenset()),
 }
 
 
@@ -283,6 +295,16 @@ def build_default_registry() -> BranchRegistrySnapshot:
                 'BR-SAFETY-001',
                 None,
                 frozenset({'incident.injury_or_danger'} & executable_codes),
+            ),
+            ContentBranch(
+                'injury.details',
+                'BR-INJURY-DETAILS-001',
+                None,
+                frozenset({
+                    'injury.persons_affected',
+                    'injury.severity_reported',
+                    'injury.medical_attention',
+                } & executable_codes),
             ),
             ContentBranch('mitigation.emergency', 'BR-MITIGATION-001', None, frozenset()),
             ContentBranch('professional_review', 'BR-REVIEW-001', None, frozenset()),
@@ -699,6 +721,20 @@ class BranchRuleEvaluator:
                 'The claimant message may describe an injury or continuing danger.',
             )
 
+        if safety_fact or safety_state:
+            add(
+                'injury.details',
+                'active',
+                'An authoritative injury or danger fact requires the injury detail branch.',
+                ('incident.injury_or_danger',),
+            )
+        elif safety_text and not safety_negated:
+            add(
+                'injury.details',
+                'candidate',
+                'The claimant message may require injury details.',
+            )
+
         if claim.claim_state.customer_support.value in {
             'human_requested',
             'accessibility_required',
@@ -884,6 +920,14 @@ class BranchRuleEvaluator:
             required.update(FAMILY_REQUIRED[selected_family])
         if 'incident.collision' in active_branches:
             required.add('parties.other_parties')
+        if 'injury.details' in active_branches:
+            required.update(
+                {
+                    'injury.persons_affected',
+                    'injury.severity_reported',
+                    'injury.medical_attention',
+                }
+            )
 
         selection_by_code = {item.field_code: item for item in selections}
         satisfied: list[str] = []
