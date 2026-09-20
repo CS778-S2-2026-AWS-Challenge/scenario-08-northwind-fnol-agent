@@ -66,7 +66,6 @@ website on port `8001`; “employee page” means the Workbench on port `8002`.
 | 7 | Customer page: refresh the page or reopen the saved claim | The staff reply appears and the claimant can continue from the saved claim without entering confirmed information again | Existing component check passed, 2026-08-24 |
 | 8 | Employee page: resolve the handoff; then check the customer page again | The claimant sees a plain-language next step. Internal staff notes and Agent drafting details are not visible | Existing API and visibility checks passed, 2026-08-24 |
 
-
 ### P12.3 interruption and recovery check
 
 Use the same Claim and claimant session from the handoff journey. This check is specifically for
