@@ -143,6 +143,13 @@ def next_requirement_step(requirements: RequirementResolution) -> CustomerNextSt
             summary='Your confirmed report is ready for claim creation.',
             responsible_party=ResponsibleParty.CLAIMANT,
         )
+    if getattr(requirements, 'ready_pending_confirmation', False):
+        return CustomerNextStep(
+            status='confirmation_requested',
+            summary='Please confirm the recorded details before claim creation.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+            required_items=list(getattr(requirements, 'recorded', [])),
+        )
     return CustomerNextStep(
         status='clarification_needed',
         summary='Please clarify the claim type before the report continues.',
