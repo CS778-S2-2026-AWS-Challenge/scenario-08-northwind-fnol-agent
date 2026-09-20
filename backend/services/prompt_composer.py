@@ -31,9 +31,10 @@ def estimate_tokens(value: str) -> int:
     return max(1, ceil(len(value.encode('utf-8')) / 3))
 
 
-def load_prompt_manifest() -> PromptPackManifest:
+def load_prompt_manifest(prompt_version: str = 'northwind-fnol-claimant-v7') -> PromptPackManifest:
+    pack = 'v8' if prompt_version == 'northwind-fnol-claimant-v8' else 'v7'
     payload = json.loads(
-        files('backend.prompts').joinpath('v7/manifest.json').read_text(encoding='utf-8')
+        files('backend.prompts').joinpath(f'{pack}/manifest.json').read_text(encoding='utf-8')
     )
     return PromptPackManifest.model_validate(payload)
 
@@ -60,10 +61,11 @@ def load_fragment_contents(
     manifest: PromptPackManifest | None = None,
 ) -> dict[str, str]:
     selected_manifest = manifest or load_prompt_manifest()
+    pack = 'v8' if selected_manifest.prompt_pack_version == 'northwind-fnol-claimant-v8' else 'v7'
     return {
         definition.fragment_id: (
             files('backend.prompts')
-            .joinpath(f'v7/{definition.path}')
+            .joinpath(f'{pack}/{definition.path}')
             .read_text(encoding='utf-8')
             .strip()
         )

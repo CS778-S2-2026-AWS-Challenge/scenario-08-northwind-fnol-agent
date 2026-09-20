@@ -1,8 +1,8 @@
 {
   "prompt_pack_version": "northwind-fnol-claimant-v8",
   "fragments": [
-    {"fragment_id": "core.role", "kind": "core", "required": true},
-    {"fragment_id": "core.safety", "kind": "core", "required": true},
-    {"fragment_id": "task.turn", "kind": "task", "required": true}
+    {"fragment_id":"core.role","version":"v1","path":"core/role.md","kind":"core","load_mode":"always","applies_when":{},"requires":[],"conflicts_with":[],"priority":400,"max_tokens":240},
+    {"fragment_id":"core.safety","version":"v1","path":"core/safety.md","kind":"core","load_mode":"always","applies_when":{},"requires":["core.role"],"conflicts_with":[],"priority":390,"max_tokens":180},
+    {"fragment_id":"task.turn","version":"v1","path":"task/turn.md","kind":"task","load_mode":"route_match","applies_when":{"tasks":["intake","correction","confirmation","status_question","claim_creation","external_support","human_handoff"]},"requires":["core.safety"],"conflicts_with":[],"priority":200,"max_tokens":400}
   ]
 }

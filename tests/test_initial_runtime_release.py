@@ -142,7 +142,7 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
     assert policy.instruction.prompt_version == 'northwind-fnol-claimant-v7'
     assert policy.instruction.composition_mode == 'fragmented'
     assert len(policy.instruction.fragments) == 23
-    assert len(policy.tool_policy.request_profiles) == 9
+    assert len(policy.tool_policy.request_profiles) == 11
     assert set(policy.tool_policy.provider_capabilities) == {
         'qwen-local',
         'nowcoding-gpt55',
