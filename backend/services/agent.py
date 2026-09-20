@@ -316,6 +316,7 @@ class AgentProposal:
     # turns; ``action`` is retained only for persisted compatibility records.
     action_code: str | None = None
     runtime_trace: RuntimeTraceRecord | None = None
+    confirms_batch: bool = False
     evidence_id: str | None = None
     source_claim_id: str | None = None
     removal_scope: str | None = None

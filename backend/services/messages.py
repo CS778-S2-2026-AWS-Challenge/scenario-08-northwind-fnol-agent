@@ -2508,6 +2508,13 @@ def submit_message(
         _grounding_source_refs(proposal.tool_results),
         {item.evidence_id: item.media_type for item in turn_evidence},
     )
+    if (
+        getattr(proposal, 'confirms_batch', False)
+        and claim.customer_next_step.status == 'confirmation_requested'
+    ):
+        for field_code, field in claim.form.items():
+            if field.status is FormStatus.PROPOSED:
+                form_changes[field_code] = field.model_copy(update={'status': FormStatus.CONFIRMED})
     contents_item_changes = _build_contents_item_changes(
         claim,
         proposal,

@@ -850,6 +850,7 @@ class GatewayAgent:
         evidence_id: str | None = None
         source_claim_id: str | None = None
         removal_scope: str | None = None
+        proposal_confirms_batch = False
         if isinstance(parsed, V8TurnProposal):
             if plan.field_contract is None:
                 raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
@@ -869,6 +870,7 @@ class GatewayAgent:
             service_offer_ids = [item.service_identity for item in parsed.service_suggestions]
             if parsed.next_question is not None:
                 model_required_items = list(parsed.next_question.field_codes)
+            proposal_confirms_batch = parsed.confirms_batch
         elif isinstance(parsed, V7IntakeProposal):
             if plan.field_contract is None:
                 raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
@@ -1093,6 +1095,7 @@ class GatewayAgent:
                 prompt_id=plan.prompt_bundle_id,
             ),
             runtime_trace=trace,
+            confirms_batch=proposal_confirms_batch,
             evidence_id=evidence_id,
             source_claim_id=source_claim_id,
             removal_scope=removal_scope,
