@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
+from backend.domain.audit import AuditSubject, AuditSubjectType
 from backend.domain.external_services import (
     ASSESSOR_SERVICE_IDENTITY,
     ExternalTaskDelivery,
@@ -50,6 +51,7 @@ from backend.domain.models import (
     TerminalDispositionValue,
     WorkflowState,
 )
+from backend.domain.realtime import RealtimeResource
 from backend.domain.retrieval import RetrievalSource
 from backend.domain.staff_identity import StaffPresenceUpdate
 from backend.domain.workbench import (
@@ -2126,6 +2128,38 @@ def test_transfer_acceptance_updates_handoff_and_revokes_existing_coworkers(
     assert handoff.assigned_to == target_id
     assert coworkers
     assert all(not item.active and item.revoked_at is not None for item in coworkers)
+
+    transfer_route = (
+        f'/api/v1/workbench/claims/{claim_id}/collaboration-requests/'
+        f'{transfer_body["request"]["request_id"]}'
+    )
+    transfer_idempotency = repository.find_idempotency(
+        target_id,
+        transfer_route,
+        'target-accepts-transfer',
+    )
+    assert transfer_idempotency is not None
+    assert transfer_idempotency.handoff_id == handoff_id
+
+    subject = AuditSubject(
+        subject_type=AuditSubjectType.CLAIM,
+        subject_id=claim_id,
+        claim_id=claim_id,
+    )
+    transfer_audits = [
+        event
+        for event in repository.list_audit_events_internal(subject)
+        if event.idempotency_key == transfer_idempotency.key
+    ]
+    assert len(transfer_audits) == 1
+    assert transfer_audits[0].claim_revision == claim.revision
+    assert handoff_id in transfer_audits[0].source_refs
+
+    realtime_event = repository.replay_realtime_events(None, limit=1000)[-1]
+    assert realtime_event.claim_revision == claim.revision
+    assert realtime_event.operation_correlation == transfer_idempotency.key
+    assert RealtimeResource.HANDOFFS in realtime_event.resources
+
     former_coworker = client.get(
         f'/api/v1/workbench/claims/{claim_id}', headers=coworker_headers
     ).json()

@@ -136,6 +136,9 @@
         "claim",
         "customer",
         "asset",
+        "policy",
+        "identity",
+        "payment_destination",
         "external_request",
         "configuration",
         "access"

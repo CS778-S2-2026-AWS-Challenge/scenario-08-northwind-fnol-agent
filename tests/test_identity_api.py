@@ -1,9 +1,11 @@
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import cast
 
+import pytest
 from fastapi.testclient import TestClient
 
-from backend.adapters.identity import FixtureIdentityRepository
+from backend.adapters.identity import FixtureIdentityRepository, SQLiteIdentityRepository
 from backend.app import create_app
 from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
 from backend.domain.identity import ClaimantAuthSessionRecord
@@ -201,3 +203,40 @@ def test_synthetic_login_requires_explicit_developer_identity_mode() -> None:
 
     assert response.status_code == 401
     assert response.json()['error']['code'] == 'AUTHENTICATION_REQUIRED'
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'sqlite'])
+def test_profile_rejects_blank_normalized_text_without_advancing_revision(
+    repository_kind: str, tmp_path: Path
+) -> None:
+    identity_repository = (
+        FixtureIdentityRepository()
+        if repository_kind == 'fixture'
+        else SQLiteIdentityRepository(str(tmp_path / 'profile.sqlite'))
+    )
+    if repository_kind == 'sqlite':
+        identity_repository.create_account(
+            'claimant.one@example.invalid', 'northwind-demo-one', 'Demo Claimant One'
+        )
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        identity_repository=identity_repository,
+    )
+    with TestClient(app) as client:
+        session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        headers = {'Authorization': f'Bearer {session["access_token"]}'}
+        before = client.get('/api/v1/account', headers=headers).json()
+        responses = [
+            client.patch('/api/v1/account/profile', headers=headers, json={field: '   '})
+            for field in (
+                'legal_name',
+                'display_name',
+                'preferred_name',
+                'residential_address',
+            )
+        ]
+        after = client.get('/api/v1/account', headers=headers).json()
+
+    assert all(response.status_code == 422 for response in responses)
+    assert all(response.json()['error']['code'] == 'VALIDATION_ERROR' for response in responses)
+    assert after == before

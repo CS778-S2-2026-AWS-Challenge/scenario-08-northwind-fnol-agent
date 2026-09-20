@@ -457,17 +457,17 @@ file, and operational data remain typed records.
 
 | Requested datum | Current canonical representation | Delivery owner |
 | --- | --- | --- |
-| Legal name | Missing Profile member | #923 |
-| Preferred name | Missing Profile member | #923 |
-| Date of birth | Missing protected Profile member | #923 |
-| Phone number | Missing Profile contact member | #923 |
-| Email address | Existing authenticated account identifier; reusable Profile projection remains missing | #923 |
-| Residential address | Missing Profile address member | #923 |
-| Policy number | Reuse `policy.policy_number`; reusable account projection remains to be implemented | #923 |
-| Bank account type | Missing protected Payment Destination member; never a payment command | #923 |
-| Bank account number | Missing protected Payment Destination member; never a payment command | #923 |
-| Driver licence number | Missing protected Identity Record member | #923 |
-| Passport number | Missing protected Identity Record member | #923 |
+| Legal name | Profile member; legacy display name migrates into it | #923 implemented |
+| Preferred name | Optional Profile member; drives the compatibility display name when present | #923 implemented |
+| Date of birth | Optional protected Profile member | #923 implemented |
+| Phone number | Existing Profile contact member | Existing / #923 projection |
+| Email address | Existing authenticated account identifier and Profile projection | Existing / #923 projection |
+| Residential address | Optional Profile address member | #923 implemented |
+| Policy number | Reuse `policy.policy_number`; reusable account Policy Number record | #923 implemented |
+| Bank account type | Protected Payment Destination member; never a payment command | #923 implemented |
+| Bank account number | Encrypted and ordinarily masked Payment Destination member | #923 implemented |
+| Driver licence number | Encrypted and ordinarily masked Identity Record member | #923 implemented |
+| Passport number | Encrypted and ordinarily masked Identity Record member | #923 implemented |
 | Reusable insured vehicle | Existing vehicle Asset and immutable Claim asset snapshot | #921 |
 | Vehicle registration | Reuse `vehicle.registration` and vehicle Asset snapshot | #921 |
 | Vehicle registered owner | Existing optional `VehicleAssetDetails.registered_owner`; copied into the immutable vehicle snapshot | #921 |

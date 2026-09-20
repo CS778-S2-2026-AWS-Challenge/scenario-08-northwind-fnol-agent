@@ -5,6 +5,11 @@ from datetime import UTC, datetime, timedelta
 from threading import Condition, Event, RLock
 from typing import Any
 
+from backend.domain.account_data import (
+    IdentityDocumentRecord,
+    PaymentDestinationRecord,
+    PolicyNumberRecord,
+)
 from backend.domain.agent_context_runtime import VerifiedConversationSummary
 from backend.domain.assets import AssetRecord, ClaimAssetSnapshot
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
@@ -85,6 +90,14 @@ from backend.domain.staff_agent_tools import (
     staff_session_search_matches,
 )
 from backend.domain.staff_identity import StaffPresenceRecord
+from backend.repositories.account_data import (
+    AccountCursorKey,
+    AccountRecord,
+    PolicySelectionConflict,
+    account_record_audit_matches,
+    account_record_identity,
+    policy_selection_audit_matches,
+)
 from backend.repositories.assets import (
     AssetSelectionRevisionConflictError,
     AssetSelectionSnapshotConflictError,
@@ -101,6 +114,7 @@ from backend.repositories.protocols import (
     RepositorySearchLimitExceeded,
     RevisionConflict,
     ValidationSeedGraph,
+    validate_handoff_mutation_audit,
     validate_staff_agent_execution,
     validate_staff_agent_execution_source,
     validate_validation_seed_session,
@@ -115,6 +129,9 @@ class FixtureRepository(PersistenceRepository):
         self._claim_mutation_lock = RLock()
         self._realtime_condition = Condition(self._claim_mutation_lock)
         self._claims: dict[str, WorkingClaim] = {}
+        self._policies: dict[str, PolicyNumberRecord] = {}
+        self._payment_destinations: dict[str, PaymentDestinationRecord] = {}
+        self._identity_documents: dict[str, IdentityDocumentRecord] = {}
         self._assets: dict[str, AssetRecord] = {}
         self._claim_asset_snapshots: dict[str, ClaimAssetSnapshot] = {}
         self._audit_events: dict[str, AuditEventEnvelope] = {}
@@ -282,6 +299,205 @@ class FixtureRepository(PersistenceRepository):
                 )
                 yield event
 
+    def _account_store(self, record: AccountRecord) -> dict[str, Any]:
+        if isinstance(record, PolicyNumberRecord):
+            return self._policies
+        if isinstance(record, PaymentDestinationRecord):
+            return self._payment_destinations
+        return self._identity_documents
+
+    def create_account_record(
+        self,
+        record: AccountRecord,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        with self._claim_mutation_lock:
+            kind, identifier, _ = account_record_identity(record)
+            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            store = self._account_store(record)
+            if (
+                record.customer_id != idempotency.actor_id
+                or identifier != idempotency.claim_id
+                or not account_record_audit_matches(
+                    record, audit_event, idempotency_key=idempotency.key
+                )
+                or identifier in store
+                or lookup in self._idempotency
+                or audit_event.event_id in self._audit_events
+            ):
+                raise IdempotencyConflict(idempotency.key)
+            del kind
+            store[identifier] = deepcopy(record)
+            self._idempotency[lookup] = deepcopy(idempotency)
+            self._audit_events[audit_event.event_id] = deepcopy(audit_event)
+
+    def get_policy(self, policy_id: str, customer_id: str) -> PolicyNumberRecord | None:
+        record = self._policies.get(policy_id)
+        return (
+            deepcopy(record) if record is not None and record.customer_id == customer_id else None
+        )
+
+    def get_payment_destination(
+        self, payment_destination_id: str, customer_id: str
+    ) -> PaymentDestinationRecord | None:
+        record = self._payment_destinations.get(payment_destination_id)
+        return (
+            deepcopy(record) if record is not None and record.customer_id == customer_id else None
+        )
+
+    def get_identity_document(
+        self, identity_id: str, customer_id: str
+    ) -> IdentityDocumentRecord | None:
+        record = self._identity_documents.get(identity_id)
+        return (
+            deepcopy(record) if record is not None and record.customer_id == customer_id else None
+        )
+
+    @staticmethod
+    def _account_page(
+        records: list[AccountRecord],
+        customer_id: str,
+        include_inactive: bool,
+        after: AccountCursorKey | None,
+        limit: int,
+    ) -> tuple[list[Any], bool]:
+        selected = sorted(
+            (
+                deepcopy(record)
+                for record in records
+                if record.customer_id == customer_id and (include_inactive or record.active)
+            ),
+            key=lambda record: (record.created_at, account_record_identity(record)[1]),
+            reverse=True,
+        )
+        if after is not None:
+            selected = [
+                record
+                for record in selected
+                if (record.created_at, account_record_identity(record)[1]) < after
+            ]
+        page = selected[: limit + 1]
+        return page[:limit], len(page) > limit
+
+    def list_policies(
+        self,
+        customer_id: str,
+        *,
+        include_inactive: bool,
+        after: AccountCursorKey | None,
+        limit: int,
+    ) -> tuple[list[PolicyNumberRecord], bool]:
+        records, more = self._account_page(
+            list(self._policies.values()), customer_id, include_inactive, after, limit
+        )
+        return [record for record in records if isinstance(record, PolicyNumberRecord)], more
+
+    def list_payment_destinations(
+        self,
+        customer_id: str,
+        *,
+        include_inactive: bool,
+        after: AccountCursorKey | None,
+        limit: int,
+    ) -> tuple[list[PaymentDestinationRecord], bool]:
+        records, more = self._account_page(
+            list(self._payment_destinations.values()),
+            customer_id,
+            include_inactive,
+            after,
+            limit,
+        )
+        return [record for record in records if isinstance(record, PaymentDestinationRecord)], more
+
+    def list_identity_documents(
+        self,
+        customer_id: str,
+        *,
+        include_inactive: bool,
+        after: AccountCursorKey | None,
+        limit: int,
+    ) -> tuple[list[IdentityDocumentRecord], bool]:
+        records, more = self._account_page(
+            list(self._identity_documents.values()),
+            customer_id,
+            include_inactive,
+            after,
+            limit,
+        )
+        return [record for record in records if isinstance(record, IdentityDocumentRecord)], more
+
+    def update_account_record(
+        self,
+        record: AccountRecord,
+        expected_revision: int,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        with self._claim_mutation_lock:
+            _, identifier, _ = account_record_identity(record)
+            store = self._account_store(record)
+            current = store.get(identifier)
+            if current is None or current.customer_id != record.customer_id:
+                raise KeyError(identifier)
+            if current.revision != expected_revision:
+                raise RevisionConflict(current.revision)
+            if (
+                record.revision != expected_revision + 1
+                or record.created_at != current.created_at
+                or not account_record_audit_matches(record, audit_event, idempotency_key=None)
+                or audit_event.event_id in self._audit_events
+            ):
+                raise KeyError(identifier)
+            store[identifier] = deepcopy(record)
+            self._audit_events[audit_event.event_id] = deepcopy(audit_event)
+
+    def save_policy_selection(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        policy_id: str,
+        policy_revision: int,
+        idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        with self._claim_mutation_lock:
+            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            if lookup in self._idempotency:
+                raise IdempotencyConflict(idempotency.key)
+            self._validate_claim_mutation(claim, expected_revision)
+            self._validate_branch_evaluation(claim, branch_evaluation)
+            policy = self._policies.get(policy_id)
+            if policy is None or policy.customer_id != claim.customer_id or not policy.active:
+                raise PolicySelectionConflict(policy_id, reason='unavailable')
+            if policy.revision != policy_revision:
+                raise PolicySelectionConflict(
+                    policy_id, reason='changed', current_revision=policy.revision
+                )
+            if (
+                idempotency.actor_id != claim.customer_id
+                or idempotency.claim_id != claim.claim_id
+                or idempotency.session_id != (claim.active_session_id or '')
+                or not policy_selection_audit_matches(
+                    claim, policy_id, policy_revision, idempotency, audit_event
+                )
+            ):
+                raise KeyError(claim.claim_id)
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.CLAIM_CHANGED,
+                claim,
+                operation_correlation=idempotency.key,
+                resources=realtime_resources_for_records(
+                    RealtimeMutation.CLAIM_CHANGED, ('branch_evaluation',)
+                ),
+            )
+            assert realtime_event is not None
+            self._claims[claim.claim_id] = deepcopy(claim)
+            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
+            self._idempotency[lookup] = deepcopy(idempotency)
+            self._audit_events[audit_event.event_id] = deepcopy(audit_event)
+            self._commit_realtime_event(realtime_event)
+
     def create_asset(
         self,
         asset: AssetRecord,
@@ -436,6 +652,9 @@ class FixtureRepository(PersistenceRepository):
         """Clear only records owned by this in-memory prototype repository."""
         cleared = {
             'claims': len(self._claims),
+            'policies': len(self._policies),
+            'payment_destinations': len(self._payment_destinations),
+            'identity_documents': len(self._identity_documents),
             'assets': len(self._assets),
             'claim_asset_snapshots': len(self._claim_asset_snapshots),
             'audit_events': len(self._audit_events),
@@ -471,6 +690,9 @@ class FixtureRepository(PersistenceRepository):
             'realtime_events': len(self._realtime_events),
         }
         self._claims.clear()
+        self._policies.clear()
+        self._payment_destinations.clear()
+        self._identity_documents.clear()
         self._assets.clear()
         self._claim_asset_snapshots.clear()
         self._audit_events.clear()
@@ -3298,6 +3520,7 @@ class FixtureRepository(PersistenceRepository):
         collaboration_request: ClaimCollaborationRequest,
         coworkers: list[ClaimCoworkerRecord] | None = None,
         handoff: HandoffRecord | None = None,
+        audit_event: AuditEventEnvelope | None = None,
         staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
         try:
@@ -3309,13 +3532,22 @@ class FixtureRepository(PersistenceRepository):
             raise KeyError(claim.claim_id) from error
         self._validate_claim_mutation(claim, expected_revision)
         coworker_records = coworkers or []
+        try:
+            validate_handoff_mutation_audit(claim, handoff, idempotency, audit_event)
+        except ValueError as error:
+            raise KeyError(claim.claim_id) from error
         if (
             collaboration_request.claim_id != claim.claim_id
             or any(item.claim_id != claim.claim_id for item in coworker_records)
             or (handoff is not None and handoff.claim_id != claim.claim_id)
+            or (handoff is not None and idempotency.handoff_id != handoff.handoff_id)
+            or (handoff is None and idempotency.handoff_id is not None)
             or idempotency.claim_id != claim.claim_id
         ):
             raise KeyError(claim.claim_id)
+        prepared_audit = (
+            self._prepare_audit_events(claim, (audit_event,)) if audit_event is not None else ()
+        )
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
         existing_idempotency = self._idempotency.get(lookup)
         if existing_idempotency is not None:
@@ -3364,6 +3596,8 @@ class FixtureRepository(PersistenceRepository):
                 staff_agent_execution
             )
         self._idempotency[lookup] = deepcopy(idempotency)
+        for event in prepared_audit:
+            self._audit_events[event.event_id] = deepcopy(event)
         self._commit_realtime_event(realtime_event)
 
     def save_staff_mutation(
@@ -3379,6 +3613,7 @@ class FixtureRepository(PersistenceRepository):
         message: MessageRecord | None = None,
         required_staff_id: str | None = None,
         required_staff_revision: int | None = None,
+        audit_event: AuditEventEnvelope | None = None,
         staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
         try:
@@ -3389,6 +3624,10 @@ class FixtureRepository(PersistenceRepository):
         except ValueError as error:
             raise KeyError(claim.claim_id) from error
         stored_claim = self._validate_claim_mutation(claim, expected_revision)
+        try:
+            validate_handoff_mutation_audit(claim, handoff, idempotency, audit_event)
+        except ValueError as error:
+            raise KeyError(claim.claim_id) from error
         if required_staff_id is not None:
             presence = self._staff_presence.get(required_staff_id)
             if (
@@ -3471,17 +3710,15 @@ class FixtureRepository(PersistenceRepository):
             and staff_agent_execution.execution_id in self._staff_agent_executions
         ):
             raise IdempotencyConflict(staff_agent_execution.execution_id)
-        if required_staff_id is not None and required_staff_revision is not None:
-            assert presence is not None
-            self._staff_presence[required_staff_id] = deepcopy(
-                presence.model_copy(update={'revision': presence.revision + 1})
-            )
         if existing_message is not None:
             raise IdempotencyConflict(message.message_id if message is not None else '')
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
         existing = self._idempotency.get(lookup)
         if existing is not None and existing.request_fingerprint != idempotency.request_fingerprint:
             raise IdempotencyConflict(idempotency.key)
+        prepared_audit = (
+            self._prepare_audit_events(claim, (audit_event,)) if audit_event is not None else ()
+        )
         excluded = (
             frozenset({RealtimeResource.MESSAGES})
             if message is not None and message.visibility is MessageVisibility.INTERNAL_ONLY
@@ -3514,6 +3751,11 @@ class FixtureRepository(PersistenceRepository):
             ),
         )
         assert realtime_event is not None
+        if required_staff_id is not None and required_staff_revision is not None:
+            assert presence is not None
+            self._staff_presence[required_staff_id] = deepcopy(
+                presence.model_copy(update={'revision': presence.revision + 1})
+            )
         self._claims[claim.claim_id] = deepcopy(claim)
         if staff_action is not None:
             self._staff_actions[staff_action.action_id] = deepcopy(staff_action)
@@ -3530,6 +3772,8 @@ class FixtureRepository(PersistenceRepository):
                 staff_agent_execution
             )
         self._idempotency[lookup] = deepcopy(idempotency)
+        for event in prepared_audit:
+            self._audit_events[event.event_id] = deepcopy(event)
         self._commit_realtime_event(realtime_event)
 
     def save_handoff(self, handoff: HandoffRecord, customer_id: str) -> None:
@@ -3579,10 +3823,12 @@ class FixtureRepository(PersistenceRepository):
         expected_revision: int,
         handoff: HandoffRecord,
         idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
         branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         self._validate_claim_mutation(claim, expected_revision)
         self._validate_branch_evaluation(claim, branch_evaluation)
+        prepared_audit = self._prepare_audit_events(claim, (audit_event,))
         existing_handoff = self._handoffs.get(handoff.handoff_id)
         if (
             handoff.claim_id != claim.claim_id
@@ -3615,7 +3861,9 @@ class FixtureRepository(PersistenceRepository):
         self._handoffs[handoff.handoff_id] = deepcopy(handoff)
         if branch_evaluation is not None:
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
-        self._idempotency[lookup] = idempotency
+        self._idempotency[lookup] = deepcopy(idempotency)
+        for event in prepared_audit:
+            self._audit_events[event.event_id] = deepcopy(event)
         self._commit_realtime_event(realtime_event)
 
 
