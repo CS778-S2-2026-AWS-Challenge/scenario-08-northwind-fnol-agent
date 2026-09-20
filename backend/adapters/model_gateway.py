@@ -461,17 +461,20 @@ class OpenAICompatibleModelGateway:
             raise ModelGatewayError(
                 ModelGatewayErrorCode.AUTHENTICATION,
                 provider_model=self._config.model,
+                provider_status=status_code,
             )
         if status_code == 429:
             raise ModelGatewayError(
                 ModelGatewayErrorCode.RATE_LIMIT,
                 retryable=True,
                 provider_model=self._config.model,
+                provider_status=status_code,
             )
         raise ModelGatewayError(
             ModelGatewayErrorCode.PROVIDER,
             retryable=status_code >= 500,
             provider_model=self._config.model,
+            provider_status=status_code,
         )
 
     @staticmethod
@@ -743,17 +746,20 @@ class BedrockConverseModelGateway:
             raise ModelGatewayError(
                 ModelGatewayErrorCode.AUTHENTICATION,
                 provider_model=self._config.model,
+                provider_status=status_code,
             )
         if status_code == 429:
             raise ModelGatewayError(
                 ModelGatewayErrorCode.RATE_LIMIT,
                 retryable=True,
                 provider_model=self._config.model,
+                provider_status=status_code,
             )
         raise ModelGatewayError(
             ModelGatewayErrorCode.PROVIDER,
             retryable=status_code >= 500,
             provider_model=self._config.model,
+            provider_status=status_code,
         )
 
     def _normalise_response(
@@ -1130,23 +1136,27 @@ class GoogleGenerateContentModelGateway:
             raise ModelGatewayError(
                 ModelGatewayErrorCode.AUTHENTICATION,
                 provider_model=self._config.model,
+                provider_status=status_code,
             )
         if status_code == 408:
             raise ModelGatewayError(
                 ModelGatewayErrorCode.TIMEOUT,
                 retryable=True,
                 provider_model=self._config.model,
+                provider_status=status_code,
             )
         if status_code == 429:
             raise ModelGatewayError(
                 ModelGatewayErrorCode.RATE_LIMIT,
                 retryable=True,
                 provider_model=self._config.model,
+                provider_status=status_code,
             )
         raise ModelGatewayError(
             ModelGatewayErrorCode.PROVIDER,
             retryable=status_code >= 500,
             provider_model=self._config.model,
+            provider_status=status_code,
         )
 
     def _normalise_response(
