@@ -23,6 +23,18 @@
       },
       "AccountProfile": {
         "properties": {
+          "date_of_birth": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Of Birth"
+          },
           "display_name": {
             "title": "Display Name",
             "type": "string"
@@ -31,14 +43,41 @@
             "title": "Email",
             "type": "string"
           },
+          "legal_name": {
+            "title": "Legal Name",
+            "type": "string"
+          },
           "phone": {
             "default": "",
             "title": "Phone",
             "type": "string"
+          },
+          "preferred_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Name"
+          },
+          "residential_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residential Address"
           }
         },
         "required": [
           "display_name",
+          "legal_name",
           "email"
         ],
         "title": "AccountProfile",
@@ -60,12 +99,24 @@
           },
           "profile": {
             "$ref": "#/components/schemas/AccountProfile"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
           }
         },
         "required": [
           "customer_id",
           "profile",
-          "preferences"
+          "preferences",
+          "revision",
+          "updated_at"
         ],
         "title": "AccountProjection",
         "type": "object"
@@ -473,6 +524,19 @@
             ],
             "title": "Display Name"
           },
+          "legal_name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Name"
+          },
           "phone": {
             "anyOf": [
               {
@@ -484,6 +548,19 @@
               }
             ],
             "title": "Phone"
+          },
+          "preferred_name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Name"
           }
         },
         "title": "AdminCustomerAccountPatch",
@@ -517,9 +594,24 @@
             "title": "Email",
             "type": "string"
           },
+          "legal_name": {
+            "title": "Legal Name",
+            "type": "string"
+          },
           "phone": {
             "title": "Phone",
             "type": "string"
+          },
+          "preferred_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Name"
           },
           "revision": {
             "minimum": 1.0,
@@ -536,6 +628,7 @@
           "customer_id",
           "email",
           "display_name",
+          "legal_name",
           "phone",
           "active",
           "communication_preferences",
@@ -2471,6 +2564,29 @@
           "received_message"
         ],
         "title": "ClaimMessageResponse",
+        "type": "object"
+      },
+      "ClaimPolicySelectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "proposed_field": {
+            "$ref": "#/components/schemas/StructuredFormField-Output"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "claim_id",
+          "revision",
+          "proposed_field"
+        ],
+        "title": "ClaimPolicySelectionResponse",
         "type": "object"
       },
       "ClaimState": {
@@ -5066,6 +5182,26 @@
         "title": "CreateExternalClaimRequest",
         "type": "object"
       },
+      "CreateIdentityDocumentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "document_number": {
+            "maxLength": 80,
+            "minLength": 4,
+            "title": "Document Number",
+            "type": "string"
+          },
+          "document_type": {
+            "$ref": "#/components/schemas/IdentityDocumentType"
+          }
+        },
+        "required": [
+          "document_type",
+          "document_number"
+        ],
+        "title": "CreateIdentityDocumentRequest",
+        "type": "object"
+      },
       "CreateMessageRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5170,6 +5306,45 @@
           }
         },
         "title": "CreateMotorOtherDriverRequest",
+        "type": "object"
+      },
+      "CreatePaymentDestinationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "account_number": {
+            "maxLength": 80,
+            "minLength": 4,
+            "title": "Account Number",
+            "type": "string"
+          },
+          "account_type": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Account Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "account_type",
+          "account_number"
+        ],
+        "title": "CreatePaymentDestinationRequest",
+        "type": "object"
+      },
+      "CreatePolicyNumberRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "policy_number": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Policy Number",
+            "type": "string"
+          }
+        },
+        "required": [
+          "policy_number"
+        ],
+        "title": "CreatePolicyNumberRequest",
         "type": "object"
       },
       "CreateStaffActionRequest": {
@@ -8383,6 +8558,80 @@
         "title": "HandoffType",
         "type": "string"
       },
+      "IdentityDocumentListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IdentityDocumentProjection"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "IdentityDocumentListResponse",
+        "type": "object"
+      },
+      "IdentityDocumentProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "document_type": {
+            "$ref": "#/components/schemas/IdentityDocumentType"
+          },
+          "identity_id": {
+            "title": "Identity Id",
+            "type": "string"
+          },
+          "masked_document_number": {
+            "title": "Masked Document Number",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identity_id",
+          "document_type",
+          "masked_document_number",
+          "revision",
+          "active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "IdentityDocumentProjection",
+        "type": "object"
+      },
+      "IdentityDocumentType": {
+        "enum": [
+          "driver_licence",
+          "passport"
+        ],
+        "title": "IdentityDocumentType",
+        "type": "string"
+      },
       "IntegrationHealthCheckPage": {
         "additionalProperties": false,
         "properties": {
@@ -10100,6 +10349,73 @@
         "title": "PauseSessionResponse",
         "type": "object"
       },
+      "PaymentDestinationListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PaymentDestinationProjection"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "PaymentDestinationListResponse",
+        "type": "object"
+      },
+      "PaymentDestinationProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "account_type": {
+            "title": "Account Type",
+            "type": "string"
+          },
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "masked_account_number": {
+            "title": "Masked Account Number",
+            "type": "string"
+          },
+          "payment_destination_id": {
+            "title": "Payment Destination Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "payment_destination_id",
+          "account_type",
+          "masked_account_number",
+          "revision",
+          "active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PaymentDestinationProjection",
+        "type": "object"
+      },
       "PendingEvidenceReference": {
         "additionalProperties": false,
         "properties": {
@@ -10226,6 +10542,68 @@
           "policy_reference"
         ],
         "title": "PolicyFacts",
+        "type": "object"
+      },
+      "PolicyNumberListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyNumberProjection"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "PolicyNumberListResponse",
+        "type": "object"
+      },
+      "PolicyNumberProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "policy_id": {
+            "title": "Policy Id",
+            "type": "string"
+          },
+          "policy_number": {
+            "title": "Policy Number",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "policy_id",
+          "policy_number",
+          "revision",
+          "active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PolicyNumberProjection",
         "type": "object"
       },
       "PolicyRetrievalRecord": {
@@ -10427,22 +10805,83 @@
       "ProfilePatchRequest": {
         "additionalProperties": false,
         "properties": {
+          "date_of_birth": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Of Birth"
+          },
           "display_name": {
-            "maxLength": 120,
-            "minLength": 1,
-            "title": "Display Name",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "legal_name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Name"
           },
           "phone": {
-            "default": "",
-            "maxLength": 40,
-            "title": "Phone",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "preferred_name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Name"
+          },
+          "residential_address": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residential Address"
           }
         },
-        "required": [
-          "display_name"
-        ],
         "title": "ProfilePatchRequest",
         "type": "object"
       },
@@ -11742,6 +12181,21 @@
           "asset_id"
         ],
         "title": "SelectClaimAssetRequest",
+        "type": "object"
+      },
+      "SelectPolicyNumberRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "policy_id": {
+            "pattern": "^pol_[a-f0-9]{20}$",
+            "title": "Policy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "policy_id"
+        ],
+        "title": "SelectPolicyNumberRequest",
         "type": "object"
       },
       "SessionStatus": {
@@ -13378,6 +13832,61 @@
           }
         },
         "title": "UpdateAssetRequest",
+        "type": "object"
+      },
+      "UpdateIdentityDocumentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "document_number": {
+            "maxLength": 80,
+            "minLength": 4,
+            "title": "Document Number",
+            "type": "string"
+          },
+          "document_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IdentityDocumentType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "UpdateIdentityDocumentRequest",
+        "type": "object"
+      },
+      "UpdatePaymentDestinationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "account_number": {
+            "maxLength": 80,
+            "minLength": 4,
+            "title": "Account Number",
+            "type": "string"
+          },
+          "account_type": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Account Type",
+            "type": "string"
+          }
+        },
+        "title": "UpdatePaymentDestinationRequest",
+        "type": "object"
+      },
+      "UpdatePolicyNumberRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "policy_number": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Policy Number",
+            "type": "string"
+          }
+        },
+        "title": "UpdatePolicyNumberRequest",
         "type": "object"
       },
       "UpdateStaffActionRequest": {
@@ -17350,6 +17859,942 @@
         ]
       }
     },
+    "/api/v1/account/identity-documents": {
+      "get": {
+        "operationId": "get_identity_documents_api_v1_account_identity_documents_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_inactive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Inactive",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityDocumentListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Identity Documents",
+        "tags": [
+          "claimant identity",
+          "claimant account data"
+        ]
+      },
+      "post": {
+        "operationId": "post_identity_document_api_v1_account_identity_documents_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateIdentityDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityDocumentProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Identity Document",
+        "tags": [
+          "claimant identity",
+          "claimant account data"
+        ]
+      }
+    },
+    "/api/v1/account/identity-documents/{identity_id}": {
+      "delete": {
+        "operationId": "delete_identity_document_api_v1_account_identity_documents__identity_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identity_id",
+            "required": true,
+            "schema": {
+              "title": "Identity Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Identity Document",
+        "tags": [
+          "claimant identity",
+          "claimant account data"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_identity_document_api_v1_account_identity_documents__identity_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identity_id",
+            "required": true,
+            "schema": {
+              "title": "Identity Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateIdentityDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityDocumentProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Identity Document",
+        "tags": [
+          "claimant identity",
+          "claimant account data"
+        ]
+      }
+    },
+    "/api/v1/account/payment-destinations": {
+      "get": {
+        "operationId": "get_payment_destinations_api_v1_account_payment_destinations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_inactive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Inactive",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentDestinationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Payment Destinations",
+        "tags": [
+          "claimant identity",
+          "claimant account data"
+        ]
+      },
+      "post": {
+        "operationId": "post_payment_destination_api_v1_account_payment_destinations_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePaymentDestinationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentDestinationProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Payment Destination",
+        "tags": [
+          "claimant identity",
+          "claimant account data"
+        ]
+      }
+    },
+    "/api/v1/account/payment-destinations/{payment_destination_id}": {
+      "delete": {
+        "operationId": "delete_payment_destination_api_v1_account_payment_destinations__payment_destination_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "payment_destination_id",
+            "required": true,
+            "schema": {
+              "title": "Payment Destination Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Payment Destination",
+        "tags": [
+          "claimant identity",
+          "claimant account data"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_payment_destination_api_v1_account_payment_destinations__payment_destination_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "payment_destination_id",
+            "required": true,
+            "schema": {
+              "title": "Payment Destination Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePaymentDestinationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentDestinationProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Payment Destination",
+        "tags": [
+          "claimant identity",
+          "claimant account data"
+        ]
+      }
+    },
+    "/api/v1/account/policies": {
+      "get": {
+        "operationId": "get_policies_api_v1_account_policies_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_inactive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Inactive",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyNumberListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Policies",
+        "tags": [
+          "claimant identity",
+          "claimant account data"
+        ]
+      },
+      "post": {
+        "operationId": "post_policy_api_v1_account_policies_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePolicyNumberRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyNumberProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Policy",
+        "tags": [
+          "claimant identity",
+          "claimant account data"
+        ]
+      }
+    },
+    "/api/v1/account/policies/{policy_id}": {
+      "delete": {
+        "operationId": "delete_policy_api_v1_account_policies__policy_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "title": "Policy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Policy",
+        "tags": [
+          "claimant identity",
+          "claimant account data"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_policy_api_v1_account_policies__policy_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "title": "Policy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePolicyNumberRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyNumberProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Policy",
+        "tags": [
+          "claimant identity",
+          "claimant account data"
+        ]
+      }
+    },
     "/api/v1/account/preferences": {
       "patch": {
         "operationId": "patch_account_preferences_api_v1_account_preferences_patch",
@@ -17413,6 +18858,22 @@
       "patch": {
         "operationId": "patch_account_profile_api_v1_account_profile_patch",
         "parameters": [
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
           {
             "in": "header",
             "name": "authorization",
@@ -20228,6 +21689,107 @@
         "summary": "Create Claim Motor Other Driver",
         "tags": [
           "claimant"
+        ]
+      }
+    },
+    "/api/v1/claims/{claim_id}/policy-selections": {
+      "post": {
+        "operationId": "post_policy_selection_api_v1_claims__claim_id__policy_selections_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectPolicyNumberRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimPolicySelectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Policy Selection",
+        "tags": [
+          "claimant",
+          "claimant account data"
         ]
       }
     },

@@ -6,8 +6,13 @@ from hashlib import scrypt
 from hmac import compare_digest
 from secrets import token_hex
 
-from backend.domain.identity import ClaimantAuthSessionRecord, CustomerAccountRecord
+from backend.domain.identity import (
+    ClaimantAuthSessionRecord,
+    CustomerAccountRecord,
+    validate_customer_account_profile,
+)
 from backend.repositories.identity import IdentityRepository
+from backend.repositories.protocols import RevisionConflict
 
 
 def _password_hash(customer_id: str, password: str) -> str:
@@ -56,6 +61,7 @@ class FixtureIdentityRepository(IdentityRepository):
                 email=email,
                 password_hash=_password_hash(customer_id, password),
                 display_name=display_name,
+                legal_name=display_name,
             )
             for customer_id, email, password, display_name in seeds
         }
@@ -89,8 +95,10 @@ class FixtureIdentityRepository(IdentityRepository):
             email=normalized,
             password_hash=_password_hash(customer_id, password),
             display_name=display_name.strip(),
+            legal_name=display_name.strip(),
             phone=phone.strip(),
         )
+        validate_customer_account_profile(account)
         self._accounts[customer_id] = deepcopy(account)
         return deepcopy(account)
 
@@ -99,11 +107,12 @@ class FixtureIdentityRepository(IdentityRepository):
         return deepcopy(account) if account else None
 
     def save_account(self, account: CustomerAccountRecord, expected_revision: int) -> None:
+        validate_customer_account_profile(account)
         current = self._accounts.get(account.customer_id)
         if current is None:
             raise KeyError(account.customer_id)
         if current.revision != expected_revision or account.revision != expected_revision + 1:
-            raise ValueError('stale_revision')
+            raise RevisionConflict(current.revision)
         self._accounts[account.customer_id] = deepcopy(account)
 
     def save_session(self, session: ClaimantAuthSessionRecord) -> None:
@@ -188,7 +197,11 @@ class SQLiteIdentityRepository(IdentityRepository):
                     email TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
                     display_name TEXT NOT NULL,
+                    legal_name TEXT,
+                    preferred_name TEXT,
+                    date_of_birth TEXT,
                     phone TEXT NOT NULL DEFAULT '',
+                    residential_address TEXT,
                     email_updates INTEGER NOT NULL DEFAULT 1,
                     sms_updates INTEGER NOT NULL DEFAULT 0,
                     active INTEGER NOT NULL DEFAULT 1,
@@ -215,6 +228,18 @@ class SQLiteIdentityRepository(IdentityRepository):
                 connection.execute(
                     'ALTER TABLE accounts ADD COLUMN active INTEGER NOT NULL DEFAULT 1'
                 )
+            for name, declaration in (
+                ('legal_name', 'TEXT'),
+                ('preferred_name', 'TEXT'),
+                ('date_of_birth', 'TEXT'),
+                ('residential_address', 'TEXT'),
+            ):
+                if name not in columns:
+                    connection.execute(f'ALTER TABLE accounts ADD COLUMN {name} {declaration}')
+            connection.execute(
+                'UPDATE accounts SET legal_name = display_name '
+                "WHERE legal_name IS NULL OR trim(legal_name) = ''"
+            )
             if 'revision' not in columns:
                 connection.execute(
                     'ALTER TABLE accounts ADD COLUMN revision INTEGER NOT NULL DEFAULT 1'
@@ -259,7 +284,15 @@ class SQLiteIdentityRepository(IdentityRepository):
             email=row['email'],
             password_hash=row['password_hash'],
             display_name=row['display_name'],
+            legal_name=row['legal_name'] or row['display_name'],
+            preferred_name=row['preferred_name'],
+            date_of_birth=(
+                datetime.fromisoformat(row['date_of_birth']).date()
+                if row['date_of_birth']
+                else None
+            ),
             phone=row['phone'],
+            residential_address=row['residential_address'],
             communication_preferences={
                 'email': bool(row['email_updates']),
                 'sms': bool(row['sms_updates']),
@@ -293,23 +326,30 @@ class SQLiteIdentityRepository(IdentityRepository):
             email=normalized,
             password_hash=_sqlite_password_hash(password, os.urandom(16)),
             display_name=display_name.strip(),
+            legal_name=display_name.strip(),
             phone=phone.strip(),
         )
+        validate_customer_account_profile(account)
         try:
             with self._connection() as connection:
                 connection.execute(
                     """
                     INSERT INTO accounts
-                    (customer_id, email, password_hash, display_name, phone,
+                    (customer_id, email, password_hash, display_name, legal_name,
+                     preferred_name, date_of_birth, phone, residential_address,
                      email_updates, sms_updates, active, revision, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         account.customer_id,
                         account.email,
                         account.password_hash,
                         account.display_name,
+                        account.legal_name,
+                        account.preferred_name,
+                        account.date_of_birth.isoformat() if account.date_of_birth else None,
                         account.phone,
+                        account.residential_address,
                         int(account.communication_preferences['email']),
                         int(account.communication_preferences['sms']),
                         int(account.active),
@@ -334,18 +374,25 @@ class SQLiteIdentityRepository(IdentityRepository):
         return [self._account(row) for row in rows]
 
     def save_account(self, account: CustomerAccountRecord, expected_revision: int) -> None:
+        validate_customer_account_profile(account)
         with self._connection() as connection:
             updated = connection.execute(
                 """
-                UPDATE accounts SET email = ?, password_hash = ?, display_name = ?, phone = ?,
-                    email_updates = ?, sms_updates = ?, active = ?, revision = ?, updated_at = ?
+                UPDATE accounts SET email = ?, password_hash = ?, display_name = ?,
+                    legal_name = ?, preferred_name = ?, date_of_birth = ?, phone = ?,
+                    residential_address = ?, email_updates = ?, sms_updates = ?, active = ?,
+                    revision = ?, updated_at = ?
                 WHERE customer_id = ? AND revision = ?
                 """,
                 (
                     account.email,
                     account.password_hash,
                     account.display_name,
+                    account.legal_name,
+                    account.preferred_name,
+                    account.date_of_birth.isoformat() if account.date_of_birth else None,
                     account.phone,
+                    account.residential_address,
                     int(account.communication_preferences['email']),
                     int(account.communication_preferences['sms']),
                     int(account.active),
@@ -356,9 +403,10 @@ class SQLiteIdentityRepository(IdentityRepository):
                 ),
             ).rowcount
         if updated != 1:
-            if self.get_account(account.customer_id) is None:
+            current = self.get_account(account.customer_id)
+            if current is None:
                 raise KeyError(account.customer_id)
-            raise ValueError('stale_revision')
+            raise RevisionConflict(current.revision)
 
     def save_session(self, session: ClaimantAuthSessionRecord) -> None:
         with self._connection() as connection:

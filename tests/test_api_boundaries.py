@@ -31,6 +31,7 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
         '/api/claims/message': require_claimant,
         '/api/v1/claims/{claim_id}/asset-selections': require_claimant_session,
         '/api/v1/claims/{claim_id}/asset-snapshots': require_claimant_session,
+        '/api/v1/claims/{claim_id}/policy-selections': require_claimant_session,
     }
     health_paths = {'/health', '/health/live', '/health/ready'}
     public_routes = {
@@ -41,6 +42,7 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
     claimant_session_routes = {
         '/api/v1/claims/{claim_id}/asset-selections',
         '/api/v1/claims/{claim_id}/asset-snapshots',
+        '/api/v1/claims/{claim_id}/policy-selections',
     }
 
     for route in app.routes:

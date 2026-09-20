@@ -7,6 +7,7 @@ from hmac import compare_digest
 from secrets import token_hex
 
 from backend.domain.staff_identity import StaffAccountRecord, StaffAuthSessionRecord
+from backend.repositories.protocols import RevisionConflict
 from backend.repositories.staff_identity import StaffIdentityRepository
 
 
@@ -81,7 +82,7 @@ class FixtureStaffIdentityRepository(StaffIdentityRepository):
         if current is None:
             raise KeyError(account.staff_id)
         if current.revision != expected_revision or account.revision != expected_revision + 1:
-            raise ValueError('stale_revision')
+            raise RevisionConflict(current.revision)
         self._accounts[account.staff_id] = deepcopy(account)
 
     def create_account(
@@ -309,9 +310,10 @@ class SQLiteStaffIdentityRepository(StaffIdentityRepository):
                 ),
             ).rowcount
         if updated != 1:
-            if self.get_account(account.staff_id) is None:
+            current = self.get_account(account.staff_id)
+            if current is None:
                 raise KeyError(account.staff_id)
-            raise ValueError('stale_revision')
+            raise RevisionConflict(current.revision)
 
     def create_account(
         self,
