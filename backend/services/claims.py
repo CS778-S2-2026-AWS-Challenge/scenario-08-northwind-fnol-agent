@@ -82,6 +82,7 @@ from backend.services.fact_resolution import (
     resolve_form_change,
 )
 from backend.services.handoffs import claimant_handoff
+from backend.services.turn_reducer import recompute_progress
 from backend.services.incomplete_claims import (
     find_incomplete_recovery,
     recovery_checkpoint_allowed,
@@ -1123,19 +1124,15 @@ def update_form(
                     )
                 ],
             )
-    next_step = next_requirement_step(candidate_branch_evaluation.requirements)
+    progress_state, next_step = recompute_progress(
+        projected_claim,
+        candidate_branch_evaluation,
+    )
     updated_claim = projected_claim.model_copy(
         update={
             'claim_state': projected_claim.claim_state.model_copy(
                 update={
-                    'workflow_state': (
-                        WorkflowState.READY_FOR_NEXT
-                        if candidate_branch_evaluation.requirements.ready
-                        else WorkflowState.COLLECTING
-                        if projected_claim.claim_state.workflow_state
-                        is WorkflowState.READY_FOR_NEXT
-                        else projected_claim.claim_state.workflow_state
-                    )
+                    'workflow_state': progress_state,
                 }
             ),
             'customer_next_step': next_step,
@@ -1311,7 +1308,14 @@ def confirm_form_fields(
         )
         .requirements
     )
-    next_step = next_requirement_step(resolved_requirements)
+    progress_state, next_step = recompute_progress(
+        projected_claim,
+        BranchRuleEvaluator().evaluate(
+            projected_claim,
+            current_action=AgentAction.CONFIRM,
+            recomputation_reason='form_confirmation_progress',
+        ),
+    )
     updated_claim = claim.model_copy(
         update={
             'form': {**claim.form, **confirmed_fields},
@@ -1320,13 +1324,7 @@ def confirm_form_fields(
             'claim_state': claim.claim_state.model_copy(
                 update={
                     'next_action': AgentAction.ASK,
-                    'workflow_state': (
-                        WorkflowState.READY_FOR_NEXT
-                        if resolved_requirements.ready
-                        else WorkflowState.COLLECTING
-                        if claim.claim_state.workflow_state is WorkflowState.READY_FOR_NEXT
-                        else claim.claim_state.workflow_state
-                    ),
+                    'workflow_state': progress_state,
                 }
             ),
             'customer_next_step': next_step,
