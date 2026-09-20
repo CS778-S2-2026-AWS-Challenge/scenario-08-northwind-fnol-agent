@@ -846,6 +846,7 @@ class GatewayAgent:
         form_changes: list[ProposedFormChange] = []
         contents_changes: list[ProposedContentsItem] = []
         service_offer_ids: list[str] = []
+        model_required_items: list[str] = []
         evidence_id: str | None = None
         source_claim_id: str | None = None
         removal_scope: str | None = None
@@ -866,6 +867,8 @@ class GatewayAgent:
                     )
                 )
             service_offer_ids = [item.service_identity for item in parsed.service_suggestions]
+            if parsed.next_question is not None:
+                model_required_items = list(parsed.next_question.field_codes)
         elif isinstance(parsed, V7IntakeProposal):
             if plan.field_contract is None:
                 raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
@@ -893,11 +896,18 @@ class GatewayAgent:
             removal_scope = parsed.removal_scope
 
         available_services = {item.service_identity for item in context.external_services}
-        service_offer_ids = [
-            service_id
-            for service_id in context.selected_external_service_ids
-            if service_id in available_services
-        ]
+        if isinstance(parsed, V8TurnProposal):
+            service_offer_ids = [
+                service_id
+                for service_id in service_offer_ids
+                if service_id in available_services
+            ]
+        else:
+            service_offer_ids = [
+                service_id
+                for service_id in context.selected_external_service_ids
+                if service_id in available_services
+            ]
         rejected_optional_ids = sorted(set(model_service_offer_ids) - set(service_offer_ids))
         if rejected_optional_ids:
             logger.info(
@@ -1067,6 +1077,7 @@ class GatewayAgent:
                 status=status,
                 summary=answer.next_step,
                 responsible_party=ResponsibleParty.CLAIMANT,
+                required_items=model_required_items,
             ),
             form_changes=form_changes,
             contents_item_changes=contents_changes,

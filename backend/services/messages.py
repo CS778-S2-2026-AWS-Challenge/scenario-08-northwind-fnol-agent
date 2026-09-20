@@ -1915,6 +1915,7 @@ def submit_message(
         ),
         None,
     )
+    handoff_open = active_handoff is not None
     # Handoff ownership changes responsibility, but it does not make the
     # conversation silent.  The turn below must still reach the Agent path so
     # later claimant messages can be recorded and answered.
@@ -2143,14 +2144,18 @@ def submit_message(
             message='The external-service lifecycle context cannot be represented safely.',
             retryable=error.retryable,
         ) from error
-    selected_external_service_intents = select_registered_service_intents(
-        payload.content.text if payload.content is not None else None,
-        product_family=turn_family_resolution.product_family,
-        available_service_ids={
-            item.service_identity
-            for item in external_services
-            if item.operation_status is ExternalLifecycleStatus.CONSENT_REQUIRED
-        },
+    selected_external_service_intents = (
+        []
+        if handoff_open
+        else select_registered_service_intents(
+            payload.content.text if payload.content is not None else None,
+            product_family=turn_family_resolution.product_family,
+            available_service_ids={
+                item.service_identity
+                for item in external_services
+                if item.operation_status is ExternalLifecycleStatus.CONSENT_REQUIRED
+            },
+        )
     )
     agent_context = AgentTurnContext(
         claim=claim,
@@ -2204,7 +2209,7 @@ def submit_message(
         ),
         progress_reporter=(progress_reporter.emit if progress_reporter is not None else None),
         rolling_summary=rolling_summary,
-        external_services=external_services,
+        external_services=() if handoff_open else external_services,
     )
     try:
         proposal = agent.propose_turn(agent_context)
