@@ -21,6 +21,7 @@ _SCHEMA_FILES = {
     'claimant.handoff.v1': 'handoff.json',
     'claimant.claim-creation.v1': 'claim-creation.json',
     'claimant.sourced-summary.v1': 'sourced-summary.json',
+    'claimant.turn.v1': 'turn.json',
 }
 
 
@@ -42,8 +43,9 @@ def load_response_schema(schema_id: str) -> dict[str, object]:
         filename = _SCHEMA_FILES[schema_id]
     except KeyError as error:
         raise ValueError(f'Unknown v7 response schema: {schema_id}.') from error
+    pack = 'v8' if schema_id == 'claimant.turn.v1' else 'v7'
     payload = json.loads(
-        files('backend.prompts').joinpath(f'v7/schema/{filename}').read_text(encoding='utf-8')
+        files('backend.prompts').joinpath(f'{pack}/schema/{filename}').read_text(encoding='utf-8')
     )
     if not isinstance(payload, dict):
         raise ValueError('A v7 response schema must be a JSON object.')

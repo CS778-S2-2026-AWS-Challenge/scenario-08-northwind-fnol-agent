@@ -1,0 +1,8 @@
+{
+  "prompt_pack_version": "northwind-fnol-claimant-v8",
+  "fragments": [
+    {"fragment_id": "core.role", "kind": "core", "required": true},
+    {"fragment_id": "core.safety", "kind": "core", "required": true},
+    {"fragment_id": "task.turn", "kind": "task", "required": true}
+  ]
+}

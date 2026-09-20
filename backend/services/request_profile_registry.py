@@ -3,6 +3,25 @@
 from backend.domain.agent_context_runtime import RequestProfile, TurnTask
 
 _PROFILES = {
+    'claimant.turn.v1': RequestProfile(
+        profile_id='claimant.turn.v1',
+        version='v1',
+        schema_id='claimant.turn.v1',
+        max_model_invocations=1,
+        max_model_selected_tools=0,
+        input_hard_limit=3000,
+        output_limit=4500,
+    ),
+    'claimant.turn.media.v1': RequestProfile(
+        profile_id='claimant.turn.media.v1',
+        version='v1',
+        schema_id='claimant.turn.v1',
+        max_model_invocations=1,
+        max_model_selected_tools=0,
+        input_hard_limit=3000,
+        output_limit=5500,
+        requires_media_types=['image/*', 'application/pdf'],
+    ),
     'claimant.intake.v1': RequestProfile(
         profile_id='claimant.intake.v1',
         version='v1',
@@ -121,13 +140,25 @@ def request_profile_for_task(
     profiles: tuple[RequestProfile, ...] | list[RequestProfile] | None = None,
 ) -> RequestProfile:
     registry = {item.profile_id: item for item in profiles} if profiles is not None else _PROFILES
+    def profile(name: str) -> RequestProfile:
+        return registry.get(name, _PROFILES[name])
     if isolated_review:
-        return registry['claimant.deep-review.v1']
+        return profile('claimant.deep-review.v1')
     if needs_lookup:
-        return registry['claimant.lookup.v1']
+        return profile('claimant.lookup.v1')
     if has_current_media and task in {TurnTask.INTAKE, TurnTask.CORRECTION}:
-        return registry['claimant.media.v1']
-    return registry[_TASK_PROFILE[task]]
+        return profile('claimant.turn.media.v1')
+    if task in {
+        TurnTask.INTAKE,
+        TurnTask.CORRECTION,
+        TurnTask.CONFIRMATION,
+        TurnTask.STATUS_QUESTION,
+        TurnTask.EXTERNAL_SUPPORT,
+        TurnTask.CLAIM_CREATION,
+        TurnTask.HUMAN_HANDOFF,
+    }:
+        return profile('claimant.turn.v1')
+    return profile(_TASK_PROFILE[task])
 
 
 def registered_request_profiles() -> tuple[RequestProfile, ...]:

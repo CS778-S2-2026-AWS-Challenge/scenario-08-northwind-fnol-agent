@@ -25,6 +25,7 @@ from backend.domain.agent_v7 import (
     V7IntakeProposal,
     V7SourcedSummaryProposal,
 )
+from backend.domain.agent_v8 import V8TurnProposal
 from backend.domain.branch_registry import build_default_registry
 from backend.domain.ids import new_id
 from backend.domain.intake import infer_controlled_product_family
@@ -168,6 +169,7 @@ def _merge_field_contract_repair(
 
 _V7_ANSWER_ADAPTER = TypeAdapter(V7AnswerProposal)
 _V7_INTAKE_ADAPTER = TypeAdapter(V7IntakeProposal)
+_V8_TURN_ADAPTER = TypeAdapter(V8TurnProposal)
 _V7_EXTERNAL_ADAPTER = TypeAdapter(V7ExternalOfferProposal)
 _V7_EVIDENCE_ADAPTER = TypeAdapter(V7EvidenceActionProposal)
 _V7_CREATION_ADAPTER = TypeAdapter(V7ClaimCreationProposal)
@@ -804,7 +806,9 @@ class GatewayAgent:
             else []
         )
         try:
-            if plan.schema_id == 'claimant.intake-patch.v1':
+            if plan.schema_id == 'claimant.turn.v1':
+                parsed = _V8_TURN_ADAPTER.validate_python(raw_output)
+            elif plan.schema_id == 'claimant.intake-patch.v1':
                 parsed: object = _V7_INTAKE_ADAPTER.validate_python(raw_output)
             elif plan.schema_id == 'claimant.external-offer.v1':
                 parsed = _V7_EXTERNAL_ADAPTER.validate_python(raw_output)
@@ -819,22 +823,50 @@ class GatewayAgent:
         except ValidationError:
             raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
 
-        answer = (
+        if isinstance(parsed, V8TurnProposal):
+            answer = V7AnswerProposal(
+                reply=parsed.reply,
+                next_step=(
+                    parsed.next_question.wording
+                    if parsed.next_question is not None
+                    else 'Continue the current report.'
+                ),
+                reason_codes=parsed.reason_codes,
+            )
+        else:
+            answer = (
             V7AnswerProposal(
                 reply=parsed.summary,
                 next_step='Continue the Claim with the sourced review when ready.',
                 reason_codes=['ISOLATED_CONTEXT_REVIEWED'],
             )
             if isinstance(parsed, V7SourcedSummaryProposal)
-            else cast(V7AnswerProposal, parsed)
-        )
+                else cast(V7AnswerProposal, parsed)
+            )
         form_changes: list[ProposedFormChange] = []
         contents_changes: list[ProposedContentsItem] = []
         service_offer_ids: list[str] = []
         evidence_id: str | None = None
         source_claim_id: str | None = None
         removal_scope: str | None = None
-        if isinstance(parsed, V7IntakeProposal):
+        if isinstance(parsed, V8TurnProposal):
+            if plan.field_contract is None:
+                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+            for item in parsed.field_changes:
+                form_changes.append(
+                    ProposedFormChange(
+                        field_code=item.field_code,
+                        value=item.value,
+                        source=FormSource.INFERENCE,
+                        status=FormStatus.PROPOSED,
+                        needed_for=NeededFor.CURRENT_ACTION,
+                        precision=item.precision,
+                        reported_text=item.reported_text,
+                        source_evidence_id=item.source_evidence_id,
+                    )
+                )
+            service_offer_ids = [item.service_identity for item in parsed.service_suggestions]
+        elif isinstance(parsed, V7IntakeProposal):
             if plan.field_contract is None:
                 raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
             parsed = parsed.model_copy(

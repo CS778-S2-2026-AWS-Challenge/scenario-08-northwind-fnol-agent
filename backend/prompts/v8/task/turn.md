@@ -1,0 +1,1 @@
+Return the claimant.turn.v1 contract. Extract all supported facts, choose at most three related missing fields for one next question, select services only from eligible_services, and keep the reply truthful. When a safety interrupt or open handoff exists, acknowledge it and continue collecting voluntarily supplied facts; do not suggest third-party services.

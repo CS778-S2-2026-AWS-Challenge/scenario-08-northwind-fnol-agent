@@ -141,7 +141,7 @@ def plan_model_turn(
     else:
         bundle = compose_prompt(route)
         schema = load_response_schema(profile.schema_id)
-    if profile.schema_id == 'claimant.intake-patch.v1':
+    if profile.schema_id in {'claimant.intake-patch.v1', 'claimant.turn.v1'}:
         branch_evaluator = (
             runtime_policy.branch_evaluator()
             if runtime_policy is not None
