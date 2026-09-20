@@ -19,8 +19,10 @@ from backend.adapters.claims_service import (
     MockAssessorServiceAdapter,
     ScriptedAssessorFailure,
 )
+from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.core.runtime_profiles import RuntimeCapabilityStatus
+from backend.domain.audit import AuditSubject, AuditSubjectType
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
     ASSESSOR_REQUESTED_ACTION,
@@ -44,8 +46,11 @@ from backend.domain.models import (
     AssessorRoutingStatus,
     AuthorityOutcome,
     Channel,
+    ClaimCollaborationRequest,
     ClaimCreationStatus,
     ClaimState,
+    CollaborationRequestKind,
+    CollaborationRequestStatus,
     CustomerNextStep,
     EvidenceFileStatus,
     EvidenceRecord,
@@ -122,6 +127,7 @@ from backend.repositories.protocols import (
     with_staff_agent_source,
 )
 from backend.services.external_service_entry import resolve_external_service_entry
+from backend.services.handoff_audit import build_handoff_audit_event
 from backend.services.integrations import (
     assessor_operation_id,
     reconcile_assessor_routing,
@@ -554,6 +560,344 @@ def mutation_contract_repository(request: pytest.FixtureRequest) -> PersistenceR
     repository = MongoDBRepository(mongomock.MongoClient(), 'mutation_contract')
     repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
     return repository
+
+
+def test_handoff_mutation_persists_atomic_audit_for_fixture_and_mongo(
+    mutation_contract_repository: PersistenceRepository,
+) -> None:
+    repository = mutation_contract_repository
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    updated = claim.model_copy(update={'revision': 2})
+    handoff = _handoff(updated)
+    route = f'/api/v1/claims/{claim.claim_id}/support-requests'
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route=route,
+        key='handoff-audit-parity',
+        request_fingerprint='handoff-audit-parity',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        handoff_id=handoff.handoff_id,
+    )
+    audit_event = build_handoff_audit_event(
+        principal=Principal(
+            subject=claim.customer_id,
+            actor_type='claimant',
+            auth_source='test:claimant',
+        ),
+        claim=updated,
+        handoff=handoff,
+        route=route,
+        idempotency_key=idempotency.key,
+        required_permission='claimant_support_request',
+        reason='Claimant support handoff queued.',
+        created_at=claim.created_at,
+    )
+
+    repository.save_handoff_mutation(
+        updated,
+        1,
+        handoff,
+        idempotency,
+        audit_event,
+    )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == updated
+    assert repository.get_handoff(claim.claim_id, handoff.handoff_id, claim.customer_id) == handoff
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        == idempotency
+    )
+    subject = AuditSubject(
+        subject_type=AuditSubjectType.CLAIM,
+        subject_id=claim.claim_id,
+        claim_id=claim.claim_id,
+    )
+    assert repository.list_audit_events_internal(subject) == [audit_event]
+    realtime_event = repository.replay_realtime_events(None, limit=20)[-1]
+    assert realtime_event.claim_revision == updated.revision
+    assert realtime_event.operation_correlation == idempotency.key
+    assert RealtimeResource.HANDOFFS in realtime_event.resources
+
+
+def test_staff_handoff_audit_is_required_across_adapters(
+    mutation_contract_repository: PersistenceRepository,
+) -> None:
+    repository = mutation_contract_repository
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+
+    stored_handoff = _handoff(claim).model_copy(
+        update={
+            'status': HandoffStatus.ACCEPTED,
+            'assigned_to': 'staff_owner',
+            'accepted_at': claim.created_at,
+        }
+    )
+    repository.save_handoff(stored_handoff, claim.customer_id)
+
+    updated = claim.model_copy(update={'revision': 2})
+    handoff = stored_handoff.model_copy(update={'status': HandoffStatus.IN_PROGRESS})
+    route = f'/api/v1/workbench/claims/{claim.claim_id}/handoffs/{handoff.handoff_id}'
+    idempotency = IdempotencyRecord(
+        actor_id='staff_owner',
+        route=route,
+        key='staff-handoff-audit-required',
+        request_fingerprint='staff-handoff-audit-required',
+        claim_id=claim.claim_id,
+        session_id='',
+        handoff_id=handoff.handoff_id,
+    )
+    audit_event = build_handoff_audit_event(
+        principal=Principal(
+            subject='staff_owner',
+            actor_type='staff',
+            auth_source='test:staff',
+        ),
+        claim=updated,
+        handoff=handoff,
+        route=route,
+        idempotency_key=idempotency.key,
+        required_permission='handoff.progress',
+        reason='Synthetic staff Handoff progression.',
+        created_at=claim.created_at,
+    )
+    malformed_audit = audit_event.model_copy(update={'claim_revision': updated.revision + 1})
+    subject = AuditSubject(
+        subject_type=AuditSubjectType.CLAIM,
+        subject_id=claim.claim_id,
+        claim_id=claim.claim_id,
+    )
+    realtime_before = repository.replay_realtime_events(None, limit=20)
+    audit_before = repository.list_audit_events_internal(subject)
+
+    with pytest.raises(KeyError):
+        repository.save_staff_mutation(
+            updated,
+            1,
+            idempotency,
+            handoff=handoff,
+        )
+    with pytest.raises(KeyError):
+        repository.save_staff_mutation(
+            updated,
+            1,
+            idempotency,
+            handoff=handoff,
+            audit_event=malformed_audit,
+        )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+    persisted_handoff = repository.get_handoff(
+        claim.claim_id,
+        handoff.handoff_id,
+        claim.customer_id,
+    )
+    assert persisted_handoff == stored_handoff
+    assert repository.find_idempotency(idempotency.actor_id, route, idempotency.key) is None
+    assert repository.list_audit_events_internal(subject) == audit_before
+    assert repository.replay_realtime_events(None, limit=20) == realtime_before
+
+    repository.save_staff_mutation(
+        updated,
+        1,
+        idempotency,
+        handoff=handoff,
+        audit_event=audit_event,
+    )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == updated
+    persisted_handoff = repository.get_handoff(
+        claim.claim_id,
+        handoff.handoff_id,
+        claim.customer_id,
+    )
+    assert persisted_handoff == handoff
+    assert repository.find_idempotency(idempotency.actor_id, route, idempotency.key) == idempotency
+    assert repository.list_audit_events_internal(subject) == [*audit_before, audit_event]
+    realtime_event = repository.replay_realtime_events(None, limit=20)[-1]
+    assert realtime_event.claim_revision == updated.revision
+    assert realtime_event.operation_correlation == idempotency.key
+    assert RealtimeResource.HANDOFFS in realtime_event.resources
+
+
+@pytest.mark.parametrize(
+    ('kind', 'actor_id', 'assigned_to'),
+    [
+        (CollaborationRequestKind.TRANSFER, 'staff_target', 'staff_target'),
+        (CollaborationRequestKind.REQUEUE, 'staff_owner', None),
+    ],
+)
+def test_ownership_handoff_child_identity_is_equivalent_across_adapters(
+    mutation_contract_repository: PersistenceRepository,
+    kind: CollaborationRequestKind,
+    actor_id: str,
+    assigned_to: str | None,
+) -> None:
+    repository = mutation_contract_repository
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+
+    stored_handoff = _handoff(claim).model_copy(
+        update={
+            'status': HandoffStatus.ACCEPTED,
+            'assigned_to': 'staff_owner',
+            'accepted_at': claim.created_at,
+        }
+    )
+    repository.save_handoff(stored_handoff, claim.customer_id)
+    realtime_before = repository.replay_realtime_events(None, limit=20)
+
+    updated = claim.model_copy(update={'revision': 2, 'assignee_id': assigned_to})
+    handoff_status = HandoffStatus.QUEUED
+    accepted_at: datetime | None = None
+    if kind is CollaborationRequestKind.TRANSFER:
+        handoff_status = HandoffStatus.ACCEPTED
+        accepted_at = stored_handoff.accepted_at
+    handoff = stored_handoff.model_copy(
+        update={
+            'status': handoff_status,
+            'assigned_to': assigned_to,
+            'accepted_at': accepted_at,
+        }
+    )
+    request = ClaimCollaborationRequest(
+        request_id=f'col_mongo_{kind.value}',
+        claim_id=claim.claim_id,
+        kind=kind,
+        status=CollaborationRequestStatus.ACCEPTED,
+        requested_by='staff_owner',
+        primary_owner_id='staff_owner',
+        target_staff_id=assigned_to,
+        reason='Synthetic ownership mutation.',
+        created_at=claim.created_at,
+        resolved_by=actor_id,
+        resolved_at=claim.created_at,
+    )
+    route = f'/api/v1/workbench/claims/{claim.claim_id}/ownership/{kind.value}'
+    idempotency = IdempotencyRecord(
+        actor_id=actor_id,
+        route=route,
+        key=f'ownership-{kind.value}-atomic-link',
+        request_fingerprint=f'ownership-{kind.value}-atomic-link',
+        claim_id=claim.claim_id,
+        session_id='',
+        handoff_id=handoff.handoff_id,
+    )
+    audit_event = build_handoff_audit_event(
+        principal=Principal(
+            subject=actor_id,
+            actor_type='staff',
+            auth_source='test:staff',
+        ),
+        claim=updated,
+        handoff=handoff,
+        route=route,
+        idempotency_key=idempotency.key,
+        required_permission=f'ownership.{kind.value}',
+        reason='Synthetic ownership mutation changed the active handoff.',
+        created_at=claim.created_at,
+        source_refs=(request.request_id,),
+    )
+    malformed_audit = audit_event.model_copy(update={'claim_revision': updated.revision + 1})
+    subject = AuditSubject(
+        subject_type=AuditSubjectType.CLAIM,
+        subject_id=claim.claim_id,
+        claim_id=claim.claim_id,
+    )
+    audit_before = repository.list_audit_events_internal(subject)
+
+    with pytest.raises(KeyError):
+        repository.save_ownership_mutation(
+            updated,
+            1,
+            idempotency,
+            request,
+            handoff=handoff,
+        )
+    with pytest.raises(KeyError):
+        repository.save_ownership_mutation(
+            updated,
+            1,
+            idempotency,
+            request,
+            handoff=handoff,
+            audit_event=malformed_audit,
+        )
+
+    wrong_link = replace(
+        idempotency,
+        key=f'{idempotency.key}-wrong',
+        request_fingerprint=f'{idempotency.request_fingerprint}-wrong',
+        handoff_id='hnd_wrong_ownership_link',
+    )
+    wrong_audit = build_handoff_audit_event(
+        principal=Principal(
+            subject=actor_id,
+            actor_type='staff',
+            auth_source='test:staff',
+        ),
+        claim=updated,
+        handoff=handoff,
+        route=route,
+        idempotency_key=wrong_link.key,
+        required_permission=f'ownership.{kind.value}',
+        reason='Synthetic wrong-link ownership mutation.',
+        created_at=claim.created_at,
+        source_refs=(request.request_id,),
+    )
+    with pytest.raises(KeyError):
+        repository.save_ownership_mutation(
+            updated,
+            1,
+            wrong_link,
+            request,
+            handoff=handoff,
+            audit_event=wrong_audit,
+        )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+    persisted_handoff = repository.get_handoff(
+        claim.claim_id,
+        handoff.handoff_id,
+        claim.customer_id,
+    )
+    assert persisted_handoff == stored_handoff
+    assert repository.find_idempotency(actor_id, route, idempotency.key) is None
+    assert repository.find_idempotency(actor_id, route, wrong_link.key) is None
+    assert repository.list_audit_events_internal(subject) == audit_before
+    assert repository.replay_realtime_events(None, limit=20) == realtime_before
+
+    repository.save_ownership_mutation(
+        updated,
+        1,
+        idempotency,
+        request,
+        handoff=handoff,
+        audit_event=audit_event,
+    )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == updated
+    persisted_handoff = repository.get_handoff(
+        claim.claim_id,
+        handoff.handoff_id,
+        claim.customer_id,
+    )
+    assert persisted_handoff == handoff
+    assert repository.find_idempotency(actor_id, route, idempotency.key) == idempotency
+    assert repository.list_audit_events_internal(subject) == [*audit_before, audit_event]
+    realtime_event = repository.replay_realtime_events(None, limit=20)[-1]
+    assert realtime_event.claim_revision == updated.revision
+    assert realtime_event.operation_correlation == idempotency.key
+    assert RealtimeResource.HANDOFFS in realtime_event.resources
 
 
 @pytest.mark.parametrize(
@@ -3479,3 +3823,112 @@ def test_mongodb_admits_one_dispatch_reserver_for_one_request(
         repository.reserve_external_dispatch(
             'clm_missing', request.request_id, claim.customer_id, taken_at, operation_id
         )
+
+
+@pytest.mark.integration
+def test_mongodb_handoff_audit_insert_failure_rolls_back_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uri = os.environ.get(
+        'NORTHWIND_MONGODB_TEST_URI',
+        'mongodb://localhost:27017/?replicaSet=rs0&directConnection=true',
+    )
+    client: MongoClient[Any] = MongoClient(uri, serverSelectionTimeoutMS=750)
+    database_name = (
+        f'northwind_handoff_audit_rollback_{datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")}'
+    )
+    connected = False
+    try:
+        try:
+            hello = client.admin.command('hello')
+            connected = True
+        except (PyMongoError, ValueError) as error:
+            pytest.skip(f'real MongoDB replica set unavailable: {type(error).__name__}')
+        if not hello.get('isWritablePrimary', False):
+            pytest.skip('real MongoDB replica set has no writable primary')
+
+        repository = MongoDBRepository(client, database_name)
+        claim = _claim().model_copy(update={'claim_id': 'clm_handoff_audit_rollback'})
+        session = _session(claim).model_copy(
+            update={
+                'claim_id': claim.claim_id,
+                'customer_id': claim.customer_id,
+                'session_id': claim.active_session_id,
+            }
+        )
+        repository.create_claim(claim, session)
+        events_before = repository.replay_realtime_events(None, limit=20)
+        updated = claim.model_copy(update={'revision': 2})
+        handoff = _handoff(updated).model_copy(update={'handoff_id': 'hnd_audit_rollback'})
+        route = f'/api/v1/claims/{claim.claim_id}/support-requests'
+        idempotency = IdempotencyRecord(
+            actor_id=claim.customer_id,
+            route=route,
+            key='handoff-audit-rollback',
+            request_fingerprint='handoff-audit-rollback',
+            claim_id=claim.claim_id,
+            session_id=session.session_id,
+            handoff_id=handoff.handoff_id,
+        )
+        audit_event = build_handoff_audit_event(
+            principal=Principal(
+                subject=claim.customer_id,
+                actor_type='claimant',
+                auth_source='test:claimant',
+            ),
+            claim=updated,
+            handoff=handoff,
+            route=route,
+            idempotency_key=idempotency.key,
+            required_permission='claimant_support_request',
+            reason='Claimant support handoff queued.',
+            created_at=claim.created_at,
+        )
+
+        def reject_audit_insert(
+            _event: object,
+            *,
+            mongo_session: object,
+        ) -> None:
+            del mongo_session
+            raise RuntimeError('forced handoff audit insert failure')
+
+        monkeypatch.setattr(repository, '_insert_audit_event', reject_audit_insert)
+
+        with pytest.raises(RuntimeError, match='forced handoff audit insert failure'):
+            repository.save_handoff_mutation(
+                updated,
+                1,
+                handoff,
+                idempotency,
+                audit_event,
+            )
+
+        assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+        assert (
+            repository.get_handoff(
+                claim.claim_id,
+                handoff.handoff_id,
+                claim.customer_id,
+            )
+            is None
+        )
+        assert (
+            repository.find_idempotency(
+                idempotency.actor_id,
+                idempotency.route,
+                idempotency.key,
+            )
+            is None
+        )
+        subject = AuditSubject(
+            subject_type=AuditSubjectType.CLAIM,
+            subject_id=claim.claim_id,
+            claim_id=claim.claim_id,
+        )
+        assert repository.list_audit_events_internal(subject) == []
+        assert repository.replay_realtime_events(None, limit=20) == events_before
+    finally:
+        if connected:
+            client.drop_database(database_name)
+        client.close()

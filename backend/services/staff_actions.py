@@ -3,6 +3,7 @@ from typing import Any
 from backend.adapters.claims_service import AssessorServiceAdapter
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
+from backend.domain.audit import AuditEventEnvelope
 from backend.domain.external_services import (
     ExternalTaskOperationStatus,
     ExternalTaskResultVerification,
@@ -56,6 +57,7 @@ from backend.repositories.protocols import (
     staff_agent_execution_for,
     with_staff_agent_source,
 )
+from backend.services.handoff_audit import build_handoff_audit_event
 from backend.services.integrations import reconcile_assessor_routing
 from backend.services.staff_access import ClaimStaffAccess, require_claim_collaborator
 from backend.services.staff_presence import require_claimable_staff
@@ -159,6 +161,7 @@ def _save(
     expected_revision: int,
     idempotency: IdempotencyRecord,
     source: StaffAgentDraftSource | None = None,
+    audit_event: AuditEventEnvelope | None = None,
     **records: Any,
 ) -> None:
     try:
@@ -167,6 +170,7 @@ def _save(
             claim,
             expected_revision,
             linked_idempotency,
+            audit_event=audit_event,
             staff_agent_execution=staff_agent_execution_for(
                 claim, expected_revision, linked_idempotency, source
             ),
@@ -291,6 +295,16 @@ def accept_handoff(
         target_ref=projected_action.target_ref,
         response_payload=response.model_dump(mode='json'),
     )
+    audit_event = build_handoff_audit_event(
+        principal=principal,
+        claim=updated,
+        handoff=accepted,
+        route=route,
+        idempotency_key=key,
+        required_permission=projected_action.action_code,
+        reason='Staff accepted the handoff.',
+        created_at=timestamp,
+    )
     _save(
         repository,
         updated,
@@ -300,6 +314,7 @@ def accept_handoff(
         required_staff_id=principal.subject,
         required_staff_revision=presence.revision if presence is not None else None,
         source=source,
+        audit_event=audit_event,
     )
     return response
 
@@ -611,6 +626,17 @@ def send_staff_message(
         target_ref=projected_action.target_ref,
         response_payload=response.model_dump(mode='json'),
     )
+    audit_event = build_handoff_audit_event(
+        principal=principal,
+        claim=updated,
+        handoff=updated_handoff,
+        route=route,
+        idempotency_key=key,
+        required_permission=projected_action.action_code,
+        reason='Staff claimant message advanced the handoff work.',
+        created_at=timestamp,
+        source_refs=(message.message_id,),
+    )
     _save(
         repository,
         updated,
@@ -619,6 +645,7 @@ def send_staff_message(
         handoff=updated_handoff,
         message=message,
         source=source,
+        audit_event=audit_event,
     )
     return response
 
@@ -729,6 +756,17 @@ def resolve_handoff(
         target_ref=projected_action.target_ref,
         response_payload=response.model_dump(mode='json'),
     )
+    audit_event = build_handoff_audit_event(
+        principal=principal,
+        claim=updated,
+        handoff=resolved,
+        route=route,
+        idempotency_key=key,
+        required_permission=projected_action.action_code,
+        reason='Staff resolved the handoff.',
+        created_at=timestamp,
+        source_refs=(action.action_id, customer_update.update_id),
+    )
     _save(
         repository,
         updated,
@@ -738,6 +776,7 @@ def resolve_handoff(
         staff_action=action,
         customer_update=customer_update,
         source=source,
+        audit_event=audit_event,
     )
     return response
 
