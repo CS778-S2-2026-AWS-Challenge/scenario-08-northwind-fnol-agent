@@ -125,6 +125,7 @@ from backend.repositories.protocols import (
     RepositorySearchLimitExceeded,
     RevisionConflict,
     ValidationSeedGraph,
+    validate_handoff_mutation_audit,
     validate_staff_agent_execution,
     validate_staff_agent_execution_source,
     validate_validation_seed_session,
@@ -3939,6 +3940,7 @@ class MongoDBRepository:
         collaboration_request: ClaimCollaborationRequest,
         coworkers: list[ClaimCoworkerRecord] | None = None,
         handoff: HandoffRecord | None = None,
+        audit_event: AuditEventEnvelope | None = None,
         staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
         try:
@@ -3948,11 +3950,17 @@ class MongoDBRepository:
         except ValueError as error:
             raise KeyError(claim.claim_id) from error
         coworker_records = coworkers or []
+        try:
+            validate_handoff_mutation_audit(claim, handoff, idempotency, audit_event)
+        except ValueError as error:
+            raise KeyError(claim.claim_id) from error
         if (
             claim.revision != expected_revision + 1
             or collaboration_request.claim_id != claim.claim_id
             or any(item.claim_id != claim.claim_id for item in coworker_records)
             or (handoff is not None and handoff.claim_id != claim.claim_id)
+            or (handoff is not None and idempotency.handoff_id != handoff.handoff_id)
+            or (handoff is None and idempotency.handoff_id is not None)
             or idempotency.claim_id != claim.claim_id
         ):
             raise KeyError(claim.claim_id)
@@ -3967,8 +3975,14 @@ class MongoDBRepository:
             records.append(
                 ('staff_agent_execution', staff_agent_execution.execution_id, staff_agent_execution)
             )
-        self._atomic(
-            lambda mongo_session: self._save_child_mutation(
+
+        def persist(mongo_session: Any) -> None:
+            prepared_audit = (
+                self._prepare_audit_events(claim, (audit_event,), mongo_session=mongo_session)
+                if audit_event is not None
+                else ()
+            )
+            self._save_child_mutation(
                 claim,
                 expected_revision,
                 idempotency,
@@ -3976,7 +3990,10 @@ class MongoDBRepository:
                 mutation=RealtimeMutation.OWNERSHIP_CHANGED,
                 records=records,
             )
-        )
+            for event in prepared_audit:
+                self._insert_audit_event(event, mongo_session=mongo_session)
+
+        self._atomic(persist)
 
     def save_staff_mutation(
         self,
@@ -3991,6 +4008,7 @@ class MongoDBRepository:
         message: MessageRecord | None = None,
         required_staff_id: str | None = None,
         required_staff_revision: int | None = None,
+        audit_event: AuditEventEnvelope | None = None,
         staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
         try:
@@ -4000,6 +4018,10 @@ class MongoDBRepository:
         except ValueError as error:
             raise KeyError(claim.claim_id) from error
         supplied = (staff_action, customer_update, signal_decision, handoff, message)
+        try:
+            validate_handoff_mutation_audit(claim, handoff, idempotency, audit_event)
+        except ValueError as error:
+            raise KeyError(claim.claim_id) from error
         if (
             claim.revision != expected_revision + 1
             or not any(item is not None for item in supplied)
@@ -4030,8 +4052,14 @@ class MongoDBRepository:
             records.append(
                 ('staff_agent_execution', staff_agent_execution.execution_id, staff_agent_execution)
             )
-        self._atomic(
-            lambda mongo_session: self._save_child_mutation(
+
+        def persist(mongo_session: Any) -> None:
+            prepared_audit = (
+                self._prepare_audit_events(claim, (audit_event,), mongo_session=mongo_session)
+                if audit_event is not None
+                else ()
+            )
+            self._save_child_mutation(
                 claim,
                 expected_revision,
                 idempotency,
@@ -4041,7 +4069,10 @@ class MongoDBRepository:
                 required_staff_id=required_staff_id,
                 required_staff_revision=required_staff_revision,
             )
-        )
+            for event in prepared_audit:
+                self._insert_audit_event(event, mongo_session=mongo_session)
+
+        self._atomic(persist)
 
     def save_message_mutation(
         self,
@@ -4666,6 +4697,7 @@ class MongoDBRepository:
         expected_revision: int,
         handoff: HandoffRecord,
         idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
         branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         if (
@@ -4683,8 +4715,14 @@ class MongoDBRepository:
             records.append(
                 ('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation)
             )
-        self._atomic(
-            lambda mongo_session: self._save_child_mutation(
+
+        def persist(mongo_session: Any) -> None:
+            prepared_audit = self._prepare_audit_events(
+                claim,
+                (audit_event,),
+                mongo_session=mongo_session,
+            )
+            self._save_child_mutation(
                 claim,
                 expected_revision,
                 idempotency,
@@ -4692,7 +4730,10 @@ class MongoDBRepository:
                 mutation=RealtimeMutation.HANDOFF_MUTATION_COMMITTED,
                 records=records,
             )
-        )
+            for event in prepared_audit:
+                self._insert_audit_event(event, mongo_session=mongo_session)
+
+        self._atomic(persist)
 
     def _save_child_mutation(
         self,

@@ -2317,8 +2317,11 @@ Request:
   claimant-safe words.
 
 Notification runs only after the handoff is durable, so a notification outage
-never fails the claimant request and never loses it. A retry with the same
-idempotency key returns the same handoff and does not notify twice.
+never fails the claimant request and never loses it. The durable mutation atomically
+persists the new Claim revision, handoff, idempotency record, and one internal
+Claim-scoped audit fact for the authenticated claimant operation. Audit failure rolls the
+whole durable mutation back. A retry with the same idempotency key returns the same
+handoff, does not append a second audit fact, and does not notify twice.
 
 `GET /health/ready` reports the notification service under the
 `handoff_dispatch` check.
@@ -2970,6 +2973,10 @@ reply. Claimants continue through the ordinary message route; there is no claima
 Staff messages use
 `POST /api/v1/workbench/claims/{claim_id}/messages`; they move an accepted handoff to
 `in_progress` but do not resolve it. `resolve` remains a separate, explicit lifecycle operation.
+Accept, handoff-linked staff-message progression, resolve, and ownership transfer/requeue when
+they change a handoff persist the resulting Claim/Handoff/idempotency state and one authenticated
+Claim-scoped audit fact atomically. A stale revision, blocked action, ownership denial, conflicting
+replay, or audit failure commits none of that mutation bundle.
 
 The prototype clients use these provider-neutral HTTP resources for explicit message refreshes.
 Real-time delivery infrastructure remains replaceable and is not part of the API contract.
