@@ -46,6 +46,7 @@ from backend.domain.models import (
     ExternalServiceOfferDecisionRequest,
     IntegrationSource,
     WorkingClaim,
+    WorkflowState,
 )
 from backend.domain.runtime import ExternalServiceOfferMetadata, RuntimeWorkItemRecord
 from backend.repositories.protocols import (
@@ -55,6 +56,7 @@ from backend.repositories.protocols import (
     RevisionConflict,
 )
 from backend.services.branching import build_applied_branch_evaluation
+from backend.domain.intake import next_requirement_step
 from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
 from backend.services.external_service_entry import ExternalServiceEntryDecision
@@ -597,6 +599,33 @@ def decide_external_service_offer(
         repository=repository,
         recomputation_reason='external_service_offer_decision',
         trigger_source_refs=[offer.offer_id, consent.consent_ref],
+    )
+    recomputed_next_step = next_requirement_step(branch_evaluation.requirements)
+    updated = updated.model_copy(
+        update={
+            'customer_next_step': recomputed_next_step,
+            'claim_state': updated.claim_state.model_copy(
+                update={
+                    'workflow_state': (
+                        WorkflowState.READY_FOR_NEXT
+                        if branch_evaluation.requirements.ready
+                        else WorkflowState.COLLECTING
+                    )
+                }
+            ),
+        }
+    )
+    response = response.model_copy(
+        update={
+            'revision': updated.revision,
+            'customer_next_step': recomputed_next_step,
+            'primary_action': project_claimant_primary_action(
+                claim_id=claim_id,
+                claim_revision=updated.revision,
+                next_step=recomputed_next_step,
+                external_service_action=None,
+            ),
+        }
     )
     try:
         repository.save_claim_mutation_with_audit(
