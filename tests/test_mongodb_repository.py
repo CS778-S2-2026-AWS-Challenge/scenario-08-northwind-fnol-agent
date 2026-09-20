@@ -604,6 +604,108 @@ def test_handoff_mutation_persists_atomic_audit_for_fixture_and_mongo(
     assert RealtimeResource.HANDOFFS in realtime_event.resources
 
 
+def test_staff_handoff_audit_is_required_across_adapters(
+    mutation_contract_repository: PersistenceRepository,
+) -> None:
+    repository = mutation_contract_repository
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+
+    stored_handoff = _handoff(claim).model_copy(
+        update={
+            'status': HandoffStatus.ACCEPTED,
+            'assigned_to': 'staff_owner',
+            'accepted_at': claim.created_at,
+        }
+    )
+    repository.save_handoff(stored_handoff, claim.customer_id)
+
+    updated = claim.model_copy(update={'revision': 2})
+    handoff = stored_handoff.model_copy(update={'status': HandoffStatus.IN_PROGRESS})
+    route = f'/api/v1/workbench/claims/{claim.claim_id}/handoffs/{handoff.handoff_id}'
+    idempotency = IdempotencyRecord(
+        actor_id='staff_owner',
+        route=route,
+        key='staff-handoff-audit-required',
+        request_fingerprint='staff-handoff-audit-required',
+        claim_id=claim.claim_id,
+        session_id='',
+        handoff_id=handoff.handoff_id,
+    )
+    audit_event = build_handoff_audit_event(
+        principal=Principal(
+            subject='staff_owner',
+            actor_type='staff',
+            auth_source='test:staff',
+        ),
+        claim=updated,
+        handoff=handoff,
+        route=route,
+        idempotency_key=idempotency.key,
+        required_permission='handoff.progress',
+        reason='Synthetic staff Handoff progression.',
+        created_at=claim.created_at,
+    )
+    malformed_audit = audit_event.model_copy(update={'claim_revision': updated.revision + 1})
+    subject = AuditSubject(
+        subject_type=AuditSubjectType.CLAIM,
+        subject_id=claim.claim_id,
+        claim_id=claim.claim_id,
+    )
+    realtime_before = repository.replay_realtime_events(None, limit=20)
+    audit_before = repository.list_audit_events_internal(subject)
+
+    with pytest.raises(KeyError):
+        repository.save_staff_mutation(
+            updated,
+            1,
+            idempotency,
+            handoff=handoff,
+        )
+    with pytest.raises(KeyError):
+        repository.save_staff_mutation(
+            updated,
+            1,
+            idempotency,
+            handoff=handoff,
+            audit_event=malformed_audit,
+        )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+    persisted_handoff = repository.get_handoff(
+        claim.claim_id,
+        handoff.handoff_id,
+        claim.customer_id,
+    )
+    assert persisted_handoff == stored_handoff
+    assert repository.find_idempotency(idempotency.actor_id, route, idempotency.key) is None
+    assert repository.list_audit_events_internal(subject) == audit_before
+    assert repository.replay_realtime_events(None, limit=20) == realtime_before
+
+    repository.save_staff_mutation(
+        updated,
+        1,
+        idempotency,
+        handoff=handoff,
+        audit_event=audit_event,
+    )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == updated
+    persisted_handoff = repository.get_handoff(
+        claim.claim_id,
+        handoff.handoff_id,
+        claim.customer_id,
+    )
+    assert persisted_handoff == handoff
+    assert repository.find_idempotency(idempotency.actor_id, route, idempotency.key) == idempotency
+    assert repository.list_audit_events_internal(subject) == [*audit_before, audit_event]
+    realtime_event = repository.replay_realtime_events(None, limit=20)[-1]
+    assert realtime_event.claim_revision == updated.revision
+    assert realtime_event.operation_correlation == idempotency.key
+    assert RealtimeResource.HANDOFFS in realtime_event.resources
+
+
 @pytest.mark.parametrize(
     ('kind', 'actor_id', 'assigned_to'),
     [
@@ -683,6 +785,31 @@ def test_ownership_handoff_child_identity_is_equivalent_across_adapters(
         created_at=claim.created_at,
         source_refs=(request.request_id,),
     )
+    malformed_audit = audit_event.model_copy(update={'claim_revision': updated.revision + 1})
+    subject = AuditSubject(
+        subject_type=AuditSubjectType.CLAIM,
+        subject_id=claim.claim_id,
+        claim_id=claim.claim_id,
+    )
+    audit_before = repository.list_audit_events_internal(subject)
+
+    with pytest.raises(KeyError):
+        repository.save_ownership_mutation(
+            updated,
+            1,
+            idempotency,
+            request,
+            handoff=handoff,
+        )
+    with pytest.raises(KeyError):
+        repository.save_ownership_mutation(
+            updated,
+            1,
+            idempotency,
+            request,
+            handoff=handoff,
+            audit_event=malformed_audit,
+        )
 
     wrong_link = replace(
         idempotency,
@@ -722,7 +849,9 @@ def test_ownership_handoff_child_identity_is_equivalent_across_adapters(
         claim.customer_id,
     )
     assert persisted_handoff == stored_handoff
+    assert repository.find_idempotency(actor_id, route, idempotency.key) is None
     assert repository.find_idempotency(actor_id, route, wrong_link.key) is None
+    assert repository.list_audit_events_internal(subject) == audit_before
     assert repository.replay_realtime_events(None, limit=20) == realtime_before
 
     repository.save_ownership_mutation(
@@ -742,17 +871,11 @@ def test_ownership_handoff_child_identity_is_equivalent_across_adapters(
     )
     assert persisted_handoff == handoff
     assert repository.find_idempotency(actor_id, route, idempotency.key) == idempotency
-    subject = AuditSubject(
-        subject_type=AuditSubjectType.CLAIM,
-        subject_id=claim.claim_id,
-        claim_id=claim.claim_id,
-    )
-    assert repository.list_audit_events_internal(subject) == [audit_event]
+    assert repository.list_audit_events_internal(subject) == [*audit_before, audit_event]
     realtime_event = repository.replay_realtime_events(None, limit=20)[-1]
     assert realtime_event.claim_revision == updated.revision
     assert realtime_event.operation_correlation == idempotency.key
     assert RealtimeResource.HANDOFFS in realtime_event.resources
-
 
 @pytest.mark.parametrize(
     ('family', 'mutation'),
