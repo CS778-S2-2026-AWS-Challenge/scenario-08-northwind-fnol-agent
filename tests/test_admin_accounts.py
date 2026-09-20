@@ -1,13 +1,20 @@
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.adapters.identity import FixtureIdentityRepository, SQLiteIdentityRepository
+from backend.adapters.staff_identity import (
+    FixtureStaffIdentityRepository,
+    SQLiteStaffIdentityRepository,
+)
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
 from backend.domain.identity import CustomerAccountRecord
+from backend.domain.staff_identity import StaffAccountRecord
 
 
 def _client() -> TestClient:
@@ -147,6 +154,141 @@ def test_admin_maps_persisted_profile_invariant_failures_to_validation_errors(
     assert after is not None
     assert after.display_name == before.display_name
     assert after.revision == before.revision
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'sqlite'])
+def test_admin_customer_repository_races_preserve_the_authoritative_winner(
+    repository_kind: Literal['fixture', 'sqlite'],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = (
+        FixtureIdentityRepository()
+        if repository_kind == 'fixture'
+        else SQLiteIdentityRepository(str(tmp_path / 'customer-race.sqlite'))
+    )
+    account = (
+        repository.get_account('cus_demo')
+        if repository_kind == 'fixture'
+        else repository.create_account('race@example.invalid', 'race-password', 'Original Customer')
+    )
+    assert account is not None
+    endpoint = f'/internal/v1/admin/accounts/customers/{account.customer_id}'
+    route = f'PATCH {endpoint}'
+    audit_route = f'/internal/v1/admin/accounts/customers/{account.customer_id}/audit'
+    original_save = repository.save_account
+
+    def race_save(rejected: CustomerAccountRecord, expected_revision: int) -> None:
+        current = repository.get_account(account.customer_id)
+        assert current is not None
+        winner = replace(
+            current,
+            display_name='Concurrent Winner',
+            legal_name='Concurrent Winner',
+            revision=current.revision + 1,
+            updated_at=datetime.now(UTC),
+        )
+        original_save(winner, expected_revision)
+        original_save(rejected, expected_revision)
+
+    monkeypatch.setattr(repository, 'save_account', race_save)
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        identity_repository=repository,
+    )
+    idempotency_key = f'customer-{repository_kind}-race'
+    with TestClient(app) as client:
+        audit_before = client.get(audit_route, headers=_headers()).json()['items']
+        response = client.patch(
+            endpoint,
+            headers=_headers(idempotency_key, account.revision),
+            json={'phone': '021 555 0999'},
+        )
+        audit_after = client.get(audit_route, headers=_headers()).json()['items']
+
+    assert response.status_code == 409, response.text
+    assert response.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert response.json()['error']['current_revision'] == account.revision + 1
+    authoritative = repository.get_account(account.customer_id)
+    assert authoritative is not None
+    assert authoritative.display_name == 'Concurrent Winner'
+    assert authoritative.phone == account.phone
+    assert authoritative.revision == account.revision + 1
+    assert audit_after == audit_before
+    assert (
+        app.state.operation_repository.find_idempotency('adm_demo', route, idempotency_key) is None
+    )
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'sqlite'])
+def test_admin_staff_repository_races_preserve_the_authoritative_winner(
+    repository_kind: Literal['fixture', 'sqlite'],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = (
+        FixtureStaffIdentityRepository()
+        if repository_kind == 'fixture'
+        else SQLiteStaffIdentityRepository(str(tmp_path / 'staff-race.sqlite'))
+    )
+    account = (
+        repository.get_account('stf_demo')
+        if repository_kind == 'fixture'
+        else repository.create_account(
+            'race.staff@example.invalid',
+            'race-staff-password',
+            'Original Staff',
+            ('claims_professional',),
+        )
+    )
+    assert account is not None
+    endpoint = f'/internal/v1/admin/accounts/staff/{account.staff_id}'
+    route = f'PATCH {endpoint}'
+    audit_route = f'/internal/v1/admin/accounts/staff/{account.staff_id}/audit'
+    original_save = repository.save_account
+
+    def race_save(
+        rejected: StaffAccountRecord,
+        expected_revision: int,
+    ) -> None:
+        current = repository.get_account(account.staff_id)
+        assert current is not None
+        winner = replace(
+            current,
+            display_name='Concurrent Winner',
+            revision=current.revision + 1,
+            updated_at=datetime.now(UTC),
+        )
+        original_save(winner, expected_revision)
+        original_save(rejected, expected_revision)
+
+    monkeypatch.setattr(repository, 'save_account', race_save)
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        staff_identity_repository=repository,
+    )
+    idempotency_key = f'staff-{repository_kind}-race'
+    with TestClient(app) as client:
+        audit_before = client.get(audit_route, headers=_headers()).json()['items']
+        response = client.patch(
+            endpoint,
+            headers=_headers(idempotency_key, account.revision),
+            json={'active': False},
+        )
+        audit_after = client.get(audit_route, headers=_headers()).json()['items']
+
+    assert response.status_code == 409, response.text
+    assert response.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert response.json()['error']['current_revision'] == account.revision + 1
+    authoritative = repository.get_account(account.staff_id)
+    assert authoritative is not None
+    assert authoritative.display_name == 'Concurrent Winner'
+    assert authoritative.active is account.active
+    assert authoritative.revision == account.revision + 1
+    assert audit_after == audit_before
+    assert (
+        app.state.operation_repository.find_idempotency('adm_demo', route, idempotency_key) is None
+    )
 
 
 @pytest.mark.parametrize('repository_kind', ['fixture', 'sqlite'])

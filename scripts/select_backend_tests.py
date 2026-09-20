@@ -167,6 +167,7 @@ BACKEND_CONSUMER_RULES = (
     (
         (
             'backend/adapters/identity.py',
+            'backend/adapters/staff_identity.py',
             'backend/domain/identity.py',
             'backend/services/admin_accounts.py',
         ),

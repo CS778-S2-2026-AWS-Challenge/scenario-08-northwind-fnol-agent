@@ -37,7 +37,7 @@ from backend.domain.staff_identity import (
     StaffAuthSessionRecord,
 )
 from backend.repositories.identity import IdentityRepository
-from backend.repositories.protocols import PersistenceRepository
+from backend.repositories.protocols import PersistenceRepository, RevisionConflict
 from backend.repositories.staff_identity import StaffIdentityRepository
 from backend.services.admin_action_projection import (
     account_session_projection,
@@ -65,6 +65,15 @@ def _raise_profile_validation_error(error: ValueError) -> NoReturn:
         status_code=422,
         code='VALIDATION_ERROR',
         message='The customer profile is invalid.',
+    ) from error
+
+
+def _raise_revision_conflict(kind: str, error: RevisionConflict) -> NoReturn:
+    raise ApiError(
+        status_code=409,
+        code='REVISION_CONFLICT',
+        message=f'The {kind} account revision is stale.',
+        current_revision=error.current_revision,
     ) from error
 
 
@@ -153,6 +162,8 @@ def update_customer(
     )
     try:
         repository.save_account(updated, expected_revision)
+    except RevisionConflict as error:
+        _raise_revision_conflict('customer', error)
     except ValueError as error:
         _raise_profile_validation_error(error)
     return customer_account_projection(customer_projection(updated))
@@ -198,7 +209,10 @@ def update_staff(
         revision=account.revision + 1,
         updated_at=datetime.now(UTC),
     )
-    repository.save_account(updated, expected_revision)
+    try:
+        repository.save_account(updated, expected_revision)
+    except RevisionConflict as error:
+        _raise_revision_conflict('staff', error)
     return staff_account_projection(staff_projection(updated))
 
 

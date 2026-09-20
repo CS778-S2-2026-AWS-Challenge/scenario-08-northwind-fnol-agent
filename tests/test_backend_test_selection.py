@@ -91,6 +91,7 @@ def test_shared_domain_model_change_uses_sentinel_and_complete_journey() -> None
     'path',
     [
         'backend/adapters/identity.py',
+        'backend/adapters/staff_identity.py',
         'backend/domain/identity.py',
         'backend/services/admin_accounts.py',
     ],
