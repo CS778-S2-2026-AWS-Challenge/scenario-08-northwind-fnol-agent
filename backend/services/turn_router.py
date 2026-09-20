@@ -50,10 +50,12 @@ def route_turn(context: AgentTurnContext) -> TurnRoute:
         message,
     )
     if resolution.product_family is None:
+        capabilities = _capabilities(message)
         return TurnRoute(
             family_resolution=resolution.status,
             task=TurnTask.INTAKE,
-            capability_ids=_capabilities(message),
+            capability_ids=capabilities,
+            intents=frozenset({'intake', *capabilities}),
             model_required=True,
         )
     family = resolution.product_family
@@ -80,10 +82,25 @@ def route_turn(context: AgentTurnContext) -> TurnRoute:
         task = TurnTask.CLAIM_CREATION
     else:
         task = TurnTask.INTAKE
+    intents = {'intake'}
+    intents.update(capabilities)
+    if task is TurnTask.CORRECTION:
+        intents.add('correction')
+    elif task is TurnTask.CONFIRMATION:
+        intents.add('confirmation')
+    elif task is TurnTask.EVIDENCE_HISTORY:
+        intents.add('evidence_history')
+    elif task is TurnTask.EVIDENCE_CURRENT:
+        intents.add('evidence_current')
+    elif task is TurnTask.CLAIM_CREATION:
+        intents.add('creation')
+    elif task is TurnTask.STATUS_QUESTION:
+        intents.add('status')
     return TurnRoute(
         product_family=family,
         family_resolution=family_resolution,
         task=task,
         capability_ids=capabilities,
+        intents=frozenset(intents),
         model_required=True,
     )

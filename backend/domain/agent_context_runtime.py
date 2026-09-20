@@ -61,6 +61,7 @@ class TurnRoute(ContractModel):
         'authoritative', 'inferred', 'unresolved', 'ambiguous', 'conflicting'
     ]
     task: TurnTask
+    intents: frozenset[str] = frozenset({'intake'})
     capability_ids: list[str] = Field(default_factory=list, max_length=8)
     deterministic_response: str | None = Field(default=None, max_length=1000)
     model_required: bool = True
