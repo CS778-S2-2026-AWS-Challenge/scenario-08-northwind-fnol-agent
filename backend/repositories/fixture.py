@@ -101,6 +101,7 @@ from backend.repositories.protocols import (
     RepositorySearchLimitExceeded,
     RevisionConflict,
     ValidationSeedGraph,
+    validate_handoff_audit_link,
     validate_staff_agent_execution,
     validate_staff_agent_execution_source,
     validate_validation_seed_session,
@@ -3310,6 +3311,13 @@ class FixtureRepository(PersistenceRepository):
             raise KeyError(claim.claim_id) from error
         self._validate_claim_mutation(claim, expected_revision)
         coworker_records = coworkers or []
+        if handoff is not None:
+            if audit_event is None:
+                raise KeyError(claim.claim_id)
+            try:
+                validate_handoff_audit_link(claim, handoff, idempotency, audit_event)
+            except ValueError as error:
+                raise KeyError(claim.claim_id) from error
         if (
             collaboration_request.claim_id != claim.claim_id
             or any(item.claim_id != claim.claim_id for item in coworker_records)
@@ -3398,6 +3406,13 @@ class FixtureRepository(PersistenceRepository):
         except ValueError as error:
             raise KeyError(claim.claim_id) from error
         stored_claim = self._validate_claim_mutation(claim, expected_revision)
+        if handoff is not None:
+            if audit_event is None:
+                raise KeyError(claim.claim_id)
+            try:
+                validate_handoff_audit_link(claim, handoff, idempotency, audit_event)
+            except ValueError as error:
+                raise KeyError(claim.claim_id) from error
         if required_staff_id is not None:
             presence = self._staff_presence.get(required_staff_id)
             if (
