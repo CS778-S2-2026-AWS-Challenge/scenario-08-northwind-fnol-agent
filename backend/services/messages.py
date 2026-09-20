@@ -3041,6 +3041,22 @@ def submit_message(
         )
         for item in effective_next_step.required_items
     ]
+    if getattr(applied_evaluation.requirements, 'ready_pending_confirmation', False):
+        work_items.append(
+            RuntimeWorkItemRecord(
+                work_item_id=new_id('wki'),
+                claim_id=claim_id,
+                turn_id=runtime_turn_id,
+                kind='confirmation',
+                subject_ref=f'confirmation:{claimant_message.message_id}',
+                owner='claimant',
+                status='open',
+                blocks_action='confirmation_requested',
+                source_refs=[claimant_message.message_id],
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
+        )
     for intent in external_service_intents:
         offer = build_offer_metadata(
             claim=updated_claim,
