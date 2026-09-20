@@ -1065,6 +1065,7 @@ class MessageRecord(ContractModel):
     content: dict[str, Any]
     evidence_refs: list[str] = Field(default_factory=list)
     in_reply_to: str | None = None
+    recovery_rule_id: str | None = Field(default=None, max_length=120)
     created_at: datetime
 
 

@@ -2223,6 +2223,9 @@ def submit_message(
                 'context_revision': recovery_claim.revision,
             }
         )
+        claimant_message = claimant_message.model_copy(
+            update={'recovery_rule_id': 'claimant_turn.model_dependency_failure'}
+        )
         recovery_response = _message_only_response(
             repository,
             principal,
