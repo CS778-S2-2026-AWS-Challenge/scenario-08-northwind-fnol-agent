@@ -125,7 +125,7 @@ from backend.repositories.protocols import (
     RepositorySearchLimitExceeded,
     RevisionConflict,
     ValidationSeedGraph,
-    validate_handoff_audit_link,
+    validate_handoff_mutation_audit,
     validate_staff_agent_execution,
     validate_staff_agent_execution_source,
     validate_validation_seed_session,
@@ -3950,13 +3950,10 @@ class MongoDBRepository:
         except ValueError as error:
             raise KeyError(claim.claim_id) from error
         coworker_records = coworkers or []
-        if handoff is not None:
-            if audit_event is None:
-                raise KeyError(claim.claim_id)
-            try:
-                validate_handoff_audit_link(claim, handoff, idempotency, audit_event)
-            except ValueError as error:
-                raise KeyError(claim.claim_id) from error
+        try:
+            validate_handoff_mutation_audit(claim, handoff, idempotency, audit_event)
+        except ValueError as error:
+            raise KeyError(claim.claim_id) from error
         if (
             claim.revision != expected_revision + 1
             or collaboration_request.claim_id != claim.claim_id
@@ -4021,13 +4018,10 @@ class MongoDBRepository:
         except ValueError as error:
             raise KeyError(claim.claim_id) from error
         supplied = (staff_action, customer_update, signal_decision, handoff, message)
-        if handoff is not None:
-            if audit_event is None:
-                raise KeyError(claim.claim_id)
-            try:
-                validate_handoff_audit_link(claim, handoff, idempotency, audit_event)
-            except ValueError as error:
-                raise KeyError(claim.claim_id) from error
+        try:
+            validate_handoff_mutation_audit(claim, handoff, idempotency, audit_event)
+        except ValueError as error:
+            raise KeyError(claim.claim_id) from error
         if (
             claim.revision != expected_revision + 1
             or not any(item is not None for item in supplied)
