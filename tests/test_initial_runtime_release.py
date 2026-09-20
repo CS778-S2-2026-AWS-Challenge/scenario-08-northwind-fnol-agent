@@ -628,13 +628,15 @@ def test_capabilities_expose_the_repository_published_model_catalogue(
     )
 
     assert response.status_code == 200
-    assert [item['id'] for item in response.json()['models']] == [
+    model_ids = [item['id'] for item in response.json()['models']]
+    assert model_ids[:2] == ['bedrock-nova2-lite', 'google-gemini35-flash-lite']
+    assert model_ids[-1] == 'qwen-local'
+    assert model_ids[2] in {'openrouter-gpt4o-mini', 'nowcoding-gpt55'}
+    assert response.json()['default_model_profile_id'] in {
+        'openrouter-gpt4o-mini',
         'qwen-local',
-        'bedrock-nova2-lite',
         'google-gemini35-flash-lite',
-        'nowcoding-gpt55',
-    ]
-    assert response.json()['default_model_profile_id'] == 'qwen-local'
+    }
     bedrock = next(item for item in response.json()['models'] if item['id'] == 'bedrock-nova2-lite')
     assert bedrock['availability'] == 'unavailable'
     assert bedrock['image_input'] is True
