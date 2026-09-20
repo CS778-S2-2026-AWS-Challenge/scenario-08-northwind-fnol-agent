@@ -398,6 +398,7 @@ function App() {
   const [evidenceItems, setEvidenceItems] = useState([])
   const [evidenceLoadStatus, setEvidenceLoadStatus] = useState('idle')
   const [evidenceSyncNotice, setEvidenceSyncNotice] = useState('')
+  const [realtimeHealth, setRealtimeHealth] = useState('healthy')
   const [resumeContext, setResumeContext] = useState(null)
   const [expandedConversationPanels, setExpandedConversationPanels] = useState({})
   const [externalCapabilitiesOpen, setExternalCapabilitiesOpen] = useState(false)
@@ -448,6 +449,11 @@ function App() {
   activeSessionIdRef.current = sessionId
   accountRef.current = account
   const realtimePrincipal = account ? 'authenticated' : claim?.claim_id ? 'anonymous' : 'none'
+  const realtimeSyncNotice = realtimeHealth === 'stale'
+    ? 'Live updates need to be resynchronised. Some claim information may be out of date while we restore the latest status.'
+    : realtimeHealth === 'reconnecting'
+      ? 'Live updates are reconnecting. Some claim information may be out of date while we restore the latest status.'
+      : ''
   const hasStarted = claim !== null
   const isWorkspaceActive = hasStarted && workspaceActive
   const savedReports = claimHistory === null
@@ -936,6 +942,7 @@ function App() {
     if (realtimePrincipal === 'none') {
       realtimeCursor.current = null
       realtimeSeenEventIds.current.clear()
+      setRealtimeHealth('healthy')
       return undefined
     }
 
@@ -944,12 +951,14 @@ function App() {
     // recovered by subscribing first and taking an authoritative snapshot.
     realtimeCursor.current = null
     realtimeSeenEventIds.current.clear()
+    setRealtimeHealth('healthy')
 
     const controller = new AbortController()
     let active = true
     let reconnectDelay = 1000
     let degradedRefreshes = 0
     let needsResyncSnapshot = false
+    let needsRecoverySnapshot = false
     const maxDegradedRefreshes = 5
 
     function rememberEvent(eventId) {
@@ -971,6 +980,7 @@ function App() {
       const activeClaim = activeClaimRef.current
       const activeSessionId = activeSessionIdRef.current
       const refreshes = []
+      let activeProjectionRecovered = !activeClaim?.claim_id
 
       if (activeClaim?.claim_id) {
         const claimId = activeClaim.claim_id
@@ -981,10 +991,15 @@ function App() {
             activeSessionId ? getClaimMessages(claimId, activeSessionId) : Promise.resolve(null),
             getClaimEvidence(claimId),
           ])
-          if (!active || activeClaimRef.current?.claim_id !== claimId) return
-          applyClaimSnapshot(currentClaim)
+          if (
+            !active
+            || activeClaimRef.current?.claim_id !== claimId
+            || activeSessionIdRef.current !== activeSessionId
+          ) return
+          const claimApplied = applyClaimSnapshot(currentClaim)
+          let messagesApplied = activeSessionId === null
           if (conversation && messagesGeneration !== null) {
-            applyMessagesReadback(conversation.items, {
+            messagesApplied = applyMessagesReadback(conversation.items, {
               generation: messagesGeneration,
               claimId,
               sessionId: activeSessionId,
@@ -992,6 +1007,12 @@ function App() {
           }
           if (syncEvidenceProjection(evidence)) setEvidenceSyncNotice('')
           setEvidenceLoadStatus('ready')
+          activeProjectionRecovered = Boolean(
+            claimApplied
+            && messagesApplied
+            && activeClaimRef.current?.claim_id === claimId
+            && activeSessionIdRef.current === activeSessionId
+          )
         })())
       }
 
@@ -1003,6 +1024,7 @@ function App() {
         }))
       }
       await Promise.all(refreshes)
+      return activeProjectionRecovered
     }
 
     async function applyRealtimeEvent(delivery) {
@@ -1010,6 +1032,8 @@ function App() {
 
       if (delivery.type === 'resync_required') {
         needsResyncSnapshot = true
+        needsRecoverySnapshot = false
+        setRealtimeHealth('stale')
         realtimeCursor.current = null
         realtimeSeenEventIds.current.clear()
         reconnectDelay = 0
@@ -1118,21 +1142,30 @@ function App() {
       while (active && !controller.signal.aborted) {
         const recoverOnOpen = (
           needsResyncSnapshot
+          || needsRecoverySnapshot
           || realtimeCursor.current === null
         )
+        const discardCursor = needsResyncSnapshot || realtimeCursor.current === null
         try {
           await streamRealtimeEvents({
-            cursor: recoverOnOpen ? null : realtimeCursor.current,
+            cursor: discardCursor ? null : realtimeCursor.current,
             signal: controller.signal,
             onOpen: recoverOnOpen
               ? async () => {
-                await refreshFullSnapshot()
+                const projectionRecovered = await refreshFullSnapshot()
                 if (!active || controller.signal.aborted) return
+                if (!projectionRecovered) {
+                  throw new Error('Authoritative claimant realtime recovery snapshot was superseded.')
+                }
                 needsResyncSnapshot = false
-                realtimeCursor.current = null
-                realtimeSeenEventIds.current.clear()
+                needsRecoverySnapshot = false
+                if (discardCursor) {
+                  realtimeCursor.current = null
+                  realtimeSeenEventIds.current.clear()
+                }
                 reconnectDelay = 1000
                 degradedRefreshes = 0
+                setRealtimeHealth('healthy')
               }
               : undefined,
             onEvent: applyRealtimeEvent,
@@ -1142,13 +1175,18 @@ function App() {
           if (!active || controller.signal.aborted) return
           if (streamFailure instanceof ApiRequestError && streamFailure.code === 'INVALID_EVENT_CURSOR') {
             needsResyncSnapshot = true
+            needsRecoverySnapshot = false
             realtimeCursor.current = null
             realtimeSeenEventIds.current.clear()
             reconnectDelay = 0
             degradedRefreshes = 0
+            setRealtimeHealth('stale')
           } else if (needsResyncSnapshot) {
             reconnectDelay = Math.max(reconnectDelay, 1000)
+            setRealtimeHealth('stale')
           } else {
+            needsRecoverySnapshot = true
+            setRealtimeHealth('reconnecting')
             await runDegradedRefresh()
           }
           if (latestEvidenceItems.current.some((item) => item.file_status === 'processing')) {
@@ -2994,6 +3032,9 @@ function App() {
                 </>
               )}
 
+              {realtimeSyncNotice && (
+                <ConversationEvent icon="●" title={realtimeSyncNotice} tone="info" />
+              )}
               {evidenceSyncNotice && (
                 <ConversationEvent icon="●" title={evidenceSyncNotice} tone="info" />
               )}
