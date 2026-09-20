@@ -1,7 +1,9 @@
 import logging
+import json
 import re
 from dataclasses import dataclass, replace
 from datetime import datetime
+from hashlib import sha256
 
 from backend.adapters.claims_service import AssessorServiceAdapter
 from backend.adapters.evidence_storage import EvidenceStorage, EvidenceStorageError
@@ -1887,6 +1889,15 @@ def submit_message(
     session = repository.get_session(claim_id, session_id, principal.subject)
     if claim is None or session is None:
         raise _session_not_found()
+    pending_confirmation_item = next(
+        (
+            item
+            for item in reversed(repository.list_runtime_work_items(claim_id, principal.subject))
+            if item.kind == 'confirmation' and item.status == 'open'
+        ),
+        None,
+    )
+    confirmation_revision_before_message = claim.revision
     if session.status.value != 'active':
         raise ApiError(
             status_code=409,
@@ -2508,9 +2519,21 @@ def submit_message(
         _grounding_source_refs(proposal.tool_results),
         {item.evidence_id: item.media_type for item in turn_evidence},
     )
+    confirmation_bound = False
+    if pending_confirmation_item is not None:
+        parts = pending_confirmation_item.subject_ref.split(':')
+        try:
+            confirmation_bound = (
+                len(parts) >= 4
+                and parts[0] == 'confirmation'
+                and int(parts[2]) == confirmation_revision_before_message
+            )
+        except ValueError:
+            confirmation_bound = False
     if (
         getattr(proposal, 'confirms_batch', False)
         and claim.customer_next_step.status == 'confirmation_requested'
+        and confirmation_bound
     ):
         for field_code, field in claim.form.items():
             if field.status is FormStatus.PROPOSED:
@@ -3113,13 +3136,24 @@ def submit_message(
         for item in effective_next_step.required_items
     ]
     if getattr(applied_evaluation.requirements, 'ready_pending_confirmation', False):
+        fingerprint_payload = sorted(
+            (code, claim.form[code].value)
+            for code in applied_evaluation.requirements.recorded
+            if code in claim.form
+        )
+        fingerprint = sha256(
+            json.dumps(fingerprint_payload, separators=(',', ':'), sort_keys=True).encode()
+        ).hexdigest()
         work_items.append(
             RuntimeWorkItemRecord(
                 work_item_id=new_id('wki'),
                 claim_id=claim_id,
                 turn_id=runtime_turn_id,
                 kind='confirmation',
-                subject_ref=f'confirmation:{claimant_message.message_id}',
+                subject_ref=(
+                    f'confirmation:{claimant_message.message_id}:'
+                    f'{updated_claim.revision}:fp:{fingerprint}'
+                ),
                 owner='claimant',
                 status='open',
                 blocks_action='confirmation_requested',
