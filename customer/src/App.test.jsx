@@ -634,6 +634,90 @@ describe('claimant intake projection', () => {
     expect(initialClaim.external_claim).toBeNull()
   })
 
+  it('keeps a queued handoff stale until reconnect installs the authoritative accepted projection', async () => {
+    const user = userEvent.setup()
+    let firstOnEvent
+    let finishFirstStream
+    let streamAttempt = 0
+    let replacementOpened = false
+
+    api.streamRealtimeEvents.mockImplementation(({ onEvent, onOpen, signal }) => {
+      streamAttempt += 1
+      if (streamAttempt === 1) {
+        firstOnEvent = onEvent
+        return new Promise((resolve) => {
+          finishFirstStream = resolve
+          signal.addEventListener('abort', resolve, { once: true })
+        })
+      }
+
+      replacementOpened = true
+      return (async () => {
+        await onOpen?.()
+        await new Promise((resolve) => {
+          signal.addEventListener('abort', resolve, { once: true })
+        })
+      })()
+    })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.requestHumanSupport.mockResolvedValue({
+      revision: 3,
+      handoff: assistanceHandoff(),
+      customer_next_step: {
+        status: 'human_support_queued',
+        summary: 'A Northwind support request has been queued.',
+        responsible_party: 'claims_professional',
+      },
+    })
+
+    const { unmount } = render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Staff assistance' }))
+    expect(await screen.findByRole('status', { name: /Waiting for staff/ })).toBeInTheDocument()
+    await waitFor(() => expect(firstOnEvent).toBeTypeOf('function'))
+
+    api.getClaim.mockResolvedValueOnce({
+      ...initialClaim,
+      revision: 4,
+      handoff: assistanceHandoff('accepted'),
+      customer_next_step: {
+        status: 'human_support_in_progress',
+        summary: 'A Northwind staff member is now assisting you.',
+        responsible_party: 'claims_professional',
+      },
+    })
+    api.getClaimMessages.mockResolvedValueOnce({
+      items: [claimantMessage, agentMessage],
+    })
+
+    await act(async () => {
+      await firstOnEvent({
+        type: 'resync_required',
+        cursor: null,
+        data: { reason: 'replay_gap' },
+      })
+    })
+    expect(screen.getByRole('status', {
+      name: /Live updates need to be resynchronised\. Some claim information may be out of date/i,
+    })).toBeInTheDocument()
+    expect(screen.getByRole('status', { name: /Waiting for staff/ })).toBeInTheDocument()
+
+    await act(async () => { finishFirstStream() })
+    await waitFor(() => expect(replacementOpened).toBe(true))
+
+    expect(await screen.findByRole('status', { name: /Staff assistance accepted/ })).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('status', {
+      name: /Live updates need to be resynchronised/i,
+    })).not.toBeInTheDocument())
+    expect(screen.getByText(/Northwind has accepted your assistance request\./)).toBeInTheDocument()
+    expect(api.requestHumanSupport).toHaveBeenCalledTimes(1)
+    expect(api.createClaim).toHaveBeenCalledTimes(1)
+
+    unmount()
+  })
+
   it('renders staff, response-needed, reply-sent, and completed assistance states', async () => {
     const user = userEvent.setup()
     let pushLiveUpdate
@@ -1920,6 +2004,43 @@ describe('claimant intake projection', () => {
       name: /Live updates are reconnecting\. Some claim information may be out of date/i,
     })).toBeInTheDocument()
     expect(screen.queryByText(/Live file status updates are temporarily disconnected/i)).not.toBeInTheDocument()
+
+    unmount()
+  })
+
+  it('marks a cleanly ended claimant realtime stream as reconnecting', async () => {
+    const user = userEvent.setup()
+    let finishCurrentStream
+
+    api.streamRealtimeEvents.mockImplementation(({ onOpen, signal }) => (async () => {
+      await onOpen?.()
+      await new Promise((resolve) => {
+        finishCurrentStream = resolve
+        signal.addEventListener('abort', resolve, { once: true })
+      })
+    })())
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.getClaim.mockResolvedValue({
+      ...initialClaim,
+      revision: 2,
+      primary_action: primaryAction({ revision: 2 }),
+    })
+    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+
+    const { unmount } = render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    await waitFor(() => expect(finishCurrentStream).toBeTypeOf('function'))
+
+    await act(async () => {
+      finishCurrentStream()
+      await Promise.resolve()
+    })
+
+    expect(await screen.findByRole('status', {
+      name: /Live updates are reconnecting\. Some claim information may be out of date/i,
+    })).toBeInTheDocument()
 
     unmount()
   })
