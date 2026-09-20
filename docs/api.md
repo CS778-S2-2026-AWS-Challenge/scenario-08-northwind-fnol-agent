@@ -918,7 +918,8 @@ persist their child record and idempotency response, and publish Claim/queue ref
 The backend MUST maintain a versioned field registry with validation and display metadata. New product fields require a registry change; clients MUST NOT invent arbitrary field codes.
 
 Every claimant Dynamic Form projection includes deterministic `requirements`: `satisfied`,
-`missing_required_now`, `pending_later`, `next_required_item`, `ready`,
+`recorded`, `missing_required_now`, `missing_by_branch`, `pending_later`, `next_required_item`, `ready`,
+`ready_pending_confirmation`,
 `current_action_total`, and `current_action_satisfied`. The backend recalculates this projection
 from authoritative Claim State, the selected registered branch, and the current action. Clients
 must not calculate readiness or choose required fields locally.
