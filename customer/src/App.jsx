@@ -1171,6 +1171,12 @@ function App() {
             onEvent: applyRealtimeEvent,
             onCursor: (cursor) => { realtimeCursor.current = cursor },
           })
+          if (!active || controller.signal.aborted) return
+          if (!needsResyncSnapshot) {
+            needsRecoverySnapshot = true
+            setRealtimeHealth('reconnecting')
+            await runDegradedRefresh()
+          }
         } catch (streamFailure) {
           if (!active || controller.signal.aborted) return
           if (streamFailure instanceof ApiRequestError && streamFailure.code === 'INVALID_EVENT_CURSOR') {
