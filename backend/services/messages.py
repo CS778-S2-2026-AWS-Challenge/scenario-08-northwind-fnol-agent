@@ -128,6 +128,7 @@ from backend.services.external_service_offers import (
     build_offer_metadata,
     continue_granted_service_offers,
     detected_service_intents,
+    find_offer,
     message_external_actions,
     offer_work_item,
     select_registered_service_intents,
@@ -2172,17 +2173,52 @@ def submit_message(
             message='The external-service lifecycle context cannot be represented safely.',
             retryable=error.retryable,
         ) from error
+    available_external_ids = {
+        item.service_identity
+        for item in external_services
+        if item.operation_status is ExternalLifecycleStatus.CONSENT_REQUIRED
+    }
+    if not handoff_open:
+        recent_claimant_messages = [
+            item
+            for item in repository.list_messages(claim_id, session_id, principal.subject)
+            if item.actor is ActorType.CLAIMANT
+        ]
+        current_text = payload.content.text if payload.content is not None else ''
+        renewed_ids = {
+            item['service_identity']
+            for item in detected_service_intents(
+                current_text,
+                [],
+                product_family=turn_family_resolution.product_family,
+            )
+        }
+        for consent in claim.external_service_consents:
+            if consent.status.value not in {'declined', 'withdrawn'} or consent.offer_ref is None:
+                continue
+            offer_item = find_offer(repository, claim, consent.offer_ref)
+            if offer_item is None or offer_item.external_offer is None:
+                continue
+            trigger_id = offer_item.external_offer.trigger_message_id
+            trigger_message = next(
+                (item for item in recent_claimant_messages if item.message_id == trigger_id),
+                None,
+            )
+            trigger_time = trigger_message.created_at if trigger_message is not None else None
+            turn_count = sum(
+                1
+                for item in recent_claimant_messages
+                if trigger_time is not None and item.created_at > trigger_time
+            )
+            if turn_count < 3 and consent.service_identity not in renewed_ids:
+                available_external_ids.discard(consent.service_identity)
     selected_external_service_intents = (
         []
         if handoff_open
         else select_registered_service_intents(
             payload.content.text if payload.content is not None else None,
             product_family=turn_family_resolution.product_family,
-            available_service_ids={
-                item.service_identity
-                for item in external_services
-                if item.operation_status is ExternalLifecycleStatus.CONSENT_REQUIRED
-            },
+            available_service_ids=available_external_ids,
         )
     )
     agent_context = AgentTurnContext(
