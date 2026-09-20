@@ -1,13 +1,6 @@
 from typing import Any, Protocol, cast, runtime_checkable
 
-from backend.domain.audit import (
-    AuditEventEnvelope,
-    AuditEventType,
-    AuditOutcome,
-    AuditPermissionOutcome,
-    AuditSubjectType,
-    AuditVisibility,
-)
+from backend.domain.audit import AuditEventEnvelope
 from backend.domain.models import (
     BranchEvaluationRecord,
     ClaimCollaborationRequest,
@@ -22,6 +15,7 @@ from backend.repositories.protocols import (
     IdempotencyRecord,
     PersistenceRepository,
     RevisionConflict,
+    validate_handoff_audit_link,
 )
 
 
@@ -93,22 +87,10 @@ def _validate_handoff_audit(
     idempotency: IdempotencyRecord,
     audit_event: AuditEventEnvelope,
 ) -> None:
-    if (
-        audit_event.event_type is not AuditEventType.ACTION_COMPLETED
-        or audit_event.outcome is not AuditOutcome.SUCCEEDED
-        or audit_event.subject.subject_type is not AuditSubjectType.CLAIM
-        or audit_event.subject.subject_id != claim.claim_id
-        or audit_event.subject.claim_id != claim.claim_id
-        or audit_event.claim_revision != claim.revision
-        or audit_event.actor.actor_id != idempotency.actor_id
-        or audit_event.idempotency_key != idempotency.key
-        or audit_event.correlation_id != idempotency.key
-        or handoff.handoff_id not in audit_event.source_refs
-        or audit_event.permission is None
-        or audit_event.permission.outcome is not AuditPermissionOutcome.AUTHORISED
-        or audit_event.visibility not in {AuditVisibility.INTERNAL_ONLY, AuditVisibility.AUDIT_ONLY}
-    ):
-        raise _conflict('The handoff audit fact does not match the authorised mutation.')
+    try:
+        validate_handoff_audit_link(claim, handoff, idempotency, audit_event)
+    except ValueError as error:
+        raise _conflict('The handoff audit fact does not match the authorised mutation.') from error
 
 
 def _validate_creation(
