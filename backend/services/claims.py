@@ -684,7 +684,7 @@ def start_claim(
         session_id=session_id,
         claim_id=claim_id,
         customer_id=principal.subject,
-        model_profile_id=payload.model_profile_id or 'qwen-local',
+        model_profile_id=payload.model_profile_id or 'openrouter-gpt4o-mini',
         context_revision=claim.revision,
         started_at=timestamp,
         last_active_at=timestamp,
@@ -891,7 +891,7 @@ def start_session(
             model_profile_id=(
                 resume_source.model_profile_id
                 if resume_source is not None and payload.intent != 'new'
-                else (payload.model_profile_id or 'qwen-local')
+                else (payload.model_profile_id or 'openrouter-gpt4o-mini')
             ),
             summary=resume_source.summary if resume_source is not None else None,
             unresolved_questions=(

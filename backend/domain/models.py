@@ -1030,7 +1030,7 @@ class SessionRecord(ContractModel):
     session_id: str
     claim_id: str
     customer_id: str
-    model_profile_id: str = Field(default='qwen-local', min_length=1, max_length=100)
+    model_profile_id: str = Field(default='openrouter-gpt4o-mini', min_length=1, max_length=100)
     status: SessionStatus = SessionStatus.ACTIVE
     summary: str | None = None
     unresolved_questions: list[str] = Field(default_factory=list)
@@ -2131,7 +2131,7 @@ class ClaimantSession(ContractModel):
     session_id: str
     claim_id: str
     status: SessionStatus
-    model_profile_id: str = Field(default='qwen-local', min_length=1, max_length=100)
+    model_profile_id: str = Field(default='openrouter-gpt4o-mini', min_length=1, max_length=100)
     resume: ResumePackage
     started_at: datetime
     last_active_at: datetime

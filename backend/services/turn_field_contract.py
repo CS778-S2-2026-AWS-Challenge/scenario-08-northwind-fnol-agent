@@ -128,10 +128,16 @@ def bind_provider_schema(
                     'value': value_schema,
                 },
                 'required': ['field_code', 'value'],
+                'additionalProperties': False,
             }
         )
     if variants:
-        field_changes['items'] = {**base_item, 'oneOf': variants}
+        # The provider strict translator closes the parent object.  Keeping the
+        # old parent properties beside these variants made every item
+        # unsatisfiable: the parent required all v7 bookkeeping keys while each
+        # variant closed the object to only field_code/value.  The v8 contract
+        # asks the model for the four semantic keys; Runtime derives the rest.
+        field_changes['items'] = {'anyOf': variants}
         field_changes['maxItems'] = min(
             int(field_changes.get('maxItems', 50)),
             len(contract.fields),

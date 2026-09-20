@@ -46,9 +46,9 @@ from backend.services.runtime_agent_policy import registered_agent_tool_names
 _AUTHOR = 'repository-initial-release-author'
 _REVIEWER = 'repository-initial-release-reviewer'
 _REQUIRED_V7_MODEL_PROFILES = frozenset(
-    {'qwen-local', 'nowcoding-gpt55', 'google-gemini35-flash-lite'}
+    {'qwen-local', 'openrouter-gpt4o-mini', 'google-gemini35-flash-lite'}
 )
-_REQUIRED_V6_MODEL_PROFILES = frozenset({'qwen-local', 'nowcoding-gpt55'})
+_REQUIRED_V6_MODEL_PROFILES = frozenset({'qwen-local', 'openrouter-gpt4o-mini'})
 _VALIDATION_EVIDENCE = (
     'Repository-defined initial Runtime release passed structural and binding validation.'
 )
@@ -318,8 +318,16 @@ def install_initial_runtime_release(
         else _REQUIRED_V6_MODEL_PROFILES
     )
     profile_ids = {binding.profile_id for binding in bindings}
-    if not required_profiles.issubset(profile_ids):
-        missing = ', '.join(sorted(required_profiles - profile_ids))
+    required_profile_aliases = {
+        'openrouter-gpt4o-mini': frozenset({'openrouter-gpt4o-mini', 'nowcoding-gpt55'}),
+    }
+    missing_profiles = {
+        profile
+        for profile in required_profiles
+        if not (profile_ids & required_profile_aliases.get(profile, frozenset({profile})))
+    }
+    if missing_profiles:
+        missing = ', '.join(sorted(missing_profiles))
         raise ValueError(f'The initial Runtime release is missing required models: {missing}.')
 
     if prompt_versions == {CLAIMANT_V7_PROMPT_ID}:

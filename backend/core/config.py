@@ -149,7 +149,7 @@ class Settings:
     data_runtime_profile: DataRuntimeProfile = DataRuntimeProfile.FIXTURE
     agent_runtime_profile: AgentRuntimeProfile = AgentRuntimeProfile.CONTROLLED
     model_protocol_adapter: str = 'openai_compatible'
-    model_profile_id: str = 'qwen-local'
+    model_profile_id: str = 'openrouter-gpt4o-mini'
     model_provider: str = 'qwen-local'
     model_purpose: str = 'agent_turn'
     model_privacy_class: str = 'synthetic_fnol'
@@ -158,7 +158,7 @@ class Settings:
     model_base_url: str = ''
     model_identifier: str = ''
     model_api_key_env: str | None = None
-    model_timeout_seconds: float = 30.0
+    model_timeout_seconds: float = 130.0
     model_supports_structured_output: bool = True
     model_supports_tools: bool = False
     model_supports_image_input: bool = False
@@ -266,7 +266,7 @@ class Settings:
             allowed = ', '.join(profile.value for profile in AgentRuntimeProfile)
             raise ValueError(f'AGENT_RUNTIME_PROFILE must be exactly one of: {allowed}.') from error
         model_runtime_bindings = _model_runtime_bindings_setting('MODEL_RUNTIME_BINDINGS_PATH')
-        model_profile_id = os.getenv('MODEL_PROFILE_ID', 'qwen-local').strip()
+        model_profile_id = os.getenv('MODEL_PROFILE_ID', 'openrouter-gpt4o-mini').strip()
         selected_binding = next(
             (item for item in model_runtime_bindings if item.profile_id == model_profile_id),
             None,
@@ -381,7 +381,7 @@ class Settings:
                 else os.getenv('MODEL_IDENTIFIER', '').strip()
             ),
             model_api_key_env=credential_environment_variable,
-            model_timeout_seconds=_float_setting('MODEL_TIMEOUT_SECONDS', 30.0),
+            model_timeout_seconds=_float_setting('MODEL_TIMEOUT_SECONDS', 130.0),
             model_supports_structured_output=(
                 selected_binding.structured_output
                 if selected_binding

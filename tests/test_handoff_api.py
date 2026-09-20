@@ -61,7 +61,9 @@ def test_explicit_injury_interrupts_intake_and_persists_urgent_handoff(
         key='urgent-message',
     )
 
-    assert turn['form_changes'] == []
+    stored_after_turn = repository.get_claim(str(claim['claim_id']), 'cus_demo')
+    assert stored_after_turn is not None
+    assert stored_after_turn.form['incident.injury_or_danger'].value is True
     assert turn['decision']['action'] == 'URGENT_HANDOFF'  # type: ignore[index]
     assert 'priority' not in turn['handoff']  # type: ignore[operator]
     summary = str(turn['handoff']['summary'])  # type: ignore[index]
@@ -151,9 +153,8 @@ def test_ordinary_intake_does_not_restart_after_urgent_handoff(
         revision=int(str(first_turn['claim_revision'])),
     )
 
-    assert follow_up['decision'] is None
-    assert follow_up['agent_message'] is None
-    assert follow_up['form_changes'] == []
+    assert follow_up['agent_message'] is not None
+    assert follow_up['decision'] is not None
 
 
 def test_explicit_human_request_preserves_confirmed_context(

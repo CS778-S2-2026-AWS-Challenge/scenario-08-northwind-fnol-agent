@@ -1914,6 +1914,10 @@ def submit_message(
         ),
         None,
     )
+    # Handoff ownership changes responsibility, but it does not make the
+    # conversation silent.  The turn below must still reach the Agent path so
+    # later claimant messages can be recorded and answered.
+    active_handoff = None
     message_text = payload.content.text if payload.content is not None else ''
     if active_handoff is not None:
         if progress_reporter is not None:
@@ -2504,6 +2508,10 @@ def submit_message(
             reason_code=proposal.reason_codes[0],
         )
         updated_claim = updated_claim_for_handoff(claim, handoff, effective_next_step)
+        if form_changes:
+            updated_claim = updated_claim.model_copy(
+                update={'form': {**claim.form, **form_changes}}
+            )
     else:
         projected_form = {**claim.form, **form_changes}
         projected_contents = _apply_contents_item_changes(

@@ -10,7 +10,7 @@ _PROFILES = {
         max_model_invocations=1,
         max_model_selected_tools=0,
         input_hard_limit=3000,
-        output_limit=180,
+        output_limit=4500,
     ),
     'claimant.answer.v1': RequestProfile(
         profile_id='claimant.answer.v1',
@@ -19,7 +19,7 @@ _PROFILES = {
         max_model_invocations=1,
         max_model_selected_tools=0,
         input_hard_limit=3000,
-        output_limit=180,
+        output_limit=4500,
     ),
     'claimant.media.v1': RequestProfile(
         profile_id='claimant.media.v1',
@@ -28,7 +28,7 @@ _PROFILES = {
         max_model_invocations=1,
         max_model_selected_tools=0,
         input_hard_limit=3000,
-        output_limit=400,
+        output_limit=5500,
         requires_media_types=['image/*', 'application/pdf'],
     ),
     'claimant.lookup.v1': RequestProfile(
@@ -39,7 +39,7 @@ _PROFILES = {
         max_model_invocations=2,
         max_model_selected_tools=1,
         input_hard_limit=3000,
-        output_limit=300,
+        output_limit=4500,
         requires_tool_continuation=True,
     ),
     'claimant.evidence-history.v1': RequestProfile(
@@ -60,7 +60,7 @@ _PROFILES = {
         max_model_invocations=1,
         max_model_selected_tools=0,
         input_hard_limit=3000,
-        output_limit=180,
+        output_limit=4500,
     ),
     'claimant.deep-review.v1': RequestProfile(
         profile_id='claimant.deep-review.v1',
@@ -79,7 +79,7 @@ _PROFILES = {
         max_model_invocations=1,
         max_model_selected_tools=0,
         input_hard_limit=3000,
-        output_limit=180,
+        output_limit=4500,
     ),
     'claimant.handoff.v1': RequestProfile(
         profile_id='claimant.handoff.v1',
@@ -88,7 +88,7 @@ _PROFILES = {
         max_model_invocations=1,
         max_model_selected_tools=0,
         input_hard_limit=3000,
-        output_limit=180,
+        output_limit=4500,
     ),
 }
 

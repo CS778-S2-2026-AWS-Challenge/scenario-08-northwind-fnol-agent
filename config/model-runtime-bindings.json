@@ -17,18 +17,18 @@
     "reasoning_mode": "disabled"
   },
   {
-    "profile_id": "nowcoding-gpt55",
+    "profile_id": "openrouter-gpt4o-mini",
     "protocol": "openai_compatible",
-    "provider": "nowcoding",
-    "model_identifier": "gpt-5.5",
-    "base_url": "https://nowcoding.ai/v1",
+    "provider": "openrouter",
+    "model_identifier": "openai/gpt-4o-mini",
+    "base_url": "https://openrouter.ai/api/v1",
     "credential_environment_variable": "NORTHWIND_MODEL_API_KEY",
     "purpose": "agent_turn",
     "privacy_class": "synthetic_fnol",
     "prompt_version": "northwind-fnol-claimant-v7",
     "structured_output": true,
     "tools": true,
-    "image_input": false,
+    "image_input": true,
     "document_input": false
   },
   {

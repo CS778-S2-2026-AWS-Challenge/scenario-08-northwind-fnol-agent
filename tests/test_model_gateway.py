@@ -3355,7 +3355,7 @@ def _model_proposal_output(
 
 
 @pytest.mark.parametrize('active_action', [AgentAction.HANDOFF, AgentAction.URGENT_HANDOFF])
-def test_active_handoff_cannot_be_replaced_by_model_provider(
+def test_active_handoff_continues_through_model_provider(
     active_action: AgentAction,
 ) -> None:
     gateway = StaticGateway(
@@ -3384,10 +3384,10 @@ def test_active_handoff_cannot_be_replaced_by_model_provider(
     )
 
     assert proposal.action is AgentAction.UPDATE
-    assert proposal.reason_codes == ['HANDOFF_ALREADY_QUEUED']
-    assert proposal.state_changes == []
-    assert proposal.customer_next_step == claim.customer_next_step
-    assert gateway.call_count == 0
+    assert proposal.reason_codes == ['MODEL_UPDATE']
+    assert proposal.state_changes[0].path == 'claim_state.next_action'
+    assert proposal.customer_next_step is not None
+    assert gateway.call_count == 1
 
 
 def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> None:

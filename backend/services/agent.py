@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from backend.core.errors import ApiError
@@ -26,10 +27,12 @@ from backend.domain.models import (
     ProposedFormChange,
     ResponsibleParty,
     RuntimeTraceRecord,
+    RuntimeInvocationTrace,
     StateChange,
     WorkingClaim,
 )
 from backend.domain.realtime import AgentTurnProgressStage
+from backend.domain.ids import new_id
 from backend.domain.support_intent import (
     SupportIntent,
     detect_support_intent,
@@ -268,7 +271,7 @@ class AgentTurnContext:
     evidence_refs: list[str]
     evidence: tuple[AgentEvidenceReference, ...] = ()
     evidence_resolver: ModelEvidenceContentResolver | None = None
-    model_profile_id: str = 'qwen-local'
+    model_profile_id: str = 'openrouter-gpt4o-mini'
     professional_review_required: bool = False
     branch_evaluation: BranchEvaluationResult | None = None
     turn_family_resolution: TurnFamilyResolution | None = None
@@ -795,13 +798,22 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
                 ),
                 responsible_party=ResponsibleParty.CLAIMS_PROFESSIONAL,
             ),
-            form_changes=[],
+            form_changes=[
+                ProposedFormChange(
+                    field_code='incident.injury_or_danger',
+                    value=True,
+                    source=FormSource.CLAIMANT,
+                    status=FormStatus.CONFIRMED,
+                    reported_text=message_text,
+                )
+            ],
             state_changes=[StateChange(path='claim_state.next_action', to='URGENT_HANDOFF')],
             proposed_signals=[],
             required_tools=[],
             next_action_requirements=[],
             handoff_priority='urgent',
             controlled_rule_authorised=True,
+            action_code='human.urgent_handoff',
         )
     support_intent = detect_support_intent(message_text)
     support_need = support_need_for_intent(support_intent)
@@ -865,6 +877,7 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
             next_action_requirements=[],
             handoff_priority=priority,
             controlled_rule_authorised=True,
+            action_code='human.handoff',
         )
     if any(pattern.search(message_text) for pattern in PENDING_POLICE_REPORT_PATTERNS):
         if context.professional_review_required and not active_handoff:
@@ -935,21 +948,6 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
             next_action_requirements=[],
             controlled_rule_authorised=True,
         )
-    if active_handoff:
-        return AgentProposal(
-            action=AgentAction.UPDATE,
-            reason_codes=['HANDOFF_ALREADY_QUEUED'],
-            customer_reason='Your additional information has been kept with the report.',
-            customer_response=(
-                'I have added that information to the report already waiting for Northwind support.'
-            ),
-            customer_next_step=context.claim.customer_next_step,
-            form_changes=[],
-            state_changes=[],
-            proposed_signals=[],
-            required_tools=[],
-            next_action_requirements=[],
-        )
     return None
 
 
@@ -961,7 +959,31 @@ class InvariantGuardedAgent:
 
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         interrupt = deterministic_interrupt_proposal(context)
-        return interrupt if interrupt is not None else self._provider.propose_turn(context)
+        proposal = interrupt if interrupt is not None else self._provider.propose_turn(context)
+        if proposal.runtime_trace is None and proposal.action_code is not None:
+            now = datetime.now(UTC)
+            proposal = replace(
+                proposal,
+                runtime_trace=RuntimeTraceRecord(
+                        trace_id=new_id('trc'),
+                        claim_id=context.claim.claim_id,
+                        session_id=context.session_id,
+                        model_profile_id=context.model_profile_id,
+                        trigger_message_id=context.trigger_message_id,
+                        invocations=[RuntimeInvocationTrace(ordinal=1, latency_ms=0)],
+                        action_code=proposal.action_code,
+                        runtime_action_code='runtime.wait_for_user',
+                        reason_codes=proposal.reason_codes,
+                        route=f'{context.claim.incident_type or "unresolved"}:controlled',
+                        model_invocations=0,
+                        tool_calls=0,
+                        total_latency_ms=0,
+                        status='succeeded',
+                        created_at=now,
+                        finished_at=now,
+                    )
+            )
+        return proposal
 
 
 class FeatureControlledAgent:
@@ -1136,6 +1158,17 @@ class ControlledAgent:
 
 def validate_proposal(proposal: AgentProposal) -> AgentAuthority:
     if proposal.action_code is not None:
+        if (
+            proposal.action in {AgentAction.HANDOFF, AgentAction.URGENT_HANDOFF}
+            and proposal.controlled_rule_authorised
+            and set(proposal.reason_codes).issubset(CONTROLLED_HANDOFF_REASONS)
+            and proposal.reason_codes
+        ):
+            return AgentAuthority(
+                proposed_by='agent',
+                validated_by='deterministic_rule_engine',
+                outcome=AuthorityOutcome.AUTHORISED,
+            )
         try:
             contract = action_contract(proposal.action_code)
         except ValueError:

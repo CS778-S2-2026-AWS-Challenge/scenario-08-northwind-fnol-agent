@@ -50,28 +50,11 @@ def route_turn(context: AgentTurnContext) -> TurnRoute:
         message,
     )
     if resolution.product_family is None:
-        configured_response = (
-            context.runtime_policy.controlled_rules.deterministic_responses.get('unresolved_family')
-            if context.runtime_policy is not None
-            else None
-        )
-        reason = {
-            'ambiguous': 'I found more than one kind of loss in that message.',
-            'conflicting': 'That description conflicts with the Claim type already confirmed.',
-        }.get(resolution.status)
         return TurnRoute(
             family_resolution=resolution.status,
             task=TurnTask.INTAKE,
-            deterministic_response=configured_response
-            or ' '.join(
-                part
-                for part in (
-                    reason,
-                    'Please choose the single loss to continue: motor, home, or contents.',
-                )
-                if part
-            ),
-            model_required=False,
+            capability_ids=_capabilities(message),
+            model_required=True,
         )
     family = resolution.product_family
     family_resolution = resolution.status
@@ -84,7 +67,9 @@ def route_turn(context: AgentTurnContext) -> TurnRoute:
     elif context.evidence:
         task = TurnTask.EVIDENCE_CURRENT
     elif _EXTERNAL.search(message):
-        task = TurnTask.EXTERNAL_SUPPORT
+        # External support is an optional intent on a claimant turn.  It must
+        # not select the narrow external-offer schema and discard FNOL facts.
+        task = TurnTask.INTAKE
     elif _STATUS.search(message):
         task = TurnTask.STATUS_QUESTION
     elif _CORRECTION.search(message):
