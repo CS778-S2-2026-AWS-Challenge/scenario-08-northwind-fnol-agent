@@ -1216,9 +1216,10 @@ class PersistenceRepository(ClaimRepository, Protocol):
         collaboration_request: ClaimCollaborationRequest,
         coworkers: list[ClaimCoworkerRecord] | None = None,
         handoff: HandoffRecord | None = None,
+        audit_event: AuditEventEnvelope | None = None,
         staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
-        """Atomically persist an ownership transition and its collaboration record."""
+        """Atomically persist ownership records and any linked handoff audit fact."""
         raise NotImplementedError
 
     def save_staff_mutation(
@@ -1234,9 +1235,10 @@ class PersistenceRepository(ClaimRepository, Protocol):
         message: MessageRecord | None = None,
         required_staff_id: str | None = None,
         required_staff_revision: int | None = None,
+        audit_event: AuditEventEnvelope | None = None,
         staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
-        """Atomically persist an authorised staff write-back and shared claim revision."""
+        """Atomically persist a staff write-back and any linked handoff audit fact."""
         raise NotImplementedError
 
     def save_handoff(self, handoff: HandoffRecord, customer_id: str) -> None:
@@ -1259,7 +1261,8 @@ class PersistenceRepository(ClaimRepository, Protocol):
         expected_revision: int,
         handoff: HandoffRecord,
         idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
         branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
-        """Atomically persist a handoff, shared claim state, and retry metadata."""
+        """Atomically persist a handoff, Claim revision, retry metadata, and audit fact."""
         raise NotImplementedError

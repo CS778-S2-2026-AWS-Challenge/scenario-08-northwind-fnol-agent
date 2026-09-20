@@ -117,7 +117,13 @@ contract update; additive optional fields are structural changes detected by CI.
 The Fixture and MongoDB repositories implement provider-neutral immutable append and
 authorised subject/time-range reads for this envelope. A Claim mutation may persist its
 idempotency record, applied Branch Evaluation, and claim-scoped audit facts in one atomic
-repository boundary. The implemented claimant assessor-consent mutation records a
+repository boundary. Every material handoff creation or lifecycle/ownership mutation that
+advances the Claim revision persists a deterministic `action.completed/succeeded` Claim audit
+fact in that same boundary. The fact carries the authenticated actor/auth source, authorised
+permission or registered Workbench action, handoff source reference, idempotency/correlation
+identity, and resulting Claim revision. Fixture validation completes before any in-memory record
+changes; MongoDB inserts the audit fact inside the same transaction as Claim, Handoff,
+Idempotency, and durable realtime persistence. The implemented claimant assessor-consent mutation records a
 `consent.granted` fact with the authenticated claimant actor and authentication source,
 the consent identity/state, bounded reason/source reference, idempotency identity, and
 resulting Claim revision. The controlled assessor-routing preparation records the
