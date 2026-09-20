@@ -150,6 +150,21 @@ def validate_handoff_audit_link(
         raise ValueError('The Handoff audit fact does not match the persisted mutation.')
 
 
+def validate_handoff_mutation_audit(
+    claim: WorkingClaim,
+    handoff: HandoffRecord | None,
+    idempotency: IdempotencyRecord,
+    audit_event: AuditEventEnvelope | None,
+) -> None:
+    """Require and validate the audit fact only when a mutation changes a Handoff."""
+
+    if handoff is None:
+        return
+    if audit_event is None:
+        raise ValueError('A Handoff mutation requires its atomic audit fact.')
+    validate_handoff_audit_link(claim, handoff, idempotency, audit_event)
+
+
 def with_staff_agent_source(
     record: IdempotencyRecord,
     source: StaffAgentDraftSource | None,
