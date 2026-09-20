@@ -8,12 +8,25 @@ journeys (#933, #942), and the per-run metric coverage (#952), which were otherw
 separate #771 comments on different heads.
 
 Every count below comes from 105 records written by the merged runners at
-`main@6fe149ecba9c95179fed8e895b68a460d0f53145` on 2026-09-18: 50 motor, 30 home, and 20 contents
+`main@c6b790573a7c7df1431fe801c0682077cdbb0024` on 2026-09-21: 50 motor, 30 home, and 20 contents
 baseline runs, and the five assessor failure journeys. The records are `northwind-journey-run/6`
 and are kept outside the repository, as `tests/journey_runs/README.md` requires. This record creates
 no contract and does not claim that any product-acceptance category is complete;
 [the journey acceptance gap record](sprint4-journey-acceptance-gaps.md) maps the same runs to the
-ten categories in #733.
+ten categories in #733, and [the rubric anchors](sprint4-rubric-anchors.md) give one named run per
+category.
+
+**Restated on 2026-09-21.** The first statement of this record was made at
+`main@6fe149ecba9c95179fed8e895b68a460d0f53145` on 2026-09-18. Three things have changed since, and
+this record now states the current head instead:
+
+- The claimant-effort metric counts the Runtime session's Agent question turns, not question marks
+  in replies (#968, #970). Metric 4 below states the new figures; every result-class count is
+  unchanged.
+- The runners can select the Agent runtime profile (#962, #988), so the Week 8 gap is model access
+  rather than a missing switch.
+- The ten rubric anchors are delivered (#963, #982), so that Week 8 gap row is replaced by the link
+  above, and `tests/test_demo_reset.py` is green again (#966).
 
 To reproduce the counts on a given head:
 
@@ -108,7 +121,7 @@ across all 105 records.
 | 1. Completed without follow-up (target 80% or more) | `not_measured` | Cites `docs/model-gateway.md`: a rule-driven Agent produces no judgement of its own to rate |
 | 2. Blind severity classification | `not_measured` | Cites `docs/model-gateway.md`: with no configured model transport, no severity signal exists |
 | 3. Fraud flag precision, no false positives | `not_measured` | Same limitation as metric 2 |
-| 4. Claimant effort, under 5 minutes and under 10 questions | `partly_measured` | 1 to 7 claimant messages and 0 to 3 question marks in Agent replies per run, plus confirmations, uploads, and consents. The question-mark count is a lower bound. Elapsed claimant time has no served source; the documented metrics endpoint is not served (#953) |
+| 4. Claimant effort, under 5 minutes and under 10 questions | `partly_measured` | 1 to 7 claimant messages and 0 to 3 Agent question turns per run, none of them repeated, plus confirmations, uploads, and consents. The question turns are the claimant session's own count of accepted Agent turns that asked for a registered fact, which is the message count #733 defines (#968, #970). By family: motor 0 or 3, home 2, contents 2, and the failure journeys 0. Elapsed claimant time has no served source; the documented metrics endpoint is not served (#953) |
 | 5. Claim number, expected timeline, final state, evidence chain | `measured` | 52 of 105 records carry a claim number and expected timeline: all 17 AT-01 runs, all 30 home runs, and all 5 failure journeys. Every record carries its final state, next step, owner, and evidence count |
 
 ## Failure classification
@@ -156,12 +169,11 @@ browser, and #964 tracks capturing them.
 
 | Gap | Effect on this evidence | Tracking | Owner |
 | --- | --- | --- | --- |
-| The journey runners cannot select the model-backed Agent runtime, and the journey environment has no model credential | Metrics 1 to 3 and real effort figures stay unmeasured; contents stays `unavailable` | #962 | @bdfa123 for the runners; @Ysoseri1224 for model access |
-| Contents item capture needs the model-backed runtime | All 20 contents runs stop before claim creation | #962; Discussion #847 records that contents behaviour is model-backed, so contents is rerun on `model_gateway` | @bdfa123 for the runners; @Ysoseri1224 for model access |
+| The journey environment has no model credential, so every run is on the controlled runtime | Metrics 1 to 3 and real effort figures stay unmeasured; contents stays `unavailable` | #962, which stays open for the first model-backed batch; the profile switch merged in #988 | @Ysoseri1224 for model access; @bdfa123 for the batch |
+| Contents item capture needs the model-backed runtime | All 20 contents runs stop before claim creation | #962; Discussion #847 records that contents behaviour is model-backed, so contents is rerun on `model_gateway` | @Ysoseri1224 for model access; @bdfa123 for the batch |
 | No served source for elapsed claimant time | Metric 4 stays `partly_measured` | #953 | @Ysoseri1224 |
 | Real AWS access and calls | Definition of Done item 4 has no evidence | #786 | @liyang6620 |
 | An `unknown_outcome` missing-information item names `external_party` while its lifecycle names `claims_professional` | One Workbench projection disagrees for the unknown-outcome case | Raised on #945 | @liyang6620 |
-| Red tests on `main`: two `tests/test_backend_quality_profiles.py` cases and one `tests/test_demo_reset.py` case | Full-suite runs cannot be fully green | Reported on #903 and #915 | @Ysoseri1224, @liyang6620 |
+| Red tests on `main`: the two `tests/test_backend_quality_profiles.py` coverage-profile cases | Full-suite runs cannot be fully green | Reported on #903. The `tests/test_demo_reset.py` case reported on #915 was fixed in #966 and is green on this head | @Ysoseri1224 |
 | The atomic initial claimant bootstrap changes intake | Every journey start must be rerun after merge | #816 | @liyang6620 |
 | Poster screenshots of the recorded states | Definition of Done item 6 lacks screens | #964, which captures the list above | @bdfa123; @LLL263 and @jxu316-arch confirm their screens |
-| Ten rubric anchors with complete input, output, state, and metric evidence | Definition of Done item 2 is not started | #963 | @bdfa123 |
