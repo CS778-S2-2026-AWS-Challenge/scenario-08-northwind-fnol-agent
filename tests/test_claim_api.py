@@ -1845,6 +1845,57 @@ def test_message_turn_deduplicates_retries_and_rejects_conflicting_client_id(
     assert len(repository.list_messages(claim_id, session_id, 'cus_demo')) == 2
 
 
+def test_message_turn_replay_preserves_turn_revision_after_later_claim_mutation(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    created = create_claim(client, auth_headers, key='message-replay-history').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+
+    first = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        key='historical-turn',
+        client_message_id='historical-client-message',
+    )
+    later_update = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': '2'},
+        json={
+            'updates': [
+                {
+                    'field_code': 'incident.description',
+                    'value': 'A later synthetic correction.',
+                    'correction_reason': 'The claimant clarified the description.',
+                }
+            ]
+        },
+    )
+    replay = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=2,
+        key='historical-turn',
+        client_message_id='historical-client-message',
+    )
+
+    assert first.status_code == 200
+    assert later_update.status_code == 200
+    assert later_update.json()['revision'] == 3
+    assert replay.status_code == 200
+    replay_body = replay.json()
+    assert replay_body['claim_revision'] == 2
+    assert replay_body['current_claim_revision'] == 3
+    assert replay_body['primary_action']['claim_revision'] == 3
+    assert replay_body['claimant_message'] == first.json()['claimant_message']
+    assert replay_body['agent_message'] == first.json()['agent_message']
+
+
 def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(
     client: TestClient,
     auth_headers: dict[str, str],

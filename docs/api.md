@@ -1580,6 +1580,7 @@ Response `200`:
   "claim_id": "clm_01J4Y7Q2AW",
   "session_id": "ses_01J4Y7RPN8",
   "claim_revision": 3,
+  "current_claim_revision": 3,
   "claimant_message": {
     "message_id": "msg_01J4Y7T1KC",
     "actor": "claimant",
@@ -1651,6 +1652,12 @@ Response `200`:
   }
 }
 ```
+
+claim_revision is the Claim revision committed by this message turn. An idempotent replay
+continues to report that historical turn revision even when later Claim mutations have advanced
+the Claim. current_claim_revision is the latest authoritative Claim revision and is the value
+used by a continuation action or a new revision-checked request. For a fresh turn these values are
+equal.
 
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
 

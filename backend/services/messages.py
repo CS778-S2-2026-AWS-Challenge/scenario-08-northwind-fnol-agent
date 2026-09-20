@@ -430,11 +430,13 @@ def _message_turn_response(
         if claim is not None
         else decision.customer_next_step
     )
-    response_revision = claim.revision if claim is not None else decision.resulting_revision
+    turn_revision = decision.resulting_revision
+    current_claim_revision = claim.revision if claim is not None else turn_revision
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=claimant_message.session_id,
-        claim_revision=response_revision,
+        claim_revision=turn_revision,
+        current_claim_revision=current_claim_revision,
         claimant_message=_claimant_message(claimant_message),
         agent_message=_claimant_message(
             agent_message,
@@ -461,7 +463,7 @@ def _message_turn_response(
         primary_action=(
             project_claimant_primary_action(
                 claim_id=claim_id,
-                claim_revision=response_revision,
+                claim_revision=current_claim_revision,
                 next_step=next_step,
                 external_service_action=external_service_action,
             )
@@ -490,6 +492,7 @@ def _message_only_response(
         claim_id=claim_id,
         session_id=session_id,
         claim_revision=revision,
+        current_claim_revision=claim.revision,
         claimant_message=_claimant_message(message),
         form_changes=[],
         handoff=None,
@@ -521,6 +524,7 @@ def _namespaced_turn_response(
         claim_id=claim_id,
         session_id=claimant_message.session_id,
         claim_revision=claim_revision,
+        current_claim_revision=claim.revision,
         claimant_message=_claimant_message(claimant_message),
         agent_message=_claimant_message(
             agent_message,

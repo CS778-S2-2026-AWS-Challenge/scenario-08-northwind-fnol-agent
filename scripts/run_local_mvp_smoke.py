@@ -285,6 +285,10 @@ def _second_process(
         )
         if int(replayed_turn['claim_revision']) != 2:
             raise RuntimeError('The persisted message turn was not replayed at revision 2.')
+        if int(replayed_turn['current_claim_revision']) != expected_revision:
+            raise RuntimeError(
+                'The replay did not expose the current Claim revision separately.'
+            )
         claim = _expect(
             client.get(f'/api/v1/claims/{claim_id}', headers=CLAIMANT_AUTH),
             200,
