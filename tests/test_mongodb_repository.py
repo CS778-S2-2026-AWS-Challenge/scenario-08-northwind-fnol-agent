@@ -877,6 +877,7 @@ def test_ownership_handoff_child_identity_is_equivalent_across_adapters(
     assert realtime_event.operation_correlation == idempotency.key
     assert RealtimeResource.HANDOFFS in realtime_event.resources
 
+
 @pytest.mark.parametrize(
     ('family', 'mutation'),
     [
