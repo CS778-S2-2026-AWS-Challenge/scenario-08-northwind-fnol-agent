@@ -595,7 +595,7 @@ def test_payout_contact_selection_rejects_missing_wrong_action_and_replay_mismat
     )
 
     assert missing.status_code == 404
-    assert missing.json()['error']['code'] == 'NOT_FOUND'
+    assert missing.json()['error']['code'] == 'RESOURCE_NOT_FOUND'
     assert wrong_action.status_code == 409
     assert wrong_action.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
     assert first.status_code == 201, first.text
@@ -609,7 +609,7 @@ def test_payout_contact_selection_rejects_missing_wrong_action_and_replay_mismat
         ('selection', 'PAYMENT_DESTINATION_SELECTION_CONFLICT'),
         ('revision', 'REVISION_CONFLICT'),
         ('idempotency', 'IDEMPOTENCY_CONFLICT'),
-        ('missing_destination', 'NOT_FOUND'),
+        ('missing_destination', 'RESOURCE_NOT_FOUND'),
     ],
 )
 def test_payout_contact_selection_maps_repository_races_without_partial_write(
