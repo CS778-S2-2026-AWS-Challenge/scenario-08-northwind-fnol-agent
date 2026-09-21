@@ -2486,6 +2486,26 @@ def submit_message(
         proposal = agent.propose_turn(agent_context)
     except ModelGatewayError as model_error:
         return recover_model_failure(model_error)
+    if proposal.validated_turn is not None:
+        # Match the v8 model's admission contract at the persistence boundary.
+        # A deployed ControlledAgent keeps its original evaluator and family path.
+        branch_evaluator = (
+            runtime_policy.branch_evaluator(model_family_judgment=True)
+            if runtime_policy is not None
+            else BranchRuleEvaluator(model_family_judgment=True)
+        )
+        turn_family_resolution = resolve_turn_family(
+            claim, previous_evaluation, message_text, model_family_judgment=True
+        )
+        branch_evaluation = branch_evaluator.evaluate(
+            claim,
+            latest_message=message_text,
+            trigger_source_refs=[claimant_message.message_id],
+            current_action=claim.claim_state.next_action,
+            previous_evaluation=previous_evaluation,
+            family_resolution=turn_family_resolution,
+            recomputation_reason='model_family_judgment',
+        )
     if runtime_policy is not None:
         enforce_agent_proposal(runtime_policy, proposal)
     preliminary_authority = validate_proposal(proposal)

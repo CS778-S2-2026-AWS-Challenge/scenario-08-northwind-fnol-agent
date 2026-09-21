@@ -1,7 +1,7 @@
 # Claimant Journey v8
 
 This document publishes the evidence, decisions and implementation contract for claimant v8,
-including the approved v3.13 design corrections. It is the shared repository reference for
+including the approved v3.14 family-admission decision. It is the shared repository reference for
 the implementation in PR #977, which delivers issues #976 and #980 and the bounded recovery
 slice of #779. Its contracts can be read without a maintainer's local workspace.
 
@@ -173,8 +173,9 @@ Contents records are inspected directly: confirmed items satisfy their requireme
 items are recorded, and no qualifying item leaves it missing. Pending-later material stays
 distinct. Required-before-creation fields join collection before final readiness.
 
-A single authoritative or inferred `TurnFamilyResolution.product_family` activates collection.
-It does not grant authority to an inferred field. Multiple candidates and persisted authority
+A single authoritative or persisted proposed `TurnFamilyResolution.product_family` activates
+collection. Keyword hints alone do not select a family or add family requirements in a v8 model
+turn. A proposed family does not gain confirmation authority. Persisted authority
 conflicts remain explicit unresolved context; mentioning a wall in an authoritative Motor
 Claim does not switch it to Home. Conditional branches persist while their supporting facts
 remain relevant and exit on a contrary correction. Disabled or observation-only registry rules
@@ -183,8 +184,17 @@ cannot retain active collection effects.
 A weak signal may expose the registered fields of a candidate conditional fact branch to
 the model as `CANDIDATE_NOW`, allowing same-turn facts to be recorded. Candidate status does
 not make those fields required or confirm the triggering fact. This consumes the already
-policy-filtered branch result; disabled and observation-only rules remain without field effects,
-and ambiguous family candidates do not expose every family's fields indiscriminately.
+policy-filtered branch result; disabled and observation-only rules remain without field effects.
+
+Before a family is authoritative, v8 exposes every registered top-level family field as a
+candidate to the model, including when no keyword matches or several do. Candidate admission
+alone does not add requirements or satisfy readiness. The model interprets the complete account
+and proposes the family and its facts in one response. The existing quotation/source validator
+remains unchanged: unsupported quotations produce inferred/proposed facts, never automatic
+confirmation. A persisted proposed family still selects its collection requirements.
+Lower conditional branches retain their existing fact-driven policies. ControlledAgent and v7
+retain their established admission behavior; the v8 model planner and persistence validation
+explicitly select the same v8 family policy. No per-turn model failure invokes ControlledAgent.
 
 Question priority is injury details, newly activated fact branch, family-specific fields,
 other fact branches, then common requirements. The model chooses up to three related fields

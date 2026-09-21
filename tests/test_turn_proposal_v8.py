@@ -13,7 +13,7 @@ from backend.domain.agent_runtime_configuration import AgentInstructionConfigura
 from backend.domain.agent_v8 import V8Escalation, V8TurnProposal
 from backend.domain.external_service_registry import capability_context
 from backend.domain.model_gateway import ModelCompletionStatus, ModelResponse
-from backend.domain.models import FormSource, FormStatus
+from backend.domain.models import FieldSelectionState, FormSource, FormStatus
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import AgentTurnContext
 from backend.services.model_agent import GatewayAgent
@@ -191,7 +191,7 @@ def test_authoritative_motor_family_survives_other_family_words(message: str) ->
         'I am reporting a rear-ending on Queen St.',
     ],
 )
-def test_rear_end_word_forms_load_motor_prompt_before_family_is_recorded(message: str) -> None:
+def test_rear_end_words_are_only_hints_until_model_proposes_family(message: str) -> None:
     context = v8_context(message)
     claim = context.claim.model_copy(update={'incident_type': None, 'form': {}})
     assert context.runtime_policy is not None
@@ -204,12 +204,16 @@ def test_rear_end_word_forms_load_motor_prompt_before_family_is_recorded(message
     )
     plan = plan_model_turn(context)
     assert plan is not None
-    assert plan.route.product_family == 'motor'
-    assert plan.route.family_resolution == 'inferred'
-    assert any(ref.startswith('family.motor@') for ref in plan.fragment_refs)
+    assert plan.route.product_family is None
+    assert plan.route.family_resolution == 'unresolved'
+    assert any(ref.startswith('family.unresolved-family@') for ref in plan.fragment_refs)
+    assert not any(ref.startswith('family.motor@') for ref in plan.fragment_refs)
     assert any(ref.startswith('task.turn@') for ref in plan.fragment_refs)
     assert plan.field_contract is not None
-    assert 'vehicle.drivable' in plan.field_contract.by_code
+    for code in ('vehicle.drivable', 'property.address'):
+        assert (
+            plan.field_contract.by_code[code].selection_state is FieldSelectionState.CANDIDATE_NOW
+        )
     assert 'incident.location' in plan.field_contract.by_code
     assert claim.incident_type is None
     assert claim.form == {}

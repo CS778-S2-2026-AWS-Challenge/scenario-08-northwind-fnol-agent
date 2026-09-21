@@ -318,9 +318,11 @@ Rules are evaluated in this order, while branch activation remains additive:
    evaluated first. They may interrupt ordinary collection and create an urgent handoff.
 2. **Support interruption:** repeated human requests, distress, or accessibility needs are
    evaluated next. A first ordinary request follows the configured/versioned rule.
-3. **Family classification:** activate at most the supported family candidates for `motor`,
-   `home`, and `contents`; an unresolved conflict keeps the candidates proposed and uses
-   shared fields only.
+3. **Family classification:** in v8 model turns without authoritative family, expose the
+   registered top-level `motor`, `home`, and `contents` fields as candidates independent of
+   keyword matches. Candidate admission adds no family requirements. A persisted proposed or
+   confirmed family selects its collection requirements; source validation still controls
+   confirmation. ControlledAgent retains its existing deterministic admission rules.
 4. **Incident and participant dimensions:** collision, theft/burglary, another party,
    witness, Police, and other conditional branches are evaluated independently.
 5. **Evidence and mitigation:** pending evidence, emergency mitigation, towing, repair, and

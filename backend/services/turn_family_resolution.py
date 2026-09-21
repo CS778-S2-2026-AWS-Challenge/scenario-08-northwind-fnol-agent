@@ -44,6 +44,8 @@ def resolve_turn_family(
     claim: WorkingClaim,
     branch_evaluation: BranchEvaluationResult | BranchEvaluationRecord | None,
     message_text: str | None,
+    *,
+    model_family_judgment: bool = False,
 ) -> TurnFamilyResolution:
     """Prefer persisted authority, otherwise accept one bounded current-turn candidate."""
 
@@ -80,6 +82,19 @@ def resolve_turn_family(
             status='authoritative',
             candidate_families=tuple(dict.fromkeys((*authoritative, *candidates))),
         )
+
+    if model_family_judgment:
+        # Message keywords are ordering hints, never model field admission or
+        # collection authority. Only a persisted model/claimant proposal selects
+        # an inferred family; previous regex-derived evaluations cannot do so.
+        if stored_candidate is not None:
+            disputed = product_family is not None and product_family.status is FormStatus.DISPUTED
+            return TurnFamilyResolution(
+                product_family=None if disputed else stored_candidate,
+                status='ambiguous' if disputed else 'inferred',
+                candidate_families=candidates,
+            )
+        return TurnFamilyResolution(status='unresolved', candidate_families=message_candidates)
 
     if len(candidates) > 1 or (
         product_family is not None

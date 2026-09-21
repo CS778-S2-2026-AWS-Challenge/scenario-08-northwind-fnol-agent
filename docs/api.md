@@ -1737,6 +1737,12 @@ When the collected report only needs confirmation, `customer_next_step.status` i
 shown, bound to their assertion identities, fingerprint and revision before accepting the
 acknowledgement message. A same-turn correction or intervening mutation invalidates that binding.
 
+In a v8 model turn without authoritative product family, registered top-level family fields
+are available as `candidate_now` even without a keyword match. This does not make every family's
+fields required. The model may propose family and supported details in the same turn; the usual
+quotation/source checks and confirmation boundary still apply. Stored proposed family values
+select collection requirements without becoming confirmed merely through selection.
+
 Runtime also requires the entire claimant message to be an unqualified acceptance of the
 displayed batch. A scoped answer such as `Yes we can still live here` may confirm habitability
 but cannot confirm other recorded values. The model's `confirms_batch` flag is advisory only:

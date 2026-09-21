@@ -685,6 +685,12 @@ def reduce_turn(
                 )
             }
         )
+    if proposal.validated_turn is not None:
+        branch_evaluator = (
+            runtime_policy.branch_evaluator(model_family_judgment=True)
+            if runtime_policy is not None
+            else BranchRuleEvaluator(model_family_judgment=True)
+        )
     applied_evaluation = branch_evaluator.evaluate(
         updated_claim,
         latest_message=(message_text),

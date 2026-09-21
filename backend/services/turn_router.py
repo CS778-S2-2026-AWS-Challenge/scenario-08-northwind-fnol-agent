@@ -40,10 +40,18 @@ def _capabilities(message: str) -> list[str]:
 
 def route_turn(context: AgentTurnContext) -> TurnRoute:
     message = (context.message_text or '').strip()
-    resolution = context.turn_family_resolution or resolve_turn_family(
-        context.claim,
-        context.branch_evaluation,
-        message,
+    snapshot = context.runtime_configuration_snapshot
+    model = snapshot.model(context.model_profile_id) if snapshot is not None else None
+    model_family_judgment = (
+        model is not None and model.values.get('prompt_version') == 'northwind-fnol-claimant-v8'
+    )
+    resolution = (
+        resolve_turn_family(
+            context.claim, context.branch_evaluation, message, model_family_judgment=True
+        )
+        if model_family_judgment
+        else context.turn_family_resolution
+        or resolve_turn_family(context.claim, context.branch_evaluation, message)
     )
     family = resolution.product_family
     family_resolution = resolution.status

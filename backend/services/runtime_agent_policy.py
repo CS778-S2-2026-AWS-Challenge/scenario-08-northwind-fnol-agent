@@ -92,7 +92,7 @@ class RuntimeAgentPolicySnapshot:
     controlled_rules: ControlledRulesConfiguration
     features: AgentFeatureSettingsConfiguration
 
-    def branch_evaluator(self) -> BranchRuleEvaluator:
+    def branch_evaluator(self, *, model_family_judgment: bool = False) -> BranchRuleEvaluator:
         """Build an evaluator carrying the published controlled-rule version."""
 
         registry = replace(
@@ -103,6 +103,7 @@ class RuntimeAgentPolicySnapshot:
             registry,
             disabled_rule_ids=frozenset(self.controlled_rules.disabled_rule_ids),
             observation_rule_ids=frozenset(self.controlled_rules.observation_rule_ids),
+            model_family_judgment=model_family_judgment,
         )
 
     def provenance(self) -> RuntimeConfigurationProvenance:

@@ -406,10 +406,12 @@ class BranchRuleEvaluator:
         *,
         disabled_rule_ids: frozenset[str] | None = None,
         observation_rule_ids: frozenset[str] | None = None,
+        model_family_judgment: bool = False,
     ) -> None:
         self.registry = registry or build_default_registry()
         self.disabled_rule_ids = disabled_rule_ids or frozenset()
         self.observation_rule_ids = observation_rule_ids or frozenset()
+        self.model_family_judgment = model_family_judgment
 
     def evaluate(
         self,
@@ -419,19 +421,25 @@ class BranchRuleEvaluator:
         trigger_source_refs: Sequence[str] = (),
         current_action: AgentAction | str | None = None,
         recomputation_reason: str = 'turn',
-        previous_evaluation: BranchEvaluationRecord | None = None,
+        previous_evaluation: BranchEvaluationRecord | BranchEvaluationResult | None = None,
         family_resolution: TurnFamilyResolution | None = None,
     ) -> BranchEvaluationResult:
         text = latest_message or ''
         support_intent = detect_support_intent(text)
+        resolution = family_resolution or resolve_turn_family(
+            claim, previous_evaluation, text, model_family_judgment=self.model_family_judgment
+        )
+        open_family_candidates = self.model_family_judgment and resolution.status != 'authoritative'
         selected_family, family_candidates, family_sources = self._family_state(
             claim,
-            family_resolution or resolve_turn_family(claim, previous_evaluation, text),
+            resolution,
             trigger_source_refs,
         )
         unresolved_conflict = (
             sorted(family_candidates)
-            if selected_family is None and len(family_candidates) > 1
+            if selected_family is None
+            and len(family_candidates) > 1
+            and resolution.status in {'ambiguous', 'conflicting'}
             else []
         )
         branch_results: list[BranchResult] = []
@@ -444,9 +452,13 @@ class BranchRuleEvaluator:
                     'One resolved family activates this collection branch '
                     'without changing fact authority.'
                 )
-            elif family in family_candidates:
+            elif open_family_candidates or family in family_candidates:
                 status = 'candidate'
-                reason = 'Proposed or message evidence identifies a family candidate.'
+                reason = (
+                    'The model may propose this family; keyword matches do not grant authority.'
+                    if open_family_candidates
+                    else 'Proposed or message evidence identifies a family candidate.'
+                )
             else:
                 status = 'exited'
                 reason = 'No current evidence supports this family.'
@@ -481,7 +493,7 @@ class BranchRuleEvaluator:
             if result.status != 'active' and not (
                 result.status == 'candidate'
                 and branch.kind == 'fact'
-                and not branch.branch_id.startswith('family.')
+                and (open_family_candidates or not branch.branch_id.startswith('family.'))
             ):
                 continue
             # A weak conditional signal prepares candidate fields, not required
@@ -493,7 +505,11 @@ class BranchRuleEvaluator:
                 for code, deadline in branch.collection_policy.items()
                 if deadline == 'staff_only'
             )
-        if selected_family is None and len(family_candidates) == 1:
+        if (
+            not self.model_family_judgment
+            and selected_family is None
+            and len(family_candidates) == 1
+        ):
             candidate_family = next(iter(family_candidates))
             permitted_fields.update(FAMILY_FIELDS[candidate_family] & self.registry.field_codes)
 
@@ -522,6 +538,7 @@ class BranchRuleEvaluator:
                     family_candidates,
                     current_action,
                     required,
+                    open_family_candidates,
                 )
                 for definition in self.registry.fields
             ]
@@ -886,7 +903,7 @@ class BranchRuleEvaluator:
     def _reconcile_previous_conditional_branches(
         self,
         current_results: list[BranchResult],
-        previous_evaluation: BranchEvaluationRecord | None,
+        previous_evaluation: BranchEvaluationRecord | BranchEvaluationResult | None,
         trigger_source_refs: Sequence[str],
         claim: WorkingClaim,
     ) -> list[BranchResult]:
@@ -1006,6 +1023,7 @@ class BranchRuleEvaluator:
         family_candidates: set[str],
         current_action: AgentAction | str | None,
         required: frozenset[str],
+        open_family_candidates: bool = False,
     ) -> FieldSelectionResult:
         stored = claim.form.get(definition.code)
         value_state = stored.status if stored is not None else FormStatus.MISSING
@@ -1019,6 +1037,7 @@ class BranchRuleEvaluator:
             definition.families
             and selected_family not in definition.families
             and not definition.families.intersection(family_candidates)
+            and not open_family_candidates
         ):
             selection_state = FieldSelectionState.INACTIVE
             reason = 'The field is outside the selected or single candidate family.'

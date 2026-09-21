@@ -98,7 +98,11 @@ from backend.services.context_planner import ContextBudgetExceeded
 from backend.services.context_resolver import resolver_for_turn
 from backend.services.isolated_context_executor import execute_isolated_context_plan
 from backend.services.model_operations import ModelOperationsRecorder
-from backend.services.model_request_planner import context_resolve_tool, plan_model_turn
+from backend.services.model_request_planner import (
+    context_resolve_tool,
+    plan_model_turn,
+    prepare_model_family_context,
+)
 from backend.services.prompt_composer import load_response_schema
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
@@ -1111,6 +1115,7 @@ class GatewayAgent:
         )
 
     def _propose_v7_turn(self, context: AgentTurnContext) -> AgentProposal:
+        context = prepare_model_family_context(context)
         try:
             plan = plan_model_turn(context)
         except ContextBudgetExceeded:

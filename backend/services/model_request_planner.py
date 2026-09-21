@@ -2,6 +2,7 @@
 
 import json
 from copy import deepcopy
+from dataclasses import replace
 from typing import Any, cast
 
 from backend.domain.agent_context_runtime import (
@@ -35,6 +36,7 @@ from backend.services.request_profile_registry import (
     request_profile_for_intents,
     request_profile_for_task,
 )
+from backend.services.turn_family_resolution import resolve_turn_family
 from backend.services.turn_field_contract import bind_provider_schema, compile_turn_field_contract
 from backend.services.turn_router import route_turn
 
@@ -60,12 +62,49 @@ def context_resolve_tool() -> ModelTool:
     return _CONTEXT_RESOLVE_TOOL
 
 
+def prepare_model_family_context(context: AgentTurnContext) -> AgentTurnContext:
+    """Open v8 family candidates at the model boundary, leaving controlled turns unchanged.
+
+    Args:
+        context: The immutable accepted-turn context.
+    Returns:
+        Context with one proposal-based family resolution and its branch evaluation.
+    """
+    snapshot = context.runtime_configuration_snapshot
+    record = snapshot.model(context.model_profile_id) if snapshot is not None else None
+    if record is None or record.values.get('prompt_version') != 'northwind-fnol-claimant-v8':
+        return context
+    if (
+        context.branch_evaluation is not None
+        and context.branch_evaluation.recomputation_reason == 'model_family_judgment'
+    ):
+        return context
+    resolution = resolve_turn_family(
+        context.claim, context.branch_evaluation, context.message_text, model_family_judgment=True
+    )
+    evaluator = (
+        context.runtime_policy.branch_evaluator(model_family_judgment=True)
+        if context.runtime_policy is not None
+        else BranchRuleEvaluator(model_family_judgment=True)
+    )
+    evaluation = evaluator.evaluate(
+        context.claim,
+        latest_message=context.message_text,
+        trigger_source_refs=[context.trigger_message_id] if context.trigger_message_id else (),
+        family_resolution=resolution,
+        previous_evaluation=context.branch_evaluation,
+        recomputation_reason='model_family_judgment',
+    )
+    return replace(context, turn_family_resolution=resolution, branch_evaluation=evaluation)
+
+
 def plan_model_turn(
     context: AgentTurnContext,
     *,
     budget_policy: ContextBudgetPolicy | None = None,
     summary: VerifiedConversationSummary | None = None,
 ) -> PlannedModelTurn | None:
+    context = prepare_model_family_context(context)
     route = route_turn(context)
     if not route.model_required:
         return None
