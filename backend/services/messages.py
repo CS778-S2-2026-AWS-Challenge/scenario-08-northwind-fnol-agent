@@ -499,7 +499,7 @@ def _message_only_response(
         decision=None,
         primary_action=project_claimant_primary_action(
             claim_id=claim_id,
-            claim_revision=revision,
+            claim_revision=claim.revision,
             next_step=next_step,
             external_service_action=external_service_action,
         ),
@@ -536,10 +536,83 @@ def _namespaced_turn_response(
         dynamic_form=claimant_dynamic_form_projection(repository, claim),
         primary_action=project_claimant_primary_action(
             claim_id=claim_id,
-            claim_revision=claim_revision,
+            claim_revision=claim.revision,
             next_step=next_step,
             external_service_action=external_service_action,
         ),
+    )
+
+
+def _replay_persisted_response(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    session_id: str,
+    idempotency: IdempotencyRecord,
+) -> MessageTurnResponse:
+    """Rebuild a persisted response against the current Claim projection.
+
+    The response payload is a durable compatibility record, not the authority for
+    current revision-dependent projections. Historical turn metadata remains in
+    that payload while the message, decision, and current Claim are re-read.
+    """
+
+    payload = idempotency.response_payload or {}
+    historical_revision = int(payload.get('claim_revision', 0))
+    claimant_message = (
+        repository.get_message(
+            claim_id,
+            session_id,
+            idempotency.message_id,
+            principal.subject,
+        )
+        if idempotency.message_id is not None
+        else None
+    )
+    if claimant_message is None:
+        raise ApiError(
+            status_code=500,
+            code='INTERNAL_ERROR',
+            message='The persisted message turn could not be restored.',
+            retryable=True,
+        )
+    if idempotency.decision_id is not None:
+        decision = repository.get_agent_decision(
+            claim_id,
+            idempotency.decision_id,
+            principal.subject,
+        )
+        if decision is not None:
+            return _message_turn_response(
+                repository, principal, claim_id, claimant_message, decision
+            )
+    if idempotency.agent_message_id is not None:
+        agent_message = repository.get_message(
+            claim_id,
+            session_id,
+            idempotency.agent_message_id,
+            principal.subject,
+        )
+        if agent_message is not None:
+            return _namespaced_turn_response(
+                repository,
+                principal,
+                claim_id,
+                historical_revision,
+                claimant_message,
+                agent_message,
+            )
+    claim = repository.get_claim(claim_id, principal.subject)
+    if claim is None:
+        raise _session_not_found()
+    return _message_only_response(
+        repository,
+        principal,
+        claim_id,
+        session_id,
+        historical_revision or claim.revision,
+        claimant_message,
+        claim=claim,
     )
 
 
@@ -1763,7 +1836,13 @@ def submit_message(
                 message='The idempotency key was reused with a different request.',
             )
         if existing_idempotency.response_payload is not None:
-            return MessageTurnResponse.model_validate(existing_idempotency.response_payload)
+            return _replay_persisted_response(
+                repository,
+                principal,
+                claim_id,
+                session_id,
+                existing_idempotency,
+            )
         if existing_idempotency.message_id is None or existing_idempotency.decision_id is None:
             raise ApiError(
                 status_code=500,

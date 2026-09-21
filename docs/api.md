@@ -1660,7 +1660,9 @@ used by a continuation action or a new revision-checked request. For a fresh tur
 equal. Both fields are integer revision values and are present on every MessageTurnResponse. The
 historical value is the revision to use when interpreting the replayed turn; the current value is
 the revision to send with a subsequent revision-checked mutation. Neither field changes the
-Claim revision or creates a new turn by itself.
+Claim revision or creates a new turn by itself. Retries of records written before
+`current_claim_revision` was introduced are hydrated from the durable message and current Claim;
+the stored idempotency record is not rewritten and no side effect is replayed.
 
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
 

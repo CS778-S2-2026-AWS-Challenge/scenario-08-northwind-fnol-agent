@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import cast
@@ -1894,6 +1895,80 @@ def test_message_turn_replay_preserves_turn_revision_after_later_claim_mutation(
     assert replay_body['primary_action']['claim_revision'] == 3
     assert replay_body['claimant_message'] == first.json()['claimant_message']
     assert replay_body['agent_message'] == first.json()['agent_message']
+
+
+def test_message_only_replay_rehydrates_current_revision_from_legacy_payload(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='message-only-replay').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+    claim = repository.get_claim(claim_id, 'cus_demo')
+    assert claim is not None
+    support = client.post(
+        f'/api/v1/claims/{claim_id}/support-requests',
+        headers={**auth_headers, 'Idempotency-Key': 'message-only-support', 'If-Match': '1'},
+        json={
+            'reason': 'I need a claims professional to help me continue.',
+            'support_need': 'human_requested',
+            'preferred_channel': 'in_app',
+        },
+    )
+    assert support.status_code == 201, support.text
+    first = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=support.json()['revision'],
+        key='message-only-replay-turn',
+        client_message_id='message-only-replay-message',
+        text='I am ready to provide the next detail.',
+    )
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    historical_revision = first_body['claim_revision']
+    idempotency_route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
+    stored = repository.find_idempotency('cus_demo', idempotency_route, 'message-only-replay-turn')
+    assert stored is not None
+    assert stored.response_payload is not None
+    legacy_payload = dict(stored.response_payload)
+    legacy_payload.pop('current_claim_revision', None)
+    repository.save_idempotency(replace(stored, response_payload=legacy_payload))
+
+    current_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert current_claim is not None
+    later_update = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(current_claim.revision)},
+        json={
+            'updates': [
+                {
+                    'field_code': 'incident.description',
+                    'value': 'A later clarification after the handoff message.',
+                    'correction_reason': 'The claimant clarified the description.',
+                }
+            ]
+        },
+    )
+    assert later_update.status_code == 200, later_update.text
+    replay = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=historical_revision,
+        key='message-only-replay-turn',
+        client_message_id='message-only-replay-message',
+        text='I am ready to provide the next detail.',
+    )
+    assert replay.status_code == 200, replay.text
+    replay_body = replay.json()
+    assert replay_body['claim_revision'] == historical_revision
+    assert replay_body['current_claim_revision'] == later_update.json()['revision']
+    assert replay_body['primary_action']['claim_revision'] == later_update.json()['revision']
 
 
 def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(

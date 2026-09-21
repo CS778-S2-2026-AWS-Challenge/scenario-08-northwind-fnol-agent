@@ -783,6 +783,10 @@ function App() {
       : current)
   }
 
+  function currentTurnRevision(turn) {
+    return turn.current_claim_revision ?? turn.claim_revision
+  }
+
   function beginMessagesReadback() {
     messagesRequestGeneration.current += 1
     return messagesRequestGeneration.current
@@ -1565,12 +1569,13 @@ function App() {
       setForm((current) => mergeFields(current, turn.form_changes))
       setContentsItems((current) => mergeContentsItems(current, turn.contents_item_changes || []))
       setDynamicForm(turn.dynamic_form || null)
-      setClaimRevision(turn.claim_revision, turn.primary_action)
+      const currentRevision = currentTurnRevision(turn)
+      setClaimRevision(currentRevision, turn.primary_action)
       if (turn.decision) setNextStep(turn.decision.customer_next_step)
       if (turn.handoff) setHandoff(turn.handoff)
       rememberClaimInHistory({
         ...activeClaim,
-        revision: turn.claim_revision,
+        revision: currentRevision,
         customer_next_step: turn.decision?.customer_next_step || activeClaim.customer_next_step,
         updated_at: turn.claimant_message?.created_at || activeClaim.updated_at,
       })
@@ -1597,7 +1602,7 @@ function App() {
       pendingSubmission.current = null
       setPendingMessage(null)
       setFailedMessage(null)
-      let attachmentClaim = { ...activeClaim, revision: turn.claim_revision }
+      let attachmentClaim = { ...activeClaim, revision: currentRevision }
       let stagedUploadsSucceeded = true
       for (const attachment of stagedAttachments) {
         const upload = await uploadAttachment(

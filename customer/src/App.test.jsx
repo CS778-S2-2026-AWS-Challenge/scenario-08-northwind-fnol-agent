@@ -592,7 +592,12 @@ describe('claimant intake projection', () => {
   it('replaces Staff assistance with a waiting status and prevents duplicate requests', async () => {
     const user = userEvent.setup()
     let resolveSupport
-    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      claim_revision: 2,
+      current_claim_revision: 3,
+      primary_action: primaryAction({ revision: 3 }),
+    })
     api.requestHumanSupport.mockImplementation(() => new Promise((resolve) => {
       resolveSupport = resolve
     }))
@@ -614,6 +619,7 @@ describe('claimant intake projection', () => {
     expect(progress).not.toHaveTextContent('A Northwind support request has been queued')
     expect(screen.queryByRole('button', { name: 'Staff assistance' })).not.toBeInTheDocument()
     expect(api.requestHumanSupport).toHaveBeenCalledTimes(1)
+    expect(api.requestHumanSupport).toHaveBeenCalledWith(expect.objectContaining({ revision: 3 }))
 
     await act(async () => resolveSupport({
       revision: 3,
@@ -629,7 +635,7 @@ describe('claimant intake projection', () => {
     expect(screen.queryByText('Staff assistance requested')).not.toBeInTheDocument()
     expect(api.requestHumanSupport).toHaveBeenCalledWith(expect.objectContaining({
       claimId: initialClaim.claim_id,
-      revision: 2,
+      revision: 3,
     }))
     expect(initialClaim.external_claim).toBeNull()
   })
