@@ -200,8 +200,13 @@ async function main() {
       await staff.getByLabel('Work email').fill(STAFF_EMAIL)
       await staff.getByLabel('Password').fill(STAFF_PASSWORD)
       await staff.getByRole('button', { name: 'Sign in', exact: true }).click()
+      await staff.waitForURL(
+        (url) => !url.pathname.includes('/workbench/login'),
+        { timeout: 30000 },
+      )
     }
 
+    await staff.goto(`${WORKBENCH}/workbench/conversations`, { waitUntil: 'domcontentloaded' })
     await staff.getByRole('heading', { name: 'Human assistance requests', exact: true })
       .waitFor({ state: 'visible', timeout: 30000 })
 
