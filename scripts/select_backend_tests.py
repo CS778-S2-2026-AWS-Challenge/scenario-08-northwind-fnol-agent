@@ -22,6 +22,7 @@ TOOLING_CONSUMER_RULES: dict[str, tuple[str, ...]] = {
     'backend/requirements-dev.txt': (SELECTOR_TEST_PATH,),
     'pyproject.toml': (SELECTOR_TEST_PATH,),
     'scripts/check_diff_coverage.py': ('tests/test_diff_coverage.py',),
+    'scripts/rehearse_mongodb_migration.py': ('tests/test_mongodb_migration_rehearsal.py',),
     'scripts/select_backend_tests.py': (SELECTOR_TEST_PATH,),
 }
 TEST_SUPPORT_CONSUMERS: dict[str, tuple[str, ...]] = {
