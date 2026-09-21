@@ -16,6 +16,7 @@ const api = vi.hoisted(() => ({
   getClaimEvidence: vi.fn(),
   getRuntimeCapabilities: vi.fn(),
   listAccountAssets: vi.fn(),
+  listAccountIdentityDocuments: vi.fn(),
   listClaims: vi.fn(),
   listEvidenceHistory: vi.fn(),
   loginClaimant: vi.fn(),
@@ -37,6 +38,8 @@ const api = vi.hoisted(() => ({
   updateAccountPreferences: vi.fn(),
   updateAccountProfile: vi.fn(),
   updateAccountAsset: vi.fn(),
+  createAccountIdentityDocument: vi.fn(),
+  updateAccountIdentityDocument: vi.fn(),
   updateClaimField: vi.fn(),
 }))
 
@@ -243,6 +246,7 @@ describe('claimant intake projection', () => {
     })
     api.getClaimEvidence.mockResolvedValue({ items: [], revision: 1 })
     api.listAccountAssets.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listAccountIdentityDocuments.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listEvidenceHistory.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.streamRealtimeEvents.mockImplementation(() => new Promise(() => {}))
     api.createClaim.mockResolvedValue({
@@ -507,6 +511,11 @@ describe('claimant intake projection', () => {
     await user.click(screen.getAllByRole('button', { name: 'Payment details' })[0])
     expect(await screen.findByRole('heading', { name: 'Payment details' })).toBeInTheDocument()
     expect(globalThis.location.pathname).toBe('/profile/payment-details')
+
+    await user.click(screen.getAllByRole('button', { name: 'Identity & verification' })[0])
+    expect(await screen.findByText('No identity documents saved.')).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile/identity-verification')
+    expect(api.listAccountIdentityDocuments).toHaveBeenCalled()
 
     globalThis.history.replaceState({}, '', '/profile/insured-assets')
     globalThis.dispatchEvent(new PopStateEvent('popstate'))
