@@ -476,13 +476,21 @@ class BranchRuleEvaluator:
         exited = [result.branch_id for result in branch_results if result.status == 'exited']
 
         permitted_fields = set(COMMON_FIELDS & self.registry.field_codes)
-        for branch_id in active:
-            permitted_fields.update(self.registry.branch_by_id[branch_id].fields)
+        for result in branch_results:
+            branch = self.registry.branch_by_id[result.branch_id]
+            if result.status != 'active' and not (
+                result.status == 'candidate'
+                and branch.kind == 'fact'
+                and not branch.branch_id.startswith('family.')
+            ):
+                continue
+            # A weak conditional signal prepares candidate fields, not required
+            # facts. Consume the policy-filtered result so disabled/observation
+            # rules cannot recover effects from the raw registry definition.
+            permitted_fields.update(result.registered_fields)
             permitted_fields.difference_update(
                 code
-                for code, deadline in self.registry.branch_by_id[
-                    branch_id
-                ].collection_policy.items()
+                for code, deadline in branch.collection_policy.items()
                 if deadline == 'staff_only'
             )
         if selected_family is None and len(family_candidates) == 1:
@@ -583,7 +591,7 @@ class BranchRuleEvaluator:
                     'reason': 'The published controlled-rule configuration disables this rule.',
                 }
             )
-        if result.rule_id in self.observation_rule_ids and result.status == 'active':
+        if result.rule_id in self.observation_rule_ids and result.status in {'active', 'candidate'}:
             return result.model_copy(
                 update={
                     'status': 'candidate',

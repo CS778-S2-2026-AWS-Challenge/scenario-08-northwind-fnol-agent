@@ -1,9 +1,12 @@
 """Registry leaves, deadlines and cross-turn correction acceptance for v8."""
 
+import pytest
+
 from backend.domain.branch_registry import BranchRuleEvaluator
 from backend.domain.field_registry import needs_confirmation
 from backend.domain.models import AgentAction, FieldSelectionState, FormSource, FormStatus
 from backend.services.branching import build_applied_branch_evaluation
+from backend.services.turn_field_contract import compile_turn_field_contract
 from tests.test_branch_registry import contents_item, field, make_claim
 
 
@@ -36,6 +39,35 @@ def test_injury_leaves_have_distinct_collection_deadlines() -> None:
         for item in inactive.field_selection
         if item.field_code.startswith('injury.')
     )
+
+
+@pytest.mark.parametrize('policy', ['enabled', 'disabled', 'observation'])
+def test_weak_injury_prepares_candidate_fields_without_requiring_or_authorising_them(
+    policy: str,
+) -> None:
+    rule_id = 'BR-INJURY-DETAILS-001'
+    evaluator = BranchRuleEvaluator(
+        disabled_rule_ids=frozenset({rule_id}) if policy == 'disabled' else frozenset(),
+        observation_rule_ids=frozenset({rule_id}) if policy == 'observation' else frozenset(),
+    )
+    claim = make_claim(incident_type='motor')
+    result = evaluator.evaluate(claim, latest_message='Possible injury details are not clear yet.')
+    injury = next(item for item in result.branch_results if item.branch_id == 'injury.details')
+    codes = {'injury.persons_affected', 'injury.severity_reported', 'injury.medical_attention'}
+    contract = compile_turn_field_contract(result, evaluator.registry)
+    selections = {item.field_code: item.selection_state for item in result.field_selection}
+    assert not codes.intersection(result.requirements.missing_required_now)
+    assert not codes.intersection(result.requirements.recorded)
+    assert 'injury.details' not in result.active_branches
+    assert claim.form == {}
+    if policy == 'enabled':
+        assert set(injury.registered_fields) == codes
+        assert codes <= set(contract.by_code)
+        assert all(selections[code] is FieldSelectionState.CANDIDATE_NOW for code in codes)
+    else:
+        assert injury.registered_fields == []
+        assert not codes.intersection(contract.by_code)
+        assert all(selections[code] is FieldSelectionState.INACTIVE for code in codes)
 
 
 def test_required_selection_matches_requirements_with_rule_disabled() -> None:
