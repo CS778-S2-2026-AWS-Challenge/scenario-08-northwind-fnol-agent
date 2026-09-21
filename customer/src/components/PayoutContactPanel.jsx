@@ -174,6 +174,7 @@ export default function PayoutContactPanel({
                 <input
                   type="radio"
                   name="payout_destination"
+                  aria-label={`${destination.account_type} ${destination.masked_account_number}`}
                   value={destination.payment_destination_id}
                   checked={effectiveDestinationId === destination.payment_destination_id}
                   onChange={() => setSelectedDestinationId(destination.payment_destination_id)}
@@ -239,6 +240,7 @@ export default function PayoutContactPanel({
               <input
                 type="radio"
                 name="contact_preference"
+                aria-label={`${method.label} ${method.available ? method.destination : 'Add this contact detail in your profile first.'}`}
                 value={method.value}
                 checked={effectiveContactPreference === method.value}
                 onChange={() => setContactPreference(method.value)}
