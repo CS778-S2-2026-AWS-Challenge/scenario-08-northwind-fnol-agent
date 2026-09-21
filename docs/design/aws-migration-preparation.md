@@ -11,8 +11,10 @@ model, or API representation.
 
 ## Current source and target boundary
 
-The current source is the local MVP persistence model. The planned target is a
-transactional DynamoDB store for operational records, with S3 and a separate governed
+The current source is the local MVP persistence model. Its core Claim persistence is
+MongoDB, while claimant/staff identity and Control Plane data use separate SQLite stores
+in the local composition. The planned target in this issue is a transactional DynamoDB
+store for the MongoDB-backed operational records, with S3 and a separate governed
 knowledge store handled by the related storage-migration work. MongoDB and MinIO remain
 local rehearsal providers until AWS access is verified.
 
@@ -26,6 +28,12 @@ The following boundaries apply to this design:
 | Evidence bytes | Active object-store contract | Migrate metadata and protected references with the record; transfer bytes under the separate MinIO/S3 plan. |
 | Knowledge documents and chunks | `docs/rag-ingestion.md` and knowledge-source contracts | Keep outside operational Claim partitions; migrate under the separate MinIO/RAG preparation issue. |
 | Secrets and credentials | Runtime secret boundary | Never copy secrets, bearer tokens, password hashes, or raw provider payloads into migration data. |
+
+The `local_mvp` composition is therefore not one MongoDB-only source. The MongoDB
+rehearsal covers the core Claim persistence boundary. The SQLite identity and Control
+Plane stores are included below as adjacent logical records so the target inventory does
+not hide an ownership gap, but their migration is not silently included in #991 or #992.
+Their final AWS placement requires a separate approved target decision.
 
 ## Access patterns
 
@@ -82,8 +90,8 @@ must come from the current repository contract at implementation time.
 | Policy summary | `pk=CUSTOMER#{customer_id}`, `sk=POLICY#{policy_id}` | Preserve bounded policy identity, product family, status, effective dates, and provenance; do not turn it into ordinary RAG text. |
 | Customer memory | `pk=CUSTOMER#{customer_id}`, `sk=MEMORY#{memory_id}` | Preserve source, visibility, correction state, expiry, and deletion behavior. |
 | Asset | `pk=CUSTOMER#{customer_id}`, `sk=ASSET#{asset_id}` | Preserve owner, typed asset details, active state, revision, and timestamps. |
-| Staff account | `pk=STAFF#{staff_id}`, `sk=PROFILE` | Preserve role and active-state data under the existing staff identity contract; password hashes remain protected and are not exposed to migration evidence. |
-| Staff auth session | `pk=STAFF_SESSION#{session_id}`, `sk=META` | Preserve opaque session identity, staff link, expiry, revocation, and revision; never migrate bearer values or token hashes into logs. |
+| Staff account | Target placement not assigned by #991; source is the SQLite staff identity store | Preserve role and active-state data under the existing staff identity contract; password hashes remain protected and are not exposed to migration evidence. |
+| Staff auth session | Target placement not assigned by #991; source is the SQLite staff identity store | Preserve opaque session identity, staff link, expiry, revocation, and revision; never migrate bearer values or token hashes into logs. |
 | Claim | `pk=CLAIM#{claim_id}`, `sk=META` | Preserve customer ownership, Claim State, workflow, responsibility, retention, and current revision. |
 | Claim asset snapshot | `pk=CLAIM#{claim_id}`, `sk=ASSET_SNAPSHOT#{snapshot_id}` | Preserve immutable selected asset details, source asset revision, provenance, and capture time. |
 | Session | `pk=SESSION#{session_id}`, `sk=META` | Preserve session ownership, optional Claim link, summary revision, question accounting, and lifecycle. |
@@ -99,8 +107,8 @@ must come from the current repository contract at implementation time.
 | Review and staff action | `pk=CLAIM#{claim_id}`, `sk=REVIEW#{review_id}` or `STAFF_ACTION#{action_id}` | Preserve internal signal, source references, professional decision, authority, and immutable action evidence. |
 | External request/task | `pk=CLAIM#{claim_id}`, `sk=EXTERNAL#{request_or_task_id}` | Preserve consent, authority, operation identity, provider-neutral result, and reconciliation state. Attempt records remain append-only pending #984. |
 | Follow-up | `pk=CLAIM#{claim_id}`, `sk=FOLLOW_UP#{follow_up_id}` | Preserve due time, responsibility, attempt count, channel, outcome, and status without making follow-up a Claim lifecycle state. |
-| Integration and operation configuration | `pk=INTEGRATION#{integration_id}`, `sk={record_type}#{record_id}` | Preserve published capability/health references, consent, operation identity, and result records without copying provider credentials. |
-| Versioned configuration | `pk=CONFIG#{configuration_type}`, `sk=VERSION#{version}` | Preserve immutable published versions, author, reason, effective time, rollback target, and audit references. |
+| Integration and operation configuration | Target placement not assigned by #991; source is the SQLite Control Plane store | Preserve published capability/health references, consent, operation identity, and result records without copying provider credentials. |
+| Versioned configuration | Target placement not assigned by #991; source is the SQLite Control Plane store | Preserve immutable published versions, author, reason, effective time, rollback target, and audit references. |
 | Branch evaluation | `pk=CLAIM#{claim_id}`, `sk=BRANCH_EVAL#{evaluation_id}` | Preserve evaluated Claim revision, selected family, active branches, field states, and application status. |
 | Retrieval record | `pk=CLAIM#{claim_id}`, `sk=RETRIEVAL#{retrieval_id}` | Preserve source, version, citations, limitations, visibility, and retrieval time. Raw provider payloads are excluded. |
 | Audit event | `pk=CLAIM#{claim_id}` or `pk=AUDIT_SUBJECT#{subject_id}`, `sk=AUDIT#{occurred_at}#{event_id}` | Preserve immutable envelope, actor, authority, outcome, correlation/idempotency reference, and resulting Claim revision. |
