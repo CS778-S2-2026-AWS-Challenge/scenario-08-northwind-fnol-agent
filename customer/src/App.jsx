@@ -698,6 +698,8 @@ function App() {
     [claim],
   )
   const conversationActionKind = conversationAction?.kind || null
+  const accountCustomerId = account?.customer_id || null
+  const accountRevision = account?.revision || null
 
   useEffect(() => {
     if (conversationActionKind !== 'payout-contact' || !claim?.claim_id) {
@@ -709,7 +711,7 @@ function App() {
       })
       return undefined
     }
-    if (!account) {
+    if (!accountCustomerId) {
       setPaymentDestinationState({
         claimId: claim.claim_id,
         status: 'idle',
@@ -754,7 +756,7 @@ function App() {
       active = false
       controller.abort()
     }
-  }, [account?.revision, claim?.claim_id, conversationActionKind])
+  }, [accountCustomerId, accountRevision, claim?.claim_id, conversationActionKind])
   const externalCapabilityKey = claim?.external_capabilities?.length > 0
     ? `${claim.claim_id}:${claim.external_capabilities
         .map((capability) => `${capability.service_identity}:${capability.registry_version || ''}`)

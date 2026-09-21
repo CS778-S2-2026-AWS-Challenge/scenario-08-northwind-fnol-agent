@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import './PayoutContactPanel.css'
 
 const CONTACT_METHODS = [
@@ -38,20 +38,17 @@ export default function PayoutContactPanel({
   const [accountType, setAccountType] = useState('')
   const [accountNumber, setAccountNumber] = useState('')
   const [formError, setFormError] = useState('')
-
-  useEffect(() => {
-    const activeIds = new Set(activeDestinations.map((item) => item.payment_destination_id))
-    setSelectedDestinationId((current) => {
-      if (activeIds.has(current)) return current
-      if (activeIds.has(claim?.payment_destination_id)) return claim.payment_destination_id
-      return ''
-    })
-    if (!loading && activeDestinations.length === 0) setAddingDestination(true)
-  }, [activeDestinations, claim?.payment_destination_id, loading])
-
-  useEffect(() => {
-    if (existingContact) setContactPreference(existingContact)
-  }, [existingContact])
+  const activeDestinationIds = useMemo(
+    () => new Set(activeDestinations.map((item) => item.payment_destination_id)),
+    [activeDestinations],
+  )
+  const effectiveDestinationId = activeDestinationIds.has(selectedDestinationId)
+    ? selectedDestinationId
+    : activeDestinationIds.has(claim?.payment_destination_id)
+      ? claim.payment_destination_id
+      : ''
+  const effectiveContactPreference = contactPreference || existingContact
+  const showDestinationForm = addingDestination || (!loading && activeDestinations.length === 0)
 
   const contactMethods = CONTACT_METHODS.map((method) => {
     const destination = method.destination(profile)
@@ -61,10 +58,12 @@ export default function PayoutContactPanel({
       available: method.value === 'in_app' || Boolean(destination),
     }
   })
-  const selectedContact = contactMethods.find((method) => method.value === contactPreference)
+  const selectedContact = contactMethods.find(
+    (method) => method.value === effectiveContactPreference,
+  )
   const canContinue = Boolean(
-    selectedDestinationId
-    && contactPreference
+    effectiveDestinationId
+    && effectiveContactPreference
     && selectedContact?.available
     && !busy
     && !loading,
@@ -100,11 +99,11 @@ export default function PayoutContactPanel({
   async function continueToAgreement(event) {
     event.preventDefault()
     setFormError('')
-    if (!selectedDestinationId) {
+    if (!effectiveDestinationId) {
       setFormError('Select or add a payout account before continuing.')
       return
     }
-    if (!contactPreference) {
+    if (!effectiveContactPreference) {
       setFormError('Select how Northwind should contact you about this Claim.')
       return
     }
@@ -114,8 +113,8 @@ export default function PayoutContactPanel({
     }
     try {
       await onContinue({
-        paymentDestinationId: selectedDestinationId,
-        contactPreference,
+        paymentDestinationId: effectiveDestinationId,
+        contactPreference: effectiveContactPreference,
       })
     } catch (requestError) {
       setFormError(requestError.message || 'Payout and contact details could not be saved.')
@@ -176,7 +175,7 @@ export default function PayoutContactPanel({
                   type="radio"
                   name="payout_destination"
                   value={destination.payment_destination_id}
-                  checked={selectedDestinationId === destination.payment_destination_id}
+                  checked={effectiveDestinationId === destination.payment_destination_id}
                   onChange={() => setSelectedDestinationId(destination.payment_destination_id)}
                   disabled={busy}
                 />
@@ -189,7 +188,7 @@ export default function PayoutContactPanel({
           </fieldset>
         )}
 
-        {addingDestination && (
+        {showDestinationForm && (
           <form className="payout-new-account" onSubmit={saveDestination}>
             <label htmlFor="payout-account-type">Account type</label>
             <input
@@ -241,7 +240,7 @@ export default function PayoutContactPanel({
                 type="radio"
                 name="contact_preference"
                 value={method.value}
-                checked={contactPreference === method.value}
+                checked={effectiveContactPreference === method.value}
                 onChange={() => setContactPreference(method.value)}
                 disabled={!method.available || busy}
               />

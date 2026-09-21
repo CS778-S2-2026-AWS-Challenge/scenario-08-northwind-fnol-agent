@@ -753,16 +753,17 @@ def select_payout_contact(
         next_step=projected_next_step,
         external_service_action=external_action,
     )
-    if current_action.action_code != 'claimant.review_payout_contact' or not current_action.available:
+    if (
+        current_action.action_code != 'claimant.review_payout_contact'
+        or not current_action.available
+    ):
         raise ApiError(
             status_code=409,
             code='INVALID_STATE_TRANSITION',
             message='Payout and contact selection is not the current claimant action.',
         )
 
-    destination = repository.get_payment_destination(
-        payload.payment_destination_id, principal.subject
-    )
+    destination = repository.get_payment_destination(payload.payment_destination_id, principal.subject)
     if destination is None or not destination.active:
         raise _not_found('payment destination')
 

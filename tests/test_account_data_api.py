@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
 from backend.domain.audit import AuditSubject, AuditSubjectType
-from backend.domain.models import CustomerNextStep, ResponsibleParty
+from backend.domain.models import CustomerNextStep, ResponsibleParty, WorkingClaim
 from backend.repositories.account_data import PolicySelectionConflict
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
@@ -343,12 +343,11 @@ def test_policy_selection_conflicts_preserve_claim_revision_and_identify_policy(
 
 
 
-
 def _advance_claim_to_payout_contact(
     repository: FixtureRepository | MongoDBRepository,
     claim_id: str,
     customer_id: str = 'cus_demo',
-):
+) -> WorkingClaim:
     claim = repository.get_claim(claim_id, customer_id)
     assert claim is not None
     ready = claim.model_copy(

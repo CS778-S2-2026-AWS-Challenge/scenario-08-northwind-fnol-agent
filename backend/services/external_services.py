@@ -401,10 +401,7 @@ def _assessment_has_come_back(
     )
 
 
-def _payout_contact_is_complete(
-    repository: PersistenceRepository,
-    claim: WorkingClaim,
-) -> bool:
+def _payout_contact_is_complete(repository: PersistenceRepository, claim: WorkingClaim) -> bool:
     contact_preference = claim.form.get('claimant.contact_preference')
     if (
         claim.payment_destination_id is None
