@@ -53,6 +53,7 @@
 
 .payout-contact-section-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
@@ -166,13 +167,3 @@
   justify-self: start;
 }
 
-@media (max-width: 640px) {
-  .payout-contact-section-heading {
-    display: grid;
-  }
-
-  .payout-contact-panel .primary-button,
-  .payout-contact-panel .secondary-button {
-    width: 100%;
-  }
-}

@@ -709,9 +709,10 @@ assessor-consent, assessor-request, and support-request responses. `customer_nex
 browser's primary action or its precedence.
 
 The versioned claimant action registry contains only claimant-safe `claimant.*` codes:
-`claimant.create_claim`, `claimant.review_details`, `claimant.request_assessment`,
-`claimant.retry_assessment`, `claimant.track_assessment`, `claimant.await_staff_review`,
-`claimant.await_reconciliation`, and `claimant.continue_conversation`. These codes are separate
+`claimant.create_claim`, `claimant.review_details`, `claimant.review_payout_contact`,
+`claimant.review_agreement`, `claimant.request_assessment`, `claimant.retry_assessment`,
+`claimant.track_assessment`, `claimant.await_staff_review`, `claimant.await_reconciliation`, and
+`claimant.continue_conversation`. These codes are separate
 from staff and Agent Runtime action registries; a browser must not execute an internal
 `external.*`, `human.*`, or other Runtime command because a similarly named lifecycle state is
 visible.
