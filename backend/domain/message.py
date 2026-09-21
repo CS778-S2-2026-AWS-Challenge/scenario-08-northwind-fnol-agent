@@ -69,6 +69,28 @@ def order_messages(messages: Sequence[MessageRecord]) -> list[MessageRecord]:
     return ordered
 
 
+def validate_message_graph(messages: Sequence[MessageRecord]) -> None:
+    """Reject cycles in a complete pending Message graph before persistence."""
+
+    by_id = {message.message_id: message for message in messages}
+    state: dict[str, int] = {}
+
+    def visit(message_id: str) -> None:
+        current = state.get(message_id, 0)
+        if current == 1:
+            raise ValueError('Message reply graph must be acyclic.')
+        if current == 2:
+            return
+        state[message_id] = 1
+        reply_to = by_id[message_id].in_reply_to
+        if reply_to in by_id:
+            visit(reply_to)
+        state[message_id] = 2
+
+    for message in messages:
+        visit(message.message_id)
+
+
 def validate_message_record(
     message: MessageRecord,
     *,

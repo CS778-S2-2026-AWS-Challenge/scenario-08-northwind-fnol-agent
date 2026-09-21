@@ -44,7 +44,12 @@ from backend.domain.external_services import (
     assert_result_matches_task,
     assert_task_transition_is_permitted,
 )
-from backend.domain.message import DuplicateClientMessage, order_messages, validate_message_record
+from backend.domain.message import (
+    DuplicateClientMessage,
+    order_messages,
+    validate_message_graph,
+    validate_message_record,
+)
 from backend.domain.models import (
     ActorType,
     AgentDecisionRecord,
@@ -1505,6 +1510,7 @@ class MongoDBRepository:
             or len(evidence_by_id) != len(graph.evidence)
         ):
             raise ValueError('Validation seed record identifiers must be unique and non-empty.')
+        validate_message_graph(graph.messages)
         for evidence in graph.evidence:
             validate_evidence_record(evidence)
         for message in graph.messages:

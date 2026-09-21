@@ -34,6 +34,7 @@ from backend.domain.external_services import (
 from backend.domain.message import (
     DuplicateClientMessage,
     order_messages,
+    validate_message_graph,
     validate_message_record,
 )
 from backend.domain.models import (
@@ -914,6 +915,8 @@ class FixtureRepository(PersistenceRepository):
         available_sessions = {**self._sessions, **{item.session_id: item for item in sessions}}
         available_evidence = {**self._evidence, **{item.evidence_id: item for item in evidence}}
         available_messages = dict(self._messages)
+        pending_by_id = {message.message_id: message for message in messages}
+        validate_message_graph(tuple(available_messages.values()) + tuple(pending_by_id.values()))
         for message in messages:
             session = available_sessions.get(message.session_id)
             if session is None:
@@ -1004,6 +1007,7 @@ class FixtureRepository(PersistenceRepository):
             messages_by_id = {message.message_id: message for message in graph.messages}
             if len(messages_by_id) != len(graph.messages):
                 raise ValueError('Validation seed messages must be unique.')
+            validate_message_graph(graph.messages)
             evidence_by_id = {item.evidence_id: item for item in graph.evidence}
             if len(evidence_by_id) != len(graph.evidence):
                 raise ValueError('Validation seed evidence must be unique.')

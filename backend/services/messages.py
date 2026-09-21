@@ -21,6 +21,7 @@ from backend.domain.external_service_registry import ExternalLifecycleStatus
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
 from backend.domain.intake import intake_field_for_requirement, next_requirement_step
+from backend.domain.message import order_messages
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -2170,9 +2171,8 @@ def submit_message(
     )
     conversation_messages = tuple(
         message
-        for message in sorted(
-            repository.list_recent_messages(claim_id, session_id, principal.subject, 14),
-            key=lambda item: (item.created_at, item.message_id),
+        for message in order_messages(
+            repository.list_recent_messages(claim_id, session_id, principal.subject, 14)
         )
         if message.visibility is not MessageVisibility.INTERNAL_ONLY
     )

@@ -5,6 +5,7 @@ import mongomock
 import pytest
 
 from backend.core.auth import Principal
+from backend.domain.message import validate_message_graph
 from backend.domain.models import (
     ActorType,
     Channel,
@@ -284,6 +285,50 @@ def test_invalid_message_mutation_leaves_complete_provider_state_unchanged(
         )
 
     assert snapshot() == before
+
+
+@pytest.mark.parametrize(
+    'reply_targets',
+    (
+        ('msg_b', 'msg_a'),
+        ('msg_b', 'msg_c', 'msg_a'),
+    ),
+)
+def test_message_graph_rejects_reply_cycles(reply_targets: tuple[str, ...]) -> None:
+    repository = FixtureRepository()
+    claim, session = _claim_graph(repository)
+    message_ids = tuple(f'msg_{chr(ord("a") + index)}' for index in range(len(reply_targets)))
+    messages = tuple(
+        _message(claim, session, message_id, actor=ActorType.AGENT).model_copy(
+            update={'in_reply_to': reply_targets[index]}
+        )
+        for index, message_id in enumerate(message_ids)
+    )
+
+    with pytest.raises(ValueError, match='reply graph must be acyclic'):
+        validate_message_graph(messages)
+
+
+def test_message_graph_accepts_forward_chain_and_claimant_agent_pair() -> None:
+    repository = FixtureRepository()
+    claim, session = _claim_graph(repository)
+    claimant = _message(claim, session, 'msg_claimant')
+    agent = _message(
+        claim,
+        session,
+        'msg_agent',
+        actor=ActorType.AGENT,
+        in_reply_to=claimant.message_id,
+    )
+    follow_up = _message(
+        claim,
+        session,
+        'msg_follow_up',
+        actor=ActorType.AGENT,
+        in_reply_to=agent.message_id,
+    )
+
+    validate_message_graph((follow_up, agent, claimant))
 
 
 def test_valid_message_evidence_reply_and_projection_order_are_provider_neutral(
