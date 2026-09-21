@@ -7,6 +7,9 @@ rollback set.
 
 from backend.domain.agent_context_runtime import RequestProfile, TurnTask
 
+# Measured v7 Home intake maximum 3955; ceil(3955 * 1.15) per v3.5.
+V7_INPUT_HARD_LIMIT = 4549
+
 _PROFILES = {
     'claimant.turn.v1': RequestProfile(
         profile_id='claimant.turn.v1',
@@ -14,7 +17,7 @@ _PROFILES = {
         schema_id='claimant.turn.v1',
         max_model_invocations=1,
         max_model_selected_tools=0,
-        input_hard_limit=3000,
+        input_hard_limit=6000,
         output_limit=4500,
     ),
     'claimant.intake.v1': RequestProfile(
@@ -23,7 +26,7 @@ _PROFILES = {
         schema_id='claimant.intake-patch.v1',
         max_model_invocations=1,
         max_model_selected_tools=0,
-        input_hard_limit=3000,
+        input_hard_limit=V7_INPUT_HARD_LIMIT,
         output_limit=4500,
     ),
     'claimant.answer.v1': RequestProfile(
@@ -32,7 +35,7 @@ _PROFILES = {
         schema_id='claimant.answer.v1',
         max_model_invocations=1,
         max_model_selected_tools=0,
-        input_hard_limit=3000,
+        input_hard_limit=V7_INPUT_HARD_LIMIT,
         output_limit=4500,
     ),
     'claimant.media.v1': RequestProfile(
@@ -41,7 +44,7 @@ _PROFILES = {
         schema_id='claimant.turn.v1',
         max_model_invocations=1,
         max_model_selected_tools=0,
-        input_hard_limit=3000,
+        input_hard_limit=6000,
         output_limit=5500,
         requires_media_types=['image/*', 'application/pdf'],
     ),
@@ -52,7 +55,7 @@ _PROFILES = {
         tool_names=['context.resolve'],
         max_model_invocations=2,
         max_model_selected_tools=1,
-        input_hard_limit=3000,
+        input_hard_limit=6000,
         output_limit=4500,
         requires_tool_continuation=True,
     ),
@@ -73,7 +76,7 @@ _PROFILES = {
         schema_id='claimant.external-offer.v1',
         max_model_invocations=1,
         max_model_selected_tools=0,
-        input_hard_limit=3000,
+        input_hard_limit=V7_INPUT_HARD_LIMIT,
         output_limit=4500,
     ),
     'claimant.deep-review.v1': RequestProfile(
@@ -92,7 +95,7 @@ _PROFILES = {
         schema_id='claimant.claim-creation.v1',
         max_model_invocations=1,
         max_model_selected_tools=0,
-        input_hard_limit=3000,
+        input_hard_limit=V7_INPUT_HARD_LIMIT,
         output_limit=4500,
     ),
     'claimant.handoff.v1': RequestProfile(
@@ -101,7 +104,7 @@ _PROFILES = {
         schema_id='claimant.handoff.v1',
         max_model_invocations=1,
         max_model_selected_tools=0,
-        input_hard_limit=3000,
+        input_hard_limit=V7_INPUT_HARD_LIMIT,
         output_limit=4500,
     ),
 }
@@ -134,7 +137,14 @@ def request_profile_for_task(
     needs_lookup: bool = False,
     profiles: tuple[RequestProfile, ...] | list[RequestProfile] | None = None,
 ) -> RequestProfile:
-    registry = {item.profile_id: item for item in profiles} if profiles is not None else _PROFILES
+    registry = {
+        item.profile_id: item
+        for item in (
+            profiles
+            if profiles is not None
+            else registered_request_profiles('northwind-fnol-claimant-v7')
+        )
+    }
 
     def profile(name: str) -> RequestProfile:
         try:
@@ -195,17 +205,25 @@ def registered_request_profiles(
     prompt_version: str = 'northwind-fnol-claimant-v8',
 ) -> tuple[RequestProfile, ...]:
     if prompt_version == 'northwind-fnol-claimant-v7':
-        return tuple(
-            _PROFILES[key].model_copy(update={'schema_id': 'claimant.answer.v1'})
-            if key == 'claimant.lookup.v1'
-            else (
-                _PROFILES[key].model_copy(update={'schema_id': 'claimant.intake-patch.v1'})
-                if key == 'claimant.media.v1'
-                else _PROFILES[key]
-            )
-            for key in sorted(_PROFILES)
-            if key != 'claimant.turn.v1'
-        )
+        legacy = []
+        for key in sorted(_PROFILES):
+            if key == 'claimant.turn.v1':
+                continue
+            profile = _PROFILES[key]
+            if key not in {'claimant.evidence-history.v1', 'claimant.deep-review.v1'}:
+                profile = profile.model_copy(
+                    update={'input_hard_limit': V7_INPUT_HARD_LIMIT, 'output_limit': 180}
+                )
+            if key == 'claimant.lookup.v1':
+                profile = profile.model_copy(
+                    update={'schema_id': 'claimant.answer.v1', 'output_limit': 300}
+                )
+            elif key == 'claimant.media.v1':
+                profile = profile.model_copy(
+                    update={'schema_id': 'claimant.intake-patch.v1', 'output_limit': 400}
+                )
+            legacy.append(profile)
+        return tuple(legacy)
     active = {
         'claimant.turn.v1',
         'claimant.media.v1',

@@ -4911,13 +4911,13 @@
             "type": "integer"
           },
           "ordinary_input_hard_limit": {
-            "default": 3000,
+            "default": 6000,
             "minimum": 100.0,
             "title": "Ordinary Input Hard Limit",
             "type": "integer"
           },
           "ordinary_input_target": {
-            "default": 1800,
+            "default": 3000,
             "minimum": 100.0,
             "title": "Ordinary Input Target",
             "type": "integer"
@@ -4940,7 +4940,7 @@
             "type": "integer"
           },
           "tool_path_input_hard_limit": {
-            "default": 3000,
+            "default": 6000,
             "minimum": 100.0,
             "title": "Tool Path Input Hard Limit",
             "type": "integer"

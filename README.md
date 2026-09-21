@@ -84,6 +84,11 @@ npm ci --prefix workbench
 npm ci --prefix admin
 ```
 
+The development requirements include `jsonschema` (MIT) and its typing package
+`types-jsonschema` (Apache-2.0). They validate the actual provider-transformed JSON
+schemas in contract tests; Pydantic validation of a response alone cannot detect an
+unsatisfiable provider schema. They are not production runtime dependencies.
+
 Start the backend:
 
 ```powershell

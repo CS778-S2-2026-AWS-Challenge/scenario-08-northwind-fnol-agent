@@ -9,7 +9,6 @@ from backend.domain.models import (
     ContentsOwnership,
     ContractModel,
     FactPrecision,
-    MoneyAmount,
 )
 
 
@@ -24,21 +23,28 @@ class V8FieldChange(ContractModel):
     source_evidence_id: str | None = Field(default=None, max_length=100)
 
 
+class V8MoneyAmount(ContractModel):
+    amount: float = Field(ge=0, le=10_000_000, allow_inf_nan=False)
+    currency: str = Field(pattern=r'^[A-Z]{3}$')
+
+
 class V8ContentsItemChange(ContractModel):
-    item_id: str | None = Field(default=None, max_length=100)
+    item_id: str | None = Field(default=None, min_length=1, max_length=100)
     description: str = Field(min_length=1, max_length=300)
     category: str = Field(min_length=1, max_length=100)
-    quantity: int = Field(default=1, ge=1)
+    quantity: int = Field(default=1, ge=1, le=999)
     brand: str | None = Field(default=None, max_length=100)
     model: str | None = Field(default=None, max_length=100)
     loss_type: ContentsLossType
     ownership: ContentsOwnership
-    estimated_value: MoneyAmount | None = None
+    estimated_value: V8MoneyAmount | None = None
     reported_text: str | None = Field(default=None, max_length=200)
 
 
 class V8NextQuestion(ContractModel):
-    field_codes: list[str] = Field(min_length=1, max_length=3)
+    field_codes: list[Annotated[str, Field(min_length=1, max_length=100)]] = Field(
+        min_length=1, max_length=3
+    )
     wording: str = Field(min_length=1, max_length=250)
     reason: Literal[
         'safety_first',

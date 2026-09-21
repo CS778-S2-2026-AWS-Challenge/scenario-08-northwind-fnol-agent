@@ -2296,6 +2296,12 @@ class FixtureRepository(PersistenceRepository):
         existing_agent_message = self._messages.get(agent_message.message_id)
         existing_decision = self._decisions.get(decision.decision_id)
         existing_handoff = self._handoffs.get(handoff.handoff_id) if handoff is not None else None
+        if handoff is not None:
+            from backend.repositories.handoff_guard import validate_runtime_handoff_update
+
+            validate_runtime_handoff_update(
+                existing_handoff, handoff, claim, claimant_message, decision
+            )
         existing_evidence = (
             self._evidence.get(evidence.evidence_id) if evidence is not None else None
         )

@@ -65,6 +65,7 @@
             "anyOf": [
               {
                 "maxLength": 100,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -84,6 +85,7 @@
           },
           "quantity": {
             "minimum": 1,
+            "maximum": 999,
             "type": "integer"
           },
           "brand": {
@@ -134,6 +136,7 @@
                 "properties": {
                   "amount": {
                     "minimum": 0,
+                    "maximum": 10000000,
                     "type": "number"
                   },
                   "currency": {
@@ -184,6 +187,8 @@
           "properties": {
             "field_codes": {
               "items": {
+                "minLength": 1,
+                "maxLength": 100,
                 "type": "string"
               },
               "maxItems": 3,

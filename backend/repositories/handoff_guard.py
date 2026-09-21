@@ -2,11 +2,20 @@ from typing import Any, Protocol, cast, runtime_checkable
 
 from backend.domain.audit import AuditEventEnvelope
 from backend.domain.models import (
+    ActorType,
+    AgentAction,
+    AgentDecisionRecord,
+    AuthorityOutcome,
     BranchEvaluationRecord,
     ClaimCollaborationRequest,
     ClaimCoworkerRecord,
+    FormSource,
+    FormStatus,
+    HandoffPriority,
     HandoffRecord,
     HandoffStatus,
+    MessageRecord,
+    SupportNeed,
     WorkingClaim,
 )
 from backend.domain.staff_agent import StaffAgentExecutionRecord
@@ -181,6 +190,69 @@ def _validate_staff_update(
         raise _conflict('A resolved handoff requires a resolution timestamp.')
     if stored.resolved_at is not None and handoff.resolved_at != stored.resolved_at:
         raise _conflict('The original handoff resolution timestamp cannot be rewritten.')
+
+
+def validate_runtime_handoff_update(
+    stored: HandoffRecord | None,
+    handoff: HandoffRecord,
+    claim: WorkingClaim,
+    message: MessageRecord,
+    decision: AgentDecisionRecord,
+) -> None:
+    """Permit only an evidence-backed urgency upgrade of the same open handoff.
+
+    Runtime turn commits do not use the staff lifecycle route. All its immutable
+    identity, ownership, packet, lifecycle and timestamps still stay unchanged;
+    the only allowed change is the explicitly documented urgency escalation.
+    """
+    if stored is None or stored == handoff:
+        return
+    if stored.status in {HandoffStatus.RESOLVED, HandoffStatus.CANCELLED}:
+        raise _conflict('Runtime cannot change a closed handoff.')
+    unchanged = handoff.model_copy(
+        update={'priority': stored.priority, 'support_need': stored.support_need}
+    )
+    if unchanged != stored:
+        raise _conflict('Runtime urgency escalation must preserve handoff identity and ownership.')
+    ranks = {
+        HandoffPriority.STANDARD: 0,
+        HandoffPriority.HIGH: 1,
+        HandoffPriority.URGENT: 2,
+        HandoffPriority.IMMEDIATE: 3,
+    }
+    if (
+        handoff.support_need is not SupportNeed.URGENT
+        or ranks[handoff.priority] < ranks[stored.priority]
+        or ranks[handoff.priority] < ranks[HandoffPriority.URGENT]
+    ):
+        raise _conflict('Runtime can only upgrade an open handoff to urgent support.')
+    fact = claim.form.get('incident.injury_or_danger')
+    source_backed_signal = fact is not None and (
+        (
+            fact.value is True
+            and fact.status is FormStatus.CONFIRMED
+            and fact.source is FormSource.CLAIMANT
+            and message.message_id in fact.source_refs
+        )
+        or any(
+            assertion.normalized_value is True and message.message_id in assertion.source_refs
+            for assertion in fact.assertions
+        )
+    )
+    if (
+        message.actor is not ActorType.CLAIMANT
+        or message.claim_id != claim.claim_id
+        or stored.claim_id != claim.claim_id
+        or decision.claim_id != claim.claim_id
+        or decision.trigger_message_id != message.message_id
+        or decision.handoff_id != handoff.handoff_id
+        or decision.action is not AgentAction.URGENT_HANDOFF
+        or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
+        or not source_backed_signal
+    ):
+        raise _conflict(
+            'Runtime urgency escalation requires an authorised source-backed safety fact.'
+        )
 
 
 class HandoffPersistenceGuard:

@@ -15,7 +15,11 @@ from backend.domain.model_gateway import ModelTool
 from backend.domain.prompt_pack import PromptPackManifest
 from backend.services.agent import AgentTurnContext
 from backend.services.cache_planner import build_cache_plan
-from backend.services.context_budget import build_request_budget, estimate_json_tokens
+from backend.services.context_budget import (
+    build_request_budget,
+    estimate_json_tokens,
+    request_input_limit,
+)
 from backend.services.context_planner import plan_context
 from backend.services.prompt_composer import (
     compose_prompt,
@@ -205,11 +209,7 @@ def plan_model_turn(
     context_plan = plan_context(
         context,
         route,
-        budget_limit=(
-            profile.input_hard_limit
-            if profile.isolated
-            else min(profile.input_hard_limit, policy.ordinary_input_hard_limit)
-        ),
+        budget_limit=request_input_limit(profile, policy),
         reserved_tokens=reserved,
         summary=summary or context.rolling_summary,
         field_contract=field_contract,

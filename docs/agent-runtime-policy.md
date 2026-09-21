@@ -36,6 +36,14 @@ they suppress all new third-party offers until resolved. A Release Set pins prom
 schemas, profiles, rules and provider capabilities together. Successful publication is not
 evidence of a healthy provider or a passed real user journey.
 
+Full-envelope v8 input has a 6000-token hard limit and a 3000-token soft observation
+threshold. Text/lookup output is capped at 4500 and media output at 5500. These are
+operating limits, not a mathematical maximum of all legal schema values. A truncated
+provider result is rejected and follows the existing saved-message recovery flow; partial
+JSON never applies partial Claim changes. Unicode budget estimates use unescaped UTF-8
+content. Only v8 model-output money and quantity types have the new bounded limits;
+shared domain money values retain their existing contract.
+
 ## Policy Is Not a Prompt
 
 A system prompt is one model-specific rendering of part of the Agent Policy. It is not

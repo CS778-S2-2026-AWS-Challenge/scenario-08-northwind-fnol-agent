@@ -31,6 +31,15 @@ Agent reply. The original HTTP key replays its original result, while an explici
 the same `submit_message` entrypoint and saved inbound checkpoint. Bounded provider HTTP status
 and `error.type`/`error.code` are retained for diagnosis; raw provider error messages are excluded.
 
+The v8 envelope is bounded at the model boundary: scalar text values are at most 300
+characters, text-list values have at most 50 entries of 100 characters, Contents quantity
+is 1–999, and v8 monetary amounts are finite values from zero to 10,000,000. `V8MoneyAmount`
+converts to the unchanged shared `MoneyAmount` after parsing. Runtime mirrors length and
+count constraints even for providers that do not enforce strict output; an oversized field
+is rejected individually, while a wrong core type still rejects the proposal. The 4500/5500
+token output caps rely on incomplete-response recovery for extreme responses, not a guarantee
+that arbitrary schema-legal text fits.
+
 Agent orchestration sends `ModelRequest` and receives `ModelResponse`. These contracts
 normalise:
 

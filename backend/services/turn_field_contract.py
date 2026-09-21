@@ -79,7 +79,7 @@ def _value_schema(field: TurnFieldDefinition) -> dict[str, object]:
             'type': 'array',
             'minItems': 1,
             'maxItems': 50,
-            'items': {'type': 'string', 'minLength': 1},
+            'items': {'type': 'string', 'minLength': 1, 'maxLength': 100},
         }
     # String is the narrow common representation accepted by the registry for
     # text, location, and temporal facts. Structured forms remain Runtime-valid
@@ -207,6 +207,8 @@ def _field_value_is_valid(field: TurnFieldDefinition, value: Any) -> bool:
 def validate_field_changes(
     contract: TurnFieldContract,
     changes: list[Any],
+    *,
+    rejected_bounds: list[TurnFieldViolation] | None = None,
 ) -> list[Any]:
     allowed = contract.by_code
     validated: list[Any] = []
@@ -224,6 +226,32 @@ def validate_field_changes(
             )
             continue
         value = normalise_field_value(field, change.value)
+        within_bound = not (
+            (
+                field.value_type in {'text', 'location', 'temporal'}
+                and isinstance(value, str)
+                and len(value) > 300
+            )
+            or (
+                field.value_type == 'text_list'
+                and isinstance(value, list)
+                and (
+                    len(value) > 50
+                    or any(isinstance(item, str) and len(item) > 100 for item in value)
+                )
+            )
+        )
+        if not within_bound:
+            violation = TurnFieldViolation(
+                field_code=field_code,
+                expected_value_type=field.value_type,
+                reason_code='length_limit_exceeded',
+            )
+            if rejected_bounds is not None:
+                rejected_bounds.append(violation)
+            else:
+                violations.append(violation)
+            continue
         if not _field_value_is_valid(field, value):
             violations.append(
                 TurnFieldViolation(

@@ -4797,6 +4797,19 @@ class MongoDBRepository:
         checkpointed: bool,
         mongo_session: Any,
     ) -> None:
+        if handoff is not None:
+            from backend.repositories.handoff_guard import validate_runtime_handoff_update
+
+            stored_handoff = self._get(
+                'handoff',
+                handoff.handoff_id,
+                HandoffRecord,
+                customer_id=claim.customer_id,
+                session=mongo_session,
+            )
+            validate_runtime_handoff_update(
+                stored_handoff, handoff, claim, claimant_message, decision
+            )
         if claimant_message.client_message_id is not None and not checkpointed:
             duplicate = self._collection.find_one(
                 {

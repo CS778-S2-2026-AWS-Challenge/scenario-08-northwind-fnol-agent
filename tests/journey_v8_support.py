@@ -1,9 +1,9 @@
 """Shared real-API, mocked-provider acceptance harness for v8 claimant journeys.
 
 Only model transport and the published test policy are controlled here.  No
-Claim, reducer, form, confirmation or lifecycle mutation is patched.  The test
-policy uses a larger input ceiling while the production v8 budget is separately
-under review; these are workflow/contract tests, not live latency evidence.
+Claim, reducer, form, confirmation or lifecycle mutation is patched. The
+published production v8 request ceilings apply; these are workflow/contract
+tests, not live provider latency evidence.
 """
 
 from collections.abc import Sequence
@@ -99,29 +99,17 @@ class V8JourneyProvider:
             template.runtime_configuration_snapshot,
             configurations=MappingProxyType({'model:openrouter-gpt4o-mini': record}),
         )
-        budget = policy.controlled_rules.context_budget_policy.model_copy(
-            update={
-                'ordinary_input_hard_limit': 9000,
-            }
-        )
         policy = replace(
             policy,
             runtime_snapshot=snapshot,
             tool_policy=policy.tool_policy.model_copy(
                 update={
-                    'request_profiles': [
-                        profile.model_copy(update={'input_hard_limit': 9000})
-                        for profile in policy.tool_policy.request_profiles
-                    ],
                     'provider_capabilities': {
                         'openrouter-gpt4o-mini': provider_capability(
                             ModelRuntimeConfiguration.model_validate(config)
                         )
                     },
                 }
-            ),
-            controlled_rules=policy.controlled_rules.model_copy(
-                update={'context_budget_policy': budget}
             ),
         )
         evaluator = policy.branch_evaluator()

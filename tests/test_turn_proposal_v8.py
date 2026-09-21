@@ -67,34 +67,6 @@ def v8_context(message: str) -> AgentTurnContext:
 
 def test_v8_multi_intent_turn_uses_one_complete_envelope_and_preserves_facts() -> None:
     context = v8_context('My car cannot be driven. Please help with repairs.')
-    # This contract test isolates the provider/reducer interface from the
-    # separately recorded input-budget decision; it does not prove production
-    # default budget acceptance.
-    policy = context.runtime_policy
-    assert policy is not None
-    budget_policy = policy.controlled_rules.context_budget_policy
-    assert budget_policy is not None
-    context = replace(
-        context,
-        runtime_policy=replace(
-            policy,
-            tool_policy=policy.tool_policy.model_copy(
-                update={
-                    'request_profiles': [
-                        profile.model_copy(update={'input_hard_limit': 5000})
-                        for profile in policy.tool_policy.request_profiles
-                    ]
-                }
-            ),
-            controlled_rules=policy.controlled_rules.model_copy(
-                update={
-                    'context_budget_policy': budget_policy.model_copy(
-                        update={'ordinary_input_hard_limit': 5000}
-                    )
-                }
-            ),
-        ),
-    )
     plan = plan_model_turn(context)
     assert plan is not None
     assert plan.schema_id == 'claimant.turn.v1'

@@ -543,7 +543,11 @@ def reduce_turn(
             if support_need is SupportNeed.URGENT:
                 handoff = handoff.model_copy(
                     update={
-                        'priority': HandoffPriority.URGENT,
+                        'priority': (
+                            HandoffPriority.IMMEDIATE
+                            if handoff.priority is HandoffPriority.IMMEDIATE
+                            else HandoffPriority.URGENT
+                        ),
                         'support_need': SupportNeed.URGENT,
                     }
                 )

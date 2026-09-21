@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from backend.domain.agent_v8 import (
     V8Escalation,
+    V8FieldChange,
     V8NextQuestion,
     V8ServiceSuggestion,
     V8StateProposal,
@@ -24,13 +25,14 @@ from backend.domain.models import (
     FieldSelectionState,
     FormSource,
     FormStatus,
+    MoneyAmount,
     NeededFor,
     ProposedContentsItem,
     ProposedFormChange,
     StateChange,
 )
 from backend.domain.safety_vocabulary import WEAK_SAFETY_PATTERN
-from backend.domain.turn_field_contract import TurnFieldContract
+from backend.domain.turn_field_contract import TurnFieldContract, TurnFieldViolation
 from backend.services.turn_field_contract import validate_field_changes
 
 if TYPE_CHECKING:
@@ -121,6 +123,26 @@ def parse_turn_proposal(raw: dict[str, object]) -> tuple[V8TurnProposal, list[di
 
     prepared = dict(raw)
     rejected: list[dict[str, str]] = []
+    raw_fields = prepared.get('field_changes', [])
+    if isinstance(raw_fields, list):
+        accepted_fields = []
+        for index, value in enumerate(raw_fields):
+            if index >= 8:
+                rejected.append(
+                    {'part': 'field_change', 'value': str(index), 'reason': 'length_limit_exceeded'}
+                )
+                continue
+            try:
+                accepted_fields.append(V8FieldChange.model_validate(value).model_dump())
+            except ValidationError as error:
+                if not all(
+                    item['type'] in {'string_too_long', 'too_long'} for item in error.errors()
+                ):
+                    raise
+                rejected.append(
+                    {'part': 'field_change', 'value': str(index), 'reason': 'length_limit_exceeded'}
+                )
+        prepared['field_changes'] = accepted_fields
     for part, model in (
         ('service_suggestions', V8ServiceSuggestion),
         ('state_proposals', V8StateProposal),
@@ -299,7 +321,13 @@ def validate_turn_proposal(
 
     evidence_by_id = {item.evidence_id: item for item in evidence}
     changes: list[ProposedFormChange] = []
-    for change in validate_field_changes(field_contract, proposal.field_changes):
+    field_bound_rejections: list[TurnFieldViolation] = []
+    validated_changes = validate_field_changes(
+        field_contract, proposal.field_changes, rejected_bounds=field_bound_rejections
+    )
+    for rejection in field_bound_rejections:
+        reject('field_change', rejection.field_code, rejection.reason_code)
+    for change in validated_changes:
         source = FormSource.INFERENCE
         if change.source_evidence_id is not None:
             attached = evidence_by_id.get(change.source_evidence_id)
@@ -332,9 +360,12 @@ def validate_turn_proposal(
                 source_evidence_id=change.source_evidence_id,
             )
         )
-    contents = [
-        ProposedContentsItem(**item.model_dump()) for item in proposal.contents_item_changes
-    ]
+    contents = []
+    for item in proposal.contents_item_changes:
+        values = item.model_dump()
+        if values.get('estimated_value') is not None:
+            values['estimated_value'] = MoneyAmount.model_validate(values['estimated_value'])
+        contents.append(ProposedContentsItem(**values))
     reply = truthful_reply(proposal.reply, rejected_services)
     for identity in service_ids:
         name = SERVICE_REGISTRY[identity].service_name if identity in SERVICE_REGISTRY else identity
