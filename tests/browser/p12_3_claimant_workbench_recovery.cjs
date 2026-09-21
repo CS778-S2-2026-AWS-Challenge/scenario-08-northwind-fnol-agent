@@ -195,16 +195,17 @@ async function main() {
 
     console.log('[4/8] Open Workbench in an independent browser context')
     await staff.goto(`${WORKBENCH}/workbench/`, { waitUntil: 'domcontentloaded' })
-
-    if (staff.url().includes('/workbench/login')) {
-      await staff.getByLabel('Work email').fill(STAFF_EMAIL)
-      await staff.getByLabel('Password').fill(STAFF_PASSWORD)
-      await staff.getByRole('button', { name: 'Sign in', exact: true }).click()
-      await staff.waitForURL(
-        (url) => !url.pathname.includes('/workbench/login'),
-        { timeout: 30000 },
-      )
-    }
+    await staff.waitForURL(
+      (url) => url.pathname === '/workbench/login',
+      { timeout: 30000 },
+    )
+    await staff.getByLabel('Work email').fill(STAFF_EMAIL)
+    await staff.getByLabel('Password').fill(STAFF_PASSWORD)
+    await staff.getByRole('button', { name: 'Sign in', exact: true }).click()
+    await staff.waitForURL(
+      (url) => !url.pathname.includes('/workbench/login'),
+      { timeout: 30000 },
+    )
 
     const conversationsLink = staff.getByRole('link', { name: 'Claim conversations', exact: true })
     await conversationsLink.waitFor({ state: 'visible', timeout: 30000 })
