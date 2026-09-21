@@ -841,7 +841,7 @@ def test_vp_family_journey_confirms_registered_facts_and_enters_payout_contact(
     assert confirmed['primary_action']['claim_revision'] == confirmed['revision']
 
     claimant_view = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers).json()
-    assert claimant_view['workflow_state'] == 'intake'
+    assert claimant_view['workflow_state'] == 'collecting'
     assert claimant_view['dynamic_form']['requirements']['ready'] is True
     assert claimant_view['customer_next_step']['status'] == 'ready_to_create'
     assert claimant_view['primary_action']['action_code'] == 'claimant.review_payout_contact'
