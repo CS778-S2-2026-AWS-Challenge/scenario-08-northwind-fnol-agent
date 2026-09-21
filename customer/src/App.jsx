@@ -783,6 +783,10 @@ function App() {
       : current)
   }
 
+  function currentTurnRevision(turn) {
+    return turn.current_claim_revision ?? turn.claim_revision
+  }
+
   function beginMessagesReadback() {
     messagesRequestGeneration.current += 1
     return messagesRequestGeneration.current
@@ -1562,18 +1566,24 @@ function App() {
         turn.claimant_message,
         ...(turn.agent_message ? [turn.agent_message] : []),
       ]))
-      setForm((current) => mergeFields(current, turn.form_changes))
-      setContentsItems((current) => mergeContentsItems(current, turn.contents_item_changes || []))
-      setDynamicForm(turn.dynamic_form || null)
-      setClaimRevision(turn.claim_revision, turn.primary_action)
-      if (turn.decision) setNextStep(turn.decision.customer_next_step)
-      if (turn.handoff) setHandoff(turn.handoff)
-      rememberClaimInHistory({
-        ...activeClaim,
-        revision: turn.claim_revision,
-        customer_next_step: turn.decision?.customer_next_step || activeClaim.customer_next_step,
-        updated_at: turn.claimant_message?.created_at || activeClaim.updated_at,
-      })
+      const currentRevision = currentTurnRevision(turn)
+      if (turn.current_claim) {
+        applyClaimSnapshot(turn.current_claim, { minimumRevision: currentRevision })
+        rememberClaimInHistory(turn.current_claim)
+      } else {
+        setForm((current) => mergeFields(current, turn.form_changes))
+        setContentsItems((current) => mergeContentsItems(current, turn.contents_item_changes || []))
+        setDynamicForm(turn.dynamic_form || null)
+        setClaimRevision(currentRevision, turn.primary_action)
+        if (turn.decision) setNextStep(turn.decision.customer_next_step)
+        if (turn.handoff) setHandoff(turn.handoff)
+        rememberClaimInHistory({
+          ...activeClaim,
+          revision: currentRevision,
+          customer_next_step: turn.decision?.customer_next_step || activeClaim.customer_next_step,
+          updated_at: turn.claimant_message?.created_at || activeClaim.updated_at,
+        })
+      }
       setDraft('')
       if (isAssistanceReply) {
         setAssistanceReplyReview({
@@ -1597,7 +1607,7 @@ function App() {
       pendingSubmission.current = null
       setPendingMessage(null)
       setFailedMessage(null)
-      let attachmentClaim = { ...activeClaim, revision: turn.claim_revision }
+      let attachmentClaim = { ...activeClaim, revision: currentRevision }
       let stagedUploadsSucceeded = true
       for (const attachment of stagedAttachments) {
         const upload = await uploadAttachment(
