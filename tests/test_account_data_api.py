@@ -437,9 +437,7 @@ def test_payout_contact_selection_is_atomic_masked_and_resumable(adapter: str) -
         )
     )
     selection_events = [
-        event
-        for event in events
-        if event.idempotency_key == f'payout-select-{adapter}'
+        event for event in events if event.idempotency_key == f'payout-select-{adapter}'
     ]
     assert len(selection_events) == 1
     assert bank_number not in selection_events[0].model_dump_json()
