@@ -16,7 +16,7 @@ from backend.repositories.account_data import (
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
-from backend.repositories.protocols import RevisionConflict
+from backend.repositories.protocols import IdempotencyConflict, RevisionConflict
 from backend.services.protected_values import UnavailableProtectedValueAdapter
 
 
@@ -532,6 +532,8 @@ def test_payout_contact_selection_rejects_stale_foreign_and_unusable_inputs(
     [
         ('selection', 'PAYMENT_DESTINATION_SELECTION_CONFLICT'),
         ('revision', 'REVISION_CONFLICT'),
+        ('idempotency', 'IDEMPOTENCY_CONFLICT'),
+        ('missing_destination', 'RESOURCE_NOT_FOUND'),
     ],
 )
 def test_payout_contact_selection_maps_repository_conflicts_without_partial_write(
@@ -564,7 +566,11 @@ def test_payout_contact_selection_maps_repository_conflicts_without_partial_writ
                 reason='changed',
                 current_revision=payment['revision'] + 1,
             )
-        raise RevisionConflict(ready.revision + 1)
+        if conflict_kind == 'revision':
+            raise RevisionConflict(ready.revision + 1)
+        if conflict_kind == 'idempotency':
+            raise IdempotencyConflict('payout-conflict')
+        raise KeyError(payment['payment_destination_id'])
 
     original_save = repository.save_payout_contact_selection
     repository.save_payout_contact_selection = conflict_save  # type: ignore[method-assign]
@@ -582,7 +588,8 @@ def test_payout_contact_selection_maps_repository_conflicts_without_partial_writ
     )
     repository.save_payout_contact_selection = original_save  # type: ignore[method-assign]
 
-    assert response.status_code == 409
+    expected_status = 404 if conflict_kind == 'missing_destination' else 409
+    assert response.status_code == expected_status
     assert response.json()['error']['code'] == expected_code
     stored = repository.get_claim(claim['claim_id'], 'cus_demo')
     assert stored is not None
