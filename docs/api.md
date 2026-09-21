@@ -1580,6 +1580,15 @@ Response `200`:
   "claim_id": "clm_01J4Y7Q2AW",
   "session_id": "ses_01J4Y7RPN8",
   "claim_revision": 3,
+  "current_claim_revision": 3,
+  "current_claim": {
+    "claim_id": "clm_01J4Y7Q2AW",
+    "revision": 3,
+    "form": {},
+    "contents_items": [],
+    "customer_next_step": {},
+    "updated_at": "2026-08-10T03:42:12Z"
+  },
   "claimant_message": {
     "message_id": "msg_01J4Y7T1KC",
     "actor": "claimant",
@@ -1651,6 +1660,29 @@ Response `200`:
   }
 }
 ```
+
+claim_revision is the Claim revision committed by this message turn. An idempotent replay
+continues to report that historical turn revision even when later Claim mutations have advanced
+the Claim. current_claim_revision is the latest authoritative Claim revision and is the value
+used by a continuation action or a new revision-checked request. For a fresh turn these values are
+equal. Both fields are integer revision values and are present on every MessageTurnResponse. The
+historical value is the revision to use when interpreting the replayed turn; the current value is
+the revision to send with a subsequent revision-checked mutation. Neither field changes the
+Claim revision or creates a new turn by itself. Retries of records written before
+`current_claim_revision` was introduced are hydrated from the durable message and current Claim;
+the stored idempotency record is not rewritten and no side effect is replayed.
+
+`current_claim` is the complete claimant-safe Claim detail projection at
+`current_claim_revision`. `form_changes`, `contents_item_changes`, `decision`, and the returned
+messages remain immutable evidence of the historical turn at `claim_revision`; they are not a
+current-state patch during replay. When the two revisions differ, clients install `current_claim`
+and must not merge the historical deltas into live form or contents state. Current dynamic form,
+next step, primary action, handoff, contents, and `updated_at` therefore come from the same
+authoritative snapshot for legacy Agent, message-only/handoff, and namespaced Runtime responses.
+The server records an explicit turn kind and committed turn revision with each accepted message.
+A retry using the same `client_message_id` under a new idempotency key resolves that original turn
+identity. A missing declared decision, Runtime trace, or Agent message is a bounded
+`500 INTERNAL_ERROR`; replay never downgrades a damaged turn to a partial successful response.
 
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
 
