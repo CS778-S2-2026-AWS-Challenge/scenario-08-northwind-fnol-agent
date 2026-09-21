@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from backend.core.errors import ApiError
 from backend.domain.agent_action_registry import action_contract
 from backend.domain.agent_context_runtime import TurnFamilyResolution, VerifiedConversationSummary
+from backend.domain.ids import new_id
 from backend.domain.intake import infer_controlled_product_family, next_requirement_field
 from backend.domain.knowledge import KnowledgeChunk
 from backend.domain.models import (
@@ -26,13 +27,12 @@ from backend.domain.models import (
     ProposedContentsItem,
     ProposedFormChange,
     ResponsibleParty,
-    RuntimeTraceRecord,
     RuntimeInvocationTrace,
+    RuntimeTraceRecord,
     StateChange,
     WorkingClaim,
 )
 from backend.domain.realtime import AgentTurnProgressStage
-from backend.domain.ids import new_id
 from backend.domain.support_intent import (
     SupportIntent,
     detect_support_intent,
@@ -966,23 +966,23 @@ class InvariantGuardedAgent:
             proposal = replace(
                 proposal,
                 runtime_trace=RuntimeTraceRecord(
-                        trace_id=new_id('trc'),
-                        claim_id=context.claim.claim_id,
-                        session_id=context.session_id,
-                        model_profile_id=context.model_profile_id,
-                        trigger_message_id=context.trigger_message_id,
-                        invocations=[RuntimeInvocationTrace(ordinal=1, latency_ms=0)],
-                        action_code=proposal.action_code,
-                        runtime_action_code='runtime.wait_for_user',
-                        reason_codes=proposal.reason_codes,
-                        route=f'{context.claim.incident_type or "unresolved"}:controlled',
-                        model_invocations=0,
-                        tool_calls=0,
-                        total_latency_ms=0,
-                        status='succeeded',
-                        created_at=now,
-                        finished_at=now,
-                    )
+                    trace_id=new_id('trc'),
+                    claim_id=context.claim.claim_id,
+                    session_id=context.session_id,
+                    model_profile_id=context.model_profile_id,
+                    trigger_message_id=context.trigger_message_id,
+                    invocations=[RuntimeInvocationTrace(ordinal=1, latency_ms=0)],
+                    action_code=proposal.action_code,
+                    runtime_action_code='runtime.wait_for_user',
+                    reason_codes=proposal.reason_codes,
+                    route=f'{context.claim.incident_type or "unresolved"}:controlled',
+                    model_invocations=0,
+                    tool_calls=0,
+                    total_latency_ms=0,
+                    status='succeeded',
+                    created_at=now,
+                    finished_at=now,
+                ),
             )
         return proposal
 

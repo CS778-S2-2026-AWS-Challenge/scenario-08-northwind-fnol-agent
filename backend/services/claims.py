@@ -11,7 +11,6 @@ from backend.domain.evidence import evidence_summary_for
 from backend.domain.external_service_registry import capability_catalogue
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
-from backend.domain.intake import next_requirement_step
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -82,7 +81,6 @@ from backend.services.fact_resolution import (
     resolve_form_change,
 )
 from backend.services.handoffs import claimant_handoff
-from backend.services.turn_reducer import recompute_progress
 from backend.services.incomplete_claims import (
     find_incomplete_recovery,
     recovery_checkpoint_allowed,
@@ -95,6 +93,7 @@ from backend.services.support import (
     request_fingerprint,
     require_idempotency_key,
 )
+from backend.services.turn_reducer import recompute_progress
 
 
 def _claim_not_found() -> ApiError:
@@ -1298,15 +1297,6 @@ def confirm_form_fields(
             'contents_items': confirmed_contents_items,
             'incident_type': incident_type,
         }
-    )
-    resolved_requirements = (
-        BranchRuleEvaluator()
-        .evaluate(
-            projected_claim,
-            current_action=AgentAction.CONFIRM,
-            recomputation_reason='form_confirmation_preview',
-        )
-        .requirements
     )
     progress_state, next_step = recompute_progress(
         projected_claim,

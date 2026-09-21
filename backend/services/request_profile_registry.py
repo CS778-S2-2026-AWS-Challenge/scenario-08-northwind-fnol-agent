@@ -140,8 +140,10 @@ def request_profile_for_task(
     profiles: tuple[RequestProfile, ...] | list[RequestProfile] | None = None,
 ) -> RequestProfile:
     registry = {item.profile_id: item for item in profiles} if profiles is not None else _PROFILES
+
     def profile(name: str) -> RequestProfile:
         return registry.get(name, _PROFILES[name])
+
     if isolated_review:
         return profile('claimant.deep-review.v1')
     if needs_lookup:

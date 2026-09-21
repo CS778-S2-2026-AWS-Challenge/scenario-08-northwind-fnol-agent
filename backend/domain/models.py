@@ -772,8 +772,12 @@ class ClaimantExternalServiceAction(ContractModel):
     capability_provenance: str = Field(min_length=1, max_length=100)
     access_form: str = Field(min_length=1, max_length=200)
     presentation: Literal[
-        'info_link', 'action_button', 'consent_request', 'tracked_task',
-        'agent_assisted', 'status_update'
+        'info_link',
+        'action_button',
+        'consent_request',
+        'tracked_task',
+        'agent_assisted',
+        'status_update',
     ] = 'consent_request'
     status_label: str = Field(min_length=1, max_length=120)
     status_detail: str = Field(min_length=1, max_length=500)

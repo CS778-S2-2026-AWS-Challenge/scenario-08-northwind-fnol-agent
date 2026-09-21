@@ -1,5 +1,5 @@
-import logging
 import json
+import logging
 import re
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -23,8 +23,8 @@ from backend.domain.branch_registry import (
 from backend.domain.external_service_registry import ExternalLifecycleStatus
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
-from backend.domain.model_gateway import ModelGatewayError
 from backend.domain.intake import intake_field_for_requirement, next_requirement_step
+from backend.domain.model_gateway import ModelGatewayError
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -1934,95 +1934,7 @@ def submit_message(
     # Handoff ownership changes responsibility, but it does not make the
     # conversation silent.  The turn below must still reach the Agent path so
     # later claimant messages can be recorded and answered.
-    active_handoff = None
     message_text = payload.content.text if payload.content is not None else ''
-    if active_handoff is not None:
-        if progress_reporter is not None:
-            progress_reporter.accepted()
-        timestamp = now_utc()
-        claimant_message = MessageRecord(
-            message_id=new_id('msg'),
-            claim_id=claim_id,
-            session_id=session_id,
-            client_message_id=payload.client_message_id,
-            actor=ActorType.CLAIMANT,
-            visibility=MessageVisibility.SHARED,
-            content=payload.content.model_dump(mode='json')
-            if payload.content is not None
-            else {'type': 'evidence_reference'},
-            evidence_refs=payload.evidence_refs,
-            created_at=timestamp,
-        )
-        updated_claim = claim.model_copy(
-            update={'revision': claim.revision + 1, 'updated_at': timestamp}
-        )
-        updated_session = session.model_copy(
-            update={'last_active_at': timestamp, 'context_revision': updated_claim.revision}
-        )
-        idempotency = IdempotencyRecord(
-            actor_id=principal.subject,
-            route=route,
-            key=key,
-            request_fingerprint=fingerprint,
-            claim_id=claim_id,
-            session_id=session_id,
-            message_id=claimant_message.message_id,
-        )
-        response = _message_only_response(
-            repository,
-            principal,
-            claim_id,
-            session_id,
-            updated_claim.revision,
-            claimant_message,
-            claim=updated_claim,
-        )
-        idempotency = IdempotencyRecord(
-            **{
-                **idempotency.__dict__,
-                'response_payload': response.model_dump(mode='json'),
-            }
-        )
-        progress_evaluation = branch_evaluator.evaluate(
-            updated_claim,
-            latest_message=message_text,
-            trigger_source_refs=[claimant_message.message_id],
-            current_action=next_action,
-            recomputation_reason='agent_turn_progress_commit',
-            previous_evaluation=previous_evaluation,
-        )
-        progress_state, progress_next_step = recompute_progress(
-            updated_claim,
-            progress_evaluation,
-            open_handoffs=tuple(
-                item
-                for item in repository.list_handoffs(claim_id, principal.subject)
-                if item.status.value not in {'resolved', 'cancelled'}
-            ),
-            proposed_next_step=effective_next_step,
-        )
-        updated_claim = updated_claim.model_copy(
-            update={
-                'claim_state': updated_claim.claim_state.model_copy(
-                    update={'workflow_state': progress_state}
-                ),
-                'customer_next_step': progress_next_step,
-            }
-        )
-        effective_next_step = progress_next_step
-        try:
-            repository.save_message_mutation(
-                updated_claim, expected_revision, updated_session, claimant_message, idempotency
-            )
-        except RevisionConflict as conflict:
-            raise ApiError(
-                status_code=409,
-                code='REVISION_CONFLICT',
-                message='The claim changed after this page was loaded.',
-                retryable=True,
-                current_revision=conflict.current_revision,
-            ) from conflict
-        return response
     if claim.revision != expected_revision:
         raise ApiError(
             status_code=409,
@@ -2152,6 +2064,7 @@ def submit_message(
         )
         if message.visibility is not MessageVisibility.INTERNAL_ONLY
     )
+    trigger_message_id = claimant_message.message_id
 
     def load_older_messages(limit: int) -> tuple[MessageRecord, ...]:
         visible = [
@@ -2162,7 +2075,7 @@ def submit_message(
                 principal.subject,
             )
             if message.visibility is not MessageVisibility.INTERNAL_ONLY
-            and message.message_id != claimant_message.message_id
+            and message.message_id != trigger_message_id
         ]
         return tuple(visible[:-4][-limit:])
 
@@ -2213,11 +2126,6 @@ def submit_message(
             if offer_item is None or offer_item.external_offer is None:
                 continue
             trigger_id = offer_item.external_offer.trigger_message_id
-            trigger_message = next(
-                (item for item in recent_claimant_messages if item.message_id == trigger_id),
-                None,
-            )
-            trigger_time = trigger_message.created_at if trigger_message is not None else None
             # Count turns by the repository's stable chronological ordering,
             # rather than comparing generated message ids or timestamps alone.
             # A fixture or fast production request may legitimately share a

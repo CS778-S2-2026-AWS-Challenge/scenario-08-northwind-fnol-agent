@@ -3,7 +3,7 @@
 ## Scope and authority
 
 This document is the executable mapping for Week 6 P2.1. It maps every field in the
-current backend Field/Branch Registry (version 5) to the three VP family branches.
+current backend Field/Branch Registry (version 6) to the three VP family branches.
 The registry and API/persistence contracts remain authoritative for names and types;
 this document records scenario applicability, projection boundaries, confirmation
 needs, and lifecycle use. It does not add fields, define policy coverage, or replace
@@ -49,6 +49,12 @@ the Dynamic Form evaluator.
 | `property.affected_areas` | home | `family.home` | text list | claimant/evidence | conditional | claimant/staff | triage and evidence requests |
 | `property.ongoing_risk` | home | `family.home`; may trigger `mitigation.emergency` | enum | claimant; staff may verify | conditional | claimant/staff | urgent safety interruption |
 | `property.habitable` | home | `family.home`; may trigger `accommodation.temporary` | boolean | claimant/staff | conditional | claimant/staff | support and accommodation work |
+| `contents.police_reference` | contents | `family.contents` + `authority.police` | text | claimant/evidence/staff | conditional | claimant/staff | authority evidence for stolen or damaged items |
+| `incident.discovered_at` | all | `common` | temporal | claimant/evidence | conditional | claimant/staff | discovery chronology |
+| `injury.persons_affected` | all | `safety.injury_or_danger` + `injury.details` | text | claimant | conditional | claimant/staff | people affected by the incident |
+| `injury.severity_reported` | all | `safety.injury_or_danger` + `injury.details` | text | claimant | conditional | claimant/staff | injury triage context |
+| `injury.medical_attention` | all | `safety.injury_or_danger` + `injury.details` | text | claimant/staff | conditional | claimant/staff | safety follow-up |
+| `theft.entry_context` | home/contents | `theft` | text | claimant/evidence | conditional | claimant/staff | theft circumstances and police routing |
 
 ## Contents record boundary
 
@@ -62,7 +68,7 @@ association remains a separate follow-up boundary and is not invented by this ma
 
 ## Explicit gaps and ownership
 
-The following catalogue candidates are intentionally not executable fields in version 5:
+The following catalogue candidates are intentionally not executable fields in version 6:
 
 - additional motor facts such as vehicle make/model, driver, collision detail, witness,
   repairer, and towing records;

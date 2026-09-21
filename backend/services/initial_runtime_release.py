@@ -25,8 +25,8 @@ from backend.domain.release import (
     ReleaseSetValidationRequest,
 )
 from backend.prompts import (
-    CLAIMANT_V8_PROMPT_ID,
     CLAIMANT_V7_PROMPT_ID,
+    CLAIMANT_V8_PROMPT_ID,
     MOTOR_CLAIMANT_PROMPT_ID,
     load_motor_claimant_prompt,
 )
@@ -114,7 +114,9 @@ def repository_v7_values(
 ) -> dict[str, dict[str, object]]:
     prompt_versions = {binding.prompt_version for binding in bindings}
     if prompt_versions not in ({CLAIMANT_V7_PROMPT_ID}, {CLAIMANT_V8_PROMPT_ID}):
-        raise ValueError('A claimant Runtime release requires one published claimant prompt version.')
+        raise ValueError(
+            'A claimant Runtime release requires one published claimant prompt version.'
+        )
     prompt_version = next(iter(prompt_versions))
     manifest = load_prompt_manifest(prompt_version)
     fragment_contents = load_fragment_contents(manifest)

@@ -43,7 +43,9 @@ CLAIMANT_TURN_MODEL_FAILURE_RULE = RecoveryRule(
     continuation='runtime.fail_safe',
     retry_mode='claimant_initiated',
     responsibility='claimant',
-    claimant_projection='Your message is saved, but I could not respond just now. You can try again.',
+    claimant_projection=(
+        'Your message is saved, but I could not respond just now. You can try again.'
+    ),
     audit_event_type='AGENT_TURN_RECOVERY',
 )
 

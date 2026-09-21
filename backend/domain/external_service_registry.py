@@ -113,8 +113,12 @@ class ExternalServiceRegistryEntry(ContractModel):
     provenance: ExternalCapabilityProvenance
     access_form: str = Field(min_length=1, max_length=200)
     presentation: Literal[
-        'info_link', 'action_button', 'consent_request', 'tracked_task',
-        'agent_assisted', 'status_update'
+        'info_link',
+        'action_button',
+        'consent_request',
+        'tracked_task',
+        'agent_assisted',
+        'status_update',
     ] = 'consent_request'
     uses_external_task: bool = True
     projectable_statuses: tuple[ExternalLifecycleStatus, ...] = (

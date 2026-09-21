@@ -4,8 +4,13 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from backend.domain.model_gateway import MoneyAmount
-from backend.domain.models import ContractModel, ContentsLossType, ContentsOwnership, FactPrecision
+from backend.domain.models import (
+    ContentsLossType,
+    ContentsOwnership,
+    ContractModel,
+    FactPrecision,
+    MoneyAmount,
+)
 
 
 class V8FieldChange(ContractModel):

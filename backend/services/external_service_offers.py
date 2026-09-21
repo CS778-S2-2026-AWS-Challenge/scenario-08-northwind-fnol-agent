@@ -31,6 +31,7 @@ from backend.domain.external_services import (
     ExternalTaskRequest,
     classify_external_task_failure,
 )
+from backend.domain.intake import next_requirement_step
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -45,8 +46,8 @@ from backend.domain.models import (
     ExternalServiceConsentStatus,
     ExternalServiceOfferDecisionRequest,
     IntegrationSource,
-    WorkingClaim,
     WorkflowState,
+    WorkingClaim,
 )
 from backend.domain.runtime import ExternalServiceOfferMetadata, RuntimeWorkItemRecord
 from backend.repositories.protocols import (
@@ -56,7 +57,6 @@ from backend.repositories.protocols import (
     RevisionConflict,
 )
 from backend.services.branching import build_applied_branch_evaluation
-from backend.domain.intake import next_requirement_step
 from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
 from backend.services.external_service_entry import ExternalServiceEntryDecision

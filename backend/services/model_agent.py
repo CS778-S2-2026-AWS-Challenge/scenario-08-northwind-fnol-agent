@@ -806,10 +806,11 @@ class GatewayAgent:
             else []
         )
         try:
+            parsed: Any
             if plan.schema_id == 'claimant.turn.v1':
                 parsed = _V8_TURN_ADAPTER.validate_python(raw_output)
             elif plan.schema_id == 'claimant.intake-patch.v1':
-                parsed: object = _V7_INTAKE_ADAPTER.validate_python(raw_output)
+                parsed = _V7_INTAKE_ADAPTER.validate_python(raw_output)
             elif plan.schema_id == 'claimant.external-offer.v1':
                 parsed = _V7_EXTERNAL_ADAPTER.validate_python(raw_output)
             elif plan.schema_id == 'claimant.evidence-action.v1':
@@ -835,12 +836,12 @@ class GatewayAgent:
             )
         else:
             answer = (
-            V7AnswerProposal(
-                reply=parsed.summary,
-                next_step='Continue the Claim with the sourced review when ready.',
-                reason_codes=['ISOLATED_CONTEXT_REVIEWED'],
-            )
-            if isinstance(parsed, V7SourcedSummaryProposal)
+                V7AnswerProposal(
+                    reply=parsed.summary,
+                    next_step='Continue the Claim with the sourced review when ready.',
+                    reason_codes=['ISOLATED_CONTEXT_REVIEWED'],
+                )
+                if isinstance(parsed, V7SourcedSummaryProposal)
                 else cast(V7AnswerProposal, parsed)
             )
         form_changes: list[ProposedFormChange] = []
@@ -900,9 +901,7 @@ class GatewayAgent:
         available_services = {item.service_identity for item in context.external_services}
         if isinstance(parsed, V8TurnProposal):
             service_offer_ids = [
-                service_id
-                for service_id in service_offer_ids
-                if service_id in available_services
+                service_id for service_id in service_offer_ids if service_id in available_services
             ]
         else:
             service_offer_ids = [
