@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from datetime import datetime
+from heapq import heappop, heappush
 
 from backend.domain.models import (
     ActorType,
@@ -22,9 +23,50 @@ class DuplicateClientMessage(ValueError):
 
 
 def message_order_key(message: MessageRecord) -> tuple[datetime, str]:
-    """Return the canonical total-order key for every message projection."""
+    """Return the deterministic tie-break key used within the causal order."""
 
     return message.created_at, message.message_id
+
+
+def order_messages(messages: Sequence[MessageRecord]) -> list[MessageRecord]:
+    """Return a stable total order that always places a reply after its target.
+
+    The persisted ``in_reply_to`` edge is authoritative. Timestamp and identifier
+    order only independent messages, so random identifiers cannot invert a
+    persisted causal relationship.
+    """
+
+    by_id = {message.message_id: message for message in messages}
+    children: dict[str, list[MessageRecord]] = {}
+    indegree = {message.message_id: 0 for message in messages}
+    for message in messages:
+        if message.in_reply_to in by_id:
+            children.setdefault(message.in_reply_to, []).append(message)
+            indegree[message.message_id] += 1
+
+    ordered: list[MessageRecord] = []
+    available: list[tuple[datetime, str, MessageRecord]] = []
+    for message in messages:
+        if indegree[message.message_id] == 0:
+            heappush(available, (*message_order_key(message), message))
+    while available:
+        _, _, message = heappop(available)
+        ordered.append(message)
+        for reply in children.get(message.message_id, ()):
+            indegree[reply.message_id] -= 1
+            if indegree[reply.message_id] == 0:
+                heappush(available, (*message_order_key(reply), reply))
+
+    # Persisted validation rejects cycles. Keep malformed legacy data visible and
+    # deterministic rather than silently dropping it from a read projection.
+    ordered_ids = {message.message_id for message in ordered}
+    ordered.extend(
+        sorted(
+            (message for message in messages if message.message_id not in ordered_ids),
+            key=message_order_key,
+        )
+    )
+    return ordered
 
 
 def validate_message_record(

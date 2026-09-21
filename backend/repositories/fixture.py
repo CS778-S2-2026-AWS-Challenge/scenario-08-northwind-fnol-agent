@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -33,7 +33,7 @@ from backend.domain.external_services import (
 )
 from backend.domain.message import (
     DuplicateClientMessage,
-    message_order_key,
+    order_messages,
     validate_message_record,
 )
 from backend.domain.models import (
@@ -894,40 +894,59 @@ class FixtureRepository(PersistenceRepository):
     def _store_message(self, message: MessageRecord) -> None:
         """Store a message and maintain the bounded-search child index."""
 
-        session = self._sessions.get(message.session_id)
-        if session is None:
-            raise ValueError('Message Session does not exist.')
-        evidence = [
-            item
-            for evidence_id in message.evidence_refs
-            if (item := self._evidence.get(evidence_id)) is not None
-        ]
-        reply = self._messages.get(message.in_reply_to) if message.in_reply_to is not None else None
-        duplicate_client_message = next(
-            (
-                item
-                for item in self._messages.values()
-                if message.client_message_id is not None
-                and item.claim_id == message.claim_id
-                and item.client_message_id == message.client_message_id
-            ),
-            None,
-        )
-        try:
-            validate_message_record(
-                message,
-                session=session,
-                evidence=evidence,
-                reply=reply,
-                duplicate_client_message=duplicate_client_message,
-            )
-        except DuplicateClientMessage as conflict:
-            raise IdempotencyConflict(message.client_message_id or message.message_id) from conflict
+        self._preflight_messages((message,))
         self._messages[message.message_id] = deepcopy(message)
         message_ids = self._message_ids_by_session.setdefault(message.session_id, [])
         if message.message_id not in message_ids:
             message_ids.append(message.message_id)
-        message_ids.sort(key=lambda message_id: message_order_key(self._messages[message_id]))
+        ordered = order_messages([self._messages[message_id] for message_id in message_ids])
+        message_ids[:] = [message.message_id for message in ordered]
+
+    def _preflight_messages(
+        self,
+        messages: Sequence[MessageRecord],
+        *,
+        sessions: Sequence[SessionRecord] = (),
+        evidence: Sequence[EvidenceRecord] = (),
+    ) -> None:
+        """Validate a complete pending message set without mutating Fixture state."""
+
+        available_sessions = {**self._sessions, **{item.session_id: item for item in sessions}}
+        available_evidence = {**self._evidence, **{item.evidence_id: item for item in evidence}}
+        available_messages = dict(self._messages)
+        for message in messages:
+            session = available_sessions.get(message.session_id)
+            if session is None:
+                raise ValueError('Message Session does not exist.')
+            referenced_evidence = [
+                item
+                for evidence_id in message.evidence_refs
+                if (item := available_evidence.get(evidence_id)) is not None
+            ]
+            reply = available_messages.get(message.in_reply_to or '')
+            duplicate_client_message = next(
+                (
+                    item
+                    for item in available_messages.values()
+                    if message.client_message_id is not None
+                    and item.claim_id == message.claim_id
+                    and item.client_message_id == message.client_message_id
+                ),
+                None,
+            )
+            try:
+                validate_message_record(
+                    message,
+                    session=session,
+                    evidence=referenced_evidence,
+                    reply=reply,
+                    duplicate_client_message=duplicate_client_message,
+                )
+            except DuplicateClientMessage as conflict:
+                raise IdempotencyConflict(
+                    message.client_message_id or message.message_id
+                ) from conflict
+            available_messages[message.message_id] = message
 
     def _store_evidence(self, evidence: EvidenceRecord) -> None:
         """Validate and store one provider-neutral Evidence record."""
@@ -1788,6 +1807,7 @@ class FixtureRepository(PersistenceRepository):
         existing = self._idempotency.get(lookup)
         if existing is not None and existing.request_fingerprint != idempotency.request_fingerprint:
             raise IdempotencyConflict(idempotency.key)
+        self._preflight_messages((message,), sessions=(session,))
         realtime_event = self._prepare_realtime_mutation(
             RealtimeMutation.MESSAGE_MUTATION_COMMITTED,
             claim,
@@ -1844,7 +1864,7 @@ class FixtureRepository(PersistenceRepository):
             for message in self._messages.values()
             if message.claim_id == claim_id and message.session_id == session_id
         ]
-        return sorted(messages, key=message_order_key)
+        return order_messages(messages)
 
     def list_recent_messages(
         self,
@@ -2057,6 +2077,7 @@ class FixtureRepository(PersistenceRepository):
         """
 
         with self._claim_mutation_lock:
+            validate_evidence_record(evidence)
             current_claim = self._validate_claim_mutation(claim, expected_revision)
             if (staff_action is None) is not (idempotency is None):
                 raise KeyError(claim.claim_id)
@@ -2428,6 +2449,15 @@ class FixtureRepository(PersistenceRepository):
         ):
             raise IdempotencyConflict(idempotency.key)
 
+        pending_evidence = (evidence,) if evidence is not None else ()
+        for item in pending_evidence:
+            validate_evidence_record(item)
+        self._preflight_messages(
+            (claimant_message, agent_message),
+            sessions=(session,),
+            evidence=pending_evidence,
+        )
+
         public_messages = all(
             item.visibility is not MessageVisibility.INTERNAL_ONLY
             for item in (claimant_message, agent_message)
@@ -2571,6 +2601,10 @@ class FixtureRepository(PersistenceRepository):
         )
         if duplicate_client_message is not None:
             raise IdempotencyConflict(claimant_message.client_message_id or '')
+        self._preflight_messages(
+            (claimant_message, agent_message),
+            sessions=(session,),
+        )
         public_messages = all(
             item.visibility is not MessageVisibility.INTERNAL_ONLY
             for item in (claimant_message, agent_message)
@@ -2917,6 +2951,8 @@ class FixtureRepository(PersistenceRepository):
         branch_evaluation: BranchEvaluationRecord,
     ) -> None:
         with self._claim_mutation_lock:
+            if evidence is not None:
+                validate_evidence_record(evidence)
             self._validate_claim_mutation(claim, expected_revision)
             self._validate_branch_evaluation(claim, branch_evaluation)
             prepared = self._prepare_audit_events(claim, (audit_event,))
@@ -3773,6 +3809,9 @@ class FixtureRepository(PersistenceRepository):
         existing = self._idempotency.get(lookup)
         if existing is not None and existing.request_fingerprint != idempotency.request_fingerprint:
             raise IdempotencyConflict(idempotency.key)
+        if message is not None:
+            assert stored_session is not None
+            self._preflight_messages((message,), sessions=(stored_session,))
         prepared_audit = (
             self._prepare_audit_events(claim, (audit_event,)) if audit_event is not None else ()
         )
@@ -3925,12 +3964,25 @@ class FixtureRepository(PersistenceRepository):
 
 
 def _serialize_material_claim_mutation(method_name: str) -> None:
-    """Wrap an existing Fixture mutation in the shared Claim mutation lock."""
+    """Run one Fixture mutation under the lock with complete rollback on failure."""
     method = getattr(FixtureRepository, method_name)
 
     def serialized(self: FixtureRepository, *args: Any, **kwargs: Any) -> Any:
         with self._claim_mutation_lock:
-            return method(self, *args, **kwargs)
+            excluded = {'_validation_seed_lock', '_claim_mutation_lock', '_realtime_condition'}
+            snapshot = {
+                key: deepcopy(value, {id(self): self})
+                for key, value in self.__dict__.items()
+                if key not in excluded
+            }
+            try:
+                return method(self, *args, **kwargs)
+            except Exception:
+                retained = {key: self.__dict__[key] for key in excluded}
+                self.__dict__.clear()
+                self.__dict__.update(snapshot)
+                self.__dict__.update(retained)
+                raise
 
     serialized.__name__ = method.__name__
     serialized.__qualname__ = method.__qualname__
@@ -3944,7 +3996,9 @@ for _material_claim_mutation in (
     'save_message_mutation',
     'save_agent_turn',
     'save_runtime_turn',
+    'save_assessor_reconciliation',
     'save_evidence',
+    'save_evidence_action_mutation',
     'save_evidence_mutation',
     'save_external_task',
     'save_external_task_request',

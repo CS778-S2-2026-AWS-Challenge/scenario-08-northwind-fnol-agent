@@ -21,7 +21,11 @@ from backend.domain.models import (
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
-from backend.repositories.protocols import IdempotencyConflict, PersistenceRepository
+from backend.repositories.protocols import (
+    IdempotencyConflict,
+    IdempotencyRecord,
+    PersistenceRepository,
+)
 from backend.services.message_history import list_claim_messages
 from backend.services.workbench import list_workbench_messages
 
@@ -145,6 +149,26 @@ def test_evidence_write_boundaries_reject_unregistered_or_contradictory_records(
     assert repository.get_evidence(claim.claim_id, evidence.evidence_id, claim.customer_id) is None
 
 
+@pytest.mark.parametrize('kind', ('item_photo', 'photo', 'document'))
+def test_existing_production_evidence_kinds_remain_registered(
+    repository: PersistenceRepository,
+    kind: str,
+) -> None:
+    claim, _session = _claim_graph(repository)
+    evidence = _evidence(claim).model_copy(
+        update={
+            'evidence_id': f'evd_{kind}',
+            'kind': kind,
+        }
+    )
+
+    repository.save_evidence(evidence, claim.customer_id)
+
+    assert (
+        repository.get_evidence(claim.claim_id, evidence.evidence_id, claim.customer_id) == evidence
+    )
+
+
 def test_message_write_boundaries_reject_missing_duplicate_and_foreign_evidence(
     repository: PersistenceRepository,
 ) -> None:
@@ -210,6 +234,58 @@ def test_claimant_retry_identity_is_unique_within_claim(
         repository.save_message(duplicate, claim.customer_id)
 
 
+def test_invalid_message_mutation_leaves_complete_provider_state_unchanged(
+    repository: PersistenceRepository,
+) -> None:
+    claim, session = _claim_graph(repository)
+    updated_claim = claim.model_copy(
+        update={'revision': 2, 'updated_at': claim.updated_at.replace(minute=1)}
+    )
+    updated_session = session.model_copy(
+        update={
+            'context_revision': 2,
+            'last_active_at': session.last_active_at.replace(minute=1),
+        }
+    )
+    invalid = _message(claim, session, 'msg_invalid_atomic').model_copy(
+        update={'visibility': MessageVisibility.INTERNAL_ONLY}
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/integrity/messages',
+        key='invalid-message-atomicity',
+        request_fingerprint='invalid-message-atomicity',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        message_id=invalid.message_id,
+    )
+
+    def snapshot() -> object:
+        if isinstance(repository, FixtureRepository):
+            return (
+                repository.get_claim_internal(claim.claim_id),
+                repository.get_session(claim.claim_id, session.session_id, claim.customer_id),
+                repository.list_messages(claim.claim_id, session.session_id, claim.customer_id),
+                dict(repository._message_ids_by_session),
+                dict(repository._idempotency),
+                repository.replay_realtime_events(None, limit=1000),
+            )
+        assert isinstance(repository, MongoDBRepository)
+        return list(repository._collection.find().sort('_id', 1))
+
+    before = snapshot()
+    with pytest.raises(ValueError, match='actor and visibility'):
+        repository.save_message_mutation(
+            updated_claim,
+            claim.revision,
+            updated_session,
+            invalid,
+            idempotency,
+        )
+
+    assert snapshot() == before
+
+
 def test_valid_message_evidence_reply_and_projection_order_are_provider_neutral(
     repository: PersistenceRepository,
 ) -> None:
@@ -258,7 +334,7 @@ def test_valid_message_evidence_reply_and_projection_order_are_provider_neutral(
         cursor=None,
     )
 
-    expected_order = ['msg_a_agent', 'msg_z_claimant']
+    expected_order = ['msg_z_claimant', 'msg_a_agent']
     assert [item.message_id for item in claimant_page.items] == expected_order
     assert [item.message_id for item in workbench_page.items] == expected_order
-    assert workbench_page.items[0].in_reply_to == claimant.message_id
+    assert workbench_page.items[1].in_reply_to == claimant.message_id

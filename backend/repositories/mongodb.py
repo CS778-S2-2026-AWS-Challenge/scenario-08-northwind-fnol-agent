@@ -44,7 +44,7 @@ from backend.domain.external_services import (
     assert_result_matches_task,
     assert_task_transition_is_permitted,
 )
-from backend.domain.message import DuplicateClientMessage, validate_message_record
+from backend.domain.message import DuplicateClientMessage, order_messages, validate_message_record
 from backend.domain.models import (
     ActorType,
     AgentDecisionRecord,
@@ -2302,11 +2302,13 @@ class MongoDBRepository:
     ) -> list[MessageRecord]:
         if not self._claim_owned(claim_id, customer_id):
             return []
-        return self._list(
-            'message',
-            MessageRecord,
-            {'claim_id': claim_id, 'session_id': session_id, 'customer_id': customer_id},
-            'created_at',
+        return order_messages(
+            self._list(
+                'message',
+                MessageRecord,
+                {'claim_id': claim_id, 'session_id': session_id, 'customer_id': customer_id},
+                'created_at',
+            )
         )
 
     def list_recent_messages(
@@ -2316,26 +2318,7 @@ class MongoDBRepository:
         customer_id: str,
         limit: int,
     ) -> list[MessageRecord]:
-        documents = (
-            self._collection.find(
-                {
-                    'record_type': 'message',
-                    'claim_id': claim_id,
-                    'session_id': session_id,
-                    'customer_id': customer_id,
-                }
-            )
-            .sort([('created_at', -1), ('_id', -1)])
-            .limit(limit)
-        )
-        messages = [
-            message
-            for message in (
-                self._model_from_document(document, MessageRecord) for document in documents
-            )
-            if message is not None
-        ]
-        return list(reversed(messages))
+        return self.list_messages(claim_id, session_id, customer_id)[-limit:]
 
     def save_conversation_summary(
         self,

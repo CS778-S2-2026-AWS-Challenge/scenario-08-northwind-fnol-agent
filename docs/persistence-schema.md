@@ -587,9 +587,10 @@ the append-only audit collection through a bounded, filterable projection.
   An identical idempotent replay is accepted; different content under the same identity is
   rejected. A summary that conflicts with current Claim State is omitted and recorded as a
   `summary_state_mismatch`; it never overwrites Claim facts.
-- Complete messages remain durable outside the bounded summary. Message lists use the stable
-  `(created_at, message_id)` ascending order in repositories, claimant history, and Workbench,
-  including when timestamps are equal.
+- Complete messages remain durable outside the bounded summary. Message lists use persisted
+  `in_reply_to` edges as the authoritative causal order, placing each reply after its target;
+  independent messages use the stable `(created_at, message_id)` ascending tie-break in
+  repositories, claimant history, and Workbench, including when timestamps are equal.
 - A message `in_reply_to` reference may identify only a message belonging to the same claim and
   interaction session.
 - Fixture and MongoDB writes fail closed when Message Evidence references are missing, duplicated,

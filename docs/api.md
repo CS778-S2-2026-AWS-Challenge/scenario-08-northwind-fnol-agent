@@ -831,8 +831,10 @@ draft state is internal UI state, not a `MessageRecord`. Only an authenticated, 
 submission creates a shared message; building or accepting a template never sends it automatically.
 
 An `in_reply_to` reference MUST identify a message in the same claim and interaction session.
-Message lists use the stable total order `(created_at, message_id)` ascending (newest-last). Equal
-timestamps therefore cannot cause cursor pagination to duplicate or skip records.
+Message lists use persisted `in_reply_to` edges as the authoritative causal order: a reply always
+appears after its target. Independent messages use `(created_at, message_id)` as their stable
+tie-break order (newest-last). Equal timestamps therefore cannot invert a persisted reply or cause
+cursor pagination to duplicate or skip records.
 
 ### Customer Next Step
 
@@ -1006,7 +1008,7 @@ later claimant statement is resolved against existing assertions rather than sil
 
 | Field | Allowed values or rule |
 |---|---|
-| `kind` | Registered evidence type: `agency_incident_record`, `assessment_report`, `claim_history`, `claimant_attachment`, `claimant_statement`, `external_assessment`, `incident_image`, `incident_photo`, `incident_report`, `internal_policy_history`, `other_document`, `policy`, `police_report`, `proof_of_ownership`, `receipt`, or `repair_quote` |
+| `kind` | Registered evidence type: `agency_incident_record`, `assessment_report`, `claim_history`, `claimant_attachment`, `claimant_statement`, `document`, `external_assessment`, `incident_image`, `incident_photo`, `incident_report`, `internal_policy_history`, `item_photo`, `other_document`, `photo`, `policy`, `police_report`, `proof_of_ownership`, `receipt`, or `repair_quote` |
 | `status` | `missing`, `pending`, `received`, `unofficial`, `invalid`, `unavailable`, `superseded`, `expired` |
 | `file_status` | `not_available`, `awaiting_upload`, `uploading`, `uploaded`, `processing`, `ready`, `failed` |
 | `source` | `claimant`, `staff`, `external_system` |

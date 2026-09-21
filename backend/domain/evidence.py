@@ -20,14 +20,17 @@ REGISTERED_EVIDENCE_KINDS = frozenset(
         'claim_history',
         'claimant_attachment',
         'claimant_statement',
+        'document',
         'external_assessment',
         'incident_image',
         'incident_photo',
         'incident_report',
         'internal_policy_history',
+        'item_photo',
         'other_document',
         'policy',
         'police_report',
+        'photo',
         'proof_of_ownership',
         'receipt',
         'repair_quote',
@@ -81,6 +84,28 @@ class UnregisteredEvidenceShape(ValueError):
     """An evidence record does not match any shared lifecycle stage."""
 
 
+def validate_evidence_vocabulary(
+    *,
+    kind: str,
+    related_fields: Sequence[str] = (),
+    needed_for: Sequence[str] = (),
+) -> None:
+    """Validate the one shared Evidence vocabulary used by every boundary."""
+
+    if kind not in REGISTERED_EVIDENCE_KINDS:
+        raise ValueError(f'Unregistered Evidence kind: {kind}.')
+    if len(related_fields) != len(set(related_fields)):
+        raise ValueError('Evidence related_fields must not contain duplicates.')
+    unregistered_fields = set(related_fields) - REGISTERED_FIELD_CODES
+    if unregistered_fields:
+        raise ValueError(f'Unregistered Evidence related_fields: {sorted(unregistered_fields)}.')
+    if len(needed_for) != len(set(needed_for)):
+        raise ValueError('Evidence needed_for must not contain duplicates.')
+    unregistered_needs = set(needed_for) - REGISTERED_EVIDENCE_NEEDS
+    if unregistered_needs:
+        raise ValueError(f'Unregistered Evidence needed_for: {sorted(unregistered_needs)}.')
+
+
 def validate_evidence_record(record: EvidenceRecord) -> None:
     """Validate the provider-neutral Evidence vocabulary and lifecycle shape.
 
@@ -91,18 +116,11 @@ def validate_evidence_record(record: EvidenceRecord) -> None:
         ValueError: The record uses an unregistered or contradictory shape.
     """
 
-    if record.kind not in REGISTERED_EVIDENCE_KINDS:
-        raise ValueError(f'Unregistered Evidence kind: {record.kind}.')
-    if len(record.related_fields) != len(set(record.related_fields)):
-        raise ValueError('Evidence related_fields must not contain duplicates.')
-    unregistered_fields = set(record.related_fields) - REGISTERED_FIELD_CODES
-    if unregistered_fields:
-        raise ValueError(f'Unregistered Evidence related_fields: {sorted(unregistered_fields)}.')
-    if len(record.needed_for) != len(set(record.needed_for)):
-        raise ValueError('Evidence needed_for must not contain duplicates.')
-    unregistered_needs = set(record.needed_for) - REGISTERED_EVIDENCE_NEEDS
-    if unregistered_needs:
-        raise ValueError(f'Unregistered Evidence needed_for: {sorted(unregistered_needs)}.')
+    validate_evidence_vocabulary(
+        kind=record.kind,
+        related_fields=record.related_fields,
+        needed_for=record.needed_for,
+    )
     if not is_registered_evidence_shape(record):
         raise UnregisteredEvidenceShape(
             f'{record.evidence_id}: status {record.status.value} with file status '
