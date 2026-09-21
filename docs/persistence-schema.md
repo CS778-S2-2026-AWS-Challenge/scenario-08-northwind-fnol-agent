@@ -478,6 +478,16 @@ the append-only audit collection through a bounded, filterable projection.
 - An idempotency record identifies an accepted operation and request fingerprint. An
   identical replay returns the current authorised projection; changed input under the
   same key is a conflict.
+- A claimant message-turn idempotency record also retains `message_turn_kind`
+  (`legacy_agent`, `runtime`, or `message_only`) and the immutable
+  `message_turn_revision`. Fixture and MongoDB can resolve the original record by actor, route,
+  Claim, and claimant `message_id`, so the same `client_message_id` under a different retry key
+  still reports the committed historical revision. The kind defines the complete required child
+  association set: legacy Agent requires its decision and Agent message, Runtime requires its
+  Runtime trace and Agent message, and message-only declares no such child. A missing declared
+  child is an integrity failure and cannot be returned as a partial message-only success. Legacy
+  records without the new coordinates use their stored response and existing durable associations
+  for compatibility; replay does not rewrite them or repeat side effects.
 - A Workbench mutation idempotency record also retains the Action Registry version, exact
   `action_code`, and exact `target_ref` resolved before execution. These fields preserve the
   runtime authorization decision with the existing atomic Claim mutation; they do not create a
@@ -893,7 +903,10 @@ fills `response_status=200` and `response_payload` on that attempt's existing Id
 record before HTTP success is returned. Fixture uses the Claim mutation lock; MongoDB uses
 its transaction and a conditional first-response update. Competing same-key finalizers return
 the first saved payload. Actor, Claim, Session, inbound, fingerprint and decision references
-must match the committed attempt. Later mutations cannot change that key's response.
+must match the committed attempt. Later mutations cannot change that key's stored response.
+On return, only `current_claim` and `current_claim_revision` refresh from authoritative state;
+the stored payload, historical revision, messages and recovery evidence remain unchanged.
+This read does not re-execute model, reducer, dispatch or audit side effects.
 
 If the process stops after committing the turn but before freezing a response, replay can
 reconstruct and freeze its first response from the durable decision and safe projections.

@@ -337,4 +337,10 @@ def test_confirmation_failure_retry_uses_original_checkpoint_without_duplicate_i
         )
         == 1
     )
-    assert client.post(url, headers=first_headers, json=payload).json() == failed.json()
+    current_snapshot = client.get(f'/api/v1/claims/{journey.claim_id}', headers=CLAIMANT).json()
+    replayed = client.post(url, headers=first_headers, json=payload).json()
+    assert replayed == {
+        **failed.json(),
+        'current_claim': current_snapshot,
+        'current_claim_revision': current_snapshot['revision'],
+    }

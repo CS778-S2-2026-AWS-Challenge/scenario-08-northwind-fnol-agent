@@ -1,7 +1,7 @@
 # Claimant Journey v8
 
 This document publishes the evidence, decisions and implementation contract for claimant v8,
-including the approved v3.12 design corrections. It is the shared repository reference for
+including the approved v3.13 design corrections. It is the shared repository reference for
 the implementation in PR #977, which delivers issues #976 and #980 and the bounded recovery
 slice of #779. Its contracts can be read without a maintainer's local workspace.
 
@@ -85,8 +85,9 @@ access and operation state. A redesign of polymorphic frontend rendering is outs
 
 The claimant model-dependency failure rule is the first registered
 `RecoveryPolicyRegistry` entry. The inbound message/checkpoint is preserved
-before provider execution. The original idempotency key replays the original
-response. Explicit retry goes through `submit_message` with a new attempt
+before provider execution. The original idempotency key replays historical turn evidence;
+only `current_claim` and `current_claim_revision` refresh from authoritative state.
+Explicit retry goes through `submit_message` with a new attempt
 identity linked to the accepted inbound message; no retry endpoint is added.
 
 Created and other protected terminal Claims cannot regress to an in-progress
@@ -229,14 +230,20 @@ its own acceptance signal and still passes the same revision/value binding check
 On a provider failure the accepted input survives. If safety was committed, a durable Agent
 notice contains safety guidance and the truthful support confirmation. It carries recovery
 metadata and does not hide Retry. A later successful non-recovery reply completes the response.
-No failed model facts are applied. Same-key replay returns the frozen original response even
-after later Claim changes. Explicit retry uses a new HTTP key with the original inbound identity,
+No failed model facts are applied. Same-key replay freezes historical `claim_revision`, messages,
+decisions and recovery metadata. Only `current_claim` and `current_claim_revision` are read afresh
+after later Claim changes. Replay never invokes the model, reducer or service dispatcher and
+never writes an audit event. Explicit retry uses a new HTTP key with the original inbound identity,
 content and checkpoint through `submit_message`; there is no new retry endpoint.
 
 If a process stops after the Claim commit but before the first response is frozen, replay can
 recover from the durable decision and freeze the first response. That response is a safe
 post-dispatch observation and may include a concurrently completed mutation before freezing;
-it is not represented as the original reducer snapshot. Once frozen, subsequent replay is exact.
+it is not represented as the original reducer snapshot. Once frozen, historical evidence remains
+exact; only the two current-state fields refresh. The frontend installs `current_claim`, never
+historical form or decision deltas. When revisions differ, it refreshes message actions through
+the existing messages read endpoint instead of enabling historical consent controls. A failed
+action refresh does not turn an already accepted message into a delivery failure.
 
 ## Progress writers and compatibility decisions
 

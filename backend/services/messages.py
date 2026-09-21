@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from functools import wraps
-from typing import ParamSpec, TypeVar, cast
+from typing import Any, ParamSpec, TypeVar, cast
 
 from backend.adapters.claims_service import AssessorServiceAdapter
 from backend.adapters.evidence_storage import EvidenceStorage, EvidenceStorageError
@@ -113,6 +113,7 @@ from backend.services.branching import (
 )
 from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.claimant_form_projection import project_claimant_form_fields
+from backend.services.claims import claimant_claim
 from backend.services.evidence_visibility import default_evidence_visibility
 from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
 from backend.services.external_service_eligibility import eligible_service_ids
@@ -411,9 +412,10 @@ def _message_turn_response(
         else None
     )
     claim = repository.get_claim(claim_id, principal.subject)
-    dynamic_form = (
-        claimant_dynamic_form_projection(repository, claim) if claim is not None else None
-    )
+    if claim is None:
+        raise _session_not_found()
+    current_claim = claimant_claim(repository, claim)
+    dynamic_form = current_claim.dynamic_form
     projected_form_changes = (
         project_claimant_form_fields(
             repository,
@@ -429,11 +431,14 @@ def _message_turn_response(
         if claim is not None
         else decision.customer_next_step
     )
-    response_revision = claim.revision if claim is not None else decision.resulting_revision
+    turn_revision = decision.resulting_revision
+    current_claim_revision = claim.revision if claim is not None else turn_revision
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=claimant_message.session_id,
-        claim_revision=response_revision,
+        claim_revision=turn_revision,
+        current_claim_revision=current_claim_revision,
+        current_claim=current_claim,
         claimant_message=_claimant_message(claimant_message).model_copy(update={'recovery': None}),
         agent_message=_claimant_message(
             agent_message,
@@ -460,7 +465,7 @@ def _message_turn_response(
         primary_action=(
             project_claimant_primary_action(
                 claim_id=claim_id,
-                claim_revision=response_revision,
+                claim_revision=current_claim_revision,
                 next_step=next_step,
                 external_service_action=external_service_action,
             )
@@ -489,7 +494,173 @@ def _freeze_message_turn_response(
             code='IDEMPOTENCY_CONFLICT',
             message='The saved message response belongs to a different attempt.',
         ) from error
-    return MessageTurnResponse.model_validate(frozen)
+    return _refresh_current_claim(repository, idempotency.actor_id, frozen)
+
+
+def _refresh_current_claim(
+    repository: PersistenceRepository, actor_id: str, historical: dict[str, Any]
+) -> MessageTurnResponse:
+    claim = repository.get_claim(str(historical.get('claim_id', '')), actor_id)
+    if claim is None:
+        raise _session_not_found()
+    return MessageTurnResponse.model_validate(
+        {
+            **historical,
+            'current_claim_revision': claim.revision,
+            'current_claim': claimant_claim(repository, claim).model_dump(mode='json'),
+        }
+    )
+
+
+def _persisted_turn_integrity_error() -> ApiError:
+    return ApiError(
+        status_code=500,
+        code='INTERNAL_ERROR',
+        message='The persisted message turn could not be restored.',
+        retryable=True,
+    )
+
+
+def _replay_persisted_response(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    session_id: str,
+    idempotency: IdempotencyRecord,
+) -> MessageTurnResponse:
+    payload = idempotency.response_payload
+    if (
+        idempotency.claim_id != claim_id
+        or idempotency.session_id != session_id
+        or idempotency.actor_id != principal.subject
+    ):
+        raise _persisted_turn_integrity_error()
+    if payload is not None and (idempotency.response_status or 0) >= 400:
+        stored_error = dict(payload)
+        stored_error['details'] = (
+            [ErrorDetail.model_validate(item) for item in stored_error['details']]
+            if stored_error.get('details')
+            else None
+        )
+        raise ApiError(status_code=cast(int, idempotency.response_status), **stored_error)
+    inbound = (
+        repository.get_message(claim_id, session_id, idempotency.message_id, principal.subject)
+        if idempotency.message_id
+        else None
+    )
+    if inbound is None or inbound.actor is not ActorType.CLAIMANT:
+        raise _persisted_turn_integrity_error()
+    kind = idempotency.message_turn_kind
+    if kind is None:
+        if idempotency.decision_id is not None or (payload and payload.get('decision') is not None):
+            kind = 'legacy_agent'
+        elif idempotency.runtime_trace_id is not None:
+            kind = 'runtime'
+        elif inbound.recovery_rule_id is not None:
+            kind = 'message_only'
+        elif idempotency.agent_message_id is not None or (
+            payload and payload.get('agent_message') is not None
+        ):
+            kind = 'runtime'
+        else:
+            kind = 'message_only'
+    if (
+        payload is None
+        and idempotency.decision_id is None
+        and idempotency.runtime_trace_id is None
+        and idempotency.message_turn_kind is None
+    ):
+        raise ApiError(
+            status_code=409,
+            code='TURN_IN_PROGRESS',
+            message='This message is already accepted and its response is still being prepared.',
+            retryable=True,
+        )
+    agent_message = (
+        repository.get_message(
+            claim_id, session_id, idempotency.agent_message_id, principal.subject
+        )
+        if idempotency.agent_message_id
+        else None
+    )
+    decision = (
+        repository.get_agent_decision(claim_id, idempotency.decision_id, principal.subject)
+        if idempotency.decision_id
+        else None
+    )
+    trace = (
+        repository.get_runtime_trace(claim_id, idempotency.runtime_trace_id, principal.subject)
+        if idempotency.runtime_trace_id
+        else None
+    )
+    if agent_message is not None and (
+        agent_message.actor is not ActorType.AGENT
+        or agent_message.in_reply_to != inbound.message_id
+    ):
+        raise _persisted_turn_integrity_error()
+    if kind == 'legacy_agent':
+        if (
+            decision is None
+            or decision.trigger_message_id != inbound.message_id
+            or agent_message is None
+            or agent_message.recovery_rule_id is not None
+        ):
+            raise _persisted_turn_integrity_error()
+        if idempotency.runtime_trace_id is not None and (
+            trace is None or trace.trigger_message_id != inbound.message_id
+        ):
+            raise _persisted_turn_integrity_error()
+    elif kind == 'runtime':
+        if (
+            trace is None
+            or trace.trigger_message_id != inbound.message_id
+            or agent_message is None
+            or agent_message.recovery_rule_id is not None
+        ):
+            raise _persisted_turn_integrity_error()
+    elif idempotency.decision_id is not None or idempotency.runtime_trace_id is not None:
+        raise _persisted_turn_integrity_error()
+    elif idempotency.agent_message_id is not None and (
+        agent_message is None
+        or inbound.recovery_rule_id is None
+        or agent_message.recovery_rule_id != inbound.recovery_rule_id
+    ):
+        # A deterministic recovery notice is not a successful Runtime turn and
+        # does not manufacture a model trace. It remains message_only recovery.
+        raise _persisted_turn_integrity_error()
+    if payload is not None:
+        if payload.get('claim_id') != claim_id or payload.get('session_id') != session_id:
+            raise _persisted_turn_integrity_error()
+        for part, expected_id, identifier in (
+            ('claimant_message', idempotency.message_id, 'message_id'),
+            ('agent_message', idempotency.agent_message_id, 'message_id'),
+            ('decision', idempotency.decision_id, 'decision_id'),
+        ):
+            child = payload.get(part)
+            if child is not None and (
+                not isinstance(child, dict) or child.get(identifier) != expected_id
+            ):
+                raise _persisted_turn_integrity_error()
+        if (
+            idempotency.message_turn_revision is not None
+            and payload.get('claim_revision') != idempotency.message_turn_revision
+        ):
+            raise _persisted_turn_integrity_error()
+        return _refresh_current_claim(repository, principal.subject, payload)
+    if decision is not None:
+        return _freeze_message_turn_response(
+            repository,
+            idempotency,
+            _message_turn_response(repository, principal, claim_id, inbound, decision),
+        )
+    revision = idempotency.message_turn_revision
+    if revision is None:
+        raise _persisted_turn_integrity_error()
+    if kind == 'runtime' and agent_message is not None:
+        return _namespaced_turn_response(
+            repository, principal, claim_id, revision, inbound, agent_message
+        )
+    return _message_only_response(repository, principal, claim_id, session_id, revision, inbound)
 
 
 def _message_only_response(
@@ -511,13 +682,16 @@ def _message_only_response(
         claim_id=claim_id,
         session_id=session_id,
         claim_revision=revision,
+        current_claim_revision=claim.revision,
+        current_claim=claimant_claim(repository, claim),
         claimant_message=_claimant_message(message),
         form_changes=[],
         handoff=None,
         decision=None,
+        dynamic_form=claimant_dynamic_form_projection(repository, claim),
         primary_action=project_claimant_primary_action(
             claim_id=claim_id,
-            claim_revision=revision,
+            claim_revision=claim.revision,
             next_step=next_step,
             external_service_action=external_service_action,
         ),
@@ -542,6 +716,8 @@ def _namespaced_turn_response(
         claim_id=claim_id,
         session_id=claimant_message.session_id,
         claim_revision=claim_revision,
+        current_claim_revision=claim.revision,
+        current_claim=claimant_claim(repository, claim),
         claimant_message=_claimant_message(claimant_message),
         agent_message=_claimant_message(
             agent_message,
@@ -553,7 +729,7 @@ def _namespaced_turn_response(
         dynamic_form=claimant_dynamic_form_projection(repository, claim),
         primary_action=project_claimant_primary_action(
             claim_id=claim_id,
-            claim_revision=claim_revision,
+            claim_revision=claim.revision,
             next_step=next_step,
             external_service_action=external_service_action,
         ),
@@ -1499,6 +1675,8 @@ def _submit_namespaced_runtime_turn(
         message_id=claimant_message.message_id,
         agent_message_id=agent_message.message_id,
         runtime_trace_id=runtime_trace.trace_id,
+        message_turn_kind='runtime',
+        message_turn_revision=claim.revision,
         response_payload=response.model_dump(mode='json'),
     )
     try:
@@ -1693,50 +1871,8 @@ def submit_message(
                 code='IDEMPOTENCY_CONFLICT',
                 message='The idempotency key was reused with a different request.',
             )
-        if existing_idempotency.response_payload is not None:
-            if (
-                existing_idempotency.response_status is not None
-                and existing_idempotency.response_status >= 400
-            ):
-                stored_error = dict(existing_idempotency.response_payload)
-                stored_error['details'] = (
-                    [ErrorDetail.model_validate(item) for item in stored_error['details']]
-                    if stored_error.get('details')
-                    else None
-                )
-                raise ApiError(status_code=existing_idempotency.response_status, **stored_error)
-            return MessageTurnResponse.model_validate(existing_idempotency.response_payload)
-        if existing_idempotency.message_id is None or existing_idempotency.decision_id is None:
-            raise ApiError(
-                status_code=409,
-                code='TURN_IN_PROGRESS',
-                message=(
-                    'This message is already accepted and its response is still being prepared.'
-                ),
-                retryable=True,
-            )
-        claimant_message = repository.get_message(
-            claim_id,
-            session_id,
-            existing_idempotency.message_id,
-            principal.subject,
-        )
-        decision = repository.get_agent_decision(
-            claim_id,
-            existing_idempotency.decision_id,
-            principal.subject,
-        )
-        if claimant_message is None or decision is None:
-            raise ApiError(
-                status_code=500,
-                code='INTERNAL_ERROR',
-                message='The idempotent message turn could not be restored.',
-                retryable=True,
-            )
-        return _freeze_message_turn_response(
-            repository,
-            existing_idempotency,
-            _message_turn_response(repository, principal, claim_id, claimant_message, decision),
+        return _replay_persisted_response(
+            repository, principal, claim_id, session_id, existing_idempotency
         )
 
     existing_client_message = repository.find_message_by_client_id(
@@ -1751,13 +1887,34 @@ def submit_message(
         if existing_client_message is not None
         else None
     )
+    existing_turn_result = (
+        repository.find_message_turn_idempotency(
+            principal.subject, route, claim_id, existing_client_message.message_id
+        )
+        if existing_client_message is not None
+        else None
+    )
+    declared_completed_turn = (
+        existing_turn_result is not None
+        and (existing_turn_result.response_status or 0) < 400
+        and (
+            existing_turn_result.message_turn_kind in {'legacy_agent', 'runtime'}
+            or existing_turn_result.decision_id is not None
+            or existing_turn_result.runtime_trace_id is not None
+        )
+    )
     retrying_saved_message = (
         existing_client_message is not None
+        and not declared_completed_turn
         and (
             existing_client_message.recovery_rule_id is not None
             or (failed_checkpoint is not None and (failed_checkpoint.response_status or 0) >= 400)
         )
         and repository.find_agent_decision_for_trigger(
+            claim_id, existing_client_message.message_id, principal.subject
+        )
+        is None
+        and repository.find_runtime_trace_for_trigger(
             claim_id, existing_client_message.message_id, principal.subject
         )
         is None
@@ -1778,67 +1935,13 @@ def submit_message(
             existing_client_message.content == expected_content
             and existing_client_message.evidence_refs == payload.evidence_refs
         ):
-            decision = repository.find_agent_decision_for_trigger(
-                claim_id,
-                existing_client_message.message_id,
-                principal.subject,
+            turn_idempotency = repository.find_message_turn_idempotency(
+                principal.subject, route, claim_id, existing_client_message.message_id
             )
-            if decision is None:
-                runtime_trace = repository.find_runtime_trace_for_trigger(
-                    claim_id,
-                    existing_client_message.message_id,
-                    principal.subject,
-                )
-                if runtime_trace is not None:
-                    agent_message = next(
-                        (
-                            message
-                            for message in repository.list_messages(
-                                claim_id,
-                                session_id,
-                                principal.subject,
-                            )
-                            if message.actor is ActorType.AGENT
-                            and message.recovery_rule_id is None
-                            and message.in_reply_to == existing_client_message.message_id
-                        ),
-                        None,
-                    )
-                    if agent_message is None:
-                        raise ApiError(
-                            status_code=500,
-                            code='INTERNAL_ERROR',
-                            message='The Runtime message turn could not be restored.',
-                            retryable=True,
-                        )
-                    claim = repository.get_claim(claim_id, principal.subject)
-                    if claim is None:
-                        raise _session_not_found()
-                    return _namespaced_turn_response(
-                        repository,
-                        principal,
-                        claim_id,
-                        claim.revision,
-                        existing_client_message,
-                        agent_message,
-                    )
-                claim = repository.get_claim(claim_id, principal.subject)
-                if claim is not None:
-                    return _message_only_response(
-                        repository,
-                        principal,
-                        claim_id,
-                        session_id,
-                        claim.revision,
-                        existing_client_message,
-                    )
-                raise _session_not_found()
-            return _message_turn_response(
-                repository,
-                principal,
-                claim_id,
-                existing_client_message,
-                decision,
+            if turn_idempotency is None:
+                raise _persisted_turn_integrity_error()
+            return _replay_persisted_response(
+                repository, principal, claim_id, session_id, turn_idempotency
             )
         raise ApiError(
             status_code=409,
@@ -2267,7 +2370,7 @@ def submit_message(
         recovery_rule = classify_recovery(
             RecoveryTrigger(source='model', outcome_code=model_error.code.value)
         )
-        claimant_message = cast(MessageRecord, claimant_message).model_copy(
+        claimant_message = claimant_message.model_copy(
             update={'recovery_rule_id': recovery_rule.rule_id}
         )
         recovery_response = _message_only_response(
@@ -2330,6 +2433,8 @@ def submit_message(
             message_id=claimant_message.message_id,
             agent_message_id=recovery_agent_message.message_id if recovery_agent_message else None,
             response_payload=recovery_response.model_dump(mode='json'),
+            message_turn_kind='message_only',
+            message_turn_revision=recovery_response.claim_revision,
             revision_before_message=confirmation_revision_before_message,
             confirmation_checkpoint=checkpoint_idempotency.confirmation_checkpoint,
             inbound_checkpoint=checkpoint_idempotency.inbound_checkpoint,

@@ -11,7 +11,8 @@ The first published rule is `claimant_turn.model_dependency_failure`.
 Before a model-dependent turn is attempted, an accepted inbound message and
 checkpoint must be preserved. A provider failure cannot create a fact, an
 external request or a success response. The original HTTP idempotency key
-replays the original result; an explicit retry uses the existing
+replays the historical result, refreshing only `current_claim` and `current_claim_revision`
+from the authoritative Claim without invoking the model, reducer or dispatcher. An explicit retry uses the existing
 `submit_message` entrypoint with a new attempt identity and reloads authoritative
 records. No retry endpoint or second lifecycle is introduced.
 

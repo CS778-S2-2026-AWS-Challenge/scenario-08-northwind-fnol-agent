@@ -233,7 +233,12 @@ def test_explicit_retry_after_safety_notice_returns_real_reply_and_keeps_origina
         assert 'Symonds Street' in body['agent_message']['content']['text']
         assert gateway.calls == 2
         assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
-        assert client.post(url, headers=failed_headers, json=payload).json() == failed.json()
+        replayed_failure = client.post(url, headers=failed_headers, json=payload).json()
+        assert replayed_failure == {
+            **failed.json(),
+            'current_claim': body['current_claim'],
+            'current_claim_revision': body['current_claim_revision'],
+        }
         assert client.post(url, headers=retry_headers, json=payload).json() == body
         duplicate = client.post(
             url, headers={**retry_headers, 'Idempotency-Key': 'third-key'}, json=payload
@@ -260,7 +265,13 @@ def test_explicit_retry_after_safety_notice_returns_real_reply_and_keeps_origina
             },
         )
         assert later.status_code == 200, later.text
-        assert client.post(url, headers=retry_headers, json=payload).json() == body
+        later_snapshot = client.get(f'/api/v1/claims/{claim_id}', headers=owner).json()
+        replayed_success = client.post(url, headers=retry_headers, json=payload).json()
+        assert replayed_success == {
+            **body,
+            'current_claim': later_snapshot,
+            'current_claim_revision': later_snapshot['revision'],
+        }
         saved = repository.find_idempotency('cus_demo', url, 'retry-safety-attempt')
         assert saved is not None and saved.response_payload == body
         with pytest.raises(IdempotencyConflict):

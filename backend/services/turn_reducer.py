@@ -907,6 +907,9 @@ def reduce_turn(
         message_id=claimant_message.message_id,
         agent_message_id=agent_message.message_id,
         decision_id=decision.decision_id,
+        runtime_trace_id=runtime_trace.trace_id if runtime_trace is not None else None,
+        message_turn_kind='legacy_agent',
+        message_turn_revision=resulting_revision,
         handoff_id=handoff.handoff_id if handoff is not None else None,
         action_registry_version=(
             live_mutation_command.contract_version if live_mutation_command is not None else None

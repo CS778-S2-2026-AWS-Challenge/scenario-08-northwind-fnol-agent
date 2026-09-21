@@ -769,6 +769,10 @@ function App() {
       : current)
   }
 
+  function currentTurnRevision(turn) {
+    return turn.current_claim_revision ?? turn.claim_revision
+  }
+
   function beginMessagesReadback() {
     messagesRequestGeneration.current += 1
     return messagesRequestGeneration.current
@@ -1553,22 +1557,33 @@ function App() {
         clientMessageId: operation.clientMessageId,
         evidenceRefs: operation.evidenceRefs || [],
       })
+      const currentRevision = currentTurnRevision(turn)
+      const historicalTurn = turn.current_claim && currentRevision > turn.claim_revision
+      // Historical actions are evidence, not permission to act on today's offer.
+      const responseAgentMessage = historicalTurn && turn.agent_message
+        ? { ...turn.agent_message, message_actions: [] }
+        : turn.agent_message
       commitMessages((current) => mergeMessagesById(current, [
         turn.claimant_message,
-        ...(turn.agent_message ? [turn.agent_message] : []),
+        ...(responseAgentMessage ? [responseAgentMessage] : []),
       ]))
-      setForm((current) => mergeFields(current, turn.form_changes))
-      setContentsItems((current) => mergeContentsItems(current, turn.contents_item_changes || []))
-      setDynamicForm(turn.dynamic_form || null)
-      setClaimRevision(turn.claim_revision, turn.primary_action)
-      if (turn.decision) setNextStep(turn.decision.customer_next_step)
-      if (turn.handoff) setHandoff(turn.handoff)
-      rememberClaimInHistory({
-        ...activeClaim,
-        revision: turn.claim_revision,
-        customer_next_step: turn.decision?.customer_next_step || activeClaim.customer_next_step,
-        updated_at: turn.claimant_message?.created_at || activeClaim.updated_at,
-      })
+      if (turn.current_claim) {
+        applyClaimSnapshot(turn.current_claim, { minimumRevision: currentRevision })
+        rememberClaimInHistory(turn.current_claim)
+      } else {
+        setForm((current) => mergeFields(current, turn.form_changes))
+        setContentsItems((current) => mergeContentsItems(current, turn.contents_item_changes || []))
+        setDynamicForm(turn.dynamic_form || null)
+        setClaimRevision(currentRevision, turn.primary_action)
+        if (turn.decision) setNextStep(turn.decision.customer_next_step)
+        if (turn.handoff) setHandoff(turn.handoff)
+        rememberClaimInHistory({
+          ...activeClaim,
+          revision: currentRevision,
+          customer_next_step: turn.decision?.customer_next_step || activeClaim.customer_next_step,
+          updated_at: turn.claimant_message?.created_at || activeClaim.updated_at,
+        })
+      }
       setDraft('')
       if (isAssistanceReply) {
         setAssistanceReplyReview({
@@ -1592,7 +1607,24 @@ function App() {
       pendingSubmission.current = null
       setPendingMessage(null)
       setFailedMessage(null)
-      let attachmentClaim = { ...activeClaim, revision: turn.claim_revision }
+      if (historicalTurn) {
+        const generation = beginMessagesReadback()
+        try {
+          const conversation = await getClaimMessages(activeClaim.claim_id, activeSessionId)
+          applyMessagesReadback(conversation.items, {
+            generation,
+            claimId: activeClaim.claim_id,
+            sessionId: activeSessionId,
+          })
+        } catch {
+          if (generation === messagesRequestGeneration.current
+            && activeClaimRef.current?.claim_id === activeClaim.claim_id
+            && activeSessionIdRef.current === activeSessionId) {
+            setError('Your message is saved, but current service actions could not be refreshed. Reopen this conversation to refresh them.')
+          }
+        }
+      }
+      let attachmentClaim = { ...activeClaim, revision: currentRevision }
       let stagedUploadsSucceeded = true
       for (const attachment of stagedAttachments) {
         const upload = await uploadAttachment(

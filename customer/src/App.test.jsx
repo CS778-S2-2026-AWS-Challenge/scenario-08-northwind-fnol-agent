@@ -663,7 +663,12 @@ describe('claimant intake projection', () => {
   it('replaces Staff assistance with a waiting status and prevents duplicate requests', async () => {
     const user = userEvent.setup()
     let resolveSupport
-    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      claim_revision: 2,
+      current_claim_revision: 3,
+      primary_action: primaryAction({ revision: 3 }),
+    })
     api.requestHumanSupport.mockImplementation(() => new Promise((resolve) => {
       resolveSupport = resolve
     }))
@@ -685,6 +690,7 @@ describe('claimant intake projection', () => {
     expect(progress).not.toHaveTextContent('A Northwind support request has been queued')
     expect(screen.queryByRole('button', { name: 'Staff assistance' })).not.toBeInTheDocument()
     expect(api.requestHumanSupport).toHaveBeenCalledTimes(1)
+    expect(api.requestHumanSupport).toHaveBeenCalledWith(expect.objectContaining({ revision: 3 }))
 
     await act(async () => resolveSupport({
       revision: 3,
@@ -700,7 +706,7 @@ describe('claimant intake projection', () => {
     expect(screen.queryByText('Staff assistance requested')).not.toBeInTheDocument()
     expect(api.requestHumanSupport).toHaveBeenCalledWith(expect.objectContaining({
       claimId: initialClaim.claim_id,
-      revision: 2,
+      revision: 3,
     }))
     expect(initialClaim.external_claim).toBeNull()
   })
@@ -1893,6 +1899,114 @@ describe('claimant intake projection', () => {
     expect(screen.getByRole('button', {
       name: /Claim progress: 1 of 2 required details complete/i,
     })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it.each([true, false])('installs the current snapshot and suppresses stale replay actions (readback succeeds: %s)', async (readbackSucceeds) => {
+    const user = userEvent.setup()
+    const currentDynamicForm = dynamicForm({ value: '9pm', valueState: 'confirmed' })
+    const historicalAction = {
+      offer_id: 'offer-assessor-replay',
+      agent_message_id: agentMessage.message_id,
+      service_identity: 'vehicle_damage_assessment_routing',
+      service_name: 'Vehicle damage assessment',
+      provider: 'Northwind assessment service',
+      purpose: 'Arrange a vehicle damage assessment.',
+      shared_data_summary: ['Your confirmed incident region'],
+      consent_status: 'not_recorded',
+      status: 'consent_required',
+      routing: null,
+      failure_code: null,
+      can_request: true,
+    }
+    let resolveHistory
+    let rejectHistory
+    api.getClaimMessages.mockReturnValue(new Promise((resolve, reject) => {
+      resolveHistory = resolve
+      rejectHistory = reject
+    }))
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      agent_message: { ...agentMessage, message_actions: [historicalAction] },
+      claim_revision: 2,
+      current_claim_revision: 3,
+      form_changes: [{
+        field_code: 'incident.occurred_at',
+        field: {
+          value: '8pm',
+          status: 'proposed',
+          source: 'claimant',
+        },
+      }],
+      contents_item_changes: [{
+        item_id: 'item-historical',
+        description: 'Historical laptop description',
+        category: 'Electronics',
+        status: 'proposed',
+        source: 'claimant',
+      }],
+      current_claim: {
+        ...initialClaim,
+        revision: 3,
+        form: {
+          'incident.occurred_at': {
+            value: '9pm',
+            status: 'confirmed',
+            source: 'claimant',
+          },
+        },
+        contents_items: [{
+          item_id: 'item-current',
+          description: 'Corrected laptop description',
+          category: 'Electronics',
+          status: 'confirmed',
+          source: 'claimant',
+        }],
+        dynamic_form: currentDynamicForm,
+        customer_next_step: {
+          status: 'continue_current_report',
+          summary: 'Continue from the corrected report.',
+          responsible_party: 'claimant',
+          required_items: [],
+        },
+        primary_action: primaryAction({ revision: 3 }),
+        updated_at: '2026-09-14T02:00:00Z',
+      },
+    })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    await waitFor(() => expect(api.getClaimMessages).toHaveBeenCalledWith(initialClaim.claim_id, 'ses_ui_vp'))
+    expect(screen.queryByText('Permission needed')).not.toBeInTheDocument()
+    await act(async () => {
+      if (readbackSucceeds) {
+        resolveHistory({ items: [claimantMessage, {
+          ...agentMessage,
+          message_actions: [{
+            ...historicalAction,
+            consent_status: 'withdrawn',
+            status: 'consent_withdrawn',
+            can_request: false,
+          }],
+        }] })
+      } else {
+        rejectHistory(new Error('History unavailable'))
+      }
+    })
+    if (readbackSucceeds) {
+      expect(await screen.findByText('Permission withdrawn')).toBeInTheDocument()
+    } else {
+      expect(await screen.findByText(/Your message is saved, but current service actions could not be refreshed/)).toBeInTheDocument()
+      expect(screen.queryByText(/We could not confirm delivery/)).not.toBeInTheDocument()
+    }
+    expect(screen.queryByText('Permission needed')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Details' }))
+
+    expect(screen.getAllByText('9pm').length).toBeGreaterThan(0)
+    expect(screen.getByText('Corrected laptop description')).toBeInTheDocument()
+    expect(screen.queryByText('8pm')).not.toBeInTheDocument()
+    expect(screen.queryByText('Historical laptop description')).not.toBeInTheDocument()
   })
 
   it('rejects delayed realtime Claim and message readbacks after a newer claimant mutation', async () => {

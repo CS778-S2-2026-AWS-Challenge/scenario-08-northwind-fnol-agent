@@ -2,7 +2,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from datetime import datetime
 from threading import Event
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from backend.domain.agent_context_runtime import VerifiedConversationSummary
 from backend.domain.audit import (
@@ -118,11 +118,34 @@ class IdempotencyRecord:
     staff_agent_message_id: str | None = None
     staff_agent_draft_id: str | None = None
     staff_agent_execution_id: str | None = None
+    message_turn_kind: Literal['legacy_agent', 'runtime', 'message_only'] | None = None
+    message_turn_revision: int | None = None
     response_payload: dict[str, Any] | None = None
     revision_before_message: int | None = None
     confirmation_checkpoint: dict[str, Any] | None = None
     inbound_checkpoint: bool = False
     response_status: int | None = None
+
+    def __post_init__(self) -> None:
+        if (self.message_turn_kind is None) != (self.message_turn_revision is None):
+            raise ValueError('Message turn kind and revision must be persisted together.')
+        if self.message_turn_revision is not None and self.message_turn_revision < 1:
+            raise ValueError('Message turn revision must be positive.')
+
+
+def message_turn_result_priority(record: IdempotencyRecord) -> tuple[int, int]:
+    """Prefer a committed response over earlier failures or an in-flight checkpoint."""
+    committed = (record.response_status or 0) < 400 and (
+        record.message_turn_kind in {'legacy_agent', 'runtime'}
+        or record.decision_id is not None
+        or record.runtime_trace_id is not None
+    )
+    rank = 2 if committed else 1 if record.response_payload is not None else 0
+    revision = record.message_turn_revision
+    if revision is None and record.response_payload is not None:
+        value = record.response_payload.get('claim_revision')
+        revision = value if isinstance(value, int) else None
+    return rank, revision or 0
 
 
 def validate_handoff_audit_link(
@@ -460,6 +483,16 @@ class ClaimRepository(Protocol):
         route: str,
         key: str,
     ) -> IdempotencyRecord | None:
+        raise NotImplementedError
+
+    def find_message_turn_idempotency(
+        self,
+        actor_id: str,
+        route: str,
+        claim_id: str,
+        message_id: str,
+    ) -> IdempotencyRecord | None:
+        """Return the durable retry identity that committed one claimant message."""
         raise NotImplementedError
 
     def save_idempotency(self, record: IdempotencyRecord) -> None:

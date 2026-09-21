@@ -1590,6 +1590,15 @@ Response `200`:
   "claim_id": "clm_01J4Y7Q2AW",
   "session_id": "ses_01J4Y7RPN8",
   "claim_revision": 3,
+  "current_claim_revision": 3,
+  "current_claim": {
+    "claim_id": "clm_01J4Y7Q2AW",
+    "revision": 3,
+    "form": {},
+    "contents_items": [],
+    "customer_next_step": {},
+    "updated_at": "2026-08-10T03:42:12Z"
+  },
   "claimant_message": {
     "message_id": "msg_01J4Y7T1KC",
     "actor": "claimant",
@@ -1662,12 +1671,40 @@ Response `200`:
 }
 ```
 
+claim_revision is the Claim revision committed by this message turn. An idempotent replay
+continues to report that historical turn revision even when later Claim mutations have advanced
+the Claim. current_claim_revision is the latest authoritative Claim revision and is the value
+used by a continuation action or a new revision-checked request. A fresh response can already have
+a newer current revision after post-commit service continuation. Both fields are integer revision
+values and are present on every MessageTurnResponse. The
+historical value is the revision to use when interpreting the replayed turn; the current value is
+the revision to send with a subsequent revision-checked mutation. Neither field changes the
+Claim revision or creates a new turn by itself. Retries of records written before
+`current_claim_revision` was introduced are hydrated from the durable message and current Claim;
+the stored idempotency record is not rewritten and no side effect is replayed.
+
+`current_claim` is the complete claimant-safe Claim detail projection at
+`current_claim_revision`. `form_changes`, `contents_item_changes`, `decision`, and the returned
+messages remain immutable evidence of the historical turn at `claim_revision`; they are not a
+current-state patch during replay. When the two revisions differ, clients install `current_claim`
+and must not merge the historical deltas into live form or contents state. Current dynamic form,
+next step, primary action, handoff, contents, and `updated_at` therefore come from the same
+authoritative snapshot for legacy Agent, message-only/handoff, and namespaced Runtime responses.
+Only `current_claim` and `current_claim_revision` refresh on replay; all historical turn evidence
+remains frozen. Replay performs no model call, reduction, service dispatch or audit mutation.
+Historical message actions do not grant current permission. When revisions differ, clients
+refresh actions through the existing messages read endpoint and suppress stale controls meanwhile.
+The server records an explicit turn kind and committed turn revision with each accepted message.
+A retry using the same `client_message_id` under a new idempotency key resolves that original turn
+identity. A missing declared decision, Runtime trace, or Agent message is a bounded
+`500 INTERNAL_ERROR`; replay never downgrades a damaged turn to a partial successful response.
+
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
 
 The v8 message boundary accepts and persists the inbound message before model processing.
 Acceptance advances the Claim revision once; a successful result commits the authorised facts,
 Agent message and turn records with a second revision check. Clients must use the returned
-`claim_revision` rather than assume a single increment. A model failure returns `200` for the
+`current_claim_revision` for subsequent mutations rather than assume a single increment. A model failure returns `200` for the
 saved message, with `agent_message: null` and a `recovery` projection containing `rule_id`,
 `continuation: runtime.fail_safe`, `claimant_projection`, `resume_triggers`, and
 `resume_entrypoint: submit_message`. It does not represent a successful model response.
@@ -1691,7 +1728,8 @@ projection so saved-but-unanswered messages remain actionable after history relo
 Retry resends that original identity, content and Evidence references with a new
 `Idempotency-Key` and the current Claim revision through this same endpoint. It reuses the saved
 inbound and its original confirmation checkpoint, never saving duplicate claimant text. An
-identical HTTP key replays its saved response without another model call. Existing session and
+identical HTTP key replays its saved historical response, refreshing only the two `current_*`
+fields without another model call. Existing session and
 Claim ownership checks continue to apply; retry does not move messages between sessions.
 
 When the collected report only needs confirmation, `customer_next_step.status` is

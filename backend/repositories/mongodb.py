@@ -5351,6 +5351,27 @@ class MongoDBRepository:
             return None
         return IdempotencyRecord(**document['payload'])
 
+    def find_message_turn_idempotency(
+        self,
+        actor_id: str,
+        route: str,
+        claim_id: str,
+        message_id: str,
+    ) -> IdempotencyRecord | None:
+        from backend.repositories.protocols import message_turn_result_priority
+
+        documents = self._collection.find(
+            {
+                'record_type': 'idempotency',
+                'actor_id': actor_id,
+                'route': route,
+                'payload.claim_id': claim_id,
+                'payload.message_id': message_id,
+            },
+        )
+        records = [IdempotencyRecord(**document['payload']) for document in documents]
+        return max(records, key=message_turn_result_priority) if records else None
+
     def save_idempotency(self, record: IdempotencyRecord) -> None:
         query = {
             'record_type': 'idempotency',
