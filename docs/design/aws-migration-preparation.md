@@ -82,39 +82,39 @@ The base key fields are:
 The following item families are provisional key shapes. The exact serialized field set
 must come from the current repository contract at implementation time.
 
-| Logical record | Primary item shape | Scope and migration rule |
-| --- | --- | --- |
-| Customer | `pk=CUSTOMER#{customer_id}`, `sk=PROFILE` | Preserve customer identity, permitted contact fields, active state, revision, and timestamps. |
-| Identity record | `pk=CUSTOMER#{customer_id}`, `sk=IDENTITY#{identity_id}` | Preserve protected ciphertext, mask, provenance, lifecycle, and revision; never migrate plaintext. |
-| Payment destination | `pk=CUSTOMER#{customer_id}`, `sk=PAYMENT#{payment_destination_id}` | Preserve protected value references and masks; never migrate account secrets as plaintext. |
-| Policy summary | `pk=CUSTOMER#{customer_id}`, `sk=POLICY#{policy_id}` | Preserve bounded policy identity, product family, status, effective dates, and provenance; do not turn it into ordinary RAG text. |
-| Customer memory | `pk=CUSTOMER#{customer_id}`, `sk=MEMORY#{memory_id}` | Preserve source, visibility, correction state, expiry, and deletion behavior. |
-| Asset | `pk=CUSTOMER#{customer_id}`, `sk=ASSET#{asset_id}` | Preserve owner, typed asset details, active state, revision, and timestamps. |
-| Staff account | Target placement not assigned by #991; source is the SQLite staff identity store | Preserve role and active-state data under the existing staff identity contract; password hashes remain protected and are not exposed to migration evidence. |
-| Staff auth session | Target placement not assigned by #991; source is the SQLite staff identity store | Preserve opaque session identity, staff link, expiry, revocation, and revision; never migrate bearer values or token hashes into logs. |
-| Claim | `pk=CLAIM#{claim_id}`, `sk=META` | Preserve customer ownership, Claim State, workflow, responsibility, retention, and current revision. |
-| Claim asset snapshot | `pk=CLAIM#{claim_id}`, `sk=ASSET_SNAPSHOT#{snapshot_id}` | Preserve immutable selected asset details, source asset revision, provenance, and capture time. |
-| Session | `pk=SESSION#{session_id}`, `sk=META` | Preserve session ownership, optional Claim link, summary revision, question accounting, and lifecycle. |
-| Message | `pk=SESSION#{session_id}`, `sk=MESSAGE#{created_at}#{message_id}` | Preserve visibility, actor, Claim/session references, and stable ordering. Historical message-turn revision must remain separate from current Claim revision pending #983. |
-| Agent turn | `pk=SESSION#{session_id}`, `sk=TURN#{created_at}#{turn_id}` | Preserve bounded proposal, execution, trace, tool-result, policy/version, usage, latency, and limitation references; exclude prompts, credentials, raw provider payloads, and hidden reasoning. |
-| Staff Agent interaction and execution | `pk=STAFF_SESSION#{session_id}`, `sk=MESSAGE#{created_at}#{message_id}` or `EXECUTION#{execution_id}` | Preserve explicit Claim scope, draft identity, confirmation source, action, expected/resulting revision, and idempotency; application capability remains separate from AWS IAM. |
-| Evidence metadata | `pk=CLAIM#{claim_id}`, `sk=EVIDENCE#{evidence_id}` | Preserve stable Evidence identity, material version/history, lifecycle, ownership, provenance, checksum, and protected object reference. |
-| Motor other driver | `pk=CLAIM#{claim_id}`, `sk=PARTICIPANT#{participant_id}` | Preserve the bounded participant record and ownership links; do not create a generic participant lifecycle. |
-| Evidence association | `pk=CLAIM#{claim_id}`, `sk=EVIDENCE_LINK#{association_id}` | Preserve immutable same-Claim links and source/target ownership checks. |
-| WorkItem | `pk=CLAIM#{claim_id}`, `sk=WORK#{work_item_id}` | Preserve purpose, owner, blocker, due time, source references, and completion evidence. |
-| Mitigation | `pk=CLAIM#{claim_id}`, `sk=MITIGATION#{mitigation_id}` | Preserve typed emergency-repair state, bounded summary, responsibility, Evidence/WorkItem links, provenance, and revision. |
-| Handoff | `pk=CLAIM#{claim_id}`, `sk=HANDOFF#{handoff_id}` | Preserve transfer packet, queue, owner, status, lifecycle timestamps, and resume target. |
-| Review and staff action | `pk=CLAIM#{claim_id}`, `sk=REVIEW#{review_id}` or `STAFF_ACTION#{action_id}` | Preserve internal signal, source references, professional decision, authority, and immutable action evidence. |
-| External request/task | `pk=CLAIM#{claim_id}`, `sk=EXTERNAL#{request_or_task_id}` | Preserve consent, authority, operation identity, provider-neutral result, and reconciliation state. Attempt records remain append-only pending #984. |
-| Follow-up | `pk=CLAIM#{claim_id}`, `sk=FOLLOW_UP#{follow_up_id}` | Preserve due time, responsibility, attempt count, channel, outcome, and status without making follow-up a Claim lifecycle state. |
-| Integration and operation configuration | Target placement not assigned by #991; source is the SQLite Control Plane store | Preserve published capability/health references, consent, operation identity, and result records without copying provider credentials. |
-| Versioned configuration | Target placement not assigned by #991; source is the SQLite Control Plane store | Preserve immutable published versions, author, reason, effective time, rollback target, and audit references. |
-| Branch evaluation | `pk=CLAIM#{claim_id}`, `sk=BRANCH_EVAL#{evaluation_id}` | Preserve evaluated Claim revision, selected family, active branches, field states, and application status. |
-| Retrieval record | `pk=CLAIM#{claim_id}`, `sk=RETRIEVAL#{retrieval_id}` | Preserve source, version, citations, limitations, visibility, and retrieval time. Raw provider payloads are excluded. |
-| Audit event | `pk=CLAIM#{claim_id}` or `pk=AUDIT_SUBJECT#{subject_id}`, `sk=AUDIT#{occurred_at}#{event_id}` | Preserve immutable envelope, actor, authority, outcome, correlation/idempotency reference, and resulting Claim revision. |
-| Realtime event | `pk=CLAIM#{claim_id}` or customer scope, `sk=REALTIME#{sequence}` | Preserve durable sequence and bounded resource hints; do not treat it as a second domain record. |
-| Idempotency result | `pk=IDEMPOTENCY#{scope}`, `sk=OPERATION#{operation_id}` | Preserve actor, operation, client key, request fingerprint, typed result, and resulting revision. |
-| Retention record | `pk=RETENTION#{subject_id}`, `sk=JOB#{retention_id}` | Preserve expiry, hold, purge eligibility, and deletion/anonymisation result. |
+| Logical record | Source store | In scope for #991 | Provisional target item shape | Scope and migration rule |
+| --- | --- | --- | --- | --- |
+| Customer account (`CustomerAccountRecord`) | SQLite claimant identity store | No | None assigned | Identity-store migration requires a separate approved target decision. Do not map claimant authentication or account authority to DynamoDB in #991. |
+| Identity record | MongoDB core persistence | Yes | `pk=CUSTOMER#{customer_id}`, `sk=IDENTITY#{identity_id}` | Preserve protected ciphertext, mask, provenance, lifecycle, and revision; never migrate plaintext. |
+| Payment destination | MongoDB core persistence | Yes | `pk=CUSTOMER#{customer_id}`, `sk=PAYMENT#{payment_destination_id}` | Preserve protected value references and masks; never migrate account secrets as plaintext. |
+| Policy summary | Synthetic policy/history source or separate governed store | No | None assigned | Keep structured policy data outside this MongoDB-to-DynamoDB rehearsal; do not turn it into ordinary RAG text. |
+| Customer memory | MongoDB core persistence | Yes | `pk=CUSTOMER#{customer_id}`, `sk=MEMORY#{memory_id}` | Preserve source, visibility, correction state, expiry, and deletion behavior. |
+| Asset | MongoDB core persistence | Yes | `pk=CUSTOMER#{customer_id}`, `sk=ASSET#{asset_id}` | Preserve owner, typed asset details, active state, revision, and timestamps. |
+| Staff account | SQLite staff identity store | No | None assigned | Preserve the existing staff identity boundary; password hashes remain protected and are not part of #991 migration evidence. |
+| Staff auth session | SQLite staff identity store | No | None assigned | Do not migrate bearer values or token hashes; target placement requires a separate identity decision. |
+| Claim | MongoDB core persistence | Yes | `pk=CLAIM#{claim_id}`, `sk=META` | Preserve customer ownership, Claim State, workflow, responsibility, retention, and current revision. |
+| Claim asset snapshot | MongoDB core persistence | Yes | `pk=CLAIM#{claim_id}`, `sk=ASSET_SNAPSHOT#{snapshot_id}` | Preserve immutable selected asset details, source asset revision, provenance, and capture time. |
+| Session | MongoDB core persistence | Yes | `pk=SESSION#{session_id}`, `sk=META` | Preserve session ownership, optional Claim link, summary revision, question accounting, and lifecycle. |
+| Message | MongoDB core persistence | Yes | `pk=SESSION#{session_id}`, `sk=MESSAGE#{created_at}#{message_id}` | Preserve visibility, actor, Claim/session references, and stable ordering. Historical message-turn revision remains separate from current Claim revision pending #983. |
+| Agent turn | MongoDB core persistence | Yes | `pk=SESSION#{session_id}`, `sk=TURN#{created_at}#{turn_id}` | Preserve bounded proposal, execution, trace, tool-result, policy/version, usage, latency, and limitation references; exclude prompts, credentials, raw provider payloads, and hidden reasoning. |
+| Staff Agent interaction and execution | MongoDB core persistence | Yes | `pk=STAFF_SESSION#{session_id}`, `sk=MESSAGE#{created_at}#{message_id}` or `EXECUTION#{execution_id}` | Preserve explicit Claim scope, draft identity, confirmation source, action, expected/resulting revision, and idempotency; application capability remains separate from AWS IAM. |
+| Evidence metadata | MongoDB core persistence | Yes | `pk=CLAIM#{claim_id}`, `sk=EVIDENCE#{evidence_id}` | Preserve stable Evidence identity, material version/history, lifecycle, ownership, provenance, checksum, and protected object reference. |
+| Motor other driver | MongoDB core persistence | Yes | `pk=CLAIM#{claim_id}`, `sk=PARTICIPANT#{participant_id}` | Preserve the bounded participant record and ownership links; do not create a generic participant lifecycle. |
+| Evidence association | MongoDB core persistence | Yes | `pk=CLAIM#{claim_id}`, `sk=EVIDENCE_LINK#{association_id}` | Preserve immutable same-Claim links and source/target ownership checks. |
+| WorkItem | MongoDB core persistence | Yes | `pk=CLAIM#{claim_id}`, `sk=WORK#{work_item_id}` | Preserve purpose, owner, blocker, due time, source references, and completion evidence. |
+| Mitigation | MongoDB core persistence | Yes | `pk=CLAIM#{claim_id}`, `sk=MITIGATION#{mitigation_id}` | Preserve typed emergency-repair state, bounded summary, responsibility, Evidence/WorkItem links, provenance, and revision. |
+| Handoff | MongoDB core persistence | Yes | `pk=CLAIM#{claim_id}`, `sk=HANDOFF#{handoff_id}` | Preserve transfer packet, queue, owner, status, lifecycle timestamps, and resume target. |
+| Review and staff action | MongoDB core persistence | Yes | `pk=CLAIM#{claim_id}`, `sk=REVIEW#{review_id}` or `STAFF_ACTION#{action_id}` | Preserve internal signal, source references, professional decision, authority, and immutable action evidence. |
+| External request/task | MongoDB core persistence | Yes | `pk=CLAIM#{claim_id}`, `sk=EXTERNAL#{request_or_task_id}` | Preserve consent, authority, operation identity, provider-neutral result, and reconciliation state. Attempt records remain append-only pending #984. |
+| Follow-up | MongoDB core persistence | Yes | `pk=CLAIM#{claim_id}`, `sk=FOLLOW_UP#{follow_up_id}` | Preserve due time, responsibility, attempt count, channel, outcome, and status without making follow-up a Claim lifecycle state. |
+| Integration and operation configuration | SQLite Control Plane store | No | None assigned | Preserve the Control Plane ownership boundary; do not copy provider credentials or assign a DynamoDB target in #991. |
+| Versioned configuration | SQLite Control Plane store | No | None assigned | Preserve immutable published versions and audit references; target placement requires a separate decision. |
+| Branch evaluation | MongoDB core persistence | Yes | `pk=CLAIM#{claim_id}`, `sk=BRANCH_EVAL#{evaluation_id}` | Preserve evaluated Claim revision, selected family, active branches, field states, and application status. |
+| Retrieval record | MongoDB core persistence | Yes | `pk=CLAIM#{claim_id}`, `sk=RETRIEVAL#{retrieval_id}` | Preserve source, version, citations, limitations, visibility, and retrieval time. Raw provider payloads are excluded. |
+| Audit event | MongoDB core persistence | Yes | `pk=CLAIM#{claim_id}` or `pk=AUDIT_SUBJECT#{subject_id}`, `sk=AUDIT#{occurred_at}#{event_id}` | Preserve immutable envelope, actor, authority, outcome, correlation/idempotency reference, and resulting Claim revision. |
+| Realtime event | MongoDB core persistence | Yes | `pk=CLAIM#{claim_id}` or customer scope, `sk=REALTIME#{sequence}` | Preserve durable sequence and bounded resource hints; do not treat it as a second domain record. |
+| Idempotency result | MongoDB core persistence | Yes | `pk=IDEMPOTENCY#{scope}`, `sk=OPERATION#{operation_id}` | Preserve actor, operation, client key, request fingerprint, typed result, and resulting revision. |
+| Retention record | MongoDB core persistence | Yes | `pk=RETENTION#{subject_id}`, `sk=JOB#{retention_id}` | Preserve expiry, hold, purge eligibility, and deletion/anonymisation result. |
 
 ## Secondary indexes
 
@@ -124,7 +124,7 @@ IaC is written.
 
 | Index | Projection purpose | Example key shape |
 | --- | --- | --- |
-| `GSI1` | Customer-scoped Claim, Asset, Evidence, and identity listing | `gsi1pk=CUSTOMER#{customer_id}`, `gsi1sk={entity_type}#{created_at}#{entity_id}`. |
+| `GSI1` | Customer-scoped Claim, Asset, Evidence, and in-scope operational record listing; not claimant identity listing | `gsi1pk=CUSTOMER#{customer_id}`, `gsi1sk={entity_type}#{created_at}#{entity_id}`. |
 | `GSI2` | Claim-scoped Session, Evidence, WorkItem, Handoff, and ExternalTask lookup | `gsi2pk=CLAIM#{claim_id}`, `gsi2sk={entity_type}#{created_at}#{entity_id}`. |
 | `GSI3` | Session-scoped Message ordering when messages use a separate aggregate partition | `gsi3pk=SESSION#{session_id}`, `gsi3sk=MESSAGE#{created_at}#{message_id}`. |
 | `GSI4` | Operation and idempotency resolution | `gsi4pk={operation_or_idempotency_scope}`, `gsi4sk={identity}#{fingerprint}`. |
@@ -175,9 +175,12 @@ checksum or content fingerprint, migration run identity, and a bounded failure r
 This record is migration evidence and is not an application audit event unless the current
 audit contract explicitly adds such an event.
 
-The local rehearsal in #992 must prove this behavior against MongoDB without writing to
-DynamoDB. It must also prove that a partial run can resume without duplicating logical
-records or changing an authoritative revision.
+The local rehearsal in #992 must read only the `Yes` rows whose source store is MongoDB
+core persistence. It must explicitly exclude the SQLite claimant identity store, SQLite
+staff identity store, SQLite Control Plane store, synthetic policy/history source, and
+knowledge object store. It must prove this behavior against MongoDB without writing to
+DynamoDB, and prove that a partial run can resume without duplicating logical records or
+changing an authoritative revision.
 
 ## Contract reconciliation points
 
@@ -209,8 +212,10 @@ bounded work after the design and AWS prerequisites are complete.
 ## Acceptance evidence for #991
 
 - The logical-record inventory and target mapping are recorded in this document.
+- Every inventory row names its source store and whether it is in scope for #991.
 - Access patterns precede the provisional key and index layout.
 - Revision, idempotency, audit, provenance, ownership, and visibility boundaries are explicit.
+- Customer identity, staff identity, and Control Plane records are explicitly excluded from #991/#992.
 - Local-only and AWS-dependent work are separated.
 - Reconciliation points for the active Backend issues are explicit.
 - The document is indexed from `docs/README.md` and does not change the current API or persistence contract.
