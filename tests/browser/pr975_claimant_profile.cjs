@@ -32,7 +32,7 @@ async function login(page) {
   await page.goto(`${CUSTOMER}/auth/login`, { waitUntil: 'domcontentloaded' })
   await page.getByLabel('Email address').fill('claimant.one@example.invalid')
   await page.getByLabel('Password').fill('northwind-demo-one')
-  await page.getByRole('button', { name: 'Log in', exact: true }).click()
+  await page.locator('.login-form').getByRole('button', { name: 'Log in', exact: true }).click()
   await page.getByPlaceholder('Tell us what happened…').waitFor({ state: 'visible', timeout: 30000 })
 }
 
