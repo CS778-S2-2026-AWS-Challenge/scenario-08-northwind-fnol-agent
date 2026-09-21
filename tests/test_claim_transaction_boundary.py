@@ -2,6 +2,8 @@ from datetime import UTC, datetime
 
 import pytest
 
+from backend.core.auth import Principal
+from backend.domain.audit import AuditEventEnvelope
 from backend.domain.models import (
     ActorType,
     AgentAction,
@@ -31,6 +33,7 @@ from backend.domain.models import (
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.protocols import IdempotencyRecord
+from backend.services.handoff_audit import build_handoff_audit_event
 
 FIXED_TIME = datetime(2026, 8, 24, 0, 0, tzinfo=UTC)
 
@@ -284,6 +287,27 @@ def _handoff(claim: WorkingClaim) -> HandoffRecord:
     )
 
 
+def _handoff_audit(
+    claim: WorkingClaim,
+    handoff: HandoffRecord,
+    idempotency: IdempotencyRecord,
+) -> AuditEventEnvelope:
+    return build_handoff_audit_event(
+        principal=Principal(
+            subject=idempotency.actor_id,
+            actor_type='claimant',
+            auth_source='test:claimant',
+        ),
+        claim=claim,
+        handoff=handoff,
+        route=idempotency.route,
+        idempotency_key=idempotency.key,
+        required_permission='claimant_support_request',
+        reason='Test handoff mutation.',
+        created_at=FIXED_TIME,
+    )
+
+
 def test_handoff_mutation_rejects_revision_jump_without_partial_write() -> None:
     repository, claim, _session = _repository()
     handoff = _handoff(claim)
@@ -297,12 +321,14 @@ def test_handoff_mutation_rejects_revision_jump_without_partial_write() -> None:
         handoff_id=handoff.handoff_id,
     )
 
+    invalid_claim = claim.model_copy(update={'revision': 3})
     with pytest.raises(KeyError):
         repository.save_handoff_mutation(
-            claim.model_copy(update={'revision': 3}),
+            invalid_claim,
             expected_revision=1,
             handoff=handoff,
             idempotency=idempotency,
+            audit_event=_handoff_audit(invalid_claim, handoff, idempotency),
         )
 
     assert repository.get_claim(claim.claim_id, claim.customer_id) == claim

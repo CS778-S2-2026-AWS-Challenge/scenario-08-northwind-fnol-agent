@@ -87,8 +87,8 @@ sequence of unrelated `save_*` calls.
 | Message-only claimant continuation | claim + session + message + idempotency | claim `N -> N+1`; session context updated to the resulting claim revision; stored `active_session_id` is preserved |
 | Validated Agent turn | claim + session question accounting + claimant message + Agent message + decision + applied Branch Evaluation + optional handoff/evidence + idempotency | claim `N -> N+1`; all trigger/reply/decision/evaluation links agree; stored `active_session_id` is preserved; failed retrieval or validation writes none of the bundle |
 | Evidence state mutation | claim + evidence + idempotency | claim `N -> N+1`; evidence belongs to the claim and active interaction boundary; stored `active_session_id` is preserved |
-| Handoff mutation | claim + handoff + idempotency | claim `N -> N+1`; handoff identity and idempotency handoff reference agree; stored `active_session_id` is preserved |
-| Staff write-back | claim + one or more authorised staff/handoff/message/customer-update records + idempotency | claim `N -> N+1`; all supplied records belong to the claim; non-interaction staff records may be session-agnostic, while staff messages bind the active session and staff actor; stored `active_session_id` is preserved |
+| Handoff mutation | claim + handoff + idempotency + Claim-scoped audit fact | claim `N -> N+1`; handoff identity, audit handoff source reference, resulting audit revision, actor, and idempotency identity agree; stored `active_session_id` is preserved |
+| Staff write-back | claim + one or more authorised staff/handoff/message/customer-update records + idempotency + audit fact when a handoff is mutated | claim `N -> N+1`; all supplied records belong to the claim; handoff lifecycle writes carry the same actor/idempotency/resulting-revision audit identity; non-interaction staff records may be session-agnostic, while staff messages bind the active session and staff actor; stored `active_session_id` is preserved |
 | Reopen terminal Claim | claim + staff-scoped idempotency response + internal audit event | claim `N -> N+1`; exact `claim.reopen` action/target/revision and primary ownership are re-resolved; only `terminal_disposition` is cleared; retained `claim_state` and `active_session_id` are preserved |
 | Retrieval + directly derived review signals | retrieval + zero or more source-linked review signals | no claim revision change merely for recording evidence; the bundle itself is atomic |
 
@@ -168,10 +168,16 @@ valid against current Claim State.
 A handoff is a child work record, not a second claim status store.
 
 - its immutable identity/reason/type/source packet remains linked to one claim;
-- acceptance/resolution/status/owner changes that materially affect shared work are
-  revision-checked claim mutations;
+- creation plus acceptance/resolution/status/owner changes that materially affect shared work are
+  revision-checked Claim mutations and persist one deterministic Claim-scoped audit fact in the
+  same atomic boundary;
+- the handoff audit fact uses the authenticated actor, authorised permission/action, operation
+  idempotency key, resulting Claim revision, and handoff identity; an exact replay cannot append a
+  second fact for the same operation;
 - one staff mutation may atomically store the updated handoff, staff action, customer-safe
-  update, shared message, or signal decision that belong to the same operation;
+  update, shared message, or signal decision that belong to the same operation; ownership
+  transfer/requeue uses the same audit requirement whenever the ownership mutation carries a
+  changed handoff;
 - staff actions, customer updates, and signal decisions that do not belong to a claimant
   interaction may use an empty idempotency `session_id`; they still require the same
   authoritative `claim_id`, staff actor identity, and relevant child identity;
@@ -179,8 +185,9 @@ A handoff is a child work record, not a second claim status store.
   on the claim's active session and the idempotency session/message links must match it;
 - claimant-visible updates are separate from internal reason/result data even though both
   may be committed in one transaction;
-- a failed staff or handoff mutation leaves the claim and every supplied child record at
-  the previous snapshot.
+- a failed staff or handoff mutation, including audit validation or persistence failure, leaves
+  the Claim, handoff, idempotency record, audit store, and durable realtime mutation at the
+  previous snapshot.
 - terminal reopen is a staff mutation with no new child work record: it atomically clears the
   embedded terminal record, stores the first Workbench response, and appends one internal audit
   fact carrying the prior terminal sources and resulting revision.

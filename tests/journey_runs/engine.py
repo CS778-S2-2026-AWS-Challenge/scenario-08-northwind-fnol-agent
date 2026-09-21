@@ -15,9 +15,11 @@ fixture-oracle comparisons to successful steps and stop when an observable contr
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -28,7 +30,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.adapters.evidence_storage import MockEvidenceStorage
-from backend.core.config import Settings
+from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
 
 from .metrics import QuestionEffort, metric_coverage
 from .record import (
@@ -50,6 +52,42 @@ from .record import (
     classify,
     step_outcome,
 )
+
+PROFILE_ENV = 'AGENT_RUNTIME_PROFILE'
+
+
+def journey_settings() -> Settings:
+    """Build the runtime a journey runs on, from the variable the backend reads.
+
+    The suite ran only on the default controlled profile, which is why three Sprint 4 metrics
+    are recorded as not measured. Reading the profile here lets a configured `model_gateway`
+    run the same journeys. A requested `model_gateway` without transport configuration raises
+    from `Settings` rather than running on the controlled Agent, because a model-backed claim
+    about a rule-driven run would be the one thing this record must never make.
+
+    Returns:
+        Test settings on the requested Agent runtime profile.
+
+    Raises:
+        ValueError: The profile name is unknown, or `model_gateway` is not configured.
+    """
+
+    raw = os.getenv(PROFILE_ENV, AgentRuntimeProfile.CONTROLLED.value).strip().lower()
+    try:
+        profile = AgentRuntimeProfile(raw)
+    except ValueError as error:
+        allowed = ', '.join(item.value for item in AgentRuntimeProfile)
+        raise ValueError(f'{PROFILE_ENV} must be exactly one of: {allowed}.') from error
+    if profile is AgentRuntimeProfile.CONTROLLED:
+        return Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    configured = Settings.from_environment()
+    return replace(
+        configured,
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+        agent_runtime_profile=profile,
+    )
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MATERIAL_ROOT = REPOSITORY_ROOT / 'backend/demo_data/materials'

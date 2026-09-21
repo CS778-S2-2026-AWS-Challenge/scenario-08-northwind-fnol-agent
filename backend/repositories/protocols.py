@@ -5,7 +5,15 @@ from threading import Event
 from typing import Any, Protocol
 
 from backend.domain.agent_context_runtime import VerifiedConversationSummary
-from backend.domain.audit import AuditEventEnvelope, AuditSubject
+from backend.domain.audit import (
+    AuditEventEnvelope,
+    AuditEventType,
+    AuditOutcome,
+    AuditPermissionOutcome,
+    AuditSubject,
+    AuditSubjectType,
+    AuditVisibility,
+)
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
@@ -111,6 +119,50 @@ class IdempotencyRecord:
     staff_agent_draft_id: str | None = None
     staff_agent_execution_id: str | None = None
     response_payload: dict[str, Any] | None = None
+
+
+def validate_handoff_audit_link(
+    claim: WorkingClaim,
+    handoff: HandoffRecord,
+    idempotency: IdempotencyRecord,
+    audit_event: AuditEventEnvelope,
+) -> None:
+    """Validate the cross-record identity for an audited Handoff mutation."""
+
+    if (
+        handoff.claim_id != claim.claim_id
+        or idempotency.claim_id != claim.claim_id
+        or idempotency.handoff_id != handoff.handoff_id
+        or audit_event.event_type is not AuditEventType.ACTION_COMPLETED
+        or audit_event.outcome is not AuditOutcome.SUCCEEDED
+        or audit_event.subject.subject_type is not AuditSubjectType.CLAIM
+        or audit_event.subject.subject_id != claim.claim_id
+        or audit_event.subject.claim_id != claim.claim_id
+        or audit_event.claim_revision != claim.revision
+        or audit_event.actor.actor_id != idempotency.actor_id
+        or audit_event.idempotency_key != idempotency.key
+        or audit_event.correlation_id != idempotency.key
+        or handoff.handoff_id not in audit_event.source_refs
+        or audit_event.permission is None
+        or audit_event.permission.outcome is not AuditPermissionOutcome.AUTHORISED
+        or audit_event.visibility not in {AuditVisibility.INTERNAL_ONLY, AuditVisibility.AUDIT_ONLY}
+    ):
+        raise ValueError('The Handoff audit fact does not match the persisted mutation.')
+
+
+def validate_handoff_mutation_audit(
+    claim: WorkingClaim,
+    handoff: HandoffRecord | None,
+    idempotency: IdempotencyRecord,
+    audit_event: AuditEventEnvelope | None,
+) -> None:
+    """Require and validate the audit fact only when a mutation changes a Handoff."""
+
+    if handoff is None:
+        return
+    if audit_event is None:
+        raise ValueError('A Handoff mutation requires its atomic audit fact.')
+    validate_handoff_audit_link(claim, handoff, idempotency, audit_event)
 
 
 def with_staff_agent_source(
@@ -1216,9 +1268,10 @@ class PersistenceRepository(ClaimRepository, Protocol):
         collaboration_request: ClaimCollaborationRequest,
         coworkers: list[ClaimCoworkerRecord] | None = None,
         handoff: HandoffRecord | None = None,
+        audit_event: AuditEventEnvelope | None = None,
         staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
-        """Atomically persist an ownership transition and its collaboration record."""
+        """Atomically persist ownership records and any linked handoff audit fact."""
         raise NotImplementedError
 
     def save_staff_mutation(
@@ -1234,9 +1287,10 @@ class PersistenceRepository(ClaimRepository, Protocol):
         message: MessageRecord | None = None,
         required_staff_id: str | None = None,
         required_staff_revision: int | None = None,
+        audit_event: AuditEventEnvelope | None = None,
         staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
-        """Atomically persist an authorised staff write-back and shared claim revision."""
+        """Atomically persist a staff write-back and any linked handoff audit fact."""
         raise NotImplementedError
 
     def save_handoff(self, handoff: HandoffRecord, customer_id: str) -> None:
@@ -1259,7 +1313,8 @@ class PersistenceRepository(ClaimRepository, Protocol):
         expected_revision: int,
         handoff: HandoffRecord,
         idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
         branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
-        """Atomically persist a handoff, shared claim state, and retry metadata."""
+        """Atomically persist a handoff, Claim revision, retry metadata, and audit fact."""
         raise NotImplementedError
