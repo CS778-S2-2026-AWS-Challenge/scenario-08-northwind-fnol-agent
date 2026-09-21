@@ -174,6 +174,16 @@ def create_claim_from_confirmed_report(
                 for field_code in missing_or_unconfirmed
             ],
         )
+    if requirements.recorded:
+        raise ApiError(
+            status_code=409,
+            code='CONFIRMATION_REQUIRED',
+            message='Recorded claim facts require claimant confirmation before creation.',
+            details=[
+                ErrorDetail(field=field_code, reason='Confirm this field before claim creation.')
+                for field_code in requirements.recorded
+            ],
+        )
     open_handoffs = [
         handoff
         for handoff in repository.list_handoffs(claim_id, principal.subject)
