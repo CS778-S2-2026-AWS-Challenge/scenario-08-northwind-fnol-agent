@@ -1657,7 +1657,9 @@ claim_revision is the Claim revision committed by this message turn. An idempote
 continues to report that historical turn revision even when later Claim mutations have advanced
 the Claim. current_claim_revision is the latest authoritative Claim revision and is the value
 used by a continuation action or a new revision-checked request. For a fresh turn these values are
-equal. Both fields are integer revision values and are present on every MessageTurnResponse.
+equal. Both fields are integer revision values and are present on every MessageTurnResponse. The
+historical value is the revision to use when interpreting the replayed turn; the current value is
+the revision to send with a subsequent revision-checked mutation.
 
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
 
