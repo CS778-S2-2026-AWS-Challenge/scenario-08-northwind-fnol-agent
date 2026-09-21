@@ -514,6 +514,14 @@ version with another published version.
 | `PATCH`, `DELETE` | `/account/identity-documents/{identity_id}` | Revision-update or soft-retire one owned identity document |
 | `POST` | `/claims/{claim_id}/policy-selections` | Propose one active owned policy number into the registered Claim field |
 
+Profile email writes accept a supported Internet-style address with one local part and a dotted
+domain. The backend trims surrounding whitespace and lowercases the complete address before it
+becomes authoritative. The claimant identity repository enforces normalized-email uniqueness in
+the same compare-and-set operation as the profile revision. An address already owned by another
+account returns `409 RESOURCE_CONFLICT`; a stale account revision remains `409 REVISION_CONFLICT`.
+Invalid email syntax returns the standard `422 VALIDATION_ERROR` without changing the account or
+its revision.
+
 `POST /api/v1/auth/sessions` is the only development/test authentication exception to the
 general bearer requirement. It accepts `email` and `password`, returns `201` with
 `customer_id`, `access_token`, `token_type`, `expires_at`, and `development_identity: true`,

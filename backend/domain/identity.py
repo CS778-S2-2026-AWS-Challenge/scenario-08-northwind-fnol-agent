@@ -1,8 +1,10 @@
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Annotated
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -18,6 +20,25 @@ from backend.domain.models import PageInfo
 PROFILE_NAME_MAX_LENGTH = 120
 PROFILE_ADDRESS_MAX_LENGTH = 500
 PROFILE_PHONE_MAX_LENGTH = 40
+_PROFILE_EMAIL_PATTERN_TEXT = (
+    r"^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*"
+    r'@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+'
+    r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$'
+)
+_PROFILE_EMAIL_PATTERN = re.compile(_PROFILE_EMAIL_PATTERN_TEXT)
+
+
+def normalize_profile_email(value: str) -> str:
+    """Return the canonical supported claimant email shape."""
+    normalized = value.strip().lower()
+    if len(normalized) > 254 or not _PROFILE_EMAIL_PATTERN.fullmatch(normalized):
+        raise ValueError('Enter a valid email address.')
+    local_part, _ = normalized.rsplit('@', 1)
+    if len(local_part) > 64:
+        raise ValueError('Enter a valid email address.')
+    return normalized
+
+
 ProfileName = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=PROFILE_NAME_MAX_LENGTH),
@@ -27,7 +48,14 @@ ProfileAddress = Annotated[
     StringConstraints(strip_whitespace=True, min_length=1, max_length=PROFILE_ADDRESS_MAX_LENGTH),
 ]
 ProfileEmail = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=3, max_length=254)
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=3,
+        max_length=254,
+        pattern=_PROFILE_EMAIL_PATTERN_TEXT,
+    ),
+    AfterValidator(normalize_profile_email),
 ]
 ProfilePhone = Annotated[
     str, StringConstraints(strip_whitespace=True, max_length=PROFILE_PHONE_MAX_LENGTH)
@@ -55,6 +83,12 @@ class CustomerAccountRecord:
 
 def validate_customer_account_profile(account: CustomerAccountRecord) -> None:
     """Reject non-normalized or internally inconsistent persisted profile text."""
+    try:
+        normalized_email = normalize_profile_email(account.email)
+    except ValueError as error:
+        raise ValueError('invalid_email') from error
+    if account.email != normalized_email:
+        raise ValueError('invalid_email')
     if (
         not account.legal_name
         or len(account.legal_name) > PROFILE_NAME_MAX_LENGTH
@@ -101,7 +135,7 @@ class LoginRequest(BaseModel):
 class RegistrationRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
-    email: str = Field(min_length=3, max_length=254)
+    email: ProfileEmail
     password: str = Field(min_length=8, max_length=256)
     display_name: ProfileName
 
@@ -219,7 +253,7 @@ class AdminCustomerAccountPatch(BaseModel):
 class AdminCustomerAccountCreate(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
-    email: str = Field(min_length=3, max_length=254)
+    email: ProfileEmail
     initial_password: str = Field(min_length=8, max_length=256)
     display_name: ProfileName
     phone: ProfilePhone = ''

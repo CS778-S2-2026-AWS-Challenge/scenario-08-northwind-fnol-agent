@@ -8,7 +8,8 @@ from fastapi.testclient import TestClient
 from backend.adapters.identity import FixtureIdentityRepository, SQLiteIdentityRepository
 from backend.app import create_app
 from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
-from backend.domain.identity import ClaimantAuthSessionRecord
+from backend.domain.identity import ClaimantAuthSessionRecord, CustomerAccountRecord
+from backend.repositories.identity import DuplicateEmailConflict
 
 
 def login(client: TestClient, email: str, password: str) -> dict[str, object]:
@@ -268,3 +269,65 @@ def test_profile_rejects_an_email_owned_by_another_claimant(client: TestClient) 
         '/api/v1/account', headers={'Authorization': f'Bearer {second["access_token"]}'}
     )
     assert account.json()['profile']['email'] == 'claimant.two@example.invalid'
+
+
+@pytest.mark.parametrize(
+    'email',
+    [
+        'not-an-email',
+        '@example.invalid',
+        'claimant@localhost',
+        'claimant..name@example.invalid',
+    ],
+)
+def test_profile_rejects_unsupported_email_shapes_without_advancing_revision(
+    client: TestClient, email: str
+) -> None:
+    session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    headers = {'Authorization': f'Bearer {session["access_token"]}'}
+    before = client.get('/api/v1/account', headers=headers).json()
+
+    response = client.patch('/api/v1/account/profile', headers=headers, json={'email': email})
+    after = client.get('/api/v1/account', headers=headers).json()
+
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert after == before
+
+
+def test_profile_accepts_unchanged_email_after_normalization(client: TestClient) -> None:
+    session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    headers = {'Authorization': f'Bearer {session["access_token"]}'}
+    before = client.get('/api/v1/account', headers=headers).json()
+
+    response = client.patch(
+        '/api/v1/account/profile',
+        headers=headers,
+        json={'email': ' CLAIMANT.ONE@EXAMPLE.INVALID '},
+    )
+
+    assert response.status_code == 200
+    assert response.json()['profile']['email'] == 'claimant.one@example.invalid'
+    assert response.json()['revision'] == before['revision'] + 1
+
+
+def test_profile_maps_repository_duplicate_email_conflict_to_resource_conflict() -> None:
+    class ConflictingIdentityRepository(FixtureIdentityRepository):
+        def save_account(self, account: CustomerAccountRecord, expected_revision: int) -> None:
+            raise DuplicateEmailConflict('reserved@example.invalid')
+
+    repository = ConflictingIdentityRepository()
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        identity_repository=repository,
+    )
+    with TestClient(app) as test_client:
+        session = login(test_client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        response = test_client.patch(
+            '/api/v1/account/profile',
+            headers={'Authorization': f'Bearer {session["access_token"]}'},
+            json={'email': 'available@example.invalid'},
+        )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'RESOURCE_CONFLICT'

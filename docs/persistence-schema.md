@@ -458,6 +458,12 @@ the append-only audit collection through a bounded, filterable projection.
   State or Workbench records.
 - Customer and Staff account writes use monotonically increasing revisions. Session revocation
   advances only the targeted session revision and preserves its prior creation and expiry times.
+- Claimant account email is stored in its trimmed lowercase form. The authoritative account save
+  checks the expected account revision and normalized-email uniqueness as one operation. Fixture
+  persistence serializes that check and write; SQLite relies on its unique email constraint and
+  maps the constraint result to the same typed repository conflict. When different accounts race
+  for one email, exactly one write succeeds and the other leaves its account and revision
+  unchanged.
 - Existing local SQLite identity databases are upgraded in place with account revisions,
   timestamps, opaque session IDs, and session revisions. The migration preserves account/session
   relationships and assigns each legacy session one stable `ias_` ID before creating its unique

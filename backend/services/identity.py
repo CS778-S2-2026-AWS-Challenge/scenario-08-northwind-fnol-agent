@@ -17,7 +17,7 @@ from backend.domain.identity import (
     ProfilePatchRequest,
     RegistrationRequest,
 )
-from backend.repositories.identity import IdentityRepository
+from backend.repositories.identity import DuplicateEmailConflict, IdentityRepository
 from backend.repositories.protocols import RevisionConflict
 from backend.services.support import parse_if_match
 
@@ -147,17 +147,6 @@ def update_profile(
     legacy_name = payload.display_name.strip() if payload.display_name is not None else None
     legal_name = str(changes.pop('legal_name', legacy_name or account.legal_name)).strip()
     email = changes.get('email', account.email)
-    if isinstance(email, str):
-        email = email.strip().lower()
-    if email != account.email and any(
-        candidate.customer_id != account.customer_id and candidate.email == email
-        for candidate in repository.list_accounts()
-    ):
-        raise ApiError(
-            status_code=409,
-            code='RESOURCE_CONFLICT',
-            message='An account with that email already exists.',
-        )
     preferred_name = changes.get('preferred_name', account.preferred_name)
     if isinstance(preferred_name, str):
         preferred_name = preferred_name.strip()
@@ -181,6 +170,12 @@ def update_profile(
     )
     try:
         repository.save_account(updated, expected_revision)
+    except DuplicateEmailConflict as error:
+        raise ApiError(
+            status_code=409,
+            code='RESOURCE_CONFLICT',
+            message='An account with that email already exists.',
+        ) from error
     except RevisionConflict as error:
         raise ApiError(
             status_code=409,
