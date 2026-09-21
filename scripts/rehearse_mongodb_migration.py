@@ -160,6 +160,14 @@ class PlannedItem:
     payload: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class PromotionRehearsal:
+    """Local-only target metadata for one anonymous Claim-owner promotion."""
+
+    items: tuple[PlannedItem, ...]
+    restored_source_ref: str
+
+
 class LocalTarget:
     """In-memory readback target that classifies repeat writes deterministically."""
 
@@ -514,6 +522,150 @@ def _idempotency_generation_items(
             )
         )
     return items
+
+
+def rehearse_anonymous_promotion(
+    documents: Sequence[Mapping[str, Any]],
+    *,
+    claim_id: str,
+    anonymous_actor: str,
+    authenticated_actor: str,
+    route: str,
+    message_id: str,
+    retry_key: str,
+) -> PromotionRehearsal:
+    """Rehearse #991 aliases and historical-turn lookup without changing source data."""
+
+    claim = next(
+        (
+            document
+            for document in documents
+            if document.get('record_type') == 'claim' and _field(document, 'claim_id') == claim_id
+        ),
+        None,
+    )
+    if claim is None or _field(claim, 'customer_id') != anonymous_actor:
+        raise ValueError('anonymous Claim ownership is absent or stale')
+    if not authenticated_actor or authenticated_actor == anonymous_actor:
+        raise ValueError('authenticated actor must be a distinct non-empty identity')
+    selected = [
+        document
+        for document in documents
+        if document.get('record_type') == 'idempotency'
+        and _field(document, 'claim_id') == claim_id
+        and _field(document, 'actor_id') == anonymous_actor
+    ]
+    if not selected:
+        raise ValueError('Claim has no anonymous idempotency records to promote')
+    source_turn = next(
+        (
+            document
+            for document in selected
+            if _field(document, 'route') == route and _field(document, 'message_id') == message_id
+        ),
+        None,
+    )
+    if source_turn is None or retry_key == _field(source_turn, 'key'):
+        raise ValueError('different-key historical message turn is absent')
+
+    output: list[PlannedItem] = []
+    occupied: set[tuple[str, str]] = set()
+    restored_source_ref = _source_ref(source_turn)
+    for document in sorted(selected, key=_source_ref):
+        source_actor = str(_field(document, 'actor_id'))
+        source_route = str(_field(document, 'route'))
+        source_key = str(_field(document, 'key'))
+        canonical_pk = f'IDEMPOTENCY#{_digest(source_actor, source_route, source_key)}'
+        alias_pk = f'IDEMPOTENCY#{_digest(authenticated_actor, source_route, source_key)}'
+        collision = any(
+            candidate.get('record_type') == 'idempotency'
+            and _field(candidate, 'actor_id') == authenticated_actor
+            and _field(candidate, 'route') == source_route
+            and _field(candidate, 'key') == source_key
+            for candidate in documents
+        )
+        if collision or (alias_pk, 'META') in occupied:
+            raise ValueError('authenticated exact-key alias collides')
+        occupied.add((alias_pk, 'META'))
+        output.append(
+            _planned_item(
+                alias_pk,
+                'META',
+                'idempotency',
+                'promotion_alias',
+                document,
+                {
+                    'canonical_pk': canonical_pk,
+                    'canonical_sk': 'META',
+                    'claim_id': claim_id,
+                    'authenticated_actor_id': authenticated_actor,
+                    'original_actor_id': source_actor,
+                    'route': source_route,
+                    'key': source_key,
+                    'request_fingerprint': _field(document, 'request_fingerprint'),
+                },
+            )
+        )
+        source_message_id = _field(document, 'message_id')
+        if isinstance(source_message_id, str) and source_message_id:
+            lookup_pk = 'LOOKUP#MESSAGE_TURN_IDEMPOTENCY#' + _digest(
+                authenticated_actor, source_route, claim_id, source_message_id
+            )
+            if (lookup_pk, 'META') in occupied:
+                raise ValueError('authenticated message-turn lookup collides')
+            occupied.add((lookup_pk, 'META'))
+            output.append(
+                _planned_item(
+                    lookup_pk,
+                    'META',
+                    'idempotency',
+                    'promotion_message_turn_lookup',
+                    document,
+                    {
+                        'canonical_pk': canonical_pk,
+                        'canonical_sk': 'META',
+                        'claim_id': claim_id,
+                        'authenticated_actor_id': authenticated_actor,
+                        'original_actor_id': source_actor,
+                        'route': source_route,
+                        'message_id': source_message_id,
+                        'request_fingerprint': _field(document, 'request_fingerprint'),
+                        'message_turn_kind': _field(document, 'message_turn_kind'),
+                        'message_turn_revision': _field(document, 'message_turn_revision'),
+                    },
+                )
+            )
+    state_pk = f'IDEMPOTENCY_ACTOR#{_digest(claim_id, anonymous_actor)}'
+    output.append(
+        _planned_item(
+            state_pk,
+            'STATE',
+            'idempotency',
+            'promotion_retirement',
+            claim,
+            {
+                'claim_id': claim_id,
+                'actor_id': anonymous_actor,
+                'generation': len(selected),
+                'retired': True,
+                'retired_to_actor_id': authenticated_actor,
+            },
+            source_ref=_digest(state_pk, 'STATE')[:16],
+        )
+    )
+    matching_lookup = next(
+        (
+            item
+            for item in output
+            if item.item_kind == 'promotion_message_turn_lookup'
+            and item.payload['route'] == route
+            and item.payload['message_id'] == message_id
+        ),
+        None,
+    )
+    if matching_lookup is None or matching_lookup.source_ref != restored_source_ref:
+        raise ValueError('authenticated historical message turn cannot be restored')
+    return PromotionRehearsal(tuple(output), restored_source_ref)
 
 
 def _relationship_findings(documents: Sequence[Mapping[str, Any]]) -> list[RehearsalFinding]:

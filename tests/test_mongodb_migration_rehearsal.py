@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -15,6 +16,7 @@ from scripts.rehearse_mongodb_migration import (
     LocalTarget,
     SnapshotMetadata,
     read_snapshot,
+    rehearse_anonymous_promotion,
     transform_snapshot,
 )
 
@@ -373,6 +375,77 @@ def test_local_target_reports_changed_authoritative_item_as_conflict() -> None:
     assert target.apply([original]) == {'migrated': 1}
     assert target.apply([changed]) == {'conflict': 1}
     assert target.readback([original]) is True
+
+
+def test_anonymous_promotion_restores_historical_turn_without_child_rewrite() -> None:
+    documents = _representative_snapshot()
+    documents[0]['customer_id'] = 'anonymous:browser'
+    for document in documents:
+        if document.get('customer_id') == 'cus_rehearsal':
+            document['customer_id'] = 'anonymous:browser'
+    before_items, _ = transform_snapshot(documents, _metadata(len(documents)))
+
+    promotion = rehearse_anonymous_promotion(
+        documents,
+        claim_id='clm_rehearsal',
+        anonymous_actor='anonymous:browser',
+        authenticated_actor='customer:123',
+        route='/api/v1/claims/clm_rehearsal/sessions/ses_rehearsal/messages',
+        message_id='msg_rehearsal',
+        retry_key='different-key',
+    )
+
+    assert [item.item_kind for item in promotion.items].count('promotion_alias') == 2
+    lookup = next(
+        item for item in promotion.items if item.item_kind == 'promotion_message_turn_lookup'
+    )
+    assert lookup.payload['message_turn_kind'] == 'runtime'
+    assert lookup.payload['message_turn_revision'] == 3
+    assert lookup.source_ref == promotion.restored_source_ref
+    retirement = next(item for item in promotion.items if item.item_kind == 'promotion_retirement')
+    assert retirement.payload['generation'] == 2
+    assert retirement.payload['retired_to_actor_id'] == 'customer:123'
+
+    promoted_documents = deepcopy(documents)
+    promoted_documents[0]['customer_id'] = 'customer:123'
+    after_items, _ = transform_snapshot(promoted_documents, _metadata(len(promoted_documents)))
+    before_session = next(
+        item
+        for item in before_items
+        if item.record_type == 'session' and item.item_kind == 'canonical'
+    )
+    after_session = next(
+        item
+        for item in after_items
+        if item.record_type == 'session' and item.item_kind == 'canonical'
+    )
+    assert after_session == before_session
+
+
+def test_anonymous_promotion_rejects_authenticated_alias_collision() -> None:
+    documents = _representative_snapshot()
+    documents[0]['customer_id'] = 'anonymous:browser'
+    documents.append(
+        _document(
+            'idempotency',
+            'customer:123:/messages:key-1',
+            actor_id='customer:123',
+            route='/api/v1/claims/clm_rehearsal/sessions/ses_rehearsal/messages',
+            key='key-1',
+            payload={'claim_id': 'clm_rehearsal'},
+        )
+    )
+
+    with pytest.raises(ValueError, match='exact-key alias collides'):
+        rehearse_anonymous_promotion(
+            documents,
+            claim_id='clm_rehearsal',
+            anonymous_actor='anonymous:browser',
+            authenticated_actor='customer:123',
+            route='/api/v1/claims/clm_rehearsal/sessions/ses_rehearsal/messages',
+            message_id='msg_rehearsal',
+            retry_key='different-key',
+        )
 
 
 @pytest.mark.integration
