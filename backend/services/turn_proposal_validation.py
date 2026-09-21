@@ -18,6 +18,7 @@ from backend.domain.agent_v8 import (
     V8StateProposal,
     V8TurnProposal,
 )
+from backend.domain.branch_registry import build_default_registry
 from backend.domain.external_service_registry import SERVICE_REGISTRY
 from backend.domain.model_gateway import ModelGatewayError, ModelGatewayErrorCode
 from backend.domain.models import (
@@ -39,6 +40,27 @@ if TYPE_CHECKING:
     from backend.services.agent import AgentEvidenceReference
 
 logger = logging.getLogger(__name__)
+
+_NON_ANSWER_PATTERN = re.compile(
+    r"\b(?:i\s+(?:do\s+not|don't)\s+know|not\s+sure|unknown|no\s+idea|"
+    r"can't\s+remember|cannot\s+remember)\b|不知道|不清楚|不确定",
+    re.IGNORECASE,
+)
+
+
+def _is_temporal_non_answer(
+    field_code: str,
+    value: object,
+    reported_text: str | None,
+) -> bool:
+    if field_code not in {'incident.occurred_at', 'incident.discovered_at'}:
+        return False
+    quote = ' '.join((reported_text or '').split())
+    return bool(
+        _NON_ANSWER_PATTERN.search(quote)
+        or (isinstance(value, str) and value.strip().casefold() in {'unknown', 'not known'})
+    )
+
 
 _STATE_WHITELIST = {
     'claim_state.urgency': frozenset({'urgent'}),
@@ -88,6 +110,8 @@ def claimant_report_supports_value(
     message = ' '.join((message_text or '').split()).casefold()
     if not quote or quote not in message:
         return False
+    if _is_temporal_non_answer(field_code, value, reported_text):
+        return False
     if isinstance(value, str):
         return True
     if isinstance(value, list):
@@ -108,6 +132,61 @@ def claimant_report_supports_value(
     }
     marker = markers.get(field_code)
     return marker is not None and re.search(marker, quote) is not None and value is not negative
+
+
+def _accepted_family(
+    branch_evaluation: BranchEvaluationResult,
+    changes: Sequence[ProposedFormChange],
+) -> str | None:
+    """Return the family accepted for this turn's semantic field checks."""
+    if branch_evaluation.selected_family in {'motor', 'home', 'contents'}:
+        return branch_evaluation.selected_family
+    family_change = next(
+        (
+            change
+            for change in changes
+            if change.field_code == 'claim.product_family'
+            and change.source is FormSource.CLAIMANT
+            and isinstance(change.value, str)
+            and change.value in {'motor', 'home', 'contents'}
+        ),
+        None,
+    )
+    return family_change.value if family_change is not None else None
+
+
+def _apply_family_semantic_boundary(
+    changes: list[ProposedFormChange],
+    *,
+    branch_evaluation: BranchEvaluationResult,
+    reject: Callable[[str, str, str], None],
+) -> list[ProposedFormChange]:
+    """Keep direct quotes from confirming a field belonging to another family."""
+    accepted_family = _accepted_family(branch_evaluation, changes)
+    field_registry = build_default_registry().field_by_code
+    bounded: list[ProposedFormChange] = []
+    for change in changes:
+        definition = field_registry.get(change.field_code)
+        families = definition.families if definition is not None else frozenset()
+        if not families:
+            bounded.append(change)
+            continue
+        if accepted_family is not None and accepted_family not in families:
+            reject('field_change', change.field_code, 'family_field_mismatch')
+            continue
+        if accepted_family is None and change.source is FormSource.CLAIMANT:
+            bounded.append(
+                change.model_copy(
+                    update={
+                        'source': FormSource.INFERENCE,
+                        'status': FormStatus.PROPOSED,
+                        'confidence': None,
+                    }
+                )
+            )
+            continue
+        bounded.append(change)
+    return bounded
 
 
 def parse_turn_proposal(raw: dict[str, object]) -> tuple[V8TurnProposal, list[dict[str, str]]]:
@@ -387,6 +466,9 @@ def validate_turn_proposal(
     for rejection in field_bound_rejections:
         reject('field_change', rejection.field_code, rejection.reason_code)
     for change in validated_changes:
+        if _is_temporal_non_answer(change.field_code, change.value, change.reported_text):
+            reject('field_change', change.field_code, 'temporal_non_answer')
+            continue
         source = FormSource.INFERENCE
         if change.source_evidence_id is not None:
             attached = evidence_by_id.get(change.source_evidence_id)
@@ -419,6 +501,11 @@ def validate_turn_proposal(
                 source_evidence_id=change.source_evidence_id,
             )
         )
+    changes = _apply_family_semantic_boundary(
+        changes,
+        branch_evaluation=branch_evaluation,
+        reject=reject,
+    )
     services_suppressed = bool(
         open_handoffs or safety_interrupt is not None or escalation is not None
     )
