@@ -2523,10 +2523,23 @@ def submit_message(
     if pending_confirmation_item is not None:
         parts = pending_confirmation_item.subject_ref.split(':')
         try:
+            current_fingerprint = sha256(
+                json.dumps(
+                    sorted(
+                        (code, field.value)
+                        for code, field in claim.form.items()
+                        if field.status is FormStatus.PROPOSED
+                    ),
+                    separators=(',', ':'),
+                    sort_keys=True,
+                ).encode()
+            ).hexdigest()
             confirmation_bound = (
-                len(parts) >= 4
+                len(parts) >= 5
                 and parts[0] == 'confirmation'
                 and int(parts[2]) == confirmation_revision_before_message
+                and parts[3] == 'fp'
+                and parts[4] == current_fingerprint
             )
         except ValueError:
             confirmation_bound = False
