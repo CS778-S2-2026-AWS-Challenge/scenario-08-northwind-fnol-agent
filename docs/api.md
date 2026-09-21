@@ -1580,6 +1580,15 @@ Response `200`:
   "claim_id": "clm_01J4Y7Q2AW",
   "session_id": "ses_01J4Y7RPN8",
   "claim_revision": 3,
+  "current_claim_revision": 3,
+  "current_claim": {
+    "claim_id": "clm_01J4Y7Q2AW",
+    "revision": 3,
+    "form": {},
+    "contents_items": [],
+    "customer_next_step": {},
+    "updated_at": "2026-08-10T03:42:12Z"
+  },
   "claimant_message": {
     "message_id": "msg_01J4Y7T1KC",
     "actor": "claimant",
@@ -1651,6 +1660,29 @@ Response `200`:
   }
 }
 ```
+
+claim_revision is the Claim revision committed by this message turn. An idempotent replay
+continues to report that historical turn revision even when later Claim mutations have advanced
+the Claim. current_claim_revision is the latest authoritative Claim revision and is the value
+used by a continuation action or a new revision-checked request. For a fresh turn these values are
+equal. Both fields are integer revision values and are present on every MessageTurnResponse. The
+historical value is the revision to use when interpreting the replayed turn; the current value is
+the revision to send with a subsequent revision-checked mutation. Neither field changes the
+Claim revision or creates a new turn by itself. Retries of records written before
+`current_claim_revision` was introduced are hydrated from the durable message and current Claim;
+the stored idempotency record is not rewritten and no side effect is replayed.
+
+`current_claim` is the complete claimant-safe Claim detail projection at
+`current_claim_revision`. `form_changes`, `contents_item_changes`, `decision`, and the returned
+messages remain immutable evidence of the historical turn at `claim_revision`; they are not a
+current-state patch during replay. When the two revisions differ, clients install `current_claim`
+and must not merge the historical deltas into live form or contents state. Current dynamic form,
+next step, primary action, handoff, contents, and `updated_at` therefore come from the same
+authoritative snapshot for legacy Agent, message-only/handoff, and namespaced Runtime responses.
+The server records an explicit turn kind and committed turn revision with each accepted message.
+A retry using the same `client_message_id` under a new idempotency key resolves that original turn
+identity. A missing declared decision, Runtime trace, or Agent message is a bounded
+`500 INTERNAL_ERROR`; replay never downgrades a damaged turn to a partial successful response.
 
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
 
@@ -1784,6 +1816,19 @@ exponential backoff and jitter; hidden tabs skip those degraded refreshes, and r
 event resets the fallback budget. This degraded recovery never resubmits a business command or
 external side effect. Existing post-mutation authoritative readback remains a separate correctness
 check and is not replaced by realtime delivery.
+
+Claimant transport health is a browser-operational state, not Claim or Handoff business state. When
+the claimant stream loses continuity, the page makes that degraded freshness explicit: ordinary
+transport failure is shown as reconnecting, while `resync_required` or
+`409 INVALID_EVENT_CURSOR` is shown as requiring resynchronisation. Opening a replacement SSE
+connection is not sufficient to claim that the displayed Claim is current. The client first
+establishes the replacement subscription and then successfully refetches the authoritative active
+Claim and, when a session is active, that session's claimant-visible messages for the same current
+Claim/session context. Only after that readback is applied may the degraded/stale notice clear.
+A superseded, failed, or partial Claim/message readback leaves the notice visible. Bounded degraded
+refreshes during an outage may improve the displayed projection but do not, by themselves, restore
+the client's live-current claim. Authentication-context changes discard the prior principal's
+transport-health state together with replay state.
 
 ### `PATCH /api/v1/claims/{claim_id}/form`
 
