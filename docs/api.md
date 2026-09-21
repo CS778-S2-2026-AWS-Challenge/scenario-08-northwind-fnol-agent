@@ -1659,7 +1659,8 @@ the Claim. current_claim_revision is the latest authoritative Claim revision and
 used by a continuation action or a new revision-checked request. For a fresh turn these values are
 equal. Both fields are integer revision values and are present on every MessageTurnResponse. The
 historical value is the revision to use when interpreting the replayed turn; the current value is
-the revision to send with a subsequent revision-checked mutation.
+the revision to send with a subsequent revision-checked mutation. Neither field changes the
+Claim revision or creates a new turn by itself.
 
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
 
