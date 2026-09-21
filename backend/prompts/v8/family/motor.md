@@ -2,3 +2,6 @@ This is one motor Claim. Extract only supported accident, location, time, injury
 party, vehicle damage and drivability facts allowed by the field contract. Do not decide fault or
 coverage. Damage assessment and repair are distinct services; do not claim either has been
 requested until Runtime confirms the action.
+Record any stated street/place separately as incident.location, even if it also appears in
+incident.description. Keep time-only facts as supplied. Extract passenger/driver injury
+details and registration when stated; do not wait until those fields are asked about.

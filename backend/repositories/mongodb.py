@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from threading import Event
-from typing import Any, NoReturn, TypeVar
+from typing import Any, NoReturn, TypeVar, cast
 
 from pydantic import BaseModel, TypeAdapter
 from pymongo import MongoClient, ReturnDocument
@@ -5486,6 +5486,60 @@ class MongoDBRepository:
                 mongo_session,
             )
         )
+
+    def freeze_message_response(
+        self, idempotency: IdempotencyRecord, response_payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        def freeze(mongo_session: Any) -> dict[str, Any]:
+            query = {
+                'record_type': 'idempotency',
+                'actor_id': idempotency.actor_id,
+                'route': idempotency.route,
+                'key': idempotency.key,
+            }
+            document = self._collection.find_one(query, session=mongo_session)
+            saved = IdempotencyRecord(**document['payload']) if document is not None else None
+            if (
+                saved is None
+                or saved.request_fingerprint != idempotency.request_fingerprint
+                or saved.claim_id != idempotency.claim_id
+                or saved.session_id != idempotency.session_id
+                or saved.message_id != idempotency.message_id
+                or saved.decision_id != idempotency.decision_id
+                or saved.decision_id is None
+                or saved.claim_id is None
+                or self._get(
+                    'claim',
+                    saved.claim_id,
+                    WorkingClaim,
+                    customer_id=saved.actor_id,
+                    session=mongo_session,
+                )
+                is None
+                or response_payload.get('claim_id') != saved.claim_id
+                or response_payload.get('session_id') != saved.session_id
+            ):
+                raise IdempotencyConflict(idempotency.key)
+            if saved.response_payload is not None:
+                return saved.response_payload
+            updated = self._collection.find_one_and_update(
+                {**query, 'payload.response_payload': None},
+                {
+                    '$set': {
+                        'payload.response_status': 200,
+                        'payload.response_payload': response_payload,
+                    }
+                },
+                return_document=ReturnDocument.AFTER,
+                session=mongo_session,
+            )
+            if updated is None:
+                updated = self._collection.find_one(query, session=mongo_session)
+            if updated is None or updated['payload'].get('response_payload') is None:
+                raise IdempotencyConflict(idempotency.key)
+            return cast(dict[str, Any], updated['payload']['response_payload'])
+
+        return self._atomic(freeze)
 
     def _save_incomplete_checkpoint(
         self,

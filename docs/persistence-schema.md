@@ -887,6 +887,21 @@ provider error body is retained. A fresh explicit attempt reuses the original in
 confirmation checkpoint; same-key replay never initiates a model request. These operations
 preserve existing Claim and Session ownership constraints.
 
+After a successful turn and its optional post-commit service continuation, the response is
+projected through the claimant visibility boundary. `freeze_message_response` then atomically
+fills `response_status=200` and `response_payload` on that attempt's existing Idempotency
+record before HTTP success is returned. Fixture uses the Claim mutation lock; MongoDB uses
+its transaction and a conditional first-response update. Competing same-key finalizers return
+the first saved payload. Actor, Claim, Session, inbound, fingerprint and decision references
+must match the committed attempt. Later mutations cannot change that key's response.
+
+If the process stops after committing the turn but before freezing a response, replay can
+reconstruct and freeze its first response from the durable decision and safe projections.
+No successful HTTP response has been delivered at that point. Because optional service
+dispatch occurs before response finalization, a concurrent mutation may be reflected in this
+first response; this is a post-dispatch observation, not a claim that it is the reducer's
+original snapshot. Once frozen, it is immutable for that key.
+
 A Runtime-detected safety/support interrupt commits the shared handoff mutation before
 provider execution, independently of the later Agent result. Existing open support is
 upgraded without duplication or priority downgrade. The turn uses the resulting revision

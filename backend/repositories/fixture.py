@@ -1558,6 +1558,33 @@ class FixtureRepository(PersistenceRepository):
         ]
         return sorted(claims, key=lambda claim: claim.created_at)
 
+    def freeze_message_response(
+        self, idempotency: IdempotencyRecord, response_payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        with self._claim_mutation_lock:
+            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            saved = self._idempotency.get(lookup)
+            if (
+                saved is None
+                or saved.request_fingerprint != idempotency.request_fingerprint
+                or saved.claim_id != idempotency.claim_id
+                or saved.session_id != idempotency.session_id
+                or saved.message_id != idempotency.message_id
+                or saved.decision_id != idempotency.decision_id
+                or saved.decision_id is None
+                or saved.claim_id is None
+                or self.get_claim(saved.claim_id, saved.actor_id) is None
+                or response_payload.get('claim_id') != saved.claim_id
+                or response_payload.get('session_id') != saved.session_id
+            ):
+                raise IdempotencyConflict(idempotency.key)
+            if saved.response_payload is not None:
+                return deepcopy(saved.response_payload)
+            self._idempotency[lookup] = replace(
+                saved, response_status=200, response_payload=deepcopy(response_payload)
+            )
+            return deepcopy(response_payload)
+
     def list_claims_internal(self) -> list[WorkingClaim]:
         return sorted(
             (deepcopy(claim) for claim in self._claims.values()),

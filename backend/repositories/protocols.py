@@ -663,6 +663,14 @@ class PersistenceRepository(ClaimRepository, Protocol):
     ) -> MessageRecord | None:
         raise NotImplementedError
 
+    def freeze_message_response(
+        self,
+        idempotency: IdempotencyRecord,
+        response_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Atomically retain the first claimant-safe response of a committed turn."""
+        raise NotImplementedError
+
     def find_message_by_client_id(
         self,
         claim_id: str,

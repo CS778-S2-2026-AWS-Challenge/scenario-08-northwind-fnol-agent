@@ -1,5 +1,7 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 
+import mongomock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -14,11 +16,13 @@ from backend.domain.models import (
     RuntimeTraceRecord,
 )
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.mongodb import MongoDBRepository
+from backend.repositories.protocols import IdempotencyConflict, PersistenceRepository
 from backend.services.agent import AgentProposal, AgentTurnContext, ControlledAgent
 
 
 class ObservingGatewayFailure:
-    def __init__(self, repository: FixtureRepository, failure: ModelGatewayErrorCode) -> None:
+    def __init__(self, repository: PersistenceRepository, failure: ModelGatewayErrorCode) -> None:
         self.repository = repository
         self.failure = failure
         self.fail = True
@@ -173,3 +177,92 @@ def test_safety_commit_failure_is_hard_error_and_provider_is_never_called(
     assert gateway.calls == 0
     messages = repository.list_messages(claim_id, session_id, 'cus_demo')
     assert len(messages) == 1 and messages[0].recovery_rule_id is None
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'mongodb'])
+def test_explicit_retry_after_safety_notice_returns_real_reply_and_keeps_original_replay(
+    repository_kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backend.app import create_app
+    from backend.core.config import IdentityMode, Settings
+
+    repository: PersistenceRepository = (
+        FixtureRepository()
+        if repository_kind == 'fixture'
+        else MongoDBRepository(mongomock.MongoClient(), 'safety_retry')
+    )
+    if repository_kind == 'mongodb':
+        # MongoDB adapter contract evidence only: mongomock has no transaction
+        # sessions/change streams; real transaction atomicity has separate tests.
+        monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
+        monkeypatch.setattr(repository, 'watch_realtime_events', lambda *_args: iter(()))
+    gateway = ObservingGatewayFailure(repository, ModelGatewayErrorCode.TIMEOUT)
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        repository=repository,
+        agent_turn_provider=gateway,
+    )
+    owner = {'Authorization': 'Bearer synthetic-claimant'}
+    with TestClient(app) as client:
+        created = client.post(
+            '/api/v1/claims',
+            headers={**owner, 'Idempotency-Key': 'retry-start'},
+            json={'incident_type': 'motor'},
+        ).json()
+        claim_id, session_id = created['claim']['claim_id'], created['session']['session_id']
+        url = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
+        payload = {
+            'client_message_id': 'retry-safety-input',
+            'content': {'type': 'text', 'text': 'A passenger is injured on Symonds Street.'},
+        }
+        failed_headers = {**owner, 'Idempotency-Key': 'failed-safety-attempt', 'If-Match': '1'}
+        failed = client.post(url, headers=failed_headers, json=payload)
+        assert failed.status_code == 200, failed.text
+        assert failed.json()['agent_message']['recovery'] is not None
+        gateway.fail = False
+        retry_headers = {
+            **owner,
+            'Idempotency-Key': 'retry-safety-attempt',
+            'If-Match': str(failed.json()['claim_revision']),
+        }
+        retry = client.post(url, headers=retry_headers, json=payload)
+        assert retry.status_code == 200, retry.text
+        body = retry.json()
+        assert body['agent_message']['recovery'] is None
+        assert 'Symonds Street' in body['agent_message']['content']['text']
+        assert gateway.calls == 2
+        assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
+        assert client.post(url, headers=failed_headers, json=payload).json() == failed.json()
+        assert client.post(url, headers=retry_headers, json=payload).json() == body
+        duplicate = client.post(
+            url, headers={**retry_headers, 'Idempotency-Key': 'third-key'}, json=payload
+        )
+        assert duplicate.status_code == 200, duplicate.text
+        assert (
+            duplicate.json()['agent_message']['message_id'] == body['agent_message']['message_id']
+        )
+        assert gateway.calls == 2
+        history = client.get(url, headers=owner).json()['items']
+        inbound = [message for message in history if message['actor'] == 'claimant']
+        assert len(inbound) == 1
+        assert inbound[0]['recovery'] is None
+        later = client.post(
+            url,
+            headers={
+                **owner,
+                'Idempotency-Key': 'later-message',
+                'If-Match': str(body['claim_revision']),
+            },
+            json={
+                'client_message_id': 'later-message',
+                'content': {'type': 'text', 'text': 'The incident happened on Symonds Street.'},
+            },
+        )
+        assert later.status_code == 200, later.text
+        assert client.post(url, headers=retry_headers, json=payload).json() == body
+        saved = repository.find_idempotency('cus_demo', url, 'retry-safety-attempt')
+        assert saved is not None and saved.response_payload == body
+        with pytest.raises(IdempotencyConflict):
+            repository.freeze_message_response(replace(saved, actor_id='cus_other'), body)
+        assert repository.freeze_message_response(saved, later.json()) == body

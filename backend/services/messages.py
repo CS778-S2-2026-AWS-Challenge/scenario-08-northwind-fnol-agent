@@ -470,6 +470,28 @@ def _message_turn_response(
     )
 
 
+def _freeze_message_turn_response(
+    repository: PersistenceRepository,
+    idempotency: IdempotencyRecord,
+    response: MessageTurnResponse,
+) -> MessageTurnResponse:
+    """Freeze the first safe response after optional external dispatch settles.
+
+    A crash before this point has not delivered a successful response. Replay may
+    reconstruct that first response from durable records; after freezing, later
+    Claim mutations must never change a same-key response.
+    """
+    try:
+        frozen = repository.freeze_message_response(idempotency, response.model_dump(mode='json'))
+    except IdempotencyConflict as error:
+        raise ApiError(
+            status_code=409,
+            code='IDEMPOTENCY_CONFLICT',
+            message='The saved message response belongs to a different attempt.',
+        ) from error
+    return MessageTurnResponse.model_validate(frozen)
+
+
 def _message_only_response(
     repository: PersistenceRepository,
     principal: Principal,
@@ -1704,7 +1726,11 @@ def submit_message(
                 message='The idempotent message turn could not be restored.',
                 retryable=True,
             )
-        return _message_turn_response(repository, principal, claim_id, claimant_message, decision)
+        return _freeze_message_turn_response(
+            repository,
+            existing_idempotency,
+            _message_turn_response(repository, principal, claim_id, claimant_message, decision),
+        )
 
     existing_client_message = repository.find_message_by_client_id(
         claim_id,
@@ -2632,4 +2658,8 @@ def submit_message(
                     'resulting_revision': updated_claim.revision,
                 },
             )
-    return _message_turn_response(repository, principal, claim_id, claimant_message, decision)
+    return _freeze_message_turn_response(
+        repository,
+        idempotency,
+        _message_turn_response(repository, principal, claim_id, claimant_message, decision),
+    )
