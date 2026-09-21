@@ -7,10 +7,12 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from backend.adapters.model_gateway import OpenAICompatibleModelGateway, _google_provider_schema
-from backend.domain.agent_v8 import V8TurnProposal
+from backend.domain.agent_v8 import V8FieldChange, V8TurnProposal
 from backend.domain.external_service_registry import capability_context
+from backend.domain.turn_field_contract import TurnFieldContractViolation
 from backend.services.agent import AgentEvidenceReference
 from backend.services.model_request_planner import plan_model_turn
+from backend.services.turn_field_contract import validate_field_changes
 from tests.journey_v8_support import envelope, fact
 from tests.test_turn_proposal_v8 import v8_context
 
@@ -58,3 +60,25 @@ def test_full_schema_is_satisfiable_after_both_provider_translations(
     if media:
         expected_keys.add('source_evidence_id')
     assert all(set(item['properties']) == expected_keys for item in variants)
+    google_fields = cast(dict[str, Any], schemas[1])['properties']['field_changes']['items']
+    assert 'anyOf' not in google_fields
+    assert set(google_fields['required']) == expected_keys
+    assert set(google_fields['properties']) == expected_keys
+
+
+def test_google_wire_value_union_does_not_replace_runtime_field_type_authority() -> None:
+    plan = plan_model_turn(v8_context('My car cannot be driven.'))
+    assert plan is not None
+    assert plan.field_contract is not None
+    invalid = envelope(fields=[fact('vehicle.drivable', 'home', 'My car')])
+    google = cast(dict[str, Any], _google_provider_schema(plan.response_schema))
+    Draft202012Validator(google).validate(invalid)
+    strict = cast(
+        dict[str, Any], OpenAICompatibleModelGateway._strict_response_schema(plan.response_schema)
+    )
+    assert not Draft202012Validator(strict).is_valid(invalid)
+    with pytest.raises(TurnFieldContractViolation):
+        validate_field_changes(
+            plan.field_contract, [V8FieldChange.model_validate(invalid['field_changes'][0])]
+        )
+    assert 'anyOf' in plan.response_schema['properties']['field_changes']['items']

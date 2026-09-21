@@ -4980,6 +4980,8 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         audit_event: AuditEventEnvelope,
         branch_evaluation: BranchEvaluationRecord | None = None,
+        *,
+        safety_message: MessageRecord | None = None,
     ) -> None:
         if (
             claim.revision != expected_revision + 1
@@ -4998,6 +5000,28 @@ class MongoDBRepository:
             )
 
         def persist(mongo_session: Any) -> None:
+            if safety_message is not None:
+                from backend.repositories.handoff_guard import validate_preprovider_safety_handoff
+
+                validate_preprovider_safety_handoff(
+                    self._get(
+                        'handoff',
+                        handoff.handoff_id,
+                        HandoffRecord,
+                        customer_id=claim.customer_id,
+                        session=mongo_session,
+                    ),
+                    handoff,
+                    claim,
+                    safety_message,
+                    self._get(
+                        'message',
+                        safety_message.message_id,
+                        MessageRecord,
+                        customer_id=claim.customer_id,
+                        session=mongo_session,
+                    ),
+                )
             prepared_audit = self._prepare_audit_events(
                 claim,
                 (audit_event,),
@@ -5367,7 +5391,13 @@ class MongoDBRepository:
         )
         return IdempotencyRecord(**document['payload']) if document is not None else None
 
-    def save_message_recovery(self, message: MessageRecord, idempotency: IdempotencyRecord) -> None:
+    def save_message_recovery(
+        self,
+        message: MessageRecord,
+        idempotency: IdempotencyRecord,
+        *,
+        agent_message: MessageRecord | None = None,
+    ) -> None:
         def write(mongo_session: Any) -> None:
             stored = self._get(
                 'message',
@@ -5401,6 +5431,29 @@ class MongoDBRepository:
                 or message.actor is not ActorType.CLAIMANT
             ):
                 raise IdempotencyConflict(idempotency.key)
+            if agent_message is not None:
+                if (
+                    agent_message.actor is not ActorType.AGENT
+                    or agent_message.claim_id != message.claim_id
+                    or agent_message.session_id != message.session_id
+                    or agent_message.in_reply_to != message.message_id
+                    or agent_message.recovery_rule_id != message.recovery_rule_id
+                    or agent_message.recovery_rule_id is None
+                    or idempotency.agent_message_id != agent_message.message_id
+                    or self._get(
+                        'message', agent_message.message_id, MessageRecord, session=mongo_session
+                    )
+                    is not None
+                ):
+                    raise IdempotencyConflict(agent_message.message_id)
+                self._put(
+                    'message',
+                    agent_message.message_id,
+                    agent_message,
+                    customer_id=idempotency.actor_id,
+                    claim_id=message.claim_id,
+                    session=mongo_session,
+                )
             self._put(
                 'message',
                 message.message_id,

@@ -4,6 +4,7 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any, cast
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -59,16 +60,81 @@ def _provider_error_type(response: httpx.Response) -> str | None:
     return None
 
 
-def _google_provider_schema(value: object) -> object:
+def _google_supported_schema(value: object) -> object:
     if isinstance(value, list):
-        return [_google_provider_schema(item) for item in value]
+        return [_google_supported_schema(item) for item in value]
     if isinstance(value, dict):
         return {
-            key: _google_provider_schema(item)
+            key: _google_supported_schema(item)
             for key, item in value.items()
             if key not in _GOOGLE_PROVIDER_SCHEMA_CONSTRAINTS
         }
     return value
+
+
+def _google_provider_schema(value: object) -> object:
+    """Translate the wire grammar without changing Runtime field authority.
+
+    Gemini 3.5 Flash Lite degenerates on the canonical field object union.
+    Use one object with an allowed-code enum and value union for this provider;
+    validate_field_changes still checks the exact code/value pair at Runtime.
+    """
+    supported = _google_supported_schema(value)
+    if not isinstance(supported, dict):
+        return supported
+    schema = cast(dict[str, Any], supported)
+    fields = schema.get('properties', {}).get('field_changes')
+    if not isinstance(fields, dict) or 'anyOf' not in fields.get('items', {}):
+        return schema
+    definitions = schema.get('$defs', {})
+
+    def inline(item: Any, resolving: frozenset[str] = frozenset()) -> Any:
+        if isinstance(item, list):
+            return [inline(member, resolving) for member in item]
+        if isinstance(item, dict):
+            if '$ref' in item:
+                ref = item['$ref']
+                if not isinstance(ref, str) or not ref.startswith('#/$defs/') or ref in resolving:
+                    raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+                name = ref.removeprefix('#/$defs/')
+                if name not in definitions:
+                    raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+                return inline(definitions[name], resolving | {ref})
+            return {
+                key: inline(member, resolving) for key, member in item.items() if key != '$defs'
+            }
+        return item
+
+    schema = cast(dict[str, Any], inline(schema))
+    fields = schema['properties']['field_changes']
+    variants = fields['items']['anyOf']
+    codes: list[str] = []
+    values: list[dict[str, Any]] = []
+    common_keys: set[str] | None = None
+    for variant in variants:
+        properties = variant.get('properties', {})
+        if not {'field_code', 'value'}.issubset(properties):
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        if common_keys is None:
+            common_keys = set(properties)
+        elif common_keys != set(properties):
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        code_schema = properties['field_code']
+        variant_codes = code_schema.get('enum', [code_schema.get('const')])
+        if not variant_codes or any(not isinstance(code, str) for code in variant_codes):
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        codes.extend(code for code in variant_codes if code not in codes)
+        if properties['value'] not in values:
+            values.append(properties['value'])
+    if not variants:
+        raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+    properties = {
+        **variants[0]['properties'],
+        'field_code': {'type': 'string', 'enum': codes},
+        'value': {'anyOf': values},
+    }
+    fields['items'] = {'type': 'object', 'properties': properties, 'required': list(properties)}
+    return schema
 
 
 @dataclass(frozen=True, slots=True)

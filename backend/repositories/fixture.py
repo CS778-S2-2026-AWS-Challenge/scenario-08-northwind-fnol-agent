@@ -1502,7 +1502,13 @@ class FixtureRepository(PersistenceRepository):
             else None
         )
 
-    def save_message_recovery(self, message: MessageRecord, idempotency: IdempotencyRecord) -> None:
+    def save_message_recovery(
+        self,
+        message: MessageRecord,
+        idempotency: IdempotencyRecord,
+        *,
+        agent_message: MessageRecord | None = None,
+    ) -> None:
         with self._claim_mutation_lock:
             stored = self.get_message(
                 message.claim_id, message.session_id, message.message_id, idempotency.actor_id
@@ -1528,7 +1534,20 @@ class FixtureRepository(PersistenceRepository):
                 or message.actor is not ActorType.CLAIMANT
             ):
                 raise IdempotencyConflict(idempotency.key)
+            if agent_message is not None and (
+                agent_message.actor is not ActorType.AGENT
+                or agent_message.claim_id != message.claim_id
+                or agent_message.session_id != message.session_id
+                or agent_message.in_reply_to != message.message_id
+                or agent_message.recovery_rule_id != message.recovery_rule_id
+                or agent_message.recovery_rule_id is None
+                or idempotency.agent_message_id != agent_message.message_id
+                or agent_message.message_id in self._messages
+            ):
+                raise IdempotencyConflict(agent_message.message_id)
             self._store_message(message)
+            if agent_message is not None:
+                self._store_message(agent_message)
             self._idempotency[(idempotency.actor_id, idempotency.route, idempotency.key)] = (
                 deepcopy(idempotency)
             )
@@ -3894,11 +3913,28 @@ class FixtureRepository(PersistenceRepository):
         idempotency: IdempotencyRecord,
         audit_event: AuditEventEnvelope,
         branch_evaluation: BranchEvaluationRecord | None = None,
+        *,
+        safety_message: MessageRecord | None = None,
     ) -> None:
         self._validate_claim_mutation(claim, expected_revision)
         self._validate_branch_evaluation(claim, branch_evaluation)
         prepared_audit = self._prepare_audit_events(claim, (audit_event,))
         existing_handoff = self._handoffs.get(handoff.handoff_id)
+        if safety_message is not None:
+            from backend.repositories.handoff_guard import validate_preprovider_safety_handoff
+
+            validate_preprovider_safety_handoff(
+                existing_handoff,
+                handoff,
+                claim,
+                safety_message,
+                self.get_message(
+                    claim.claim_id,
+                    safety_message.session_id,
+                    safety_message.message_id,
+                    claim.customer_id,
+                ),
+            )
         if (
             handoff.claim_id != claim.claim_id
             or (existing_handoff is not None and existing_handoff.claim_id != claim.claim_id)

@@ -197,8 +197,8 @@ def test_primary_rear_end_journey_preserves_context_through_handoff(
         'Can I still send more details while I wait?',
         4,
     )
-    assert support_message['agent_message'] is None
-    assert support_message['decision'] is None
+    assert support_message['agent_message'] is not None
+    assert support_message['decision']['customer_next_step']['status'] == 'awaiting_staff'
     support_retry = client.post(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
         headers={
@@ -260,7 +260,7 @@ def test_primary_rear_end_journey_preserves_context_through_handoff(
         headers={'Authorization': 'Bearer synthetic-staff'},
     ).json()['items']
     assert latest_handoffs[0]['status'] == 'in_progress'
-    assert latest_detail['customer_next_step']['status'] == 'human_support_in_progress'
+    assert latest_detail['customer_next_step']['status'] == 'awaiting_staff'
     resolve_action = next(
         item
         for item in latest_detail['allowed_actions']

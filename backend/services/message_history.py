@@ -123,7 +123,9 @@ def list_claim_messages(
         key=_message_key,
     )
     answered_ids = {
-        message.in_reply_to for message in visible_messages if message.actor is ActorType.AGENT
+        message.in_reply_to
+        for message in visible_messages
+        if message.actor is ActorType.AGENT and message.recovery_rule_id is None
     }
     if before is not None:
         visible_messages = [message for message in visible_messages if message.created_at < before]

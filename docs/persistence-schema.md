@@ -887,6 +887,15 @@ provider error body is retained. A fresh explicit attempt reuses the original in
 confirmation checkpoint; same-key replay never initiates a model request. These operations
 preserve existing Claim and Session ownership constraints.
 
+A Runtime-detected safety/support interrupt commits the shared handoff mutation before
+provider execution, independently of the later Agent result. Existing open support is
+upgraded without duplication or priority downgrade. The turn uses the resulting revision
+for its final CAS while retaining the original `revision_before_message` confirmation
+checkpoint. A provider failure cannot roll back the handoff. Its deterministic safety
+notice is an Agent message carrying `recovery_rule_id`; it is not treated as a successful
+answer when discovering messages eligible for explicit retry. Failure to commit the
+safety mutation is a hard request failure, not model-dependency recovery.
+
 `ConfirmationRequestRecord` is carried by an immutable confirmation Runtime WorkItem. It has
 `confirmation_id`, `claim_id`, `claim_revision`, `field_codes`, `shown_values_fingerprint` and
 `created_at`. Confirmation IDs use `new_id('cnf')` (`cnf_` plus generated hex); the enclosing

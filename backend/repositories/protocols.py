@@ -644,7 +644,13 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """Read the original accepted inbound checkpoint, not a later retry revision."""
         raise NotImplementedError
 
-    def save_message_recovery(self, message: MessageRecord, idempotency: IdempotencyRecord) -> None:
+    def save_message_recovery(
+        self,
+        message: MessageRecord,
+        idempotency: IdempotencyRecord,
+        *,
+        agent_message: MessageRecord | None = None,
+    ) -> None:
         """Complete an accepted attempt without changing the Claim or message content."""
         raise NotImplementedError
 
@@ -1331,6 +1337,8 @@ class PersistenceRepository(ClaimRepository, Protocol):
         idempotency: IdempotencyRecord,
         audit_event: AuditEventEnvelope,
         branch_evaluation: BranchEvaluationRecord | None = None,
+        *,
+        safety_message: MessageRecord | None = None,
     ) -> None:
         """Atomically persist a handoff, Claim revision, retry metadata, and audit fact."""
         raise NotImplementedError

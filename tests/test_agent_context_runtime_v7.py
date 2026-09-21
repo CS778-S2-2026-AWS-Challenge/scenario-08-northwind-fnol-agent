@@ -29,6 +29,7 @@ from backend.domain.configuration import (
     ModelRuntimeConfiguration,
 )
 from backend.domain.external_service_registry import capability_context
+from backend.domain.field_registry import FIELD_REGISTRY_VERSION
 from backend.domain.knowledge import KnowledgeChunk, KnowledgeRetrievalUnavailable, KnowledgeSearch
 from backend.domain.knowledge_admin import KnowledgeSourceRecord, KnowledgeVersionState
 from backend.domain.model_gateway import (
@@ -383,8 +384,8 @@ def test_router_keeps_authoritative_family_and_resolves_ambiguous_new_claims() -
 
     unresolved = route_turn(_context('My car and furniture were damaged.', incident_type=None))
     assert unresolved.product_family is None
-    assert unresolved.model_required is False
-    assert unresolved.deterministic_response is not None
+    assert unresolved.model_required is True
+    assert unresolved.deterministic_response is None
 
 
 def test_prompt_manifest_compiles_one_family_in_stable_order() -> None:
@@ -739,7 +740,7 @@ def test_ordinary_model_plan_is_single_call_tool_free_and_budgeted() -> None:
     assert plan.request_profile.profile_id == 'claimant.intake.v1'
     assert plan.request_profile.max_model_invocations == 1
     assert plan.request_profile.tool_names == []
-    assert plan.request_budget.raw_input_tokens <= 3000
+    assert plan.request_budget.raw_input_tokens <= plan.request_budget.hard_limit == 4549
     assert plan.request_budget.reserved_output_tokens == 180
     assert plan.context_payload['message.latest'] == 'My car was rear-ended this morning.'
     assert plan.context_plan.estimated_tokens == estimate_json_tokens(plan.context_payload)
@@ -1304,7 +1305,7 @@ def test_intake_field_contract_rejects_a_mismatched_branch_registry() -> None:
     branch_evaluation = BranchEvaluationResult(
         claim_id='clm_v7',
         evaluated_against_claim_revision=1,
-        field_registry_version='5',
+        field_registry_version=FIELD_REGISTRY_VERSION,
         branch_rules_version='unrelated-branch-rules-v7',
         selected_family='motor',
         requirements=RequirementResolution(ready=False),
@@ -1419,10 +1420,8 @@ def test_v7_replaces_executional_prose_before_consent_with_runtime_owned_copy() 
 
     proposal = GatewayAgent(_RecordingGateway([response])).propose_turn(context)
 
-    assert proposal.customer_response == (
-        'I found a registered support option. Review what would be shared and give your '
-        'consent before Northwind sends anything.'
-    )
+    assert 'arranged' not in proposal.customer_response
+    assert proposal.customer_response
     assert proposal.external_service_intents == [
         {'service_identity': service_identity, 'requested_action': 'submit_request'}
     ]

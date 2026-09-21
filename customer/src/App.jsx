@@ -1241,7 +1241,7 @@ function App() {
       })
       .catch(() => {})
     return () => { active = false }
-  }, [])
+  }, [account?.profile?.email])
 
   useEffect(() => {
     if (!claim?.claim_id) {
@@ -2886,7 +2886,7 @@ function App() {
                       <div>
                         <div className="user-bubble">{messageText(message)}</div>
                         <div className="msg-meta">{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
-                        {message.recovery && !messages.some((reply) => reply.actor === 'agent' && reply.in_reply_to === message.message_id) && (
+                        {message.actor === 'claimant' && message.recovery && !messages.some((reply) => reply.actor === 'agent' && !reply.recovery && reply.in_reply_to === message.message_id) && (
                           <div role="status">
                             <p>{message.recovery.claimant_projection}</p>
                             {message.client_message_id && message.recovery.resume_triggers?.includes('explicit_retry_request') && (

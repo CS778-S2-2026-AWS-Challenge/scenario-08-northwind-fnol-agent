@@ -1672,6 +1672,20 @@ saved message, with `agent_message: null` and a `recovery` projection containing
 `continuation: runtime.fail_safe`, `claimant_projection`, `resume_triggers`, and
 `resume_entrypoint: submit_message`. It does not represent a successful model response.
 
+When Runtime detects an explicit safety or human-support request, it commits the shared
+handoff creation or priority upgrade before calling the model. This advances the revision
+independently and survives a later provider failure. If that safety mutation cannot commit,
+the request fails rather than claiming that support has been notified. On provider failure
+after a committed safety action, `agent_message` is non-null: it contains the deterministic
+safety guidance and support confirmation, with the same `recovery` metadata. This notice
+does not represent a completed model response or remove the original message's Retry action.
+Only a subsequent non-recovery Agent reply completes that response. Failed model facts are
+never applied, and the turn does not fall back to ControlledAgent.
+
+Failure to persist that safety action returns `500 SAFETY_HANDOFF_PERSISTENCE_FAILED`
+with `retryable: true`. The accepted inbound remains stored, but the client must not present
+the failed support action as completed.
+
 `ClaimantMessage` exposes its original `client_message_id` and the same optional `recovery`
 projection so saved-but-unanswered messages remain actionable after history reload. An explicit
 Retry resends that original identity, content and Evidence references with a new

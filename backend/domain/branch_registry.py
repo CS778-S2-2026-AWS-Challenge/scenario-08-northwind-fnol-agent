@@ -438,7 +438,10 @@ class BranchRuleEvaluator:
             branch = self.registry.branch_by_id[f'family.{family}']
             if selected_family == family:
                 status = 'active'
-                reason = 'A confirmed family fact activates this mutually exclusive branch.'
+                reason = (
+                    'One resolved family activates this collection branch '
+                    'without changing fact authority.'
+                )
             elif family in family_candidates:
                 status = 'candidate'
                 reason = 'Proposed or message evidence identifies a family candidate.'
@@ -598,9 +601,7 @@ class BranchRuleEvaluator:
         trigger_source_refs: Sequence[str],
     ) -> tuple[str | None, set[str], dict[str, list[str]]]:
         candidates: set[str] = set(resolution.candidate_families)
-        selected: str | None = (
-            resolution.product_family if resolution.status == 'authoritative' else None
-        )
+        selected = resolution.product_family
         sources: dict[str, list[str]] = {family: [] for family in FAMILY_NAMES}
         product_family_field = claim.form.get('claim.product_family')
         if product_family_field is not None and isinstance(product_family_field.value, str):
@@ -1014,7 +1015,7 @@ class BranchRuleEvaluator:
         elif definition.code.endswith('police_report_reference') and self._police_pending(claim):
             selection_state = FieldSelectionState.PENDING_LATER
             reason = 'The required material is recorded as pending for a later action.'
-        elif definition.code == 'claim.product_family' and selected_family is not None:
+        elif definition.code == 'claim.product_family' and claim.incident_type in FAMILY_NAMES:
             selection_state = FieldSelectionState.CANDIDATE_NOW
             reason = 'The persisted Claim already supplies the authoritative family.'
         elif value_state in {FormStatus.CONFIRMED, FormStatus.PROPOSED}:
@@ -1079,7 +1080,7 @@ class BranchRuleEvaluator:
         for requirement in REQUIREMENT_PRIORITY:
             if requirement not in required:
                 continue
-            if requirement == 'claim.product_family' and selected_family is not None:
+            if requirement == 'claim.product_family' and claim.incident_type in FAMILY_NAMES:
                 satisfied.append(requirement)
                 continue
             if requirement == 'contents.items':
@@ -1102,8 +1103,6 @@ class BranchRuleEvaluator:
             else:
                 missing.append(requirement)
 
-        if selected_family is None and 'claim.product_family' not in missing:
-            missing.insert(0, 'claim.product_family')
         missing_by_branch: list[dict[str, object]] = []
         fact_branches = [
             self.registry.branch_by_id[branch_id]

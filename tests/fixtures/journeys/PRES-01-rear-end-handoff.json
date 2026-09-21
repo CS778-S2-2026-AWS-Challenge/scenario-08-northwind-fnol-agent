@@ -37,8 +37,8 @@
     {
       "input": "I want to speak with a person now.",
       "expected_action": "HANDOFF",
-      "response_contains": ["transfer", "should not need to start again"],
-      "next_step_status": "human_support_queued"
+      "response_contains": ["support has been requested", "continue sharing details"],
+      "next_step_status": "awaiting_staff"
     }
   ],
   "expected_handoff": {

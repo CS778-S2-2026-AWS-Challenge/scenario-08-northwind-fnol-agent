@@ -408,6 +408,29 @@ describe('claimant intake projection', () => {
     expect(screen.queryByText(initialClaim.claim_id)).not.toBeInTheDocument()
   })
 
+  it('reloads the published model catalogue after login when the initial request was unauthorized', async () => {
+    const user = userEvent.setup()
+    api.getRuntimeCapabilities.mockRejectedValueOnce(new api.ApiRequestError('Sign in again.'))
+      .mockResolvedValueOnce({
+        default_model_profile_id: 'openrouter-gpt4o-mini',
+        models: [{ id: 'openrouter-gpt4o-mini', label: 'openai/gpt-4o-mini', availability: 'available' }],
+      })
+    api.loginClaimant.mockResolvedValue({ access_token: 'claimant-token' })
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'QA claimant', email: 'qa@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    render(<App />)
+    await waitFor(() => expect(api.getRuntimeCapabilities).toHaveBeenCalledTimes(1))
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.type(screen.getByLabelText('Email address'), 'qa@example.test')
+    await user.type(screen.getByLabelText('Password'), 'Synthetic-QA-Password!')
+    await user.click(screen.getAllByRole('button', { name: 'Log in' }).at(-1))
+    expect(await screen.findByText('openai/gpt-4o-mini')).toBeVisible()
+    expect(api.getRuntimeCapabilities).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps account actions and the composer without exposing the legacy form route', async () => {
     globalThis.history.replaceState({}, '', '/claim-form')
     const { container } = render(<App />)
@@ -498,7 +521,7 @@ describe('claimant intake projection', () => {
     await waitFor(() => expect(trigger).toHaveFocus())
   })
 
-  it('retries a saved unanswered message with its original identity and a new request key', async () => {
+  it.each([false, true])('retries a saved unanswered message with its original identity and a new request key (safety notice: %s)', async (hasSafetyNotice) => {
     const user = userEvent.setup()
     let requestSequence = 0
     api.requestId.mockImplementation((prefix) => `${prefix}-${++requestSequence}`)
@@ -512,7 +535,13 @@ describe('claimant intake projection', () => {
     api.submitClaimMessage.mockImplementationOnce(async (request) => ({
       ...initialTurn(),
       claimant_message: { ...claimantMessage, client_message_id: request.clientMessageId, recovery },
-      agent_message: null,
+      agent_message: hasSafetyNotice ? {
+        ...agentMessage,
+        message_id: 'msg-safety-recovery',
+        content: { text: 'If anyone is in immediate danger, call 111. Northwind support has been notified and your report has been saved.' },
+        in_reply_to: claimantMessage.message_id,
+        recovery,
+      } : null,
       decision: null,
       recovery,
     })).mockImplementationOnce(async (request) => ({
@@ -527,6 +556,9 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     expect(await screen.findByText(recovery.claimant_projection)).toBeVisible()
     expect(screen.queryByText('Not sent')).not.toBeInTheDocument()
+    if (hasSafetyNotice) {
+      expect(screen.getByText(/Northwind support has been notified/)).toBeVisible()
+    }
     await user.click(screen.getByRole('button', { name: 'Retry response' }))
     expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
     const [first, retried] = api.submitClaimMessage.mock.calls.map(([request]) => request)

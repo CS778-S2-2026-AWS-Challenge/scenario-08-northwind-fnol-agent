@@ -24,6 +24,11 @@ grounded normalised value keeps claimant provenance. Inferred and disputed value
 and authority-sensitive values without claimant provenance, require confirmation; pending confirmation does not
 prevent the next useful question but can prevent final creation.
 
+A single inferred family activates collection of that family's requirements. It does not
+confirm the family field: that value remains recorded until the displayed batch is confirmed.
+Each requirement belongs to exactly one of satisfied, recorded, or missing. Fallback questions
+consume the same missing set and cannot independently reclassify a recorded family as missing.
+
 Conversational confirmation and `POST /claims/{id}/form/confirmations` share the
 same confirmation validation and fact-confirmation logic. The conversational record stores the displayed field set and
 value fingerprint. The turn reducer compares it with the revision before the
@@ -31,6 +36,14 @@ new claimant message was persisted, then uses the final CAS to protect against
 concurrent changes.
 
 ## Safety and external services
+
+Runtime-detected safety and explicit human-support requests commit through the shared
+handoff writer before model invocation. A model timeout or malformed response cannot undo
+this action. The reducer handles additional model-originated escalation and checks existing
+handoffs without duplicating them. Failed safety persistence is a hard failure. A later
+provider failure returns a deterministic safety/support notice marked as recovery, keeps
+the original message retryable and applies no model facts. ControlledAgent remains a
+deployment choice, never a replacement for one failed model turn.
 
 An open handoff continues to accept claimant messages and returns an Agent
 reply. It may record facts and ask a non-blocking question. It suppresses all

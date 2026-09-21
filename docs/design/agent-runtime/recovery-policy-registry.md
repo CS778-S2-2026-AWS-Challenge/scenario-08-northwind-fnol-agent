@@ -15,6 +15,13 @@ replays the original result; an explicit retry uses the existing
 `submit_message` entrypoint with a new attempt identity and reloads authoritative
 records. No retry endpoint or second lifecycle is introduced.
 
+If Runtime detects a safety or human-support interrupt, the shared handoff mutation must
+also commit before the provider call. Its failure is a hard request failure, not a recovery
+success. If the provider then fails, the recovery response includes a deterministic Agent
+notice with safety guidance and confirmation that support has been notified. The notice
+carries recovery metadata and does not hide explicit Retry. It neither applies failed
+model facts nor switches the turn to ControlledAgent.
+
 Unknown recovery triggers fail closed. The complete external reconciliation,
 tool-unavailable, revision-conflict and high-impact review matrix remains
 tracked by issue #779.

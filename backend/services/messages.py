@@ -130,6 +130,7 @@ from backend.services.fact_resolution import (
 )
 from backend.services.handoffs import (
     claimant_handoff,
+    commit_detected_handoff,
 )
 from backend.services.retrieval import search_claim_history, search_policy
 from backend.services.runtime_agent_policy import (
@@ -145,7 +146,7 @@ from backend.services.support import (
     require_idempotency_key,
 )
 from backend.services.turn_family_resolution import resolve_turn_family
-from backend.services.turn_reducer import reduce_turn
+from backend.services.turn_reducer import compose_reply, reduce_turn
 from backend.services.turn_router import route_turn
 
 logger = logging.getLogger(__name__)
@@ -393,6 +394,7 @@ def _message_turn_response(
             for message in messages
             if message.actor is ActorType.AGENT
             and message.in_reply_to == claimant_message.message_id
+            and message.recovery_rule_id is None
         ),
         None,
     )
@@ -1764,6 +1766,7 @@ def submit_message(
                                 principal.subject,
                             )
                             if message.actor is ActorType.AGENT
+                            and message.recovery_rule_id is None
                             and message.in_reply_to == existing_client_message.message_id
                         ),
                         None,
@@ -2035,6 +2038,24 @@ def submit_message(
     # Result persistence is a second CAS boundary. It must reject a mutation
     # performed by another request while the provider was producing its reply.
     expected_revision = claim.revision
+    safety_interrupt = detect_safety_interrupt(
+        AgentTurnContext(
+            claim=claim,
+            session_id=session_id,
+            trigger_message_id=claimant_message.message_id,
+            message_text=message_text,
+            evidence_refs=payload.evidence_refs,
+            model_profile_id=session.model_profile_id,
+        )
+    )
+    preprovider_handoff = None
+    if safety_interrupt is not None:
+        claim, preprovider_handoff = commit_detected_handoff(
+            repository, principal, claim, claimant_message, safety_interrupt
+        )
+        expected_revision = claim.revision
+        session = session.model_copy(update={'context_revision': claim.revision})
+        handoff_open = True
     if progress_reporter is not None:
         progress_reporter.accepted()
         progress_reporter.emit(AgentTurnProgressStage.CONTEXT_LOADING, 'claim.context')
@@ -2200,7 +2221,7 @@ def submit_message(
             if item.status.value not in {'resolved', 'cancelled'}
         ),
     )
-    agent_context = replace(agent_context, safety_interrupt=detect_safety_interrupt(agent_context))
+    agent_context = replace(agent_context, safety_interrupt=safety_interrupt)
     turn_route = route_turn(agent_context)
 
     def recover_model_failure(model_error: ModelGatewayError) -> MessageTurnResponse:
@@ -2236,6 +2257,36 @@ def submit_message(
                 )
             }
         )
+        recovery_agent_message = None
+        if safety_interrupt is not None and preprovider_handoff is not None:
+            notice = compose_reply(
+                safety_interrupt,
+                (),
+                'Northwind support has been notified and your report has been saved.',
+                None,
+            )
+            recovery_agent_message = MessageRecord(
+                message_id=new_id('msg'),
+                claim_id=claim_id,
+                session_id=session_id,
+                actor=ActorType.AGENT,
+                visibility=MessageVisibility.SHARED,
+                content={'type': 'text', 'text': notice},
+                in_reply_to=claimant_message.message_id,
+                recovery_rule_id=recovery_rule.rule_id,
+                created_at=now_utc(),
+            )
+            recovery_response = recovery_response.model_copy(
+                update={
+                    'agent_message': _claimant_message(recovery_agent_message),
+                    'handoff': claimant_handoff(preprovider_handoff),
+                    'recovery': recovery_response.recovery.model_copy(
+                        update={'claimant_projection': notice}
+                    )
+                    if recovery_response.recovery
+                    else None,
+                }
+            )
         recovery_idempotency = IdempotencyRecord(
             actor_id=principal.subject,
             route=route,
@@ -2244,12 +2295,15 @@ def submit_message(
             claim_id=claim_id,
             session_id=session_id,
             message_id=claimant_message.message_id,
+            agent_message_id=recovery_agent_message.message_id if recovery_agent_message else None,
             response_payload=recovery_response.model_dump(mode='json'),
             revision_before_message=confirmation_revision_before_message,
             confirmation_checkpoint=checkpoint_idempotency.confirmation_checkpoint,
             inbound_checkpoint=checkpoint_idempotency.inbound_checkpoint,
         )
-        repository.save_message_recovery(claimant_message, recovery_idempotency)
+        repository.save_message_recovery(
+            claimant_message, recovery_idempotency, agent_message=recovery_agent_message
+        )
         repository.append_audit_event(
             AuditEventEnvelope(
                 event_id=new_id('aud'),

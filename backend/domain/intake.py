@@ -148,13 +148,15 @@ def next_requirement_field(
 
     if evaluation is None:
         return INTAKE_REQUIREMENTS['incident.description']
-    return intake_field_for_requirement(evaluation.requirements.next_required_item)
+    missing = evaluation.requirements.missing_required_now
+    return intake_field_for_requirement(missing[0] if missing else None)
 
 
 def next_requirement_step(requirements: RequirementResolution) -> CustomerNextStep:
     """Project deterministic requirements into the existing claimant next-step contract."""
 
-    intake_field = intake_field_for_requirement(requirements.next_required_item)
+    missing = requirements.missing_required_now
+    intake_field = intake_field_for_requirement(missing[0] if missing else None)
     if intake_field is not None:
         return CustomerNextStep(
             status='more_information_needed',
@@ -177,7 +179,7 @@ def next_requirement_step(requirements: RequirementResolution) -> CustomerNextSt
         )
     return CustomerNextStep(
         status='clarification_needed',
-        summary='Please clarify the claim type before the report continues.',
+        summary='Your report needs clarification before it can continue.',
         responsible_party=ResponsibleParty.CLAIMANT,
-        required_items=['claim.product_family'],
+        required_items=[],
     )

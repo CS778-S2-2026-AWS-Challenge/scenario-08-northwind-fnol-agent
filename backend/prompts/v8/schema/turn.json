@@ -50,7 +50,9 @@
         },
         "required": [
           "field_code",
-          "value"
+          "value",
+          "reported_text",
+          "precision"
         ],
         "type": "object"
       },

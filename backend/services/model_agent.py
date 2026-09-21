@@ -919,7 +919,7 @@ class GatewayAgent:
         handoff_priority = None
         runtime_action = 'runtime.continue'
         status = 'continue_current_report'
-        if plan.route.task is TurnTask.EXTERNAL_SUPPORT and service_offer_ids:
+        if 'external' in plan.route.intents and service_offer_ids:
             runtime_action = 'runtime.wait_for_user'
             status = 'external_service_consent_required'
         elif plan.route.task is TurnTask.CLAIM_CREATION:

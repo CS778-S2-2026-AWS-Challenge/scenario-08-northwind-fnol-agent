@@ -85,10 +85,22 @@ def _claim_projection(
 def _external_service_projection(context: AgentTurnContext, route: TurnRoute) -> list[object]:
     if getattr(context, 'open_handoffs', ()):
         return []
+    v8 = (
+        context.runtime_policy is not None
+        and context.runtime_policy.instruction.prompt_version == 'northwind-fnol-claimant-v8'
+    )
+    if not v8 and route.task.value in {'evidence_current', 'evidence_history'}:
+        return []
     matched: list[object] = []
     eligible_ids = getattr(context, 'eligible_service_ids', None)
     for service in context.external_services:
         if eligible_ids is not None and service.service_identity not in eligible_ids:
+            continue
+        if (
+            not v8
+            and context.selected_external_service_ids
+            and service.service_identity not in context.selected_external_service_ids
+        ):
             continue
         matched.append(
             {
@@ -96,7 +108,7 @@ def _external_service_projection(context: AgentTurnContext, route: TurnRoute) ->
                 'claimant_purpose': service.purpose,
             }
         )
-    return matched
+    return matched if v8 else matched[:3]
 
 
 def _catalogue(

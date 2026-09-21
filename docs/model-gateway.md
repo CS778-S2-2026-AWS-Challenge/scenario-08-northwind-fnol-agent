@@ -273,7 +273,22 @@ not a second Runtime decision.
 A direct synthetic probe on 21 September 2026 returned HTTP 400 for Gemini 3.5 Flash Lite
 with `thinkingBudget=0`, and HTTP 200 with `thinkingLevel=minimal` (1.700 seconds, 25 input
 and 6 output tokens, no reported thought tokens). This establishes parameter compatibility,
-not full claimant-journey acceptance or a measured reasoning-on/off latency comparison.
+not full claimant-journey acceptance. A later production-planner probe used the synthetic
+message "My bathroom pipe burst last night and flooded the kitchen" with the corrected
+Google wire schema. `provider_default` completed in 2.825 seconds (1,349 input / 429 output
+tokens); the published `disabled` setting, translated to `minimal`, completed in 2.523 seconds
+(1,349 input / 373 output tokens). Both returned complete field proposals. This single paired
+observation establishes working transport, not a latency distribution or proof that minimal
+reasoning always speeds up responses. `minimal` is the provider's lowest reasoning level,
+not a promise of zero reasoning tokens.
+
+A separate OpenRouter output-volume probe returned 828 output tokens in 6.901 seconds,
+about 120 output tokens per second including request latency. At that observed rate, the
+4,500/5,500-token operating caps represent roughly 37.5/45.8 seconds of output; twice the
+media estimate is approximately 91.7 seconds. These are practical calibration estimates,
+not upper latency guarantees. They provide no evidence for increasing the 130-second
+bootstrap timeout or the existing 180-second published-release ceiling. Neither timeout
+was changed by the probe.
 
 The local Qwen deployment uses the OpenAI-compatible transport with `json_object` structured
 output. Its llama.cpp endpoint cannot compile the larger claimant JSON Schema grammar used by
@@ -366,32 +381,38 @@ boundary can hold equivalent provider-private continuation metadata for another 
 changing the Runtime contract. Text, structured output, completion status, usage, cache-read usage,
 model version, and response identity are normalised into `ModelResponse`.
 
-Gemini rejects the complete claimant JSON Schema when provider-side scalar and collection
-constraints make the schema exceed its accepted complexity. The adapter therefore removes
+Live requests to the current Gemini profile reject the complete claimant JSON Schema and
+a variant restoring only array bounds with HTTP 400. The adapter therefore removes
 `additionalProperties`, string and collection length bounds, numeric bounds, and `pattern` only
-from the Gemini wire schema. It retains the field structure, required properties, types, enums,
-and union branches. The original schema and the domain validators remain authoritative after the
-response, so this compatibility projection cannot make an invalid Agent proposal executable.
+from the Gemini wire schema. For `field_changes`, the canonical object-level `anyOf` caused
+repetitive role proposals until `MAX_TOKENS`; resolving references alone did not fix it.
+The Google adapter expands local references and emits one field object with an allowed-code
+enum and a union of registered value shapes. All four text keys, or five media keys including
+`source_evidence_id`, remain required; nullable provenance remains nullable. OpenAI retains
+the canonical per-field object variants.
+
+The Google wire grammar alone no longer couples each field code to its exact value type.
+`validate_field_changes` still validates that pair against the unchanged turn field contract;
+source and Evidence checks also remain Runtime responsibilities. Tests prove that a
+code/value mismatch accepted by the broader Google wire union is rejected by Runtime.
+Unsupported provider-side length limits are likewise enforced after parsing. An incomplete
+response still enters the existing recovery path and never applies partial facts.
 
 The `google-gemini35-flash-lite` profile was verified on 2026-09-17 with live image and PDF
 `inlineData` requests, a structured-output request, and a live forced `context.resolve` call followed
 by structured continuation. This verifies transport compatibility for synthetic FNOL data. Provider
 availability and latency remain deployment observations rather than a permanent guarantee. The
-NowCoding GPT profile remains text/tool-only until its endpoint accepts the same authorised image and
-document blocks with a successful structured response; the local Qwen profile remains text-only until a
+current OpenRouter GPT-4o-mini binding supports image input but not document input;
+the local Qwen profile remains text-only until a
 vision-capable deployment is qualified.
 
-The executable claimant Prompt Pack is `northwind-fnol-claimant-v7`, authored under
-`backend/prompts/v7/` and embedded immutably in the published `agent_instruction` configuration.
-Runtime deterministically composes core, one family, one task, and matching capability fragments;
-it then injects a budgeted Claim projection, bounded references, and the selected narrow schema.
-The versioned `config/model-runtime-bindings-v6.json` manifest remains an explicit rollback
-artifact. A never-initialised scope started with that manifest publishes the complete v6 Runtime
-rather than rewriting its bindings to v7. An existing scope requires an operator to select or
-publish the matching complete v6 Release Set as well as the v6 deployment allow-list; changing
-the manifest alone never mixes it into an active v7 release. A v7 failure never activates v6
-automatically. Changing executable fragment content requires a new fragment or pack version and a
-complete atomic Release Set.
+The executable claimant Prompt Pack is `northwind-fnol-claimant-v8`, authored under
+`backend/prompts/v8/` and embedded immutably in the published `agent_instruction` configuration.
+Runtime composes bounded core, family, turn and capability instructions with one complete
+turn envelope. The v7 pack and versioned bindings remain available for an explicit complete
+Release Set rollback. v6 source artifacts remain deprecated and are not enabled as fallback.
+Changing executable fragment content requires a new fragment or pack version and a complete
+atomic Release Set; changing a manifest alone never mutates an existing active release.
 
 The repository includes configuration and transport tests, but a deployment is live only after an
 authorised model invocation succeeds in its selected AWS account and region. Model listing or

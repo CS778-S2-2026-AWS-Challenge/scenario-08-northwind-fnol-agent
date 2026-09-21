@@ -276,10 +276,14 @@ def validate_turn_proposal(
 
     requirements = branch_evaluation.requirements
     question = proposal.next_question
+    proposed_reply = proposal.reply
     if question is not None and not set(question.field_codes).issubset(
         requirements.missing_required_now
     ):
         reject('next_question', ','.join(question.field_codes), 'field_not_missing')
+        # Remove this rejected proposal's exact wording only. Other questions
+        # remain model-authored content; never delete every question sentence.
+        proposed_reply = proposed_reply.replace(question.wording, '').strip()
         question = None
 
     service_ids: list[str] = []
@@ -366,7 +370,7 @@ def validate_turn_proposal(
         if values.get('estimated_value') is not None:
             values['estimated_value'] = MoneyAmount.model_validate(values['estimated_value'])
         contents.append(ProposedContentsItem(**values))
-    reply = truthful_reply(proposal.reply, rejected_services)
+    reply = truthful_reply(proposed_reply, rejected_services)
     for identity in service_ids:
         name = SERVICE_REGISTRY[identity].service_name if identity in SERVICE_REGISTRY else identity
         reply += f' I can also help arrange {name} — see the option below.'

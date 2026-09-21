@@ -192,19 +192,7 @@ def _validate_staff_update(
         raise _conflict('The original handoff resolution timestamp cannot be rewritten.')
 
 
-def validate_runtime_handoff_update(
-    stored: HandoffRecord | None,
-    handoff: HandoffRecord,
-    claim: WorkingClaim,
-    message: MessageRecord,
-    decision: AgentDecisionRecord,
-) -> None:
-    """Permit only an evidence-backed urgency upgrade of the same open handoff.
-
-    Runtime turn commits do not use the staff lifecycle route. All its immutable
-    identity, ownership, packet, lifecycle and timestamps still stay unchanged;
-    the only allowed change is the explicitly documented urgency escalation.
-    """
+def _validate_runtime_upgrade_shape(stored: HandoffRecord | None, handoff: HandoffRecord) -> None:
     if stored is None or stored == handoff:
         return
     if stored.status in {HandoffStatus.RESOLVED, HandoffStatus.CANCELLED}:
@@ -226,6 +214,24 @@ def validate_runtime_handoff_update(
         or ranks[handoff.priority] < ranks[HandoffPriority.URGENT]
     ):
         raise _conflict('Runtime can only upgrade an open handoff to urgent support.')
+
+
+def validate_runtime_handoff_update(
+    stored: HandoffRecord | None,
+    handoff: HandoffRecord,
+    claim: WorkingClaim,
+    message: MessageRecord,
+    decision: AgentDecisionRecord,
+) -> None:
+    """Permit only an evidence-backed urgency upgrade of the same open handoff.
+
+    Runtime turn commits do not use the staff lifecycle route. All its immutable
+    identity, ownership, packet, lifecycle and timestamps still stay unchanged;
+    the only allowed change is the explicitly documented urgency escalation.
+    """
+    if stored is None or stored == handoff:
+        return
+    _validate_runtime_upgrade_shape(stored, handoff)
     fact = claim.form.get('incident.injury_or_danger')
     source_backed_signal = fact is not None and (
         (
@@ -253,6 +259,48 @@ def validate_runtime_handoff_update(
         raise _conflict(
             'Runtime urgency escalation requires an authorised source-backed safety fact.'
         )
+
+
+def validate_preprovider_safety_handoff(
+    stored: HandoffRecord | None,
+    handoff: HandoffRecord,
+    claim: WorkingClaim,
+    safety_message: MessageRecord,
+    persisted_message: MessageRecord | None,
+) -> None:
+    from backend.services.agent import AgentTurnContext, detect_safety_interrupt
+
+    if (
+        persisted_message != safety_message
+        or safety_message.actor is not ActorType.CLAIMANT
+        or safety_message.claim_id != claim.claim_id
+        or safety_message.session_id != claim.active_session_id
+    ):
+        raise _conflict('Safety escalation requires the accepted claimant message.')
+    signal = detect_safety_interrupt(
+        AgentTurnContext(
+            claim=claim,
+            session_id=safety_message.session_id,
+            trigger_message_id=safety_message.message_id,
+            message_text=str(safety_message.content.get('text', '')),
+            evidence_refs=[],
+        )
+    )
+    expected_need = {
+        'urgent_safety': SupportNeed.URGENT,
+        'human_requested': SupportNeed.HUMAN_REQUESTED,
+        'accessibility': SupportNeed.ACCESSIBILITY_REQUIRED,
+        'distress': SupportNeed.DISTRESS,
+    }
+    if signal is None or handoff.support_need is not expected_need[signal.kind]:
+        raise _conflict('Safety escalation does not match the deterministic claimant request.')
+    _validate_runtime_upgrade_shape(stored, handoff)
+    if stored is None and (
+        handoff.source_message_id != safety_message.message_id
+        or handoff.status not in {HandoffStatus.REQUESTED, HandoffStatus.QUEUED}
+        or handoff.assigned_to is not None
+    ):
+        raise _conflict('A new safety handoff must retain its source and start unassigned.')
 
 
 class HandoffPersistenceGuard:
@@ -289,8 +337,20 @@ class HandoffPersistenceGuard:
         idempotency: IdempotencyRecord,
         audit_event: AuditEventEnvelope,
         branch_evaluation: BranchEvaluationRecord | None = None,
+        *,
+        safety_message: MessageRecord | None = None,
     ) -> None:
-        _validate_creation(self._repository, claim, expected_revision, handoff, idempotency)
+        stored = self._repository.get_handoff(claim.claim_id, handoff.handoff_id, claim.customer_id)
+        if stored is None:
+            _validate_creation(self._repository, claim, expected_revision, handoff, idempotency)
+        else:
+            _validate_parent_revision(self._repository, claim, expected_revision)
+            if (
+                idempotency.actor_id != claim.customer_id
+                or idempotency.handoff_id != handoff.handoff_id
+            ):
+                raise _conflict('Support escalation must retain the authenticated Claim owner.')
+            _validate_runtime_upgrade_shape(stored, handoff)
         _validate_handoff_audit(claim, handoff, idempotency, audit_event)
         self._repository.save_handoff_mutation(
             claim,
@@ -299,6 +359,7 @@ class HandoffPersistenceGuard:
             idempotency,
             audit_event,
             branch_evaluation,
+            safety_message=safety_message,
         )
 
     def save_staff_mutation(

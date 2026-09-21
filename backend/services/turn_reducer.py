@@ -35,7 +35,6 @@ from backend.domain.models import (
     EvidenceStatus,
     FormSource,
     FormStatus,
-    HandoffPriority,
     HandoffRecord,
     MessageRecord,
     MessageVisibility,
@@ -68,7 +67,7 @@ from backend.services.external_service_offers import (
     offer_work_item,
 )
 from backend.services.fact_resolution import confirm_contents_item, confirm_form_field
-from backend.services.handoffs import build_handoff, updated_claim_for_handoff
+from backend.services.handoffs import prepare_support_handoff, updated_claim_for_handoff
 from backend.services.professional_reviews import build_policy_review_handoff
 
 if TYPE_CHECKING:
@@ -253,6 +252,8 @@ def recompute_progress(
     }:
         return claim.claim_state.workflow_state, claim.customer_next_step
     if evaluation.requirements.ready_pending_confirmation:
+        if proposed_next_step is not None and proposed_next_step.status == 'confirmation_required':
+            return WorkflowState.COLLECTING, proposed_next_step
         return WorkflowState.COLLECTING, CustomerNextStep(
             status='confirmation_requested',
             summary='Please confirm the recorded details before creating the Claim.',
@@ -538,36 +539,21 @@ def reduce_turn(
             if proposal.action is AgentAction.URGENT_HANDOFF
             else detected_support_need or SupportNeed.HUMAN_REQUESTED
         )
-        if open_handoffs:
-            handoff = open_handoffs[-1]
-            if support_need is SupportNeed.URGENT:
-                handoff = handoff.model_copy(
-                    update={
-                        'priority': (
-                            HandoffPriority.IMMEDIATE
-                            if handoff.priority is HandoffPriority.IMMEDIATE
-                            else HandoffPriority.URGENT
-                        ),
-                        'support_need': SupportNeed.URGENT,
-                    }
-                )
-            effective_next_step = claim.customer_next_step
-        else:
-            handoff, effective_next_step = build_handoff(
-                repository,
-                claim.model_copy(
-                    update={
-                        'form': projected_form,
-                        'contents_items': projected_contents,
-                        'incident_type': inferred_incident_type,
-                    }
-                ),
-                support_need=support_need,
-                reason=proposal.customer_reason,
-                preferred_channel=None,
-                source_message_id=claimant_message.message_id,
-                reason_code=proposal.reason_codes[0],
-            )
+        handoff, effective_next_step, _handoff_changed = prepare_support_handoff(
+            repository,
+            claim.model_copy(
+                update={
+                    'form': projected_form,
+                    'contents_items': projected_contents,
+                    'incident_type': inferred_incident_type,
+                }
+            ),
+            support_need=support_need,
+            reason=proposal.customer_reason,
+            preferred_channel=None,
+            source_message_id=claimant_message.message_id,
+            reason_code=proposal.reason_codes[0],
+        )
         updated_claim = updated_claim_for_handoff(claim, handoff, effective_next_step)
         updated_claim = updated_claim.model_copy(
             update={
@@ -696,6 +682,23 @@ def reduce_turn(
             )
         else:
             effective_next_step = next_requirement_step(applied_evaluation.requirements)
+    elif (
+        proposal.proposal_source is AgentProposalSource.CONTROLLED_AGENT
+        and authority.outcome is AuthorityOutcome.AUTHORISED
+        and updated_claim.claim_state.workflow_state
+        in {WorkflowState.COLLECTING, WorkflowState.READY_FOR_NEXT}
+        and updated_claim.terminal_disposition is None
+        and not open_handoffs
+        and handoff is None
+        and not clarification_items
+        and effective_next_step.responsible_party is ResponsibleParty.CLAIMANT
+        and effective_next_step.status not in {'confirmation_required', 'confirmation_requested'}
+        and set(effective_next_step.required_items) & set(applied_evaluation.requirements.satisfied)
+    ):
+        # Controlled fixtures propose their question against the pre-turn form.
+        # Once this turn satisfies that request, project the current requirement
+        # instead of retaining the answered field beside the fresh fallback text.
+        effective_next_step = next_requirement_step(applied_evaluation.requirements)
     if question is None and applied_evaluation.requirements.missing_required_now:
         field = intake_field_for_requirement(applied_evaluation.requirements.next_required_item)
         question = field.prompt if field is not None else None

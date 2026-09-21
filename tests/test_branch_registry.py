@@ -247,16 +247,20 @@ def test_confirmed_family_activates_exactly_one_branch(family: str) -> None:
     assert incident_type.selection_state.value == 'candidate_now'
 
 
-def test_proposed_family_is_candidate_and_cannot_select_formal_family() -> None:
+def test_proposed_family_selects_collection_without_confirming_formal_family() -> None:
     claim = make_claim().model_copy(
         update={'form': {'claim.product_family': field('contents', FormStatus.PROPOSED)}}
     )
 
     result = BranchRuleEvaluator().evaluate(claim)
 
-    assert result.selected_family is None
-    assert 'family.contents' in result.candidate_branches
-    assert 'family.contents' not in result.active_branches
+    assert result.selected_family == 'contents'
+    assert 'family.contents' in result.active_branches
+    assert 'claim.product_family' in result.requirements.recorded
+    assert 'claim.product_family' not in result.requirements.missing_required_now
+    assert 'contents.items' in result.requirements.missing_required_now
+    assert claim.form['claim.product_family'].status is FormStatus.PROPOSED
+    assert claim.incident_type is None
 
 
 @pytest.mark.parametrize('family', ['motor', 'home', 'contents'])

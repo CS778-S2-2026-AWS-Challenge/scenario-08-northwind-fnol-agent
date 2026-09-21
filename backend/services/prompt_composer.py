@@ -4,7 +4,7 @@ import json
 from importlib.resources import files
 from math import ceil
 
-from backend.domain.agent_context_runtime import ContextLoadMode, TurnRoute
+from backend.domain.agent_context_runtime import ContextLoadMode, TurnRoute, TurnTask
 from backend.domain.prompt_pack import (
     PromptBundle,
     PromptFragmentDefinition,
@@ -145,6 +145,14 @@ def compose_prompt(
     fragment_contents: dict[str, str] | None = None,
 ) -> PromptBundle:
     selected_manifest = manifest or load_prompt_manifest()
+    # The rollback pack still names its external fragment by the old task.
+    # Translate the shared intent only for prompt selection, never to clip facts.
+    if (
+        selected_manifest.prompt_pack_version == 'northwind-fnol-claimant-v7'
+        and 'external' in route.intents
+        and route.task is TurnTask.INTAKE
+    ):
+        route = route.model_copy(update={'task': TurnTask.EXTERNAL_SUPPORT})
     by_id = {item.fragment_id: item for item in selected_manifest.fragments}
     selected_ids = _initial_fragment_ids(route, by_id)
     missing = selected_ids - set(by_id)
