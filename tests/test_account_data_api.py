@@ -10,10 +10,13 @@ from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
 from backend.domain.audit import AuditSubject, AuditSubjectType
 from backend.domain.models import CustomerNextStep, ResponsibleParty, WorkingClaim
-from backend.repositories.account_data import PolicySelectionConflict
+from backend.repositories.account_data import (
+    PaymentDestinationSelectionConflict,
+    PolicySelectionConflict,
+)
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
-from backend.repositories.protocols import RevisionConflict
+from backend.repositories.protocols import IdempotencyConflict, RevisionConflict
 from backend.services.protected_values import UnavailableProtectedValueAdapter
 
 
@@ -517,6 +520,156 @@ def test_payout_contact_selection_rejects_stale_foreign_and_unusable_inputs(
     assert missing_phone.json()['error']['details'] == [
         {'field': 'contact_preference', 'reason': 'Add a phone number first.'}
     ]
+    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    assert stored is not None
+    assert stored.revision == ready.revision
+    assert stored.payment_destination_id is None
+    assert 'claimant.contact_preference' not in stored.form
+
+
+def test_payout_contact_selection_rejects_missing_wrong_action_and_replay_mismatch(
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    payment = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        'payout-guard-payment',
+        {'account_type': 'cheque', 'account_number': '12-3456-4444555-00'},
+    )
+
+    missing = client.post(
+        '/api/v1/claims/clm_missing/payout-contact-selections',
+        headers={**owner, 'Idempotency-Key': 'payout-missing', 'If-Match': '1'},
+        json={
+            'payment_destination_id': payment['payment_destination_id'],
+            'contact_preference': 'email',
+        },
+    )
+
+    claim = client.post(
+        '/api/v1/claims',
+        headers={**owner, 'Idempotency-Key': 'payout-guard-claim'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'home'},
+    ).json()['claim']
+    route = f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections'
+    wrong_action = client.post(
+        route,
+        headers={
+            **owner,
+            'Idempotency-Key': 'payout-wrong-action',
+            'If-Match': str(claim['revision']),
+        },
+        json={
+            'payment_destination_id': payment['payment_destination_id'],
+            'contact_preference': 'email',
+        },
+    )
+
+    ready = _advance_claim_to_payout_contact(repository, claim['claim_id'])
+    first = client.post(
+        route,
+        headers={
+            **owner,
+            'Idempotency-Key': 'payout-replay-mismatch',
+            'If-Match': str(ready.revision),
+        },
+        json={
+            'payment_destination_id': payment['payment_destination_id'],
+            'contact_preference': 'email',
+        },
+    )
+    conflicting_replay = client.post(
+        route,
+        headers={
+            **owner,
+            'Idempotency-Key': 'payout-replay-mismatch',
+            'If-Match': str(ready.revision),
+        },
+        json={
+            'payment_destination_id': payment['payment_destination_id'],
+            'contact_preference': 'in_app',
+        },
+    )
+
+    assert missing.status_code == 404
+    assert missing.json()['error']['code'] == 'NOT_FOUND'
+    assert wrong_action.status_code == 409
+    assert wrong_action.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    assert first.status_code == 201, first.text
+    assert conflicting_replay.status_code == 409
+    assert conflicting_replay.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+
+
+@pytest.mark.parametrize(
+    ('conflict_kind', 'expected_code'),
+    [
+        ('selection', 'PAYMENT_DESTINATION_SELECTION_CONFLICT'),
+        ('revision', 'REVISION_CONFLICT'),
+        ('idempotency', 'IDEMPOTENCY_CONFLICT'),
+        ('missing_destination', 'NOT_FOUND'),
+    ],
+)
+def test_payout_contact_selection_maps_repository_races_without_partial_write(
+    conflict_kind: str,
+    expected_code: str,
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    payment = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        f'payout-race-payment-{conflict_kind}',
+        {'account_type': 'cheque', 'account_number': '12-3456-5555666-00'},
+    )
+    claim = client.post(
+        '/api/v1/claims',
+        headers={**owner, 'Idempotency-Key': f'payout-race-claim-{conflict_kind}'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'home'},
+    ).json()['claim']
+    ready = _advance_claim_to_payout_contact(repository, claim['claim_id'])
+    route = f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections'
+
+    def conflict_save(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        if conflict_kind == 'selection':
+            raise PaymentDestinationSelectionConflict(
+                payment['payment_destination_id'],
+                reason='changed',
+                current_revision=payment['revision'] + 1,
+            )
+        if conflict_kind == 'revision':
+            raise RevisionConflict(ready.revision + 1)
+        if conflict_kind == 'idempotency':
+            raise IdempotencyConflict('payout-race')
+        raise KeyError(payment['payment_destination_id'])
+
+    original_save = repository.save_payout_contact_selection
+    repository.save_payout_contact_selection = conflict_save  # type: ignore[method-assign]
+    response = client.post(
+        route,
+        headers={
+            **owner,
+            'Idempotency-Key': f'payout-race-{conflict_kind}',
+            'If-Match': str(ready.revision),
+        },
+        json={
+            'payment_destination_id': payment['payment_destination_id'],
+            'contact_preference': 'email',
+        },
+    )
+    repository.save_payout_contact_selection = original_save  # type: ignore[method-assign]
+
+    assert response.status_code == 409 if conflict_kind != 'missing_destination' else 404
+    assert response.json()['error']['code'] == expected_code
+    if conflict_kind == 'selection':
+        assert response.json()['error']['details'] == [
+            {'field': 'payment_destination_id', 'reason': 'changed'}
+        ]
     stored = repository.get_claim(claim['claim_id'], 'cus_demo')
     assert stored is not None
     assert stored.revision == ready.revision
