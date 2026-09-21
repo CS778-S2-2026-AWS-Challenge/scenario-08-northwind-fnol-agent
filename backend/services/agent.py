@@ -1247,6 +1247,9 @@ class ControlledAgent:
 
 
 def validate_proposal(proposal: AgentProposal) -> AgentAuthority:
+    # InvariantGuardedAgent prepends the registered interrupt reason while
+    # preserving provider fact reasons. The server-owned authority marker is
+    # still mandatory; a model-authored reason alone grants no handoff authority.
     if proposal.validated_turn is not None:
         # v8 has already validated every optional part.  Retain that boundary
         # while checking the compatibility shell cannot add a protected write.
@@ -1277,8 +1280,8 @@ def validate_proposal(proposal: AgentProposal) -> AgentAuthority:
         if (
             proposal.action in {AgentAction.HANDOFF, AgentAction.URGENT_HANDOFF}
             and proposal.controlled_rule_authorised
-            and set(proposal.reason_codes).issubset(CONTROLLED_HANDOFF_REASONS)
             and proposal.reason_codes
+            and proposal.reason_codes[0] in CONTROLLED_HANDOFF_REASONS
         ):
             return AgentAuthority(
                 proposed_by='agent',
@@ -1335,8 +1338,8 @@ def validate_proposal(proposal: AgentProposal) -> AgentAuthority:
     if (
         proposal.action in {AgentAction.HANDOFF, AgentAction.URGENT_HANDOFF}
         and proposal.controlled_rule_authorised
-        and set(proposal.reason_codes).issubset(CONTROLLED_HANDOFF_REASONS)
         and proposal.reason_codes
+        and proposal.reason_codes[0] in CONTROLLED_HANDOFF_REASONS
     ):
         return AgentAuthority(
             proposed_by='agent',

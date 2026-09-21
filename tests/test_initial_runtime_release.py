@@ -689,6 +689,7 @@ def test_capabilities_expose_the_repository_published_model_catalogue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv('GEMINI_API_KEY', 'test-only-gemini-key')
+    monkeypatch.setenv('NORTHWIND_MODEL_API_KEY', 'test-only-openrouter-key')
     client = TestClient(create_app(_settings()))
 
     response = client.get(

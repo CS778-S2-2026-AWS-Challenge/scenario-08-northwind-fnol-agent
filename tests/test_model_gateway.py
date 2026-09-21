@@ -4324,7 +4324,7 @@ def test_namespaced_model_handoff_on_routine_message_does_not_create_handoff() -
     body = response.json()
     safe_response = (
         'I have recorded what you shared, but I could not safely apply the proposed next '
-        'step. Your current report remains available. Tell me what happened in your own words.'
+        'step. Your current report remains available.'
     )
     assert body['handoff'] is None
     assert body['agent_message']['content']['text'] == safe_response
