@@ -10,7 +10,7 @@ import pytest
 from journey_runs import motor_collision
 from journey_runs.__main__ import main as journey_main
 from journey_runs.assessor_failures import FAILURE_CASES, run_assessor_failure
-from journey_runs.engine import REPOSITORY_ROOT, PackMaterial
+from journey_runs.engine import PROFILE_ENV, REPOSITORY_ROOT, PackMaterial, journey_settings
 from journey_runs.household import (
     CONTENTS,
     CONTENTS_CONFLICTING_OWNERSHIP,
@@ -56,6 +56,8 @@ from journey_runs.record import (
     cited_authority,
 )
 from pydantic import ValidationError
+
+from backend.core.config import AgentRuntimeProfile, IdentityMode
 
 _NOW = datetime(2026, 9, 15, tzinfo=UTC)
 
@@ -552,6 +554,63 @@ def test_a_step_must_carry_response_body_validity_evidence() -> None:
 def test_the_run_step_schema_lists_response_body_valid_as_required() -> None:
     required = RunStep.model_json_schema().get('required', [])
     assert 'response_body_valid' in required
+
+
+_MODEL_ENVIRONMENT = {
+    'MODEL_PROTOCOL_ADAPTER': 'openai_compatible',
+    'MODEL_BASE_URL': 'http://localhost:1/v1',
+    'MODEL_IDENTIFIER': 'qwen-test',
+    'MODEL_API_KEY_ENV': 'NORTHWIND_MODEL_API_KEY',
+    'NORTHWIND_MODEL_API_KEY': 'synthetic-key',
+}
+
+
+def test_a_run_uses_the_controlled_profile_unless_one_is_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(PROFILE_ENV, raising=False)
+
+    settings = journey_settings()
+
+    assert settings.agent_runtime_profile is AgentRuntimeProfile.CONTROLLED
+    assert (settings.environment, settings.identity_mode) == ('test', IdentityMode.DEVELOPER)
+
+
+def test_a_requested_model_runtime_runs_the_journeys_on_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(PROFILE_ENV, AgentRuntimeProfile.MODEL_GATEWAY.value)
+    for name, value in _MODEL_ENVIRONMENT.items():
+        monkeypatch.setenv(name, value)
+
+    settings = journey_settings()
+
+    assert settings.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY
+    assert settings.model_identifier == 'qwen-test'
+    # The journeys still run their own test identity and fixture data.
+    assert (settings.environment, settings.identity_mode) == ('test', IdentityMode.DEVELOPER)
+
+
+@pytest.mark.parametrize(
+    ('environment', 'message'),
+    [
+        ({PROFILE_ENV: 'model_gateway'}, 'MODEL_BASE_URL'),
+        ({PROFILE_ENV: 'gpt'}, 'must be exactly one of'),
+    ],
+    ids=['unconfigured', 'unknown'],
+)
+def test_a_model_runtime_the_suite_cannot_reach_refuses_rather_than_falls_back(
+    monkeypatch: pytest.MonkeyPatch, environment: dict[str, str], message: str
+) -> None:
+    """A rule-driven run must never be reported as a model-backed one."""
+
+    for name in _MODEL_ENVIRONMENT:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValueError, match=message):
+        journey_settings()
 
 
 _MEASURED_METRIC = {

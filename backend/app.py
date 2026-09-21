@@ -115,6 +115,10 @@ from backend.services.initial_runtime_release import install_initial_runtime_rel
 from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.model_profiles import model_configuration
+from backend.services.protected_values import (
+    ProtectedValueAdapter,
+    protected_value_adapter_for,
+)
 from backend.services.realtime import RealtimeDispatcher
 from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
 from backend.services.runtime_configuration import (
@@ -152,6 +156,7 @@ def create_app(
     evaluation_repository: EvaluationRepository | None = None,
     knowledge_admin_repository: KnowledgeAdminRepository | None = None,
     external_capability_dispatcher: ExternalCapabilityDispatcher | None = None,
+    protected_value_adapter: ProtectedValueAdapter | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
     resolved_configuration_repository = configuration_repository or (
@@ -260,6 +265,9 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.settings = resolved_settings
+    app.state.protected_value_adapter = protected_value_adapter or protected_value_adapter_for(
+        resolved_settings.environment
+    )
     if identity_repository is not None:
         app.state.identity_repository = identity_repository
     elif resolved_settings.developer_mode:

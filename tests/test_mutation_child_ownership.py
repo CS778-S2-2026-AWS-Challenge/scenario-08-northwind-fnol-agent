@@ -2,6 +2,8 @@ from datetime import UTC, datetime
 
 import pytest
 
+from backend.core.auth import Principal
+from backend.domain.audit import AuditEventEnvelope
 from backend.domain.models import (
     ActorType,
     AgentAction,
@@ -29,6 +31,7 @@ from backend.domain.models import (
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.protocols import IdempotencyRecord
+from backend.services.handoff_audit import build_handoff_audit_event
 
 FIXED_TIME = datetime(2026, 8, 24, 1, 50, tzinfo=UTC)
 
@@ -81,6 +84,27 @@ def _claimant_retry(
         agent_message_id=agent_message_id,
         decision_id=decision_id,
         handoff_id=handoff_id,
+    )
+
+
+def _handoff_audit(
+    claim: WorkingClaim,
+    handoff: HandoffRecord,
+    idempotency: IdempotencyRecord,
+) -> AuditEventEnvelope:
+    return build_handoff_audit_event(
+        principal=Principal(
+            subject=idempotency.actor_id,
+            actor_type='claimant',
+            auth_source='test:claimant',
+        ),
+        claim=claim,
+        handoff=handoff,
+        route=idempotency.route,
+        idempotency_key=idempotency.key,
+        required_permission='claimant_support_request',
+        reason='Test handoff mutation.',
+        created_at=FIXED_TIME,
     )
 
 
@@ -150,12 +174,16 @@ def test_handoff_id_cannot_be_reowned_by_another_claim() -> None:
     original = _handoff(first.claim_id, 'hnd_shared_identity')
     repository.save_handoff(original, first.customer_id)
 
+    updated = second.model_copy(update={'revision': 2})
+    reowned = original.model_copy(update={'claim_id': second.claim_id})
+    retry = _claimant_retry(second, 'steal-handoff', handoff_id=original.handoff_id)
     with pytest.raises(KeyError):
         repository.save_handoff_mutation(
-            second.model_copy(update={'revision': 2}),
+            updated,
             1,
-            original.model_copy(update={'claim_id': second.claim_id}),
-            _claimant_retry(second, 'steal-handoff', handoff_id=original.handoff_id),
+            reowned,
+            retry,
+            _handoff_audit(updated, reowned, retry),
         )
 
     assert (
