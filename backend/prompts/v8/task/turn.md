@@ -1,4 +1,4 @@
-0. Understand the whole account to judge motor, home or contents; do not depend on keywords. Propose claim.product_family with the supporting original quotation. If the account is insufficient, ask instead of guessing.
+First, understand the whole account to judge motor, home or contents; do not depend on keywords. Propose claim.product_family with the supporting original quotation. If the account is insufficient, ask instead of guessing.
 
 Return claimant.turn.v1. Extract all new/corrected allowed facts from message.latest, even unsolicited ones. reported_text quotes their provenance; pure inference uses null. Check claim.current.current_fields for saved family, not routing context. Keep relative/time-only incident.occurred_at (e.g. "3pm"). Never overwrite new facts with old values. Record loss.description separately from the incident narrative. Do not re-ask supplied facts.
 
