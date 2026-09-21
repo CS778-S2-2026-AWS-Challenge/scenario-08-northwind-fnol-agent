@@ -821,6 +821,10 @@ retains the text and original idempotency identifiers so replay restores the del
 without creating a duplicate. The complete state
 and page flow is defined in `docs/claimant-staff-messaging-journey.md`.
 
+Claimant and Agent messages may be `claimant_visible` or `shared`; they cannot be `internal_only`.
+Staff and System records may use any registered visibility. Only a claimant message may carry a
+`client_message_id`, and that retry identity is unique within its Claim.
+
 The current staff reply helper is a deterministic template built from claimant-safe state; it does
 not call the Agent or model gateway and MUST NOT be labelled as Agent- or AI-generated. Template
 draft state is internal UI state, not a `MessageRecord`. Only an authenticated, assigned staff
@@ -1002,18 +1006,20 @@ later claimant statement is resolved against existing assertions rather than sil
 
 | Field | Allowed values or rule |
 |---|---|
-| `kind` | Registered evidence type such as `incident_image`, `police_report`, `receipt`, `repair_quote`, or `other_document` |
+| `kind` | Registered evidence type: `agency_incident_record`, `assessment_report`, `claim_history`, `claimant_attachment`, `claimant_statement`, `external_assessment`, `incident_image`, `incident_photo`, `incident_report`, `internal_policy_history`, `other_document`, `policy`, `police_report`, `proof_of_ownership`, `receipt`, or `repair_quote` |
 | `status` | `missing`, `pending`, `received`, `unofficial`, `invalid`, `unavailable`, `superseded`, `expired` |
 | `file_status` | `not_available`, `awaiting_upload`, `uploading`, `uploaded`, `processing`, `ready`, `failed` |
 | `source` | `claimant`, `staff`, `external_system` |
 | `related_fields` | Registered form field codes supported or challenged by the item |
-| `needed_for` | One or more business actions; later evidence MUST NOT block an unrelated safe current action |
+| `needed_for` | Unique registered purposes: `current_action`, `later_action`, `liability_review`, `professional_review`, or `repair_authorisation`; later evidence MUST NOT block an unrelated safe current action |
 | `references` | Typed statements about a second record or claim fact. **Staff-visible only** |
 
 `status` carries the condition of the material and `file_status` the upload and
 processing lifecycle. They answer different questions and MUST NOT be read as
 alternatives to each other: `pending` with `not_available` is a document that does not
 exist yet, and `pending` with `awaiting_upload` is a file on its way in.
+Every fixture and MongoDB write boundary rejects unregistered kinds, fields, purposes,
+duplicates, and contradictory status/file-status combinations before persistence.
 
 Three conditions are statements about a *second* thing and therefore cannot be carried by
 `status` alone. Each is recorded as an `EvidenceReference`:

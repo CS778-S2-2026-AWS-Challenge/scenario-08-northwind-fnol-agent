@@ -33,13 +33,14 @@ def _save_message(
     timestamp: datetime,
     *,
     visibility: MessageVisibility = MessageVisibility.CLAIMANT_VISIBLE,
+    actor: ActorType = ActorType.AGENT,
 ) -> None:
     repository.save_message(
         MessageRecord(
             message_id=message_id,
             claim_id=claim_id,
             session_id=session_id,
-            actor=ActorType.AGENT,
+            actor=actor,
             visibility=visibility,
             content={'type': 'text', 'text': message_id},
             created_at=timestamp,
@@ -64,6 +65,7 @@ def test_message_cursor_uses_total_order_and_filters_visibility_before_paging(
         'msg_ab_internal',
         timestamp,
         visibility=MessageVisibility.INTERNAL_ONLY,
+        actor=ActorType.SYSTEM,
     )
 
     route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'

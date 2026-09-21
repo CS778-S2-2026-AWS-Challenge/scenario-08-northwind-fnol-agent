@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 from enum import Enum
 
+from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.models import (
     EvidenceFileStatus,
     EvidenceRecord,
@@ -10,6 +11,37 @@ from backend.domain.models import (
     EvidenceState,
     EvidenceStatus,
     EvidenceSummary,
+)
+
+REGISTERED_EVIDENCE_KINDS = frozenset(
+    {
+        'agency_incident_record',
+        'assessment_report',
+        'claim_history',
+        'claimant_attachment',
+        'claimant_statement',
+        'external_assessment',
+        'incident_image',
+        'incident_photo',
+        'incident_report',
+        'internal_policy_history',
+        'other_document',
+        'policy',
+        'police_report',
+        'proof_of_ownership',
+        'receipt',
+        'repair_quote',
+    }
+)
+
+REGISTERED_EVIDENCE_NEEDS = frozenset(
+    {
+        'current_action',
+        'later_action',
+        'liability_review',
+        'professional_review',
+        'repair_authorisation',
+    }
 )
 
 PENDING_FILE_STATES = frozenset(
@@ -47,6 +79,42 @@ class EvidenceLifecycleStage(str, Enum):
 
 class UnregisteredEvidenceShape(ValueError):
     """An evidence record does not match any shared lifecycle stage."""
+
+
+def validate_evidence_record(record: EvidenceRecord) -> None:
+    """Validate the provider-neutral Evidence vocabulary and lifecycle shape.
+
+    Args:
+        record: Evidence record about to cross a persistence boundary.
+
+    Raises:
+        ValueError: The record uses an unregistered or contradictory shape.
+    """
+
+    if record.kind not in REGISTERED_EVIDENCE_KINDS:
+        raise ValueError(f'Unregistered Evidence kind: {record.kind}.')
+    if len(record.related_fields) != len(set(record.related_fields)):
+        raise ValueError('Evidence related_fields must not contain duplicates.')
+    unregistered_fields = set(record.related_fields) - REGISTERED_FIELD_CODES
+    if unregistered_fields:
+        raise ValueError(f'Unregistered Evidence related_fields: {sorted(unregistered_fields)}.')
+    if len(record.needed_for) != len(set(record.needed_for)):
+        raise ValueError('Evidence needed_for must not contain duplicates.')
+    unregistered_needs = set(record.needed_for) - REGISTERED_EVIDENCE_NEEDS
+    if unregistered_needs:
+        raise ValueError(f'Unregistered Evidence needed_for: {sorted(unregistered_needs)}.')
+    if not is_registered_evidence_shape(record):
+        raise UnregisteredEvidenceShape(
+            f'{record.evidence_id}: status {record.status.value} with file status '
+            f'{record.file_status.value} is not a registered evidence shape.'
+        )
+    if record.updated_at < record.created_at:
+        raise ValueError('Evidence cannot be updated before it was created.')
+    for reference in record.references:
+        if reference.field_code is not None and reference.field_code not in REGISTERED_FIELD_CODES:
+            raise ValueError(f'Unregistered Evidence reference field: {reference.field_code}.')
+        if reference.evidence_id == record.evidence_id:
+            raise ValueError('Evidence cannot reference itself.')
 
 
 def unresolved_conflicts(references: Sequence[EvidenceReference]) -> tuple[str, ...]:

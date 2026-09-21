@@ -1687,7 +1687,7 @@ def _pending_evidence_for_proposal(
     return EvidenceRecord(
         evidence_id=new_id('evd'),
         claim_id=claim_id,
-        kind=str(pending.get('kind') or 'document'),
+        kind=str(pending.get('kind') or 'other_document'),
         status=EvidenceStatus.PENDING,
         file_status=EvidenceFileStatus.NOT_AVAILABLE,
         source=EvidenceSource.CLAIMANT,

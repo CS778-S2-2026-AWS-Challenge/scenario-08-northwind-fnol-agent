@@ -215,6 +215,17 @@ def _seed_persisted_evidence_authority(
         created_at=base_time,
     )
     repository.save_message(trigger, customer_id)
+    proposal_message = MessageRecord(
+        message_id=f'msg_{case}_proposal',
+        claim_id=claim_id,
+        session_id=session.session_id,
+        actor=ActorType.AGENT,
+        visibility=MessageVisibility.CLAIMANT_VISIBLE,
+        content={'type': 'text', 'text': f'Please confirm that I should {action} this Evidence.'},
+        in_reply_to=trigger.message_id,
+        created_at=base_time + timedelta(seconds=1),
+    )
+    repository.save_message(proposal_message, customer_id)
     proposal_id = f'apr_{case}'
     proposal = AgentProposalRecord(
         proposal_id=proposal_id,
@@ -232,7 +243,7 @@ def _seed_persisted_evidence_authority(
         removal_scope='source_claim_history' if action == 'remove' else None,
         proposal_source=AgentProposalSource.CONTROLLED_AGENT,
         model_profile_id=session.model_profile_id,
-        created_at=base_time + timedelta(seconds=1),
+        created_at=proposal_message.created_at,
     )
     confirmation_id = f'msg_{case}_confirmation'
     confirmation = MessageRecord(
@@ -242,7 +253,7 @@ def _seed_persisted_evidence_authority(
         actor=ActorType.CLAIMANT,
         visibility=MessageVisibility.CLAIMANT_VISIBLE,
         content={'type': 'text', 'text': 'Yes, please do that.'},
-        in_reply_to=proposal_id,
+        in_reply_to=proposal_message.message_id,
         created_at=base_time + timedelta(seconds=2),
     )
     repository.save_message(confirmation, customer_id)
@@ -627,6 +638,7 @@ def test_evidence_history_is_account_scoped_and_filters_non_claimant_file_states
         customer_id='cus_demo',
         evidence_id='evd-awaiting-upload',
         file_status=EvidenceFileStatus.AWAITING_UPLOAD,
+        status=EvidenceStatus.PENDING,
     )
     _seed_history_evidence(
         repository,

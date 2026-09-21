@@ -27,6 +27,7 @@ from backend.domain.external_services import (
     external_task_requires_reconciliation,
     request_provenance,
 )
+from backend.domain.message import message_order_key
 from backend.domain.models import (
     AgentAction,
     AssessorRoutingResult,
@@ -321,10 +322,7 @@ def _claim_messages(
         messages.extend(
             repository.list_messages(claim.claim_id, session.session_id, claim.customer_id)
         )
-    actor_order = {'claimant': 0, 'agent': 1, 'staff': 2, 'system': 3}
-    messages.sort(
-        key=lambda item: (item.created_at, actor_order[item.actor.value], item.message_id)
-    )
+    messages.sort(key=message_order_key)
     return messages
 
 
@@ -2241,10 +2239,7 @@ def list_workbench_messages(
             status_code=404, code='RESOURCE_NOT_FOUND', message='The session was not found.'
         )
     messages = repository.list_messages(claim_id, session_id, claim.customer_id)
-    actor_order = {'claimant': 0, 'agent': 1, 'staff': 2, 'system': 3}
-    messages.sort(
-        key=lambda item: (item.created_at, actor_order[item.actor.value], item.message_id)
-    )
+    messages.sort(key=message_order_key)
     return _page(messages, limit, cursor)
 
 

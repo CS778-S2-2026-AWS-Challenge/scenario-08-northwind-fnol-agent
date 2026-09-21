@@ -13,7 +13,10 @@ from backend.domain.account_data import (
 from backend.domain.agent_context_runtime import VerifiedConversationSummary
 from backend.domain.assets import AssetRecord, ClaimAssetSnapshot
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
-from backend.domain.evidence import assert_material_history_is_append_only
+from backend.domain.evidence import (
+    assert_material_history_is_append_only,
+    validate_evidence_record,
+)
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
@@ -27,6 +30,11 @@ from backend.domain.external_services import (
     assert_result_evidence_is_linked,
     assert_result_matches_task,
     assert_task_transition_is_permitted,
+)
+from backend.domain.message import (
+    DuplicateClientMessage,
+    message_order_key,
+    validate_message_record,
 )
 from backend.domain.models import (
     ActorType,
@@ -886,16 +894,46 @@ class FixtureRepository(PersistenceRepository):
     def _store_message(self, message: MessageRecord) -> None:
         """Store a message and maintain the bounded-search child index."""
 
+        session = self._sessions.get(message.session_id)
+        if session is None:
+            raise ValueError('Message Session does not exist.')
+        evidence = [
+            item
+            for evidence_id in message.evidence_refs
+            if (item := self._evidence.get(evidence_id)) is not None
+        ]
+        reply = self._messages.get(message.in_reply_to) if message.in_reply_to is not None else None
+        duplicate_client_message = next(
+            (
+                item
+                for item in self._messages.values()
+                if message.client_message_id is not None
+                and item.claim_id == message.claim_id
+                and item.client_message_id == message.client_message_id
+            ),
+            None,
+        )
+        try:
+            validate_message_record(
+                message,
+                session=session,
+                evidence=evidence,
+                reply=reply,
+                duplicate_client_message=duplicate_client_message,
+            )
+        except DuplicateClientMessage as conflict:
+            raise IdempotencyConflict(message.client_message_id or message.message_id) from conflict
         self._messages[message.message_id] = deepcopy(message)
         message_ids = self._message_ids_by_session.setdefault(message.session_id, [])
         if message.message_id not in message_ids:
             message_ids.append(message.message_id)
-        message_ids.sort(
-            key=lambda message_id: (
-                self._messages[message_id].created_at,
-                message_id,
-            )
-        )
+        message_ids.sort(key=lambda message_id: message_order_key(self._messages[message_id]))
+
+    def _store_evidence(self, evidence: EvidenceRecord) -> None:
+        """Validate and store one provider-neutral Evidence record."""
+
+        validate_evidence_record(evidence)
+        self._evidence[evidence.evidence_id] = deepcopy(evidence)
 
     def _store_session(self, session: SessionRecord) -> None:
         self._sessions[session.session_id] = deepcopy(session)
@@ -1806,7 +1844,7 @@ class FixtureRepository(PersistenceRepository):
             for message in self._messages.values()
             if message.claim_id == claim_id and message.session_id == session_id
         ]
-        return sorted(messages, key=lambda message: (message.created_at, message.message_id))
+        return sorted(messages, key=message_order_key)
 
     def list_recent_messages(
         self,
@@ -2119,7 +2157,7 @@ class FixtureRepository(PersistenceRepository):
             self._external_tasks[task.task_id] = deepcopy(task)
             self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
             self._external_task_requests[request.request_id] = deepcopy(request)
-            self._evidence[evidence.evidence_id] = deepcopy(evidence)
+            self._store_evidence(evidence)
             self._external_task_evidence_links[(link.claim_id, link.evidence_id)] = deepcopy(link)
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
             if staff_action is not None and idempotency is not None and presence is not None:
@@ -2432,7 +2470,7 @@ class FixtureRepository(PersistenceRepository):
         if handoff is not None:
             self._handoffs[handoff.handoff_id] = deepcopy(handoff)
         if evidence is not None:
-            self._evidence[evidence.evidence_id] = deepcopy(evidence)
+            self._store_evidence(evidence)
         if branch_evaluation is not None:
             if branch_evaluation.evaluation_id in self._branch_evaluations:
                 raise IdempotencyConflict(branch_evaluation.evaluation_id)
@@ -2632,6 +2670,7 @@ class FixtureRepository(PersistenceRepository):
         claim = self._claims.get(evidence.claim_id)
         if claim is None or claim.customer_id != customer_id:
             raise KeyError(evidence.claim_id)
+        validate_evidence_record(evidence)
         existing = self._evidence.get(evidence.evidence_id)
         try:
             assert_material_history_is_append_only(existing, evidence)
@@ -2649,7 +2688,7 @@ class FixtureRepository(PersistenceRepository):
             claim,
         )
         assert realtime_event is not None
-        self._evidence[evidence.evidence_id] = deepcopy(evidence)
+        self._store_evidence(evidence)
         self._commit_realtime_event(realtime_event)
 
     def get_evidence(
@@ -2928,7 +2967,7 @@ class FixtureRepository(PersistenceRepository):
             assert realtime_event is not None
             self._claims[claim.claim_id] = deepcopy(claim)
             if evidence is not None:
-                self._evidence[evidence.evidence_id] = deepcopy(evidence)
+                self._store_evidence(evidence)
             if link is not None:
                 self._evidence_claim_links[(link.target_claim_id, link.evidence_id)] = deepcopy(
                     link
@@ -2948,6 +2987,7 @@ class FixtureRepository(PersistenceRepository):
         branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         self._validate_claim_mutation(claim, expected_revision)
+        validate_evidence_record(evidence)
         self._validate_branch_evaluation(claim, branch_evaluation)
         existing_evidence = self._evidence.get(evidence.evidence_id)
         if (
@@ -2981,7 +3021,7 @@ class FixtureRepository(PersistenceRepository):
         )
         assert realtime_event is not None
         self._claims[claim.claim_id] = deepcopy(claim)
-        self._evidence[evidence.evidence_id] = deepcopy(evidence)
+        self._store_evidence(evidence)
         if branch_evaluation is not None:
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
         self._idempotency[lookup] = idempotency
