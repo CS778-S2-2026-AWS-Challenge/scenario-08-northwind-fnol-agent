@@ -193,8 +193,8 @@ async function main() {
     console.log('[3/8] Interrupt claimant transport without refreshing the page')
     await claimantContext.setOffline(true)
 
-    console.log('[4/8] Open the assistance queue in an independent Workbench browser context')
-    await staff.goto(`${WORKBENCH}/workbench/conversations`, { waitUntil: 'domcontentloaded' })
+    console.log('[4/8] Open Workbench in an independent browser context')
+    await staff.goto(`${WORKBENCH}/workbench/`, { waitUntil: 'domcontentloaded' })
 
     if (staff.url().includes('/workbench/login')) {
       await staff.getByLabel('Work email').fill(STAFF_EMAIL)
@@ -206,7 +206,9 @@ async function main() {
       )
     }
 
-    await staff.goto(`${WORKBENCH}/workbench/conversations`, { waitUntil: 'domcontentloaded' })
+    const conversationsLink = staff.getByRole('link', { name: 'Claim conversations', exact: true })
+    await conversationsLink.waitFor({ state: 'visible', timeout: 30000 })
+    await conversationsLink.click()
     await staff.getByRole('heading', { name: 'Human assistance requests', exact: true })
       .waitFor({ state: 'visible', timeout: 30000 })
 
