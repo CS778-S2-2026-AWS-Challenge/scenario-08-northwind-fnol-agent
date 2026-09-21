@@ -26,7 +26,13 @@ def test_login_account_update_and_logout_are_server_authenticated(client: TestCl
     profile = client.patch(
         '/api/v1/account/profile',
         headers=headers,
-        json={'display_name': 'Updated Demo Claimant', 'phone': '020 000 0000'},
+        json={
+            'legal_name': 'Updated Demo Claimant',
+            'date_of_birth': '1990-04-12',
+            'email': 'UPDATED.DEMO@EXAMPLE.INVALID',
+            'phone': '020 000 0000',
+            'residential_address': '1 Queen Street, Auckland',
+        },
     )
     preferences = client.patch(
         '/api/v1/account/preferences',
@@ -41,6 +47,10 @@ def test_login_account_update_and_logout_are_server_authenticated(client: TestCl
     assert account.json()['development_identity'] is True
     assert account.json()['profile']['email'].endswith('.invalid')
     assert profile.json()['profile']['display_name'] == 'Updated Demo Claimant'
+    assert profile.json()['profile']['legal_name'] == 'Updated Demo Claimant'
+    assert profile.json()['profile']['date_of_birth'] == '1990-04-12'
+    assert profile.json()['profile']['email'] == 'updated.demo@example.invalid'
+    assert profile.json()['profile']['residential_address'] == '1 Queen Street, Auckland'
     assert preferences.json()['preferences'] == {'email': False, 'sms': True}
     assert logout.status_code == 204
     assert after_logout.status_code == 401
@@ -229,6 +239,7 @@ def test_profile_rejects_blank_normalized_text_without_advancing_revision(
         responses = [
             client.patch('/api/v1/account/profile', headers=headers, json={field: '   '})
             for field in (
+                'email',
                 'legal_name',
                 'display_name',
                 'preferred_name',
@@ -240,3 +251,20 @@ def test_profile_rejects_blank_normalized_text_without_advancing_revision(
     assert all(response.status_code == 422 for response in responses)
     assert all(response.json()['error']['code'] == 'VALIDATION_ERROR' for response in responses)
     assert after == before
+
+
+def test_profile_rejects_an_email_owned_by_another_claimant(client: TestClient) -> None:
+    login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    second = login(client, 'claimant.two@example.invalid', 'northwind-demo-two')
+    response = client.patch(
+        '/api/v1/account/profile',
+        headers={'Authorization': f'Bearer {second["access_token"]}'},
+        json={'email': 'claimant.one@example.invalid'},
+    )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'RESOURCE_CONFLICT'
+    account = client.get(
+        '/api/v1/account', headers={'Authorization': f'Bearer {second["access_token"]}'}
+    )
+    assert account.json()['profile']['email'] == 'claimant.two@example.invalid'

@@ -26,6 +26,9 @@ ProfileAddress = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=PROFILE_ADDRESS_MAX_LENGTH),
 ]
+ProfileEmail = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=3, max_length=254)
+]
 ProfilePhone = Annotated[
     str, StringConstraints(strip_whitespace=True, max_length=PROFILE_PHONE_MAX_LENGTH)
 ]
@@ -144,6 +147,7 @@ class AccountProjection(BaseModel):
 class ProfilePatchRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
+    email: ProfileEmail | None = None
     legal_name: ProfileName | None = None
     preferred_name: ProfileName | None = None
     date_of_birth: date | None = None
@@ -167,6 +171,8 @@ class ProfilePatchRequest(BaseModel):
             raise ValueError('legal_name cannot be null.')
         if 'display_name' in self.model_fields_set and self.display_name is None:
             raise ValueError('display_name cannot be null.')
+        if 'email' in self.model_fields_set and self.email is None:
+            raise ValueError('email cannot be null.')
         if 'phone' in self.model_fields_set and self.phone is None:
             raise ValueError('phone cannot be null.')
         if (

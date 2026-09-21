@@ -146,6 +146,18 @@ def update_profile(
     changes = payload.model_dump(exclude_unset=True, exclude={'display_name'})
     legacy_name = payload.display_name.strip() if payload.display_name is not None else None
     legal_name = str(changes.pop('legal_name', legacy_name or account.legal_name)).strip()
+    email = changes.get('email', account.email)
+    if isinstance(email, str):
+        email = email.strip().lower()
+    if email != account.email and any(
+        candidate.customer_id != account.customer_id and candidate.email == email
+        for candidate in repository.list_accounts()
+    ):
+        raise ApiError(
+            status_code=409,
+            code='RESOURCE_CONFLICT',
+            message='An account with that email already exists.',
+        )
     preferred_name = changes.get('preferred_name', account.preferred_name)
     if isinstance(preferred_name, str):
         preferred_name = preferred_name.strip()
@@ -157,6 +169,7 @@ def update_profile(
         address = address.strip()
     updated = replace(
         account,
+        email=email,
         legal_name=legal_name,
         preferred_name=preferred_name,
         date_of_birth=changes.get('date_of_birth', account.date_of_birth),

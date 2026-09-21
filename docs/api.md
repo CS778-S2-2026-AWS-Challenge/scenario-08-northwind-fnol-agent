@@ -531,7 +531,9 @@ the legal-name alias; it cannot disagree with `legal_name`. New clients send the
 revision in `If-Match`; a stale revision returns `409 REVISION_CONFLICT`.
 Profile text is whitespace-normalized before validation. Blank legal name, compatibility display
 name, preferred name, or residential address returns `422 VALIDATION_ERROR` and does not change
-the stored profile or revision.
+the stored profile or revision. Email updates are normalized to lowercase, and an email already
+owned by another account returns `409 RESOURCE_CONFLICT` without changing the stored profile or
+revision.
 
 Create requests for the three account resources require `Idempotency-Key`. List routes use the
 standard opaque cursor and default to active records. Their stable descending keyset is
