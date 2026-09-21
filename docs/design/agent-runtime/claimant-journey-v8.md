@@ -179,6 +179,12 @@ Claim does not switch it to Home. Conditional branches persist while their suppo
 remain relevant and exit on a contrary correction. Disabled or observation-only registry rules
 cannot retain active collection effects.
 
+A weak signal may expose the registered fields of a candidate conditional fact branch to
+the model as `CANDIDATE_NOW`, allowing same-turn facts to be recorded. Candidate status does
+not make those fields required or confirm the triggering fact. This consumes the already
+policy-filtered branch result; disabled and observation-only rules remain without field effects,
+and ambiguous family candidates do not expose every family's fields indiscriminately.
+
 Question priority is injury details, newly activated fact branch, family-specific fields,
 other fact branches, then common requirements. The model chooses up to three related fields
 from the first non-empty group. Runtime fallback consumes that same missing set and asks one
