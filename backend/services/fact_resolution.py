@@ -157,6 +157,30 @@ def resolve_form_change(
 
     if relation is AssertionRelation.EQUIVALENT and existing is not None:
         if (
+            existing.status is FormStatus.PROPOSED
+            and proposal.source is FormSource.CLAIMANT
+            and accepted_status is FormStatus.CONFIRMED
+        ):
+            # Equivalent value does not mean equivalent authority: a later
+            # direct claimant statement can settle an earlier inference. Keep
+            # the earlier assertion intact and make the new source current.
+            return existing.model_copy(
+                update={
+                    'source': FormSource.CLAIMANT,
+                    'source_refs': list(dict.fromkeys([*existing.source_refs, source_ref])),
+                    'status': FormStatus.CONFIRMED,
+                    'resolution_state': FactResolutionState.RESOLVED,
+                    'confidence': proposal.confidence,
+                    'precision': precision,
+                    'normalised': proposal.reported_text is not None
+                    and str(existing.value).strip() != proposal.reported_text.strip(),
+                    'assertions': [*history, assertion],
+                    'current_assertion_id': assertion.assertion_id,
+                    'updated_at': timestamp,
+                    'updated_by': updated_by,
+                }
+            )
+        if (
             existing.resolution_state is FactResolutionState.CLARIFICATION_REQUIRED
             and accepted_status is FormStatus.CONFIRMED
         ):

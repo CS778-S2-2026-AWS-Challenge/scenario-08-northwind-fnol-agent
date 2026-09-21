@@ -108,6 +108,61 @@ def test_equivalent_statement_preserves_resolution_without_false_conflict() -> N
     ]
 
 
+@pytest.mark.parametrize('claimant_confirms', [True, False])
+def test_equivalent_fact_upgrades_claimant_provenance_but_never_downgrades_it(
+    claimant_confirms: bool,
+) -> None:
+    first_source = FormSource.INFERENCE if claimant_confirms else FormSource.CLAIMANT
+    first_status = FormStatus.PROPOSED if claimant_confirms else FormStatus.CONFIRMED
+    original = resolve_form_change(
+        field_code='property.address',
+        existing=None,
+        proposal=ProposedFormChange(
+            field_code='property.address',
+            value='12 Example Street',
+            source=first_source,
+            status=first_status,
+        ),
+        source_ref='msg_original',
+        message_text='A home claim.',
+        timestamp=NOW,
+        accepted_status=first_status,
+        updated_by=CLAIMANT,
+    )
+    source = FormSource.CLAIMANT if claimant_confirms else FormSource.INFERENCE
+    status = FormStatus.CONFIRMED if claimant_confirms else FormStatus.PROPOSED
+    result = resolve_form_change(
+        field_code='property.address',
+        existing=original,
+        proposal=ProposedFormChange(
+            field_code='property.address',
+            value='12 Example Street',
+            source=source,
+            status=status,
+            confidence=1.0 if claimant_confirms else None,
+            reported_text='12 Example Street',
+        ),
+        source_ref='msg_update',
+        message_text='The address is 12 Example Street.',
+        timestamp=NOW,
+        accepted_status=status,
+        updated_by=CLAIMANT,
+    )
+    assert result.status is FormStatus.CONFIRMED
+    assert result.source is FormSource.CLAIMANT
+    assert result.resolution_state is FactResolutionState.RESOLVED
+    assert result.value == original.value
+    assert result.assertions[:-1] == original.assertions
+    assert result.assertions[-1].relation is AssertionRelation.EQUIVALENT
+    assert result.source_refs == ['msg_original', 'msg_update']
+    if claimant_confirms:
+        assert result.current_assertion_id == result.assertions[-1].assertion_id
+        assert result.assertions[-1].source_refs == ['msg_update']
+        assert result.confidence == 1.0
+    else:
+        assert result.current_assertion_id == original.current_assertion_id
+
+
 def test_explicit_correction_supersedes_prior_assertion() -> None:
     resolved = resolve(field('around 8pm'), proposal('9pm'), 'Actually, it was 9pm.')
 
