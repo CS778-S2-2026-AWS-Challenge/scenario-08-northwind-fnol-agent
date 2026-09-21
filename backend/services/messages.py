@@ -70,6 +70,7 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.domain.realtime import AgentTurnProgressStage
+from backend.domain.recovery_policy_registry import RecoveryTrigger, classify_recovery
 from backend.domain.retrieval import (
     ClaimHistoryRetrievalRecord,
     ClaimHistorySearchRequest,
@@ -162,6 +163,7 @@ from backend.services.support import (
 )
 from backend.services.turn_family_resolution import resolve_turn_family
 from backend.services.turn_reducer import recompute_progress
+from backend.services.turn_router import route_turn
 
 logger = logging.getLogger(__name__)
 
@@ -2216,10 +2218,22 @@ def submit_message(
                 None,
             )
             trigger_time = trigger_message.created_at if trigger_message is not None else None
-            turn_count = sum(
-                1
-                for item in recent_claimant_messages
-                if trigger_time is not None and item.created_at > trigger_time
+            # Count turns by the repository's stable chronological ordering,
+            # rather than comparing generated message ids or timestamps alone.
+            # A fixture or fast production request may legitimately share a
+            # timestamp with the triggering message.
+            trigger_index = next(
+                (
+                    index
+                    for index, item in enumerate(recent_claimant_messages)
+                    if item.message_id == trigger_id
+                ),
+                None,
+            )
+            turn_count = (
+                len(recent_claimant_messages) - trigger_index - 1
+                if trigger_index is not None
+                else 0
             )
             if turn_count < 3 and consent.service_identity not in renewed_ids:
                 available_external_ids.discard(consent.service_identity)
@@ -2286,9 +2300,10 @@ def submit_message(
         rolling_summary=rolling_summary,
         external_services=() if handoff_open else external_services,
     )
+    turn_route = route_turn(agent_context)
     try:
         proposal = agent.propose_turn(agent_context)
-    except ModelGatewayError:
+    except ModelGatewayError as model_error:
         # Preserve the claimant's accepted input and revision when the provider
         # fails before any Claim mutation.  The existing message entrypoint is
         # the recovery boundary; no retry endpoint or duplicate inbound record
@@ -2303,8 +2318,11 @@ def submit_message(
                 'context_revision': recovery_claim.revision,
             }
         )
+        recovery_rule = classify_recovery(
+            RecoveryTrigger(source='model', outcome_code=model_error.code.value)
+        )
         claimant_message = claimant_message.model_copy(
-            update={'recovery_rule_id': 'claimant_turn.model_dependency_failure'}
+            update={'recovery_rule_id': recovery_rule.rule_id}
         )
         recovery_response = _message_only_response(
             repository,
@@ -2545,7 +2563,7 @@ def submit_message(
             confirmation_bound = False
     if (
         getattr(proposal, 'confirms_batch', False)
-        and claim.customer_next_step.status == 'confirmation_requested'
+        and claim.customer_next_step.status == 'confirmation_required'
         and confirmation_bound
     ):
         for field_code, field in claim.form.items():
@@ -2821,8 +2839,6 @@ def submit_message(
             timestamp,
         )
     )
-    if updated_claim.customer_next_step != effective_next_step:
-        updated_claim = updated_claim.model_copy(update={'customer_next_step': effective_next_step})
     applied_evaluation = branch_evaluator.evaluate(
         updated_claim,
         latest_message=(payload.content.text if payload.content is not None else None),
@@ -2831,23 +2847,29 @@ def submit_message(
         recomputation_reason='agent_turn_applied',
         previous_evaluation=previous_evaluation,
     )
-    if updated_claim.claim_state.workflow_state in {
-        WorkflowState.COLLECTING,
-        WorkflowState.READY_FOR_NEXT,
-    }:
+    progress_state, progress_next_step = recompute_progress(
+        updated_claim,
+        applied_evaluation,
+        open_handoffs=tuple(
+            item
+            for item in repository.list_handoffs(claim_id, principal.subject)
+            if item.status.value not in {'resolved', 'cancelled'}
+        ),
+        proposed_next_step=effective_next_step,
+    )
+    if (
+        updated_claim.claim_state.workflow_state != progress_state
+        or updated_claim.customer_next_step != progress_next_step
+    ):
         updated_claim = updated_claim.model_copy(
             update={
                 'claim_state': updated_claim.claim_state.model_copy(
-                    update={
-                        'workflow_state': (
-                            WorkflowState.READY_FOR_NEXT
-                            if applied_evaluation.requirements.ready
-                            else WorkflowState.COLLECTING
-                        )
-                    }
-                )
+                    update={'workflow_state': progress_state}
+                ),
+                'customer_next_step': progress_next_step,
             }
         )
+    effective_next_step = progress_next_step
     live_mutation_command = _live_mutation_command(
         claim=claim,
         claimant_message=claimant_message,
@@ -2997,7 +3019,7 @@ def submit_message(
         session_id=session_id,
         trigger_message_id=claimant_message.message_id,
         model_profile_id=session.model_profile_id,
-        intents=['report_incident'],
+        intents=sorted(turn_route.intents),
         conversation_moves=['acknowledge', 'collect_or_confirm_facts'],
         candidate_fields=sorted({change.field_code for change in proposal.form_changes}),
         tool_requests=list(proposal.required_tools),
@@ -3149,10 +3171,14 @@ def submit_message(
         for item in effective_next_step.required_items
     ]
     if getattr(applied_evaluation.requirements, 'ready_pending_confirmation', False):
+        # Bind the confirmation to the exact values shown by this turn.  The
+        # evaluation is calculated from ``updated_claim``; using the pre-turn
+        # Claim here produced a fingerprint that could never match the next
+        # message after the proposal had been applied.
         fingerprint_payload = sorted(
-            (code, claim.form[code].value)
-            for code in applied_evaluation.requirements.recorded
-            if code in claim.form
+            (code, field.value)
+            for code, field in updated_claim.form.items()
+            if field.status is FormStatus.PROPOSED
         )
         fingerprint = sha256(
             json.dumps(fingerprint_payload, separators=(',', ':'), sort_keys=True).encode()
@@ -3169,7 +3195,7 @@ def submit_message(
                 ),
                 owner='claimant',
                 status='open',
-                blocks_action='confirmation_requested',
+                blocks_action='confirmation_required',
                 source_refs=[claimant_message.message_id],
                 created_at=timestamp,
                 updated_at=timestamp,

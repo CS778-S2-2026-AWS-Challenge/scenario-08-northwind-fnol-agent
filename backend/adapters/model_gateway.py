@@ -978,6 +978,11 @@ class GoogleGenerateContentModelGateway:
                     'responseJsonSchema': _google_provider_schema(request.response_schema),
                 }
             )
+        # Gemini exposes reasoning controls inside generationConfig.  Keep the
+        # switch provider-specific: sending OpenAI/Qwen-only fields to this
+        # endpoint makes an otherwise valid request fail before generation.
+        if self._config.reasoning_mode == 'disabled':
+            generation_config['thinkingConfig'] = {'thinkingBudget': 0}
         if generation_config:
             payload['generationConfig'] = generation_config
         if request.tools:

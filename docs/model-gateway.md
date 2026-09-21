@@ -235,6 +235,13 @@ The published claimant profiles use this adapter contract:
 | `bedrock-nova2-lite` | `global.amazon.nova-2-lite-v1:0` through Bedrock Sydney | published but unavailable until AWS account verification completes | structured output and image input |
 | `google-gemini35-flash-lite` | `gemini-3.5-flash-lite` through Google AI Studio | selectable | structured output, tools, image input, and PDF document input |
 
+The Google profile publishes `reasoning_mode=disabled`.  The native Google adapter
+translates that setting to `generationConfig.thinkingConfig.thinkingBudget=0`; it does
+not send the OpenAI-compatible `chat_template_kwargs` field.  The default
+`openrouter-gpt4o-mini` profile is a non-reasoning model and therefore carries no
+reasoning control parameter.  These are transport details of the published binding,
+not a second Runtime decision.
+
 The local Qwen deployment uses the OpenAI-compatible transport with `json_object` structured
 output. Its llama.cpp endpoint cannot compile the larger claimant JSON Schema grammar used by
 the other providers during continuation. The Runtime still validates every returned object

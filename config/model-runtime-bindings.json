@@ -61,6 +61,7 @@
     "structured_output": true,
     "tools": true,
     "image_input": true,
-    "document_input": true
+    "document_input": true,
+    "reasoning_mode": "disabled"
   }
 ]

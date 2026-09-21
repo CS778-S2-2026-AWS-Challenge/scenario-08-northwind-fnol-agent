@@ -42,7 +42,7 @@ def recompute_progress(
         return claim.claim_state.workflow_state, proposed_next_step or claim.customer_next_step
     if evaluation.requirements.ready_pending_confirmation:
         return WorkflowState.COLLECTING, CustomerNextStep(
-            status='confirmation_requested',
+            status='confirmation_required',
             summary='Please confirm the recorded details before creating the Claim.',
             responsible_party='claimant',
             required_items=list(evaluation.requirements.recorded),

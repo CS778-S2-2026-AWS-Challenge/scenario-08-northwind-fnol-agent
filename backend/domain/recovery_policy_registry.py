@@ -30,6 +30,10 @@ class RecoveryRule(ContractModel):
     audit_event_type: str = Field(min_length=1, max_length=120)
 
 
+class UnknownRecoveryTrigger(ValueError):
+    """Raised when a failure has no explicitly published recovery policy."""
+
+
 CLAIMANT_TURN_MODEL_FAILURE_RULE = RecoveryRule(
     rule_id='claimant_turn.model_dependency_failure',
     version='v1',
@@ -50,4 +54,6 @@ def classify_recovery(trigger: RecoveryTrigger) -> RecoveryRule:
     for rule in RECOVERY_RULES.values():
         if rule.trigger_source == trigger.source:
             return rule
-    raise ValueError(f'No recovery policy is registered for {trigger.source}:{trigger.outcome_code}.')
+    raise UnknownRecoveryTrigger(
+        f'No recovery policy is registered for {trigger.source}:{trigger.outcome_code}.'
+    )
