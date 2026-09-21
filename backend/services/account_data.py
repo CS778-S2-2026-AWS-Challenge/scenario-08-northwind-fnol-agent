@@ -931,4 +931,3 @@ def select_payout_contact(
             raise _idempotency_conflict() from error
         return ClaimPayoutContactSelectionResponse.model_validate(replay.response_payload)
     return response
-

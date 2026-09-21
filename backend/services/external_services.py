@@ -439,9 +439,8 @@ def claimant_next_step(
     """
 
     if action is None:
-        if (
-            claim.customer_next_step.status == 'ready_to_create'
-            and _payout_contact_is_complete(repository, claim)
+        if claim.customer_next_step.status == 'ready_to_create' and _payout_contact_is_complete(
+            repository, claim
         ):
             return claim.customer_next_step.model_copy(
                 update={
