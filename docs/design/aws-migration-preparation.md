@@ -119,6 +119,22 @@ record exists. Only rows marked `Implemented` and `Yes` are eligible inputs to #
 | Idempotency result | MongoDB core persistence | Implemented | Yes | Idempotency result is bound to actor, operation, client key, fingerprint, and resulting revision. | `pk=IDEMPOTENCY#{scope}`, `sk=OPERATION#{operation_id}` | Preserve actor, operation, client key, request fingerprint, typed result, and resulting revision. |
 | Retention record | No implemented source record; contract-only concept | Not implemented | No | The persistence contract describes retention vocabulary, but the current backend has no corresponding source record, repository method, or adapter boundary. | None assigned | Do not assign a DynamoDB target or include Retention in #991/#992. A future migration requires a separate persistence contract and implementation first. |
 
+## Migration Input Eligibility
+
+Issue #992 may consume an inventory row only when all of the following are true:
+
+1. `Implementation status` is `Implemented`, meaning the current backend has the
+   corresponding domain record and persistence boundary.
+2. `Source store` is `MongoDB core persistence`.
+3. `In scope for #991` is `Yes`.
+4. The row has a provisional target item shape other than `None assigned`.
+
+The persistence contract can describe future or contract-only vocabulary, but it
+cannot by itself make a source record eligible for migration. A row that fails any
+condition is excluded from the local rehearsal and must not produce a DynamoDB
+item shape, seed record, or migration result. This rule prevents documentation-only
+concepts from becoming invented source data.
+
 ## Secondary indexes
 
 The following index projections are the minimum provisional set. They are derived from
