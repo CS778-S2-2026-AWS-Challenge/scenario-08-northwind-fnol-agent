@@ -5,8 +5,11 @@ import logging
 from dataclasses import replace
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from backend.domain.agent_context_runtime import ContextBudgetPolicy
+from backend.repositories.fixture import FixtureRepository
 from backend.services.context_budget import build_request_budget, estimate_json_tokens
 from backend.services.context_planner import ContextBudgetExceeded
 from backend.services.model_request_planner import plan_model_turn
@@ -46,6 +49,41 @@ def test_hard_limit_rejects_oversized_authoritative_input_without_truncating() -
     with pytest.raises(ContextBudgetExceeded):
         plan_model_turn(context)
     assert context.message_text == 'A' * 20000
+
+
+def test_v8_api_budget_overflow_preserves_input_without_provider_or_controlled_fallback(
+    app: FastAPI,
+    client: TestClient,
+    repository: FixtureRepository,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from backend.services.agent import InvariantGuardedAgent
+    from tests.journey_v8_support import CLAIMANT, V8JourneyProvider
+    from tests.test_claim_api import create_claim, submit_message
+
+    caplog.set_level(logging.WARNING, logger='backend.services.model_agent')
+    provider = V8JourneyProvider([])
+    app.state.agent_turn_provider = InvariantGuardedAgent(provider)
+    created = create_claim(client, CLAIMANT, key='input-budget-overflow').json()
+    claim_id, session_id = created['claim']['claim_id'], created['session']['session_id']
+    message = '车辆损失说明' * 800
+    response = submit_message(
+        client, CLAIMANT, claim_id, session_id, text=message, key='input-budget-overflow-message'
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body['agent_message'] is None
+    assert body['recovery']['rule_id'] == 'claimant_turn.model_dependency_failure'
+    assert provider.gateway.requests == []
+    assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
+    saved = repository.list_messages(claim_id, session_id, 'cus_demo')
+    assert len(saved) == 1 and saved[0].content['text'] == message
+    claim = repository.get_claim(claim_id, 'cus_demo')
+    assert claim is not None and claim.revision == 2 and claim.form == {}
+    assert any(
+        getattr(record, 'diagnostic', None) == 'context_budget_exceeded'
+        for record in caplog.records
+    )
 
 
 def test_lookup_hard_limit_is_per_request_not_cumulative_input_plus_output() -> None:

@@ -254,3 +254,87 @@ def test_retry_does_not_revive_confirmation_after_an_intervening_mutation(
     resumed = repository.get_claim(claim_id, 'cus_demo')
     assert resumed is not None
     assert resumed.form['incident.location'].status is FormStatus.PROPOSED
+
+
+def test_confirmation_failure_retry_uses_original_checkpoint_without_duplicate_inbound(
+    app: FastAPI,
+    client: TestClient,
+    repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inspect import unwrap
+    from typing import cast
+
+    from backend.domain.model_gateway import ModelRequest, ModelResponse
+    from backend.services.agent import InvariantGuardedAgent
+    from tests.journey_v8_support import CLAIMANT, Journey, V8JourneyProvider
+    from tests.test_journey_v8_home import agent_turn_provider
+
+    provider = cast(Callable[[], V8JourneyProvider], unwrap(agent_turn_provider))()
+    app.state.agent_turn_provider = InvariantGuardedAgent(provider)
+    journey = Journey(client, 'home', 'retry-original-confirmation')
+    journey.send('A pipe burst in my bathroom last night in Wellington and flooded the lounge.')
+    journey.send('No one was hurt but water is still dripping from the ceiling.')
+    shown = journey.send(
+        '12 Example Street, Wellington. The lounge ceiling and wall are affected; '
+        'we can still live here.'
+    )
+    assert shown['dynamic_form']['requirements']['ready_pending_confirmation'] is True
+    original_revision = journey.revision
+    complete = provider.gateway.complete
+    fail = [True]
+
+    def fail_once(request: ModelRequest) -> ModelResponse:
+        if fail[0]:
+            fail[0] = False
+            raise ModelGatewayError(ModelGatewayErrorCode.TIMEOUT, retryable=True)
+        return complete(request)
+
+    monkeypatch.setattr(provider.gateway, 'complete', fail_once)
+    url = f'/api/v1/claims/{journey.claim_id}/sessions/{journey.session_id}/messages'
+    payload = {
+        'client_message_id': 'confirm-same-inbound',
+        'content': {'type': 'text', 'text': 'Yes all correct.'},
+    }
+    first_headers = {
+        **CLAIMANT,
+        'Idempotency-Key': 'confirm-failed-attempt',
+        'If-Match': str(original_revision),
+    }
+    failed = client.post(url, headers=first_headers, json=payload)
+    assert failed.status_code == 200, failed.text
+    assert failed.json()['agent_message'] is None
+    assert failed.json()['claim_revision'] == original_revision + 1
+    saved = repository.find_message_checkpoint(
+        journey.claim_id, failed.json()['claimant_message']['message_id'], 'cus_demo'
+    )
+    assert saved is not None and saved.revision_before_message == original_revision
+    assert saved.confirmation_checkpoint is not None
+    retry = client.post(
+        url,
+        headers={
+            **CLAIMANT,
+            'Idempotency-Key': 'confirm-second-attempt',
+            'If-Match': str(original_revision + 1),
+        },
+        json=payload,
+    )
+    assert retry.status_code == 200, retry.text
+    assert retry.json()['dynamic_form']['requirements']['ready'] is True
+    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    assert claim is not None and all(
+        field.status.value == 'confirmed' for field in claim.form.values()
+    )
+    assert (
+        len(
+            [
+                message
+                for message in repository.list_messages(
+                    journey.claim_id, journey.session_id, 'cus_demo'
+                )
+                if message.client_message_id == 'confirm-same-inbound'
+            ]
+        )
+        == 1
+    )
+    assert client.post(url, headers=first_headers, json=payload).json() == failed.json()

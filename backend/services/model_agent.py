@@ -1114,6 +1114,22 @@ class GatewayAgent:
         try:
             plan = plan_model_turn(context)
         except ContextBudgetExceeded:
+            if (
+                context.runtime_policy is not None
+                and context.runtime_policy.instruction.prompt_version == CLAIMANT_V8_PROMPT_ID
+            ):
+                logger.warning(
+                    'agent_turn_input_budget_hard_exceeded',
+                    extra={
+                        'claim_id': context.claim.claim_id,
+                        'trigger_message_id': context.trigger_message_id,
+                        'diagnostic': 'context_budget_exceeded',
+                    },
+                )
+                raise ModelGatewayError(
+                    ModelGatewayErrorCode.CONFIGURATION,
+                    provider_error_type='context_budget_exceeded',
+                ) from None
             budget_response = (
                 context.runtime_policy.controlled_rules.deterministic_responses.get(
                     'context_budget_exceeded'
