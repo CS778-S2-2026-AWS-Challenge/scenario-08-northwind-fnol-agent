@@ -52,6 +52,11 @@ values such as `injury.medical_attention=unknown` remain valid; boolean and temp
 validation are unchanged. Prompt fragment `task.turn@v4` instructs the model to omit an
 unprovided field instead of fabricating a placeholder, alongside the Runtime check.
 
+A malformed `next_question`, including a group larger than three fields, is rejected as an
+optional part; valid facts still apply and the existing single-field Runtime fallback is used.
+Only its exact rejected wording is removed from reply prose; an originally empty reply or an
+invalid core fact still rejects the turn and uses saved-message recovery.
+
 ## Policy Is Not a Prompt
 
 A system prompt is one model-specific rendering of part of the Agent Policy. It is not

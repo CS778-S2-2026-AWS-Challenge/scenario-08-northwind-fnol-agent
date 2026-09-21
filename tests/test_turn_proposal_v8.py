@@ -5,6 +5,8 @@ from types import MappingProxyType
 from typing import Any, cast
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from backend.adapters.model_gateway import OpenAICompatibleModelGateway
 from backend.domain.agent_runtime_configuration import AgentInstructionConfiguration
@@ -12,6 +14,7 @@ from backend.domain.agent_v8 import V8Escalation, V8TurnProposal
 from backend.domain.external_service_registry import capability_context
 from backend.domain.model_gateway import ModelCompletionStatus, ModelResponse
 from backend.domain.models import FormSource, FormStatus
+from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import AgentTurnContext
 from backend.services.model_agent import GatewayAgent
 from backend.services.model_request_planner import plan_model_turn
@@ -183,3 +186,91 @@ def test_authoritative_motor_family_survives_other_family_words(message: str) ->
 def test_v8_reason_codes_and_contents_lengths_are_bounded() -> None:
     with pytest.raises(ValueError):
         V8TurnProposal(reply='Recorded.', reason_codes=['x' * 51])
+
+
+@pytest.mark.parametrize(
+    'question_fields',
+    [
+        ['property.address', 'property.habitable', 'incident.location', 'incident.occurred_at'],
+        'property.address',
+    ],
+)
+def test_malformed_optional_question_preserves_facts_and_uses_one_runtime_fallback(
+    app: FastAPI,
+    client: TestClient,
+    repository: FixtureRepository,
+    caplog: pytest.LogCaptureFixture,
+    question_fields: Any,
+) -> None:
+    import logging
+
+    from backend.services.agent import InvariantGuardedAgent
+    from tests.journey_v8_support import Journey, V8JourneyProvider, envelope, fact
+
+    caplog.set_level(logging.INFO, logger='backend.services.turn_proposal_validation')
+    wording = 'What is the address, is it habitable, where and when did it happen?'
+    raw = envelope(
+        fields=[
+            fact('property.ongoing_risk', 'active_leak', 'water is still dripping'),
+            fact('property.affected_areas', ['ceiling'], 'ceiling'),
+        ]
+    )
+    raw['reply'] = wording
+    raw['next_question'] = {
+        'field_codes': question_fields,
+        'wording': wording,
+        'reason': 'natural_follow_up',
+    }
+    app.state.agent_turn_provider = InvariantGuardedAgent(V8JourneyProvider([raw]))
+    journey = Journey(client, 'home', 'optional-question')
+    response = journey.send('The water is still dripping through the ceiling.')
+    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    assert claim is not None
+    assert claim.form['property.ongoing_risk'].value == 'active_leak'
+    assert claim.form['property.affected_areas'].value == ['ceiling']
+    reply = response['agent_message']['content']['text']
+    assert wording not in reply
+    assert reply.startswith('I have recorded your message.')
+    assert reply.endswith('Tell me what happened in your own words.')
+    assert '?' not in reply
+    assert response['decision']['customer_next_step']['required_items'] == ['incident.description']
+    session = repository.get_session(journey.claim_id, journey.session_id, 'cus_demo')
+    assert session is not None and session.question_turn_count == 1
+    assert any(
+        getattr(record, 'rejection', {}).get('part') == 'next_question' for record in caplog.records
+    )
+
+
+@pytest.mark.parametrize('core_failure', ['empty_reply', 'blank_reply', 'invalid_fact'])
+def test_bad_core_remains_atomic_even_when_optional_question_is_malformed(
+    app: FastAPI,
+    client: TestClient,
+    repository: FixtureRepository,
+    core_failure: str,
+) -> None:
+    from backend.services.agent import InvariantGuardedAgent
+    from tests.journey_v8_support import CLAIMANT, V8JourneyProvider, envelope, fact
+    from tests.test_claim_api import create_claim, submit_message
+
+    raw = envelope(fields=[fact('incident.location', 'Wellington', 'Wellington')])
+    raw['next_question'] = {'field_codes': ['x'] * 4, 'wording': 'Question?', 'reason': 'invalid'}
+    if core_failure == 'invalid_fact':
+        raw['field_changes'].append(fact('vehicle.drivable', {'invalid': 'shape'}))
+    else:
+        raw['reply'] = '' if core_failure == 'empty_reply' else '   '
+    app.state.agent_turn_provider = InvariantGuardedAgent(V8JourneyProvider([raw]))
+    created = create_claim(client, CLAIMANT, key='invalid-core').json()
+    claim_id, session_id = created['claim']['claim_id'], created['session']['session_id']
+    response = submit_message(
+        client,
+        CLAIMANT,
+        claim_id,
+        session_id,
+        text='It happened in Wellington.',
+        key='invalid-core-message',
+    )
+    assert response.status_code == 200
+    assert response.json()['agent_message'] is None
+    assert response.json()['recovery']['rule_id'] == 'claimant_turn.model_dependency_failure'
+    claim = repository.get_claim(claim_id, 'cus_demo')
+    assert claim is not None and claim.form == {}

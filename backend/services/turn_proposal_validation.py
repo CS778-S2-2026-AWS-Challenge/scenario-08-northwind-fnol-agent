@@ -118,11 +118,38 @@ def parse_turn_proposal(raw: dict[str, object]) -> tuple[V8TurnProposal, list[di
     Returns:
         The core-valid envelope and structured optional-part rejections.
     Raises:
-        ValidationError: The required envelope, field changes, or question structure is invalid.
+        ValidationError: The required envelope or core field changes are invalid.
     """
 
     prepared = dict(raw)
     rejected: list[dict[str, str]] = []
+    # Validate original prose before removing an optional question. Otherwise an
+    # empty or overlong core reply could become valid through fallback wording.
+    original_reply = V8TurnProposal.model_validate(
+        {
+            'reply': raw.get('reply'),
+            'reason_codes': ['REPLY_VALIDATION'],
+        }
+    ).reply
+    if not original_reply.strip():
+        raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+    raw_question = prepared.get('next_question')
+    if raw_question is not None:
+        try:
+            prepared['next_question'] = V8NextQuestion.model_validate(raw_question).model_dump()
+        except ValidationError:
+            prepared['next_question'] = None
+            rejected.append(
+                {
+                    'part': 'next_question',
+                    'value': 'invalid_structure',
+                    'reason': 'optional_part_invalid',
+                }
+            )
+            wording = raw_question.get('wording') if isinstance(raw_question, dict) else None
+            if isinstance(wording, str) and wording:
+                remaining = original_reply.replace(wording, '').strip()
+                prepared['reply'] = remaining or 'I have recorded your message.'
     raw_fields = prepared.get('field_changes', [])
     if isinstance(raw_fields, list):
         accepted_fields = []

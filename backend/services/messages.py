@@ -1028,8 +1028,16 @@ def _apply_question_accounting(
     timestamp: datetime,
     during_handoff: bool = False,
 ) -> tuple[SessionRecord, CustomerNextStep, str]:
-    asks_question = proposal.action in {AgentAction.ASK, AgentAction.CLARIFY} or (
-        '?' in response_text and bool(_question_fields(proposal, next_step))
+    fields = _question_fields(proposal, next_step)
+    structured_v8_question = (
+        proposal.validated_turn is not None
+        and bool(fields)
+        and (next_step.status == 'more_information_needed' or during_handoff)
+    )
+    asks_question = (
+        proposal.action in {AgentAction.ASK, AgentAction.CLARIFY}
+        or ('?' in response_text and bool(fields))
+        or structured_v8_question
     )
     if not asks_question:
         return session, next_step, response_text
@@ -1046,7 +1054,6 @@ def _apply_question_accounting(
             'I have saved what you shared. Northwind may follow up on the remaining information.',
         )
 
-    fields = _question_fields(proposal, next_step)
     previously_requested = {
         field_code
         for record in session.question_history
