@@ -31,10 +31,32 @@ when no adapter is configured. Adapter output is returned as provider evidence;
 the model cannot turn an unavailable, acknowledged or unverified response into a
 Claim fact or a completed booking.
 
-Service selection is a Runtime responsibility. One shared per-turn family resolution filters the
-registry, and bounded intent recognition selects the exact service identity before model output is
-validated. The model does not echo or authorise service IDs. If no registered capability matches,
-the conversation may continue without an offer and without executional wording.
+Runtime computes eligibility from the registry, shared family resolution and existing lifecycle.
+The v8 model proposes identities from that eligible set; validation may reject them, and only
+the reducer creates offers. A suggestion grants neither consent nor dispatch authority. Pattern
+selection remains only for explicit renewed intent during cooldown and the no-model path.
+If no capability is eligible, chat continues without a fabricated offer or execution claim.
+
+| Contract | Producer | Authority boundary |
+| --- | --- | --- |
+| Eligible capability | Runtime `eligible_service_ids` | Family, lifecycle, availability and suppression filters. |
+| Service suggestion | Model `V8ServiceSuggestion` | Advisory subset of the eligible identities. |
+| Offer | Reducer / external Runtime WorkItem | Bound to the actual Agent message and disclosure fingerprint. |
+| Consent | Claimant | Existing scoped `ExternalServiceConsent`; never inferred from prose. |
+| ExternalTask | Dispatcher | Created only after existing consent and execution checks. |
+
+Declined or withdrawn services are hidden for the next three claimant turns. A renewed explicit
+request can restore eligibility during that cooldown, but cannot bypass an open handoff:
+every new service suggestion is suppressed while support remains open. A renewed offer receives
+a new offer ID/disclosure binding and requires a fresh consent; the old consent remains history
+and its offer cannot be reused to request dispatch. Consent mutations recompute claimant progress.
+
+The registry projects `presentation` from access form and operation status: `info_link`,
+`action_button`, `consent_request`, `tracked_task`, `agent_assisted`, or `status_update`.
+The frontend consumes that value rather than guessing from provider fields. New polymorphic
+rendering is outside this change. Unknown-family catalogues contain only cross-family manual,
+link or phone guidance; the message offer set remains empty. The independent Staff Assistance
+entry is not a third-party catalogue item and stays available.
 
 Conversation commit and external dispatch are separate outcomes. An adapter rejection,
 unavailability, or exception is recorded as the corresponding external-task failure and emits a

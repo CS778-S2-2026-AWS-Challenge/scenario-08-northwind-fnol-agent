@@ -410,7 +410,9 @@ The executable claimant Prompt Pack is `northwind-fnol-claimant-v8`, authored un
 `backend/prompts/v8/` and embedded immutably in the published `agent_instruction` configuration.
 Runtime composes bounded core, family, turn and capability instructions with one complete
 turn envelope. The v7 pack and versioned bindings remain available for an explicit complete
-Release Set rollback. v6 source artifacts remain deprecated and are not enabled as fallback.
+Release Set rollback together with reverting/deploying the pre-v8 change set; selecting the
+old prompt alone is not the operational rollback procedure. v6 source artifacts remain
+deprecated and are not enabled as fallback.
 Changing executable fragment content requires a new fragment or pack version and a complete
 atomic Release Set; changing a manifest alone never mutates an existing active release.
 

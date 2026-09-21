@@ -49,7 +49,7 @@ such as `>UNKNOWN<`, `N/A` or `TBD`. The existing field validator rejects that i
 change and retains the previous field state; other valid facts in the turn still apply.
 An absent field stays missing and is not offered for batch confirmation. Registered enum
 values such as `injury.medical_attention=unknown` remain valid; boolean and temporal
-validation are unchanged. Prompt fragment `task.turn@v4` instructs the model to omit an
+validation are unchanged. The versioned `task.turn` fragment instructs the model to omit an
 unprovided field instead of fabricating a placeholder, alongside the Runtime check.
 
 A malformed `next_question`, including a group larger than three fields, is rejected as an
@@ -131,14 +131,15 @@ knowledge selection, model transport, action/tool restrictions, and persisted pr
 publication affects the next turn and cannot mutate the snapshot already selected for an active
 turn.
 
-The executable claimant instruction is `northwind-fnol-claimant-v7`. Runtime chooses a stable
-profile and schema, converts its narrow response into an internal proposal, and validates the
+The executable claimant instruction is `northwind-fnol-claimant-v8`. Runtime chooses a stable
+profile and schema, converts its complete response into an internal proposal, and validates the
 result through the Action Registry and authority boundary. Model output cannot select a Release
 Set, construct arbitrary context references, enlarge a token budget, or perform a side effect.
 Deprecated flat actions, invented directives, stale references, incompatible provider/profile
-combinations, and published-rule-only interrupts fail before Claim State mutation. v6 remains an
-immutable explicit rollback target through its complete binding manifest and matching Release Set;
-an operator must select both, and Runtime never uses it as an automatic fallback.
+combinations fail before applying model facts. Safety actions may already be durably committed.
+Operational rollback requires the previous v7 Release Set and the pre-v8 code deployment/revert,
+as documented in [Claimant Journey v8](design/agent-runtime/claimant-journey-v8.md).
+v6 artifacts remain deprecated and inactive; Runtime never selects them as a failure fallback.
 
 The configuration layer may restrict capabilities but cannot invent them. Action codes, tool
 names, and branch rule IDs must already exist in their server Registries. The policy must retain
@@ -160,7 +161,7 @@ turn. It stores coordinates, not copied prompts, configuration values, or secret
 
 ## Published policy bundle
 
-The v7 machine-readable bundle identifies at least:
+The machine-readable Runtime bundle identifies at least:
 
 - `policy_id`, semantic version, lifecycle status, and effective time;
 - author, change reason, approver when required, and previous version;

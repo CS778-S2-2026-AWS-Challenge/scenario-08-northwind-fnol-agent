@@ -26,6 +26,25 @@ Unknown recovery triggers fail closed. The complete external reconciliation,
 tool-unavailable, revision-conflict and high-impact review matrix remains
 tracked by issue #779.
 
+## Remaining #779 policy evidence
+
+The following distinguishes this delivered slice from the broader issue. Existing subsystem
+behavior does not mean that its corresponding registry migration or end-to-end proof is done.
+
+| Requested #779 entry | Status of this delivery |
+| --- | --- |
+| `recovery.model_timeout` | Covered by the shared claimant model-dependency rule, including persist-first and explicit retry. |
+| `recovery.model_malformed_response` | Covered by that same rule; no duplicate registry lifecycle is introduced. |
+| `recovery.tool_unavailable` | Existing tool failure behavior retained; full policy migration/evidence remains #779 work. |
+| `recovery.external_not_submitted_retryable` | Existing external retry authority retained; not implemented as a new recovery rule here. |
+| `recovery.external_submitted_unknown` | Existing operation identity/reconciliation retained; complete registry migration remains open. |
+| `recovery.external_terminal_failure` | Existing staff resolution remains authoritative; broader policy evidence remains open. |
+| `recovery.revision_conflict` | CAS/stale-checkpoint protections are exercised here; a general conflict-recovery policy is not delivered. |
+| `recovery.high_impact_review_required` | Existing human-review authority retained; broader controlled resume matrix remains open. |
+
+This PR references #779 and must not close it. The supplied claimant rule and its concrete
+tests do not establish the remaining tool, external or high-impact recovery loops.
+
 Claim creation also fails closed when branch evaluation still contains recorded
 facts: the API returns `CONFIRMATION_REQUIRED` and lists the fields that must be
 confirmed before the creation command can be prepared. This is a Claim creation
