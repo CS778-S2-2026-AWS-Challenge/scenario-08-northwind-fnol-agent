@@ -132,7 +132,8 @@ query capability.
 | Exact-subject audit | `(subject_type, subject_id, claim_id)` and `(created_at, event_id)` | Strongly consistent `Query` on exact subject partition with time range in the sort key. |
 | Admin audit | Optional event type, subject type, actor, time; ascending time | Query global or the most selective exact filter partition, filter remaining exact values, and stop at the requested limit, partition exhaustion, 500 examined projections, or 10 DynamoDB pages, whichever occurs first. No table scan. |
 | Realtime | One global cursor and total order | Strongly consistent `Query` on `SYSTEM#REALTIME`, strictly after the zero-padded sequence. |
-| Idempotency | Exact actor/route/key triplet | Strongly consistent `GetItem` on its deterministic authoritative key. |
+| Idempotency exact replay | Exact actor/route/key triplet | Strongly consistent `GetItem` on its deterministic authoritative key; the item is either the immutable canonical record or a governed promotion alias. |
+| Message-turn idempotency replay | `(actor_id, route, claim_id, message_id)` when `message_id` is present | Strongly consistent `GetItem` on the deterministic message-turn lookup item, followed by a strongly consistent canonical read. No idempotency key is required for this lookup. |
 
 Unsupported query behavior is explicit: free-text Claim search, substring Claim search,
 arbitrary date ranges beyond the registered date keys, and sorting by an unregistered
@@ -181,6 +182,24 @@ conflict for Messages, Audit events, Runtime evidence, and other immutable child
 identity uses its digest in the final component. Claim fragments and Evidence material
 versions remain under their canonical entity PK with their documented non-`META` sort
 keys; they are physical serialization details, not new domain records.
+
+Idempotency and promotion use these exact base-table shapes. Every hash input uses the
+same length-prefixed canonical encoding defined above, and every item stores its unhashed
+components for collision verification:
+
+| Purpose | Exact base-table key pattern |
+| --- | --- |
+| Canonical idempotency record | `PK=IDEMPOTENCY#{sha256(actor_id, route, key)}`, `SK=META` |
+| Claim/actor enumeration reference | `PK=ACCESS#CLAIM_IDEMPOTENCY#{sha256(claim_id, actor_id)}`, `SK=RECORD#{sha256(route, key)}` |
+| Claim/actor generation-retirement item | `PK=IDEMPOTENCY_ACTOR#{sha256(claim_id, actor_id)}`, `SK=STATE` |
+| Authenticated exact-key alias | `PK=IDEMPOTENCY#{sha256(authenticated_actor_id, route, key)}`, `SK=META` |
+| Message-turn lookup reference | `PK=LOOKUP#MESSAGE_TURN_IDEMPOTENCY#{sha256(actor_id, route, claim_id, message_id)}`, `SK=META` |
+
+The canonical and exact-key alias deliberately occupy the same requested-key namespace,
+so a pre-existing destination canonical item is a transactional collision rather than a
+second source of truth. A normal idempotency write creates the Claim/actor reference and,
+when `message_id` is present, its message-turn lookup in the same atomic mutation as the
+canonical record and generation update.
 
 ### Access projections
 
@@ -256,9 +275,11 @@ Anonymous-to-authenticated promotion is one transaction that:
 4. writes the new customer-Claim access projection;
 5. writes one destination lookup alias for every immutable idempotency record selected by
    the strongly consistent Claim/anonymous-actor projection;
-6. writes one Claim-scoped anonymous-actor retirement item;
-7. conditionally advances the global realtime counter; and
-8. appends the globally ordered realtime event.
+6. writes one authenticated message-turn lookup reference for every selected record with a
+   non-null `message_id`;
+7. writes one Claim-scoped anonymous-actor retirement item;
+8. conditionally advances the global realtime counter; and
+9. appends the globally ordered realtime event.
 
 An idempotency alias occupies the deterministic requested key for the authenticated
 `(actor_id, route, key)` and points to the unchanged canonical record under the original
@@ -266,7 +287,8 @@ anonymous triplet. It carries the Claim ID, original triplet, and original finge
 verification, but does not copy or redefine the response. Alias insertion requires the
 destination key to be absent; an existing canonical record or alias to another source is a
 collision and aborts the whole promotion. Exact retry of an already completed promotion may
-reuse only an alias to the same original canonical item and an identical retirement item.
+reuse only an alias and message-turn reference to the same original canonical item and an
+identical retirement item.
 
 No original idempotency item is deleted or re-keyed. An authenticated lookup first resolves
 its deterministic item and follows an alias with strongly consistent reads, then verifies
@@ -276,21 +298,40 @@ promotion it fails closed instead of replaying through stale anonymous authority
 retirement is Claim-scoped so promoting one Claim does not revoke unrelated Claims from the
 same browser session.
 
+`find_message_turn_idempotency(authenticated_actor_id, route, claim_id, message_id)`
+strongly reads the authenticated message-turn lookup reference and then its immutable
+anonymous canonical target. It verifies the requested authenticated actor, route, Claim,
+and Message against the lookup; verifies the original actor, route, Claim, Message,
+fingerprint, `message_turn_kind`, and `message_turn_revision` against the canonical record;
+and verifies that the Claim/anonymous-actor state is retired specifically to that
+authenticated actor. Any missing item, mismatched component, alias to a different canonical
+record, or retirement to another actor fails closed as persisted-turn integrity failure.
+This preserves the current different-key/same-`client_message_id` replay path without a
+table scan or replacement of the immutable source record.
+The original anonymous message-turn lookup remains for provenance, but resolution under
+the anonymous actor reads the same retired Claim/actor state and fails closed after
+promotion; it cannot bypass the stale-anonymous rule applied to exact-key replay.
+
 Each Claim/actor idempotency write also conditionally advances one adapter-owned
 Claim/actor generation item and requires that item not be retired. Promotion strongly reads
 that generation before enumerating its `R` items, then changes the same item to retired with
 a generation-equality condition in the promotion transaction. A concurrent or newly added
 anonymous operation therefore conflicts with promotion instead of escaping alias creation.
 
-The promotion preflight counts `m` selected idempotency records and verifies that every
-record names the promoted Claim. The transaction has `m + 7` actions: the six existing
-Claim/projection/realtime actions, `m` alias puts, and one retirement put. It performs no
-idempotency deletes. If the action count exceeds 100, the serialized transaction exceeds
-4 MB, a destination collides, or the source projection changes before commit, no promotion
-write occurs. The current `promote_claim_owner` and `find_idempotency` protocol methods do
-not expose alias/retirement semantics; the Backend owner must add and conformance-test that
-repository contract before a DynamoDB profile is enabled. Until then this capability is
-`unavailable`, rather than silently losing replay or weakening the exact triplet authority.
+The promotion preflight counts `m` selected idempotency records and `t` selected records
+with a non-null `message_id`, and verifies that every record names the promoted Claim. The
+transaction has `m + t + 7` actions: the six existing Claim/projection/realtime actions,
+`m` exact-key alias puts, `t` authenticated message-turn lookup puts, and one retirement
+put. It performs no idempotency deletes. Every destination exact-key and message-turn item
+must be absent or be an exact retry pointing to the same canonical record. If the action
+count exceeds 100, the serialized transaction exceeds 4 MB, a destination collides, or the
+source projection changes before commit, no promotion write occurs. The current
+`promote_claim_owner`, `find_idempotency`, and `find_message_turn_idempotency` signatures
+remain authoritative and require no caller-visible change; aliases, lookup references, and
+retirement state are private DynamoDB adapter details. The Backend/AWS owner must implement
+and conformance-test both replay methods and promotion together before the DynamoDB profile
+is enabled. Until then this capability is `unavailable`, rather than silently losing replay
+or weakening the exact triplet authority.
 
 Child records are not rewritten. Every authorized child read resolves the owner first, so
 there is no partial state in which old and new customers each authorize different children.
@@ -344,7 +385,8 @@ For an atomic write, let:
 - `D` be changed canonical domain items, including changed Claim fragments;
 - `P` be access-projection puts/deletes and uniqueness lookup items;
 - `I` be the idempotency action bundle when the current method requires it: canonical
-  record, Claim/actor projection, and Claim/actor generation update/retirement guard;
+  record, Claim/actor projection, optional message-turn lookup, and Claim/actor generation
+  update/retirement guard;
 - `A` be append-only audit items and their projections;
 - `R=2` for a changed realtime publication (counter update plus event), otherwise `0`.
 
@@ -359,7 +401,7 @@ serialized bytes before calling DynamoDB. Important mutation families are:
 | Agent turn | Changed Claim fragments and Session, two Messages, Agent Decision, optional Handoff/Evidence/Branch Evaluation/Runtime Trace, every individual Runtime turn record, idempotency, projections, realtime counter/event |
 | Staff/ownership mutation | Changed Claim fragments, Staff Action/Collaboration/Coworker/Customer Update/Signal Decision/Handoff as supplied, optional Staff Agent execution, idempotency, audit, projections, realtime counter/event |
 | Retrieval bundle | Retrieval plus every Review Signal and Claim-order projections; no Claim revision change unless the current caller supplies a separate governed mutation |
-| Anonymous promotion | Owner/Claim/customer-projection/realtime actions, one immutable alias per Claim/anonymous-actor idempotency record, and one Claim-scoped actor-retirement update; no child rewrite |
+| Anonymous promotion | Owner/Claim/customer-projection/realtime actions, one immutable exact-key alias per Claim/anonymous-actor idempotency record, one authenticated message-turn lookup per selected record with `message_id`, and one Claim-scoped actor-retirement update; no child rewrite |
 
 The current domain does not bound the total number of changed Claim fragments or Runtime
 children tightly enough to prove that every valid input fits 100 actions and 4 MB. #991
@@ -412,7 +454,7 @@ maintained subset.
 | Inventory completeness | Discover all 45 allowlisted record types; reject unknown types; prove excluded SQLite/MinIO/contract-only concepts are not read as MongoDB records. |
 | Identity | Produce one deterministic canonical key per source identity; prove separator-safe compound encoding and idempotency hash collision checks. |
 | Relationships | Resolve Claim/Session/Message, Claim children, Runtime turn, Staff Agent, Evidence, external task, Retrieval/review, and audit references; reject dangling or cross-owner links. |
-| Ownership | Verify every Claim child customer matches the current Claim before converting it to `owner_ref`; simulate anonymous promotion without child rewrites. |
+| Ownership | Verify every Claim child customer matches the current Claim before converting it to `owner_ref`; simulate anonymous promotion without child rewrites. Commit an anonymous message turn, promote its Claim, then retry the same `client_message_id` as the authenticated actor with a different idempotency key and restore the original historical turn through the authenticated message-turn lookup. |
 | Ordering | Prove customer Claim `updated_at`, Session, Message, child-list, audit, Staff Agent, and global realtime ordering including stable ID tie-breaks. |
 | Uniqueness | Detect duplicate idempotency triplets, promotion-alias collisions, Evidence Claim target/Evidence tuples, External Task Claim/Evidence tuples, Message client IDs, Staff Agent client IDs, Contents item/Evidence tuples, external-task results, open FollowUps, and one Motor other-driver per Claim. |
 | Size | Serialize every target item and report bytes; reject over 300 KiB; calculate action count and bytes for every reconstructed atomic mutation family. |
@@ -426,7 +468,7 @@ maintained subset.
 | Decision or dependency | Current assumption | Affected target | Reconciliation owner and point | Risk if changed |
 | --- | --- | --- | --- | --- |
 | Message historical revision (#983/#989) | #989 is merged at this baseline; `message_turn_kind` and positive `message_turn_revision` are now preserved with idempotency while Message identity and ordering remain unchanged | Message canonical, session access items, and idempotency payload | Reconciled at `origin/main` `e4a3f498d054154462d43f390ec72ed8267b5c16`; #992 must retain the added fields | Omitting either field would break historical replay revision even though Message identity still matched. |
-| Anonymous idempotency promotion | Governed destination aliases plus Claim-scoped anonymous retirement preserve the original triplet and disable stale anonymous replay | Idempotency canonical items, Claim/actor projections, aliases, retirement item, promotion action count | Backend owner before DynamoDB adapter/profile enablement | Current protocol cannot express alias resolution; omission loses authenticated replay, while unbounded aliasing can exceed transaction limits. |
+| Anonymous idempotency promotion | Governed exact-key aliases, authenticated message-turn lookups, and Claim-scoped anonymous retirement preserve the original triplet, different-key client-message replay, and stale-anonymous rejection | Idempotency canonical items, Claim/actor projections, message-turn lookups, aliases, retirement item, promotion action count | Backend/AWS owner in DynamoDB adapter conformance before profile enablement | Omitting private alias resolution loses exact-key or historical-turn replay, while unbounded aliases/lookups can exceed transaction limits. |
 | Evidence integrity (#986) | Stable Evidence ID and append-only material generations remain authoritative | Evidence core/version items and S3 references | Backend owner before migration tooling is frozen | Material layout or visibility could require remapping. |
 | Claim creation evidence (#987) | Current atomic creation boundary remains authoritative | Claim creation action count and provenance | Backend owner before adapter implementation | Reservation/provenance records could increase transaction cardinality. |
 | External task attempts (#984) | Current task/request/result identities and uniqueness remain authoritative | External-task canonical and lookup items | Backend owner before adapter implementation | A separately approved attempt record would add inventory and projections. |
