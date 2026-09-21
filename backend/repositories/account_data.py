@@ -15,7 +15,7 @@ from backend.domain.audit import (
     AuditSubjectType,
     AuditVisibility,
 )
-from backend.domain.models import ActorType, BranchEvaluationRecord, WorkingClaim
+from backend.domain.models import ActorType, BranchEvaluationRecord, FormStatus, WorkingClaim
 from backend.repositories.protocols import IdempotencyRecord, RepositoryConflict
 
 AccountRecord = PolicyNumberRecord | PaymentDestinationRecord | IdentityDocumentRecord
@@ -93,8 +93,12 @@ def payout_contact_selection_audit_matches(
     idempotency: IdempotencyRecord,
     event: AuditEventEnvelope,
 ) -> bool:
+    contact_preference = claim.form.get('claimant.contact_preference')
     return (
-        event.event_type is AuditEventType.ACTION_COMPLETED
+        claim.payment_destination_id == payment_destination_id
+        and contact_preference is not None
+        and contact_preference.status is FormStatus.CONFIRMED
+        and event.event_type is AuditEventType.ACTION_COMPLETED
         and event.outcome is AuditOutcome.SUCCEEDED
         and event.subject.subject_type is AuditSubjectType.CLAIM
         and event.subject.subject_id == claim.claim_id

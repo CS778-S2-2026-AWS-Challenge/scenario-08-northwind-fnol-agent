@@ -50,12 +50,10 @@ from backend.domain.ids import new_id
 from backend.domain.models import (
     ActorReference,
     ActorType,
-    CustomerNextStep,
     FormSource,
     FormStatus,
     NeededFor,
     PageInfo,
-    ResponsibleParty,
     ProposedFormChange,
 )
 from backend.repositories.account_data import (
@@ -706,6 +704,7 @@ def select_policy(
             raise _idempotency_conflict() from error
         return ClaimPolicySelectionResponse.model_validate(replay.response_payload)
     return response
+
 
 def select_payout_contact(
     repository: AccountDataRepository,
