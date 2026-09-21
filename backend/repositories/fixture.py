@@ -93,9 +93,11 @@ from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.account_data import (
     AccountCursorKey,
     AccountRecord,
+    PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
     account_record_audit_matches,
     account_record_identity,
+    payout_contact_selection_audit_matches,
     policy_selection_audit_matches,
 )
 from backend.repositories.assets import (
@@ -480,6 +482,65 @@ class FixtureRepository(PersistenceRepository):
                 or idempotency.session_id != (claim.active_session_id or '')
                 or not policy_selection_audit_matches(
                     claim, policy_id, policy_revision, idempotency, audit_event
+                )
+            ):
+                raise KeyError(claim.claim_id)
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.CLAIM_CHANGED,
+                claim,
+                operation_correlation=idempotency.key,
+                resources=realtime_resources_for_records(
+                    RealtimeMutation.CLAIM_CHANGED, ('branch_evaluation',)
+                ),
+            )
+            assert realtime_event is not None
+            self._claims[claim.claim_id] = deepcopy(claim)
+            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
+            self._idempotency[lookup] = deepcopy(idempotency)
+            self._audit_events[audit_event.event_id] = deepcopy(audit_event)
+            self._commit_realtime_event(realtime_event)
+
+    def save_payout_contact_selection(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        payment_destination_id: str,
+        payment_destination_revision: int,
+        idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        with self._claim_mutation_lock:
+            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            if lookup in self._idempotency:
+                raise IdempotencyConflict(idempotency.key)
+            self._validate_claim_mutation(claim, expected_revision)
+            self._validate_branch_evaluation(claim, branch_evaluation)
+            destination = self._payment_destinations.get(payment_destination_id)
+            if (
+                destination is None
+                or destination.customer_id != claim.customer_id
+                or not destination.active
+            ):
+                raise PaymentDestinationSelectionConflict(
+                    payment_destination_id, reason='unavailable'
+                )
+            if destination.revision != payment_destination_revision:
+                raise PaymentDestinationSelectionConflict(
+                    payment_destination_id,
+                    reason='changed',
+                    current_revision=destination.revision,
+                )
+            if (
+                idempotency.actor_id != claim.customer_id
+                or idempotency.claim_id != claim.claim_id
+                or idempotency.session_id != (claim.active_session_id or '')
+                or not payout_contact_selection_audit_matches(
+                    claim,
+                    payment_destination_id,
+                    payment_destination_revision,
+                    idempotency,
+                    audit_event,
                 )
             ):
                 raise KeyError(claim.claim_id)

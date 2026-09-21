@@ -22,6 +22,22 @@ AccountRecord = PolicyNumberRecord | PaymentDestinationRecord | IdentityDocument
 AccountCursorKey = tuple[datetime, str]
 
 
+class PaymentDestinationSelectionConflict(RepositoryConflict):
+    """The selected Payment Destination changed or became unavailable during Claim selection."""
+
+    def __init__(
+        self,
+        payment_destination_id: str,
+        *,
+        reason: str,
+        current_revision: int | None = None,
+    ) -> None:
+        super().__init__(f'Payment Destination {payment_destination_id} is {reason}.')
+        self.payment_destination_id = payment_destination_id
+        self.reason = reason
+        self.current_revision = current_revision
+
+
 class PolicySelectionConflict(RepositoryConflict):
     """The selected account Policy changed or became unavailable during selection."""
 
@@ -67,6 +83,32 @@ def account_record_audit_matches(
         and event.source_refs == [f'{kind}:{identifier}:revision:{record.revision}']
         and event.visibility is AuditVisibility.AUDIT_ONLY
         and event.created_at == record.updated_at
+    )
+
+
+def payout_contact_selection_audit_matches(
+    claim: WorkingClaim,
+    payment_destination_id: str,
+    payment_destination_revision: int,
+    idempotency: IdempotencyRecord,
+    event: AuditEventEnvelope,
+) -> bool:
+    return (
+        event.event_type is AuditEventType.ACTION_COMPLETED
+        and event.outcome is AuditOutcome.SUCCEEDED
+        and event.subject.subject_type is AuditSubjectType.CLAIM
+        and event.subject.subject_id == claim.claim_id
+        and event.subject.claim_id == claim.claim_id
+        and event.actor.actor_type is ActorType.CLAIMANT
+        and event.actor.actor_id == claim.customer_id
+        and event.idempotency_key == idempotency.key
+        and event.claim_revision == claim.revision
+        and event.source_refs
+        == [
+            f'payment_destination:{payment_destination_id}:revision:{payment_destination_revision}',
+            'field:claimant.contact_preference',
+        ]
+        and event.visibility is AuditVisibility.AUDIT_ONLY
     )
 
 
@@ -150,6 +192,17 @@ class AccountDataRepository(Protocol):
         expected_revision: int,
         policy_id: str,
         policy_revision: int,
+        idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None: ...
+
+    def save_payout_contact_selection(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        payment_destination_id: str,
+        payment_destination_revision: int,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord,
         audit_event: AuditEventEnvelope,

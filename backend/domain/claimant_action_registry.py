@@ -4,13 +4,15 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
 
-CLAIMANT_ACTION_REGISTRY_VERSION = '1.0.0'
+CLAIMANT_ACTION_REGISTRY_VERSION = '1.1.0'
 
 ClaimantActionType = Literal['claim_creation', 'external_service', 'conversation']
 ClaimantExecutionBoundary = Literal['claimant_api', 'external_service', 'conversation']
 ClaimantActionHandler = Literal[
     'create_claim',
     'review_details',
+    'review_payout_contact',
+    'review_agreement',
     'request_assessment',
     'none',
 ]
@@ -60,6 +62,19 @@ CLAIMANT_ACTION_REGISTRY = MappingProxyType(
                 'conversation',
                 'conversation',
                 'review_details',
+            ),
+            _contract(
+                'claimant.review_payout_contact',
+                'conversation',
+                'conversation',
+                'review_payout_contact',
+                ('payment_destination_id', 'claimant.contact_preference'),
+            ),
+            _contract(
+                'claimant.review_agreement',
+                'conversation',
+                'conversation',
+                'review_agreement',
             ),
             _contract(
                 'claimant.request_assessment',

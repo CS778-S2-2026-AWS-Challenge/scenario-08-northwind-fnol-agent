@@ -1,5 +1,5 @@
 from hashlib import sha256
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 
 from backend.adapters.claims_service import AssessorServiceAdapter
 from backend.core.auth import Principal
@@ -53,6 +53,7 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
+from backend.repositories.account_data import AccountDataRepository
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -400,6 +401,24 @@ def _assessment_has_come_back(
     )
 
 
+def _payout_contact_is_complete(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+) -> bool:
+    contact_preference = claim.form.get('claimant.contact_preference')
+    if (
+        claim.payment_destination_id is None
+        or contact_preference is None
+        or contact_preference.status is not FormStatus.CONFIRMED
+    ):
+        return False
+    account_repository = cast(AccountDataRepository, repository)
+    destination = account_repository.get_payment_destination(
+        claim.payment_destination_id, claim.customer_id
+    )
+    return destination is not None and destination.active
+
+
 def claimant_next_step(
     repository: PersistenceRepository,
     claim: WorkingClaim,
@@ -423,6 +442,22 @@ def claimant_next_step(
     """
 
     if action is None:
+        if (
+            claim.customer_next_step.status == 'ready_to_create'
+            and _payout_contact_is_complete(repository, claim)
+        ):
+            return claim.customer_next_step.model_copy(
+                update={
+                    'status': 'agreement_required',
+                    'summary': (
+                        'Your payout destination and contact preference are saved. '
+                        'Continue to agreement and confirmation.'
+                    ),
+                    'responsible_party': ResponsibleParty.CLAIMANT,
+                    'expected_by': None,
+                    'required_items': [],
+                }
+            )
         return claim.customer_next_step
     replacement = _WITHDRAWN_ACTION_NEXT_STEPS.get(action.status)
     if replacement is None:

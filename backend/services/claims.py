@@ -336,6 +336,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
             else None
         ),
         evidence_summary=evidence_summary_for(claimant_evidence),
+        payment_destination_id=claim.payment_destination_id,
         external_claim=claim.external_claim,
         external_service_action=legacy_external_service_action,
         external_capabilities=list(capability_catalogue(claim.incident_type)),
@@ -1096,6 +1097,11 @@ def update_form(
         update={
             'form': {**claim.form, **updated_fields},
             'incident_type': incident_type,
+            'payment_destination_id': (
+                None
+                if 'claimant.contact_preference' in updated_fields
+                else claim.payment_destination_id
+            ),
         }
     )
     candidate_branch_evaluation = BranchRuleEvaluator().evaluate(

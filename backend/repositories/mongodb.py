@@ -118,9 +118,11 @@ from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.account_data import (
     AccountCursorKey,
     AccountRecord,
+    PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
     account_record_audit_matches,
     account_record_identity,
+    payout_contact_selection_audit_matches,
     policy_selection_audit_matches,
 )
 from backend.repositories.assets import (
@@ -833,6 +835,65 @@ class MongoDBRepository:
             if policy.revision != policy_revision:
                 raise PolicySelectionConflict(
                     policy_id, reason='changed', current_revision=policy.revision
+                )
+            prepared_audit = self._prepare_audit_events(
+                claim, (audit_event,), mongo_session=mongo_session
+            )
+            self._save_child_mutation(
+                claim,
+                expected_revision,
+                idempotency,
+                mongo_session,
+                mutation=RealtimeMutation.CLAIM_CHANGED,
+                records=[('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation)],
+            )
+            for event in prepared_audit:
+                self._insert_audit_event(event, mongo_session=mongo_session)
+
+        self._atomic(persist)
+
+    def save_payout_contact_selection(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        payment_destination_id: str,
+        payment_destination_revision: int,
+        idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        if (
+            idempotency.actor_id != claim.customer_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.session_id != (claim.active_session_id or '')
+            or not payout_contact_selection_audit_matches(
+                claim,
+                payment_destination_id,
+                payment_destination_revision,
+                idempotency,
+                audit_event,
+            )
+        ):
+            raise KeyError(claim.claim_id)
+        self._validate_branch_evaluation(claim, branch_evaluation)
+
+        def persist(mongo_session: Any) -> None:
+            destination = self._get(
+                'payment_destination',
+                payment_destination_id,
+                PaymentDestinationRecord,
+                customer_id=claim.customer_id,
+                session=mongo_session,
+            )
+            if destination is None or not destination.active:
+                raise PaymentDestinationSelectionConflict(
+                    payment_destination_id, reason='unavailable'
+                )
+            if destination.revision != payment_destination_revision:
+                raise PaymentDestinationSelectionConflict(
+                    payment_destination_id,
+                    reason='changed',
+                    current_revision=destination.revision,
                 )
             prepared_audit = self._prepare_audit_events(
                 claim, (audit_event,), mongo_session=mongo_session

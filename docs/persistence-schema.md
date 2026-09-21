@@ -20,8 +20,12 @@ here.
 The account-data slice also persists account-owned `pol_`, `idn_`, and `pyd_` records with
 Fixture/MongoDB parity. Policy selection is an authoritative Claim transaction containing the
 proposed registered fact, Branch Evaluation, Claim revision, idempotency result, and value-free
-audit event. Protected records persist authenticated ciphertext and a last-four mask; plaintext
-bank and identity-document numbers never cross the protected-value adapter into repositories.
+audit event. Payout/contact selection follows the same transaction boundary: the Claim stores only
+the selected `payment_destination_id` plus the confirmed registered
+`claimant.contact_preference` fact, while the selected Payment Destination is rechecked for
+ownership, active state, and revision inside the transaction. Protected records persist
+authenticated ciphertext and a last-four mask; plaintext bank and identity-document numbers never
+cross the protected-value adapter into repositories or Claim State.
 
 The adapter owns bounded environment parsing and verified client construction through
 `MongoDBConnectionConfig` and `connect_mongodb_repository`. A connection is exposed to the

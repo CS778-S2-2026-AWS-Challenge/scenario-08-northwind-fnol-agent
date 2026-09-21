@@ -101,7 +101,7 @@
             "$ref": "#/components/schemas/AccountProfile"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -201,7 +201,7 @@
             "type": "string"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -267,7 +267,7 @@
           "expected_revision": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -381,7 +381,7 @@
             "type": "string"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -614,7 +614,7 @@
             "title": "Preferred Name"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -664,7 +664,7 @@
           "chunk_count": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -794,7 +794,7 @@
             "title": "Product"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -964,7 +964,7 @@
             "type": "string"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -1157,7 +1157,7 @@
             "type": "string"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -2174,7 +2174,7 @@
             "$ref": "#/components/schemas/ClaimantPrimaryAction"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           }
@@ -2326,8 +2326,8 @@
           },
           "limit": {
             "default": 10,
-            "maximum": 50.0,
-            "minimum": 1.0,
+            "maximum": 50,
+            "minimum": 1,
             "title": "Limit",
             "type": "integer"
           },
@@ -2566,6 +2566,42 @@
         "title": "ClaimMessageResponse",
         "type": "object"
       },
+      "ClaimPayoutContactSelectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "contact_preference": {
+            "$ref": "#/components/schemas/StructuredFormField-Output"
+          },
+          "customer_next_step": {
+            "$ref": "#/components/schemas/CustomerNextStep"
+          },
+          "payment_destination_id": {
+            "title": "Payment Destination Id",
+            "type": "string"
+          },
+          "primary_action": {
+            "$ref": "#/components/schemas/ClaimantPrimaryAction"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "claim_id",
+          "revision",
+          "payment_destination_id",
+          "contact_preference",
+          "customer_next_step",
+          "primary_action"
+        ],
+        "title": "ClaimPayoutContactSelectionResponse",
+        "type": "object"
+      },
       "ClaimPolicySelectionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2643,7 +2679,7 @@
             "$ref": "#/components/schemas/ActorReference"
           },
           "recorded_revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Recorded Revision",
             "type": "integer"
           },
@@ -2780,6 +2816,18 @@
                 "type": "null"
               }
             ]
+          },
+          "payment_destination_id": {
+            "anyOf": [
+              {
+                "pattern": "^pyd_[a-f0-9]{20}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Destination Id"
           },
           "primary_action": {
             "$ref": "#/components/schemas/ClaimantPrimaryAction"
@@ -2918,7 +2966,7 @@
           },
           "quantity": {
             "default": 1,
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Quantity",
             "type": "integer"
           },
@@ -3164,7 +3212,7 @@
           "revision": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -3602,7 +3650,7 @@
             "$ref": "#/components/schemas/ClaimantPrimaryAction"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           }
@@ -3796,7 +3844,7 @@
             "type": "boolean"
           },
           "claim_revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Claim Revision",
             "type": "integer"
           },
@@ -3971,7 +4019,7 @@
             "$ref": "#/components/schemas/ClaimCollaborationRequest"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           }
@@ -4072,7 +4120,7 @@
             "type": "string"
           },
           "configuration_revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Configuration Revision",
             "type": "integer"
           },
@@ -4251,7 +4299,7 @@
             "type": "string"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -4321,7 +4369,7 @@
             "type": "string"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           }
@@ -4459,8 +4507,8 @@
           "confidence": {
             "anyOf": [
               {
-                "maximum": 1.0,
-                "minimum": 0.0,
+                "maximum": 1,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -4541,7 +4589,7 @@
           },
           "quantity": {
             "default": 1,
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Quantity",
             "type": "integer"
           },
@@ -4680,7 +4728,7 @@
           },
           "quantity": {
             "default": 1,
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Quantity",
             "type": "integer"
           },
@@ -4748,7 +4796,7 @@
             "$ref": "#/components/schemas/ContentsItemEvidenceAssociationProjection"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           }
@@ -4825,33 +4873,33 @@
         "properties": {
           "max_model_invocations": {
             "default": 2,
-            "maximum": 2.0,
-            "minimum": 1.0,
+            "maximum": 2,
+            "minimum": 1,
             "title": "Max Model Invocations",
             "type": "integer"
           },
           "max_model_selected_tools": {
             "default": 1,
-            "maximum": 1.0,
-            "minimum": 0.0,
+            "maximum": 1,
+            "minimum": 0,
             "title": "Max Model Selected Tools",
             "type": "integer"
           },
           "ordinary_input_hard_limit": {
             "default": 3000,
-            "minimum": 100.0,
+            "minimum": 100,
             "title": "Ordinary Input Hard Limit",
             "type": "integer"
           },
           "ordinary_input_target": {
             "default": 1800,
-            "minimum": 100.0,
+            "minimum": 100,
             "title": "Ordinary Input Target",
             "type": "integer"
           },
           "ordinary_output_limit": {
             "default": 180,
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Ordinary Output Limit",
             "type": "integer"
           },
@@ -4862,19 +4910,19 @@
           },
           "soft_latency_target_ms": {
             "default": 10000,
-            "minimum": 100.0,
+            "minimum": 100,
             "title": "Soft Latency Target Ms",
             "type": "integer"
           },
           "tool_path_input_hard_limit": {
             "default": 3000,
-            "minimum": 100.0,
+            "minimum": 100,
             "title": "Tool Path Input Hard Limit",
             "type": "integer"
           },
           "tool_path_output_limit": {
             "default": 300,
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Tool Path Output Limit",
             "type": "integer"
           }
@@ -5133,7 +5181,7 @@
             "type": "string"
           },
           "claim_revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Claim Revision",
             "type": "integer"
           },
@@ -5849,7 +5897,7 @@
             "type": "string"
           },
           "claim_revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Claim Revision",
             "type": "integer"
           },
@@ -5912,7 +5960,7 @@
           "configuration_revision": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -6024,8 +6072,8 @@
           "threshold": {
             "anyOf": [
               {
-                "maximum": 1.0,
-                "minimum": 0.0,
+                "maximum": 1,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -6096,7 +6144,7 @@
           "configuration_revision": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -6218,8 +6266,8 @@
           "threshold": {
             "anyOf": [
               {
-                "maximum": 1.0,
-                "minimum": 0.0,
+                "maximum": 1,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -6263,8 +6311,8 @@
           "score": {
             "anyOf": [
               {
-                "maximum": 1.0,
-                "minimum": 0.0,
+                "maximum": 1,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -6418,8 +6466,8 @@
           "confidence": {
             "anyOf": [
               {
-                "maximum": 1.0,
-                "minimum": 0.0,
+                "maximum": 1,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -6604,7 +6652,7 @@
           "size_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -6617,7 +6665,7 @@
             "$ref": "#/components/schemas/EvidenceStatus"
           },
           "version": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Version",
             "type": "integer"
           },
@@ -6791,7 +6839,7 @@
           },
           "material_version": {
             "default": 1,
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Material Version",
             "type": "integer"
           },
@@ -6856,7 +6904,7 @@
           "size_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -7327,7 +7375,7 @@
         "type": "string"
       },
       "ExternalRequestProvenance": {
-        "description": "What a request actually reached, as distinct from what was configured.\n\nThe three classes are **derived** from `IntegrationSource` and the delivery the task\nalready records, not stored as a fourth thing that could disagree with them:\n\n- `simulated` \u2014 a fixture source. No production provider is involved, whatever the\n  request looks like.\n- `configured` \u2014 a configured service that has not been sent. Configuration is not\n  contact, and a demonstration that reads it as contact would claim a provider\n  relationship nobody has.\n- `live_attempted` \u2014 a configured service whose request was submitted with delivery\n  evidence. It says an attempt reached a provider; it says nothing about the result,\n  which is `ExternalTaskResultVerification`'s question.\n\nDeriving rather than storing matters here. `docs/third-party-service-consent-and-\nshared-data-contract.md` records the only implemented service identity as a\ncontrolled fixture and `P3-ASSESSOR` as simulation-only, so `live_attempted` is\ncurrently unreachable. Stored as an enum member on a persisted record it would be a\nvalue nothing can produce and a projection could still assert; derived, it simply\nnever occurs until a configured service actually sends something.",
+        "description": "What a request actually reached, as distinct from what was configured.\n\nThe three classes are **derived** from `IntegrationSource` and the delivery the task\nalready records, not stored as a fourth thing that could disagree with them:\n\n- `simulated` — a fixture source. No production provider is involved, whatever the\n  request looks like.\n- `configured` — a configured service that has not been sent. Configuration is not\n  contact, and a demonstration that reads it as contact would claim a provider\n  relationship nobody has.\n- `live_attempted` — a configured service whose request was submitted with delivery\n  evidence. It says an attempt reached a provider; it says nothing about the result,\n  which is `ExternalTaskResultVerification`'s question.\n\nDeriving rather than storing matters here. `docs/third-party-service-consent-and-\nshared-data-contract.md` records the only implemented service identity as a\ncontrolled fixture and `P3-ASSESSOR` as simulation-only, so `live_attempted` is\ncurrently unreachable. Stored as an enum member on a persisted record it would be a\nvalue nothing can produce and a projection could still assert; derived, it simply\nnever occurs until a configured service actually sends something.",
         "enum": [
           "simulated",
           "configured",
@@ -7369,7 +7417,7 @@
         "description": "The two independent authorities one external request needs.\n\n`docs/claim-creation-boundary.md` requires both a current Northwind rule or\nstaff decision and a matching active claimant-consent record, and states\nthat neither substitutes for the other. They are separate fields here for\nthat reason: a request holding only one of them is not authorised, and no\ncode path can satisfy the pair by supplying the same reference twice.",
         "properties": {
           "authorised_revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Authorised Revision",
             "type": "integer"
           },
@@ -7495,7 +7543,7 @@
             "type": "string"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -7778,7 +7826,7 @@
           "verified_against_revision": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -8337,7 +8385,7 @@
           "size_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -8384,7 +8432,7 @@
             "$ref": "#/components/schemas/WorkbenchHandoff"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -8432,7 +8480,7 @@
             "type": "array"
           },
           "form_revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Form Revision",
             "type": "integer"
           },
@@ -8706,7 +8754,7 @@
             "type": "string"
           },
           "latency_ms": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Latency Ms",
             "type": "number"
           },
@@ -8842,7 +8890,7 @@
           "latency_ms": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -8929,7 +8977,7 @@
             "type": "string"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           }
@@ -8982,8 +9030,8 @@
           },
           "limit": {
             "default": 5,
-            "maximum": 10.0,
-            "minimum": 1.0,
+            "maximum": 10,
+            "minimum": 1,
             "title": "Limit",
             "type": "integer"
           },
@@ -9263,7 +9311,7 @@
           "chunk_count": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -9393,7 +9441,7 @@
             "title": "Product"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -9837,7 +9885,7 @@
           "configuration_revision": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -9860,12 +9908,12 @@
             "title": "Currency"
           },
           "estimated_microunits": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Estimated Microunits",
             "type": "integer"
           },
           "priced_calls": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Priced Calls",
             "type": "integer"
           },
@@ -9879,7 +9927,7 @@
             "type": "string"
           },
           "unpriced_calls": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Unpriced Calls",
             "type": "integer"
           }
@@ -9897,27 +9945,27 @@
         "additionalProperties": false,
         "properties": {
           "calls": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Calls",
             "type": "integer"
           },
           "input_tokens": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Input Tokens",
             "type": "integer"
           },
           "output_tokens": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Output Tokens",
             "type": "integer"
           },
           "reported_calls": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Reported Calls",
             "type": "integer"
           },
           "total_tokens": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Total Tokens",
             "type": "integer"
           }
@@ -9936,7 +9984,7 @@
         "additionalProperties": false,
         "properties": {
           "amount": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Amount",
             "type": "number"
           },
@@ -9962,7 +10010,7 @@
             "$ref": "#/components/schemas/MotorOtherDriverProjection"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           }
@@ -10101,7 +10149,7 @@
             "type": "string"
           },
           "total": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Total",
             "type": "integer"
           },
@@ -10172,8 +10220,8 @@
           "progress_percent": {
             "anyOf": [
               {
-                "maximum": 100.0,
-                "minimum": 0.0,
+                "maximum": 100,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -10194,7 +10242,7 @@
             "title": "Result"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -10272,7 +10320,7 @@
           "observed": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -10291,7 +10339,7 @@
             "type": "string"
           },
           "threshold": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Threshold",
             "type": "integer"
           }
@@ -10498,7 +10546,7 @@
           "excess_amount": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -10994,7 +11042,7 @@
           "maximum_cache_points": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -11006,7 +11054,7 @@
           "minimum_cache_tokens": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -11118,8 +11166,8 @@
             "$ref": "#/components/schemas/ContextLoadMode"
           },
           "max_tokens": {
-            "maximum": 3000.0,
-            "minimum": 1.0,
+            "maximum": 3000,
+            "minimum": 1,
             "title": "Max Tokens",
             "type": "integer"
           },
@@ -11130,8 +11178,8 @@
             "type": "string"
           },
           "priority": {
-            "maximum": 1000.0,
-            "minimum": 0.0,
+            "maximum": 1000,
+            "minimum": 0,
             "title": "Priority",
             "type": "integer"
           },
@@ -11215,7 +11263,7 @@
         "additionalProperties": false,
         "properties": {
           "events_in_window": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Events In Window",
             "type": "integer"
           },
@@ -11243,8 +11291,8 @@
           "window_seconds": {
             "anyOf": [
               {
-                "maximum": 86400.0,
-                "minimum": 60.0,
+                "maximum": 86400,
+                "minimum": 60,
                 "type": "integer"
               },
               {
@@ -11492,7 +11540,7 @@
             "type": "string"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -11655,7 +11703,7 @@
             "type": "string"
           },
           "size_bytes": {
-            "exclusiveMinimum": 0.0,
+            "exclusiveMinimum": 0,
             "title": "Size Bytes",
             "type": "integer"
           }
@@ -11673,7 +11721,7 @@
         "additionalProperties": false,
         "properties": {
           "input_hard_limit": {
-            "minimum": 100.0,
+            "minimum": 100,
             "title": "Input Hard Limit",
             "type": "integer"
           },
@@ -11683,19 +11731,19 @@
             "type": "boolean"
           },
           "max_model_invocations": {
-            "maximum": 2.0,
-            "minimum": 1.0,
+            "maximum": 2,
+            "minimum": 1,
             "title": "Max Model Invocations",
             "type": "integer"
           },
           "max_model_selected_tools": {
-            "maximum": 1.0,
-            "minimum": 0.0,
+            "maximum": 1,
+            "minimum": 0,
             "title": "Max Model Selected Tools",
             "type": "integer"
           },
           "output_limit": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Output Limit",
             "type": "integer"
           },
@@ -11773,13 +11821,13 @@
         "properties": {
           "current_action_satisfied": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Current Action Satisfied",
             "type": "integer"
           },
           "current_action_total": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Current Action Total",
             "type": "integer"
           },
@@ -11894,31 +11942,31 @@
           },
           "question_budget": {
             "default": 9,
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Question Budget",
             "type": "integer"
           },
           "question_turn_count": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Question Turn Count",
             "type": "integer"
           },
           "remaining_question_budget": {
             "default": 9,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Remaining Question Budget",
             "type": "integer"
           },
           "repeated_question_count": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Repeated Question Count",
             "type": "integer"
           },
           "requested_fact_count": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Requested Fact Count",
             "type": "integer"
           },
@@ -12183,6 +12231,28 @@
         "title": "SelectClaimAssetRequest",
         "type": "object"
       },
+      "SelectPayoutContactRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "contact_preference": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Contact Preference",
+            "type": "string"
+          },
+          "payment_destination_id": {
+            "pattern": "^pyd_[a-f0-9]{20}$",
+            "title": "Payment Destination Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "payment_destination_id",
+          "contact_preference"
+        ],
+        "title": "SelectPayoutContactRequest",
+        "type": "object"
+      },
       "SelectPolicyNumberRequest": {
         "additionalProperties": false,
         "properties": {
@@ -12323,7 +12393,7 @@
         "additionalProperties": false,
         "properties": {
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -12375,7 +12445,7 @@
             ]
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           }
@@ -12742,7 +12812,7 @@
             "type": "string"
           },
           "expected_revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Expected Revision",
             "type": "integer"
           },
@@ -12760,7 +12830,7 @@
             "type": "object"
           },
           "resulting_revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Resulting Revision",
             "type": "integer"
           },
@@ -13207,7 +13277,7 @@
           },
           "revision": {
             "default": 1,
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -13244,8 +13314,8 @@
           },
           "lease_seconds": {
             "default": 60,
-            "maximum": 300.0,
-            "minimum": 15.0,
+            "maximum": 300,
+            "minimum": 15,
             "title": "Lease Seconds",
             "type": "integer"
           },
@@ -13332,8 +13402,8 @@
             "type": "string"
           },
           "display_weight": {
-            "maximum": 100.0,
-            "minimum": 1.0,
+            "maximum": 100,
+            "minimum": 1,
             "title": "Display Weight",
             "type": "integer"
           },
@@ -13460,8 +13530,8 @@
           "confidence": {
             "anyOf": [
               {
-                "maximum": 1.0,
-                "minimum": 0.0,
+                "maximum": 1,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -13548,8 +13618,8 @@
           "confidence": {
             "anyOf": [
               {
-                "maximum": 1.0,
-                "minimum": 0.0,
+                "maximum": 1,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -14130,8 +14200,8 @@
           "year": {
             "anyOf": [
               {
-                "maximum": 2200.0,
-                "minimum": 1886.0,
+                "maximum": 2200,
+                "minimum": 1886,
                 "type": "integer"
               },
               {
@@ -14338,7 +14408,7 @@
           "resulting_revision": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -14386,7 +14456,7 @@
             "$ref": "#/components/schemas/ActionAvailability"
           },
           "based_on_revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Based On Revision",
             "type": "integer"
           },
@@ -14583,7 +14653,7 @@
             "$ref": "#/components/schemas/WorkbenchPriorityProjection"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -14784,7 +14854,7 @@
             "$ref": "#/components/schemas/WorkbenchPriorityProjection"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -14995,7 +15065,7 @@
           },
           "unread_count": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Unread Count",
             "type": "integer"
           },
@@ -15265,7 +15335,7 @@
           "result_verified_against_revision": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -15625,7 +15695,7 @@
           },
           "follow_up_attempts": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Follow Up Attempts",
             "type": "integer"
           },
@@ -15781,7 +15851,7 @@
           },
           "coworker_count": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Coworker Count",
             "type": "integer"
           },
@@ -15809,13 +15879,13 @@
           },
           "pending_cowork_requests": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Pending Cowork Requests",
             "type": "integer"
           },
           "pending_transfer_requests": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Pending Transfer Requests",
             "type": "integer"
           },
@@ -15891,7 +15961,7 @@
             "$ref": "#/components/schemas/WorkPriorityLevel"
           },
           "rank": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Rank",
             "type": "integer"
           },
@@ -16712,13 +16782,13 @@
           },
           "needs_attention": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Needs Attention",
             "type": "integer"
           },
           "session_count": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Session Count",
             "type": "integer"
           },
@@ -16727,13 +16797,13 @@
           },
           "total": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Total",
             "type": "integer"
           },
           "unread_count": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Unread Count",
             "type": "integer"
           }
@@ -16765,7 +16835,7 @@
             "title": "Closed At"
           },
           "context_revision": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Context Revision",
             "type": "integer"
           },
@@ -16795,7 +16865,7 @@
           },
           "question_budget": {
             "default": 9,
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Question Budget",
             "type": "integer"
           },
@@ -16808,25 +16878,25 @@
           },
           "question_turn_count": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Question Turn Count",
             "type": "integer"
           },
           "remaining_question_budget": {
             "default": 9,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Remaining Question Budget",
             "type": "integer"
           },
           "repeated_question_count": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Repeated Question Count",
             "type": "integer"
           },
           "requested_fact_count": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Requested Fact Count",
             "type": "integer"
           },
@@ -16974,8 +17044,8 @@
           "confidence": {
             "anyOf": [
               {
-                "maximum": 1.0,
-                "minimum": 0.0,
+                "maximum": 1,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -17157,7 +17227,7 @@
         "additionalProperties": false,
         "properties": {
           "count": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Count",
             "type": "integer"
           },
@@ -17255,7 +17325,7 @@
           },
           "external_wait_count": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "External Wait Count",
             "type": "integer"
           },
@@ -17333,7 +17403,7 @@
           },
           "unread_claimant_messages": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Unread Claimant Messages",
             "type": "integer"
           }
@@ -21689,6 +21759,107 @@
         "summary": "Create Claim Motor Other Driver",
         "tags": [
           "claimant"
+        ]
+      }
+    },
+    "/api/v1/claims/{claim_id}/payout-contact-selections": {
+      "post": {
+        "operationId": "post_payout_contact_selection_api_v1_claims__claim_id__payout_contact_selections_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectPayoutContactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimPayoutContactSelectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Payout Contact Selection",
+        "tags": [
+          "claimant",
+          "claimant account data"
         ]
       }
     },

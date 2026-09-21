@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from backend.core.auth import Principal, require_claimant_session
 from backend.core.errors import ApiError
 from backend.domain.account_data import (
+    ClaimPayoutContactSelectionResponse,
     ClaimPolicySelectionResponse,
     CreateIdentityDocumentRequest,
     CreatePaymentDestinationRequest,
@@ -19,12 +20,14 @@ from backend.domain.account_data import (
     PaymentDestinationProjection,
     PolicyNumberListResponse,
     PolicyNumberProjection,
+    SelectPayoutContactRequest,
     SelectPolicyNumberRequest,
     UpdateIdentityDocumentRequest,
     UpdatePaymentDestinationRequest,
     UpdatePolicyNumberRequest,
 )
 from backend.repositories.account_data import AccountDataRepository
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.account_data import (
     create_identity_document,
@@ -34,6 +37,7 @@ from backend.services.account_data import (
     list_identity_documents,
     list_payment_destinations,
     list_policies,
+    select_payout_contact,
     select_policy,
     update_identity_document,
     update_payment_destination,
@@ -100,6 +104,10 @@ def repositories_for(request: Request) -> tuple[AccountDataRepository, Persisten
 
 def protected_values_for(request: Request) -> ProtectedValueAdapter:
     return cast(ProtectedValueAdapter, request.app.state.protected_value_adapter)
+
+
+def identity_repository_for(request: Request) -> IdentityRepository:
+    return cast(IdentityRepository, request.app.state.identity_repository)
 
 
 @account_router.post('/policies', response_model=PolicyNumberProjection, status_code=201)
@@ -379,3 +387,35 @@ def post_policy_selection(
             repository, persistence, principal, claim_id, payload, idempotency_key, if_match
         ),
     )
+
+@claim_router.post(
+    '/{claim_id}/payout-contact-selections',
+    response_model=ClaimPayoutContactSelectionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def post_payout_contact_selection(
+    claim_id: str,
+    payload: SelectPayoutContactRequest,
+    request: Request,
+    principal: Principal = Depends(require_claimant_session),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> ClaimPayoutContactSelectionResponse:
+    repository, persistence = repositories_for(request)
+    return _execute_logged_account_operation(
+        operation='claim_payout_contact.select',
+        request=request,
+        principal=principal,
+        resource_id=claim_id,
+        execute=lambda: select_payout_contact(
+            repository,
+            persistence,
+            identity_repository_for(request),
+            principal,
+            claim_id,
+            payload,
+            idempotency_key,
+            if_match,
+        ),
+    )
+
