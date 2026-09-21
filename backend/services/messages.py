@@ -2778,6 +2778,22 @@ def submit_message(
             }
         )
     effective_next_step = progress_next_step
+    # A validated create proposal is the explicit Runtime transition into the
+    # creation-ready boundary.  Keep this narrow exception here rather than
+    # allowing a generic next-step projection to leave the Claim in collecting
+    # while the create command is being prepared.
+    if (
+        authority.outcome is AuthorityOutcome.AUTHORISED
+        and proposal.action is AgentAction.CREATE_CLAIM
+        and updated_claim.claim_state.workflow_state is WorkflowState.COLLECTING
+    ):
+        updated_claim = updated_claim.model_copy(
+            update={
+                'claim_state': updated_claim.claim_state.model_copy(
+                    update={'workflow_state': WorkflowState.READY_FOR_NEXT}
+                )
+            }
+        )
     live_mutation_command = _live_mutation_command(
         claim=claim,
         claimant_message=claimant_message,

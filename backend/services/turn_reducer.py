@@ -34,7 +34,14 @@ def recompute_progress(
 ) -> tuple[WorkflowState, CustomerNextStep]:
     """Compute claimant workflow and next step from one post-mutation evaluation."""
 
-    if claim.claim_state.workflow_state is WorkflowState.CREATED or claim.terminal_disposition:
+    # ``CREATED`` is also the bootstrap value for a working Claim before its
+    # first intake turn.  It becomes terminal only once an external Claim (or
+    # an explicit terminal disposition) exists; otherwise progress must still
+    # be allowed to reach READY_FOR_NEXT.
+    if claim.terminal_disposition or (
+        claim.claim_state.workflow_state is WorkflowState.CREATED
+        and claim.external_claim is not None
+    ):
         return claim.claim_state.workflow_state, claim.customer_next_step
     if claim.claim_state.workflow_state is WorkflowState.PROFESSIONAL_REVIEW:
         return claim.claim_state.workflow_state, claim.customer_next_step
