@@ -18,3 +18,7 @@ records. No retry endpoint or second lifecycle is introduced.
 Unknown recovery triggers fail closed. The complete external reconciliation,
 tool-unavailable, revision-conflict and high-impact review matrix remains
 tracked by issue #779.
+
+Claim creation also fails closed when branch evaluation still contains recorded
+facts: the API returns `CONFIRMATION_REQUIRED` and lists the fields that must be
+confirmed before the creation command can be prepared.
