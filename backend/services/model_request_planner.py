@@ -95,7 +95,16 @@ def prepare_model_family_context(context: AgentTurnContext) -> AgentTurnContext:
         previous_evaluation=context.branch_evaluation,
         recomputation_reason='model_family_judgment',
     )
-    return replace(context, turn_family_resolution=resolution, branch_evaluation=evaluation)
+    return replace(
+        context,
+        turn_family_resolution=resolution,
+        branch_evaluation=evaluation,
+        external_services=(
+            context.external_service_context_loader()
+            if context.external_service_context_loader is not None
+            else context.external_services
+        ),
+    )
 
 
 def plan_model_turn(

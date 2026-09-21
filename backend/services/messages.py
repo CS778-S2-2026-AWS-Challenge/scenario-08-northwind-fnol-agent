@@ -22,6 +22,7 @@ from backend.domain.branch_registry import (
     BranchRuleEvaluator,
     validate_registered_field_value,
 )
+from backend.domain.external_service_registry import ExternalServiceLifecycleProjection
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
 from backend.domain.model_gateway import ModelGatewayError
@@ -2297,6 +2298,57 @@ def submit_message(
             available_service_ids=set(available_external_ids),
         )
     )
+
+    def load_model_service_toolbox() -> tuple[ExternalServiceLifecycleProjection, ...]:
+        if handoff_open:
+            return ()
+        try:
+            return build_agent_external_lifecycle_context(
+                repository, claim_id, claim.assessor_routing, all_families=True
+            )
+        except ExternalLifecycleContextError:
+            logger.warning(
+                'external_lifecycle_context_unavailable',
+                extra={'claim_id': claim_id, 'component': 'model_service_toolbox'},
+            )
+            return ()
+
+    def resolve_turn_services(changes: list[ProposedFormChange]) -> frozenset[str]:
+        # Resolve the same assertions the reducer will apply. A source-backed
+        # proposal can still be disputed against stored authority; it must not
+        # unlock a service merely because the model supplied a valid quotation.
+        family_changes = [item for item in changes if item.field_code == 'claim.product_family']
+        resolved = _build_form_changes(
+            claim.form,
+            family_changes,
+            claimant_message,
+            timestamp,
+            AuthorityOutcome.AUTHORISED,
+            AgentProposalSource.MODEL_GATEWAY,
+            None,
+        )
+        projected_claim = claim.model_copy(update={'form': {**claim.form, **resolved}})
+        family = resolve_turn_family(projected_claim, None, None, model_family_judgment=True)
+        accepted_family = family.product_family if family.status == 'authoritative' else None
+        try:
+            return eligible_service_ids(
+                repository,
+                projected_claim,
+                accepted_family,
+                tuple(
+                    item
+                    for item in repository.list_messages(claim_id, session_id, principal.subject)
+                    if item.message_id != claimant_message.message_id
+                ),
+                current_text=message_text,
+            )
+        except ExternalLifecycleContextError:
+            logger.warning(
+                'external_lifecycle_context_unavailable',
+                extra={'claim_id': claim_id, 'component': 'turn_service_eligibility'},
+            )
+            return frozenset()
+
     agent_context = AgentTurnContext(
         claim=claim,
         session_id=session_id,
@@ -2351,6 +2403,8 @@ def submit_message(
         rolling_summary=rolling_summary,
         external_services=() if handoff_open else external_services,
         eligible_service_ids=frozenset() if handoff_open else frozenset(available_external_ids),
+        service_eligibility_resolver=resolve_turn_services,
+        external_service_context_loader=load_model_service_toolbox,
         open_handoffs=tuple(
             item
             for item in repository.list_handoffs(claim_id, principal.subject)

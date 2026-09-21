@@ -297,10 +297,20 @@ def message_external_actions(
                 routing = assessor_action.routing
                 failure_code = assessor_action.failure_code
         elif consent is not None and consent.status is ExternalServiceConsentStatus.GRANTED:
+            try:
+                requests = repository.list_external_task_requests_internal(claim.claim_id)
+                tasks = repository.list_external_tasks_internal(claim.claim_id)
+            except RuntimeError:
+                logger.warning(
+                    'external_lifecycle_context_unavailable',
+                    extra={'claim_id': claim.claim_id, 'component': 'message_service_projection'},
+                )
+                # Do not turn an unknown existing operation into a retry control.
+                continue
             request = next(
                 (
                     candidate
-                    for candidate in repository.list_external_task_requests_internal(claim.claim_id)
+                    for candidate in requests
                     if candidate.authorisation.claimant_consent_ref == consent.consent_ref
                 ),
                 None,
@@ -308,7 +318,7 @@ def message_external_actions(
             task = next(
                 (
                     candidate
-                    for candidate in repository.list_external_tasks_internal(claim.claim_id)
+                    for candidate in tasks
                     if request is not None and candidate.task_id == request.task_id
                 ),
                 None,

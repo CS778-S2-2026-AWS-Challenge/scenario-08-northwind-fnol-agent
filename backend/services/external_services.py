@@ -1,3 +1,4 @@
+import logging
 from hashlib import sha256
 from typing import Any, NoReturn
 
@@ -75,6 +76,8 @@ from backend.services.support import (
     request_fingerprint,
     require_idempotency_key,
 )
+
+logger = logging.getLogger(__name__)
 
 _ACTION_SERVICE_NAME = 'Vehicle damage assessment'
 _ACTION_PROVIDER = 'Controlled assessment fixture'
@@ -244,7 +247,16 @@ def claimant_assessor_action(
     interrupted_dispatch = False
     continuation: ExternalTaskContinuationOutcome | None = None
     if routing is None:
-        actionable_task = _latest_actionable_assessor_task(repository, claim)
+        try:
+            actionable_task = _latest_actionable_assessor_task(repository, claim)
+        except RuntimeError:
+            logger.warning(
+                'external_lifecycle_context_unavailable',
+                extra={'claim_id': claim.claim_id, 'component': 'claimant_assessor_projection'},
+            )
+            # An unavailable task read is not proof that nothing was sent.
+            # Suppress the optional action instead of offering another request.
+            return None
         if actionable_task is not None:
             failed_task, interrupted_dispatch = actionable_task
         consent = _active_assessor_consent(claim)
@@ -442,7 +454,20 @@ def claimant_next_step(
         )
     replacement = _WITHDRAWN_ACTION_NEXT_STEPS.get(action.status)
     if replacement is None:
-        if action.status in _ANSWERABLE_STATUSES and _assessment_has_come_back(repository, claim):
+        try:
+            result_received = action.status in _ANSWERABLE_STATUSES and _assessment_has_come_back(
+                repository, claim
+            )
+        except RuntimeError:
+            logger.warning(
+                'external_lifecycle_context_unavailable',
+                extra={
+                    'claim_id': claim.claim_id,
+                    'component': 'claimant_assessor_result_projection',
+                },
+            )
+            return claim.customer_next_step
+        if result_received:
             replacement = _RESULT_RECEIVED_NEXT_STEP
         elif (
             action.status

@@ -14,6 +14,7 @@ from backend.domain.agent_context_runtime import (
     TurnRoute,
     VerifiedConversationSummary,
 )
+from backend.domain.external_service_registry import ExternalLifecycleStatus
 from backend.domain.models import MessageRecord, MessageVisibility, NeededFor
 from backend.domain.turn_field_contract import TurnFieldContract
 from backend.services.agent import AgentTurnContext
@@ -94,7 +95,9 @@ def _external_service_projection(context: AgentTurnContext, route: TurnRoute) ->
     matched: list[object] = []
     eligible_ids = getattr(context, 'eligible_service_ids', None)
     for service in context.external_services:
-        if eligible_ids is not None and service.service_identity not in eligible_ids:
+        if v8 and service.operation_status is not ExternalLifecycleStatus.CONSENT_REQUIRED:
+            continue
+        if not v8 and eligible_ids is not None and service.service_identity not in eligible_ids:
             continue
         if (
             not v8

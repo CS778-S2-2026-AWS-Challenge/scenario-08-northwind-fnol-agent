@@ -56,6 +56,8 @@ def build_agent_external_lifecycle_context(
     claim_id: str,
     assessor_routing: AssessorRoutingResult | None = None,
     product_family: str | None = None,
+    *,
+    all_families: bool = False,
 ) -> tuple[ExternalServiceLifecycleProjection, ...]:
     """Return the complete bounded lifecycle context for one Claim.
 
@@ -166,7 +168,7 @@ def build_agent_external_lifecycle_context(
             for item in capability_context(product_family)
             if item.service_identity not in active_identities
         ]
-        if product_family is not None
+        if product_family is not None or all_families
         else [
             item
             for item in capability_context()

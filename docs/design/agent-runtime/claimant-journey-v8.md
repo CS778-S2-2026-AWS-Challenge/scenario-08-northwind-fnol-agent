@@ -1,7 +1,7 @@
 # Claimant Journey v8
 
 This document publishes the evidence, decisions and implementation contract for claimant v8,
-including the approved v3.14 family-admission decision. It is the shared repository reference for
+including the approved v3.15 family and service-admission decisions. It is the shared repository reference for
 the implementation in PR #977, which delivers issues #976 and #980 and the bounded recovery
 slice of #779. Its contracts can be read without a maintainer's local workspace.
 
@@ -74,12 +74,21 @@ offers are suppressed for three claimant turns; an explicit renewed request can
 create a new offer identity. Consent, withdrawal, dispatch, result and handoff
 mutations recompute the claimant next step.
 
-Unknown family limits the service catalogue to cross-family manual assistance.
+Unknown family limits the frontend catalogue to cross-family manual assistance.
 The independent Northwind Staff Assistance entry remains available. Manual/link/phone
 third-party entries such as Police 105 remain registered guidance; using them does not
 create an ExternalTask or imply that an external organisation accepted work.
 Presentation metadata is projected by the service registry from the current
 access and operation state. A redesign of polymorphic frontend rendering is outside this change.
+
+The model receives the existing small service toolbox (at most eight lifecycle projections),
+independent of family, with open-handoff and existing-operation exclusions. This is read-only
+context, not permission or a new candidate state. `validate_turn_proposal` validates facts first,
+then resolves service eligibility from the same-turn accepted family through the existing
+eligibility query. The shared assertion resolver prevents conflicting or unsupported family
+proposals from unlocking another family's services. Registry, cooldown, renewed intent,
+handoff, disclosure and consent rules are unchanged. Optional lifecycle-read failure omits
+services and logs a bounded diagnostic while preserving chat.
 
 ## Recovery and terminal lifecycle
 

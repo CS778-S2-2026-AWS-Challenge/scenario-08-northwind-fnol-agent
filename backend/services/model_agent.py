@@ -848,6 +848,7 @@ class GatewayAgent:
                 open_handoffs=getattr(context, 'open_handoffs', ()),
                 message_text=context.message_text,
                 evidence=context.evidence,
+                service_eligibility_resolver=context.service_eligibility_resolver,
             )
             if optional_rejections:
                 validated_turn = replace(

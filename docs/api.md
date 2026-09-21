@@ -1743,6 +1743,12 @@ fields required. The model may propose family and supported details in the same 
 quotation/source checks and confirmation boundary still apply. Stored proposed family values
 select collection requirements without becoming confirmed merely through selection.
 
+The v8 model's service toolbox is independent of the frontend catalogue's initial family filter.
+After validating facts, Runtime checks service suggestions against the accepted same-turn family
+and existing task, cooldown and handoff rules. A first-turn family proposal and matching consent
+card can therefore appear in one response. Seeing a service in model context grants neither
+consent nor execution authority; the frontend's initial catalogue behavior is unchanged.
+
 Runtime also requires the entire claimant message to be an unqualified acceptance of the
 displayed batch. A scoped answer such as `Yes we can still live here` may confirm habitability
 but cannot confirm other recorded values. The model's `confirms_batch` flag is advisory only:

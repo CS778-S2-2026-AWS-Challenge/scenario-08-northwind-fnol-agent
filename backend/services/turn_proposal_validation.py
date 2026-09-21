@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -313,6 +313,8 @@ def validate_turn_proposal(
     open_handoffs: Collection[object],
     message_text: str | None,
     evidence: Sequence[AgentEvidenceReference] = (),
+    service_eligibility_resolver: Callable[[list[ProposedFormChange]], Collection[str]]
+    | None = None,
 ) -> ValidatedTurn:
     """Validate one model envelope without applying claim mutations.
 
@@ -325,6 +327,7 @@ def validate_turn_proposal(
         open_handoffs: Active handoffs; any entry suppresses every service suggestion.
         message_text: Latest claimant message used solely as fact provenance.
         evidence: Evidence authorised for this model request.
+        service_eligibility_resolver: Existing eligibility query using validated turn facts.
     Returns:
         A typed, immutable boundary consumed by the sole claimant reducer.
     Raises:
@@ -352,21 +355,6 @@ def validate_turn_proposal(
         # remain model-authored content; never delete every question sentence.
         proposed_reply = proposed_reply.replace(question.wording, '').strip()
         question = None
-
-    service_ids: list[str] = []
-    rejected_services: list[str] = []
-    for suggestion in proposal.service_suggestions:
-        identity = suggestion.service_identity
-        reason = (
-            'suppressed_during_handoff'
-            if open_handoffs or safety_interrupt is not None or proposal.escalation is not None
-            else ('service_not_eligible' if identity not in eligible_service_ids else None)
-        )
-        if reason is not None:
-            reject('service_suggestion', identity, reason)
-            rejected_services.append(identity)
-        elif identity not in service_ids:
-            service_ids.append(identity)
 
     state_changes: list[StateChange] = []
     for state in proposal.state_proposals:
@@ -431,6 +419,25 @@ def validate_turn_proposal(
                 source_evidence_id=change.source_evidence_id,
             )
         )
+    services_suppressed = bool(
+        open_handoffs or safety_interrupt is not None or escalation is not None
+    )
+    if service_eligibility_resolver is not None and not services_suppressed:
+        eligible_service_ids = service_eligibility_resolver(changes)
+    service_ids: list[str] = []
+    rejected_services: list[str] = []
+    for suggestion in proposal.service_suggestions:
+        identity = suggestion.service_identity
+        reason = (
+            'suppressed_during_handoff'
+            if services_suppressed
+            else ('service_not_eligible' if identity not in eligible_service_ids else None)
+        )
+        if reason is not None:
+            reject('service_suggestion', identity, reason)
+            rejected_services.append(identity)
+        elif identity not in service_ids:
+            service_ids.append(identity)
     contents = []
     for item in proposal.contents_item_changes:
         values = item.model_dump()
