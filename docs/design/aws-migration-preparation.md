@@ -7,7 +7,7 @@ exists.
 
 The mapping is derived from the current domain records, `PersistenceRepository`
 protocol, and `MongoDBRepository` implementation at `origin/main`
-`8fa367f54af7d455b5d71ecfde1ec652ed45daf7`. It preserves provider-neutral record
+`e4a3f498d054154462d43f390ec72ed8267b5c16`. It preserves provider-neutral record
 identity, ownership, ordering, uniqueness, revision, idempotency, audit, and atomic
 write boundaries. It does not define a new API field, state, permission, lifecycle,
 or business rule.
@@ -73,17 +73,17 @@ contract requires atomic visibility.
 | `action_envelope` | `envelope_id` | Required Claim/session/turn scope; list for turn | `C(ActionEnvelope)`; turn-order `R` | Immutable; each envelope remains an individual record. |
 | `tool_result` | `result_id` | Required Claim/session/turn scope; list for turn | `C(ToolResult)`; turn-order `R` | Immutable; raw provider payloads and credentials remain excluded. |
 | `turn_result` | `result_id` | Required Claim/session/turn scope | `C(TurnResult)`; turn-bundle `R` | Immutable terminal constituent of one Runtime turn. |
-| `runtime_work_item` | `work_item_id` | Required Claim/session/turn scope; list by Claim in `updated_at` order and by turn | `C(RuntimeWorkItem)`; Claim and turn-order `R` | Individual mutable Runtime work record; never collapsed into the turn item. |
+| `runtime_work_item` | `work_item_id` | Required Claim and turn scope; Session scope exists only where the current containing Runtime variant supplies and validates it; list by Claim in `updated_at` order and by turn | `C(RuntimeWorkItem)`; Claim and turn-order `R` | Individual mutable Runtime work record; never collapsed into the turn item or assigned a universal Session requirement. |
 | `asset` | `asset_id` | Customer-owned; list by active state and `updated_at` | `C(Asset)`; customer active/all `R` | Revisioned account data; remains outside Claim-owner promotion. |
 | `claim_asset_snapshot` | `snapshot_id` | Required Claim/customer scope; list `(captured_at, snapshot_id)` | `C(ClaimAssetSnapshot)`; Claim-order `R` | Immutable snapshot tied to source Asset and Claim revisions. |
 | `motor_other_driver` | `participant_id` | Required Claim/customer scope; one current record per Claim | `C(MotorOtherDriver)`; Claim singleton lookup item | Stable participant identity plus uniqueness on `claim_id`. |
 | `contents_item_evidence_association` | `association_id` | Required Claim/customer/item scope; page by `(created_at, association_id)` | `C(ContentsEvidenceAssociation)`; Claim/item page `R`; tuple uniqueness item | Immutable; `(claim_id, item_id, evidence_id)` is also unique. |
 | `evidence` | `evidence_id` | Required Claim owner; get/list by Claim and claimant-source customer history | `C(Evidence)` plus material-version child items; Claim/customer `R` | Stable identity; current material changes while prior material history remains append-only. |
-| `evidence_claim_link` | `link_id` | Customer-owned cross-Claim link; list by source/target Claim as implemented | `C(EvidenceClaimLink)`; source/target Claim `R` | Link lifecycle updates same identity; source Evidence and both Claims must remain customer-authorized. |
+| `evidence_claim_link` | Stable domain identity `link_id`; enforced lookup/uniqueness tuple `(target_claim_id, evidence_id)` | Customer-owned cross-Claim link; direct lookup by target Claim/Evidence tuple and listing by target Claim | `C(EvidenceClaimLink)` keyed by `link_id`; deterministic target/Evidence uniqueness and lookup item; source/target Claim `R` | The tuple item conditionally names exactly one `link_id`. Reusing either the stable ID with different content or the tuple for another stable ID conflicts. Link lifecycle updates the same `link_id`; source Evidence and both Claims must remain customer-authorized. |
 | `external_task` | `task_id` | Required Claim/customer scope; get/list by Claim | `C(ExternalTask)`; Claim-order `R` | Stable identity; immutable identity fields and governed lifecycle transitions. |
 | `external_task_request` | `request_id`; current MongoDB storage also enforces one canonical request per `task_id` | Required Claim/task/customer scope; get/list by Claim and task | `C(ExternalTaskRequest)`; Claim/task `R`; task uniqueness item | Preparation/reservation/send state updates the same request. Preserve current task-level uniqueness. |
 | `external_task_result` | `result_id` | Required Claim/task/customer scope; list by `received_at` | `C(ExternalTaskResult)`; Claim-order `R`; task uniqueness item | Immutable first canonical result; `(claim_id, task_id)` remains unique. |
-| `external_task_evidence_link` | `(task_id, evidence_id)` | Required Claim/task/Evidence scope; list by Claim in `linked_at` order | Deterministic tuple-keyed `C(ExternalTaskEvidenceLink)`; Claim/task `R` | Immutable provenance link; no invented link ID. |
+| `external_task_evidence_link` | `(claim_id, evidence_id)`; `task_id` is relationship data, not identity | Required Claim/task/Evidence scope; list by Claim in `linked_at` order | Deterministic `(claim_id, evidence_id)` `C(ExternalTaskEvidenceLink)`; Claim/task `R` | Immutable provenance link with no invented link ID. The tuple permits only one external-task origin for an Evidence item in a Claim; a different `task_id` at the same tuple conflicts. |
 | `assessor_routing_operation` | `operation_id` | Required Claim scope; get by operation and reconcile against external task | `C(AssessorRoutingOperation)`; Claim-order `R` | Immutable identity fields; governed operation status updates same identity. |
 | `handoff` | `handoff_id` | Required Claim/customer scope; get/list by `created_at`; contributes queue projection | `C(Handoff)`; Claim-order and queue `R` | Updates same identity; creation/change can be part of Claim/idempotency/audit transactions. |
 | `retrieval` | `retrieval_id` | Required Claim/customer scope; list by source retrieval time | `C(Retrieval)`; Claim-order `R` | Policy and Claim-history variants retain their existing source/citation fields. |
@@ -100,7 +100,7 @@ contract requires atomic visibility.
 | `audit_event` | `event_id` | Exact subject plus time; admin filters by event type, subject type, actor, and time | `C(AuditEvent)`; subject/global/event/subject-type/actor time-order `R` | Append-only. Stable ID reuse with different content is a conflict. |
 | `realtime_sequence` | singleton `global` | Internal global sequence allocator | `pk=SYSTEM#REALTIME`, `sk=COUNTER` | Conditional counter update; not an API record. |
 | `realtime_event` | `event_id`; unique global `sequence` | Global replay after cursor, high watermark, and live watch | `pk=SYSTEM#REALTIME`, `sk=EVENT#{sequence20}#{event_id}` | Append-only and allocated atomically with the domain mutation and counter. |
-| `idempotency` | exact triplet `(actor_id, route, key)` | Resolve one request fingerprint and typed stored result | Deterministic hashed `C(Idempotency)` only | Conditional create on authoritative key; no GSI uniqueness. |
+| `idempotency` | exact triplet `(actor_id, route, key)` | Resolve one request fingerprint and typed stored result; enumerate Claim/actor records only for atomic ownership promotion | Deterministic hashed `C(Idempotency)` plus Claim/actor `R`; governed promotion aliases are target-only adapter metadata | Conditional create on authoritative key; no GSI uniqueness. Original actor, route, key, fingerprint, result, and provenance remain immutable through promotion. |
 | `policy` | `policy_id` | Customer-owned account record; active/all list by `(created_at, policy_id)` | `C(PolicyNumber)`; customer active/all `R` | Revisioned account data. Distinct from RAG policy/history retrieval. |
 | `identity_document` | `identity_id` | Customer-owned protected account record; active/all list by creation order | `C(IdentityDocument)`; customer active/all `R` | Preserve ciphertext and mask only; revision compare-and-set. |
 | `payment_destination` | `payment_destination_id` | Customer-owned protected account record; active/all list by creation order | `C(PaymentDestination)`; customer active/all `R` | Preserve ciphertext and mask only; revision compare-and-set. |
@@ -120,7 +120,7 @@ query capability.
 | Entity get | Stable domain ID | Strongly consistent `GetItem` on `C` item; Claim-scoped reads first strongly read Claim `OWNER`. |
 | Customer Claims | `updated_at` descending, then stable ID | Strongly consistent `Query` on `ACCESS#CUSTOMER_CLAIMS#{customer}`. Never change to `created_at`. |
 | Internal Claim list | `updated_at` descending, then stable ID | Strongly consistent `Query` on `ACCESS#CLAIMS#ALL`. |
-| Workbench Claim search | Claim/external/customer reference, created date, incident date, product family, lifecycle state, assignee, queue; `updated_at` descending | Exact base-table partition for global and every listed field/value. For multiple filters, query the most selective exact partition, apply the remaining exact filters, and continue pages until the requested limit or partition exhaustion. |
+| Workbench Claim search | Claim/external/customer reference, created date, incident date, product family, lifecycle state, assignee, queue; `updated_at` descending | Exact base-table partition for global and every listed field/value. For multiple filters, query the most selective exact partition, apply the remaining exact filters, and stop at the requested limit, partition exhaustion, 500 examined projections, or 10 DynamoDB pages, whichever occurs first. |
 | Claim Sessions | `started_at`, with exact ID/date/status staff filters | Claim session-order partition plus exact date and status partitions. Actor and `message_contains` retain the current bounded fan-out over candidate Sessions and their bounded Message sets; exceeding the current examination limits fails rather than scanning. |
 | Session Messages | `(created_at, message_id)`; recent reads reverse then restore ascending order | Strongly consistent `Query` on one session-order partition with cursor/limit. |
 | Message client identity | `(claim_id, client_message_id)` | Strongly consistent deterministic lookup item; conditional creation enforces uniqueness. |
@@ -130,7 +130,7 @@ query capability.
 | Claim child lists | Existing record-specific time/ID order | Strongly consistent `Query` on a type-specific Claim access partition; canonical records are fetched with strongly consistent `BatchGetItem`. |
 | Account data | Customer plus record type and active/all state | Strongly consistent `Query` on customer/type partitions preserving the current timestamp and ID tie-break. |
 | Exact-subject audit | `(subject_type, subject_id, claim_id)` and `(created_at, event_id)` | Strongly consistent `Query` on exact subject partition with time range in the sort key. |
-| Admin audit | Optional event type, subject type, actor, time; ascending time | Query global or the most selective exact filter partition, filter remaining exact values, and continue pages to limit/exhaustion. No table scan. |
+| Admin audit | Optional event type, subject type, actor, time; ascending time | Query global or the most selective exact filter partition, filter remaining exact values, and stop at the requested limit, partition exhaustion, 500 examined projections, or 10 DynamoDB pages, whichever occurs first. No table scan. |
 | Realtime | One global cursor and total order | Strongly consistent `Query` on `SYSTEM#REALTIME`, strictly after the zero-padded sequence. |
 | Idempotency | Exact actor/route/key triplet | Strongly consistent `GetItem` on its deterministic authoritative key. |
 
@@ -139,6 +139,13 @@ arbitrary date ranges beyond the registered date keys, and sorting by an unregis
 field are not introduced by this target. New combinations require a repository-contract
 change before adding a projection. Filter expressions must not be used as a substitute
 for an unbounded access path.
+
+The 500-item and 10-page ceilings are initial AWS adapter design bounds, not new public
+pagination promises. Reaching either ceiling before the requested result is complete fails
+closed as an unavailable/bounded-search outcome; it never returns a partial result as if it
+were complete. The Backend owner must reconcile that outcome with an existing public error
+and register the same constants in repository conformance tests before the AWS profile can
+be enabled. Changing either bound requires measured #786 evidence and contract review.
 
 ## Key and item design
 
@@ -247,8 +254,43 @@ Anonymous-to-authenticated promotion is one transaction that:
 2. updates Claim `META` and `OWNER` to the authenticated customer;
 3. deletes the old customer-Claim access projection;
 4. writes the new customer-Claim access projection;
-5. conditionally advances the global realtime counter; and
-6. appends the globally ordered realtime event.
+5. writes one destination lookup alias for every immutable idempotency record selected by
+   the strongly consistent Claim/anonymous-actor projection;
+6. writes one Claim-scoped anonymous-actor retirement item;
+7. conditionally advances the global realtime counter; and
+8. appends the globally ordered realtime event.
+
+An idempotency alias occupies the deterministic requested key for the authenticated
+`(actor_id, route, key)` and points to the unchanged canonical record under the original
+anonymous triplet. It carries the Claim ID, original triplet, and original fingerprint for
+verification, but does not copy or redefine the response. Alias insertion requires the
+destination key to be absent; an existing canonical record or alias to another source is a
+collision and aborts the whole promotion. Exact retry of an already completed promotion may
+reuse only an alias to the same original canonical item and an identical retirement item.
+
+No original idempotency item is deleted or re-keyed. An authenticated lookup first resolves
+its deterministic item and follows an alias with strongly consistent reads, then verifies
+the original actor, route, key, Claim, and fingerprint. An anonymous lookup that finds a
+canonical record must also strongly read the retirement item for that record's Claim; after
+promotion it fails closed instead of replaying through stale anonymous authority. The
+retirement is Claim-scoped so promoting one Claim does not revoke unrelated Claims from the
+same browser session.
+
+Each Claim/actor idempotency write also conditionally advances one adapter-owned
+Claim/actor generation item and requires that item not be retired. Promotion strongly reads
+that generation before enumerating its `R` items, then changes the same item to retired with
+a generation-equality condition in the promotion transaction. A concurrent or newly added
+anonymous operation therefore conflicts with promotion instead of escaping alias creation.
+
+The promotion preflight counts `m` selected idempotency records and verifies that every
+record names the promoted Claim. The transaction has `m + 7` actions: the six existing
+Claim/projection/realtime actions, `m` alias puts, and one retirement put. It performs no
+idempotency deletes. If the action count exceeds 100, the serialized transaction exceeds
+4 MB, a destination collides, or the source projection changes before commit, no promotion
+write occurs. The current `promote_claim_owner` and `find_idempotency` protocol methods do
+not expose alias/retirement semantics; the Backend owner must add and conformance-test that
+repository contract before a DynamoDB profile is enabled. Until then this capability is
+`unavailable`, rather than silently losing replay or weakening the exact triplet authority.
 
 Child records are not rewritten. Every authorized child read resolves the owner first, so
 there is no partial state in which old and new customers each authorize different children.
@@ -301,7 +343,8 @@ For an atomic write, let:
 
 - `D` be changed canonical domain items, including changed Claim fragments;
 - `P` be access-projection puts/deletes and uniqueness lookup items;
-- `I` be one idempotency item when the current method requires it;
+- `I` be the idempotency action bundle when the current method requires it: canonical
+  record, Claim/actor projection, and Claim/actor generation update/retirement guard;
 - `A` be append-only audit items and their projections;
 - `R=2` for a changed realtime publication (counter update plus event), otherwise `0`.
 
@@ -316,7 +359,7 @@ serialized bytes before calling DynamoDB. Important mutation families are:
 | Agent turn | Changed Claim fragments and Session, two Messages, Agent Decision, optional Handoff/Evidence/Branch Evaluation/Runtime Trace, every individual Runtime turn record, idempotency, projections, realtime counter/event |
 | Staff/ownership mutation | Changed Claim fragments, Staff Action/Collaboration/Coworker/Customer Update/Signal Decision/Handoff as supplied, optional Staff Agent execution, idempotency, audit, projections, realtime counter/event |
 | Retrieval bundle | Retrieval plus every Review Signal and Claim-order projections; no Claim revision change unless the current caller supplies a separate governed mutation |
-| Anonymous promotion | Fixed owner/Claim/customer-projection/realtime actions described above; no child rewrite |
+| Anonymous promotion | Owner/Claim/customer-projection/realtime actions, one immutable alias per Claim/anonymous-actor idempotency record, and one Claim-scoped actor-retirement update; no child rewrite |
 
 The current domain does not bound the total number of changed Claim fragments or Runtime
 children tightly enough to prove that every valid input fits 100 actions and 4 MB. #991
@@ -332,6 +375,15 @@ canonical items and projections in deterministic batches, but the profile cannot
 until a complete source snapshot is reconciled and a single dataset completion marker records
 the source snapshot, inventory version, item count, and fingerprint. A failed run has no
 completion marker and is never readable as a complete migration.
+
+All source records for one run are read in one MongoDB session and transaction using
+`snapshot` read concern. The run records its migration ID, MongoDB cluster/operation time,
+database and collection identity, inventory version, and start time before transforming any
+record. Parent, child, ownership, revision, idempotency, audit, and realtime reads must use
+that same session and snapshot. A provider that cannot establish or retain this consistent
+snapshot fails the run before target writes; the migration must never combine records from
+different live moments. #992 may validate this snapshot metadata and repeatability against
+local MongoDB, but that remains local preflight rather than AWS migration evidence.
 
 For every source record, the migration derives the same canonical key and normalized content
 fingerprint on every run. Results are classified as:
@@ -362,7 +414,7 @@ maintained subset.
 | Relationships | Resolve Claim/Session/Message, Claim children, Runtime turn, Staff Agent, Evidence, external task, Retrieval/review, and audit references; reject dangling or cross-owner links. |
 | Ownership | Verify every Claim child customer matches the current Claim before converting it to `owner_ref`; simulate anonymous promotion without child rewrites. |
 | Ordering | Prove customer Claim `updated_at`, Session, Message, child-list, audit, Staff Agent, and global realtime ordering including stable ID tie-breaks. |
-| Uniqueness | Detect duplicate idempotency triplets, Message client IDs, Staff Agent client IDs, Contents item/Evidence tuples, external-task results, open FollowUps, and one Motor other-driver per Claim. |
+| Uniqueness | Detect duplicate idempotency triplets, promotion-alias collisions, Evidence Claim target/Evidence tuples, External Task Claim/Evidence tuples, Message client IDs, Staff Agent client IDs, Contents item/Evidence tuples, external-task results, open FollowUps, and one Motor other-driver per Claim. |
 | Size | Serialize every target item and report bytes; reject over 300 KiB; calculate action count and bytes for every reconstructed atomic mutation family. |
 | Repeatability | Two transformations of the same snapshot produce identical keys, fingerprints, items, projections, and counts; an interrupted run resumes without duplicates. |
 | Conflict safety | Changed content under an existing authoritative identity reports `conflict`; no last-write-wins replacement is accepted. |
@@ -373,7 +425,8 @@ maintained subset.
 
 | Decision or dependency | Current assumption | Affected target | Reconciliation owner and point | Risk if changed |
 | --- | --- | --- | --- | --- |
-| Message historical revision (#983) | Current Message identity and ordering remain authoritative | Message canonical and session access items | Backend owner before DynamoDB adapter implementation | Replay may need another stored coordinate, but not another Message identity. |
+| Message historical revision (#983/#989) | #989 is merged at this baseline; `message_turn_kind` and positive `message_turn_revision` are now preserved with idempotency while Message identity and ordering remain unchanged | Message canonical, session access items, and idempotency payload | Reconciled at `origin/main` `e4a3f498d054154462d43f390ec72ed8267b5c16`; #992 must retain the added fields | Omitting either field would break historical replay revision even though Message identity still matched. |
+| Anonymous idempotency promotion | Governed destination aliases plus Claim-scoped anonymous retirement preserve the original triplet and disable stale anonymous replay | Idempotency canonical items, Claim/actor projections, aliases, retirement item, promotion action count | Backend owner before DynamoDB adapter/profile enablement | Current protocol cannot express alias resolution; omission loses authenticated replay, while unbounded aliasing can exceed transaction limits. |
 | Evidence integrity (#986) | Stable Evidence ID and append-only material generations remain authoritative | Evidence core/version items and S3 references | Backend owner before migration tooling is frozen | Material layout or visibility could require remapping. |
 | Claim creation evidence (#987) | Current atomic creation boundary remains authoritative | Claim creation action count and provenance | Backend owner before adapter implementation | Reservation/provenance records could increase transaction cardinality. |
 | External task attempts (#984) | Current task/request/result identities and uniqueness remain authoritative | External-task canonical and lookup items | Backend owner before adapter implementation | A separately approved attempt record would add inventory and projections. |
