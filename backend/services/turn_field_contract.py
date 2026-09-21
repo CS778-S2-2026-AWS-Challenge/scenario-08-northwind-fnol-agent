@@ -212,17 +212,14 @@ def _field_value_is_valid(field: TurnFieldDefinition, value: Any) -> bool:
     if field.value_type == 'enum':
         return isinstance(value, str) and value in field.allowed_values
     if field.value_type == 'location':
-        return (
-            isinstance(value, str) and bool(value.strip())
-        ) or (isinstance(value, Mapping) and bool(value))
+        return (isinstance(value, str) and bool(value.strip())) or (
+            isinstance(value, Mapping) and bool(value)
+        )
     if field.value_type == 'text_list':
         return (
             isinstance(value, list)
             and bool(value)
-            and all(
-                isinstance(item, str) and bool(item.strip())
-                for item in value
-            )
+            and all(isinstance(item, str) and bool(item.strip()) for item in value)
         )
     if field.value_type == 'temporal':
         if isinstance(value, str):
