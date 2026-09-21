@@ -1,243 +1,410 @@
 ## Purpose
 
-This document defines the pre-account migration design for moving the local MongoDB
-operational records to DynamoDB. It is a target design and migration reference, not
-evidence that AWS is configured or that a DynamoDB adapter exists.
+This document defines the pre-account migration design for the implemented MongoDB
+operational store. It is the authoritative design input for the local rehearsal in
+`#992`. It is not evidence that a DynamoDB adapter, AWS account, table, or deployment
+exists.
 
-The design preserves the provider-neutral records and access boundaries in the
-[Persistence Contract](../persistence-schema.md) and [Data Architecture](../data-architecture.md).
-It does not introduce a second Claim State, field vocabulary, lifecycle, permission
-model, or API representation.
+The mapping is derived from the current domain records, `PersistenceRepository`
+protocol, and `MongoDBRepository` implementation at `origin/main`
+`8fa367f54af7d455b5d71ecfde1ec652ed45daf7`. It preserves provider-neutral record
+identity, ownership, ordering, uniqueness, revision, idempotency, audit, and atomic
+write boundaries. It does not define a new API field, state, permission, lifecycle,
+or business rule.
 
-## Current source and target boundary
+## Migration boundary
 
-The current source is the local MVP persistence model. Its core Claim persistence is
-MongoDB, while claimant/staff identity and Control Plane data use separate SQLite stores
-in the local composition. The planned target in this issue is a transactional DynamoDB
-store for the MongoDB-backed operational records, with S3 and a separate governed
-knowledge store handled by the related storage-migration work. MongoDB and MinIO remain
-local rehearsal providers until AWS access is verified.
+The source for #991 and #992 is the `northwind_records` MongoDB collection used by
+the local MVP profile. The target design is one DynamoDB operational table. S3
+Evidence objects and policy-knowledge objects are handled by their own storage
+preparation work; this document carries only their protected references and metadata.
 
-The following boundaries apply to this design:
+The following adjacent stores are explicitly excluded:
 
-| Area | Source of truth | Migration treatment |
+| Source | Status | Treatment |
 | --- | --- | --- |
-| Logical records and relationships | `docs/persistence-schema.md` and existing domain models | Preserve record identity, ownership, lifecycle, revision, timestamps, and source references. |
-| API resources and visibility | `docs/api.md` and current projection rules | Do not expose DynamoDB item names, keys, indexes, or provider fields. |
-| Claim revision and idempotency | Current Claim State transaction contract | Use conditional writes and transaction boundaries; do not create a second revision token. |
-| Evidence bytes | Active object-store contract | Migrate metadata and protected references with the record; transfer bytes under the separate MinIO/S3 plan. |
-| Knowledge documents and chunks | `docs/rag-ingestion.md` and knowledge-source contracts | Keep outside operational Claim partitions; migrate under the separate MinIO/RAG preparation issue. |
-| Secrets and credentials | Runtime secret boundary | Never copy secrets, bearer tokens, password hashes, or raw provider payloads into migration data. |
+| SQLite claimant identity and claimant auth sessions | Implemented, separate authority | No DynamoDB target is assigned by #991. |
+| SQLite staff identity and staff auth sessions | Implemented, separate authority | No DynamoDB target is assigned by #991. |
+| SQLite Control Plane configuration, release, operation, integration, and knowledge administration | Implemented, separate authority | No DynamoDB target is assigned by #991. |
+| MinIO Evidence bytes and knowledge objects | Implemented local object-store boundary | Metadata references remain in scope; object transfer is not. |
+| Customer memory, Mitigation, and Retention records | Contract-only concepts without implemented MongoDB records | Excluded from #991 and #992. |
 
-The `local_mvp` composition is therefore not one MongoDB-only source. The MongoDB
-rehearsal covers the core Claim persistence boundary. The SQLite identity and Control
-Plane stores are included below as adjacent logical records so the target inventory does
-not hide an ownership gap, but their migration is not silently included in #991 or #992.
-Their final AWS placement requires a separate approved target decision.
+`PolicyNumberRecord` is not part of the policy/history retrieval source. It is an
+implemented, account-owned MongoDB `policy` record and is in scope. Policy/history
+retrieval records remain separate `retrieval` records, and governed RAG knowledge
+remains outside the operational table.
 
-## Access patterns
+The excluded record inventory is explicit so a rehearsal cannot infer a target from
+documentation alone:
 
-The design starts from the current required access patterns rather than from a
-MongoDB collection or an API route. The first DynamoDB target must support these
-operations without a table scan:
-
-| Access pattern | Required scope | Target query shape |
+| Excluded record or family | Actual source/status | Exclusion reason |
 | --- | --- | --- |
-| Read one Claim | One Claim after ownership or staff authorization | Claim partition, Claim metadata item. |
-| List a customer's Claims | One customer in stable order | Customer GSI with Claim entries ordered by creation time and ID. |
-| Conditionally update Claim State | One Claim and expected revision | Claim partition transaction with a revision condition. |
-| Read and resume a Session | One persisted Session bound to one Claim and customer | Session lookup plus Claim/session scope index. |
-| Append and page Messages | One Session with visibility filtering | Session partition ordered by `(created_at, message_id)`. |
-| Register and list Evidence | One Claim, or claimant-authorized customer history | Claim partition plus customer-scoped Evidence index. |
-| Read Handoffs and WorkItems | One Claim or staff queue scope | Claim partition plus bounded queue index where required. |
-| Read ExternalTask and request state | One Claim or operation identity | Claim partition plus operation/idempotency lookup. |
-| Read and append Audit events | Authorized subject and time range | Subject/time index with append-only audit items. |
-| Resolve idempotency | Actor, operation, client key, and fingerprint | Idempotency lookup index with conditional creation. |
-| Read branch and retrieval evidence | One Claim and evaluated revision | Claim partition, with no independent public projection unless the current contract adds one. |
+| `CustomerAccountRecord` | SQLite claimant identity store | Account authority is outside the MongoDB operational boundary. |
+| `ClaimantAuthSessionRecord` | SQLite claimant identity store | Bearer/authentication state and token material require a separate security placement decision. |
+| `StaffAccountRecord` | SQLite staff identity store | Staff identity and role authority are outside the MongoDB operational boundary. |
+| `StaffAuthSessionRecord` | SQLite staff identity store | Staff bearer/authentication state is not migration input. |
+| Control Plane configuration, approval, release, Runtime Snapshot, integration, operation, evaluation, and knowledge-administration records | SQLite Control Plane stores | Configuration authority and secret references retain their separate repository boundary. |
+| Customer memory | No implemented source model or repository method | Contract-only wording cannot create migration data. |
+| Mitigation | No implemented source model or repository method | Contract-only wording cannot create migration data. |
+| Retention record | No implemented source model or repository method | Contract-only wording cannot create migration data. |
+| Governed policy-knowledge documents and chunks | MinIO/object-store knowledge source | Bedrock Knowledge Bases preparation owns document/chunk migration; these are not `policy` account records. |
 
-These access patterns are derived from the current Persistence Contract. They are not a
-commitment to a production capacity model, throughput target, or final AWS table count.
+## Implemented source inventory
 
-## Provisional DynamoDB layout
+Every MongoDB `record_type` currently emitted by `MongoDBRepository` appears below.
+The identity is the domain identity that must remain authoritative, not the current
+MongoDB `_id` string. `C` means a canonical entity item. `R` means a base-table access
+reference written in the same transaction as its canonical item where the runtime
+contract requires atomic visibility.
 
-The initial target is one operational table with an overloaded primary key and bounded
-secondary indexes. A later capacity or isolation decision may split tables, but any split
-must preserve the same logical records, access boundaries, conditional writes, and
-provider-neutral repository ports.
+| MongoDB record | Authoritative identity | Ownership and current reads | DynamoDB canonical item and access references | Lifecycle and atomicity |
+| --- | --- | --- | --- | --- |
+| `claim` | `claim_id` | Claim owner; get by ID; list globally or by customer in `updated_at` descending order; Workbench search | `C(Claim)`, Claim `OWNER`, customer/global/search `R` items | Revision compare-and-set authority for Claim State and workflow. Split large collections as defined below. |
+| `session` | `session_id` | Required Claim and customer scope; get active/by ID; list by Claim `started_at`; staff search by ID/date/status | `C(Session)`; Claim/session and date/status `R` items | Current contract has no non-Claim Session. Session changes participate in Claim mutation transactions. |
+| `message` | `message_id` | Required Claim/session scope; list `(created_at, message_id)`; lookup by `client_message_id` within Claim | `C(Message)`; session-order `R`; deterministic client-ID lookup item | Stable ID and client-ID reuse must conflict unless the complete stored record is identical. |
+| `conversation_summary` | `summary_id` | Required Claim/session scope; latest by creation order | `C(ConversationSummary)`; session summary-order `R` | Immutable verified summary; never overwrites another summary identity. |
+| `follow_up` | `follow_up_id` | Claim scope; list by creation; lookup open purpose/source Session | `C(FollowUp)`; Claim-order `R`; open-purpose and source-session lookup items | At most one open `(claim_id, purpose)` and one `(claim_id, source_session_id)`; lifecycle updates replace the same identity. |
+| `agent_decision` | `decision_id` | Required Claim/session/trigger-message scope; get by ID or trigger; list by Claim | `C(AgentDecision)`; Claim-order and trigger lookup `R` | Immutable execution evidence inside Agent-turn atomic writes. |
+| `branch_evaluation` | `evaluation_id` | Claim scope; list by `created_at` | `C(BranchEvaluation)`; Claim-order `R` | Immutable; evaluated/resulting revisions must retain current validation. |
+| `runtime_trace` | `trace_id` | Required Claim/session/trigger scope; get by ID or trigger | `C(RuntimeTrace)`; Claim/session and trigger lookup `R` | Compatibility record remains separate and immutable. |
+| `turn_plan` | `turn_id` | Required Claim/session/trigger scope; first Runtime record for turn reconstruction | `C(TurnPlan)`; trigger and turn-bundle `R` | Immutable; Claim scope is required in the implemented claimant Runtime path. |
+| `agent_proposal` | `proposal_id` | Required Claim/session/turn scope | `C(AgentProposal)`; turn-bundle `R` | Immutable constituent of one Runtime turn. |
+| `execution_plan` | `execution_plan_id` | Required Claim/session/turn scope | `C(ExecutionPlan)`; turn-bundle `R` | Immutable constituent of one Runtime turn. |
+| `action_envelope` | `envelope_id` | Required Claim/session/turn scope; list for turn | `C(ActionEnvelope)`; turn-order `R` | Immutable; each envelope remains an individual record. |
+| `tool_result` | `result_id` | Required Claim/session/turn scope; list for turn | `C(ToolResult)`; turn-order `R` | Immutable; raw provider payloads and credentials remain excluded. |
+| `turn_result` | `result_id` | Required Claim/session/turn scope | `C(TurnResult)`; turn-bundle `R` | Immutable terminal constituent of one Runtime turn. |
+| `runtime_work_item` | `work_item_id` | Required Claim/session/turn scope; list by Claim in `updated_at` order and by turn | `C(RuntimeWorkItem)`; Claim and turn-order `R` | Individual mutable Runtime work record; never collapsed into the turn item. |
+| `asset` | `asset_id` | Customer-owned; list by active state and `updated_at` | `C(Asset)`; customer active/all `R` | Revisioned account data; remains outside Claim-owner promotion. |
+| `claim_asset_snapshot` | `snapshot_id` | Required Claim/customer scope; list `(captured_at, snapshot_id)` | `C(ClaimAssetSnapshot)`; Claim-order `R` | Immutable snapshot tied to source Asset and Claim revisions. |
+| `motor_other_driver` | `participant_id` | Required Claim/customer scope; one current record per Claim | `C(MotorOtherDriver)`; Claim singleton lookup item | Stable participant identity plus uniqueness on `claim_id`. |
+| `contents_item_evidence_association` | `association_id` | Required Claim/customer/item scope; page by `(created_at, association_id)` | `C(ContentsEvidenceAssociation)`; Claim/item page `R`; tuple uniqueness item | Immutable; `(claim_id, item_id, evidence_id)` is also unique. |
+| `evidence` | `evidence_id` | Required Claim owner; get/list by Claim and claimant-source customer history | `C(Evidence)` plus material-version child items; Claim/customer `R` | Stable identity; current material changes while prior material history remains append-only. |
+| `evidence_claim_link` | `link_id` | Customer-owned cross-Claim link; list by source/target Claim as implemented | `C(EvidenceClaimLink)`; source/target Claim `R` | Link lifecycle updates same identity; source Evidence and both Claims must remain customer-authorized. |
+| `external_task` | `task_id` | Required Claim/customer scope; get/list by Claim | `C(ExternalTask)`; Claim-order `R` | Stable identity; immutable identity fields and governed lifecycle transitions. |
+| `external_task_request` | `request_id`; current MongoDB storage also enforces one canonical request per `task_id` | Required Claim/task/customer scope; get/list by Claim and task | `C(ExternalTaskRequest)`; Claim/task `R`; task uniqueness item | Preparation/reservation/send state updates the same request. Preserve current task-level uniqueness. |
+| `external_task_result` | `result_id` | Required Claim/task/customer scope; list by `received_at` | `C(ExternalTaskResult)`; Claim-order `R`; task uniqueness item | Immutable first canonical result; `(claim_id, task_id)` remains unique. |
+| `external_task_evidence_link` | `(task_id, evidence_id)` | Required Claim/task/Evidence scope; list by Claim in `linked_at` order | Deterministic tuple-keyed `C(ExternalTaskEvidenceLink)`; Claim/task `R` | Immutable provenance link; no invented link ID. |
+| `assessor_routing_operation` | `operation_id` | Required Claim scope; get by operation and reconcile against external task | `C(AssessorRoutingOperation)`; Claim-order `R` | Immutable identity fields; governed operation status updates same identity. |
+| `handoff` | `handoff_id` | Required Claim/customer scope; get/list by `created_at`; contributes queue projection | `C(Handoff)`; Claim-order and queue `R` | Updates same identity; creation/change can be part of Claim/idempotency/audit transactions. |
+| `retrieval` | `retrieval_id` | Required Claim/customer scope; list by source retrieval time | `C(Retrieval)`; Claim-order `R` | Policy and Claim-history variants retain their existing source/citation fields. |
+| `review_signal` | `signal_id` | Required Claim/customer scope; list by `created_at` | `C(ReviewSignal)`; Claim-order `R` | Stored atomically with its Retrieval bundle; immutable identity. |
+| `signal_decision` | `signal_decision_id` | Claim/staff scope; list by `created_at` | `C(SignalDecision)`; Claim-order `R` | Immutable staff decision evidence inside a Claim mutation. |
+| `staff_action` | `action_id` | Claim/staff scope; get/list by `created_at` | `C(StaffAction)`; Claim-order and assignee `R` | Lifecycle updates same identity inside revision/idempotency/audit boundaries. |
+| `customer_update` | `update_id` | Claim scope; list by `created_at` | `C(CustomerUpdate)`; Claim-order `R` | Immutable claimant-safe update written with its staff mutation. |
+| `collaboration_request` | `request_id` | Claim/staff scope; list by `created_at` | `C(CollaborationRequest)`; Claim-order and target staff `R` | Status updates same identity inside ownership mutation. |
+| `claim_coworker` | `coworker_id` | Claim/staff scope; list active by `granted_at` | `C(ClaimCoworker)`; Claim active/all `R` | Grant/revoke updates same identity; active projection changes atomically. |
+| `staff_presence` | `staff_id` | Staff scope; get/list by staff ID | `C(StaffPresence)`; staff listing `R` | Revision compare-and-set lease record; expiry does not become Claim state. |
+| `staff_agent_session` | `session_id` | Staff-owned; list by `staff_id` in `updated_at` descending order | `C(StaffAgentSession)`; staff session-order `R` | Stable identity; account/auth authority remains in SQLite. |
+| `staff_agent_message` | `message_id` | Staff/session scope; list by `created_at`; lookup by `(staff_id, session_id, client_message_id)` | `C(StaffAgentMessage)`; session-order `R`; deterministic client-ID lookup item | Stable ID and client-ID reuse conflict unless exact stored content matches. |
+| `staff_agent_execution` | `execution_id` | Staff/session/message/draft and Claim scope; get by execution ID | `C(StaffAgentExecution)`; Claim and staff-session `R` | Immutable confirmation/execution evidence written with the authorized Claim mutation. |
+| `audit_event` | `event_id` | Exact subject plus time; admin filters by event type, subject type, actor, and time | `C(AuditEvent)`; subject/global/event/subject-type/actor time-order `R` | Append-only. Stable ID reuse with different content is a conflict. |
+| `realtime_sequence` | singleton `global` | Internal global sequence allocator | `pk=SYSTEM#REALTIME`, `sk=COUNTER` | Conditional counter update; not an API record. |
+| `realtime_event` | `event_id`; unique global `sequence` | Global replay after cursor, high watermark, and live watch | `pk=SYSTEM#REALTIME`, `sk=EVENT#{sequence20}#{event_id}` | Append-only and allocated atomically with the domain mutation and counter. |
+| `idempotency` | exact triplet `(actor_id, route, key)` | Resolve one request fingerprint and typed stored result | Deterministic hashed `C(Idempotency)` only | Conditional create on authoritative key; no GSI uniqueness. |
+| `policy` | `policy_id` | Customer-owned account record; active/all list by `(created_at, policy_id)` | `C(PolicyNumber)`; customer active/all `R` | Revisioned account data. Distinct from RAG policy/history retrieval. |
+| `identity_document` | `identity_id` | Customer-owned protected account record; active/all list by creation order | `C(IdentityDocument)`; customer active/all `R` | Preserve ciphertext and mask only; revision compare-and-set. |
+| `payment_destination` | `payment_destination_id` | Customer-owned protected account record; active/all list by creation order | `C(PaymentDestination)`; customer active/all `R` | Preserve ciphertext and mask only; revision compare-and-set. |
 
-The base key fields are:
+The inventory contains 45 implemented MongoDB record types. #992 must fail if the
+source collection contains an unknown `record_type`, if an inventory row cannot resolve
+its authoritative identity, or if a row is silently dropped.
 
-| Field | Meaning |
+## Current access and write contract
+
+The target adapter must support these repository operations without a table `Scan` on a
+request path. Authorization is evaluated before existence and is separate from physical
+query capability.
+
+| Query family | Current ordering or identity | Target query plan and consistency |
+| --- | --- | --- |
+| Entity get | Stable domain ID | Strongly consistent `GetItem` on `C` item; Claim-scoped reads first strongly read Claim `OWNER`. |
+| Customer Claims | `updated_at` descending, then stable ID | Strongly consistent `Query` on `ACCESS#CUSTOMER_CLAIMS#{customer}`. Never change to `created_at`. |
+| Internal Claim list | `updated_at` descending, then stable ID | Strongly consistent `Query` on `ACCESS#CLAIMS#ALL`. |
+| Workbench Claim search | Claim/external/customer reference, created date, incident date, product family, lifecycle state, assignee, queue; `updated_at` descending | Exact base-table partition for global and every listed field/value. For multiple filters, query the most selective exact partition, apply the remaining exact filters, and continue pages until the requested limit or partition exhaustion. |
+| Claim Sessions | `started_at`, with exact ID/date/status staff filters | Claim session-order partition plus exact date and status partitions. Actor and `message_contains` retain the current bounded fan-out over candidate Sessions and their bounded Message sets; exceeding the current examination limits fails rather than scanning. |
+| Session Messages | `(created_at, message_id)`; recent reads reverse then restore ascending order | Strongly consistent `Query` on one session-order partition with cursor/limit. |
+| Message client identity | `(claim_id, client_message_id)` | Strongly consistent deterministic lookup item; conditional creation enforces uniqueness. |
+| Staff Agent Sessions | `staff_id`, `updated_at` descending | Strongly consistent `Query` on a staff session-order partition. |
+| Staff Agent Messages | `(staff_id, session_id)`, `created_at` | Strongly consistent `Query` on a staff Agent session partition. |
+| Staff Agent client identity | `(staff_id, session_id, client_message_id)` | Strongly consistent deterministic lookup item; conditional creation enforces uniqueness. |
+| Claim child lists | Existing record-specific time/ID order | Strongly consistent `Query` on a type-specific Claim access partition; canonical records are fetched with strongly consistent `BatchGetItem`. |
+| Account data | Customer plus record type and active/all state | Strongly consistent `Query` on customer/type partitions preserving the current timestamp and ID tie-break. |
+| Exact-subject audit | `(subject_type, subject_id, claim_id)` and `(created_at, event_id)` | Strongly consistent `Query` on exact subject partition with time range in the sort key. |
+| Admin audit | Optional event type, subject type, actor, time; ascending time | Query global or the most selective exact filter partition, filter remaining exact values, and continue pages to limit/exhaustion. No table scan. |
+| Realtime | One global cursor and total order | Strongly consistent `Query` on `SYSTEM#REALTIME`, strictly after the zero-padded sequence. |
+| Idempotency | Exact actor/route/key triplet | Strongly consistent `GetItem` on its deterministic authoritative key. |
+
+Unsupported query behavior is explicit: free-text Claim search, substring Claim search,
+arbitrary date ranges beyond the registered date keys, and sorting by an unregistered
+field are not introduced by this target. New combinations require a repository-contract
+change before adding a projection. Filter expressions must not be used as a substitute
+for an unbounded access path.
+
+## Key and item design
+
+### Canonical encoding
+
+Domain identifiers are encoded as their exact UTF-8 bytes without case folding or Unicode
+normalization. A compound identity uses a sequence of `byte_length:value` components, so
+embedded separators cannot create the same byte stream. When a physical key would include
+caller-controlled or compound text, the table key uses the lower-case SHA-256 digest of
+that canonical byte stream and stores every original component beside it.
+
+Examples:
+
+```text
+PK=ENTITY#claim#clm_...
+SK=META
+
+PK=ENTITY#message#msg_...
+SK=META
+
+PK=IDEMPOTENCY#<sha256(length-prefixed actor_id, route, key)>
+SK=META
+```
+
+A read of a hashed item compares the stored original components with the requested
+components. A digest match with different components is a collision and fails closed.
+Canonical insertion uses `attribute_not_exists(PK)` and `attribute_not_exists(SK)` where
+the record is append-only. Reusing a stable ID with different scope or content is a
+conflict for Messages, Audit events, Runtime evidence, and other immutable children.
+
+`C(Type)` in the inventory expands to
+`PK=ENTITY#{record_type}#{encoded-authoritative-identity}, SK=META`. A compound
+identity uses its digest in the final component. Claim fragments and Evidence material
+versions remain under their canonical entity PK with their documented non-`META` sort
+keys; they are physical serialization details, not new domain records.
+
+### Access projections
+
+Access projections are ordinary items in the same table, not GSIs. This permits strongly
+consistent `Query` and makes projection visibility part of the same `TransactWriteItems`
+boundary as the canonical record. A projection contains only the canonical locator,
+authorized filter fields, ordering fields, and non-sensitive summary data needed by the
+repository method.
+
+```text
+PK=ACCESS#CUSTOMER_CLAIMS#<customer_id>
+SK=UPDATED#<reverse-time>#<claim_id>
+
+PK=ACCESS#CLAIM_SEARCH#<field>#<sha256(encoded-value)>
+SK=UPDATED#<reverse-time>#<claim_id>
+
+PK=ACCESS#SESSION_MESSAGES#<session_id>
+SK=CREATED#<timestamp>#<message_id>
+
+PK=ACCESS#AUDIT_SUBJECT#<subject-hash>
+SK=TIME#<timestamp>#<event_id>
+```
+
+When an ordering value changes, the transaction deletes the old projection and writes the
+new projection. No GSI is used to enforce identity or uniqueness. Secondary indexes are
+therefore not required for the first adapter; adding one later requires a measured access
+pattern and cannot weaken conditional uniqueness.
+
+The access-reference labels in the inventory expand as follows:
+
+| Reference label | Exact base-table key pattern |
 | --- | --- |
-| `pk` | Item's authoritative aggregate or identity partition. |
-| `sk` | Item type and stable ordering within that partition. |
-| `entity_type` | Existing logical record category, not a new domain enum. |
-| `entity_id` | Existing stable record identity. |
-| `customer_id` | Ownership scope where the current record has one. |
-| `claim_id` | Claim scope where the current record has one. |
-| `revision` | The record's current provider-neutral revision where defined. |
-| `created_at` / `updated_at` | Existing timestamps used for deterministic ordering and migration audit. |
-| `source_provider` / `source_record_id` | Migration provenance only; not an API field or authority override. |
+| Claim-order | `PK=ACCESS#CLAIM#{claim_id}#{record_type}`, `SK={order_name}#{timestamp_or_state}#{entity_id}` |
+| Session-order | `PK=ACCESS#SESSION#{session_id}#{record_type}`, `SK=CREATED#{created_at}#{entity_id}` |
+| Turn-order | `PK=ACCESS#TURN#{turn_id}#{record_type}`, `SK=CREATED#{created_at}#{entity_id}` |
+| Customer account active/all | `PK=ACCESS#CUSTOMER#{customer_id}#{record_type}#{active_or_all}`, `SK={configured_time}#{entity_id}` |
+| Staff Agent session-order | `PK=ACCESS#STAFF_AGENT#{staff_id}#SESSIONS`, `SK=UPDATED#{reverse_time}#{session_id}` |
+| Staff Agent message-order | `PK=ACCESS#STAFF_AGENT_SESSION#{session_id}#MESSAGES`, `SK=CREATED#{created_at}#{message_id}` |
+| Deterministic client lookup | `PK=LOOKUP#{lookup_type}#{sha256(encoded-scope-and-client-id)}`, `SK=META` |
+| Deterministic tuple uniqueness | `PK=UNIQUE#{constraint_name}#{sha256(encoded-components)}`, `SK=META` |
+| Claim search | `PK=ACCESS#CLAIM_SEARCH#{field}#{sha256(encoded-value)}`, `SK=UPDATED#{reverse_time}#{claim_id}` |
+| Audit time-order | `PK=ACCESS#AUDIT#{filter_name}#{sha256(encoded-filter-value)}`, `SK=TIME#{created_at}#{event_id}` |
 
-The following item families are provisional key shapes. The exact serialized field set
-must come from the current repository contract at implementation time. `Implemented`
-means that the current backend has a corresponding domain record and persistence
-boundary; a row in the persistence contract alone is not evidence that a source
-record exists. Only rows marked `Implemented` and `Yes` are eligible inputs to #992.
+Every reference stores the canonical PK/SK and its unhashed scope components. The adapter
+verifies those components before dereferencing. The initial table has zero GSIs: all listed
+request paths use base-table `GetItem`, `BatchGetItem`, or `Query` so they can request strong
+consistency. This is the explicit GSI assumption for #991, not an omitted index decision.
+Timestamps use UTC RFC 3339 with fixed microsecond precision for ascending keys. A descending
+key uses a zero-padded 20-digit value equal to `99999999999999999999` minus Unix epoch
+microseconds, followed by the stable entity ID as the tie-break.
 
-| Logical record | Source store | Implementation status | In scope for #991 | Current contract relationship | Provisional target item shape | Scope and migration rule |
-| --- | --- | --- | --- | --- | --- | --- |
-| Customer account (`CustomerAccountRecord`) | SQLite claimant identity store | Implemented | No | Account authority and claimant authentication are owned by the identity adapter. | None assigned | Identity-store migration requires a separate approved target decision. Do not map claimant authentication or account authority to DynamoDB in #991. |
-| Identity record | MongoDB core persistence | Implemented | Yes | Customer-owned protected identity record linked by `customer_id`; account authority remains outside this migration. | `pk=CUSTOMER#{customer_id}`, `sk=IDENTITY#{identity_id}` | Preserve protected ciphertext, mask, provenance, lifecycle, and revision; never migrate plaintext. |
-| Payment destination | MongoDB core persistence | Implemented | Yes | Customer-owned protected payment destination linked by `customer_id`; account authority remains outside this migration. | `pk=CUSTOMER#{customer_id}`, `sk=PAYMENT#{payment_destination_id}` | Preserve protected value references and masks; never migrate account secrets as plaintext. |
-| Policy summary | Synthetic policy/history source or separate governed store | Not implemented as a MongoDB source record | No | Policy/history remains synthetic or separately governed and is not an operational MongoDB record for this issue. | None assigned | Keep structured policy data outside this MongoDB-to-DynamoDB rehearsal; do not turn it into ordinary RAG text. |
-| Customer memory | No implemented source record; contract-only concept | Not implemented | No | The persistence contract describes the concept, but the current backend has no corresponding source record, repository method, or adapter boundary. | None assigned | Do not assign a DynamoDB target or include Customer memory in #991/#992. A future migration requires a separate persistence contract and implementation first. |
-| Asset | MongoDB core persistence | Implemented | Yes | Customer-owned typed asset linked by `customer_id`; Claim asset snapshots reference the selected asset and revision. | `pk=CUSTOMER#{customer_id}`, `sk=ASSET#{asset_id}` | Preserve owner, typed asset details, active state, revision, and timestamps. |
-| Staff account | SQLite staff identity store | Implemented | No | Staff identity and role authority are owned by the staff identity adapter. | None assigned | Preserve the existing staff identity boundary; password hashes remain protected and are not part of #991 migration evidence. |
-| Staff auth session | SQLite staff identity store | Implemented | No | Staff bearer-session authority is owned by the staff identity adapter. | None assigned | Do not migrate bearer values or token hashes; target placement requires a separate identity decision. |
-| Claim | MongoDB core persistence | Implemented | Yes | Working Claim State is linked to one `customer_id` and owns its revision and workflow. | `pk=CLAIM#{claim_id}`, `sk=META` | Preserve customer ownership, Claim State, workflow, responsibility, retention, and current revision. |
-| Claim asset snapshot | MongoDB core persistence | Implemented | Yes | Immutable selected asset details are linked to one Claim revision and source Asset revision. | `pk=CLAIM#{claim_id}`, `sk=ASSET_SNAPSHOT#{snapshot_id}` | Preserve immutable selected asset details, source asset revision, provenance, and capture time. |
-| Session | MongoDB core persistence | Implemented | Yes | Every persisted Session has required `session_id`, `claim_id`, and `customer_id`; it is Claim-bound at the current contract. | `pk=SESSION#{session_id}`, `sk=META` | Preserve required Claim/customer ownership, summary revision, question accounting, and lifecycle. No non-Claim or optional-Claim Session is included in the current mapping. |
-| Message | MongoDB core persistence | Implemented | Yes | Message is linked to a persisted Session and its Claim/customer scope, with visibility and ordering rules. | `pk=SESSION#{session_id}`, `sk=MESSAGE#{created_at}#{message_id}` | Preserve visibility, actor, Claim/session references, and stable ordering. Historical message-turn revision remains separate from current Claim revision pending #983. |
-| Agent turn | MongoDB core persistence | Implemented | Yes | Runtime turn evidence is linked to a Session and optional Claim scope according to the current turn contract. | `pk=SESSION#{session_id}`, `sk=TURN#{created_at}#{turn_id}` | Preserve bounded proposal, execution, trace, tool-result, policy/version, usage, latency, and limitation references; exclude prompts, credentials, raw provider payloads, and hidden reasoning. |
-| Staff Agent interaction and execution | MongoDB core persistence | Implemented | Yes | Staff session records remain staff-owned; each message or execution carries explicit Claim scope where the current contract requires it. | `pk=STAFF_SESSION#{session_id}`, `sk=MESSAGE#{created_at}#{message_id}` or `EXECUTION#{execution_id}` | Preserve explicit Claim scope, draft identity, confirmation source, action, expected/resulting revision, and idempotency; application capability remains separate from AWS IAM. |
-| Evidence metadata | MongoDB core persistence | Implemented | Yes | Evidence metadata is Claim-owned and references protected object storage through the current Evidence contract. | `pk=CLAIM#{claim_id}`, `sk=EVIDENCE#{evidence_id}` | Preserve stable Evidence identity, material version/history, lifecycle, ownership, provenance, checksum, and protected object reference. |
-| Motor other driver | MongoDB core persistence | Implemented | Yes | Bounded participant data is linked to one Claim and its customer ownership scope. | `pk=CLAIM#{claim_id}`, `sk=PARTICIPANT#{participant_id}` | Preserve the bounded participant record and ownership links; do not create a generic participant lifecycle. |
-| Evidence association | MongoDB core persistence | Implemented | Yes | Immutable same-Claim link connects Evidence to its owning record under the current ownership checks. | `pk=CLAIM#{claim_id}`, `sk=EVIDENCE_LINK#{association_id}` | Preserve immutable same-Claim links and source/target ownership checks. |
-| WorkItem | MongoDB core persistence | Implemented | Yes | WorkItem is Claim-scoped with owner, blocker, due time, and completion evidence. | `pk=CLAIM#{claim_id}`, `sk=WORK#{work_item_id}` | Preserve purpose, owner, blocker, due time, source references, and completion evidence. |
-| Mitigation | No implemented source record; contract-only concept | Not implemented | No | The persistence contract describes mitigation vocabulary, but the current backend has no corresponding source record, repository method, or adapter boundary. | None assigned | Do not assign a DynamoDB target or include Mitigation in #991/#992. A future migration requires a separate persistence contract and implementation first. |
-| Handoff | MongoDB core persistence | Implemented | Yes | Handoff is Claim-scoped and preserves ownership transfer and resume context. | `pk=CLAIM#{claim_id}`, `sk=HANDOFF#{handoff_id}` | Preserve transfer packet, queue, owner, status, lifecycle timestamps, and resume target. |
-| Review and staff action | MongoDB core persistence | Implemented | Yes | Internal review signals and staff actions are Claim/work scoped and remain staff-only where required. | `pk=CLAIM#{claim_id}`, `sk=REVIEW#{review_id}` or `STAFF_ACTION#{action_id}` | Preserve internal signal, source references, professional decision, authority, and immutable action evidence. |
-| External request/task | MongoDB core persistence | Implemented | Yes | External request/task records are Claim-scoped and linked by operation identity; attempts remain governed by #984. | `pk=CLAIM#{claim_id}`, `sk=EXTERNAL#{request_or_task_id}` | Preserve consent, authority, operation identity, provider-neutral result, and reconciliation state. Attempt records remain append-only pending #984. |
-| Follow-up | MongoDB core persistence | Implemented | Yes | Follow-up is Claim-scoped and does not become a Claim lifecycle state. | `pk=CLAIM#{claim_id}`, `sk=FOLLOW_UP#{follow_up_id}` | Preserve due time, responsibility, attempt count, channel, outcome, and status without making follow-up a Claim lifecycle state. |
-| Integration and operation configuration | SQLite Control Plane store | Implemented | No | Configuration and operation authority are owned by the Control Plane repository. | None assigned | Preserve the Control Plane ownership boundary; do not copy provider credentials or assign a DynamoDB target in #991. |
-| Versioned configuration | SQLite Control Plane store | Implemented | No | Published configuration revisions and audit references are owned by the Control Plane repository. | None assigned | Preserve immutable published versions and audit references; target placement requires a separate decision. |
-| Branch evaluation | MongoDB core persistence | Implemented | Yes | Branch evaluation is Claim-scoped and records the evaluated Claim revision. | `pk=CLAIM#{claim_id}`, `sk=BRANCH_EVAL#{evaluation_id}` | Preserve evaluated Claim revision, selected family, active branches, field states, and application status. |
-| Retrieval record | MongoDB core persistence | Implemented | Yes | Retrieval evidence is Claim-scoped and preserves source/version/citation metadata without raw provider payloads. | `pk=CLAIM#{claim_id}`, `sk=RETRIEVAL#{retrieval_id}` | Preserve source, version, citations, limitations, visibility, and retrieval time. Raw provider payloads are excluded. |
-| Audit event | MongoDB core persistence | Implemented | Yes | Audit events are append-only and scoped to the Claim or authorized subject under the current audit envelope. | `pk=CLAIM#{claim_id}` or `pk=AUDIT_SUBJECT#{subject_id}`, `sk=AUDIT#{occurred_at}#{event_id}` | Preserve immutable envelope, actor, authority, outcome, correlation/idempotency reference, and resulting Claim revision. |
-| Realtime event | MongoDB core persistence | Implemented | Yes | Durable realtime events are Claim/customer scoped ordering records, not a second domain record. | `pk=CLAIM#{claim_id}` or customer scope, `sk=REALTIME#{sequence}` | Preserve durable sequence and bounded resource hints; do not treat it as a second domain record. |
-| Idempotency result | MongoDB core persistence | Implemented | Yes | Idempotency result is bound to actor, operation, client key, fingerprint, and resulting revision. | `pk=IDEMPOTENCY#{scope}`, `sk=OPERATION#{operation_id}` | Preserve actor, operation, client key, request fingerprint, typed result, and resulting revision. |
-| Retention record | No implemented source record; contract-only concept | Not implemented | No | The persistence contract describes retention vocabulary, but the current backend has no corresponding source record, repository method, or adapter boundary. | None assigned | Do not assign a DynamoDB target or include Retention in #991/#992. A future migration requires a separate persistence contract and implementation first. |
+### Claim ownership indirection
 
-## Migration Input Eligibility
+Every Claim has an ownership authority item:
 
-Issue #992 may consume an inventory row only when all of the following are true:
+```text
+PK=ENTITY#claim#<claim_id>
+SK=OWNER
+owner_customer_id=<current customer_id>
+```
 
-1. `Implementation status` is `Implemented`, meaning the current backend has the
-   corresponding domain record and persistence boundary.
-2. `Source store` is `MongoDB core persistence`.
-3. `In scope for #991` is `Yes`.
-4. The row has a provisional target item shape other than `None assigned`.
+Claim-scoped canonical children store immutable `owner_ref=claim:<claim_id>` as their
+physical authorization link. Their serialized payload omits the duplicated mutable
+`customer_id`; the adapter strongly reads the Claim owner and rehydrates the required
+provider-neutral `customer_id` field. Account-owned Policy, Asset, identity, and payment
+records remain directly customer-owned and do not use Claim owner indirection.
 
-The persistence contract can describe future or contract-only vocabulary, but it
-cannot by itself make a source record eligible for migration. A row that fails any
-condition is excluded from the local rehearsal and must not produce a DynamoDB
-item shape, seed record, or migration result. This rule prevents documentation-only
-concepts from becoming invented source data.
+Anonymous-to-authenticated promotion is one transaction that:
 
-## Secondary indexes
+1. conditions `OWNER.owner_customer_id` on the anonymous ID;
+2. updates Claim `META` and `OWNER` to the authenticated customer;
+3. deletes the old customer-Claim access projection;
+4. writes the new customer-Claim access projection;
+5. conditionally advances the global realtime counter; and
+6. appends the globally ordered realtime event.
 
-The following index projections are the minimum provisional set. They are derived from
-the access patterns above and must be confirmed against measured query shapes before
-IaC is written.
+Child records are not rewritten. Every authorized child read resolves the owner first, so
+there is no partial state in which old and new customers each authorize different children.
+Migration rejects a source Claim when any Claim-scoped child carrying `customer_id` does
+not match the current Claim owner. A staged ownership transition is not supported.
 
-| Index | Projection purpose | Example key shape |
+## Global realtime design
+
+The implemented contract is one globally ordered stream. Claim- or customer-partitioned
+events cannot implement its cursor, high watermark, or watch methods.
+
+For each changed publication, the adapter strongly reads counter `n`, constructs sequence
+`n + 1`, and submits one transaction containing the domain writes plus:
+
+- a conditional counter update from `n` to `n + 1`; and
+- an event put at `EVENT#{n+1:020d}#{event_id}` with stable-ID conflict checks.
+
+A concurrent counter-condition failure retries from a fresh strongly consistent counter
+read. `replay_realtime_events(after, limit)` queries event sort keys after the supplied
+sequence. `realtime_high_watermark()` queries descending with limit one. One shared ECS
+dispatcher repeatedly queries after its current cursor and fans out authorized events;
+individual clients do not each scan or merge partitions. A dispatcher starts from a strongly
+read high watermark and then queries after that cursor; reconnecting consumers use the
+existing replay API from their own last cursor before joining the live feed.
+
+The Sprint 4 target retains realtime events without TTL because the current repository has
+no approved retention window. The single partition deliberately preserves the current total
+order and is acceptable only for Validation Prototype volume. #786, owned by the Backend/AWS
+owner, must record consumed capacity, throttling, retry, and alarm evidence before AWS is
+reported verified. A measured throughput limit that is insufficient blocks the AWS profile
+and requires a separately approved ordering/sharding contract; #991 does not silently shard
+the stream.
+
+## Item and transaction limits
+
+DynamoDB permits at most 400 KB per item and 100 actions / 4 MB per transaction. The
+adapter target budget is 300 KiB for every serialized item, including key and adapter
+metadata, leaving headroom for expression and format changes.
+
+| Aggregate | Physical layout | Overflow rule |
 | --- | --- | --- |
-| `GSI1` | Customer-scoped Claim, Asset, Evidence, and in-scope operational record listing; not claimant identity listing | `gsi1pk=CUSTOMER#{customer_id}`, `gsi1sk={entity_type}#{created_at}#{entity_id}`. |
-| `GSI2` | Claim-scoped Session, Evidence, WorkItem, Handoff, and ExternalTask lookup | `gsi2pk=CLAIM#{claim_id}`, `gsi2sk={entity_type}#{created_at}#{entity_id}`. |
-| `GSI3` | Session-scoped Message ordering when messages use a separate aggregate partition | `gsi3pk=SESSION#{session_id}`, `gsi3sk=MESSAGE#{created_at}#{message_id}`. |
-| `GSI4` | Operation and idempotency resolution | `gsi4pk={operation_or_idempotency_scope}`, `gsi4sk={identity}#{fingerprint}`. |
-| `GSI5` | Bounded staff queue and audit reads where the current contract requires them | `gsi5pk={authorized_queue_or_subject}`, `gsi5sk={time}#{entity_id}`. |
+| Working Claim | Core `META`; one `FORM#{field_code}` item per form field; one `CONTENTS#{item_id}` item per Contents item; one `CONSENT#{consent_ref}` item per external-service consent | Rehydrate one `WorkingClaim`. Any item over 300 KiB is `oversized`; no partial write. |
+| Evidence | Core Evidence item plus one immutable `MATERIAL_VERSION#{version}` item for every archived material generation | Rehydrate ordered material history. Current material and each history generation must independently fit. |
+| Message | One canonical item | Current content bounds normally fit; serialization is still measured. |
+| Runtime turn | Every implemented Runtime record remains its own canonical item; lists of envelopes, tool results, and work items are not embedded into one turn item | Any individual oversized record or oversized atomic turn is blocked; records are never truncated. |
+| Audit | One canonical append-only event plus bounded access references | Event and each projection must fit; no source refs or envelope fields are dropped. |
+| Realtime | One bounded event and one singleton counter | Event must fit; no domain payload is copied into realtime. |
 
-These indexes are not application permissions. Every query still applies the current
-ownership, actor, visibility, and Claim authorization rules before returning a projection.
-The `GSI` names and projections remain provisional until the migration implementation
-records real query and capacity assumptions.
+For an atomic write, let:
 
-## Consistency and migration rules
+- `D` be changed canonical domain items, including changed Claim fragments;
+- `P` be access-projection puts/deletes and uniqueness lookup items;
+- `I` be one idempotency item when the current method requires it;
+- `A` be append-only audit items and their projections;
+- `R=2` for a changed realtime publication (counter update plus event), otherwise `0`.
 
-The migration must preserve the current write boundaries:
+The exact action count is `D + P + I + A + R`. The adapter must calculate count and
+serialized bytes before calling DynamoDB. Important mutation families are:
 
-1. A Claim mutation uses the stored current Claim revision as its compare-and-set value.
-   A stale expected revision fails without a partial migration or write.
-2. A successful material Claim mutation advances the Claim revision exactly once.
-3. Idempotency records bind actor, operation, client key, and request fingerprint. An
-   identical retry returns the stored typed result; a different request under the same
-   key is a conflict.
-4. Claim mutation, idempotency result, applicable Branch Evaluation, audit facts, and
-   durable realtime persistence remain one approved transaction boundary where the
-   current contract requires that boundary.
-5. Messages preserve the deterministic `(created_at, message_id)` order. The historical
-   message-turn revision must not be rewritten by later Claim, Evidence, or retrieval
-   writes; #983 owns the final replay contract.
-6. Evidence metadata and bytes remain separate. The migration carries metadata,
-   checksum, provenance, and protected references; it does not expose adapter-owned
-   object keys in claimant projections.
-7. Evidence replacements preserve the stable Evidence identity and append material
-   history. A replacement must not become a second requirement record.
-8. ExternalTask attempts are append-only and distinguish retryable, terminal, and unknown
-   outcomes. The final attempt and reconciliation shape remains subject to #984.
-9. Raw provider payloads, credentials, bearer tokens, password hashes, and unrestricted
-   model context are excluded from the target records.
-
-## Migration provenance and idempotency
-
-The future migration tool must treat the source record identity and content fingerprint
-as an input to a deterministic migration identity. A record is eligible for a second run
-only when the source identity, source version, and normalized content fingerprint match the
-already migrated target. A mismatch must stop that record as a conflict rather than silently
-replace the target.
-
-Each migration result should be classified as `migrated`, `unchanged`, `conflict`,
-`invalid`, or `failed`. The result should retain source identity, target identity,
-checksum or content fingerprint, migration run identity, and a bounded failure reason.
-This record is migration evidence and is not an application audit event unless the current
-audit contract explicitly adds such an event.
-
-The local rehearsal in #992 must read only rows whose `Implementation status` is
-`Implemented`, `In scope for #991` is `Yes`, and `Source store` is MongoDB core
-persistence. It must explicitly exclude contract-only/not-implemented rows, the SQLite
-claimant identity store, SQLite staff identity store, SQLite Control Plane store,
-synthetic policy/history source, and knowledge object store. It must prove this behavior
-against MongoDB without writing to DynamoDB, and prove that a partial run can resume
-without duplicating logical records or changing an authoritative revision.
-
-## Contract reconciliation points
-
-The mapping is deliberately provisional in the following areas:
-
-| Backend issue | Reconciliation required before formal migration tooling |
+| Mutation family | Records included in one current atomic boundary |
 | --- | --- |
-| #983 | Confirm separate historical message-turn revision and current Claim revision fields and replay readback. |
-| #987 | Confirm Claim-creation Evidence set, operation reservation, provenance, and interrupted/unknown outcome records. |
-| #986 | Confirm Evidence material/version metadata, Message references, actor/visibility checks, and total ordering. |
-| #984 | Confirm ExternalTask attempt identity, append-only history, retry/terminal/unknown outcome, and reconciliation records. |
-| #985 | No data-key change is expected; application Workbench capabilities remain separate from AWS IAM roles. |
+| Claim creation | Claim fragments, Claim owner, Session, customer/global/search/Claim-session projections, realtime counter/event |
+| Session mutation/checkpoint | Changed Claim fragments, current/replaced Session, optional FollowUp and Branch Evaluation, idempotency, projections, realtime counter/event |
+| Claim/child mutation | Changed Claim fragments, each supplied child, optional Session, idempotency, applicable audit events, all changed projections, realtime counter/event |
+| Agent turn | Changed Claim fragments and Session, two Messages, Agent Decision, optional Handoff/Evidence/Branch Evaluation/Runtime Trace, every individual Runtime turn record, idempotency, projections, realtime counter/event |
+| Staff/ownership mutation | Changed Claim fragments, Staff Action/Collaboration/Coworker/Customer Update/Signal Decision/Handoff as supplied, optional Staff Agent execution, idempotency, audit, projections, realtime counter/event |
+| Retrieval bundle | Retrieval plus every Review Signal and Claim-order projections; no Claim revision change unless the current caller supplies a separate governed mutation |
+| Anonymous promotion | Fixed owner/Claim/customer-projection/realtime actions described above; no child rewrite |
 
-If one of these contracts changes, the affected mapping and local rehearsal must be
-updated before the migration tool is frozen. No migration design decision may silently
-override the owning Backend issue.
+The current domain does not bound the total number of changed Claim fragments or Runtime
+children tightly enough to prove that every valid input fits 100 actions and 4 MB. #991
+does not invent a new public error, truncate records, split a currently atomic runtime
+mutation, or weaken consistency. If preflight finds a valid runtime mutation above either
+limit, the DynamoDB capability remains `unavailable` until the Backend owner adds an
+approved bound or transaction contract. #992 must report this as `oversized`, not success.
 
-## Out of scope and AWS limitation
+## Migration and repeatability rules
 
-This document does not claim that the AWS profile is configured, reachable, permitted, or
-deployed. The current AWS runtime profile remains fail-closed until the capabilities and
-permissions in #786 are verified.
+Migration runs while the DynamoDB profile is not serving application traffic. It may write
+canonical items and projections in deterministic batches, but the profile cannot be enabled
+until a complete source snapshot is reconciled and a single dataset completion marker records
+the source snapshot, inventory version, item count, and fingerprint. A failed run has no
+completion marker and is never readable as a complete migration.
 
-This issue does not implement a DynamoDB repository, create tables or indexes, migrate
-real records, change the local MongoDB model, change Claim or Evidence business semantics,
-or validate Bedrock, Knowledge Bases, ECS, IAM, or S3. Those activities require separate
-bounded work after the design and AWS prerequisites are complete.
+For every source record, the migration derives the same canonical key and normalized content
+fingerprint on every run. Results are classified as:
 
-## Acceptance evidence for #991
+- `migrated`: target absent and deterministic items written;
+- `unchanged`: every target item and fingerprint already match;
+- `conflict`: authoritative key exists with different identity, scope, or content;
+- `invalid`: source violates identity, ownership, relationship, or ordering rules;
+- `oversized`: an item or required atomic bundle exceeds the target budget;
+- `failed`: infrastructure or serialization prevented a conclusive result.
 
-- The logical-record inventory and target mapping are recorded in this document.
-- Every inventory row names its source store, implementation status, current contract relationship, and whether it is in scope for #991.
-- Only implemented MongoDB records marked in scope are eligible inputs to #992; contract-only concepts are explicitly excluded.
-- Session mapping follows the current required `claim_id` and `customer_id` relationship and excludes non-Claim sessions.
-- Access patterns precede the provisional key and index layout.
-- Revision, idempotency, audit, provenance, ownership, and visibility boundaries are explicit.
-- Customer identity, staff identity, and Control Plane records are explicitly excluded from #991/#992.
-- Local-only and AWS-dependent work are separated.
-- Reconciliation points for the active Backend issues are explicit.
-- The document is indexed from `docs/README.md` and does not change the current API or persistence contract.
+The migration preserves source identity, revision, timestamps, idempotency triplets,
+request fingerprints, audit envelopes, global realtime sequence, and provenance. It does
+not allocate new domain IDs. Resume skips only exact `unchanged` records. Conflicts,
+invalid rows, oversized rows, unknown record types, and gaps in global realtime sequence
+prevent the completion marker.
+
+## #992 local rehearsal assertions
+
+`#992` is local design validation against MongoDB; it does not write DynamoDB or claim AWS
+connectivity. It must derive assertions from this mapping rather than from a manually
+maintained subset.
+
+| Assertion group | Required proof |
+| --- | --- |
+| Inventory completeness | Discover all 45 allowlisted record types; reject unknown types; prove excluded SQLite/MinIO/contract-only concepts are not read as MongoDB records. |
+| Identity | Produce one deterministic canonical key per source identity; prove separator-safe compound encoding and idempotency hash collision checks. |
+| Relationships | Resolve Claim/Session/Message, Claim children, Runtime turn, Staff Agent, Evidence, external task, Retrieval/review, and audit references; reject dangling or cross-owner links. |
+| Ownership | Verify every Claim child customer matches the current Claim before converting it to `owner_ref`; simulate anonymous promotion without child rewrites. |
+| Ordering | Prove customer Claim `updated_at`, Session, Message, child-list, audit, Staff Agent, and global realtime ordering including stable ID tie-breaks. |
+| Uniqueness | Detect duplicate idempotency triplets, Message client IDs, Staff Agent client IDs, Contents item/Evidence tuples, external-task results, open FollowUps, and one Motor other-driver per Claim. |
+| Size | Serialize every target item and report bytes; reject over 300 KiB; calculate action count and bytes for every reconstructed atomic mutation family. |
+| Repeatability | Two transformations of the same snapshot produce identical keys, fingerprints, items, projections, and counts; an interrupted run resumes without duplicates. |
+| Conflict safety | Changed content under an existing authoritative identity reports `conflict`; no last-write-wins replacement is accepted. |
+| Realtime | Preserve unique contiguous source sequence and replay-after/high-watermark behavior; gaps or duplicate sequence values fail. |
+| Reporting | Record source head, inventory version, local-only evidence level, counts by result class, and every unresolved reconciliation point. |
+
+## Provisional decisions and reconciliation owners
+
+| Decision or dependency | Current assumption | Affected target | Reconciliation owner and point | Risk if changed |
+| --- | --- | --- | --- | --- |
+| Message historical revision (#983) | Current Message identity and ordering remain authoritative | Message canonical and session access items | Backend owner before DynamoDB adapter implementation | Replay may need another stored coordinate, but not another Message identity. |
+| Evidence integrity (#986) | Stable Evidence ID and append-only material generations remain authoritative | Evidence core/version items and S3 references | Backend owner before migration tooling is frozen | Material layout or visibility could require remapping. |
+| Claim creation evidence (#987) | Current atomic creation boundary remains authoritative | Claim creation action count and provenance | Backend owner before adapter implementation | Reservation/provenance records could increase transaction cardinality. |
+| External task attempts (#984) | Current task/request/result identities and uniqueness remain authoritative | External-task canonical and lookup items | Backend owner before adapter implementation | A separately approved attempt record would add inventory and projections. |
+| Workbench capability (#985) | Application permissions stay separate from IAM | Search and staff access projections | Backend owner at Workbench contract reconciliation | IAM must not become application authorization. |
+| Global realtime capacity | One partition preserves the implemented total order | `SYSTEM#REALTIME` | Backend/AWS owner in #786 after real AWS load evidence | Insufficient capacity keeps AWS runtime unavailable. |
+| Transaction cardinality | Current valid inputs may exceed DynamoDB hard limits | All multi-record runtime writes | Backend owner before enabling DynamoDB profile | Splitting would violate atomicity; silent truncation would corrupt evidence. |
+| Identity and Control Plane placement | Existing SQLite stores remain separate | No #991 target | Separate approved architecture issue if deployment requires relocation | Pulling them into #991 would change authority and credential scope. |
+
+If a dependency changes a field, state, revision rule, idempotency identity, Evidence
+metadata, RAG citation, or readiness capability, the owner must update the relevant
+authoritative contract first. This design and #992 assertions then reconcile to that
+contract; migration code never overrides it.
+
+## AWS limitation and acceptance evidence
+
+This document does not implement a DynamoDB repository, create a table or index, transfer
+records, change MongoDB, or validate S3, DynamoDB, Bedrock, Knowledge Bases, ECS, IAM,
+Secrets Manager, or CloudWatch. The AWS profile remains fail-closed until #786 records
+real account evidence.
+
+`#991` is complete when review confirms that:
+
+- all 45 implemented MongoDB record types and all excluded adjacent stores are explicit;
+- each source identity, owner, read order, uniqueness rule, canonical item, access path,
+  and atomic boundary is implementable without a request-path table scan;
+- idempotency uses the exact actor/route/key authority with conditional creation;
+- global realtime replay, high watermark, watch integration, retention, and capacity risk
+  are explicit;
+- anonymous Claim promotion is atomic without an unbounded child rewrite;
+- 300 KiB item budgets and 100-action/4-MB transaction preflight determine readiness;
+- #992 has executable local assertions and cannot misreport local transformation as AWS
+  validation; and
+- the design remains provider-neutral and does not change current API or business
+  semantics.
