@@ -379,6 +379,101 @@ def test_namespaced_runtime_applies_claim_mutation_and_persists_runtime_records(
         assert replay.json() == body
         assert len(gateway.requests) == 2
 
+        later = client.patch(
+            f'/api/v1/claims/{claim_id}/form',
+            headers={**headers, 'If-Match': '2'},
+            json={
+                'updates': [
+                    {
+                        'field_code': 'incident.description',
+                        'value': 'A corrected description after the Runtime turn.',
+                        'correction_reason': 'The claimant corrected the original account.',
+                    }
+                ]
+            },
+        )
+        assert later.status_code == 200, later.text
+        assert idempotency.runtime_trace_id is not None
+        runtime_replay = replace(
+            idempotency,
+            key='runtime-message-replay-kind',
+            message_turn_revision=2,
+            response_payload=body,
+        )
+        repository.save_idempotency(runtime_replay)
+        reconstructed = client.post(
+            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+            headers={
+                **headers,
+                'Idempotency-Key': runtime_replay.key,
+                'If-Match': '2',
+            },
+            json={
+                'client_message_id': 'runtime-client-message',
+                'content': {'type': 'text', 'text': 'Please read the current report.'},
+                'evidence_refs': [],
+            },
+        )
+        assert reconstructed.status_code == 200, reconstructed.text
+        assert reconstructed.json()['claim_revision'] == 2
+        assert reconstructed.json()['current_claim_revision'] == 3
+        assert reconstructed.json()['decision'] is not None
+        assert (
+            reconstructed.json()['current_claim']['form']['incident.description']['value']
+            == 'A corrected description after the Runtime turn.'
+        )
+
+        compatibility_payload = {**body, 'decision': None}
+        compatibility_replay = replace(
+            runtime_replay,
+            key='runtime-message-legacy-payload',
+            decision_id=None,
+            message_turn_kind=None,
+            message_turn_revision=None,
+            response_payload=compatibility_payload,
+        )
+        repository.save_idempotency(compatibility_replay)
+        compatibility = client.post(
+            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+            headers={
+                **headers,
+                'Idempotency-Key': compatibility_replay.key,
+                'If-Match': '2',
+            },
+            json={
+                'client_message_id': 'runtime-client-message',
+                'content': {'type': 'text', 'text': 'Please read the current report.'},
+                'evidence_refs': [],
+            },
+        )
+        assert compatibility.status_code == 200, compatibility.text
+        assert compatibility.json()['claim_revision'] == 2
+        assert compatibility.json()['current_claim_revision'] == 3
+        assert compatibility.json()['decision'] is None
+
+        for missing_field in ('decision_id', 'agent_message_id', 'runtime_trace_id'):
+            corrupted = replace(
+                runtime_replay,
+                key=f'runtime-message-missing-{missing_field}',
+                **{missing_field: 'missing-record'},
+            )
+            repository.save_idempotency(corrupted)
+            failed = client.post(
+                f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+                headers={
+                    **headers,
+                    'Idempotency-Key': corrupted.key,
+                    'If-Match': '2',
+                },
+                json={
+                    'client_message_id': 'runtime-client-message',
+                    'content': {'type': 'text', 'text': 'Please read the current report.'},
+                    'evidence_refs': [],
+                },
+            )
+            assert failed.status_code == 500
+            assert failed.json()['error']['code'] == 'INTERNAL_ERROR'
+
 
 def test_model_profile_can_change_between_turns_without_new_claim(
     monkeypatch: pytest.MonkeyPatch,

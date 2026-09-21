@@ -1830,6 +1830,69 @@ describe('claimant intake projection', () => {
     })).toHaveAttribute('aria-expanded', 'false')
   })
 
+  it('installs the current claim snapshot without merging historical replay deltas', async () => {
+    const user = userEvent.setup()
+    const currentDynamicForm = dynamicForm({ value: '9pm', valueState: 'confirmed' })
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      claim_revision: 2,
+      current_claim_revision: 3,
+      form_changes: [{
+        field_code: 'incident.occurred_at',
+        field: {
+          value: '8pm',
+          status: 'proposed',
+          source: 'claimant',
+        },
+      }],
+      contents_item_changes: [{
+        item_id: 'item-historical',
+        description: 'Historical laptop description',
+        category: 'Electronics',
+        status: 'proposed',
+        source: 'claimant',
+      }],
+      current_claim: {
+        ...initialClaim,
+        revision: 3,
+        form: {
+          'incident.occurred_at': {
+            value: '9pm',
+            status: 'confirmed',
+            source: 'claimant',
+          },
+        },
+        contents_items: [{
+          item_id: 'item-current',
+          description: 'Corrected laptop description',
+          category: 'Electronics',
+          status: 'confirmed',
+          source: 'claimant',
+        }],
+        dynamic_form: currentDynamicForm,
+        customer_next_step: {
+          status: 'continue_current_report',
+          summary: 'Continue from the corrected report.',
+          responsible_party: 'claimant',
+          required_items: [],
+        },
+        primary_action: primaryAction({ revision: 3 }),
+        updated_at: '2026-09-14T02:00:00Z',
+      },
+    })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Details' }))
+
+    expect(screen.getAllByText('9pm').length).toBeGreaterThan(0)
+    expect(screen.getByText('Corrected laptop description')).toBeInTheDocument()
+    expect(screen.queryByText('8pm')).not.toBeInTheDocument()
+    expect(screen.queryByText('Historical laptop description')).not.toBeInTheDocument()
+  })
+
   it('rejects delayed realtime Claim and message readbacks after a newer claimant mutation', async () => {
     const user = userEvent.setup()
     let pushRealtime

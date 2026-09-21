@@ -1892,7 +1892,13 @@ def test_message_turn_replay_preserves_turn_revision_after_later_claim_mutation(
     )
     assert decision is not None
     repository.save_idempotency(
-        replace(stored, decision_id=decision.decision_id, response_payload=first.json())
+        replace(
+            stored,
+            decision_id=decision.decision_id,
+            message_turn_kind=None,
+            message_turn_revision=None,
+            response_payload=first.json(),
+        )
     )
     replay = submit_message(
         client,
@@ -1900,7 +1906,7 @@ def test_message_turn_replay_preserves_turn_revision_after_later_claim_mutation(
         claim_id,
         session_id,
         revision=2,
-        key='historical-turn',
+        key='historical-turn-new-key',
         client_message_id='historical-client-message',
     )
     assert replay.status_code == 200
@@ -1912,7 +1918,9 @@ def test_message_turn_replay_preserves_turn_revision_after_later_claim_mutation(
     assert replay_body['agent_message'] == first.json()['agent_message']
 
 
-def test_persisted_runtime_response_rehydrates_from_agent_message_record(
+@pytest.mark.parametrize('missing_child', ['claimant_message', 'decision', 'agent_message'])
+def test_persisted_legacy_response_fails_closed_when_child_is_missing(
+    missing_child: str,
     client: TestClient,
     auth_headers: dict[str, str],
     repository: FixtureRepository,
@@ -1934,25 +1942,26 @@ def test_persisted_runtime_response_rehydrates_from_agent_message_record(
     stored = repository.find_idempotency('cus_demo', route, 'runtime-replay-original')
     assert stored is not None
     assert stored.agent_message_id == first_body['agent_message']['message_id']
-    replay_key = replace(
-        stored,
-        key='runtime-replay-agent-record',
-        decision_id=None,
-        response_payload=first_body,
-    )
-    repository.save_idempotency(replay_key)
+    if missing_child == 'claimant_message':
+        assert stored.message_id is not None
+        repository._messages.pop(stored.message_id)
+    elif missing_child == 'decision':
+        corrupted = replace(stored, decision_id=None, response_payload=first_body)
+        repository._idempotency[('cus_demo', route, 'runtime-replay-original')] = corrupted
+    else:
+        assert stored.agent_message_id is not None
+        repository._messages.pop(stored.agent_message_id)
 
     replay = submit_message(
         client,
         auth_headers,
         claim_id,
         session_id,
-        key='runtime-replay-agent-record',
+        key='runtime-replay-original',
         client_message_id='runtime-replay-message',
     )
-    assert replay.status_code == 200, replay.text
-    assert replay.json()['claimant_message'] == first_body['claimant_message']
-    assert replay.json()['agent_message'] == first_body['agent_message']
+    assert replay.status_code == 500
+    assert replay.json()['error']['code'] == 'INTERNAL_ERROR'
 
 
 def test_message_only_replay_rehydrates_current_revision_from_legacy_payload(
@@ -1994,7 +2003,14 @@ def test_message_only_replay_rehydrates_current_revision_from_legacy_payload(
     assert stored.response_payload is not None
     legacy_payload = dict(stored.response_payload)
     legacy_payload.pop('current_claim_revision', None)
-    repository.save_idempotency(replace(stored, response_payload=legacy_payload))
+    repository.save_idempotency(
+        replace(
+            stored,
+            message_turn_kind=None,
+            message_turn_revision=None,
+            response_payload=legacy_payload,
+        )
+    )
 
     current_claim = repository.get_claim(claim_id, 'cus_demo')
     assert current_claim is not None
@@ -2018,7 +2034,7 @@ def test_message_only_replay_rehydrates_current_revision_from_legacy_payload(
         claim_id,
         session_id,
         revision=historical_revision,
-        key='message-only-replay-turn',
+        key='message-only-replay-new-key',
         client_message_id='message-only-replay-message',
         text='I am ready to provide the next detail.',
     )
@@ -2027,6 +2043,73 @@ def test_message_only_replay_rehydrates_current_revision_from_legacy_payload(
     assert replay_body['claim_revision'] == historical_revision
     assert replay_body['current_claim_revision'] == later_update.json()['revision']
     assert replay_body['primary_action']['claim_revision'] == later_update.json()['revision']
+
+
+def test_mongodb_replay_with_new_key_survives_repository_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mongo_client = mongomock.MongoClient()
+    database_name = 'message_replay_restart'
+    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    headers = {'Authorization': 'Bearer synthetic-claimant'}
+    first_repository = MongoDBRepository(mongo_client, database_name)
+    monkeypatch.setattr(first_repository, '_atomic', lambda operation: operation(None))
+
+    with TestClient(create_app(settings, repository=first_repository)) as first_client:
+        created = create_claim(first_client, headers, key='restart-claim').json()
+        claim_id = created['claim']['claim_id']
+        session_id = created['session']['session_id']
+        first = submit_message(
+            first_client,
+            headers,
+            claim_id,
+            session_id,
+            key='restart-turn',
+            client_message_id='restart-client-message',
+        )
+        assert first.status_code == 200, first.text
+        historical_revision = first.json()['claim_revision']
+        later = first_client.patch(
+            f'/api/v1/claims/{claim_id}/form',
+            headers={**headers, 'If-Match': str(historical_revision)},
+            json={
+                'updates': [
+                    {
+                        'field_code': 'incident.description',
+                        'value': 'The corrected description persisted after restart.',
+                        'correction_reason': 'The claimant corrected the original account.',
+                    }
+                ]
+            },
+        )
+        assert later.status_code == 200, later.text
+
+    # Mongomock does not reapply MongoDB partial-filter semantics while rebuilding
+    # existing indexes. A real MongoDB restart keeps these indexes, so suppress only
+    # the mock's duplicate index initialisation for the reopened adapter.
+    monkeypatch.setattr(first_repository._collection, 'create_index', lambda *args, **kwargs: None)
+    restarted_repository = MongoDBRepository(mongo_client, database_name)
+    monkeypatch.setattr(restarted_repository, '_atomic', lambda operation: operation(None))
+    with TestClient(create_app(settings, repository=restarted_repository)) as restarted_client:
+        replay = submit_message(
+            restarted_client,
+            headers,
+            claim_id,
+            session_id,
+            revision=historical_revision,
+            key='restart-turn-new-key',
+            client_message_id='restart-client-message',
+        )
+
+    assert replay.status_code == 200, replay.text
+    replay_body = replay.json()
+    assert replay_body['claim_revision'] == historical_revision
+    assert replay_body['current_claim_revision'] == later.json()['revision']
+    assert replay_body['current_claim']['revision'] == later.json()['revision']
+    assert (
+        replay_body['current_claim']['form']['incident.description']['value']
+        == 'The corrected description persisted after restart.'
+    )
 
 
 def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(

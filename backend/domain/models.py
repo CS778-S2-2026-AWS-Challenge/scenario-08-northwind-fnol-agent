@@ -2189,6 +2189,9 @@ class MessageTurnResponse(ContractModel):
     claim_revision: int
     # The current Claim revision used by a continuation action or retry.
     current_claim_revision: int
+    # Authoritative current state. Historical deltas below remain turn evidence and
+    # must not be merged into this snapshot when the revisions differ.
+    current_claim: ClaimantClaim
     claimant_message: ClaimantMessage
     agent_message: ClaimantMessage | None = None
     form_changes: list[FormChange]

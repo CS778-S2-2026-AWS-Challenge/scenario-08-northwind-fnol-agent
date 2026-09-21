@@ -1566,19 +1566,24 @@ function App() {
         turn.claimant_message,
         ...(turn.agent_message ? [turn.agent_message] : []),
       ]))
-      setForm((current) => mergeFields(current, turn.form_changes))
-      setContentsItems((current) => mergeContentsItems(current, turn.contents_item_changes || []))
-      setDynamicForm(turn.dynamic_form || null)
       const currentRevision = currentTurnRevision(turn)
-      setClaimRevision(currentRevision, turn.primary_action)
-      if (turn.decision) setNextStep(turn.decision.customer_next_step)
-      if (turn.handoff) setHandoff(turn.handoff)
-      rememberClaimInHistory({
-        ...activeClaim,
-        revision: currentRevision,
-        customer_next_step: turn.decision?.customer_next_step || activeClaim.customer_next_step,
-        updated_at: turn.claimant_message?.created_at || activeClaim.updated_at,
-      })
+      if (turn.current_claim) {
+        applyClaimSnapshot(turn.current_claim, { minimumRevision: currentRevision })
+        rememberClaimInHistory(turn.current_claim)
+      } else {
+        setForm((current) => mergeFields(current, turn.form_changes))
+        setContentsItems((current) => mergeContentsItems(current, turn.contents_item_changes || []))
+        setDynamicForm(turn.dynamic_form || null)
+        setClaimRevision(currentRevision, turn.primary_action)
+        if (turn.decision) setNextStep(turn.decision.customer_next_step)
+        if (turn.handoff) setHandoff(turn.handoff)
+        rememberClaimInHistory({
+          ...activeClaim,
+          revision: currentRevision,
+          customer_next_step: turn.decision?.customer_next_step || activeClaim.customer_next_step,
+          updated_at: turn.claimant_message?.created_at || activeClaim.updated_at,
+        })
+      }
       setDraft('')
       if (isAssistanceReply) {
         setAssistanceReplyReview({
