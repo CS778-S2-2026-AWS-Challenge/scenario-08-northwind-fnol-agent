@@ -21,4 +21,5 @@ tracked by issue #779.
 
 Claim creation also fails closed when branch evaluation still contains recorded
 facts: the API returns `CONFIRMATION_REQUIRED` and lists the fields that must be
-confirmed before the creation command can be prepared.
+confirmed before the creation command can be prepared. This is a Claim creation
+boundary response, not a provider failure and not an implicit retry.
