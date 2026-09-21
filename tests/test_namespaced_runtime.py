@@ -451,12 +451,24 @@ def test_namespaced_runtime_applies_claim_mutation_and_persists_runtime_records(
         assert compatibility.json()['current_claim_revision'] == 3
         assert compatibility.json()['decision'] is None
 
-        for missing_field in ('decision_id', 'agent_message_id', 'runtime_trace_id'):
-            corrupted = replace(
+        corrupted_records = {
+            'decision_id': replace(
                 runtime_replay,
-                key=f'runtime-message-missing-{missing_field}',
-                **{missing_field: 'missing-record'},
-            )
+                key='runtime-message-missing-decision_id',
+                decision_id='missing-record',
+            ),
+            'agent_message_id': replace(
+                runtime_replay,
+                key='runtime-message-missing-agent_message_id',
+                agent_message_id='missing-record',
+            ),
+            'runtime_trace_id': replace(
+                runtime_replay,
+                key='runtime-message-missing-runtime_trace_id',
+                runtime_trace_id='missing-record',
+            ),
+        }
+        for corrupted in corrupted_records.values():
             repository.save_idempotency(corrupted)
             failed = client.post(
                 f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',

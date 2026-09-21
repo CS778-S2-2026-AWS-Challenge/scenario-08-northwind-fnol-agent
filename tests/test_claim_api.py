@@ -1,7 +1,7 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from typing import cast
+from typing import Any, cast
 from uuid import uuid4
 
 import mongomock
@@ -2048,7 +2048,7 @@ def test_message_only_replay_rehydrates_current_revision_from_legacy_payload(
 def test_mongodb_replay_with_new_key_survives_repository_restart(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    mongo_client = mongomock.MongoClient()
+    mongo_client: Any = mongomock.MongoClient()
     database_name = 'message_replay_restart'
     settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
     headers = {'Authorization': 'Bearer synthetic-claimant'}
