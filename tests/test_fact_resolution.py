@@ -39,21 +39,14 @@ from backend.services.fact_resolution import (
 from backend.services.messages import (
     _apply_question_accounting,
     _build_form_changes,
-    _with_single_runtime_question,
 )
 from backend.services.retrieval_review import persist_retrieval_record
+from backend.services.turn_reducer import compose_reply
 
 
-def test_runtime_owns_one_canonical_next_question() -> None:
-    response = _with_single_runtime_question(
-        'I recorded the kitchen damage. What is the full address? What is the address?',
-        'What is the address of the affected property?',
-    )
-
-    assert response == (
-        'I recorded the kitchen damage. What is the address of the affected property?'
-    )
-    assert response.count('?') == 1
+def test_runtime_preserves_model_questions_without_duplicating_the_selected_question() -> None:
+    reply = 'I recorded the kitchen damage. What is the address? Is anyone hurt?'
+    assert compose_reply(None, (), reply, 'What is the address?') == reply
 
 
 NOW = datetime(2026, 9, 8, 2, 0, tzinfo=UTC)

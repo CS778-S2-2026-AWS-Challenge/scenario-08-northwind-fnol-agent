@@ -2137,8 +2137,9 @@ withdrawn. It is a stored field written when permission is recorded, and a faile
 no claim field, so on its own it keeps saying that Northwind can now send the request. Where
 `external_service_action.status` is `terminal_failure` or `awaiting_reconciliation`, the projected
 next step instead reports that Northwind is reviewing or checking the request, with
-`responsible_party` `claims_professional` and no required items. A `retryable_failure` keeps the
-stored next step, which agrees with `can_request`. The correction is derived for the read; the
+`responsible_party` `claims_professional` and no required items. A `retryable_failure` with
+`can_request=true` projects the existing `assessor_request_ready` step with claimant ownership,
+even if Claim creation previously stored a system-owned step. The correction is derived for the read; the
 stored field is not rewritten, so a failed attempt still changes nothing on the claim.
 
 The authorised decision and prepared operation identity are persisted together before the

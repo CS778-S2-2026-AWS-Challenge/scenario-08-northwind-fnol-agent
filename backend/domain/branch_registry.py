@@ -425,7 +425,9 @@ class BranchRuleEvaluator:
         text = latest_message or ''
         support_intent = detect_support_intent(text)
         selected_family, family_candidates, family_sources = self._family_state(
-            claim, family_resolution or resolve_turn_family(claim, None, text), trigger_source_refs
+            claim,
+            family_resolution or resolve_turn_family(claim, previous_evaluation, text),
+            trigger_source_refs,
         )
         unresolved_conflict = (
             sorted(family_candidates)

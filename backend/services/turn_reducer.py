@@ -239,6 +239,14 @@ def recompute_progress(
         or claim.claim_state.workflow_state is WorkflowState.CREATED
     ):
         return claim.claim_state.workflow_state, claim.customer_next_step
+    if (
+        claim.claim_state.workflow_state is WorkflowState.PROFESSIONAL_REVIEW
+        and proposed_next_step is not None
+        and proposed_next_step.status == 'professional_review_queued'
+    ):
+        # The controlled PRES-02 policy-review contract remains an explicit
+        # compatibility path; v8 does not propose this legacy status.
+        return claim.claim_state.workflow_state, proposed_next_step
     if any(item.status.value not in {'resolved', 'cancelled'} for item in open_handoffs):
         return claim.claim_state.workflow_state, CustomerNextStep(
             status='awaiting_staff',
@@ -699,7 +707,11 @@ def reduce_turn(
         # Once this turn satisfies that request, project the current requirement
         # instead of retaining the answered field beside the fresh fallback text.
         effective_next_step = next_requirement_step(applied_evaluation.requirements)
-    if question is None and applied_evaluation.requirements.missing_required_now:
+    if (
+        validated is not None
+        and question is None
+        and applied_evaluation.requirements.missing_required_now
+    ):
         field = intake_field_for_requirement(applied_evaluation.requirements.next_required_item)
         question = field.prompt if field is not None else None
         if (open_handoffs or handoff) and field is not None:
@@ -726,7 +738,7 @@ def reduce_turn(
         )
     effective_next_step = progress_next_step
     confirmation_request = None
-    if applied_evaluation.requirements.ready_pending_confirmation:
+    if validated is not None and applied_evaluation.requirements.ready_pending_confirmation:
         codes = list(applied_evaluation.requirements.recorded)
         shown_parts: list[str] = []
         shown_codes: list[str] = []
@@ -777,12 +789,16 @@ def reduce_turn(
             confirmation_request = None
         if len(shown_codes) != len(codes):
             effective_customer_response += ' Please review the remaining details in your form.'
-    effective_customer_response = compose_reply(
-        safety_interrupt,
-        tuple([*open_handoffs, *([handoff] if handoff is not None else [])]),
-        effective_customer_response,
-        question,
-    )
+    if (
+        proposal.proposal_source is not AgentProposalSource.CONTROLLED_AGENT
+        or safety_interrupt is not None
+    ):
+        effective_customer_response = compose_reply(
+            safety_interrupt,
+            tuple([*open_handoffs, *([handoff] if handoff is not None else [])]),
+            effective_customer_response,
+            question,
+        )
     session_after_questions, accounted_next_step, effective_customer_response = (
         _apply_question_accounting(
             session_after_questions,

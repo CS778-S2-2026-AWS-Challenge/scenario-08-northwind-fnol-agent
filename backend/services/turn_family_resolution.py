@@ -3,7 +3,12 @@
 import re
 
 from backend.domain.agent_context_runtime import TurnFamilyResolution
-from backend.domain.models import BranchEvaluationResult, FormStatus, WorkingClaim
+from backend.domain.models import (
+    BranchEvaluationRecord,
+    BranchEvaluationResult,
+    FormStatus,
+    WorkingClaim,
+)
 
 _FAMILY_TERMS = {
     'motor': re.compile(
@@ -37,7 +42,7 @@ def _message_candidates(message_text: str | None) -> tuple[str, ...]:
 
 def resolve_turn_family(
     claim: WorkingClaim,
-    branch_evaluation: BranchEvaluationResult | None,
+    branch_evaluation: BranchEvaluationResult | BranchEvaluationRecord | None,
     message_text: str | None,
 ) -> TurnFamilyResolution:
     """Prefer persisted authority, otherwise accept one bounded current-turn candidate."""

@@ -409,10 +409,10 @@ def claimant_next_step(
 ) -> CustomerNextStep:
     """Say what the claimant does next, without contradicting the record beside it.
 
-    Three cases are corrected, and each is corrected because the stored next step says
-    something the claim's own records contradict. A retryable failure is left alone: the
-    stored next step already says Northwind can send the request, and `can_request`
-    agrees. Every correction is derived here rather than written, so AT-10's empty
+    Each correction applies when the stored next step contradicts the operation's
+    current ownership. A retryable failure with an offered retry belongs to the claimant,
+    even if Claim creation previously stored system ownership. Every correction is
+    derived here rather than written, so AT-10's empty
     `claim_state_effects.failure_may_change` still holds.
 
     Args:
@@ -426,6 +426,20 @@ def claimant_next_step(
 
     if action is None:
         return claim.customer_next_step
+    if action.status is ClaimantExternalServiceStatus.RETRYABLE_FAILURE and action.can_request:
+        # Claim creation may have ended with a system-owned next step. The
+        # separate assessor operation now offers a claimant-owned retry; its
+        # read-time projection must agree with the lifecycle without reopening
+        # or rewriting the terminal Claim.
+        return claim.customer_next_step.model_copy(
+            update={
+                'status': 'assessor_request_ready',
+                'summary': action.next_action,
+                'responsible_party': ResponsibleParty.CLAIMANT,
+                'expected_by': None,
+                'required_items': [],
+            }
+        )
     replacement = _WITHDRAWN_ACTION_NEXT_STEPS.get(action.status)
     if replacement is None:
         if action.status in _ANSWERABLE_STATUSES and _assessment_has_come_back(repository, claim):
