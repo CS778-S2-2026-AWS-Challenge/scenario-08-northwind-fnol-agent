@@ -664,7 +664,8 @@ def test_payout_contact_selection_maps_repository_races_without_partial_write(
     )
     repository.save_payout_contact_selection = original_save  # type: ignore[method-assign]
 
-    assert response.status_code == 409 if conflict_kind != 'missing_destination' else 404
+    expected_status = 404 if conflict_kind == 'missing_destination' else 409
+    assert response.status_code == expected_status
     assert response.json()['error']['code'] == expected_code
     if conflict_kind == 'selection':
         assert response.json()['error']['details'] == [
