@@ -77,11 +77,11 @@ def test_one_turn_contract_drives_all_registered_value_shapes_and_schema() -> No
         'text_list',
     }
     assert 'claimant.client_number' not in contract.by_code
-    variants = schema['properties']['field_changes']['items']['oneOf']  # type: ignore[index]
+    variants = schema['properties']['field_changes']['items']['anyOf']  # type: ignore[index]
     product_family = next(
         item
         for item in variants
-        if item['properties']['field_code']['const'] == 'claim.product_family'
+        if item['properties']['field_code'].get('const') == 'claim.product_family'
     )
     assert product_family['properties']['value']['enum'] == ['contents', 'home', 'motor']
     assert schema['properties']['field_changes']['maxItems'] == len(contract.fields)  # type: ignore[index]

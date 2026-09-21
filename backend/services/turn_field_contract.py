@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
@@ -175,22 +176,45 @@ def normalise_field_value(field: TurnFieldDefinition, value: Any) -> Any:
     return value
 
 
+_PLACEHOLDER_PATTERN = re.compile(
+    r'^[<>\[\]{}]*\s*(unknown|n/?a|none|tbd|todo|placeholder|not[\s_-]?provided|'
+    r'not[\s_-]?specified|xxx+)\s*[<>\[\]{}]*$',
+    re.IGNORECASE,
+)
+
+
+def _is_placeholder_text(value: str) -> bool:
+    """Recognize free-text stand-ins; registered enum values are not placeholders."""
+    return bool(_PLACEHOLDER_PATTERN.match(value.strip()))
+
+
+def _free_text_placeholder(field: TurnFieldDefinition, value: Any) -> bool:
+    if field.value_type in {'text', 'location'} and isinstance(value, str):
+        return _is_placeholder_text(value)
+    if field.value_type == 'text_list' and isinstance(value, list):
+        return any(isinstance(item, str) and _is_placeholder_text(item) for item in value)
+    return False
+
+
 def _field_value_is_valid(field: TurnFieldDefinition, value: Any) -> bool:
     if field.value_type == 'text':
-        return isinstance(value, str) and bool(value.strip())
+        return isinstance(value, str) and bool(value.strip()) and not _is_placeholder_text(value)
     if field.value_type == 'boolean':
         return isinstance(value, bool)
     if field.value_type == 'enum':
         return isinstance(value, str) and value in field.allowed_values
     if field.value_type == 'location':
-        return (isinstance(value, str) and bool(value.strip())) or (
-            isinstance(value, Mapping) and bool(value)
-        )
+        return (
+            isinstance(value, str) and bool(value.strip()) and not _is_placeholder_text(value)
+        ) or (isinstance(value, Mapping) and bool(value))
     if field.value_type == 'text_list':
         return (
             isinstance(value, list)
             and bool(value)
-            and all(isinstance(item, str) and bool(item.strip()) for item in value)
+            and all(
+                isinstance(item, str) and bool(item.strip()) and not _is_placeholder_text(item)
+                for item in value
+            )
         )
     if field.value_type == 'temporal':
         if isinstance(value, str):
@@ -253,13 +277,15 @@ def validate_field_changes(
                 violations.append(violation)
             continue
         if not _field_value_is_valid(field, value):
-            violations.append(
-                TurnFieldViolation(
-                    field_code=field_code,
-                    expected_value_type=field.value_type,
-                    reason_code='invalid_value',
-                )
+            violation = TurnFieldViolation(
+                field_code=field_code,
+                expected_value_type=field.value_type,
+                reason_code='invalid_value',
             )
+            if rejected_bounds is not None and _free_text_placeholder(field, value):
+                rejected_bounds.append(violation)
+            else:
+                violations.append(violation)
             continue
         validated.append(change.model_copy(update={'value': value}))
     if violations:

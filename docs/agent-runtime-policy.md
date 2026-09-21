@@ -44,6 +44,14 @@ JSON never applies partial Claim changes. Unicode budget estimates use unescaped
 content. Only v8 model-output money and quantity types have the new bounded limits;
 shared domain money values retain their existing contract.
 
+Free-text `text`, `location` and `text_list` proposals cannot supply placeholder answers
+such as `>UNKNOWN<`, `N/A` or `TBD`. The existing field validator rejects that individual
+change and retains the previous field state; other valid facts in the turn still apply.
+An absent field stays missing and is not offered for batch confirmation. Registered enum
+values such as `injury.medical_attention=unknown` remain valid; boolean and temporal
+validation are unchanged. Prompt fragment `task.turn@v4` instructs the model to omit an
+unprovided field instead of fabricating a placeholder, alongside the Runtime check.
+
 ## Policy Is Not a Prompt
 
 A system prompt is one model-specific rendering of part of the Agent Policy. It is not
