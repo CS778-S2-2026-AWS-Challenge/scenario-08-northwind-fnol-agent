@@ -6,6 +6,7 @@ const api = vi.hoisted(() => ({
   ApiRequestError: class ApiRequestError extends Error {},
   confirmClaimFields: vi.fn(),
   createAccountAsset: vi.fn(),
+  createAccountPolicy: vi.fn(),
   createExternalClaim: vi.fn(),
   createClaim: vi.fn(),
   grantAssessorConsent: vi.fn(),
@@ -17,6 +18,8 @@ const api = vi.hoisted(() => ({
   getRuntimeCapabilities: vi.fn(),
   listAccountAssets: vi.fn(),
   listAccountIdentityDocuments: vi.fn(),
+  listAccountPaymentDestinations: vi.fn(),
+  listAccountPolicies: vi.fn(),
   listClaims: vi.fn(),
   listEvidenceHistory: vi.fn(),
   loginClaimant: vi.fn(),
@@ -40,6 +43,7 @@ const api = vi.hoisted(() => ({
   updateAccountAsset: vi.fn(),
   createAccountIdentityDocument: vi.fn(),
   updateAccountIdentityDocument: vi.fn(),
+  updateAccountPolicy: vi.fn(),
   updateClaimField: vi.fn(),
 }))
 
@@ -247,6 +251,8 @@ describe('claimant intake projection', () => {
     api.getClaimEvidence.mockResolvedValue({ items: [], revision: 1 })
     api.listAccountAssets.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listAccountIdentityDocuments.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listAccountPaymentDestinations.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listAccountPolicies.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listEvidenceHistory.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.streamRealtimeEvents.mockImplementation(() => new Promise(() => {}))
     api.createClaim.mockResolvedValue({
@@ -480,7 +486,60 @@ describe('claimant intake projection', () => {
     expect(globalThis.location.pathname).toBe('/')
   })
 
-  it('canonicalizes the removed Policies route and restores Profile categories on popstate', async () => {
+  it('reloads a stale Profile revision, keeps the draft, and retries only after review', async () => {
+    const user = userEvent.setup()
+    const initialAccount = {
+      customer_id: 'cus_profile_conflict',
+      revision: 3,
+      profile: {
+        display_name: 'Iris',
+        legal_name: 'Iris Zhang',
+        preferred_name: 'Iris',
+        email: 'iris@gmail.com',
+        phone: '+64 21 555 123',
+      },
+      preferences: { email: true, sms: false },
+    }
+    const latestAccount = {
+      ...initialAccount,
+      revision: 4,
+      profile: { ...initialAccount.profile, display_name: 'Shared saved name', preferred_name: 'Shared saved name' },
+    }
+    const retriedAccount = {
+      ...latestAccount,
+      revision: 5,
+      profile: { ...latestAccount.profile, display_name: 'Iris draft', preferred_name: 'Iris draft' },
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount
+      .mockResolvedValueOnce(initialAccount)
+      .mockResolvedValueOnce(latestAccount)
+    api.updateAccountProfile
+      .mockRejectedValueOnce({ code: 'REVISION_CONFLICT', status: 409 })
+      .mockResolvedValueOnce(retriedAccount)
+    globalThis.history.replaceState({}, '', '/profile/personal-details')
+
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'Edit profile' }))
+    const preferredName = screen.getByLabelText('Preferred name')
+    await user.clear(preferredName)
+    await user.type(preferredName, 'Iris draft')
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('kept your draft')
+    expect(preferredName).toHaveValue('Iris draft')
+    expect(screen.getByText('Shared saved name', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(api.updateAccountProfile).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+
+    expect(api.updateAccountProfile).toHaveBeenNthCalledWith(2, { preferred_name: 'Iris draft' }, 4)
+    expect(await screen.findByText('Iris draft', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Preferred name')).not.toBeInTheDocument()
+  })
+
+  it('opens the Policies route and restores Profile categories on popstate', async () => {
     const user = userEvent.setup()
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue({
@@ -505,8 +564,10 @@ describe('claimant intake projection', () => {
 
     render(<App />)
 
-    expect(await screen.findByRole('region', { name: 'Personal details' })).toBeInTheDocument()
-    expect(globalThis.location.pathname).toBe('/profile/personal-details')
+    expect(await screen.findByRole('heading', { name: 'Policies' })).toBeInTheDocument()
+    expect(await screen.findByText('No policy numbers saved.')).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile/policies')
+    expect(api.listAccountPolicies).toHaveBeenCalled()
 
     await user.click(screen.getAllByRole('button', { name: 'Insured assets' })[0])
     expect(await screen.findByRole('heading', { name: 'Insured assets' })).toBeInTheDocument()

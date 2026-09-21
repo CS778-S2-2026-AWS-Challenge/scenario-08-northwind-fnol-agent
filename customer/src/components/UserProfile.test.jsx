@@ -91,10 +91,10 @@ describe('UserProfile', () => {
     expect(screen.queryByText('Account summary')).not.toBeInTheDocument()
     expect(screen.queryByText('Review the information Northwind can currently show for this account.')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'My profile' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Policies' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Policies' })).toHaveLength(2)
     expect(screen.getByText('i•••@gmail.com')).toBeInTheDocument()
     expect(screen.getByText('••• ••• 123')).toBeInTheDocument()
-    expect(screen.getByText('Policy number')).toBeInTheDocument()
+    expect(screen.queryByText('Policy number')).not.toBeInTheDocument()
     expect(screen.queryByText(/^Saved$/)).not.toBeInTheDocument()
     expect(screen.getByText('Iris', { selector: '.profile-header-copy > strong' }).closest('.profile-header')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Edit profile' }).closest('.profile-header')).toBeInTheDocument()
@@ -134,7 +134,8 @@ describe('UserProfile', () => {
     expect(screen.queryByText('This information is not supported by the current account service.')).not.toBeInTheDocument()
     expect(screen.queryByText(/Used only when a claim payment needs to be made/)).not.toBeInTheDocument()
     expect(props.container.querySelector('.profile-availability-note')).not.toBeInTheDocument()
-    expect(screen.getAllByText('Unavailable')).toHaveLength(3)
+    expect(screen.getAllByText('Not supported')).toHaveLength(2)
+    expect(screen.getByText('Not designated')).toBeInTheDocument()
 
     await user.click(screen.getAllByRole('button', { name: 'Claim auto-fill' })[0])
     expect(screen.getByText(/must review and confirm it before it becomes claim information/i)).toBeInTheDocument()
@@ -192,6 +193,24 @@ describe('UserProfile', () => {
     expect(screen.getByText('Iris Zhang', { selector: '.profile-summary-row > dd' })).toBeInTheDocument()
     expect(screen.queryByLabelText('Preferred name')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Edit profile' })).toHaveFocus()
+  })
+
+  it('clears the preferred name with an explicit null value', async () => {
+    const user = userEvent.setup()
+    const updatedAccount = {
+      ...account,
+      profile: { ...account.profile, display_name: 'Iris Zhang', preferred_name: null },
+    }
+    const onSaveProfile = vi.fn().mockResolvedValue(updatedAccount)
+    renderProfile({ onSaveProfile }, 'personal-details')
+
+    await user.click(screen.getByRole('button', { name: 'Edit profile' }))
+    await user.clear(screen.getByLabelText('Preferred name'))
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+
+    expect(onSaveProfile).toHaveBeenCalledWith({ preferred_name: null })
+    expect(await screen.findByText('Not provided', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(screen.getByText('Iris Zhang', { selector: '.profile-summary-row > dd' })).toBeInTheDocument()
   })
 
   it('does not show the legal-name projection as an unset preferred name', () => {

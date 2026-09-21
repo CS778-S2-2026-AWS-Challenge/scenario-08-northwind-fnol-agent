@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ApiRequestError,
   confirmClaimFields,
-  createAccountAsset,
   createClaim,
   createExternalClaim,
   decideExternalServiceOffer,
@@ -13,7 +12,6 @@ import {
   getClaimMessages,
   getClaimEvidence,
   getRuntimeCapabilities,
-  listAccountAssets,
   listClaims,
   loginClaimant,
   logoutClaimant,
@@ -29,9 +27,6 @@ import {
   streamRealtimeEvents,
   submitClaimMessage,
   setClaimantAccessToken,
-  updateAccountPreferences,
-  updateAccountProfile,
-  updateAccountAsset,
   updateClaimField,
 } from './api.js'
 import './App.css'
@@ -49,8 +44,12 @@ import {
 } from './components/AgentTurnActivity.jsx'
 import { completeTurnProgress, reduceTurnProgress } from './agentTurnProgress.js'
 import UserProfile from './components/UserProfile.jsx'
-import './styles/user-profile.css'
+import './styles/profile-shell.css'
+import './styles/profile-records.css'
+import './styles/profile-assets.css'
+import './styles/profile-responsive.css'
 import { profilePathForSection, profileSectionFromPath } from './profileRoutes.js'
+import useProfileController from './profile/useProfileController.js'
 import { documentAttentionCount } from './claimDocumentProjection.js'
 import {
   forgetAnonymousConversation,
@@ -294,28 +293,6 @@ async function fetchClaimHistory({ signal } = {}) {
   return [...claimsById.values()]
 }
 
-async function fetchAccountAssets({ signal } = {}) {
-  const assetsById = new Map()
-  const seenCursors = new Set()
-  let cursor
-
-  do {
-    const response = await listAccountAssets({ cursor, signal })
-    for (const item of response.items) assetsById.set(item.asset_id, item)
-    const nextCursor = response.page?.next_cursor || null
-    if (nextCursor && seenCursors.has(nextCursor)) {
-      throw new ApiRequestError(
-        'Northwind returned an invalid asset page. Try loading your saved assets again.',
-        { code: 'INVALID_PAGINATION' },
-      )
-    }
-    if (nextCursor) seenCursors.add(nextCursor)
-    cursor = nextCursor
-  } while (cursor)
-
-  return [...assetsById.values()]
-}
-
 function mergeFields(current, changes) {
   return changes.reduce(
     (fields, change) => ({ ...fields, [change.field_code]: change.field }),
@@ -389,9 +366,6 @@ function App() {
   const [page, setPageState] = useState(initialPage)
   const [profileSection, setProfileSection] = useState(initialProfileSection)
   const [account, setAccount] = useState(null)
-  const [accountAssets, setAccountAssets] = useState(null)
-  const [accountAssetsError, setAccountAssetsError] = useState('')
-  const [assetStatus, setAssetStatus] = useState('idle')
   const [authStatus, setAuthStatus] = useState('idle')
   const [authError, setAuthError] = useState('')
   const [claimType, setClaimType] = useState('')
@@ -423,6 +397,11 @@ function App() {
   const [mobileView, setMobileView] = useState('chat')
   const [workspaceView, setWorkspaceView] = useState('chat')
   const [workspaceActive, setWorkspaceActive] = useState(false)
+  const profileController = useProfileController({
+    account,
+    setAccount,
+    enabled: page === 'account' || workspaceView === 'account',
+  })
   const [runtimeCapabilities, setRuntimeCapabilities] = useState({
     claim_types: ['motor', 'home', 'contents'],
     models: [],
@@ -555,22 +534,6 @@ function App() {
   // setPage is a stable local navigation helper; keep this guard tied to auth state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account, page])
-
-  useEffect(() => {
-    if (!account) return
-    const controller = new AbortController()
-    setAccountAssetsError('')
-    fetchAccountAssets({ signal: controller.signal })
-      .then((items) => setAccountAssets(items))
-      .catch((requestError) => {
-        if (requestError?.name === 'AbortError') return
-        setAccountAssets([])
-        setAccountAssetsError(
-          `${requestError.message || 'Northwind could not load your saved assets.'} Try loading them again.`,
-        )
-      })
-    return () => controller.abort()
-  }, [account])
 
   useEffect(() => {
     if (isWorkspaceActive || page !== 'home') setConversationHistoryOpen(false)
@@ -2200,9 +2163,6 @@ function App() {
     setAuthStatus('loading'); setAuthError('')
     try { await logoutClaimant() } catch (requestError) { setAuthError(requestError.message) }
     setAccount(null)
-    setAccountAssets(null)
-    setAccountAssetsError('')
-    setAssetStatus('idle')
     setClaimHistory(readAnonymousConversationHistory())
     setClaimHistoryError('')
     setSelectedHistoryClaimId(null)
@@ -2325,73 +2285,6 @@ function App() {
     const nextPath = profilePathForSection(section)
     if (globalThis.location?.pathname !== nextPath) {
       globalThis.history?.pushState({ northwindRoute: 'account', profileSection: section }, '', nextPath)
-    }
-  }
-
-  async function saveProfile(profile) {
-    setAuthStatus('saving')
-    try {
-      const updated = account?.revision == null
-        ? await updateAccountProfile(profile)
-        : await updateAccountProfile(profile, account.revision)
-      setAccount(updated)
-      return updated
-    } finally {
-      setAuthStatus('idle')
-    }
-  }
-
-  async function savePreferences(preferences) {
-    setAuthStatus('saving')
-    try {
-      const updated = await updateAccountPreferences(preferences)
-      setAccount(updated)
-      return updated
-    } finally {
-      setAuthStatus('idle')
-    }
-  }
-
-  async function reloadAccountAssets() {
-    setAccountAssets(null)
-    setAccountAssetsError('')
-    try {
-      const items = await fetchAccountAssets()
-      setAccountAssets(items)
-      return items
-    } catch (requestError) {
-      setAccountAssets([])
-      setAccountAssetsError(
-        `${requestError.message || 'Northwind could not load your saved assets.'} Try loading them again.`,
-      )
-      throw requestError
-    }
-  }
-
-  async function addAccountAsset(asset) {
-    setAssetStatus('saving')
-    try {
-      const created = await createAccountAsset({ asset })
-      setAccountAssets((current) => [
-        created,
-        ...(current || []).filter((item) => item.asset_id !== created.asset_id),
-      ])
-      return created
-    } finally {
-      setAssetStatus('idle')
-    }
-  }
-
-  async function saveAccountAsset(assetId, revision, updates) {
-    setAssetStatus('saving')
-    try {
-      const updated = await updateAccountAsset({ assetId, revision, updates })
-      setAccountAssets((current) => (
-        (current || []).map((item) => item.asset_id === updated.asset_id ? updated : item)
-      ))
-      return updated
-    } finally {
-      setAssetStatus('idle')
     }
   }
 
@@ -2654,16 +2547,9 @@ function App() {
           {account ? (
             <UserProfile
               account={account}
-              assets={accountAssets}
-              assetsError={accountAssetsError}
               activeSection={profileSection}
-              busy={authStatus !== 'idle' || assetStatus !== 'idle'}
-              onCreateAsset={addAccountAsset}
+              controller={profileController}
               onOpenClaims={openSavedClaims}
-              onReloadAssets={reloadAccountAssets}
-              onSaveProfile={saveProfile}
-              onSavePreferences={savePreferences}
-              onUpdateAsset={saveAccountAsset}
               onSelectSection={openProfileSection}
               onSignOut={signOut}
             />
@@ -2923,17 +2809,10 @@ function App() {
                 <div className="workspace-account-content">
                   <UserProfile
                     account={account}
-                    assets={accountAssets}
-                    assetsError={accountAssetsError}
                     activeSection={profileSection}
+                    controller={profileController}
                     embedded
-                    busy={authStatus !== 'idle' || assetStatus !== 'idle'}
-                    onCreateAsset={addAccountAsset}
                     onOpenClaims={openClaimHistory}
-                    onReloadAssets={reloadAccountAssets}
-                    onSaveProfile={saveProfile}
-                    onSavePreferences={savePreferences}
-                    onUpdateAsset={saveAccountAsset}
                     onSelectSection={openProfileSection}
                     onSignOut={signOut}
                   />
