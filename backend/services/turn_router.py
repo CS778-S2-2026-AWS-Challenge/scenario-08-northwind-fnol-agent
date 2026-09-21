@@ -41,7 +41,16 @@ def _capabilities(message: str) -> list[str]:
 def route_turn(context: AgentTurnContext) -> TurnRoute:
     message = (context.message_text or '').strip()
     snapshot = context.runtime_configuration_snapshot
-    model = snapshot.model(context.model_profile_id) if snapshot is not None else None
+    # Routing also serves deterministic deployments whose policy release has no
+    # model binding. Only a v8 instruction can require model-owned family routing;
+    # model execution still validates its selected binding in the request planner.
+    inspect_model = (
+        context.runtime_policy is None
+        or context.runtime_policy.instruction.prompt_version == 'northwind-fnol-claimant-v8'
+    )
+    model = (
+        snapshot.model(context.model_profile_id) if snapshot is not None and inspect_model else None
+    )
     model_family_judgment = (
         model is not None and model.values.get('prompt_version') == 'northwind-fnol-claimant-v8'
     )
