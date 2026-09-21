@@ -123,6 +123,33 @@ describe('UserProfile', () => {
     await user.click(screen.getAllByRole('button', { name: 'Claim auto-fill' })[0])
     expect(screen.getByText(/must review and confirm it before it becomes claim information/i)).toBeInTheDocument()
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Not configured')).toHaveLength(5)
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+  })
+
+  it('shows the prepared Claim choices only when account-backed handlers are supplied', async () => {
+    const user = userEvent.setup()
+    const onChangeAutoFillChoice = vi.fn()
+    const onSaveAutoFillChoices = vi.fn()
+    renderProfile({
+      autoFillChoices: [
+        { key: 'a', label: 'Personal details', visible: false },
+        { key: 'b', label: 'Policy number', visible: false },
+        { key: 'c', label: 'Saved assets', visible: false },
+        { key: 'd', label: 'Payment details', visible: false },
+        { key: 'e', label: 'Identity information', visible: false },
+      ],
+      autoFillDirty: true,
+      onChangeAutoFillChoice,
+      onSaveAutoFillChoices,
+    }, 'claim-auto-fill')
+
+    expect(screen.queryByText('Not configured')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('combobox')).toHaveLength(5)
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Saved assets' }), 'show')
+    expect(onChangeAutoFillChoice).toHaveBeenCalledWith('c', true)
+    await user.click(screen.getByRole('button', { name: 'Save Claim auto-fill choices' }))
+    expect(onSaveAutoFillChoices).toHaveBeenCalledTimes(1)
   })
 
   it('submits only current-contract account fields and reports the authoritative update', async () => {

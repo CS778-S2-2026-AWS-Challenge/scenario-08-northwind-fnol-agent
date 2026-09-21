@@ -451,6 +451,54 @@
   margin-top: var(--space-2);
 }
 
+.profile-autofill-form {
+  display: grid;
+  max-width: var(--measure-reading);
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
+.profile-autofill-choices {
+  display: grid;
+}
+
+.profile-autofill-row {
+  display: grid;
+  grid-template-columns: minmax(var(--space-16), var(--density-workbench-record-label-width)) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: var(--border-component);
+}
+
+.profile-autofill-row label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-control);
+  font-weight: var(--font-weight-medium);
+}
+
+.profile-autofill-row select {
+  min-height: var(--size-control-touch);
+  min-width: 0;
+  padding: 0 var(--space-3);
+  border: var(--border-component);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  font: inherit;
+  font-size: var(--font-size-control);
+}
+
+.profile-autofill-row select:focus-visible {
+  outline: var(--border-focus);
+  outline-offset: var(--space-1);
+}
+
+.profile-autofill-form > .primary-button {
+  min-height: var(--size-control-touch);
+  justify-self: start;
+}
+
 .profile-field-limit,
 .profile-capability-copy,
 .profile-helper-copy {
@@ -912,6 +960,15 @@
   .profile-summary-row {
     grid-template-columns: 1fr;
     gap: var(--space-1);
+  }
+
+  .profile-autofill-row {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+
+  .profile-autofill-form > .primary-button {
+    width: 100%;
   }
 
   .profile-personal-information .profile-summary-list {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { PROFILE_CATEGORIES } from '../profileRoutes.js'
+import ClaimAutoFillChoices from './ClaimAutoFillChoices.jsx'
 
 const ASSET_CATEGORIES = [
   { key: 'vehicle', label: 'Vehicles', singular: 'vehicle', addLabel: 'Add vehicle' },
@@ -378,14 +379,21 @@ export default function UserProfile({
   account,
   assets = null,
   assetsError = '',
+  autoFillChoices = null,
+  autoFillDirty = false,
+  autoFillSaving = false,
+  autoFillError = '',
+  autoFillNotice = '',
   activeSection = null,
   embedded = false,
   busy = false,
   onCreateAsset = async () => null,
+  onChangeAutoFillChoice,
   onOpenClaims,
   onReloadAssets = async () => [],
   onSaveProfile,
   onSavePreferences,
+  onSaveAutoFillChoices,
   onSelectSection = () => {},
   onSignOut,
   onUpdateAsset = async () => null,
@@ -785,6 +793,27 @@ export default function UserProfile({
             <SummaryRow label="Passport" value="Unavailable" />
           </dl>
         </UnavailableSection>
+      )
+    }
+    if (autoFillChoices && onChangeAutoFillChoice && onSaveAutoFillChoices) {
+      return (
+        <section className="profile-section" aria-labelledby="profile-claim-auto-fill">
+          <SectionHeading
+            as={SectionTitle}
+            id="profile-claim-auto-fill"
+            title="Claim auto-fill"
+            description="Choose which saved information may be suggested when you start a future claim."
+          />
+          <ClaimAutoFillChoices
+            choices={autoFillChoices}
+            dirty={autoFillDirty}
+            saving={autoFillSaving}
+            error={autoFillError}
+            notice={autoFillNotice}
+            onChange={onChangeAutoFillChoice}
+            onSave={onSaveAutoFillChoices}
+          />
+        </section>
       )
     }
     return (
