@@ -1536,6 +1536,23 @@ class FixtureRepository(PersistenceRepository):
     ) -> IdempotencyRecord | None:
         return self._idempotency.get((actor_id, route, key))
 
+    def find_message_turn_idempotency(
+        self,
+        actor_id: str,
+        route: str,
+        claim_id: str,
+        message_id: str,
+    ) -> IdempotencyRecord | None:
+        matches = [
+            record
+            for record in self._idempotency.values()
+            if record.actor_id == actor_id
+            and record.route == route
+            and record.claim_id == claim_id
+            and record.message_id == message_id
+        ]
+        return deepcopy(matches[-1]) if matches else None
+
     def save_idempotency(self, record: IdempotencyRecord) -> None:
         lookup = (record.actor_id, record.route, record.key)
         existing = self._idempotency.get(lookup)

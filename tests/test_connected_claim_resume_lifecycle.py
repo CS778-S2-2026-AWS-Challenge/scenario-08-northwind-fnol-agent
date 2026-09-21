@@ -121,6 +121,24 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
     assert staff_reply.json()['claim_revision'] == 5
     staff_message_id = staff_reply.json()['message']['message_id']
 
+    replay_after_staff_mutation = client.post(
+        f'/api/v1/claims/{claim_id}/sessions/{first_session_id}/messages',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'issue-257-first-message',
+            'If-Match': '1',
+        },
+        json={
+            'client_message_id': 'issue-257-first-message',
+            'content': {'type': 'text', 'text': description},
+            'evidence_refs': [],
+        },
+    )
+    assert replay_after_staff_mutation.status_code == 200
+    assert replay_after_staff_mutation.json()['claim_revision'] == 2
+    assert replay_after_staff_mutation.json()['current_claim_revision'] == 5
+    assert replay_after_staff_mutation.json()['current_claim']['revision'] == 5
+
     history = client.get(
         f'/api/v1/claims/{claim_id}/sessions/{first_session_id}/messages?limit=100',
         headers=auth_headers,

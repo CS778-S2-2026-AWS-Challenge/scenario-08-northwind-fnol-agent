@@ -482,6 +482,16 @@ the append-only audit collection through a bounded, filterable projection.
 - An idempotency record identifies an accepted operation and request fingerprint. An
   identical replay returns the current authorised projection; changed input under the
   same key is a conflict.
+- A claimant message-turn idempotency record also retains `message_turn_kind`
+  (`legacy_agent`, `runtime`, or `message_only`) and the immutable
+  `message_turn_revision`. Fixture and MongoDB can resolve the original record by actor, route,
+  Claim, and claimant `message_id`, so the same `client_message_id` under a different retry key
+  still reports the committed historical revision. The kind defines the complete required child
+  association set: legacy Agent requires its decision and Agent message, Runtime requires its
+  Runtime trace and Agent message, and message-only declares no such child. A missing declared
+  child is an integrity failure and cannot be returned as a partial message-only success. Legacy
+  records without the new coordinates use their stored response and existing durable associations
+  for compatibility; replay does not rewrite them or repeat side effects.
 - A Workbench mutation idempotency record also retains the Action Registry version, exact
   `action_code`, and exact `target_ref` resolved before execution. These fields preserve the
   runtime authorization decision with the existing atomic Claim mutation; they do not create a

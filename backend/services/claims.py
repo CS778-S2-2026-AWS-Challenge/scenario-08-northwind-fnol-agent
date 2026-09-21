@@ -256,7 +256,7 @@ def _claimant_incomplete_context(
     )
 
 
-def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> ClaimantClaim:
+def claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> ClaimantClaim:
     claimant_evidence = claimant_visible_evidence(
         repository.list_evidence(claim.claim_id, claim.customer_id)
     )
@@ -581,7 +581,7 @@ def pause_session(
         follow_up_due_at=follow_up.due_at,
         follow_up_status=follow_up.status,
     )
-    claimant_after = _claimant_claim(
+    claimant_after = claimant_claim(
         repository,
         updated_claim,
     )
@@ -657,7 +657,7 @@ def start_claim(
                 retryable=True,
             )
         return CreateClaimResponse(
-            claim=_claimant_claim(repository, claim),
+            claim=claimant_claim(repository, claim),
             session=_claimant_session(session, claim.customer_next_step),
         )
 
@@ -702,7 +702,7 @@ def start_claim(
         )
     )
     return CreateClaimResponse(
-        claim=_claimant_claim(repository, claim),
+        claim=claimant_claim(repository, claim),
         session=_claimant_session(session, next_step),
     )
 
@@ -713,7 +713,7 @@ def get_claim(
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _claim_not_found()
-    return _claimant_claim(repository, claim)
+    return claimant_claim(repository, claim)
 
 
 def promote_anonymous_claim(
@@ -732,7 +732,7 @@ def promote_anonymous_claim(
     )
     if promoted is None:
         raise _claim_not_found()
-    return _claimant_claim(repository, promoted)
+    return claimant_claim(repository, promoted)
 
 
 def list_claims(

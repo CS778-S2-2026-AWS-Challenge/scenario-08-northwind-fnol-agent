@@ -9709,6 +9709,13 @@
             "title": "Contents Item Changes",
             "type": "array"
           },
+          "current_claim": {
+            "$ref": "#/components/schemas/ClaimantClaim"
+          },
+          "current_claim_revision": {
+            "title": "Current Claim Revision",
+            "type": "integer"
+          },
           "decision": {
             "anyOf": [
               {
@@ -9758,6 +9765,8 @@
           "claim_id",
           "session_id",
           "claim_revision",
+          "current_claim_revision",
+          "current_claim",
           "claimant_message",
           "form_changes",
           "primary_action"
