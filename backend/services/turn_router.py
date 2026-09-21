@@ -2,7 +2,7 @@
 
 import re
 
-from backend.domain.agent_context_runtime import TurnRoute, TurnTask
+from backend.domain.agent_context_runtime import TurnIntent, TurnRoute, TurnTask
 from backend.services.agent import AgentTurnContext
 from backend.services.turn_family_resolution import resolve_turn_family
 
@@ -17,12 +17,8 @@ _STATUS = re.compile(
     re.I,
 )
 _EVIDENCE_HISTORY = re.compile(
-    r'\b(?:previous|prior|earlier|history|already uploaded|old (?:photo|document|file))\b',
-    re.I,
-)
-_EXTERNAL = re.compile(
-    r'\b(?:assess(?:or|ment)?|damage assessment|repair(?:er| shop| booking)?|police|'
-    r'tow(?:ing)?|emergency service)\b',
+    r'\b(?:(?:previous|prior|earlier|old)\s+(?:photos?|images?|documents?|files?|uploads?|evidence)'
+    r'|(?:upload|file|evidence|document|photo)\s+history|already uploaded)\b',
     re.I,
 )
 
@@ -31,7 +27,7 @@ def _capabilities(message: str) -> list[str]:
     capabilities: list[str] = []
     for capability, pattern in (
         ('assessor', r'\b(?:assess(?:or|ment)?|damage assessment)\b'),
-        ('repair', r'\b(?:repair(?:er| shop| booking)?|fix (?:my|the))\b'),
+        ('repair', r'\b(?:repair(?:s|er| shop| booking)?|tow(?:ing)?|fix (?:my|the))\b'),
         ('emergency', r'\b(?:emergency|immediate danger|ambulance|fire service)\b'),
         ('police', r'\bpolice\b'),
         ('policy-search', r'\b(?:policy|cover(?:age|ed)?|excess)\b'),
@@ -49,15 +45,6 @@ def route_turn(context: AgentTurnContext) -> TurnRoute:
         context.branch_evaluation,
         message,
     )
-    if resolution.product_family is None:
-        capabilities = _capabilities(message)
-        return TurnRoute(
-            family_resolution=resolution.status,
-            task=TurnTask.INTAKE,
-            capability_ids=capabilities,
-            intents=frozenset({'intake', *capabilities}),
-            model_required=True,
-        )
     family = resolution.product_family
     family_resolution = resolution.status
 
@@ -68,10 +55,6 @@ def route_turn(context: AgentTurnContext) -> TurnRoute:
         task = TurnTask.EVIDENCE_HISTORY
     elif context.evidence:
         task = TurnTask.EVIDENCE_CURRENT
-    elif _EXTERNAL.search(message):
-        # External support is an optional intent on a claimant turn.  It must
-        # not select the narrow external-offer schema and discard FNOL facts.
-        task = TurnTask.INTAKE
     elif _STATUS.search(message):
         task = TurnTask.STATUS_QUESTION
     elif _CORRECTION.search(message):
@@ -82,19 +65,24 @@ def route_turn(context: AgentTurnContext) -> TurnRoute:
         task = TurnTask.CLAIM_CREATION
     else:
         task = TurnTask.INTAKE
-    intents = {'intake'}
-    intents.update(capabilities)
-    if task is TurnTask.CORRECTION:
+    intents: set[TurnIntent] = {'intake'}
+    if set(capabilities) & {'assessor', 'repair', 'emergency', 'police'}:
+        intents.add('external')
+    if 'policy-search' in capabilities:
+        intents.add('policy_lookup')
+    if 'claim-history' in capabilities:
+        intents.add('history_lookup')
+    if _CORRECTION.search(message):
         intents.add('correction')
-    elif task is TurnTask.CONFIRMATION:
+    if _CONFIRMATION.search(message):
         intents.add('confirmation')
-    elif task is TurnTask.EVIDENCE_HISTORY:
+    if _EVIDENCE_HISTORY.search(message):
         intents.add('evidence_history')
-    elif task is TurnTask.EVIDENCE_CURRENT:
+    if context.evidence:
         intents.add('evidence_current')
-    elif task is TurnTask.CLAIM_CREATION:
+    if context.branch_evaluation is not None and context.branch_evaluation.requirements.ready:
         intents.add('creation')
-    elif task is TurnTask.STATUS_QUESTION:
+    if _STATUS.search(message):
         intents.add('status')
     return TurnRoute(
         product_family=family,

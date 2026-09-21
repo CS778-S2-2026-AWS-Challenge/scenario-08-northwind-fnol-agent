@@ -54,6 +54,15 @@ def resolve_turn_family(
 
     authoritative = tuple(dict.fromkeys(persisted))
     message_candidates = _message_candidates(message_text)
+    stored_candidate = (
+        _normalise(product_family.value)
+        if product_family is not None
+        and product_family.status in {FormStatus.PROPOSED, FormStatus.DISPUTED}
+        else None
+    )
+    candidates = tuple(
+        dict.fromkeys((*message_candidates, *((stored_candidate,) if stored_candidate else ())))
+    )
     if len(authoritative) > 1:
         return TurnFamilyResolution(
             status='conflicting',
@@ -61,27 +70,26 @@ def resolve_turn_family(
         )
     if authoritative:
         selected = authoritative[0]
-        if message_candidates and selected not in message_candidates:
-            return TurnFamilyResolution(
-                status='conflicting',
-                candidate_families=tuple(dict.fromkeys((*authoritative, *message_candidates))),
-            )
         return TurnFamilyResolution(
             product_family=selected,
             status='authoritative',
-            candidate_families=(selected,),
+            candidate_families=tuple(dict.fromkeys((*authoritative, *candidates))),
         )
 
-    if len(message_candidates) > 1:
+    if len(candidates) > 1 or (
+        product_family is not None
+        and product_family.status is FormStatus.DISPUTED
+        and stored_candidate is not None
+    ):
         return TurnFamilyResolution(
             status='ambiguous',
-            candidate_families=message_candidates,
+            candidate_families=candidates,
         )
-    if len(message_candidates) == 1:
+    if len(candidates) == 1:
         return TurnFamilyResolution(
-            product_family=message_candidates[0],
+            product_family=candidates[0],
             status='inferred',
-            candidate_families=message_candidates,
+            candidate_families=candidates,
         )
 
     branch_family = _normalise(

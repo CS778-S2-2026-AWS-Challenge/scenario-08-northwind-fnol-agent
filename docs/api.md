@@ -1252,9 +1252,9 @@ active Release Set; runtime readiness means this process has the required endpoi
 credential. Health remains `null` until a controlled provider check records a result and opening
 the page never invokes a paid provider. The frontend uses the default when creating a Session,
 while a message may select another published and runtime-ready profile in the same conversation.
-The repository initial catalogue publishes `qwen-local`, `nowcoding-gpt55`,
+The repository initial catalogue publishes `qwen-local`, `openrouter-gpt4o-mini`,
 `google-gemini35-flash-lite`, and the explicitly unavailable `bedrock-nova2-lite`; deployment
-selection keeps `qwen-local` as the default unless `MODEL_PROFILE_ID` changes.
+selection keeps `openrouter-gpt4o-mini` as the default unless `MODEL_PROFILE_ID` changes.
 
 ### `POST /api/v1/claims`
 
@@ -1616,11 +1616,39 @@ Response `200`:
 
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
 
+The v8 message boundary accepts and persists the inbound message before model processing.
+Acceptance advances the Claim revision once; a successful result commits the authorised facts,
+Agent message and turn records with a second revision check. Clients must use the returned
+`claim_revision` rather than assume a single increment. A model failure returns `200` for the
+saved message, with `agent_message: null` and a `recovery` projection containing `rule_id`,
+`continuation: runtime.fail_safe`, `claimant_projection`, `resume_triggers`, and
+`resume_entrypoint: submit_message`. It does not represent a successful model response.
+
+`ClaimantMessage` exposes its original `client_message_id` and the same optional `recovery`
+projection so saved-but-unanswered messages remain actionable after history reload. An explicit
+Retry resends that original identity, content and Evidence references with a new
+`Idempotency-Key` and the current Claim revision through this same endpoint. It reuses the saved
+inbound and its original confirmation checkpoint, never saving duplicate claimant text. An
+identical HTTP key replays its saved response without another model call. Existing session and
+Claim ownership checks continue to apply; retry does not move messages between sessions.
+
+When the collected report only needs confirmation, `customer_next_step.status` is
+`confirmation_requested`. A conversational acknowledgement confirms only the values actually
+shown, bound to their assertion identities, fingerprint and revision before accepting the
+acknowledgement message. A same-turn correction or intervening mutation invalidates that binding.
+`POST /form/confirmations` remains available for explicit selected-field confirmation.
+
 `agent_message.message_actions[]` is supplementary to `primary_action`. Runtime may attach a
 registered third-party offer while the normal safety, information, confirmation, or creation
 action remains primary. Each offer is bound to its originating Agent message and is restored by
 message history; formal external Claim creation is not a precondition for recognition, display,
 or consent. The client cannot construct an offer or widen its disclosure scope.
+
+Each service action also carries `presentation`: `info_link`, `action_button`,
+`consent_request`, `tracked_task`, `agent_assisted`, or `status_update`, derived by the backend
+registry from access form and operation/consent state. The initial unknown-family catalogue
+contains only manual services common to all three families, such as Police 105. It does not
+automatically open or suppress the independent Staff Assistance entry.
 
 `dynamic_form` is a claimant-safe projection of the applied branch evaluation after the turn. It
 exposes only active, claimant-visible fields; inactive and system-owned fields remain outside this

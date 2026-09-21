@@ -84,7 +84,7 @@ def _value_schema(field: TurnFieldDefinition) -> dict[str, object]:
     # String is the narrow common representation accepted by the registry for
     # text, location, and temporal facts. Structured forms remain Runtime-valid
     # but are not requested from providers until their exact schema is registered.
-    return {'type': 'string', 'minLength': 1}
+    return {'type': 'string', 'minLength': 1, 'maxLength': 300}
 
 
 def bind_provider_schema(
@@ -114,6 +114,17 @@ def bind_provider_schema(
         grouped_fields[schema_key][1].append(field.field_code)
 
     variants: list[dict[str, object]] = []
+    shared_properties = {
+        key: value for key, value in base_properties.items() if key not in {'field_code', 'value'}
+    }
+    if len(grouped_fields) > 1 and shared_properties:
+        definitions = bound.setdefault('$defs', {})
+        if not isinstance(definitions, dict):
+            raise ValueError('The response schema definitions must be an object.')
+        for key, value in shared_properties.items():
+            definition_id = f'TurnField_{key}'
+            definitions[definition_id] = value
+            shared_properties[key] = {'$ref': f'#/$defs/{definition_id}'}
     for value_schema, field_codes in grouped_fields.values():
         field_code_schema: dict[str, object] = {'type': 'string'}
         if len(field_codes) == 1:
@@ -124,10 +135,11 @@ def bind_provider_schema(
             {
                 'type': 'object',
                 'properties': {
+                    **shared_properties,
                     'field_code': field_code_schema,
                     'value': value_schema,
                 },
-                'required': ['field_code', 'value'],
+                'required': list(base_item.get('required', list(base_properties))),
                 'additionalProperties': False,
             }
         )
@@ -138,10 +150,7 @@ def bind_provider_schema(
         # variant closed the object to only field_code/value.  The v8 contract
         # asks the model for the four semantic keys; Runtime derives the rest.
         field_changes['items'] = {'anyOf': variants}
-        field_changes['maxItems'] = min(
-            int(field_changes.get('maxItems', 50)),
-            len(contract.fields),
-        )
+        field_changes['maxItems'] = min(int(field_changes.get('maxItems', 8)), len(contract.fields))
     else:
         field_changes['items'] = base_item
         field_changes['maxItems'] = 0

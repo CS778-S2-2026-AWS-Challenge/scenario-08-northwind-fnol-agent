@@ -54,11 +54,14 @@ persisted and projected to the claimant; no model draft can describe creation as
 - Required material facts and confirmations must satisfy the current controlled rule.
 - Motor, home, and contents use one deterministic requirement resolver over their mutually
   exclusive registered family branch plus shared fields. Creation rejects any missing or
-  unconfirmed `required_now` item and routes accepted commands as `standard_motor_intake`,
+  unconfirmed item in the shared `required_now` and `before_creation` sets and routes accepted commands as `standard_motor_intake`,
   `standard_home_intake`, or `standard_contents_intake`.
 - Typed contents items satisfy the contents collection requirement only when at least one current
   item is confirmed. They are not flattened into the generic form or inferred from an empty
   `contents.items` string.
+- Recorded facts return `409 CONFIRMATION_REQUIRED` with the affected field codes. Both the
+  explicit form confirmation and the conversational confirmation preserve current assertion
+  history; conversational confirmation binds only displayed values and the pre-message revision.
 - Claim creation requires the current Working Claim revision and an authorised
   `claim.create` ActionEnvelope. During migration, the existing `CREATE_CLAIM` Agent
   Decision may satisfy this boundary only through an explicit, tested mapping to the new

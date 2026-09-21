@@ -39,6 +39,20 @@ class TurnTask(StrEnum):
     HUMAN_HANDOFF = 'human_handoff'
 
 
+TurnIntent = Literal[
+    'intake',
+    'correction',
+    'confirmation',
+    'status',
+    'external',
+    'policy_lookup',
+    'history_lookup',
+    'evidence_current',
+    'evidence_history',
+    'creation',
+]
+
+
 class TurnFamilyResolution(ContractModel):
     """One bounded product-family decision shared by every turn consumer."""
 
@@ -61,13 +75,15 @@ class TurnRoute(ContractModel):
         'authoritative', 'inferred', 'unresolved', 'ambiguous', 'conflicting'
     ]
     task: TurnTask
-    intents: frozenset[str] = frozenset({'intake'})
+    intents: frozenset[TurnIntent] = frozenset({'intake'})
     capability_ids: list[str] = Field(default_factory=list, max_length=8)
     deterministic_response: str | None = Field(default=None, max_length=1000)
     model_required: bool = True
 
     @model_validator(mode='after')
     def validate_deterministic_route(self) -> 'TurnRoute':
+        if not self.intents:
+            raise ValueError('A turn route must contain at least one intent.')
         if not self.model_required and not self.deterministic_response:
             raise ValueError('A model-free route requires a deterministic response.')
         if self.family_resolution in {'unresolved', 'ambiguous', 'conflicting'} and (
@@ -161,7 +177,7 @@ class RequestProfile(ContractModel):
     max_model_invocations: int = Field(ge=1, le=2)
     max_model_selected_tools: int = Field(ge=0, le=1)
     input_hard_limit: int = Field(ge=100)
-    output_limit: int = Field(ge=1)
+    output_limit: int = Field(ge=1, le=6000)
     requires_media_types: list[str] = Field(default_factory=list, max_length=20)
     requires_tool_continuation: bool = False
     isolated: bool = False

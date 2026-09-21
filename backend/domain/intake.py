@@ -87,6 +87,31 @@ INTAKE_REQUIREMENTS = {
             'Please check whether the property is habitable.',
         ),
         ControlledIntakeField(
+            'injury.persons_affected',
+            'Who was injured or affected?',
+            'Please check who was affected.',
+        ),
+        ControlledIntakeField(
+            'injury.severity_reported',
+            'How serious are the reported injuries?',
+            'Please check the reported injury severity.',
+        ),
+        ControlledIntakeField(
+            'injury.medical_attention',
+            'What medical attention has been received or requested?',
+            'Please check the medical attention details.',
+        ),
+        ControlledIntakeField(
+            'theft.entry_context',
+            'Was entry forced, unlocked, or is this unknown?',
+            'Please check the entry circumstances.',
+        ),
+        ControlledIntakeField(
+            'incident.discovered_at',
+            'When did you discover the loss?',
+            'Please check when the loss was discovered.',
+        ),
+        ControlledIntakeField(
             'contents.items',
             'Tell me about one damaged, lost, or stolen item.',
             'Please check the item details before I continue.',

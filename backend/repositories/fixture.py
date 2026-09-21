@@ -1260,6 +1260,57 @@ class FixtureRepository(PersistenceRepository):
             raise IdempotencyConflict(record.key)
         self._idempotency[lookup] = record
 
+    def find_message_checkpoint(
+        self, claim_id: str, message_id: str, customer_id: str
+    ) -> IdempotencyRecord | None:
+        if self.get_claim(claim_id, customer_id) is None:
+            return None
+        matches = [
+            item
+            for item in self._idempotency.values()
+            if item.claim_id == claim_id
+            and item.actor_id == customer_id
+            and item.message_id == message_id
+            and item.revision_before_message is not None
+            and item.inbound_checkpoint
+        ]
+        return (
+            deepcopy(min(matches, key=lambda item: item.revision_before_message or 0))
+            if matches
+            else None
+        )
+
+    def save_message_recovery(self, message: MessageRecord, idempotency: IdempotencyRecord) -> None:
+        with self._claim_mutation_lock:
+            stored = self.get_message(
+                message.claim_id, message.session_id, message.message_id, idempotency.actor_id
+            )
+            existing = self.find_idempotency(
+                idempotency.actor_id, idempotency.route, idempotency.key
+            )
+            if (
+                stored is None
+                or stored.model_copy(update={'recovery_rule_id': message.recovery_rule_id})
+                != message
+            ):
+                raise IdempotencyConflict(message.message_id)
+            if (
+                existing is None
+                or existing.request_fingerprint != idempotency.request_fingerprint
+                or existing.message_id != message.message_id
+                or existing.claim_id != message.claim_id
+                or existing.session_id != message.session_id
+                or existing.response_payload is not None
+                or existing.decision_id is not None
+                or idempotency.message_id != message.message_id
+                or message.actor is not ActorType.CLAIMANT
+            ):
+                raise IdempotencyConflict(idempotency.key)
+            self._store_message(message)
+            self._idempotency[(idempotency.actor_id, idempotency.route, idempotency.key)] = (
+                deepcopy(idempotency)
+            )
+
     def list_claims_for_customer(self, customer_id: str) -> list[WorkingClaim]:
         claims = [
             deepcopy(claim) for claim in self._claims.values() if claim.customer_id == customer_id
@@ -2014,6 +2065,8 @@ class FixtureRepository(PersistenceRepository):
         branch_evaluation: BranchEvaluationRecord | None = None,
         runtime_trace: RuntimeTraceRecord | None = None,
         runtime_records: RuntimeTurnRecords | None = None,
+        *,
+        checkpointed: bool = False,
     ) -> None:
         stored_claim = self._validate_claim_mutation(claim, expected_revision)
         stored_session = self._sessions.get(session.session_id)
@@ -2127,6 +2180,7 @@ class FixtureRepository(PersistenceRepository):
                     ),
                 )
                 if existing is not None
+                and not (checkpointed and identity == claimant_message.message_id)
             ),
             None,
         )
@@ -2141,10 +2195,18 @@ class FixtureRepository(PersistenceRepository):
             ),
             None,
         )
-        if duplicate_client_message is not None:
+        if duplicate_client_message is not None and not checkpointed:
             raise IdempotencyConflict(claimant_message.client_message_id or '')
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
         existing_idempotency = self._idempotency.get(lookup)
+        if checkpointed and (
+            existing_claimant_message != claimant_message
+            or existing_idempotency is None
+            or existing_idempotency.message_id != claimant_message.message_id
+            or existing_idempotency.decision_id is not None
+            or existing_idempotency.response_payload is not None
+        ):
+            raise IdempotencyConflict(idempotency.key)
         if (
             existing_idempotency is not None
             and existing_idempotency.request_fingerprint != idempotency.request_fingerprint
@@ -2187,7 +2249,8 @@ class FixtureRepository(PersistenceRepository):
         assert realtime_event is not None
         self._claims[claim.claim_id] = deepcopy(claim)
         self._store_session(session)
-        self._store_message(claimant_message)
+        if not checkpointed:
+            self._store_message(claimant_message)
         self._store_message(agent_message)
         self._decisions[decision.decision_id] = deepcopy(decision)
         if handoff is not None:

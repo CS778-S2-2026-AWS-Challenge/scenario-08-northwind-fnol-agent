@@ -674,6 +674,36 @@ SERVICE_REGISTRY: Final = MappingProxyType(
 )
 
 
+def service_action_presentation(
+    service_identity: str, status: str
+) -> Literal[
+    'info_link',
+    'action_button',
+    'consent_request',
+    'tracked_task',
+    'agent_assisted',
+    'status_update',
+]:
+    """Project service access and current operation status into a rendering hint."""
+    entry = SERVICE_REGISTRY[service_identity]
+    if status == 'consent_required':
+        return 'consent_request'
+    if status in {
+        'consent_declined',
+        'consent_withdrawn',
+        'terminal_failure',
+        'awaiting_reconciliation',
+    }:
+        return 'status_update'
+    if not entry.uses_external_task:
+        return 'info_link'
+    if status in {'ready_to_request', 'retryable_failure'}:
+        return 'action_button'
+    if status == 'pending_input':
+        return 'agent_assisted'
+    return 'tracked_task'
+
+
 def capability_catalogue(
     product_family: str | None = None,
 ) -> tuple['ExternalCapabilityProjection', ...]:
@@ -685,6 +715,11 @@ def capability_catalogue(
     rows = []
     for entry in REGISTRY_ENTRIES:
         if family is not None and family not in entry.product_families:
+            continue
+        if family is None and (
+            not {'motor', 'home', 'contents'}.issubset(entry.product_families)
+            or entry.uses_external_task
+        ):
             continue
         rows.append(
             ExternalCapabilityProjection(

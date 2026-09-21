@@ -44,13 +44,15 @@ def _binding(
         provider=(
             'amazon-bedrock'
             if is_bedrock
-            else ('google-ai-studio' if is_google else ('qwen-local' if is_qwen else 'nowcoding'))
+            else ('google-ai-studio' if is_google else ('qwen-local' if is_qwen else 'openrouter'))
         ),
         model_identifier=(
             'global.amazon.nova-2-lite-v1:0'
             if is_bedrock
             else (
-                'gemini-3.5-flash-lite' if is_google else ('qwen3.8-27b' if is_qwen else 'gpt-5.5')
+                'gemini-3.5-flash-lite'
+                if is_google
+                else ('qwen3.8-27b' if is_qwen else 'openai/gpt-4o-mini')
             )
         ),
         base_url=(
@@ -59,7 +61,7 @@ def _binding(
             else (
                 'https://generativelanguage.googleapis.com/v1beta'
                 if is_google
-                else ('http://qwen.test/v1' if is_qwen else 'https://nowcoding.ai/v1')
+                else ('http://qwen.test/v1' if is_qwen else 'https://openrouter.ai/api/v1')
             )
         ),
         credential_environment_variable=(
@@ -84,7 +86,7 @@ def _binding(
 def _settings() -> Settings:
     bindings = (
         _binding('qwen-local'),
-        _binding('nowcoding-gpt55'),
+        _binding('openrouter-gpt4o-mini'),
         _binding('bedrock-nova2-lite'),
         _binding('google-gemini35-flash-lite'),
     )
@@ -119,7 +121,7 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
         'agent_rule',
         'feature',
         'model:qwen-local',
-        'model:nowcoding-gpt55',
+        'model:openrouter-gpt4o-mini',
         'model:bedrock-nova2-lite',
         'model:google-gemini35-flash-lite',
     }
@@ -142,10 +144,20 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
     assert policy.instruction.prompt_version == 'northwind-fnol-claimant-v7'
     assert policy.instruction.composition_mode == 'fragmented'
     assert len(policy.instruction.fragments) == 23
-    assert len(policy.tool_policy.request_profiles) == 11
+    assert {item.profile_id for item in policy.tool_policy.request_profiles} == {
+        'claimant.answer.v1',
+        'claimant.creation.v1',
+        'claimant.deep-review.v1',
+        'claimant.evidence-history.v1',
+        'claimant.external.v1',
+        'claimant.handoff.v1',
+        'claimant.intake.v1',
+        'claimant.lookup.v1',
+        'claimant.media.v1',
+    }
     assert set(policy.tool_policy.provider_capabilities) == {
         'qwen-local',
-        'nowcoding-gpt55',
+        'openrouter-gpt4o-mini',
         'bedrock-nova2-lite',
         'google-gemini35-flash-lite',
     }
@@ -154,7 +166,7 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
         for record in configurations.list_configurations('model')
     } == {
         'qwen-local': 180.0,
-        'nowcoding-gpt55': 180.0,
+        'openrouter-gpt4o-mini': 180.0,
         'bedrock-nova2-lite': 180.0,
         'google-gemini35-flash-lite': 180.0,
     }
@@ -201,6 +213,63 @@ def test_existing_release_history_is_never_repaired_or_overwritten() -> None:
     assert [item.release_set_id for item in releases.list_release_sets()] == [
         'rel_operator_withdrawn'
     ]
+
+
+def test_fresh_v8_release_publishes_atomic_prompt_schema_and_default_model() -> None:
+    settings = _settings()
+    bindings = tuple(
+        binding.model_copy(update={'prompt_version': 'northwind-fnol-claimant-v8'})
+        for binding in settings.model_runtime_bindings
+    )
+    settings = replace(settings, model_runtime_bindings=bindings)
+    configurations = ConfigurationRepository()
+    releases = ReleaseSetRepository()
+    release = install_initial_runtime_release(
+        settings, configurations, releases, KnowledgeAdminRepository()
+    )
+    assert release is not None
+    policy = RuntimeAgentPolicyResolver(
+        RuntimeConfigurationResolver(
+            configurations, releases, environment='test', runtime_profile='fixture'
+        )
+    ).resolve_for_turn()
+    assert policy is not None
+    assert policy.instruction.prompt_version == 'northwind-fnol-claimant-v8'
+    assert policy.instruction.manifest_version == 'northwind-fnol-claimant-v8'
+    assert {item.profile_id for item in policy.tool_policy.request_profiles} == {
+        'claimant.turn.v1',
+        'claimant.media.v1',
+        'claimant.lookup.v1',
+        'claimant.evidence-history.v1',
+        'claimant.deep-review.v1',
+    }
+    assert 'claimant.turn.v1' in policy.tool_policy.schema_registry
+    assert settings.model_profile_id == 'openrouter-gpt4o-mini'
+    model_ref = release.configuration_refs['model:openrouter-gpt4o-mini']
+    model = configurations.get(model_ref.configuration_id, model_ref.revision)
+    assert model is not None
+    assert model.values['prompt_version'] == 'northwind-fnol-claimant-v8'
+    assert model.values['model_identifier'] == 'openai/gpt-4o-mini'
+
+
+def test_v8_startup_preserves_existing_v7_release_for_explicit_publication() -> None:
+    settings = _settings()
+    configurations = ConfigurationRepository()
+    releases = ReleaseSetRepository()
+    knowledge = KnowledgeAdminRepository()
+    original = install_initial_runtime_release(settings, configurations, releases, knowledge)
+    upgraded_settings = replace(
+        settings,
+        model_runtime_bindings=tuple(
+            binding.model_copy(update={'prompt_version': 'northwind-fnol-claimant-v8'})
+            for binding in settings.model_runtime_bindings
+        ),
+    )
+    current = install_initial_runtime_release(
+        upgraded_settings, configurations, releases, knowledge
+    )
+    assert current == original
+    assert len(releases.list_release_sets('test', 'fixture')) == 1
 
 
 def test_repository_managed_v7_release_upgrades_to_current_catalogue() -> None:
@@ -257,7 +326,7 @@ def test_repository_managed_v7_release_upgrades_to_current_catalogue() -> None:
     assert policy is not None
     assert set(policy.tool_policy.provider_capabilities) == {
         'qwen-local',
-        'nowcoding-gpt55',
+        'openrouter-gpt4o-mini',
         'bedrock-nova2-lite',
         'google-gemini35-flash-lite',
     }
@@ -266,7 +335,7 @@ def test_repository_managed_v7_release_upgrades_to_current_catalogue() -> None:
 def test_repository_managed_release_does_not_cross_prompt_generations() -> None:
     v6_bindings = (
         _binding('qwen-local', prompt_version='northwind-fnol-claimant-v6'),
-        _binding('nowcoding-gpt55', prompt_version='northwind-fnol-claimant-v6'),
+        _binding('openrouter-gpt4o-mini', prompt_version='northwind-fnol-claimant-v6'),
     )
     v6_settings = replace(
         _settings(),
@@ -341,7 +410,7 @@ def test_initial_release_rejects_missing_or_mixed_model_catalogues() -> None:
         base,
         model_runtime_bindings=(
             _binding('qwen-local'),
-            _binding('nowcoding-gpt55', prompt_version='northwind-fnol-claimant-v6'),
+            _binding('openrouter-gpt4o-mini', prompt_version='northwind-fnol-claimant-v6'),
         ),
     )
     with pytest.raises(ValueError, match='cannot mix Prompt versions'):
@@ -629,14 +698,13 @@ def test_capabilities_expose_the_repository_published_model_catalogue(
 
     assert response.status_code == 200
     model_ids = [item['id'] for item in response.json()['models']]
-    assert model_ids[:2] == ['bedrock-nova2-lite', 'google-gemini35-flash-lite']
-    assert model_ids[-1] == 'qwen-local'
-    assert model_ids[2] in {'openrouter-gpt4o-mini', 'nowcoding-gpt55'}
-    assert response.json()['default_model_profile_id'] in {
+    assert model_ids == [
         'openrouter-gpt4o-mini',
-        'qwen-local',
+        'bedrock-nova2-lite',
         'google-gemini35-flash-lite',
-    }
+        'qwen-local',
+    ]
+    assert response.json()['default_model_profile_id'] == 'openrouter-gpt4o-mini'
     bedrock = next(item for item in response.json()['models'] if item['id'] == 'bedrock-nova2-lite')
     assert bedrock['availability'] == 'unavailable'
     assert bedrock['image_input'] is True
@@ -671,7 +739,7 @@ def test_capabilities_expose_the_repository_published_model_catalogue(
 def test_v6_binding_manifest_installs_a_real_manual_rollback_release() -> None:
     bindings = (
         _binding('qwen-local', prompt_version='northwind-fnol-claimant-v6'),
-        _binding('nowcoding-gpt55', prompt_version='northwind-fnol-claimant-v6'),
+        _binding('openrouter-gpt4o-mini', prompt_version='northwind-fnol-claimant-v6'),
     )
     settings = Settings(
         environment='test',

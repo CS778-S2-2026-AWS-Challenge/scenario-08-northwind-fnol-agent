@@ -12,7 +12,6 @@ from backend.domain.agent_context_runtime import (
     ContextPlan,
     ContextReference,
     TurnRoute,
-    TurnTask,
     VerifiedConversationSummary,
 )
 from backend.domain.models import MessageRecord, MessageVisibility, NeededFor
@@ -50,7 +49,6 @@ def _claim_projection(
             'value': field.value,
             'status': field.status.value,
             'precision': field.precision.value,
-            'source_refs': field.source_refs,
         }
         for code, field in claim.form.items()
         if code in allowed_fields and field.needed_for is NeededFor.CURRENT_ACTION
@@ -59,6 +57,10 @@ def _claim_projection(
         'claim_id': claim.claim_id,
         'revision': claim.revision,
         'product_family': route.product_family,
+        'family_resolution': route.family_resolution,
+        'handoff_open': bool(getattr(context, 'open_handoffs', ())),
+        'safety_interrupt': (getattr(getattr(context, 'safety_interrupt', None), 'kind', None)),
+        'eligible_services': _external_service_projection(context, route),
         'workflow_state': claim.claim_state.workflow_state.value,
         'next_action': claim.claim_state.next_action.value,
         'current_fields': current_fields,
@@ -66,9 +68,12 @@ def _claim_projection(
         'requirements': (
             {
                 'satisfied': branch.requirements.satisfied,
+                'recorded': branch.requirements.recorded,
                 'missing_required_now': branch.requirements.missing_required_now,
+                'missing_by_branch': branch.requirements.missing_by_branch,
                 'next_required_item': branch.requirements.next_required_item,
                 'ready': branch.requirements.ready,
+                'ready_pending_confirmation': branch.requirements.ready_pending_confirmation,
             }
             if branch is not None
             else {}
@@ -78,37 +83,19 @@ def _claim_projection(
 
 
 def _external_service_projection(context: AgentTurnContext, route: TurnRoute) -> list[object]:
-    if route.task is not TurnTask.EXTERNAL_SUPPORT:
+    if getattr(context, 'open_handoffs', ()):
         return []
     matched: list[object] = []
-    requested = {item.casefold() for item in route.capability_ids}
+    eligible_ids = getattr(context, 'eligible_service_ids', None)
     for service in context.external_services:
-        searchable_identity = ' '.join(
-            value
-            for value in (
-                service.service_identity,
-                service.catalogue_reference,
-                service.service_name,
-                service.purpose,
-                service.requested_action,
-                service.access_form,
-            )
-            if value
-        ).casefold()
-        if requested and not any(capability in searchable_identity for capability in requested):
+        if eligible_ids is not None and service.service_identity not in eligible_ids:
             continue
         matched.append(
             {
                 'service_identity': service.service_identity,
                 'claimant_purpose': service.purpose,
-                'supported_action': service.requested_action,
-                'required_consent_scope': list(service.disclosure_fields),
-                'current_status': service.operation_status.value,
-                'next_allowed_action': service.next_action,
             }
         )
-        if len(matched) == 3:
-            break
     return matched
 
 
@@ -253,7 +240,13 @@ def _catalogue(
             )
         )
     services = _external_service_projection(context, route)
-    if services:
+    # v8 includes the complete eligible set in claim.current.  Do not pay for a
+    # second copy of the same catalogue in a separate context section.
+    v8 = (
+        context.runtime_policy is not None
+        and context.runtime_policy.instruction.prompt_version == 'northwind-fnol-claimant-v8'
+    )
+    if services and not v8:
         values['external.services'] = services
         entries.append(
             ContextCatalogueEntry(

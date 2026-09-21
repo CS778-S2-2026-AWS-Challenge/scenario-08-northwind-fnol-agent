@@ -234,6 +234,10 @@ def resolve_form_change(
         confidence=proposal.confidence,
         resolution_state=resolution,
         precision=precision,
+        normalised=(
+            proposal.reported_text is not None
+            and str(proposal.value).strip() != proposal.reported_text.strip()
+        ),
         current_assertion_id=assertion.assertion_id,
         assertions=[*history, assertion],
         updated_at=timestamp,
@@ -366,7 +370,11 @@ def resolve_contents_item_change(
             status=accepted_status,
             needed_for=NeededFor.CURRENT_ACTION,
             confidence=proposal.confidence,
-            resolution_state=FactResolutionState.NEEDS_CONFIRMATION,
+            resolution_state=(
+                FactResolutionState.RESOLVED
+                if accepted_status is FormStatus.CONFIRMED
+                else FactResolutionState.NEEDS_CONFIRMATION
+            ),
             current_assertion_id=assertion.assertion_id,
             assertions=[assertion],
             updated_at=timestamp,
@@ -422,7 +430,11 @@ def resolve_contents_item_change(
             'status': accepted_status,
             'needed_for': NeededFor.CURRENT_ACTION,
             'confidence': proposal.confidence,
-            'resolution_state': FactResolutionState.NEEDS_CONFIRMATION,
+            'resolution_state': (
+                FactResolutionState.RESOLVED
+                if accepted_status is FormStatus.CONFIRMED
+                else FactResolutionState.NEEDS_CONFIRMATION
+            ),
             'current_assertion_id': assertion.assertion_id,
             'assertions': [*history, assertion],
             'updated_at': timestamp,

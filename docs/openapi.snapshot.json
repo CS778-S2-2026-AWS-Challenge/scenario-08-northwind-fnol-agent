@@ -3381,6 +3381,19 @@
             "title": "Pending Owner",
             "type": "string"
           },
+          "presentation": {
+            "default": "consent_request",
+            "enum": [
+              "info_link",
+              "action_button",
+              "consent_request",
+              "tracked_task",
+              "agent_assisted",
+              "status_update"
+            ],
+            "title": "Presentation",
+            "type": "string"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
@@ -3601,6 +3614,17 @@
           "actor": {
             "$ref": "#/components/schemas/ActorType"
           },
+          "client_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Message Id"
+          },
           "content": {
             "title": "Content",
             "type": "object"
@@ -3638,6 +3662,16 @@
           "message_id": {
             "title": "Message Id",
             "type": "string"
+          },
+          "recovery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantTurnRecovery"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3805,7 +3839,7 @@
             "type": "string"
           },
           "model_profile_id": {
-            "default": "qwen-local",
+            "default": "openrouter-gpt4o-mini",
             "maxLength": 100,
             "minLength": 1,
             "title": "Model Profile Id",
@@ -3836,6 +3870,45 @@
           "last_active_at"
         ],
         "title": "ClaimantSession",
+        "type": "object"
+      },
+      "ClaimantTurnRecovery": {
+        "additionalProperties": false,
+        "properties": {
+          "claimant_projection": {
+            "title": "Claimant Projection",
+            "type": "string"
+          },
+          "continuation": {
+            "const": "runtime.fail_safe",
+            "title": "Continuation",
+            "type": "string"
+          },
+          "resume_entrypoint": {
+            "const": "submit_message",
+            "title": "Resume Entrypoint",
+            "type": "string"
+          },
+          "resume_triggers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Resume Triggers",
+            "type": "array"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_id",
+          "continuation",
+          "claimant_projection",
+          "resume_triggers",
+          "resume_entrypoint"
+        ],
+        "title": "ClaimantTurnRecovery",
         "type": "object"
       },
       "CollaborationMutationResponse": {
@@ -9361,6 +9434,18 @@
             "title": "Message Id",
             "type": "string"
           },
+          "recovery_rule_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Rule Id"
+          },
           "session_id": {
             "title": "Session Id",
             "type": "string"
@@ -9451,6 +9536,16 @@
           },
           "primary_action": {
             "$ref": "#/components/schemas/ClaimantPrimaryAction"
+          },
+          "recovery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantTurnRecovery"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "session_id": {
             "title": "Session Id",
@@ -10732,6 +10827,11 @@
             "title": "Asked At",
             "type": "string"
           },
+          "during_handoff": {
+            "default": false,
+            "title": "During Handoff",
+            "type": "boolean"
+          },
           "field_codes": {
             "items": {
               "type": "string"
@@ -11256,6 +11356,7 @@
             "type": "integer"
           },
           "output_limit": {
+            "maximum": 6000.0,
             "minimum": 1.0,
             "title": "Output Limit",
             "type": "integer"
@@ -11344,6 +11445,13 @@
             "title": "Current Action Total",
             "type": "integer"
           },
+          "missing_by_branch": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Missing By Branch",
+            "type": "array"
+          },
           "missing_required_now": {
             "items": {
               "type": "string"
@@ -11373,6 +11481,18 @@
             "default": false,
             "title": "Ready",
             "type": "boolean"
+          },
+          "ready_pending_confirmation": {
+            "default": false,
+            "title": "Ready Pending Confirmation",
+            "type": "boolean"
+          },
+          "recorded": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Recorded",
+            "type": "array"
           },
           "satisfied": {
             "items": {
@@ -13031,6 +13151,11 @@
           "needed_for": {
             "$ref": "#/components/schemas/NeededFor"
           },
+          "normalised": {
+            "default": false,
+            "title": "Normalised",
+            "type": "boolean"
+          },
           "precision": {
             "$ref": "#/components/schemas/FactPrecision",
             "default": "exact"
@@ -13118,6 +13243,11 @@
           },
           "needed_for": {
             "$ref": "#/components/schemas/NeededFor"
+          },
+          "normalised": {
+            "default": false,
+            "title": "Normalised",
+            "type": "boolean"
           },
           "precision": {
             "$ref": "#/components/schemas/FactPrecision",

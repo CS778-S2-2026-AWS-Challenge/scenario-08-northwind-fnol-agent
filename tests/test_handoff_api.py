@@ -1,7 +1,46 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.domain.models import CustomerNextStep, ResponsibleParty, WorkflowState
 from backend.repositories.fixture import FixtureRepository
+
+
+def test_support_request_preserves_created_claim_progress(
+    client: TestClient, auth_headers: dict[str, str], repository: FixtureRepository
+) -> None:
+    created = create_claim(client, auth_headers, 'created-support')
+    claim_id = created['claim']['claim_id']  # type: ignore[index]
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    completed = claim.model_copy(
+        update={
+            'revision': claim.revision + 1,
+            'claim_state': claim.claim_state.model_copy(
+                update={'workflow_state': WorkflowState.CREATED}
+            ),
+            'customer_next_step': CustomerNextStep(
+                status='claim_created',
+                summary='Claim created.',
+                responsible_party=ResponsibleParty.SYSTEM,
+            ),
+        }
+    )
+    repository.save_claim(completed, claim.revision)
+    response = client.post(
+        f'/api/v1/claims/{claim_id}/support-requests',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'created-support-request',
+            'If-Match': str(completed.revision),
+        },
+        json={'reason': 'I need help after submitting.', 'support_need': 'human_requested'},
+    )
+    assert response.status_code == 201, response.text
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    assert stored.claim_state.workflow_state is WorkflowState.CREATED
+    assert stored.customer_next_step == completed.customer_next_step
+    assert len(repository.list_handoffs(claim_id, claim.customer_id)) == 1
 
 
 def create_claim(client: TestClient, headers: dict[str, str], key: str) -> dict[str, object]:
@@ -227,7 +266,8 @@ def test_explicit_human_request_preserves_confirmed_context(
         key='continued-human-message',
         revision=int(str(turn['claim_revision'])),
     )
-    assert continued['decision'] is None
+    assert continued['decision'] is not None
+    assert continued['agent_message'] is not None
     assert continued['primary_action']['claim_revision'] == continued['claim_revision']  # type: ignore[index]
     assert continued['primary_action']['action_code'] == 'claimant.continue_conversation'  # type: ignore[index]
     stored_continued = repository.get_message(

@@ -167,7 +167,7 @@ def _runtime_policy(snapshot: RuntimeConfigurationSnapshot) -> RuntimeAgentPolic
             policy_version='test-v7',
             allowed_action_codes=list(registered_actions()),
             allowed_tool_names=list(registered_agent_tool_names()),
-            request_profiles=list(registered_request_profiles()),
+            request_profiles=list(registered_request_profiles('northwind-fnol-claimant-v7')),
             provider_capabilities={'qwen-local': provider_capability(model_configuration)},
             schema_registry=load_response_schemas(),
         ),

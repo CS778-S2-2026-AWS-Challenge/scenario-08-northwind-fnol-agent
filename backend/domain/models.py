@@ -508,6 +508,7 @@ class StructuredFormField(ContractModel):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     resolution_state: FactResolutionState | None = None
     precision: FactPrecision = FactPrecision.EXACT
+    normalised: bool = False
     current_assertion_id: str | None = Field(default=None, max_length=120)
     assertions: list[FactAssertion] = Field(default_factory=list)
     updated_at: datetime
@@ -975,6 +976,7 @@ class QuestionRecord(ContractModel):
     field_codes: list[str] = Field(default_factory=list)
     purpose: str = Field(min_length=1, max_length=120)
     repeated: bool = False
+    during_handoff: bool = False
     asked_at: datetime
 
 
@@ -1073,6 +1075,15 @@ class MessageRecord(ContractModel):
     created_at: datetime
 
 
+class ConfirmationRequestRecord(ContractModel):
+    confirmation_id: str
+    claim_id: str
+    claim_revision: int = Field(ge=1)
+    field_codes: list[str]
+    shown_values_fingerprint: str
+    created_at: datetime
+
+
 class StateChange(ContractModel):
     path: str = Field(min_length=1, max_length=200)
     to: Any
@@ -1147,7 +1158,8 @@ class RuntimeTraceRecord(ContractModel):
     model_profile_id: str
     trigger_message_id: str
     evidence: list[RuntimeEvidenceTrace] = Field(default_factory=list, max_length=20)
-    invocations: list[RuntimeInvocationTrace] = Field(min_length=1, max_length=2)
+    invocations: list[RuntimeInvocationTrace] = Field(min_length=0, max_length=2)
+    deterministic_response_id: str | None = Field(default=None, max_length=120)
     tool_call_id: str | None = None
     tool_name: str | None = Field(
         default=None,
@@ -2172,6 +2184,8 @@ class ClaimantMessage(ContractModel):
     content: dict[str, Any]
     evidence_refs: list[str] = Field(default_factory=list)
     in_reply_to: str | None = None
+    client_message_id: str | None = None
+    recovery: 'ClaimantTurnRecovery | None' = None
     message_actions: list[ClaimantExternalServiceAction] = Field(default_factory=list)
     created_at: datetime
 
@@ -2190,6 +2204,14 @@ class ClaimantDecision(ContractModel):
     customer_next_step: CustomerNextStep
 
 
+class ClaimantTurnRecovery(ContractModel):
+    rule_id: str
+    continuation: Literal['runtime.fail_safe']
+    claimant_projection: str
+    resume_triggers: list[str]
+    resume_entrypoint: Literal['submit_message']
+
+
 class MessageTurnResponse(ContractModel):
     claim_id: str
     session_id: str
@@ -2202,6 +2224,7 @@ class MessageTurnResponse(ContractModel):
     handoff: ClaimantHandoff | None = None
     dynamic_form: 'DynamicFormProjection | None' = None
     primary_action: ClaimantPrimaryAction
+    recovery: ClaimantTurnRecovery | None = None
 
 
 class MessageListResponse(ContractModel):

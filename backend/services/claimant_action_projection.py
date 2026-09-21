@@ -77,7 +77,10 @@ def project_claimant_primary_action(
             execution_boundary=definition.execution_boundary,
         )
 
-    if next_step.status == 'confirmation_required' and next_step.required_items:
+    if (
+        next_step.status in {'confirmation_requested', 'confirmation_required'}
+        and next_step.required_items
+    ):
         definition = claimant_action_contract('claimant.review_details')
         available = True
     else:

@@ -143,7 +143,7 @@ def repository_v7_values(
             'allowed_action_codes': list(registered_actions()),
             'allowed_tool_names': list(registered_agent_tool_names()),
             'request_profiles': [
-                item.model_dump(mode='json') for item in registered_request_profiles()
+                item.model_dump(mode='json') for item in registered_request_profiles(prompt_version)
             ],
             'provider_capabilities': {
                 profile_id: provider_capability(
@@ -323,14 +323,7 @@ def install_initial_runtime_release(
         else _REQUIRED_V6_MODEL_PROFILES
     )
     profile_ids = {binding.profile_id for binding in bindings}
-    required_profile_aliases = {
-        'openrouter-gpt4o-mini': frozenset({'openrouter-gpt4o-mini', 'nowcoding-gpt55'}),
-    }
-    missing_profiles = {
-        profile
-        for profile in required_profiles
-        if not (profile_ids & required_profile_aliases.get(profile, frozenset({profile})))
-    }
+    missing_profiles = required_profiles - profile_ids
     if missing_profiles:
         missing = ', '.join(sorted(missing_profiles))
         raise ValueError(f'The initial Runtime release is missing required models: {missing}.')

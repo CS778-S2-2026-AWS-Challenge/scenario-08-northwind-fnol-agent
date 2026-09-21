@@ -13,6 +13,7 @@ from backend.domain.models import (
     MessageVisibility,
     PageInfo,
 )
+from backend.domain.recovery_policy_registry import claimant_recovery_projection
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.external_service_offers import message_external_actions
 
@@ -41,6 +42,8 @@ def _claimant_message(message: MessageRecord) -> ClaimantMessage:
         content=message.content,
         evidence_refs=message.evidence_refs,
         in_reply_to=message.in_reply_to,
+        client_message_id=message.client_message_id,
+        recovery=claimant_recovery_projection(message.recovery_rule_id),
         created_at=message.created_at,
     )
 
@@ -119,6 +122,9 @@ def list_claim_messages(
         ),
         key=_message_key,
     )
+    answered_ids = {
+        message.in_reply_to for message in visible_messages if message.actor is ActorType.AGENT
+    }
     if before is not None:
         visible_messages = [message for message in visible_messages if message.created_at < before]
     if after is not None:
@@ -141,11 +147,16 @@ def list_claim_messages(
         items=[
             _claimant_message(message).model_copy(
                 update={
+                    'recovery': (
+                        None
+                        if message.message_id in answered_ids
+                        else claimant_recovery_projection(message.recovery_rule_id)
+                    ),
                     'message_actions': (
                         message_external_actions(repository, claim, message.message_id)
                         if claim is not None and message.actor is ActorType.AGENT
                         else []
-                    )
+                    ),
                 }
             )
             for message in page_messages

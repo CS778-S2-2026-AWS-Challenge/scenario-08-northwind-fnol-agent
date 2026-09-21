@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import Literal
 
+from backend.domain.agent_context_runtime import TurnFamilyResolution
 from backend.domain.field_registry import FIELD_REGISTRY_VERSION, REGISTERED_FIELD_CODES
 from backend.domain.models import (
     AgentAction,
@@ -19,11 +22,13 @@ from backend.domain.models import (
     TemporalFactValue,
     WorkingClaim,
 )
+from backend.domain.safety_vocabulary import WEAK_SAFETY_NEGATION_PATTERN, WEAK_SAFETY_PATTERN
 from backend.domain.support_intent import (
     SupportIntent,
     detect_support_intent,
     support_need_for_intent,
 )
+from backend.services.turn_family_resolution import resolve_turn_family
 
 BRANCH_RULES_VERSION = 'vp-dynamic-form-branch-rules-v2'
 FAMILY_NAMES = ('motor', 'home', 'contents')
@@ -41,6 +46,7 @@ CONDITIONAL_TRANSITION_STATUS = {
     'accommodation.temporary': 'exited',
     'contents.theft': 'suspended',
     'safety.injury_or_danger': 'suspended',
+    'injury.details': 'suspended',
     'mitigation.emergency': 'exited',
     'professional_review': 'exited',
     'human_support': 'exited',
@@ -64,13 +70,13 @@ COMMON_FIELDS = frozenset(
         'incident.cause',
         'loss.description',
         'parties.other_parties',
+        'authorities.emergency_services_notified',
     }
 )
 FAMILY_FIELDS = {
     'motor': frozenset(
         {
             'authorities.police_report_reference',
-            'authorities.emergency_services_notified',
             'vehicle.registration',
             'vehicle.damage_description',
             'vehicle.drivable',
@@ -94,6 +100,9 @@ REQUIREMENT_PRIORITY = (
     'claim.product_family',
     'incident.description',
     'incident.injury_or_danger',
+    'injury.persons_affected',
+    'injury.severity_reported',
+    'injury.medical_attention',
     'incident.occurred_at',
     'incident.location',
     'loss.description',
@@ -105,6 +114,8 @@ REQUIREMENT_PRIORITY = (
     'property.ongoing_risk',
     'property.habitable',
     'contents.items',
+    'theft.entry_context',
+    'incident.discovered_at',
 )
 COMMON_REQUIRED = frozenset(
     {
@@ -130,13 +141,10 @@ FAMILY_REQUIRED = {
 }
 SYSTEM_OWNED_FIELDS = frozenset({'claimant.client_number'})
 CLAIMANT_HIDDEN_FIELDS = frozenset({'claimant.client_number'})
-FAMILY_PATTERNS = {
-    'motor': re.compile(
-        r'\b(car|vehicle|motor|driv(?:e|ing)|collision|crash|road|traffic)\b', re.I
-    ),
-    'home': re.compile(r'\b(home|house|property|roof|room|building|pipe|flood|storm)\b', re.I),
-    'contents': re.compile(r'\b(contents|belongings|item|laptop|phone|stolen|theft|lost)\b', re.I),
-}
+BranchKind = Literal['fact', 'workflow', 'record', 'projection']
+CollectionDeadline = Literal[
+    'required_now', 'before_creation', 'before_dispatch', 'optional', 'staff_only'
+]
 
 FIELD_VALUE_CONTRACTS: dict[str, tuple[str, frozenset[str]]] = {
     'policy.policy_number': ('text', frozenset()),
@@ -206,6 +214,11 @@ class ContentBranch:
     rule_id: str
     family: str | None
     fields: frozenset[str]
+    kind: BranchKind = 'projection'
+    collection_policy: Mapping[str, CollectionDeadline] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    record_intents: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +270,10 @@ def build_default_registry() -> BranchRegistrySnapshot:
             rule_id=FAMILY_RULE_IDS[family],
             family=family,
             fields=frozenset((COMMON_FIELDS | FAMILY_FIELDS[family]) & executable_codes),
+            kind='fact',
+            collection_policy=MappingProxyType(
+                dict.fromkeys(FAMILY_REQUIRED[family], 'required_now')
+            ),
         )
         for family in FAMILY_NAMES
     ]
@@ -267,12 +284,17 @@ def build_default_registry() -> BranchRegistrySnapshot:
                 'BR-COLLISION-001',
                 None,
                 frozenset({'parties.other_parties'} & executable_codes),
+                kind='fact',
+                collection_policy=MappingProxyType({'parties.other_parties': 'required_now'}),
+                record_intents=('motor_other_driver',),
             ),
             ContentBranch(
                 'participant.another_party',
                 'BR-PARTICIPANT-OTHER-001',
                 None,
                 frozenset({'parties.other_parties'} & executable_codes),
+                kind='record',
+                record_intents=('motor_other_driver',),
             ),
             ContentBranch('participant.witness', 'BR-PARTICIPANT-WITNESS-001', None, frozenset()),
             ContentBranch(
@@ -286,20 +308,49 @@ def build_default_registry() -> BranchRegistrySnapshot:
                     }
                     & executable_codes
                 ),
+                kind='record',
+                collection_policy=MappingProxyType(
+                    {'authorities.police_report_reference': 'optional'}
+                ),
+                record_intents=('evidence_pending_police_report',),
             ),
             ContentBranch(
                 'evidence.pending',
                 'BR-EVIDENCE-PENDING-001',
                 None,
                 frozenset({'authorities.police_report_reference'} & executable_codes),
+                kind='record',
             ),
-            ContentBranch('accommodation.temporary', 'BR-ACCOMMODATION-001', 'home', frozenset()),
-            ContentBranch('contents.theft', 'BR-THEFT-001', None, frozenset()),
+            ContentBranch(
+                'accommodation.temporary',
+                'BR-ACCOMMODATION-001',
+                'home',
+                frozenset(),
+                kind='record',
+                record_intents=('accommodation_work_item',),
+            ),
+            ContentBranch(
+                'contents.theft',
+                'BR-THEFT-001',
+                None,
+                frozenset(
+                    {'theft.entry_context', 'incident.discovered_at', 'contents.police_reference'}
+                ),
+                kind='fact',
+                collection_policy=MappingProxyType(
+                    {
+                        'theft.entry_context': 'required_now',
+                        'incident.discovered_at': 'before_creation',
+                        'contents.police_reference': 'optional',
+                    }
+                ),
+            ),
             ContentBranch(
                 'safety.injury_or_danger',
                 'BR-SAFETY-001',
                 None,
                 frozenset({'incident.injury_or_danger'} & executable_codes),
+                kind='workflow',
             ),
             ContentBranch(
                 'injury.details',
@@ -313,10 +364,29 @@ def build_default_registry() -> BranchRegistrySnapshot:
                     }
                     & executable_codes
                 ),
+                kind='fact',
+                collection_policy=MappingProxyType(
+                    {
+                        'injury.persons_affected': 'required_now',
+                        'injury.severity_reported': 'required_now',
+                        'injury.medical_attention': 'before_creation',
+                    }
+                ),
             ),
-            ContentBranch('mitigation.emergency', 'BR-MITIGATION-001', None, frozenset()),
-            ContentBranch('professional_review', 'BR-REVIEW-001', None, frozenset()),
-            ContentBranch('human_support', 'BR-HUMAN-SUPPORT-001', None, frozenset()),
+            ContentBranch(
+                'mitigation.emergency',
+                'BR-MITIGATION-001',
+                None,
+                frozenset(),
+                kind='record',
+                record_intents=('mitigation_work_item',),
+            ),
+            ContentBranch(
+                'professional_review', 'BR-REVIEW-001', None, frozenset(), kind='workflow'
+            ),
+            ContentBranch(
+                'human_support', 'BR-HUMAN-SUPPORT-001', None, frozenset(), kind='workflow'
+            ),
         ]
     )
     return BranchRegistrySnapshot(
@@ -350,11 +420,12 @@ class BranchRuleEvaluator:
         current_action: AgentAction | str | None = None,
         recomputation_reason: str = 'turn',
         previous_evaluation: BranchEvaluationRecord | None = None,
+        family_resolution: TurnFamilyResolution | None = None,
     ) -> BranchEvaluationResult:
         text = latest_message or ''
         support_intent = detect_support_intent(text)
         selected_family, family_candidates, family_sources = self._family_state(
-            claim, text, trigger_source_refs
+            claim, family_resolution or resolve_turn_family(claim, None, text), trigger_source_refs
         )
         unresolved_conflict = (
             sorted(family_candidates)
@@ -391,6 +462,7 @@ class BranchRuleEvaluator:
             branch_results,
             previous_evaluation,
             trigger_source_refs,
+            claim,
         )
         branch_results = [self._apply_controlled_rule_policy(result) for result in branch_results]
         active = [result.branch_id for result in branch_results if result.status == 'active']
@@ -401,28 +473,61 @@ class BranchRuleEvaluator:
         permitted_fields = set(COMMON_FIELDS & self.registry.field_codes)
         for branch_id in active:
             permitted_fields.update(self.registry.branch_by_id[branch_id].fields)
+            permitted_fields.difference_update(
+                code
+                for code, deadline in self.registry.branch_by_id[
+                    branch_id
+                ].collection_policy.items()
+                if deadline == 'staff_only'
+            )
         if selected_family is None and len(family_candidates) == 1:
             candidate_family = next(iter(family_candidates))
             permitted_fields.update(FAMILY_FIELDS[candidate_family] & self.registry.field_codes)
 
-        selections = [
-            self._select_field(
-                definition,
-                permitted_fields,
-                claim,
-                selected_family,
-                family_candidates,
-                current_action,
-            )
-            for definition in self.registry.fields
-        ]
-        requirements = self._requirements(
-            claim,
-            selected_family=selected_family,
-            unresolved_family_conflict=unresolved_conflict,
-            selections=selections,
-            active_branches=active,
+        required_now = self._required_set(selected_family, active)
+        previously_active = (
+            {
+                result.branch_id
+                for result in previous_evaluation.branch_results
+                if result.status == 'active'
+            }
+            if previous_evaluation is not None
+            and previous_evaluation.branch_rules_version == self.registry.branch_rules_version
+            else set()
         )
+        newly_active = frozenset(set(active) - previously_active)
+
+        def project_requirements(
+            required: frozenset[str],
+        ) -> tuple[list[FieldSelectionResult], RequirementResolution]:
+            selections = [
+                self._select_field(
+                    definition,
+                    permitted_fields,
+                    claim,
+                    selected_family,
+                    family_candidates,
+                    current_action,
+                    required,
+                )
+                for definition in self.registry.fields
+            ]
+            return selections, self._requirements(
+                claim,
+                selected_family=selected_family,
+                unresolved_family_conflict=unresolved_conflict,
+                selections=selections,
+                active_branches=active,
+                required=required,
+                newly_active_branches=newly_active,
+            )
+
+        selections, requirements = project_requirements(required_now)
+        before_creation = self._required_set(selected_family, active, 'before_creation')
+        if before_creation and (
+            current_action == AgentAction.CREATE_CLAIM or not requirements.missing_required_now
+        ):
+            selections, requirements = project_requirements(required_now | before_creation)
         return BranchEvaluationResult(
             claim_id=claim.claim_id,
             evaluated_against_claim_revision=claim.revision,
@@ -436,7 +541,12 @@ class BranchRuleEvaluator:
             exited_branches=exited,
             branch_results=branch_results,
             field_selection=selections,
-            work_item_intents=self._work_item_intents(selections),
+            work_item_intents=self._work_item_intents(selections)
+            + [
+                {'type': intent, 'branch_id': branch_id}
+                for branch_id in active
+                for intent in self.registry.branch_by_id[branch_id].record_intents
+            ],
             handoff_intents=self._handoff_intents(
                 claim,
                 support_intent,
@@ -482,40 +592,25 @@ class BranchRuleEvaluator:
         return result
 
     def _family_state(
-        self, claim: WorkingClaim, text: str, trigger_source_refs: Sequence[str]
+        self,
+        claim: WorkingClaim,
+        resolution: TurnFamilyResolution,
+        trigger_source_refs: Sequence[str],
     ) -> tuple[str | None, set[str], dict[str, list[str]]]:
-        authoritative: set[str] = set()
-        candidates: set[str] = set()
+        candidates: set[str] = set(resolution.candidate_families)
+        selected: str | None = (
+            resolution.product_family if resolution.status == 'authoritative' else None
+        )
         sources: dict[str, list[str]] = {family: [] for family in FAMILY_NAMES}
         product_family_field = claim.form.get('claim.product_family')
-        form_family: str | None = None
         if product_family_field is not None and isinstance(product_family_field.value, str):
             normalised = product_family_field.value.strip().lower()
             if normalised in FAMILY_NAMES:
-                form_family = normalised
-                sources[form_family].extend(product_family_field.source_refs)
-                if product_family_field.status is FormStatus.CONFIRMED:
-                    authoritative.add(form_family)
-                elif product_family_field.status in {FormStatus.PROPOSED, FormStatus.DISPUTED}:
-                    candidates.add(form_family)
-
-        canonical_family = (
-            claim.incident_type.strip().lower()
-            if isinstance(claim.incident_type, str)
-            and claim.incident_type.strip().lower() in FAMILY_NAMES
-            else None
-        )
-        if canonical_family is not None:
-            authoritative.add(canonical_family)
-            sources[canonical_family].append(f'claim:{claim.claim_id}:incident_type')
-
-        for family, pattern in FAMILY_PATTERNS.items():
-            if pattern.search(text):
-                candidates.add(family)
-                sources[family].extend(trigger_source_refs)
-        selected = next(iter(authoritative)) if len(authoritative) == 1 else None
-        if len(authoritative) > 1:
-            candidates.update(authoritative)
+                sources[normalised].extend(product_family_field.source_refs)
+        if claim.incident_type in FAMILY_NAMES:
+            sources[claim.incident_type].append(f'claim:{claim.claim_id}:incident_type')
+        for family in candidates:
+            sources[family].extend(trigger_source_refs)
         if selected is not None:
             candidates.discard(selected)
         for family in sources:
@@ -704,12 +799,10 @@ class BranchRuleEvaluator:
 
         safety_state = claim.claim_state.urgency.value in {'urgent', 'immediate_safety_risk'}
         safety_fact = self._confirmed_truthy(claim, 'incident.injury_or_danger')
-        safety_text = bool(
-            re.search(r'\b(injur(?:y|ed)|hurt|danger|unsafe|emergency)\b', text, re.I)
-        )
+        safety_text = bool(re.search(rf'\b{WEAK_SAFETY_PATTERN}\b', text, re.I))
         safety_negated = bool(
             re.search(
-                r'\b(no one|nobody|not)\s+(?:was\s+)?(?:injured|hurt|in danger)\b', text, re.I
+                rf'\b(no one|nobody|not)\s+(?:was\s+)?{WEAK_SAFETY_NEGATION_PATTERN}\b', text, re.I
             )
         )
         if safety_state or safety_fact:
@@ -729,7 +822,7 @@ class BranchRuleEvaluator:
                 'The claimant message may describe an injury or continuing danger.',
             )
 
-        if safety_fact or safety_state:
+        if safety_fact:
             add(
                 'injury.details',
                 'active',
@@ -779,23 +872,64 @@ class BranchRuleEvaluator:
             )
         return results
 
-    @staticmethod
     def _reconcile_previous_conditional_branches(
+        self,
         current_results: list[BranchResult],
         previous_evaluation: BranchEvaluationRecord | None,
         trigger_source_refs: Sequence[str],
+        claim: WorkingClaim,
     ) -> list[BranchResult]:
-        if previous_evaluation is None:
+        if (
+            previous_evaluation is None
+            or previous_evaluation.branch_rules_version != self.registry.branch_rules_version
+        ):
             return current_results
-        current_branch_ids = {result.branch_id for result in current_results}
+        current_by_id = {result.branch_id: result for result in current_results}
         reconciled = list(current_results)
         for previous in previous_evaluation.branch_results:
             transition_status = CONDITIONAL_TRANSITION_STATUS.get(previous.branch_id)
+            if transition_status is None or previous.status not in {'active', 'candidate'}:
+                continue
+            current = current_by_id.get(previous.branch_id)
+            if current is not None and current.status != 'candidate':
+                continue
+            branch = self.registry.branch_by_id.get(previous.branch_id)
+            keep = (
+                branch is not None
+                and previous.status == 'active'
+                and any(
+                    code in claim.form
+                    and claim.form[code].status in {FormStatus.PROPOSED, FormStatus.CONFIRMED}
+                    for code in branch.collection_policy
+                )
+            )
+            # A source-backed trigger correction overrides retained leaf values.
+            trigger_code, expected = {
+                'injury.details': ('incident.injury_or_danger', True),
+                'contents.theft': ('incident.type', 'theft'),
+                'incident.collision': ('incident.type', 'collision'),
+            }.get(previous.branch_id, ('', None))
+            trigger = claim.form.get(trigger_code)
             if (
-                transition_status is None
-                or previous.status not in {'active', 'candidate'}
-                or previous.branch_id in current_branch_ids
+                trigger is not None
+                and trigger.status is FormStatus.CONFIRMED
+                and trigger.value != expected
             ):
+                keep = False
+            if keep and branch is not None:
+                reconciled = [
+                    result for result in reconciled if result.branch_id != branch.branch_id
+                ]
+                reconciled.append(
+                    self._branch_result(
+                        branch,
+                        'active',
+                        'Previously active branch retains recorded facts across turns.',
+                        previous.source_refs,
+                    )
+                )
+                continue
+            if current is not None:
                 continue
             reconciled.append(
                 previous.model_copy(
@@ -860,6 +994,7 @@ class BranchRuleEvaluator:
         selected_family: str | None,
         family_candidates: set[str],
         current_action: AgentAction | str | None,
+        required: frozenset[str],
     ) -> FieldSelectionResult:
         stored = claim.form.get(definition.code)
         value_state = stored.status if stored is not None else FormStatus.MISSING
@@ -879,10 +1014,13 @@ class BranchRuleEvaluator:
         elif definition.code.endswith('police_report_reference') and self._police_pending(claim):
             selection_state = FieldSelectionState.PENDING_LATER
             reason = 'The required material is recorded as pending for a later action.'
-        elif value_state is FormStatus.CONFIRMED:
+        elif definition.code == 'claim.product_family' and selected_family is not None:
             selection_state = FieldSelectionState.CANDIDATE_NOW
-            reason = 'The current requirement is satisfied by an accepted Claim fact.'
-        elif self._required_now(definition.code, selected_family, claim):
+            reason = 'The persisted Claim already supplies the authoritative family.'
+        elif value_state in {FormStatus.CONFIRMED, FormStatus.PROPOSED}:
+            selection_state = FieldSelectionState.CANDIDATE_NOW
+            reason = 'The current requirement already has an accepted or recorded Claim fact.'
+        elif definition.code in required:
             selection_state = FieldSelectionState.REQUIRED_NOW
             reason = (
                 'The field is missing, disputed, or awaiting confirmation for the current '
@@ -899,20 +1037,28 @@ class BranchRuleEvaluator:
             reason=reason,
         )
 
-    @staticmethod
-    def _required_now(code: str, family: str | None, claim: WorkingClaim) -> bool:
-        required = set(COMMON_REQUIRED)
-        if family is not None:
-            required.update(FAMILY_REQUIRED[family])
-        incident_type = claim.form.get('incident.type')
-        if (
-            family == 'motor'
-            and incident_type is not None
-            and incident_type.status is FormStatus.CONFIRMED
-            and incident_type.value == 'collision'
-        ):
-            required.add('parties.other_parties')
-        return code in required
+    def _required_set(
+        self,
+        selected_family: str | None,
+        active_branches: Sequence[str],
+        deadline: CollectionDeadline = 'required_now',
+    ) -> frozenset[str]:
+        """Compute requirements for a collection deadline from active registry policies."""
+        required = set(COMMON_REQUIRED) if deadline == 'required_now' else set()
+        if selected_family is not None and deadline == 'required_now':
+            required.update(FAMILY_REQUIRED[selected_family])
+        for branch_id in active_branches:
+            branch = self.registry.branch_by_id.get(branch_id)
+            if branch is None or branch.kind != 'fact':
+                continue
+            required.update(
+                code for code, policy in branch.collection_policy.items() if policy == deadline
+            )
+        # Contents is a separate typed record, never a generic form field.
+        contents_required = {'contents.items'} & required
+        return frozenset((required - contents_required) & self.registry.field_codes) | frozenset(
+            contents_required
+        )
 
     def _requirements(
         self,
@@ -922,21 +1068,9 @@ class BranchRuleEvaluator:
         unresolved_family_conflict: list[str],
         selections: Sequence[FieldSelectionResult],
         active_branches: Sequence[str],
+        required: frozenset[str],
+        newly_active_branches: frozenset[str],
     ) -> RequirementResolution:
-        required = set(COMMON_REQUIRED)
-        if selected_family is not None:
-            required.update(FAMILY_REQUIRED[selected_family])
-        if 'incident.collision' in active_branches:
-            required.add('parties.other_parties')
-        if 'injury.details' in active_branches:
-            required.update(
-                {
-                    'injury.persons_affected',
-                    'injury.severity_reported',
-                    'injury.medical_attention',
-                }
-            )
-
         selection_by_code = {item.field_code: item for item in selections}
         satisfied: list[str] = []
         recorded: list[str] = []
@@ -951,6 +1085,8 @@ class BranchRuleEvaluator:
             if requirement == 'contents.items':
                 if any(item.status is FormStatus.CONFIRMED for item in claim.contents_items):
                     satisfied.append(requirement)
+                elif any(item.status is FormStatus.PROPOSED for item in claim.contents_items):
+                    recorded.append(requirement)
                 else:
                     missing.append(requirement)
                 continue
@@ -969,13 +1105,39 @@ class BranchRuleEvaluator:
         if selected_family is None and 'claim.product_family' not in missing:
             missing.insert(0, 'claim.product_family')
         missing_by_branch: list[dict[str, object]] = []
-        for branch_id in active_branches:
-            branch = self.registry.branch_by_id.get(branch_id)
-            if branch is None:
-                continue
-            branch_missing = [field for field in branch.fields if field in missing]
+        fact_branches = [
+            self.registry.branch_by_id[branch_id]
+            for branch_id in active_branches
+            if self.registry.branch_by_id[branch_id].kind == 'fact'
+        ]
+
+        def branch_priority(branch: ContentBranch) -> tuple[int, str]:
+            if branch.branch_id == 'injury.details':
+                return (0, branch.branch_id)
+            if (
+                not branch.branch_id.startswith('family.')
+                and branch.branch_id in newly_active_branches
+            ):
+                return (1, branch.branch_id)
+            if branch.branch_id.startswith('family.'):
+                return (2, branch.branch_id)
+            return (3, branch.branch_id)
+
+        ungrouped = set(missing)
+        for branch in sorted(fact_branches, key=branch_priority):
+            # Family branches carry common fields for visibility, not priority.
+            # Collection policies identify their own requirements without duplicates.
+            branch_missing = [
+                code
+                for code in REQUIREMENT_PRIORITY
+                if code in ungrouped and code in branch.collection_policy
+            ]
             if branch_missing:
-                missing_by_branch.append({'branch': branch_id, 'fields': sorted(branch_missing)})
+                missing_by_branch.append({'branch': branch.branch_id, 'fields': branch_missing})
+                ungrouped.difference_update(branch_missing)
+        common_missing = [code for code in missing if code in ungrouped]
+        if common_missing:
+            missing_by_branch.append({'branch': 'common', 'fields': common_missing})
         ready = (
             not missing
             and not recorded
@@ -996,7 +1158,7 @@ class BranchRuleEvaluator:
                 and not unresolved_family_conflict
                 and selected_family is not None
             ),
-            current_action_total=len(satisfied) + len(missing),
+            current_action_total=len(satisfied) + len(recorded) + len(missing),
             current_action_satisfied=len(satisfied),
         )
 

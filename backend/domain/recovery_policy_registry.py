@@ -1,10 +1,12 @@
 """Provider-neutral recovery policy contracts used by claimant Runtime turns."""
 
+from types import MappingProxyType
 from typing import Literal
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
-from backend.domain.models import ContractModel
+from backend.domain.model_gateway import ModelGatewayErrorCode
+from backend.domain.models import ClaimantTurnRecovery, ContractModel
 
 
 class RecoveryTrigger(ContractModel):
@@ -14,6 +16,7 @@ class RecoveryTrigger(ContractModel):
 
 
 class RecoveryRule(ContractModel):
+    model_config = ConfigDict(extra='forbid', frozen=True)
     rule_id: str = Field(min_length=1, max_length=120)
     version: str = Field(min_length=1, max_length=30)
     trigger_source: Literal['model', 'tool', 'retrieval', 'repository', 'external', 'human']
@@ -49,13 +52,44 @@ CLAIMANT_TURN_MODEL_FAILURE_RULE = RecoveryRule(
     audit_event_type='AGENT_TURN_RECOVERY',
 )
 
-RECOVERY_RULES = {CLAIMANT_TURN_MODEL_FAILURE_RULE.rule_id: CLAIMANT_TURN_MODEL_FAILURE_RULE}
+RECOVERY_RULES = MappingProxyType(
+    {CLAIMANT_TURN_MODEL_FAILURE_RULE.rule_id: CLAIMANT_TURN_MODEL_FAILURE_RULE}
+)
 
 
 def classify_recovery(trigger: RecoveryTrigger) -> RecoveryRule:
     for rule in RECOVERY_RULES.values():
-        if rule.trigger_source == trigger.source:
+        if (
+            rule.trigger_source == trigger.source
+            and trigger.outcome_code in {code.value for code in ModelGatewayErrorCode}
+            and trigger.delivery_certain is not True
+        ):
             return rule
     raise UnknownRecoveryTrigger(
         f'No recovery policy is registered for {trigger.source}:{trigger.outcome_code}.'
+    )
+
+
+def preservation_requirements(rule: RecoveryRule) -> str:
+    return rule.preservation
+
+
+def retry_decision(rule: RecoveryRule, trigger: str) -> bool:
+    return trigger in rule.resume_triggers and rule.retry_mode == 'claimant_initiated'
+
+
+def resume_entrypoint(rule: RecoveryRule) -> str:
+    return rule.resume_entrypoint
+
+
+def claimant_recovery_projection(rule_id: str | None) -> ClaimantTurnRecovery | None:
+    rule = RECOVERY_RULES.get(rule_id or '')
+    if rule is None:
+        return None
+    return ClaimantTurnRecovery(
+        rule_id=rule.rule_id,
+        continuation=rule.continuation,
+        claimant_projection=rule.claimant_projection,
+        resume_triggers=sorted(rule.resume_triggers),
+        resume_entrypoint=rule.resume_entrypoint,
     )

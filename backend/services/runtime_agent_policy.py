@@ -227,7 +227,10 @@ class RuntimeAgentPolicyResolver:
         assert isinstance(controlled_rules, ControlledRulesConfiguration)
         assert isinstance(features, AgentFeatureSettingsConfiguration)
 
-        if instruction.prompt_version == 'northwind-fnol-claimant-v7':
+        if instruction.prompt_version in {
+            'northwind-fnol-claimant-v7',
+            'northwind-fnol-claimant-v8',
+        }:
             self._validate_complete_v7_release(
                 snapshot,
                 instruction,
@@ -275,7 +278,7 @@ class RuntimeAgentPolicyResolver:
                 'A published v7 Prompt fragment exceeds budget.'
             )
 
-        expected_profiles = list(registered_request_profiles())
+        expected_profiles = list(registered_request_profiles(instruction.prompt_version))
         if tool_policy.request_profiles != expected_profiles:
             raise RuntimeConfigurationResolutionError(
                 'The v7 Request Profile registry is incomplete or incompatible.'

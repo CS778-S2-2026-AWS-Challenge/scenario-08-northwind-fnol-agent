@@ -16,6 +16,7 @@ from backend.domain.audit import (
 from backend.domain.external_service_registry import (
     ExternalLifecycleStatus,
     build_lifecycle_projection,
+    service_action_presentation,
 )
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
@@ -294,7 +295,7 @@ def claimant_assessor_action(
         catalogue_reference=canonical_projection.catalogue_reference,
         capability_provenance=canonical_projection.provenance.value,
         access_form=canonical_projection.access_form,
-        presentation='tracked_task',
+        presentation=service_action_presentation(ASSESSOR_SERVICE_IDENTITY, status.value),
         status_label=canonical_projection.status_label,
         status_detail=canonical_projection.status_detail,
         pending_owner=canonical_projection.pending_owner,
@@ -429,6 +430,40 @@ def claimant_next_step(
     if replacement is None:
         if action.status in _ANSWERABLE_STATUSES and _assessment_has_come_back(repository, claim):
             replacement = _RESULT_RECEIVED_NEXT_STEP
+        elif (
+            action.status
+            in {
+                ClaimantExternalServiceStatus.ASSIGNED,
+                ClaimantExternalServiceStatus.QUEUED,
+            }
+            and action.routing is not None
+        ):
+            return claim.customer_next_step.model_copy(
+                update={
+                    'status': (
+                        'assessor_assigned'
+                        if action.status is ClaimantExternalServiceStatus.ASSIGNED
+                        else 'awaiting_assessor_assignment'
+                    ),
+                    'summary': action.routing.next_step,
+                    'responsible_party': ResponsibleParty.EXTERNAL_PARTY,
+                    'expected_by': action.routing.expected_by,
+                    'required_items': [],
+                }
+            )
+        elif action.status is ClaimantExternalServiceStatus.READY_TO_REQUEST:
+            return claim.customer_next_step.model_copy(
+                update={
+                    'status': 'assessor_request_ready',
+                    'summary': (
+                        'Your permission is recorded. Northwind can now send the vehicle '
+                        'assessment request.'
+                    ),
+                    'responsible_party': ResponsibleParty.CLAIMANT,
+                    'expected_by': None,
+                    'required_items': [],
+                }
+            )
         else:
             return claim.customer_next_step
     status, summary = replacement
@@ -565,17 +600,18 @@ def grant_assessor_consent(
     updated = claim.model_copy(
         update={
             'external_service_consents': [*claim.external_service_consents, consent],
-            'customer_next_step': CustomerNextStep(
-                status='assessor_request_ready',
-                summary=(
-                    'Your permission is recorded. Northwind can now send the vehicle '
-                    'assessment request.'
-                ),
-                responsible_party=ResponsibleParty.CLAIMANT,
-            ),
             'revision': claim.revision + 1,
             'updated_at': now_utc(),
         }
+    )
+    from backend.services.turn_reducer import apply_progress
+
+    updated = apply_progress(
+        updated,
+        build_applied_branch_evaluation(
+            updated, repository=repository, recomputation_reason='external_consent_progress'
+        ),
+        open_handoffs=tuple(repository.list_handoffs(claim_id, principal.subject)),
     )
     response = _response(repository, updated)
     idempotency = IdempotencyRecord(

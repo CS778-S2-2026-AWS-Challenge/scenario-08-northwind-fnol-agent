@@ -43,6 +43,22 @@ _GOOGLE_PROVIDER_SCHEMA_CONSTRAINTS = frozenset(
 )
 
 
+def _provider_error_type(response: httpx.Response) -> str | None:
+    if response.status_code < 400:
+        return None
+    try:
+        payload = response.json()
+    except (ValueError, json.JSONDecodeError):
+        return None
+    error = payload.get('error') if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return None
+    value = error.get('type') or error.get('code')
+    if isinstance(value, str | int) and re.fullmatch(r'[A-Za-z0-9_.:-]{1,120}', str(value)):
+        return str(value)
+    return None
+
+
 def _google_provider_schema(value: object) -> object:
     if isinstance(value, list):
         return [_google_provider_schema(item) for item in value]
@@ -233,7 +249,7 @@ class OpenAICompatibleModelGateway:
                 provider_model=self._config.model,
             ) from None
 
-        self._raise_for_status(response.status_code)
+        self._raise_for_status(response.status_code, _provider_error_type(response))
         try:
             payload = response.json()
             return self._normalise_response(payload, request, response.headers)
@@ -454,7 +470,7 @@ class OpenAICompatibleModelGateway:
             normalised['additionalProperties'] = False
         return normalised
 
-    def _raise_for_status(self, status_code: int) -> None:
+    def _raise_for_status(self, status_code: int, error_type: str | None = None) -> None:
         if status_code < 400:
             return
         if status_code in {401, 403}:
@@ -462,6 +478,7 @@ class OpenAICompatibleModelGateway:
                 ModelGatewayErrorCode.AUTHENTICATION,
                 provider_model=self._config.model,
                 provider_status=status_code,
+                provider_error_type=error_type,
             )
         if status_code == 429:
             raise ModelGatewayError(
@@ -469,12 +486,14 @@ class OpenAICompatibleModelGateway:
                 retryable=True,
                 provider_model=self._config.model,
                 provider_status=status_code,
+                provider_error_type=error_type,
             )
         raise ModelGatewayError(
             ModelGatewayErrorCode.PROVIDER,
             retryable=status_code >= 500,
             provider_model=self._config.model,
             provider_status=status_code,
+            provider_error_type=error_type,
         )
 
     @staticmethod
@@ -682,7 +701,7 @@ class BedrockConverseModelGateway:
                 provider_model=self._config.model,
             ) from None
 
-        self._raise_for_status(response.status_code)
+        self._raise_for_status(response.status_code, _provider_error_type(response))
         try:
             payload = response.json()
             return self._normalise_response(payload, request, response.headers)
@@ -739,7 +758,7 @@ class BedrockConverseModelGateway:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
         return '\n\n'.join(system_parts), messages
 
-    def _raise_for_status(self, status_code: int) -> None:
+    def _raise_for_status(self, status_code: int, error_type: str | None = None) -> None:
         if status_code < 400:
             return
         if status_code in {401, 403}:
@@ -747,6 +766,7 @@ class BedrockConverseModelGateway:
                 ModelGatewayErrorCode.AUTHENTICATION,
                 provider_model=self._config.model,
                 provider_status=status_code,
+                provider_error_type=error_type,
             )
         if status_code == 429:
             raise ModelGatewayError(
@@ -754,12 +774,14 @@ class BedrockConverseModelGateway:
                 retryable=True,
                 provider_model=self._config.model,
                 provider_status=status_code,
+                provider_error_type=error_type,
             )
         raise ModelGatewayError(
             ModelGatewayErrorCode.PROVIDER,
             retryable=status_code >= 500,
             provider_model=self._config.model,
             provider_status=status_code,
+            provider_error_type=error_type,
         )
 
     def _normalise_response(
@@ -916,7 +938,7 @@ class GoogleGenerateContentModelGateway:
             for call_id in consumed_call_ids:
                 self._tool_continuations.pop(call_id, None)
 
-        self._raise_for_status(response.status_code)
+        self._raise_for_status(response.status_code, _provider_error_type(response))
         try:
             payload = response.json()
             return self._normalise_response(payload, request, response.headers)
@@ -982,7 +1004,15 @@ class GoogleGenerateContentModelGateway:
         # switch provider-specific: sending OpenAI/Qwen-only fields to this
         # endpoint makes an otherwise valid request fail before generation.
         if self._config.reasoning_mode == 'disabled':
-            generation_config['thinkingConfig'] = {'thinkingBudget': 0}
+            # Gemini 3 uses thinkingLevel and rejects a zero thinkingBudget.
+            # The deployed 3.5 Flash Lite profile was verified with minimal;
+            # Gemini 2.5 retains the documented zero-budget contract.
+            thinking_config: dict[str, object] = (
+                {'thinkingLevel': 'minimal'}
+                if self._config.model.startswith('gemini-3')
+                else {'thinkingBudget': 0}
+            )
+            generation_config['thinkingConfig'] = thinking_config
         if generation_config:
             payload['generationConfig'] = generation_config
         if request.tools:
@@ -1134,7 +1164,7 @@ class GoogleGenerateContentModelGateway:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
         return provider_names
 
-    def _raise_for_status(self, status_code: int) -> None:
+    def _raise_for_status(self, status_code: int, error_type: str | None = None) -> None:
         if status_code < 400:
             return
         if status_code in {401, 403}:
@@ -1142,6 +1172,7 @@ class GoogleGenerateContentModelGateway:
                 ModelGatewayErrorCode.AUTHENTICATION,
                 provider_model=self._config.model,
                 provider_status=status_code,
+                provider_error_type=error_type,
             )
         if status_code == 408:
             raise ModelGatewayError(
@@ -1149,6 +1180,7 @@ class GoogleGenerateContentModelGateway:
                 retryable=True,
                 provider_model=self._config.model,
                 provider_status=status_code,
+                provider_error_type=error_type,
             )
         if status_code == 429:
             raise ModelGatewayError(
@@ -1156,12 +1188,14 @@ class GoogleGenerateContentModelGateway:
                 retryable=True,
                 provider_model=self._config.model,
                 provider_status=status_code,
+                provider_error_type=error_type,
             )
         raise ModelGatewayError(
             ModelGatewayErrorCode.PROVIDER,
             retryable=status_code >= 500,
             provider_model=self._config.model,
             provider_status=status_code,
+            provider_error_type=error_type,
         )
 
     def _normalise_response(

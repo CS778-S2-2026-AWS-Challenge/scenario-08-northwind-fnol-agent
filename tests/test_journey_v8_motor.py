@@ -1,0 +1,132 @@
+"""Motor fixture acceptance: facts, safety, continued chat, support and creation."""
+
+import json
+import logging
+from collections.abc import Callable
+
+import pytest
+from fastapi.testclient import TestClient
+
+from backend.repositories.fixture import FixtureRepository
+from tests.journey_v8_support import Journey, V8JourneyProvider, envelope, fact
+
+
+@pytest.fixture
+def agent_turn_provider() -> V8JourneyProvider:
+    return V8JourneyProvider(
+        [
+            envelope(
+                fields=[
+                    fact(
+                        'incident.description',
+                        'Rear-end collision on Queen St.',
+                        'My car was rear-ended',
+                    ),
+                    fact('incident.location', 'Queen St', 'Queen St'),
+                    fact(
+                        'incident.occurred_at', '2026-09-20T15:00:00+12:00', 'yesterday around 3pm'
+                    ),
+                    fact('vehicle.damage_description', 'Bumper damaged', 'bumper damaged'),
+                    fact('claim.product_family', 'motor', 'My car'),
+                    fact('incident.type', 'collision', 'rear-ended'),
+                    fact('loss.description', 'Rear bumper damage'),
+                ],
+                question='incident.injury_or_danger',
+                services=['vehicle_damage_assessment_routing'],
+            ),
+            envelope(
+                fields=[fact('incident.injury_or_danger', False, 'No one was hurt')],
+                question='vehicle.drivable',
+            ),
+            envelope(
+                fields=[fact('incident.injury_or_danger', True, 'my passenger has a sore neck')]
+            ),
+            envelope(
+                fields=[
+                    fact('injury.persons_affected', ['passenger'], 'Just the passenger'),
+                    fact('injury.severity_reported', 'minor', "she says it's minor"),
+                    fact('injury.medical_attention', 'none', 'no ambulance'),
+                ],
+                question='vehicle.drivable',
+                services=['vehicle_recovery_request'],
+            ),
+            envelope(
+                fields=[fact('vehicle.drivable', False, "Can't drive it")],
+                services=['vehicle_recovery_request'],
+            ),
+            envelope(services=['vehicle_recovery_request']),
+            envelope(fields=[fact('parties.other_parties', True, 'another vehicle')]),
+            envelope(confirms=True),
+        ]
+    )
+
+
+def test_motor_safety_handoff_continues_chat_then_resumes_support_and_creates(
+    client: TestClient,
+    repository: FixtureRepository,
+    caplog: pytest.LogCaptureFixture,
+    record_property: Callable[[str, object], None],
+) -> None:
+    caplog.set_level(logging.INFO, logger='backend.services.turn_proposal_validation')
+    journey = Journey(client, 'motor', 'v8-motor')
+    first = journey.send(
+        'My car was rear-ended on Queen St yesterday around 3pm, bumper damaged, need an assessor'
+    )
+    assert (
+        first['agent_message']['message_actions'][0]['service_identity']
+        == 'vehicle_damage_assessment_routing'
+    )
+    assert 'incident.injury_or_danger' in first['decision']['customer_next_step']['required_items']
+    second = journey.send('No one was hurt')
+    assert (
+        'incident.injury_or_danger'
+        not in second['dynamic_form']['requirements']['missing_required_now']
+    )
+    assert journey.view()['form']['incident.injury_or_danger']['value'] is False
+    third = journey.send('Actually my passenger has a sore neck')
+    handoff = repository.get_handoff(journey.claim_id, third['handoff']['handoff_id'], 'cus_demo')
+    assert handoff is not None
+    assert handoff.priority.value == 'urgent'
+    assert third['decision']['customer_next_step']['status'] == 'awaiting_staff'
+    assert (
+        'injury.persons_affected' in third['dynamic_form']['requirements']['missing_required_now']
+    )
+    fourth = journey.send("Just the passenger, she says it's minor, no ambulance")
+    assert fourth['agent_message']['message_actions'] == []
+    assert all(
+        code not in fourth['dynamic_form']['requirements']['missing_required_now']
+        for code in (
+            'injury.persons_affected',
+            'injury.severity_reported',
+            'injury.medical_attention',
+        )
+    )
+    fifth = journey.send("Can't drive it, can you get a tow?")
+    assert journey.view()['form']['vehicle.drivable']['value'] is False
+    assert fifth['agent_message']['message_actions'] == []
+    assert any(
+        getattr(record, 'rejection', {}).get('reason') == 'suppressed_during_handoff'
+        for record in caplog.records
+    )
+    journey.resolve_handoff(repository, third['handoff']['handoff_id'])
+    sixth = journey.send('Yes please arrange the tow')
+    assert any(
+        action['service_identity'] == 'vehicle_recovery_request'
+        for action in sixth['agent_message']['message_actions']
+    )
+    seventh = journey.send('There was another vehicle involved.')
+    assert seventh['dynamic_form']['requirements']['ready_pending_confirmation'] is True
+    final = journey.send('Yes all correct')
+    assert final['dynamic_form']['requirements']['ready'] is True
+    journey.create()
+    record_property('planned_input_budget', json.dumps(journey.budget_measurements(repository)))
+    assert len(journey.turns) <= 9
+    session = repository.get_session(journey.claim_id, journey.session_id, 'cus_demo')
+    assert session is not None
+    assert session.repeated_question_count == 0, [
+        (
+            turn['decision']['customer_next_step']['required_items'],
+            turn['agent_message']['content']['text'],
+        )
+        for turn in journey.turns
+    ]

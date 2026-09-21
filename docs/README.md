@@ -53,6 +53,7 @@ them:
 - [Agent Behaviour and Action Brief](agent-behaviour-action-brief.md)
 - [Agent Runtime Policy](agent-runtime-policy.md)
 - [Claimant Journey v8](design/agent-runtime/claimant-journey-v8.md)
+- [Recovery Policy Registry](design/agent-runtime/recovery-policy-registry.md)
 - [FNOL Agent Behaviour Catalogue](agent-behaviour-catalogue.md)
 - [Claim Creation and Provider Adapter Boundary](claim-creation-boundary.md)
 - [Claimant-to-Staff Messaging Journey](claimant-staff-messaging-journey.md)

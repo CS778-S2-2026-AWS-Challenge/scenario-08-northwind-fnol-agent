@@ -445,7 +445,7 @@ describe('claimant intake projection', () => {
       'The model service is temporarily unavailable. The claim is unchanged. Try again in a moment.',
     )
     expect(failure).toBeInTheDocument()
-    expect(screen.getByText('Not sent')).toBeInTheDocument()
+    expect(screen.getByText('Delivery not confirmed')).toBeInTheDocument()
     expect(container.querySelector('.workspace-composer [role="alert"]')).toHaveTextContent(
       'The model service is temporarily unavailable. The claim is unchanged. Try again in a moment.',
     )
@@ -482,22 +482,58 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'My car was damaged.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    const dialog = await screen.findByRole('dialog', { name: 'Third-party services' })
-    expect(dialog).toBeVisible()
+    await screen.findByText(agentMessage.content.text)
+    expect(screen.queryByRole('dialog', { name: 'Third-party services' })).not.toBeInTheDocument()
     expect(container.querySelector('.message-list .service-capability-list')).not.toBeInTheDocument()
     expect(container.querySelector('.message-list .external-capabilities-trigger')).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Close third-party services' }))
-    expect(screen.queryByRole('dialog', { name: 'Third-party services' })).not.toBeInTheDocument()
-
     const documentsTab = screen.getByRole('tab', { name: 'What to provide' })
-    await waitFor(() => expect(documentsTab).toHaveFocus())
     await user.click(documentsTab)
     const trigger = screen.getByRole('button', { name: /Third-party support/ })
     expect(trigger.closest('[role="tabpanel"]')).toHaveAccessibleName('What to provide')
     expect(trigger).toHaveTextContent('2 services available')
     await user.click(trigger)
     expect(await screen.findByRole('dialog', { name: 'Third-party services' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Close third-party services' }))
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it('retries a saved unanswered message with its original identity and a new request key', async () => {
+    const user = userEvent.setup()
+    let requestSequence = 0
+    api.requestId.mockImplementation((prefix) => `${prefix}-${++requestSequence}`)
+    const recovery = {
+      rule_id: 'claimant_turn.model_dependency_failure',
+      claimant_projection: 'Your message is saved, but I could not respond just now. You can try again.',
+      resume_triggers: ['claimant_reply', 'explicit_retry_request'],
+      resume_entrypoint: 'submit_message',
+      continuation: 'runtime.fail_safe',
+    }
+    api.submitClaimMessage.mockImplementationOnce(async (request) => ({
+      ...initialTurn(),
+      claimant_message: { ...claimantMessage, client_message_id: request.clientMessageId, recovery },
+      agent_message: null,
+      decision: null,
+      recovery,
+    })).mockImplementationOnce(async (request) => ({
+      ...initialTurn(),
+      claim_revision: 3,
+      claimant_message: { ...claimantMessage, client_message_id: request.clientMessageId },
+      agent_message: { ...agentMessage, in_reply_to: claimantMessage.message_id },
+    }))
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    expect(await screen.findByText(recovery.claimant_projection)).toBeVisible()
+    expect(screen.queryByText('Not sent')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Retry response' }))
+    expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
+    const [first, retried] = api.submitClaimMessage.mock.calls.map(([request]) => request)
+    expect(retried.clientMessageId).toBe(first.clientMessageId)
+    expect(retried.idempotencyKey).not.toBe(first.idempotencyKey)
+    expect(screen.getAllByText(claimantMessage.content.text)).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Retry response' })).not.toBeInTheDocument()
   })
 
   it('returns to Claim history from Claim tools without dropping the active conversation', async () => {

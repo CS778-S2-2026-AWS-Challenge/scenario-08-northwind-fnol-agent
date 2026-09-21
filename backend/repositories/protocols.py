@@ -111,6 +111,10 @@ class IdempotencyRecord:
     staff_agent_draft_id: str | None = None
     staff_agent_execution_id: str | None = None
     response_payload: dict[str, Any] | None = None
+    revision_before_message: int | None = None
+    confirmation_checkpoint: dict[str, Any] | None = None
+    inbound_checkpoint: bool = False
+    response_status: int | None = None
 
 
 def with_staff_agent_source(
@@ -582,6 +586,16 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """Atomically persist a claimant or staff message and claim revision."""
         raise NotImplementedError
 
+    def find_message_checkpoint(
+        self, claim_id: str, message_id: str, customer_id: str
+    ) -> IdempotencyRecord | None:
+        """Read the original accepted inbound checkpoint, not a later retry revision."""
+        raise NotImplementedError
+
+    def save_message_recovery(self, message: MessageRecord, idempotency: IdempotencyRecord) -> None:
+        """Complete an accepted attempt without changing the Claim or message content."""
+        raise NotImplementedError
+
     def get_message(
         self,
         claim_id: str,
@@ -780,6 +794,8 @@ class PersistenceRepository(ClaimRepository, Protocol):
         branch_evaluation: BranchEvaluationRecord | None = None,
         runtime_trace: RuntimeTraceRecord | None = None,
         runtime_records: RuntimeTurnRecords | None = None,
+        *,
+        checkpointed: bool = False,
     ) -> None:
         """Atomically persist one validated Agent turn and optional Runtime trace."""
         raise NotImplementedError

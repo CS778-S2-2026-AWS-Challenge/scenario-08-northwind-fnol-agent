@@ -1,17 +1,321 @@
 {
-  "type": "object",
   "additionalProperties": false,
-  "required": ["reply", "reason_codes", "field_changes", "contents_item_changes", "next_question", "service_suggestions", "state_proposals", "escalation", "ready_to_create", "confirms_batch"],
   "properties": {
-    "reply": {"type": "string", "minLength": 1, "maxLength": 500},
-    "reason_codes": {"type": "array", "minItems": 1, "maxItems": 5, "items": {"type": "string", "maxLength": 50}},
-    "field_changes": {"type": "array", "maxItems": 8, "items": {"type": "object", "additionalProperties": false, "required": ["field_code", "value", "reported_text", "precision"], "properties": {"field_code": {"type": "string", "maxLength": 100}, "value": {}, "reported_text": {"type": ["string", "null"], "maxLength": 200}, "precision": {"enum": ["exact", "approximate", "range", "partial", "unknown"]}}}},
-    "contents_item_changes": {"type": "array", "maxItems": 6, "items": {"type": "object", "additionalProperties": false, "required": ["item_id", "description", "category", "quantity", "brand", "model", "loss_type", "ownership", "estimated_value", "reported_text"], "properties": {"item_id": {"type": ["string", "null"]}, "description": {"type": "string", "maxLength": 300}, "category": {"type": "string", "maxLength": 100}, "quantity": {"type": "integer", "minimum": 1}, "brand": {"type": ["string", "null"], "maxLength": 100}, "model": {"type": ["string", "null"], "maxLength": 100}, "loss_type": {"enum": ["damaged", "lost", "stolen", "destroyed"]}, "ownership": {"enum": ["owned", "leased", "borrowed", "gifted", "other"]}, "estimated_value": {"type": ["object", "null"]}, "reported_text": {"type": ["string", "null"], "maxLength": 200}}}},
-    "next_question": {"type": ["object", "null"], "additionalProperties": false, "required": ["field_codes", "wording", "reason"], "properties": {"field_codes": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "string", "maxLength": 100}}, "wording": {"type": "string", "maxLength": 250}, "reason": {"enum": ["safety_first", "branch_just_activated", "blocks_creation", "clarify_conflict", "natural_follow_up"]}}},
-    "service_suggestions": {"type": "array", "maxItems": 3, "items": {"type": "object", "additionalProperties": false, "required": ["service_identity", "rationale"], "properties": {"service_identity": {"type": "string", "maxLength": 100}, "rationale": {"type": "string", "maxLength": 150}}}},
-    "state_proposals": {"type": "array", "maxItems": 2, "items": {"type": "object", "additionalProperties": false, "required": ["path", "to", "reason"], "properties": {"path": {"enum": ["claim_state.urgency", "claim_state.customer_support"]}, "to": {"type": "string", "maxLength": 50}, "reason": {"type": "string", "maxLength": 150}}}},
-    "escalation": {"type": ["object", "null"], "additionalProperties": false, "required": ["kind", "reason"], "properties": {"kind": {"enum": ["urgent_safety", "human_requested", "accessibility", "distress", "professional_review"]}, "reason": {"type": "string", "maxLength": 150}}},
-    "ready_to_create": {"type": "boolean"},
-    "confirms_batch": {"type": "boolean"}
-  }
+    "reply": {
+      "maxLength": 500,
+      "minLength": 1,
+      "type": "string"
+    },
+    "reason_codes": {
+      "items": {
+        "maxLength": 50,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 5,
+      "minItems": 1,
+      "type": "array"
+    },
+    "field_changes": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "field_code": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "value": {},
+          "reported_text": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "precision": {
+            "enum": [
+              "exact",
+              "approximate",
+              "range",
+              "partial",
+              "unknown"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "field_code",
+          "value"
+        ],
+        "type": "object"
+      },
+      "maxItems": 8,
+      "type": "array"
+    },
+    "contents_item_changes": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "item_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "maxLength": 300,
+            "minLength": 1,
+            "type": "string"
+          },
+          "category": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "quantity": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "brand": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "loss_type": {
+            "enum": [
+              "damaged",
+              "lost",
+              "stolen",
+              "destroyed"
+            ],
+            "type": "string"
+          },
+          "ownership": {
+            "enum": [
+              "owned",
+              "leased",
+              "borrowed",
+              "gifted",
+              "other"
+            ],
+            "type": "string"
+          },
+          "estimated_value": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "amount": {
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "currency": {
+                    "maxLength": 3,
+                    "minLength": 3,
+                    "pattern": "^[A-Z]{3}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "amount",
+                  "currency"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reported_text": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "description",
+          "category",
+          "loss_type",
+          "ownership"
+        ],
+        "type": "object"
+      },
+      "maxItems": 6,
+      "type": "array"
+    },
+    "next_question": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field_codes": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 3,
+              "minItems": 1,
+              "type": "array"
+            },
+            "wording": {
+              "maxLength": 250,
+              "minLength": 1,
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "safety_first",
+                "branch_just_activated",
+                "blocks_creation",
+                "clarify_conflict",
+                "natural_follow_up"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "field_codes",
+            "wording",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "service_suggestions": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "service_identity": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "rationale": {
+            "maxLength": 150,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "service_identity",
+          "rationale"
+        ],
+        "type": "object"
+      },
+      "maxItems": 3,
+      "type": "array"
+    },
+    "state_proposals": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "enum": [
+              "claim_state.urgency",
+              "claim_state.customer_support"
+            ],
+            "type": "string"
+          },
+          "to": {
+            "maxLength": 50,
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 150,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "to",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "maxItems": 2,
+      "type": "array"
+    },
+    "escalation": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "urgent_safety",
+                "human_requested",
+                "accessibility",
+                "distress",
+                "professional_review"
+              ],
+              "type": "string"
+            },
+            "reason": {
+              "maxLength": 150,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ready_to_create": {
+      "type": "boolean"
+    },
+    "confirms_batch": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "reply",
+    "reason_codes"
+  ],
+  "type": "object"
 }

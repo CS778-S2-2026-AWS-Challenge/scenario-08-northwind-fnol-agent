@@ -47,6 +47,8 @@ class TurnFieldContract(ContractModel):
                     **({'allowed': item.allowed_values} if item.allowed_values else {}),
                 }
                 for item in self.fields
+                if item.selection_state
+                in {FieldSelectionState.REQUIRED_NOW, FieldSelectionState.CANDIDATE_NOW}
             ],
         }
 

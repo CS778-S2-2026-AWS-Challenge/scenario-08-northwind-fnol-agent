@@ -208,7 +208,7 @@ def publish(args: argparse.Namespace) -> str:
                 key: {'knowledge_id': item['knowledge_id'], 'revision': item['revision']}
                 for key, item in active.get('knowledge', {}).items()
             },
-            'reason': 'Publish the complete atomic Agent Context Runtime v7 Release Set.',
+            'reason': 'Publish the complete atomic claimant Agent Runtime Release Set.',
         },
         idempotent=True,
     )

@@ -48,7 +48,8 @@
         "action.completed",
         "action.failed",
         "action.unknown_outcome",
-        "access.denied"
+        "access.denied",
+        "AGENT_TURN_RECOVERY"
       ],
       "title": "AuditEventType",
       "type": "string"

@@ -25,6 +25,7 @@ from backend.domain.models import (
     ClaimListItem,
     ClaimListResponse,
     ClaimState,
+    ConfirmationRequestRecord,
     CreateClaimRequest,
     CreateClaimResponse,
     CustomerNextStep,
@@ -93,7 +94,11 @@ from backend.services.support import (
     request_fingerprint,
     require_idempotency_key,
 )
-from backend.services.turn_reducer import recompute_progress
+from backend.services.turn_reducer import (
+    apply_progress,
+    can_confirm,
+    shown_values_fingerprint,
+)
 
 
 def _claim_not_found() -> ApiError:
@@ -1123,18 +1128,16 @@ def update_form(
                     )
                 ],
             )
-    progress_state, next_step = recompute_progress(
+    from backend.services.turn_reducer import apply_progress
+
+    projected_claim = apply_progress(
         projected_claim,
         candidate_branch_evaluation,
+        open_handoffs=tuple(repository.list_handoffs(claim_id, principal.subject)),
     )
+    next_step = projected_claim.customer_next_step
     updated_claim = projected_claim.model_copy(
         update={
-            'claim_state': projected_claim.claim_state.model_copy(
-                update={
-                    'workflow_state': progress_state,
-                }
-            ),
-            'customer_next_step': next_step,
             'revision': claim.revision + 1,
             'updated_at': timestamp,
         }
@@ -1259,6 +1262,34 @@ def confirm_form_fields(
 
     timestamp = now_utc()
     confirmation_revision = claim.revision + 1
+    # The explicit UI selection is itself the displayed confirmation request.
+    # Its If-Match revision and values pass through the same validator used by
+    # conversational confirmation, before the final repository CAS.
+    explicit_confirmation = ConfirmationRequestRecord(
+        confirmation_id=new_id('cnf'),
+        claim_id=claim.claim_id,
+        claim_revision=expected_revision,
+        field_codes=list(payload.field_codes),
+        shown_values_fingerprint=shown_values_fingerprint(
+            claim.form, payload.field_codes, claim.contents_items
+        ),
+        created_at=timestamp,
+    )
+    if not can_confirm(
+        claim,
+        claim.form,
+        explicit_confirmation,
+        revision_before_message=expected_revision,
+        confirms_batch=True,
+        explicit_field_selection=True,
+        contents_items=claim.contents_items,
+    ):
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The displayed confirmation is no longer current.',
+            current_revision=claim.revision,
+        )
     confirmed_fields = {
         field_code: confirm_form_field(
             claim.form[field_code],
@@ -1291,21 +1322,6 @@ def confirm_form_fields(
         for item in claim.contents_items
     ]
     incident_type = _apply_product_family_transition(claim, confirmed_fields)
-    projected_claim = claim.model_copy(
-        update={
-            'form': {**claim.form, **confirmed_fields},
-            'contents_items': confirmed_contents_items,
-            'incident_type': incident_type,
-        }
-    )
-    progress_state, next_step = recompute_progress(
-        projected_claim,
-        BranchRuleEvaluator().evaluate(
-            projected_claim,
-            current_action=AgentAction.CONFIRM,
-            recomputation_reason='form_confirmation_progress',
-        ),
-    )
     updated_claim = claim.model_copy(
         update={
             'form': {**claim.form, **confirmed_fields},
@@ -1314,14 +1330,22 @@ def confirm_form_fields(
             'claim_state': claim.claim_state.model_copy(
                 update={
                     'next_action': AgentAction.ASK,
-                    'workflow_state': progress_state,
                 }
             ),
-            'customer_next_step': next_step,
             'revision': claim.revision + 1,
             'updated_at': timestamp,
         }
     )
+    updated_claim = apply_progress(
+        updated_claim,
+        BranchRuleEvaluator().evaluate(
+            updated_claim,
+            current_action=AgentAction.CONFIRM,
+            recomputation_reason='form_confirmation_progress',
+        ),
+        open_handoffs=tuple(repository.list_handoffs(claim_id, principal.subject)),
+    )
+    next_step = updated_claim.customer_next_step
     try:
         repository.save_claim(
             updated_claim,

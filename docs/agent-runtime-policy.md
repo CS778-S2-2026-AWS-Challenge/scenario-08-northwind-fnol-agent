@@ -20,21 +20,21 @@ The target object catalogue, FNOL problem mapping, and delivery levels are recor
 recorded in [Agent Runtime Migration](design/agent-runtime/agent-runtime-migration.md). Current
 implementation evidence is tracked in [Agent Runtime Progress](status/agent-runtime-progress.md).
 
-The current model-backed claimant path uses the v7 fragmented Prompt Pack, deterministic routing,
-budgeted context, stable Request Profiles, narrow schemas, and at most one bounded read-only
-`context.resolve` call. Ordinary turns make exactly one tool-free model call. The legacy static eight-action schema remains only as a
-rejected compatibility boundary; it cannot regain execution authority. The provider-neutral Model
-Gateway implements `ModelRequest` and `ModelResponse`, OpenAI-compatible and Bedrock adapters,
-strict structured proposal validation, bounded context projection, server-rendered claimant
-responses, and normalised failure mapping. It does not yet implement every action handler,
-qualified fallback, or complete target trajectory capability defined here. The Control Plane
-publishes four independently versioned
-Agent configuration components and one Release Set pins the exact revisions used by a turn. This
-is the implemented policy-loading boundary, not evidence that the target `TurnPlan`,
-`ExecutionPlan`, or `TurnResult` migration is complete.
-The current field registry contains 18 allowed field codes, while controlled intake
-actively sequences only incident description, incident location, loss description, and
-incident type. It does not yet implement policy-driven dynamic branches.
+The v8 claimant release uses one complete turn envelope for conversation, facts, questions,
+service suggestions and escalation. `TurnIntents` accumulates concerns rather than selecting a
+schema that drops facts when external help is requested. `ValidatedTurn` separates valid facts
+from rejected optional suggestions; `reduce_turn` determines the resulting Claim, messages,
+work, confirmation and audit records. Ordinary turns make one tool-free call; bounded lookup
+allows one `context.resolve` and one continuation. Evidence history and isolated review retain
+their separate restricted contracts. The v7 pack remains an explicit rollback version; v6 is
+deprecated and never an implicit fallback.
+
+The current scalar registry has 28 fields. Branch collection policies determine what is
+required now, before creation or before dispatch, while Contents items remain independent
+records. Open safety/support handoffs preserve factual collection and non-blocking questions;
+they suppress all new third-party offers until resolved. A Release Set pins prompt bodies,
+schemas, profiles, rules and provider capabilities together. Successful publication is not
+evidence of a healthy provider or a passed real user journey.
 
 ## Policy Is Not a Prompt
 

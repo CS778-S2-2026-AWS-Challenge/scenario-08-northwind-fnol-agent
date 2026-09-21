@@ -1,9 +1,10 @@
-import json
+import inspect
 import logging
-import re
+from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import datetime
-from hashlib import sha256
+from datetime import datetime, timedelta
+from functools import wraps
+from typing import ParamSpec, TypeVar, cast
 
 from backend.adapters.claims_service import AssessorServiceAdapter
 from backend.adapters.evidence_storage import EvidenceStorage, EvidenceStorageError
@@ -16,14 +17,13 @@ from backend.domain.agent_action_registry import (
     ExecutionAuthority,
     action_contract,
 )
+from backend.domain.audit import AuditEventEnvelope
 from backend.domain.branch_registry import (
     BranchRuleEvaluator,
     validate_registered_field_value,
 )
-from backend.domain.external_service_registry import ExternalLifecycleStatus
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
-from backend.domain.intake import intake_field_for_requirement, next_requirement_step
 from backend.domain.model_gateway import ModelGatewayError
 from backend.domain.models import (
     ActorReference,
@@ -35,20 +35,17 @@ from backend.domain.models import (
     AuthorityOutcome,
     BranchEvaluationRecord,
     BranchEvaluationResult,
-    BranchEvaluationStatus,
     ClaimantContentsItem,
     ClaimantDecision,
     ClaimantExternalServiceAction,
     ClaimantMessage,
+    ClaimantTurnRecovery,
     ContentsItem,
-    Coverage,
     CreateMessageRequest,
     CustomerNextStep,
-    DiscrepancyCandidate,
     EvidenceFileStatus,
     EvidenceRecord,
     EvidenceSource,
-    EvidenceState,
     EvidenceStatus,
     FormChange,
     FormSource,
@@ -58,19 +55,20 @@ from backend.domain.models import (
     MessageRecord,
     MessageTurnResponse,
     MessageVisibility,
-    NeededFor,
     ProposedFormChange,
     QuestionRecord,
     ResponsibleParty,
     RuntimeTraceRecord,
     SessionRecord,
     StructuredFormField,
-    SupportNeed,
-    WorkflowState,
     WorkingClaim,
 )
 from backend.domain.realtime import AgentTurnProgressStage
-from backend.domain.recovery_policy_registry import RecoveryTrigger, classify_recovery
+from backend.domain.recovery_policy_registry import (
+    RecoveryTrigger,
+    claimant_recovery_projection,
+    classify_recovery,
+)
 from backend.domain.retrieval import (
     ClaimHistoryRetrievalRecord,
     ClaimHistorySearchRequest,
@@ -79,17 +77,8 @@ from backend.domain.retrieval import (
     RetrievalStatus,
 )
 from backend.domain.runtime import (
-    ActionEnvelopeRecord,
-    AgentProposalRecord,
-    ExecutionPlanRecord,
-    ExternalLifecycleContextCoordinate,
-    RuntimeTurnRecords,
     RuntimeWorkItemRecord,
-    ToolResultRecord,
-    TurnPlanRecord,
-    TurnResultRecord,
 )
-from backend.domain.support_intent import detect_support_intent, support_need_for_intent
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -101,7 +90,7 @@ from backend.services.agent import (
     AgentProposal,
     AgentTurnContext,
     AgentTurnProvider,
-    authorised_state_changes,
+    detect_safety_interrupt,
     validate_proposal,
 )
 from backend.services.agent_action_execution import (
@@ -126,14 +115,11 @@ from backend.services.claimant_action_projection import project_claimant_primary
 from backend.services.claimant_form_projection import project_claimant_form_fields
 from backend.services.evidence_visibility import default_evidence_visibility
 from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
+from backend.services.external_service_eligibility import eligible_service_ids
 from backend.services.external_service_entry import ExternalServiceEntryDecision
 from backend.services.external_service_offers import (
-    build_offer_metadata,
     continue_granted_service_offers,
-    detected_service_intents,
-    find_offer,
     message_external_actions,
-    offer_work_item,
     select_registered_service_intents,
 )
 from backend.services.external_services import claimant_assessor_action, claimant_next_step
@@ -143,11 +129,8 @@ from backend.services.fact_resolution import (
     resolve_form_change,
 )
 from backend.services.handoffs import (
-    build_handoff,
     claimant_handoff,
-    updated_claim_for_handoff,
 )
-from backend.services.professional_reviews import build_policy_review_handoff
 from backend.services.retrieval import search_claim_history, search_policy
 from backend.services.runtime_agent_policy import (
     RuntimeAgentPolicyResolver,
@@ -162,7 +145,7 @@ from backend.services.support import (
     require_idempotency_key,
 )
 from backend.services.turn_family_resolution import resolve_turn_family
-from backend.services.turn_reducer import recompute_progress
+from backend.services.turn_reducer import reduce_turn
 from backend.services.turn_router import route_turn
 
 logger = logging.getLogger(__name__)
@@ -366,6 +349,8 @@ def _claimant_message(
         content=message.content,
         evidence_refs=message.evidence_refs,
         in_reply_to=message.in_reply_to,
+        client_message_id=message.client_message_id,
+        recovery=claimant_recovery_projection(message.recovery_rule_id),
         message_actions=message_actions or [],
         created_at=message.created_at,
     )
@@ -447,7 +432,7 @@ def _message_turn_response(
         claim_id=claim_id,
         session_id=claimant_message.session_id,
         claim_revision=response_revision,
-        claimant_message=_claimant_message(claimant_message),
+        claimant_message=_claimant_message(claimant_message).model_copy(update={'recovery': None}),
         agent_message=_claimant_message(
             agent_message,
             message_external_actions(repository, claim, agent_message.message_id)
@@ -548,172 +533,6 @@ def _namespaced_turn_response(
             next_step=next_step,
             external_service_action=external_service_action,
         ),
-    )
-
-
-def _effective_next_step(
-    proposed: CustomerNextStep,
-    outcome: AuthorityOutcome,
-) -> CustomerNextStep:
-    if outcome is AuthorityOutcome.AUTHORISED:
-        return proposed
-    if outcome is AuthorityOutcome.REVIEW_REQUIRED:
-        return CustomerNextStep(
-            status='professional_review_required',
-            summary='The proposed action requires professional review before it can continue.',
-            responsible_party=ResponsibleParty.CLAIMS_PROFESSIONAL,
-        )
-    return CustomerNextStep(
-        status='action_not_applied',
-        summary='The proposed action was not applied. Your current report remains available.',
-        responsible_party=ResponsibleParty.SYSTEM,
-    )
-
-
-_MODEL_FIELD_QUESTIONS: dict[str, tuple[str, str, str]] = {
-    'incident.injury_or_danger': (
-        'provide_safety_status',
-        'Is anyone injured or in immediate danger?',
-        'Tell us whether anyone is injured or in immediate danger.',
-    ),
-    'vehicle.drivable': (
-        'provide_vehicle_status',
-        'Is the vehicle safe to drive?',
-        'Tell us whether the vehicle is safe to drive.',
-    ),
-    'incident.occurred_at': (
-        'provide_incident_time',
-        'About when did this happen?',
-        'Tell us approximately when the incident happened.',
-    ),
-    'incident.location': (
-        'provide_incident_location',
-        'Where did the incident happen?',
-        'Tell us where the incident happened.',
-    ),
-    'loss.description': (
-        'describe_loss',
-        'What was damaged or lost?',
-        'Describe what was damaged or lost.',
-    ),
-}
-
-
-def _with_single_runtime_question(response: str, question: str) -> str:
-    """Keep model acknowledgement while making Runtime own the next question."""
-
-    statements = [
-        sentence.strip()
-        for sentence in re.split(r'(?<=[.!?])\s+', response.strip())
-        if sentence.strip() and '?' not in sentence
-    ]
-    acknowledgement = ' '.join(statements).strip()
-    if not acknowledgement:
-        acknowledgement = 'Thanks. I have recorded what you shared.'
-    return f'{acknowledgement.rstrip()} {question}'.strip()
-
-
-def _validated_model_question(
-    proposal: AgentProposal,
-    current_form: dict[str, StructuredFormField],
-) -> tuple[str, CustomerNextStep] | None:
-    available_fields = {
-        field_code
-        for field_code, field in current_form.items()
-        if field.status is not FormStatus.MISSING
-    }
-    available_fields.update(change.field_code for change in proposal.form_changes)
-    if 'vehicle.damage_description' in available_fields:
-        available_fields.add('loss.description')
-    for field_code in proposal.customer_next_step.required_items:
-        if field_code in available_fields:
-            continue
-        question = _MODEL_FIELD_QUESTIONS.get(field_code)
-        if question is None:
-            continue
-        status, response_text, summary = question
-        return (
-            response_text,
-            CustomerNextStep(
-                status=status,
-                summary=summary,
-                responsible_party=ResponsibleParty.CLAIMANT,
-                required_items=[field_code],
-            ),
-        )
-    return None
-
-
-def _safe_model_customer_content(
-    proposal: AgentProposal,
-    outcome: AuthorityOutcome,
-    current_next_step: CustomerNextStep,
-    current_form: dict[str, StructuredFormField],
-) -> tuple[str, str, CustomerNextStep]:
-    if outcome is AuthorityOutcome.REVIEW_REQUIRED:
-        return (
-            'The proposed action requires professional review.',
-            'I have recorded what you shared. A Northwind claims professional must review the '
-            'proposed next step before it can continue.',
-            _effective_next_step(proposal.customer_next_step, outcome),
-        )
-    if outcome is AuthorityOutcome.BLOCKED:
-        return (
-            'The proposed action was not applied.',
-            'I have recorded what you shared, but I could not safely apply the proposed next '
-            'step. Your current report remains available.',
-            _effective_next_step(proposal.customer_next_step, outcome),
-        )
-
-    validated_question = _validated_model_question(proposal, current_form)
-    if proposal.action is AgentAction.ASK and validated_question is not None:
-        question, next_step = validated_question
-        return (
-            'More incident information is needed.',
-            f'Thanks. {question}',
-            next_step,
-        )
-    if proposal.action is AgentAction.ASK:
-        return (
-            'More incident information is needed.',
-            'Thanks. Please share the next incident detail you want Northwind to record.',
-            CustomerNextStep(
-                status='more_information_needed',
-                summary='Provide the next incident detail.',
-                responsible_party=ResponsibleParty.CLAIMANT,
-            ),
-        )
-    if proposal.action is AgentAction.CLARIFY:
-        return (
-            'A material incident detail needs clarification.',
-            'Thanks. Please clarify or correct the incident detail before the report continues.',
-            CustomerNextStep(
-                status='clarification_needed',
-                summary='Clarify or correct the incident detail.',
-                responsible_party=ResponsibleParty.CLAIMANT,
-            ),
-        )
-    if proposal.action is AgentAction.CONFIRM and validated_question is not None:
-        question, next_step = validated_question
-        return (
-            'Proposed incident details need claimant confirmation.',
-            f'Thanks. Please review the proposed information. {question}',
-            next_step,
-        )
-    if proposal.action is AgentAction.CONFIRM:
-        return (
-            'A proposed incident detail needs claimant confirmation.',
-            'Thanks. Please review the proposed information and confirm or correct it.',
-            CustomerNextStep(
-                status='confirmation_needed',
-                summary='Confirm or correct the proposed information.',
-                responsible_party=ResponsibleParty.CLAIMANT,
-            ),
-        )
-    return (
-        'The claimant update was recorded without a high-impact decision.',
-        'Thanks. I have recorded your update. You can continue when you are ready.',
-        current_next_step,
     )
 
 
@@ -927,7 +746,11 @@ def _build_contents_item_changes(
                 else str(claimant_message.content.get('text', '')) or None
             ),
             timestamp=timestamp,
-            accepted_status=FormStatus.PROPOSED,
+            accepted_status=(
+                FormStatus.CONFIRMED
+                if claimant_supplied and evidence_source is None
+                else FormStatus.PROPOSED
+            ),
             updated_by=ActorReference(
                 actor_type=ActorType.AGENT,
                 actor_id=proposal.proposal_source.value,
@@ -1179,13 +1002,14 @@ def _apply_question_accounting(
     response_text: str,
     trigger_message_id: str,
     timestamp: datetime,
+    during_handoff: bool = False,
 ) -> tuple[SessionRecord, CustomerNextStep, str]:
     asks_question = proposal.action in {AgentAction.ASK, AgentAction.CLARIFY} or (
         '?' in response_text and bool(_question_fields(proposal, next_step))
     )
     if not asks_question:
         return session, next_step, response_text
-    if session.question_turn_count >= session.question_budget:
+    if not during_handoff and session.question_turn_count >= session.question_budget:
         paused_step = CustomerNextStep(
             status='question_budget_reached',
             summary='Your report is saved. Northwind may follow up on the remaining information.',
@@ -1200,15 +1024,23 @@ def _apply_question_accounting(
 
     fields = _question_fields(proposal, next_step)
     previously_requested = {
-        field_code for record in session.question_history for field_code in record.field_codes
+        field_code
+        for record in session.question_history
+        if not record.during_handoff
+        for field_code in record.field_codes
     }
-    repeated = bool(fields) and all(field_code in previously_requested for field_code in fields)
+    repeated = (
+        not during_handoff
+        and bool(fields)
+        and all(field_code in previously_requested for field_code in fields)
+    )
     question = QuestionRecord(
         question_id=new_id('qst'),
         trigger_message_id=trigger_message_id,
         field_codes=fields,
         purpose=proposal.action.value.lower(),
         repeated=repeated,
+        during_handoff=during_handoff,
         asked_at=timestamp,
     )
     return (
@@ -1739,6 +1571,66 @@ def _live_mutation_command(
     )
 
 
+_Params = ParamSpec('_Params')
+_Result = TypeVar('_Result')
+
+
+def _settle_accepted_error(function: Callable[_Params, _Result]) -> Callable[_Params, _Result]:
+    """Record the terminal API outcome of an accepted attempt, then re-raise it.
+
+    This never retries or turns an invalid proposal into a successful response.
+    In-flight HTTP replay is excluded so another request cannot finish its owner.
+    """
+    signature = inspect.signature(function)
+
+    @wraps(function)
+    def call(*args: _Params.args, **kwargs: _Params.kwargs) -> _Result:
+        try:
+            return function(*args, **kwargs)
+        except ApiError as error:
+            if error.code == 'TURN_IN_PROGRESS':
+                raise
+            arguments = signature.bind(*args, **kwargs).arguments
+            repository = arguments['repository']
+            principal = arguments['principal']
+            claim_id, session_id = arguments['claim_id'], arguments['session_id']
+            key = arguments.get('idempotency_key')
+            route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
+            saved = repository.find_idempotency(principal.subject, route, key) if key else None
+            if (
+                saved is not None
+                and saved.response_payload is None
+                and saved.decision_id is None
+                and saved.request_fingerprint
+                == request_fingerprint(arguments['payload'].model_dump(mode='json'))
+                and saved.message_id is not None
+            ):
+                message = repository.get_message(
+                    claim_id, session_id, saved.message_id, principal.subject
+                )
+                if message is not None:
+                    repository.save_message_recovery(
+                        message,
+                        replace(
+                            saved,
+                            response_status=error.status_code,
+                            response_payload={
+                                'code': error.code,
+                                'message': error.message,
+                                'details': [item.model_dump() for item in error.details]
+                                if error.details
+                                else None,
+                                'retryable': error.retryable,
+                                'current_revision': error.current_revision,
+                            },
+                        ),
+                    )
+            raise
+
+    return call
+
+
+@_settle_accepted_error
 def submit_message(
     repository: PersistenceRepository,
     agent: AgentTurnProvider,
@@ -1771,12 +1663,25 @@ def submit_message(
                 message='The idempotency key was reused with a different request.',
             )
         if existing_idempotency.response_payload is not None:
+            if (
+                existing_idempotency.response_status is not None
+                and existing_idempotency.response_status >= 400
+            ):
+                stored_error = dict(existing_idempotency.response_payload)
+                stored_error['details'] = (
+                    [ErrorDetail.model_validate(item) for item in stored_error['details']]
+                    if stored_error.get('details')
+                    else None
+                )
+                raise ApiError(status_code=existing_idempotency.response_status, **stored_error)
             return MessageTurnResponse.model_validate(existing_idempotency.response_payload)
         if existing_idempotency.message_id is None or existing_idempotency.decision_id is None:
             raise ApiError(
-                status_code=500,
-                code='INTERNAL_ERROR',
-                message='The idempotent message turn could not be restored.',
+                status_code=409,
+                code='TURN_IN_PROGRESS',
+                message=(
+                    'This message is already accepted and its response is still being prepared.'
+                ),
                 retryable=True,
             )
         claimant_message = repository.get_message(
@@ -1804,7 +1709,25 @@ def submit_message(
         payload.client_message_id,
         principal.subject,
     )
-    if existing_client_message is not None:
+    failed_checkpoint = (
+        repository.find_message_checkpoint(
+            claim_id, existing_client_message.message_id, principal.subject
+        )
+        if existing_client_message is not None
+        else None
+    )
+    retrying_saved_message = (
+        existing_client_message is not None
+        and (
+            existing_client_message.recovery_rule_id is not None
+            or (failed_checkpoint is not None and (failed_checkpoint.response_status or 0) >= 400)
+        )
+        and repository.find_agent_decision_for_trigger(
+            claim_id, existing_client_message.message_id, principal.subject
+        )
+        is None
+    )
+    if existing_client_message is not None and not retrying_saved_message:
         if existing_client_message.session_id != session_id:
             raise ApiError(
                 status_code=409,
@@ -1891,15 +1814,57 @@ def submit_message(
     session = repository.get_session(claim_id, session_id, principal.subject)
     if claim is None or session is None:
         raise _session_not_found()
-    pending_confirmation_item = next(
+    pending_confirmation_item = max(
         (
             item
-            for item in reversed(repository.list_runtime_work_items(claim_id, principal.subject))
-            if item.kind == 'confirmation' and item.status == 'open'
+            for item in repository.list_runtime_work_items(claim_id, principal.subject)
+            if item.kind == 'confirmation'
+            and item.status == 'open'
+            and item.confirmation_request is not None
         ),
-        None,
+        key=lambda item: item.confirmation_request.claim_revision
+        if item.confirmation_request
+        else 0,
+        default=None,
     )
     confirmation_revision_before_message = claim.revision
+    original_checkpoint = (
+        repository.find_message_checkpoint(
+            claim_id, existing_client_message.message_id, principal.subject
+        )
+        if retrying_saved_message and existing_client_message is not None
+        else None
+    )
+    if retrying_saved_message:
+        expected_content = (
+            payload.content.model_dump(mode='json')
+            if payload.content is not None
+            else {'type': 'evidence_reference'}
+        )
+        if (
+            existing_client_message is None
+            or original_checkpoint is None
+            or existing_client_message.session_id != session_id
+            or existing_client_message.content != expected_content
+            or existing_client_message.evidence_refs != payload.evidence_refs
+        ):
+            raise ApiError(
+                status_code=409,
+                code='IDEMPOTENCY_CONFLICT',
+                message='Retry must refer to the saved message and its original content.',
+            )
+        confirmation_revision_before_message = cast(
+            int, original_checkpoint.revision_before_message
+        )
+        pending_confirmation_item = (
+            RuntimeWorkItemRecord.model_validate(original_checkpoint.confirmation_checkpoint)
+            if original_checkpoint.confirmation_checkpoint
+            else None
+        )
+        if claim.revision != (original_checkpoint.revision_before_message or 0) + 1:
+            # A retry reuses the original observation, but it cannot revive a
+            # displayed confirmation after another request changed the Claim.
+            pending_confirmation_item = None
     if session.status.value != 'active':
         raise ApiError(
             status_code=409,
@@ -1925,8 +1890,6 @@ def submit_message(
             item
             for item in reversed(repository.list_handoffs(claim_id, principal.subject))
             if item.status.value not in {'resolved', 'cancelled'}
-            and item.type is not HandoffType.PROFESSIONAL_REVIEW
-            and item.support_need is not None
         ),
         None,
     )
@@ -2014,7 +1977,7 @@ def submit_message(
         session_id=session_id,
         client_message_id=payload.client_message_id,
         actor=ActorType.CLAIMANT,
-        visibility=MessageVisibility.CLAIMANT_VISIBLE,
+        visibility=MessageVisibility.SHARED if handoff_open else MessageVisibility.CLAIMANT_VISIBLE,
         content=(
             payload.content.model_dump(mode='json')
             if payload.content is not None
@@ -2023,6 +1986,55 @@ def submit_message(
         evidence_refs=payload.evidence_refs,
         created_at=timestamp,
     )
+    checkpoint_idempotency = IdempotencyRecord(
+        actor_id=principal.subject,
+        route=route,
+        key=key,
+        request_fingerprint=fingerprint,
+        claim_id=claim_id,
+        session_id=session_id,
+        message_id=(
+            existing_client_message.message_id
+            if retrying_saved_message and existing_client_message
+            else claimant_message.message_id
+        ),
+        revision_before_message=confirmation_revision_before_message,
+        confirmation_checkpoint=(
+            pending_confirmation_item.model_dump(mode='json') if pending_confirmation_item else None
+        ),
+        inbound_checkpoint=not retrying_saved_message,
+    )
+    if retrying_saved_message and existing_client_message is not None:
+        claimant_message = existing_client_message
+        repository.save_idempotency(checkpoint_idempotency)
+    else:
+        claim = claim.model_copy(
+            update={'revision': expected_revision + 1, 'updated_at': timestamp}
+        )
+        session = session.model_copy(
+            update={'context_revision': claim.revision, 'last_active_at': timestamp}
+        )
+        try:
+            repository.save_message_mutation(
+                claim, expected_revision, session, claimant_message, checkpoint_idempotency
+            )
+        except RevisionConflict as conflict:
+            raise ApiError(
+                status_code=409,
+                code='REVISION_CONFLICT',
+                message='The claim changed after this page was loaded.',
+                retryable=True,
+                current_revision=conflict.current_revision,
+            ) from conflict
+        except IdempotencyConflict as conflict:
+            raise ApiError(
+                status_code=409,
+                code='IDEMPOTENCY_CONFLICT',
+                message='The message was already accepted.',
+            ) from conflict
+    # Result persistence is a second CAS boundary. It must reject a mutation
+    # performed by another request while the provider was producing its reply.
+    expected_revision = claim.revision
     if progress_reporter is not None:
         progress_reporter.accepted()
         progress_reporter.emit(AgentTurnProgressStage.CONTEXT_LOADING, 'claim.context')
@@ -2063,6 +2075,7 @@ def submit_message(
             key=lambda item: (item.created_at, item.message_id),
         )
         if message.visibility is not MessageVisibility.INTERNAL_ONLY
+        and message.message_id != claimant_message.message_id
     )
     trigger_message_id = claimant_message.message_id
 
@@ -2093,65 +2106,38 @@ def submit_message(
             turn_family_resolution.product_family,
         )
     except ExternalLifecycleContextError as error:
-        raise ApiError(
-            status_code=503,
-            code='EXTERNAL_LIFECYCLE_CONTEXT_UNAVAILABLE',
-            message='The external-service lifecycle context cannot be represented safely.',
-            retryable=error.retryable,
-        ) from error
-    available_external_ids = {
-        item.service_identity
-        for item in external_services
-        if item.operation_status is ExternalLifecycleStatus.CONSENT_REQUIRED
-    }
-    if not handoff_open:
-        recent_claimant_messages = [
+        external_services = ()
+        logger.warning(
+            'external_lifecycle_context_unavailable',
+            extra={
+                'claim_id': claim_id,
+                'retryable': error.retryable,
+                'component': 'external_service_eligibility',
+            },
+        )
+    available_external_ids = eligible_service_ids(
+        repository,
+        claim,
+        turn_family_resolution.product_family,
+        tuple(
             item
             for item in repository.list_messages(claim_id, session_id, principal.subject)
-            if item.actor is ActorType.CLAIMANT
-        ]
-        current_text = payload.content.text if payload.content is not None else ''
-        renewed_ids = {
-            item['service_identity']
-            for item in detected_service_intents(
-                current_text,
-                [],
-                product_family=turn_family_resolution.product_family,
-            )
-        }
-        for consent in claim.external_service_consents:
-            if consent.status.value not in {'declined', 'withdrawn'} or consent.offer_ref is None:
-                continue
-            offer_item = find_offer(repository, claim, consent.offer_ref)
-            if offer_item is None or offer_item.external_offer is None:
-                continue
-            trigger_id = offer_item.external_offer.trigger_message_id
-            # Count turns by the repository's stable chronological ordering,
-            # rather than comparing generated message ids or timestamps alone.
-            # A fixture or fast production request may legitimately share a
-            # timestamp with the triggering message.
-            trigger_index = next(
-                (
-                    index
-                    for index, item in enumerate(recent_claimant_messages)
-                    if item.message_id == trigger_id
-                ),
-                None,
-            )
-            turn_count = (
-                len(recent_claimant_messages) - trigger_index - 1
-                if trigger_index is not None
-                else 0
-            )
-            if turn_count < 3 and consent.service_identity not in renewed_ids:
-                available_external_ids.discard(consent.service_identity)
+            if item.message_id != claimant_message.message_id
+        ),
+        current_text=message_text,
+        lifecycle=external_services,
+    )
     selected_external_service_intents = (
         []
         if handoff_open
+        or (
+            runtime_policy is not None
+            and runtime_policy.instruction.prompt_version == 'northwind-fnol-claimant-v8'
+        )
         else select_registered_service_intents(
             payload.content.text if payload.content is not None else None,
             product_family=turn_family_resolution.product_family,
-            available_service_ids=available_external_ids,
+            available_service_ids=set(available_external_ids),
         )
     )
     agent_context = AgentTurnContext(
@@ -2207,29 +2193,27 @@ def submit_message(
         progress_reporter=(progress_reporter.emit if progress_reporter is not None else None),
         rolling_summary=rolling_summary,
         external_services=() if handoff_open else external_services,
+        eligible_service_ids=frozenset() if handoff_open else frozenset(available_external_ids),
+        open_handoffs=tuple(
+            item
+            for item in repository.list_handoffs(claim_id, principal.subject)
+            if item.status.value not in {'resolved', 'cancelled'}
+        ),
     )
+    agent_context = replace(agent_context, safety_interrupt=detect_safety_interrupt(agent_context))
     turn_route = route_turn(agent_context)
-    try:
-        proposal = agent.propose_turn(agent_context)
-    except ModelGatewayError as model_error:
+
+    def recover_model_failure(model_error: ModelGatewayError) -> MessageTurnResponse:
+        nonlocal claimant_message
         # Preserve the claimant's accepted input and revision when the provider
         # fails before any Claim mutation.  The existing message entrypoint is
         # the recovery boundary; no retry endpoint or duplicate inbound record
         # is introduced here.
-        recovery_timestamp = now_utc()
-        recovery_claim = claim.model_copy(
-            update={'revision': claim.revision + 1, 'updated_at': recovery_timestamp}
-        )
-        recovery_session = session.model_copy(
-            update={
-                'last_active_at': recovery_timestamp,
-                'context_revision': recovery_claim.revision,
-            }
-        )
+        recovery_claim = repository.get_claim(claim_id, principal.subject) or claim
         recovery_rule = classify_recovery(
             RecoveryTrigger(source='model', outcome_code=model_error.code.value)
         )
-        claimant_message = claimant_message.model_copy(
+        claimant_message = cast(MessageRecord, claimant_message).model_copy(
             update={'recovery_rule_id': recovery_rule.rule_id}
         )
         recovery_response = _message_only_response(
@@ -2241,6 +2225,17 @@ def submit_message(
             claimant_message,
             claim=recovery_claim,
         )
+        recovery_response = recovery_response.model_copy(
+            update={
+                'recovery': ClaimantTurnRecovery(
+                    rule_id=recovery_rule.rule_id,
+                    continuation=recovery_rule.continuation,
+                    claimant_projection=recovery_rule.claimant_projection,
+                    resume_triggers=sorted(recovery_rule.resume_triggers),
+                    resume_entrypoint=recovery_rule.resume_entrypoint,
+                )
+            }
+        )
         recovery_idempotency = IdempotencyRecord(
             actor_id=principal.subject,
             route=route,
@@ -2250,24 +2245,55 @@ def submit_message(
             session_id=session_id,
             message_id=claimant_message.message_id,
             response_payload=recovery_response.model_dump(mode='json'),
+            revision_before_message=confirmation_revision_before_message,
+            confirmation_checkpoint=checkpoint_idempotency.confirmation_checkpoint,
+            inbound_checkpoint=checkpoint_idempotency.inbound_checkpoint,
         )
-        try:
-            repository.save_message_mutation(
-                recovery_claim,
-                expected_revision,
-                recovery_session,
-                claimant_message,
-                recovery_idempotency,
+        repository.save_message_recovery(claimant_message, recovery_idempotency)
+        repository.append_audit_event(
+            AuditEventEnvelope(
+                event_id=new_id('aud'),
+                event_type=recovery_rule.audit_event_type,
+                outcome='failed',
+                subject={'subject_type': 'claim', 'subject_id': claim_id, 'claim_id': claim_id},
+                actor={
+                    'actor_type': 'claimant',
+                    'actor_id': principal.subject,
+                    'auth_source': principal.auth_source,
+                },
+                reason=(
+                    'The accepted claimant message was preserved after a model dependency failure.'
+                ),
+                source_refs=[
+                    claimant_message.message_id,
+                    recovery_rule.rule_id,
+                    model_error.code.value,
+                ],
+                visibility='audit_only',
+                idempotency_key=key,
+                claim_revision=recovery_claim.revision,
+                created_at=now_utc(),
             )
-        except RevisionConflict as conflict:
-            raise ApiError(
-                status_code=409,
-                code='REVISION_CONFLICT',
-                message='The claim changed after this page was loaded.',
-                retryable=True,
-                current_revision=conflict.current_revision,
-            ) from conflict
+        )
+        logger.warning(
+            'AGENT_TURN_RECOVERY',
+            extra={
+                'claim_id': claim_id,
+                'source_refs': [
+                    claimant_message.message_id,
+                    recovery_rule.rule_id,
+                    model_error.code.value,
+                ],
+                'recovery_rule_id': recovery_rule.rule_id,
+                'provider_outcome': model_error.code.value,
+            },
+        )
         return recovery_response
+
+    try:
+        proposal = agent.propose_turn(agent_context)
+    except ModelGatewayError as model_error:
+        return recover_model_failure(model_error)
     if runtime_policy is not None:
         enforce_agent_proposal(runtime_policy, proposal)
     preliminary_authority = validate_proposal(proposal)
@@ -2311,25 +2337,28 @@ def submit_message(
             claim,
             proposal,
         )
-        for tool, outcome in (
+        for tool, context_outcome in (
             ('policy_history', policy_outcome),
             ('claim_history', history_outcome),
             ('evidence.history', evidence_history_outcome),
         ):
             if tool not in requested_context_tools:
                 continue
-            if outcome is None:
+            if context_outcome is None:
                 raise ApiError(
                     status_code=503,
                     code='AGENT_TOOL_NOT_PERMITTED',
                     message='The Agent supplied an incomplete context-tool request.',
                 )
-            _record, tool_result = outcome
+            _record, tool_result = context_outcome
             context_tool_results.append(tool_result)
         if proposal.proposal_source is AgentProposalSource.MODEL_GATEWAY:
-            proposal = agent.propose_turn(
-                replace(agent_context, tool_results=tuple(context_tool_results))
-            )
+            try:
+                proposal = agent.propose_turn(
+                    replace(agent_context, tool_results=tuple(context_tool_results))
+                )
+            except ModelGatewayError as model_error:
+                return recover_model_failure(model_error)
             if runtime_policy is not None:
                 enforce_agent_proposal(runtime_policy, proposal)
             replanned_authority = validate_proposal(proposal)
@@ -2416,773 +2445,50 @@ def submit_message(
             message='Model responses using the deprecated legacy action contract are rejected.',
             retryable=False,
         )
-    executed_state_changes = authorised_state_changes(proposal, authority)
-    effective_customer_reason = proposal.customer_reason
-    effective_customer_response = proposal.customer_response
-    effective_next_step = _effective_next_step(proposal.customer_next_step, authority.outcome)
-    if (
-        proposal.proposal_source is AgentProposalSource.MODEL_GATEWAY
-        and authority.outcome is not AuthorityOutcome.AUTHORISED
-    ):
-        (
-            effective_customer_reason,
-            effective_customer_response,
-            effective_next_step,
-        ) = _safe_model_customer_content(
-            proposal,
-            authority.outcome,
-            claim.customer_next_step,
-            claim.form,
-        )
-    form_changes = _build_form_changes(
-        claim.form,
-        proposal.form_changes,
-        claimant_message,
-        timestamp,
-        authority.outcome,
-        proposal.proposal_source,
-        branch_evaluation,
-        _grounding_source_refs(proposal.tool_results),
-        {item.evidence_id: item.media_type for item in turn_evidence},
-    )
-    confirmation_bound = False
-    if pending_confirmation_item is not None:
-        parts = pending_confirmation_item.subject_ref.split(':')
-        try:
-            current_fingerprint = sha256(
-                json.dumps(
-                    sorted(
-                        (code, field.value)
-                        for code, field in claim.form.items()
-                        if field.status is FormStatus.PROPOSED
-                    ),
-                    separators=(',', ':'),
-                    sort_keys=True,
-                ).encode()
-            ).hexdigest()
-            confirmation_bound = (
-                len(parts) >= 5
-                and parts[0] == 'confirmation'
-                and int(parts[2]) == confirmation_revision_before_message
-                and parts[3] == 'fp'
-                and parts[4] == current_fingerprint
-            )
-        except ValueError:
-            confirmation_bound = False
-    if (
-        getattr(proposal, 'confirms_batch', False)
-        and claim.customer_next_step.status == 'confirmation_required'
-        and confirmation_bound
-    ):
-        for field_code, field in claim.form.items():
-            if field.status is FormStatus.PROPOSED:
-                form_changes[field_code] = field.model_copy(update={'status': FormStatus.CONFIRMED})
-    contents_item_changes = _build_contents_item_changes(
+    outcome = reduce_turn(
         claim,
-        proposal,
-        claimant_message,
-        timestamp,
-        authority.outcome,
-        branch_evaluation,
-        {item.evidence_id: item.media_type for item in turn_evidence},
-    )
-    conflicting_fields = [
-        field_code
-        for field_code, field in form_changes.items()
-        if field.status is FormStatus.DISPUTED
-    ]
-    conflicting_contents = [
-        item for item in contents_item_changes if item.status is FormStatus.DISPUTED
-    ]
-    clarification_items = [
-        *conflicting_fields,
-        *(['contents.items'] if conflicting_contents else []),
-    ]
-    if clarification_items:
-        effective_customer_reason = 'A material incident detail needs clarification.'
-        effective_customer_response = (
-            'I have two different versions of an incident detail. Which version should '
-            'Northwind use?'
-        )
-        effective_next_step = CustomerNextStep(
-            status='clarification_needed',
-            summary='Clarify the conflicting incident detail.',
-            responsible_party=ResponsibleParty.CLAIMANT,
-            required_items=clarification_items,
-        )
-    discrepancy_candidates = [
-        DiscrepancyCandidate(
-            candidate_id=new_id('dsc'),
-            field_code=field_code,
-            source_refs=form_changes[field_code].source_refs,
-            created_at=timestamp,
-        )
-        for field_code in conflicting_fields
-        if len(form_changes[field_code].source_refs) >= 2
-    ]
-    discrepancy_candidates.extend(
-        DiscrepancyCandidate(
-            candidate_id=new_id('dsc'),
-            field_code='contents.items',
-            source_refs=item.source_refs,
-            created_at=timestamp,
-        )
-        for item in conflicting_contents
-        if len(item.source_refs) >= 2
-    )
-    session_after_questions = session
-    pending_evidence = _pending_evidence_for_proposal(
-        claim_id,
-        proposal,
-        claimant_message,
-        timestamp,
-    )
-    if pending_evidence is not None:
-        form_changes['authorities.police_report_reference'] = StructuredFormField(
-            value=None,
-            source=FormSource.CLAIMANT,
-            source_refs=[claimant_message.message_id, pending_evidence.evidence_id],
-            status=FormStatus.PENDING_GENERATION,
-            needed_for=NeededFor.LATER_ACTION,
-            confidence=1.0,
-            updated_at=timestamp,
-            updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id=principal.subject),
-        )
-    if authority.outcome is AuthorityOutcome.BLOCKED:
-        form_changes = {}
-        contents_item_changes = []
-
-    policy_retrieval = next(
-        (
-            record
-            for record in reversed(repository.list_retrieval_records(claim_id, principal.subject))
-            if isinstance(record, PolicyRetrievalRecord)
-            and record.retrieval_id in _tool_source_refs(proposal.tool_results)
-        ),
-        None,
-    )
-    inferred_incident_type = claim.incident_type
-    proposed_family = form_changes.get('claim.product_family')
-    if (
-        proposed_family is not None
-        and proposed_family.status is FormStatus.CONFIRMED
-        and isinstance(proposed_family.value, str)
-        and proposed_family.value in {'motor', 'home', 'contents'}
-    ):
-        inferred_incident_type = proposed_family.value
-
-    next_action = claim.claim_state.next_action
-    for state_change in executed_state_changes:
-        if state_change.path == 'claim_state.next_action':
-            raw_action = (
-                state_change.to.value
-                if isinstance(state_change.to, AgentAction)
-                else state_change.to
-            )
-            next_action = AgentAction(str(raw_action))
-    handoff: HandoffRecord | None = None
-    professional_review = False
-    if authority.outcome is AuthorityOutcome.AUTHORISED and proposal.action in {
-        AgentAction.HANDOFF,
-        AgentAction.URGENT_HANDOFF,
-    }:
-        detected_support_need = support_need_for_intent(detect_support_intent(message_text))
-        support_need = (
-            SupportNeed.URGENT
-            if proposal.action is AgentAction.URGENT_HANDOFF
-            else detected_support_need or SupportNeed.HUMAN_REQUESTED
-        )
-        handoff, effective_next_step = build_handoff(
-            repository,
-            claim,
-            support_need=support_need,
-            reason=proposal.customer_reason,
-            preferred_channel=None,
-            source_message_id=claimant_message.message_id,
-            reason_code=proposal.reason_codes[0],
-        )
-        updated_claim = updated_claim_for_handoff(claim, handoff, effective_next_step)
-        if form_changes:
-            updated_claim = updated_claim.model_copy(
-                update={'form': {**claim.form, **form_changes}}
-            )
-    else:
-        projected_form = {**claim.form, **form_changes}
-        projected_contents = _apply_contents_item_changes(
-            claim.contents_items,
-            contents_item_changes,
-        )
-        professional_review = _professional_review_requested(proposal)
-        if professional_review:
-            existing_retrievals = repository.list_retrieval_records(claim_id, principal.subject)
-            existing_signals = repository.list_review_signals(claim_id, principal.subject)
-            policy_record = next(
-                (
-                    item
-                    for item in reversed(existing_retrievals)
-                    if isinstance(item, PolicyRetrievalRecord) and item.uncertainty
-                ),
-                None,
-            )
-            review_signal = next(
-                (
-                    item
-                    for item in reversed(existing_signals)
-                    if policy_record is not None and policy_record.retrieval_id in item.source_refs
-                ),
-                None,
-            )
-            if policy_record is None or review_signal is None:
-                raise ApiError(
-                    status_code=409,
-                    code='INVALID_STATE_TRANSITION',
-                    message='A sourced policy review is required before professional review.',
-                )
-            projected_claim = claim.model_copy(
-                update={
-                    'form': projected_form,
-                    'contents_items': projected_contents,
-                    'incident_type': inferred_incident_type,
-                    'revision': claim.revision + 1,
-                }
-            )
-            handoff, effective_next_step = build_policy_review_handoff(
-                repository,
-                projected_claim,
-                retrieval=policy_record,
-                signal=review_signal,
-                source_message_id=claimant_message.message_id,
-                pending_evidence=pending_evidence,
-            )
-        has_confirmation_work = any(
-            field.status in {FormStatus.PROPOSED, FormStatus.DISPUTED}
-            for field in form_changes.values()
-        ) or any(
-            item.status in {FormStatus.PROPOSED, FormStatus.DISPUTED}
-            for item in contents_item_changes
-        )
-        if (
-            not professional_review
-            and not has_confirmation_work
-            and (form_changes or contents_item_changes or pending_evidence is not None)
-            and not any(
-                code in proposal.reason_codes
-                for code in {'SAFETY_STATUS_RECORDED', 'POLICY_WORDING_REVIEW_NEEDED'}
-            )
-        ):
-            projected_claim = claim.model_copy(
-                update={
-                    'form': projected_form,
-                    'contents_items': projected_contents,
-                    'incident_type': inferred_incident_type,
-                }
-            )
-            requirements = branch_evaluator.evaluate(
-                projected_claim,
-                latest_message=message_text,
-                trigger_source_refs=[claimant_message.message_id],
-                current_action=next_action,
-                recomputation_reason='agent_turn_progress_preview',
-                previous_evaluation=previous_evaluation,
-            ).requirements
-            effective_next_step = next_requirement_step(requirements)
-            if requirements.ready:
-                effective_customer_response = (
-                    'Thanks. I have saved those details. Your confirmed report is ready for '
-                    'claim creation.'
-                )
-            else:
-                next_field = intake_field_for_requirement(requirements.next_required_item)
-                if next_field is not None:
-                    effective_customer_response = _with_single_runtime_question(
-                        effective_customer_response,
-                        next_field.prompt,
-                    )
-        updated_claim = claim.model_copy(
-            update={
-                'claim_state': claim.claim_state.model_copy(
-                    update={
-                        'next_action': (
-                            AgentAction.HANDOFF if professional_review else next_action
-                        ),
-                        **(
-                            {'coverage': Coverage.REVIEW_REQUIRED}
-                            if policy_retrieval is not None
-                            else {}
-                        ),
-                        **(
-                            {'workflow_state': WorkflowState.PROFESSIONAL_REVIEW}
-                            if professional_review
-                            else {}
-                        ),
-                        **(
-                            {'evidence': EvidenceState.PENDING}
-                            if pending_evidence is not None
-                            else {}
-                        ),
-                    }
-                ),
-                'form': projected_form,
-                'contents_items': projected_contents,
-                'incident_type': inferred_incident_type,
-                'evidence_summary': (
-                    claim.evidence_summary.model_copy(
-                        update={'pending': claim.evidence_summary.pending + 1}
-                    )
-                    if pending_evidence is not None
-                    else claim.evidence_summary
-                ),
-                'customer_next_step': effective_next_step,
-                'revision': claim.revision + 1,
-                'updated_at': timestamp,
-            }
-        )
-    session_after_questions, effective_next_step, effective_customer_response = (
-        _apply_question_accounting(
-            session_after_questions,
-            proposal,
-            effective_next_step,
-            effective_customer_response,
-            claimant_message.message_id,
-            timestamp,
-        )
-    )
-    applied_evaluation = branch_evaluator.evaluate(
-        updated_claim,
-        latest_message=(payload.content.text if payload.content is not None else None),
-        trigger_source_refs=[claimant_message.message_id],
-        current_action=updated_claim.claim_state.next_action,
-        recomputation_reason='agent_turn_applied',
-        previous_evaluation=previous_evaluation,
-    )
-    progress_state, progress_next_step = recompute_progress(
-        updated_claim,
-        applied_evaluation,
-        open_handoffs=tuple(
-            item
-            for item in repository.list_handoffs(claim_id, principal.subject)
-            if item.status.value not in {'resolved', 'cancelled'}
-        ),
-        proposed_next_step=effective_next_step,
-    )
-    if (
-        updated_claim.claim_state.workflow_state != progress_state
-        or updated_claim.customer_next_step != progress_next_step
-    ):
-        updated_claim = updated_claim.model_copy(
-            update={
-                'claim_state': updated_claim.claim_state.model_copy(
-                    update={'workflow_state': progress_state}
-                ),
-                'customer_next_step': progress_next_step,
-            }
-        )
-    effective_next_step = progress_next_step
-    # A validated create proposal is the explicit Runtime transition into the
-    # creation-ready boundary.  Keep this narrow exception here rather than
-    # allowing a generic next-step projection to leave the Claim in collecting
-    # while the create command is being prepared.
-    if (
-        authority.outcome is AuthorityOutcome.AUTHORISED
-        and proposal.action is AgentAction.CREATE_CLAIM
-        and updated_claim.claim_state.workflow_state is WorkflowState.COLLECTING
-    ):
-        updated_claim = updated_claim.model_copy(
-            update={
-                'claim_state': updated_claim.claim_state.model_copy(
-                    update={'workflow_state': WorkflowState.READY_FOR_NEXT}
-                )
-            }
-        )
-    live_mutation_command = _live_mutation_command(
-        claim=claim,
+        proposal.validated_turn,
+        branch_evaluator=branch_evaluator,
+        safety_interrupt=agent_context.safety_interrupt,
+        open_handoffs=agent_context.open_handoffs,
+        session=session,
         claimant_message=claimant_message,
-        idempotency_key=key,
-        form_changes=form_changes,
-        contents_item_changes=contents_item_changes,
-        handoff=handoff,
-        pending_evidence=pending_evidence,
-        runtime_policy=runtime_policy,
-    )
-    resulting_revision = updated_claim.revision
-    updated_session = session_after_questions.model_copy(
-        update={
-            'last_active_at': timestamp,
-            'context_revision': resulting_revision,
-        }
-    )
-    agent_message = MessageRecord(
-        message_id=new_id('msg'),
-        claim_id=claim_id,
-        session_id=session_id,
-        actor=ActorType.AGENT,
-        visibility=MessageVisibility.CLAIMANT_VISIBLE,
-        content={'type': 'text', 'text': effective_customer_response},
-        in_reply_to=claimant_message.message_id,
-        created_at=timestamp,
-    )
-    decision = AgentDecisionRecord(
-        decision_id=new_id('dec'),
-        claim_id=claim_id,
-        session_id=session_id,
-        trigger_message_id=claimant_message.message_id,
-        action=proposal.action,
-        reason_codes=proposal.reason_codes,
-        customer_reason=effective_customer_reason,
-        customer_response=effective_customer_response,
-        state_changes=proposal.state_changes,
-        proposed_signals=proposal.proposed_signals,
-        required_tools=proposal.required_tools,
-        tool_results=proposal.tool_results,
-        next_action_requirements=proposal.next_action_requirements,
-        handoff_priority=proposal.handoff_priority,
-        handoff_id=handoff.handoff_id if handoff is not None else None,
-        customer_next_step=effective_next_step,
+        eligible_service_ids=frozenset(available_external_ids),
+        timestamp=max(now_utc(), claimant_message.created_at + timedelta(microseconds=1)),
+        revision_before_message=confirmation_revision_before_message,
+        confirmation_before_message=(
+            pending_confirmation_item.confirmation_request if pending_confirmation_item else None
+        ),
+        proposal=proposal,
         authority=authority,
-        proposal_source=proposal.proposal_source,
-        model_provenance=proposal.model_provenance,
-        runtime_configuration=(runtime_policy.provenance() if runtime_policy else None),
-        form_changes=form_changes,
-        contents_item_changes=contents_item_changes,
-        resulting_revision=resulting_revision,
-        created_at=timestamp,
-        discrepancy_candidates=discrepancy_candidates,
-    )
-    idempotency = IdempotencyRecord(
-        actor_id=principal.subject,
-        route=route,
+        repository=repository,
+        principal=principal,
+        branch_evaluation=branch_evaluation,
+        previous_evaluation=previous_evaluation,
+        turn_evidence=turn_evidence,
+        message_text=message_text,
+        runtime_trace=runtime_trace,
+        runtime_policy=runtime_policy,
+        prepared_action_code=prepared_action_code,
         key=key,
-        request_fingerprint=fingerprint,
-        claim_id=claim_id,
-        session_id=session_id,
-        message_id=claimant_message.message_id,
-        agent_message_id=agent_message.message_id,
-        decision_id=decision.decision_id,
-        handoff_id=handoff.handoff_id if handoff is not None else None,
-        action_registry_version=(
-            live_mutation_command.contract_version if live_mutation_command is not None else None
-        ),
-        action_code=(
-            live_mutation_command.action_code
-            if live_mutation_command is not None
-            else prepared_action_code
-        ),
-        target_ref=(
-            claim_id
-            if live_mutation_command is not None or prepared_action_code is not None
-            else None
-        ),
+        fingerprint=fingerprint,
+        request_checkpoint=checkpoint_idempotency,
+        turn_route=turn_route,
+        agent_context=agent_context,
+        selected_external_service_intents=selected_external_service_intents,
+        turn_family_resolution=turn_family_resolution,
+        external_capability_dispatcher=external_capability_dispatcher,
     )
-    evaluation_record = BranchEvaluationRecord(
-        evaluation_id=new_id('brn'),
-        claim_id=claim_id,
-        session_id=session_id,
-        turn_id=claimant_message.message_id,
-        evaluated_against_claim_revision=applied_evaluation.evaluated_against_claim_revision,
-        resulting_claim_revision=resulting_revision,
-        field_registry_version=applied_evaluation.field_registry_version,
-        branch_rules_version=applied_evaluation.branch_rules_version,
-        selected_family=applied_evaluation.selected_family,
-        unresolved_family_conflict=applied_evaluation.unresolved_family_conflict,
-        branch_results=applied_evaluation.branch_results,
-        field_selection_results=applied_evaluation.field_selection,
-        work_item_intents=applied_evaluation.work_item_intents,
-        handoff_intents=applied_evaluation.handoff_intents,
-        evidence_intents=applied_evaluation.evidence_intents,
-        consent_intents=applied_evaluation.consent_intents,
-        integration_intents=applied_evaluation.integration_intents,
-        interruption_result=applied_evaluation.interruption_result,
-        permitted_actions=applied_evaluation.permitted_actions,
-        permitted_tools=applied_evaluation.permitted_tools,
-        requirements=applied_evaluation.requirements,
-        recomputation_reason=applied_evaluation.recomputation_reason,
-        status=BranchEvaluationStatus.APPLIED,
-        created_at=timestamp,
-    )
-    runtime_turn_id = new_id('turn')
-    external_service_intents = (
-        selected_external_service_intents
-        if proposal.proposal_source is AgentProposalSource.MODEL_GATEWAY
-        else detected_service_intents(
-            payload.content.text if payload.content is not None else None,
-            proposal.external_service_intents,
-            product_family=turn_family_resolution.product_family,
-        )
-    )
-    runtime_directive = (
-        runtime_trace.runtime_action_code if runtime_trace is not None else 'runtime.continue'
-    )
-    runtime_proposal = AgentProposalRecord(
-        proposal_id=new_id('apr'),
-        turn_id=runtime_turn_id,
-        claim_id=claim_id,
-        session_id=session_id,
-        action_code=runtime_trace.action_code
-        if runtime_trace is not None
-        else 'conversation.answer',
-        runtime_directive=runtime_directive,
-        reason_codes=list(proposal.reason_codes),
-        customer_reason=effective_customer_reason,
-        customer_response=effective_customer_response,
-        customer_next_step=effective_next_step,
-        evidence_id=proposal.evidence_id,
-        source_claim_id=proposal.source_claim_id,
-        removal_scope=proposal.removal_scope,
-        form_changes=list(proposal.form_changes),
-        contents_item_changes=list(proposal.contents_item_changes),
-        source_refs=sorted(_tool_source_refs(proposal.tool_results)),
-        external_service_intents=external_service_intents,
-        proposal_source=proposal.proposal_source,
-        model_profile_id=session.model_profile_id,
-        runtime_configuration=(runtime_policy.provenance() if runtime_policy else None),
-        created_at=timestamp,
-    )
-    runtime_turn_plan = TurnPlanRecord(
-        turn_id=runtime_turn_id,
-        claim_id=claim_id,
-        session_id=session_id,
-        trigger_message_id=claimant_message.message_id,
-        model_profile_id=session.model_profile_id,
-        intents=sorted(turn_route.intents),
-        conversation_moves=['acknowledge', 'collect_or_confirm_facts'],
-        candidate_fields=sorted({change.field_code for change in proposal.form_changes}),
-        tool_requests=list(proposal.required_tools),
-        registry_versions=(
-            {'external_service_lifecycle': agent_context.external_services[0].registry_version}
-            if agent_context.external_services
-            else {}
-        ),
-        external_lifecycle_context=[
-            ExternalLifecycleContextCoordinate(
-                registry_version=item.registry_version,
-                service_identity=item.service_identity,
-                operation_status=item.operation_status,
-                result_status=item.result_status,
-                result_verification=item.result_verification,
-            )
-            for item in agent_context.external_services
-            if item.operation_status is not ExternalLifecycleStatus.CONSENT_REQUIRED
-        ],
-        runtime_directive=runtime_directive,
-        limitations=list(
-            dict.fromkeys(
-                [
-                    *(['model_runtime_trace_only'] if runtime_trace is not None else []),
-                    *(['professional_review_required'] if professional_review else []),
-                ]
-            )
-        ),
-        created_at=timestamp,
-    )
-    primary_action_code = (
-        runtime_trace.action_code
-        if runtime_trace is not None
-        else (
-            'human.create_handoff'
-            if proposal.action in {AgentAction.HANDOFF, AgentAction.URGENT_HANDOFF}
-            else 'conversation.answer'
-        )
-    )
-    primary_namespace = primary_action_code.split('.', 1)[0]
-    envelope_records = [
-        ActionEnvelopeRecord(
-            envelope_id=new_id('env'),
-            turn_id=runtime_turn_id,
-            claim_id=claim_id,
-            namespace=primary_namespace,
-            action_code=primary_action_code,
-            target_ref=agent_message.message_id,
-            expected_revision=expected_revision,
-            source_refs=[claimant_message.message_id],
-            authority=authority,
-            status='executed' if authority.outcome is AuthorityOutcome.AUTHORISED else 'rejected',
-            idempotency_key=key,
-            created_at=timestamp,
-        )
-    ]
-    executed_action_code = (
-        live_mutation_command.action_code
-        if live_mutation_command is not None
-        else prepared_action_code
-    )
-    if executed_action_code is not None and executed_action_code != primary_action_code:
-        envelope_records.append(
-            ActionEnvelopeRecord(
-                envelope_id=new_id('env'),
-                turn_id=runtime_turn_id,
-                claim_id=claim_id,
-                namespace=executed_action_code.split('.', 1)[0],
-                action_code=executed_action_code,
-                target_ref=claim_id,
-                expected_revision=expected_revision,
-                source_refs=[claimant_message.message_id],
-                authority=authority,
-                status='executed',
-                idempotency_key=key,
-                created_at=timestamp,
-            )
-        )
-    tool_records: list[ToolResultRecord] = []
-    if (
-        runtime_trace is not None
-        and runtime_trace.tool_call_id is not None
-        and runtime_trace.tool_name is not None
-        and runtime_trace.tool_result_status is not None
-    ):
-        tool_records.append(
-            ToolResultRecord(
-                result_id=new_id('toolres'),
-                turn_id=runtime_turn_id,
-                claim_id=claim_id,
-                tool_call_id=runtime_trace.tool_call_id,
-                tool_name=runtime_trace.tool_name,
-                status=runtime_trace.tool_result_status,
-                output=dict(runtime_trace.tool_output),
-                source_refs=[f'claim:{claim_id}:revision:{expected_revision}'],
-                limitations=[],
-                created_at=timestamp,
-            )
-        )
-    for index, context_result in enumerate(
-        result for result in proposal.tool_results if result.get('tool') == 'evidence.history'
-    ):
-        raw_status = context_result.get('status')
-        status = (
-            raw_status
-            if raw_status in {'succeeded', 'unavailable', 'failed', 'unknown'}
-            else 'failed'
-        )
-        raw_refs = context_result.get('source_refs', [])
-        source_refs = [str(ref) for ref in raw_refs] if isinstance(raw_refs, list) else []
-        raw_limitations = context_result.get('limitations', [])
-        limitations = (
-            [str(item) for item in raw_limitations]
-            if isinstance(raw_limitations, list)
-            else ['The Evidence history result did not contain valid limitations.']
-        )
-        tool_records.append(
-            ToolResultRecord(
-                result_id=new_id('toolres'),
-                turn_id=runtime_turn_id,
-                claim_id=claim_id,
-                tool_call_id=f'context:{claimant_message.message_id}:evidence_history:{index}',
-                tool_name='evidence.history',
-                status=status,
-                output=dict(context_result),
-                source_refs=source_refs,
-                limitations=limitations,
-                created_at=timestamp,
-            )
-        )
-    work_items = [
-        RuntimeWorkItemRecord(
-            work_item_id=new_id('wki'),
-            claim_id=claim_id,
-            turn_id=runtime_turn_id,
-            kind='question' if item in effective_next_step.required_items else 'system',
-            subject_ref=item,
-            owner=(
-                'claimant'
-                if effective_next_step.responsible_party is ResponsibleParty.CLAIMANT
-                else 'staff'
-            ),
-            status='open',
-            blocks_action=effective_next_step.status,
-            source_refs=[claimant_message.message_id],
-            created_at=timestamp,
-            updated_at=timestamp,
-        )
-        for item in effective_next_step.required_items
-    ]
-    if getattr(applied_evaluation.requirements, 'ready_pending_confirmation', False):
-        # Bind the confirmation to the exact values shown by this turn.  The
-        # evaluation is calculated from ``updated_claim``; using the pre-turn
-        # Claim here produced a fingerprint that could never match the next
-        # message after the proposal had been applied.
-        fingerprint_payload = sorted(
-            (code, field.value)
-            for code, field in updated_claim.form.items()
-            if field.status is FormStatus.PROPOSED
-        )
-        fingerprint = sha256(
-            json.dumps(fingerprint_payload, separators=(',', ':'), sort_keys=True).encode()
-        ).hexdigest()
-        work_items.append(
-            RuntimeWorkItemRecord(
-                work_item_id=new_id('wki'),
-                claim_id=claim_id,
-                turn_id=runtime_turn_id,
-                kind='confirmation',
-                subject_ref=(
-                    f'confirmation:{claimant_message.message_id}:'
-                    f'{updated_claim.revision}:fp:{fingerprint}'
-                ),
-                owner='claimant',
-                status='open',
-                blocks_action='confirmation_required',
-                source_refs=[claimant_message.message_id],
-                created_at=timestamp,
-                updated_at=timestamp,
-            )
-        )
-    for intent in external_service_intents:
-        offer = build_offer_metadata(
-            claim=updated_claim,
-            agent_message_id=agent_message.message_id,
-            trigger_message_id=claimant_message.message_id,
-            intent=intent,
-            dispatcher=external_capability_dispatcher,
-        )
-        work_items.append(
-            offer_work_item(
-                claim=updated_claim,
-                turn_id=runtime_turn_id,
-                offer=offer,
-                timestamp=timestamp,
-            )
-        )
-    execution_plan = ExecutionPlanRecord(
-        execution_plan_id=new_id('xpl'),
-        turn_id=runtime_turn_id,
-        claim_id=claim_id,
-        expected_revision=expected_revision,
-        envelope_ids=[item.envelope_id for item in envelope_records],
-        approved_envelope_ids=[
-            item.envelope_id for item in envelope_records if item.status in {'approved', 'executed'}
-        ],
-        rejected_envelope_ids=[
-            item.envelope_id for item in envelope_records if item.status == 'rejected'
-        ],
-        status=('executed' if authority.outcome is AuthorityOutcome.AUTHORISED else 'rejected'),
-        created_at=timestamp,
-        finished_at=timestamp,
-    )
-    turn_result = TurnResultRecord(
-        result_id=new_id('res'),
-        turn_id=runtime_turn_id,
-        claim_id=claim_id,
-        session_id=session_id,
-        trigger_message_id=claimant_message.message_id,
-        agent_message_id=agent_message.message_id,
-        execution_plan_id=execution_plan.execution_plan_id,
-        status=('succeeded' if authority.outcome is AuthorityOutcome.AUTHORISED else 'blocked'),
-        resulting_claim_revision=resulting_revision,
-        customer_response=effective_customer_response,
-        state_change_refs=[f'claim:{claim_id}:revision:{resulting_revision}'],
-        tool_result_refs=[item.result_id for item in tool_records],
-        work_item_refs=[item.work_item_id for item in work_items],
-        limitations=[],
-        created_at=timestamp,
-    )
-    runtime_records = RuntimeTurnRecords(
-        turn_plan=runtime_turn_plan,
-        proposal=runtime_proposal,
-        execution_plan=execution_plan,
-        action_envelopes=envelope_records,
-        tool_results=tool_records,
-        result=turn_result,
-        work_items=work_items,
-    )
+    updated_claim = outcome.claim
+    pending_evidence = outcome.records.pending_evidence
+    handoff = outcome.handoff
+    updated_session = outcome.session
+    agent_message = outcome.records.agent_message
+    decision = outcome.records.decision
+    idempotency = outcome.records.idempotency
+    evaluation_record = outcome.records.evaluation_record
+    runtime_records = outcome.records.runtime_records
+    live_mutation_command = outcome.records.live_mutation_command
 
     def persist_agent_turn(_command: ClaimContextCommand) -> ClaimContextHandlerOutcome:
         repository.save_agent_turn(
@@ -3198,6 +2504,7 @@ def submit_message(
             evaluation_record,
             runtime_trace,
             runtime_records,
+            checkpointed=True,
         )
         return ClaimContextHandlerOutcome(
             claim_id=claim_id,
@@ -3230,6 +2537,7 @@ def submit_message(
                 evaluation_record,
                 runtime_trace,
                 runtime_records,
+                checkpointed=True,
             )
         except RevisionConflict as conflict:
             raise ApiError(

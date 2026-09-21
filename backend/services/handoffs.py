@@ -320,12 +320,19 @@ def updated_claim_for_handoff(
         else CustomerSupport.HUMAN_REQUESTED
     )
     urgency = (
-        Urgency.URGENT if handoff.support_need is SupportNeed.URGENT else claim.claim_state.urgency
+        Urgency.URGENT
+        if handoff.support_need is SupportNeed.URGENT
+        and claim.claim_state.urgency is not Urgency.IMMEDIATE_SAFETY_RISK
+        else claim.claim_state.urgency
     )
     action = (
         AgentAction.URGENT_HANDOFF
-        if handoff.type is HandoffType.URGENT_SUPPORT
+        if handoff.type is HandoffType.URGENT_SUPPORT or handoff.support_need is SupportNeed.URGENT
         else AgentAction.HANDOFF
+    )
+    terminal = (
+        claim.terminal_disposition is not None
+        or claim.claim_state.workflow_state is WorkflowState.CREATED
     )
     return claim.model_copy(
         update={
@@ -334,11 +341,15 @@ def updated_claim_for_handoff(
                 update={
                     'customer_support': customer_support,
                     'urgency': urgency,
-                    'workflow_state': WorkflowState.PROFESSIONAL_REVIEW,
-                    'next_action': action,
+                    'workflow_state': (
+                        claim.claim_state.workflow_state
+                        if terminal
+                        else WorkflowState.PROFESSIONAL_REVIEW
+                    ),
+                    'next_action': claim.claim_state.next_action if terminal else action,
                 }
             ),
-            'customer_next_step': next_step,
+            'customer_next_step': claim.customer_next_step if terminal else next_step,
             'updated_at': handoff.created_at,
         }
     )
@@ -438,6 +449,19 @@ def create_support_request(
         source_message_id=None,
     )
     updated_claim = updated_claim_for_handoff(claim, handoff, next_step)
+    from backend.services.turn_reducer import apply_progress
+
+    evaluation = build_applied_branch_evaluation(
+        updated_claim,
+        repository=repository,
+        recomputation_reason='handoff_created',
+        trigger_source_refs=[handoff.handoff_id],
+    )
+    updated_claim = apply_progress(
+        updated_claim,
+        evaluation,
+        open_handoffs=(*repository.list_handoffs(claim_id, principal.subject), handoff),
+    )
     idempotency = IdempotencyRecord(
         actor_id=principal.subject,
         route=route,
@@ -453,12 +477,7 @@ def create_support_request(
             expected_revision,
             handoff,
             idempotency,
-            branch_evaluation=build_applied_branch_evaluation(
-                updated_claim,
-                repository=repository,
-                recomputation_reason='handoff_created',
-                trigger_source_refs=[handoff.handoff_id],
-            ),
+            branch_evaluation=evaluation,
         )
     except RevisionConflict as conflict:
         raise ApiError(

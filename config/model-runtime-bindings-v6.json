@@ -26,7 +26,7 @@
     "prompt_version": "northwind-fnol-claimant-v6",
     "structured_output": true,
     "tools": true,
-    "image_input": false,
+    "image_input": true,
     "document_input": false
   }
 ]

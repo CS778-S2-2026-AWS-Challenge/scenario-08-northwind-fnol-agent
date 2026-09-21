@@ -3132,6 +3132,57 @@ def test_agent_turn_persists_linked_records_as_one_mutation(
     )
 
 
+def test_checkpointed_agent_turn_updates_claim_and_retains_one_inbound(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    inbound = _message(claim, session)
+    checkpoint = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/agent-turn',
+        key='checkpoint-turn',
+        request_fingerprint='saved-request',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        message_id=inbound.message_id,
+        revision_before_message=1,
+        inbound_checkpoint=True,
+    )
+    accepted = claim.model_copy(update={'revision': 2})
+    accepted_session = session.model_copy(update={'context_revision': 2})
+    repository.save_message_mutation(accepted, 1, accepted_session, inbound, checkpoint)
+    result = accepted.model_copy(update={'revision': 3})
+    result_session = session.model_copy(update={'context_revision': 3})
+    reply = inbound.model_copy(
+        update={
+            'message_id': 'msg_checkpoint_reply',
+            'client_message_id': None,
+            'actor': ActorType.AGENT,
+            'in_reply_to': inbound.message_id,
+            'content': {'type': 'text', 'text': 'Saved.'},
+        }
+    )
+    decision = _decision(result, result_session, inbound)
+    final = replace(checkpoint, agent_message_id=reply.message_id, decision_id=decision.decision_id)
+    repository.save_agent_turn(
+        result, 2, result_session, inbound, reply, decision, final, checkpointed=True
+    )
+    stored_claim = repository.get_claim(claim.claim_id, claim.customer_id)
+    assert stored_claim is not None and stored_claim.revision == 3
+    messages = repository.list_messages(claim.claim_id, session.session_id, claim.customer_id)
+    assert {message.message_id: message for message in messages} == {
+        inbound.message_id: inbound,
+        reply.message_id: reply,
+    }
+    assert repository.find_idempotency(claim.customer_id, '/agent-turn', 'checkpoint-turn') == final
+    original_checkpoint = repository.find_message_checkpoint(
+        claim.claim_id, inbound.message_id, claim.customer_id
+    )
+    assert original_checkpoint is not None and original_checkpoint.revision_before_message == 1
+
+
 def test_agent_turn_reads_back_target_runtime_records_by_turn_scope(
     repository: MongoDBRepository,
 ) -> None:

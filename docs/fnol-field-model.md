@@ -106,7 +106,7 @@ make their boundary explicit.
 | `incident.type` | Collision, fire, water, theft, weather, etc. | common/enum/no | C/y/y/y | safety/y/registered | Registry + form | C/S; review if disputed |
 | `incident.description` | Natural account of what happened | common/scalar/no | C/y/n/y | y/c/registered | Registry + form | C/S; privacy |
 | `incident.occurred_at` | Loss occurrence date/time without invented precision | common/temporal/no | C/y/y/y | safety/c/registered | Registry + form assertion history | C/S; exact, approximate, range, partial, unknown, timezone-aware |
-| `incident.discovered_at` | Discovery time, especially theft | conditional/date-time/no | C/y/y/y | safety/c/candidate | No field/schema | C/S; privacy |
+| `incident.discovered_at` | Discovery time, especially theft | conditional/temporal/no | C/y/y/y | creation/c/registered | Theft branch; before creation | C/S; privacy |
 | `incident.location` | Incident place or useful region | common/location/no | C/y/y/y | safety/y/registered | Registry + form | C/S; privacy |
 | `incident.cause` | Initial cause, not coverage conclusion | common/scalar/no | C,E/y/y/y | safety/c/registered | Registry; evidence proposal gap | C/S; review if conflict |
 | `loss.description` | Damaged, lost, or stolen subject | common/scalar/no | C,E/y/y/y | y/c/registered | Registry + form | C/S; privacy |
@@ -193,15 +193,70 @@ coverage. Repeated item facts belong to item records, not a flat claim form.
 | `contents.item.replacement_need` | Replace, repair, substitute | enum/no | C/y/y/y | next action/c/candidate | Item rule + WorkItem | C/S; privacy |
 | `contents.item.loss_type` | Damaged, lost, stolen, destroyed | enum/no | C,E/y/y/y | routing/y/record | Typed item enum; theft conditional behavior remains a separate branch | C/S; authority |
 | `contents.discovery_at` | When loss was discovered | date-time/no | C/y/y/y | safety/c/candidate | Registry/domain field | C/S; privacy |
-| `theft.entry_context` | Forced entry/access/unknown | enum/scalar/no | C,E/y/y/y | authority/y/candidate | Restricted theft branch | C/S; authority/privacy |
+| `theft.entry_context` | Forced entry/access/unknown | enum/scalar/no | C,E/y/y/y | authority/y/registered | Theft branch; required now; forced_entry, unlocked, unknown, not_applicable | C/S; authority/privacy |
 | `contents.receipt_availability` | Receipt/invoice status | enum/no | C,E/y/y/y | evidence/y/candidate | Evidence projection | C/S; privacy |
 | `contents.proof_of_ownership` | Ownership evidence references | list/yes | E,C/y/y/y | evidence/c/record | Item/evidence mapping | C/S; privacy |
 | `contents.police_status` | Police status for theft/burglary | enum/no | C,S/y/y/y | authority/y/candidate | Authority record + branch | C/S; authority |
-| `contents.police_reference` | Police file/reference | scalar/no | C,E/y/y/y | authority/pending/candidate | Reuse bounded reference | C/S; privacy/authority |
+| `contents.police_reference` | Police file/reference | text/no | C,E/y/y/y | authority/pending/registered | Optional bounded reference in theft branch | C/S; privacy/authority |
 | `contents.item.evidence_refs` | Item photos/receipts/valuations | list/yes | E,C/y/y/y | evidence/y/record | Immutable item links | C/S; privacy |
 | `contents.item_group` | Similar-item grouping/provenance | record/yes | C,E,Y/y/y/y | evidence/c/record | Group record + provenance | S; privacy |
 
 ## Conditional branch matrix
+
+The executable catalogue uses Field Registry `6` and branch rules
+`vp-dynamic-form-branch-rules-v2`. The following leaf fields are registered:
+
+| Field | Value contract | Collection deadline |
+| --- | --- | --- |
+| `injury.persons_affected` | Nonempty text list | required_now |
+| `injury.severity_reported` | minor, needs_medical_attention, serious, unknown | required_now |
+| `injury.medical_attention` | none, self_treated, gp_or_clinic, ambulance_called, hospitalised, unknown | before_creation |
+| `incident.discovered_at` | Temporal value with original wording and precision | before_creation in theft |
+| `theft.entry_context` | forced_entry, unlocked, unknown, not_applicable | required_now |
+| `contents.police_reference` | Nonempty text | optional |
+
+Collection deadlines are declared by each branch. The evaluator's `_required_set`
+supplies field selection, requirement resolution, creation, and external-dispatch
+gates. `before_creation` and `before_dispatch` do not become `required_now` merely
+because a branch is active. Optional fields remain permitted; staff-only fields do
+not enter the model field contract. Repeatable records remain outside generic form.
+`authorities.emergency_services_notified` is a cross-path boolean, including Home
+and Contents incidents; it is not restricted to Motor.
+
+| Branch | Kind | Collection policy | Record intents |
+| --- | --- | --- | --- |
+| family.motor / home / contents | fact | Family-required fields: required_now | None |
+| incident.collision | fact | parties.other_parties: required_now | motor_other_driver |
+| contents.theft | fact | theft.entry_context: required_now; incident.discovered_at: before_creation; contents.police_reference: optional | None |
+| injury.details | fact | persons_affected and severity_reported: required_now; medical_attention: before_creation | None |
+| safety.injury_or_danger | workflow | None; incident.injury_or_danger is already common-required | Handoff intent |
+| authority.police | record | authorities.police_report_reference: optional | evidence_pending_police_report |
+| participant.another_party | record | None | motor_other_driver |
+| evidence.pending | record | Existing evidence lifecycle | Existing evidence intent |
+| accommodation.temporary | record | None | accommodation_work_item |
+| mitigation.emergency | record | None | mitigation_work_item |
+| human_support / professional_review | workflow | None | Existing handoff/review intent |
+| participant.witness | projection | None | None |
+
+The injury-detail branch requires a confirmed positive injury/danger fact; urgent
+Claim State alone activates the safety workflow, not these fact leaves. Weak
+injury words can identify a candidate without being accepted as a fact. A source-backed
+negative correction exits injury details even when previous leaf values remain for
+audit. Active fact branches retain recorded leaves across silent turns; old-version
+branch evaluations never resurrect a branch in the current registry.
+
+Required facts are split into `satisfied` (confirmed), `recorded` (proposed), and
+`missing_required_now` (missing or disputed). Proposed facts, including Contents
+items, are not asked again. They block creation until explicit confirmation.
+`missing_by_branch` groups missing facts for contextual questions; `ready_pending_confirmation`
+distinguishes an otherwise complete report with proposed facts. The total includes
+recorded facts, while the satisfied count includes only confirmed facts.
+
+Direct claimant facts may be normalized without requiring a second confirmation.
+Inference, disputed facts, and non-claimant values for authority-sensitive fields
+(`claim.product_family`, `incident.injury_or_danger`, `parties.other_parties`,
+`incident.type`) require confirmation. Safety handoff preserves accepted facts and
+permits subsequent conversation; active handoff suspends all third-party suggestions.
 
 | Branch | Trigger | Activates / promotes | Exit/correction | Visibility/lifecycle | Separate record |
 | --- | --- | --- | --- | --- | --- |
@@ -290,7 +345,7 @@ add useful fact proposals, evidence records, or questions without overriding tha
 | `BR-PARTICIPANT-OTHER-001` | Another person, vehicle, property owner, or organisation is mentioned | Activate `participant.another_party`; add participant candidates and a consent check before disclosure | A correction or consent withdrawal exits sharing while retaining the original statement | Contact or identity is `required_now` only for an authorised next action |
 | `BR-PARTICIPANT-WITNESS-001` | A witness is mentioned or requested for the next action | Activate `participant.witness`; create a participant/evidence work item | Mark unavailable when the claimant cannot provide details; never invent contact data | Witness details normally remain `candidate_now` or `pending_later` |
 | `BR-AUTHORITY-POLICE-001` | Police contact, a Police report, theft/burglary, or pending Police generation is mentioned | Activate `authority.police`; track status/reference and an evidence WorkItem | Correction or verified inapplicability exits the branch with audit history | A missing report remains `pending_later` unless a current authorised action explicitly requires it |
-| `BR-SAFETY-001` | Explicit injury, continuing danger, or an emergency condition is present | Activate `safety.injury_or_danger`; create urgent handoff/WorkItem and bounded safe response | Clear only from a new authoritative fact; preserve the original safety statement | Interrupt ordinary questions; do not wait for the complete form |
+| `BR-SAFETY-001` | Explicit injury, continuing danger, or an emergency condition is present | Activate safety workflow; save accepted facts and urgent handoff with bounded safe response | Clear only from a new authoritative fact; preserve the original safety statement | Preserve dialogue and optional relevant questions; suspend third-party suggestions during handoff |
 | `BR-EVIDENCE-PENDING-001` | Expected material is missing, incomplete, unofficial, or not yet generated | Activate `evidence.pending`; create or update an evidence WorkItem with responsibility | Supplied evidence can resolve the item; rejection keeps the limitation explicit | Do not block unrelated safe progress or erase accepted facts |
 | `BR-MITIGATION-001` | Active leak, fire, exposure, unsafe property, towing, or emergency repair is described | Activate the relevant mitigation branch and record safe actions separately | Verified resolution closes the WorkItem but retains action history | Ask only the minimum safety or mitigation information needed now |
 | `BR-ACCOMMODATION-001` | A home is not safely habitable or temporary accommodation is requested | Activate `accommodation.temporary`; create a support WorkItem | Habitability correction or staff resolution exits the branch | Accommodation details remain support/workflow data unless needed for the current action |

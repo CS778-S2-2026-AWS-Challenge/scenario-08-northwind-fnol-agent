@@ -1,6 +1,8 @@
 """Compose one fully validated v7 model turn before transport."""
 
 import json
+from copy import deepcopy
+from typing import Any, cast
 
 from backend.domain.agent_context_runtime import (
     ContextBudgetPolicy,
@@ -15,13 +17,20 @@ from backend.services.agent import AgentTurnContext
 from backend.services.cache_planner import build_cache_plan
 from backend.services.context_budget import build_request_budget, estimate_json_tokens
 from backend.services.context_planner import plan_context
-from backend.services.prompt_composer import compose_prompt, load_response_schema
+from backend.services.prompt_composer import (
+    compose_prompt,
+    load_prompt_manifest,
+    load_response_schema,
+)
 from backend.services.provider_capability_registry import (
     provider_capability,
     validate_capability_binding,
     validate_profile_compatibility,
 )
-from backend.services.request_profile_registry import request_profile_for_task
+from backend.services.request_profile_registry import (
+    request_profile_for_intents,
+    request_profile_for_task,
+)
 from backend.services.turn_field_contract import bind_provider_schema, compile_turn_field_contract
 from backend.services.turn_router import route_turn
 
@@ -81,28 +90,33 @@ def plan_model_turn(
         and runtime_policy.instruction.composition_mode == 'fragmented'
         else None
     )
-    profile = request_profile_for_task(
-        route.task,
-        has_current_media=bool(context.evidence),
-        isolated_review=isolated_review,
-        needs_lookup=(
-            route.task is not None
+    needs_lookup = route.task is not None and (
+        (
+            bool({'policy-search', 'claim-history'} & set(route.capability_ids))
             and (
-                (
-                    bool({'policy-search', 'claim-history'} & set(route.capability_ids))
-                    and (
-                        context.policy_context_loader is not None
-                        or context.knowledge_context_loader is not None
-                        or context.claim_history_context_loader is not None
-                    )
-                )
-                or (
-                    route.task.value == 'status_question' and len(context.conversation_messages) > 4
-                )
+                context.policy_context_loader is not None
+                or context.knowledge_context_loader is not None
+                or context.claim_history_context_loader is not None
             )
-        ),
-        profiles=published_profiles,
+        )
+        or (route.task.value == 'status_question' and len(context.conversation_messages) > 4)
     )
+    if model_configuration.prompt_version == 'northwind-fnol-claimant-v8':
+        profile = request_profile_for_intents(
+            route.intents,
+            has_current_media=bool(context.evidence),
+            isolated_review=isolated_review,
+            needs_lookup=needs_lookup,
+            profiles=published_profiles,
+        )
+    else:
+        profile = request_profile_for_task(
+            route.task,
+            has_current_media=bool(context.evidence),
+            isolated_review=isolated_review,
+            needs_lookup=needs_lookup,
+            profiles=published_profiles,
+        )
     capability = (
         runtime_policy.tool_policy.provider_capabilities[context.model_profile_id]
         if runtime_policy is not None
@@ -139,9 +153,21 @@ def plan_model_turn(
                 'The selected schema is absent from the published registry.'
             ) from error
     else:
-        bundle = compose_prompt(route)
+        bundle = compose_prompt(
+            route,
+            manifest=load_prompt_manifest(model_configuration.prompt_version),
+        )
         schema = load_response_schema(profile.schema_id)
     if profile.schema_id in {'claimant.intake-patch.v1', 'claimant.turn.v1'}:
+        schema = deepcopy(schema)
+        if profile.schema_id == 'claimant.turn.v1' and context.evidence:
+            properties = cast(dict[str, Any], schema['properties'])
+            field_items = properties['field_changes']['items']
+            field_items['properties']['source_evidence_id'] = {
+                'type': ['string', 'null'],
+                'maxLength': 100,
+            }
+            field_items.setdefault('required', []).append('source_evidence_id')
         branch_evaluator = (
             runtime_policy.branch_evaluator()
             if runtime_policy is not None

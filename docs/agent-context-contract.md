@@ -23,6 +23,23 @@ endpoint, or secret is never a context selector.
 
 ## Model-aware budget
 
+The v8 claimant envelope is `V8TurnProposal`: `reply`, `reason_codes`,
+`field_changes`, `contents_item_changes`, `next_question`, `service_suggestions`,
+`state_proposals`, `escalation`, `ready_to_create`, and `confirms_batch`. Text field
+changes carry registered code, value, supporting quotation and precision; a media
+turn also carries the authorised evidence reference. Runtime derives source, status,
+confirmation need and permissions. These are proposals, not execution results.
+
+Requirements separate `satisfied` facts, `recorded` facts awaiting confirmation, and
+`missing_required_now`. `missing_by_branch` orders useful questions by active branch;
+`ready_pending_confirmation` means collection is complete but creation remains blocked.
+Proposed facts do not appear as a missing fact to ask for again. The current accepted
+inbound is excluded from recent history because it already has its own message slice.
+
+The model sees only Runtime-eligible service identities. Open handoffs suppress all
+new suggestions; declined or withdrawn offers have a three-turn cooldown unless the
+claimant explicitly renews the request. A suggestion cannot grant consent or dispatch.
+
 The selected published Model Profile supplies:
 
 - `context_window_tokens`: provider-declared total window, when known;

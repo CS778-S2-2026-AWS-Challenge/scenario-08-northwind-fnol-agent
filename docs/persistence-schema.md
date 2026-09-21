@@ -827,6 +827,32 @@ Evidence record or protected object.
 - The final role projection is derived after execution. It cannot claim that a proposed,
   requested, queued, failed, or unknown action succeeded.
 
+## Claimant v8 message checkpoint and confirmation
+
+`save_message_mutation` commits an accepted inbound and revision before provider execution.
+Its existing Idempotency record also retains `revision_before_message` and the pending
+confirmation checkpoint. `save_agent_turn` finalizes the same inbound with a second CAS and
+immutable Agent response/turn records. It must compare the persisted inbound's complete scope
+and content, not allow an arbitrary message overwrite. A concurrent Claim mutation rejects a
+stale result while leaving the accepted inbound intact.
+
+A failed model attempt stores only the bounded `recovery_rule_id` on the message and its
+saved HTTP response on the matching Idempotency record. `AGENT_TURN_RECOVERY` audit events
+reference message identity, rule identity and provider-neutral outcome code; no prompt or
+provider error body is retained. A fresh explicit attempt reuses the original inbound and
+confirmation checkpoint; same-key replay never initiates a model request. These operations
+preserve existing Claim and Session ownership constraints.
+
+`ConfirmationRequestRecord` is carried by an immutable confirmation Runtime WorkItem. It has
+`confirmation_id`, `claim_id`, `claim_revision`, `field_codes`, `shown_values_fingerprint` and
+`created_at`. Confirmation IDs use `new_id('cnf')` (`cnf_` plus generated hex); the enclosing
+WorkItem retains its `wki_` identity. The fingerprint binds actual displayed scalar values and assertion identities,
+including independent Contents items when displayed. Confirmation compares the original
+pre-message revision, then commits against the current accepted revision. `normalised` on a
+structured field records that its value was normalized from supporting claimant wording;
+normalization alone does not downgrade the claimant source. `QuestionRecord.during_handoff`
+marks non-blocking questions and excludes them from repeated-question pressure.
+
 ## Model Profile and External-request Invariants
 
 - A Model Profile stores adapter and endpoint references, provider model identity,
@@ -998,7 +1024,7 @@ flags, and one cache layout version. An incomplete or incompatible set fails res
 does not repair it by combining another release or falling back to v6.
 
 Model records use `domain=model` and `configuration_key=profile_id`, so one published Release
-Set can bind `qwen-local`, `nowcoding-gpt55`, `bedrock-nova2-lite`, and
+Set can bind `qwen-local`, `openrouter-gpt4o-mini`, `bedrock-nova2-lite`, and
 `google-gemini35-flash-lite` without overwriting any profile.
 Claimant profiles must declare `structured_output=true`. Tool and continuation capabilities are
 profile-specific and are checked before a route can send work to provider transport. A Session

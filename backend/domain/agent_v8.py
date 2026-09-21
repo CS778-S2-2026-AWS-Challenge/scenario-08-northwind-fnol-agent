@@ -1,6 +1,6 @@
 """Unified claimant turn contract for Agent Context Runtime v8."""
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field
 
@@ -18,6 +18,9 @@ class V8FieldChange(ContractModel):
     value: Any
     reported_text: str | None = Field(default=None, max_length=200)
     precision: FactPrecision = FactPrecision.EXACT
+    # Present only for the media profile.  The text profile's bound provider
+    # schema omits it, while keeping the optional field here lets the Runtime
+    # use one parser for both profile variants.
     source_evidence_id: str | None = Field(default=None, max_length=100)
 
 
@@ -70,7 +73,9 @@ class V8Escalation(ContractModel):
 
 class V8TurnProposal(ContractModel):
     reply: str = Field(min_length=1, max_length=500)
-    reason_codes: list[str] = Field(min_length=1, max_length=5)
+    reason_codes: list[Annotated[str, Field(min_length=1, max_length=50)]] = Field(
+        min_length=1, max_length=5
+    )
     field_changes: list[V8FieldChange] = Field(default_factory=list, max_length=8)
     contents_item_changes: list[V8ContentsItemChange] = Field(default_factory=list, max_length=6)
     next_question: V8NextQuestion | None = None

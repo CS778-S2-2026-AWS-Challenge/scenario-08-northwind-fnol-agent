@@ -20,12 +20,12 @@ revisions, idempotency, terminal protection, and the audit trace.
 
 Branch requirements are computed by one `_required_set` implementation and are
 classified as confirmed, recorded pending confirmation, or missing. A claimant
-grounded normalised value keeps claimant provenance. Inferred, disputed, and
-authority-sensitive values require confirmation; pending confirmation does not
+grounded normalised value keeps claimant provenance. Inferred and disputed values,
+and authority-sensitive values without claimant provenance, require confirmation; pending confirmation does not
 prevent the next useful question but can prevent final creation.
 
 Conversational confirmation and `POST /claims/{id}/form/confirmations` share the
-same bound confirmation record. The record stores the displayed field set and
+same confirmation validation and fact-confirmation logic. The conversational record stores the displayed field set and
 value fingerprint. The turn reducer compares it with the revision before the
 new claimant message was persisted, then uses the final CAS to protect against
 concurrent changes.
@@ -39,11 +39,11 @@ offers are suppressed for three claimant turns; an explicit renewed request can
 create a new offer identity. Consent, withdrawal, dispatch, result and handoff
 mutations recompute the claimant next step.
 
-Unknown family closes the automatic service catalogue while retaining the
-Northwind Staff Assistance entry. Manual/link/phone third-party entries such as
+Unknown family limits the service catalogue to cross-family manual assistance.
+The independent Northwind Staff Assistance entry remains available. Manual/link/phone third-party entries such as
 Police 105 remain separate catalogue items and do not become automatic message
-offers. Presentation is declared by the service registry and rendered by the
-claimant surface.
+offers. Presentation metadata is projected by the service registry from the current
+access and operation state. A redesign of polymorphic frontend rendering is outside this change.
 
 ## Recovery and terminal lifecycle
 
@@ -64,7 +64,8 @@ remains available for comparison and applicable multimodal checks. Qwen is a
 local optional profile and is excluded from live provider evidence when offline.
 The default profile is non-reasoning and receives no reasoning parameter.
 
-Text and lookup turns use the 4500-token budget; media turns use 5500. The
-limits are derived from the v8 bounded response fields and are checked with
-maximum legal fixtures. Provider failure telemetry records status and error type
+Text and lookup turns currently cap output at 4500 tokens; media turns at 5500.
+These configured caps are not evidence that every schema-legal output fits. Final
+maximum-size budget acceptance remains dependent on the open design-budget correction.
+Provider failure telemetry records status and error type
 without storing prompts, claimant text, credentials, or raw provider responses.

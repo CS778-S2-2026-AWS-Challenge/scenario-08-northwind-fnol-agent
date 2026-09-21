@@ -21,7 +21,11 @@ from backend.domain.audit import (
     AuditSubjectType,
     AuditVisibility,
 )
-from backend.domain.external_service_registry import REGISTRY_VERSION, service_registry_entry
+from backend.domain.external_service_registry import (
+    REGISTRY_VERSION,
+    service_action_presentation,
+    service_registry_entry,
+)
 from backend.domain.external_services import (
     ExternalTaskAuthorisation,
     ExternalTaskDelivery,
@@ -31,7 +35,6 @@ from backend.domain.external_services import (
     ExternalTaskRequest,
     classify_external_task_failure,
 )
-from backend.domain.intake import next_requirement_step
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -46,7 +49,6 @@ from backend.domain.models import (
     ExternalServiceConsentStatus,
     ExternalServiceOfferDecisionRequest,
     IntegrationSource,
-    WorkflowState,
     WorkingClaim,
 )
 from backend.domain.runtime import ExternalServiceOfferMetadata, RuntimeWorkItemRecord
@@ -344,7 +346,7 @@ def message_external_actions(
                 catalogue_reference=entry.catalogue_reference,
                 capability_provenance=entry.provenance.value,
                 access_form=entry.access_form,
-                presentation=entry.presentation,
+                presentation=service_action_presentation(entry.service_identity, status.value),
                 status_label=status_labels[status],
                 status_detail=(
                     'Review and confirm the exact information Northwind may share.'
@@ -601,21 +603,14 @@ def decide_external_service_offer(
         recomputation_reason='external_service_offer_decision',
         trigger_source_refs=[offer.offer_id, consent.consent_ref],
     )
-    recomputed_next_step = next_requirement_step(branch_evaluation.requirements)
-    updated = updated.model_copy(
-        update={
-            'customer_next_step': recomputed_next_step,
-            'claim_state': updated.claim_state.model_copy(
-                update={
-                    'workflow_state': (
-                        WorkflowState.READY_FOR_NEXT
-                        if branch_evaluation.requirements.ready
-                        else WorkflowState.COLLECTING
-                    )
-                }
-            ),
-        }
+    from backend.services.turn_reducer import apply_progress
+
+    updated = apply_progress(
+        updated,
+        branch_evaluation,
+        open_handoffs=tuple(repository.list_handoffs(claim_id, principal.subject)),
     )
+    recomputed_next_step = updated.customer_next_step
     response = response.model_copy(
         update={
             'revision': updated.revision,
@@ -627,6 +622,9 @@ def decide_external_service_offer(
                 external_service_action=None,
             ),
         }
+    )
+    idempotency = IdempotencyRecord(
+        **{**idempotency.__dict__, 'response_payload': response.model_dump(mode='json')}
     )
     try:
         repository.save_claim_mutation_with_audit(
@@ -754,10 +752,15 @@ def _source_value(claim: WorkingClaim, source: str) -> Any:
 
 
 def _generic_offer_ready(claim: WorkingClaim, offer: ExternalServiceOfferMetadata) -> bool:
+    from backend.domain.branch_registry import BranchRuleEvaluator
+
     entry = service_registry_entry(offer.service_identity)
-    return all(
-        _source_value(claim, source) not in (None, '', [], {}) for source in entry.required_fields
+    evaluator = BranchRuleEvaluator()
+    evaluation = evaluator.evaluate(claim, recomputation_reason='external_dispatch_requirements')
+    required = set(entry.required_fields) | evaluator._required_set(
+        evaluation.selected_family, evaluation.active_branches, 'before_dispatch'
     )
+    return all(_source_value(claim, source) not in (None, '', [], {}) for source in required)
 
 
 def _offer_has_request(

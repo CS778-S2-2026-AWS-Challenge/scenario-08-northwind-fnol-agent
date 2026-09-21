@@ -104,7 +104,7 @@ def contents_item(item_id: str = 'item_1') -> ContentsItem:
 def test_registry_includes_minimum_home_fields_and_contents_is_a_separate_record() -> None:
     registry = build_default_registry()
 
-    assert registry.field_registry_version == '5'
+    assert registry.field_registry_version == '6'
     assert registry.field_by_code['property.ongoing_risk'].value_type == 'enum'
     assert registry.field_by_code['property.habitable'].value_type == 'boolean'
     assert registry.branch_by_id['family.home'].fields >= {
@@ -115,7 +115,6 @@ def test_registry_includes_minimum_home_fields_and_contents_is_a_separate_record
         'family.motor'
     ].fields - {
         'authorities.police_report_reference',
-        'authorities.emergency_services_notified',
         'vehicle.registration',
         'vehicle.damage_description',
         'vehicle.drivable',
@@ -489,7 +488,7 @@ def test_branch_results_retain_rule_and_source_coordinates() -> None:
     assert motor.rule_id == 'BR-FAMILY-MOTOR-001'
     assert motor.source_refs == ['msg_source']
     assert result.field_registry_version == FIELD_REGISTRY_VERSION
-    assert result.branch_rules_version == 'vp-dynamic-form-branch-rules-v1'
+    assert result.branch_rules_version == 'vp-dynamic-form-branch-rules-v2'
 
 
 def test_collision_correction_suspends_previous_branch_with_both_sources() -> None:

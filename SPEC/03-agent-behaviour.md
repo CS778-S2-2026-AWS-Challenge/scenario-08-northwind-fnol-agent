@@ -89,8 +89,9 @@ The Agent considers:
 - **Guided:** resolve manageable ambiguity with focused explanation or clarification.
 - **Professional review:** transfer high-impact ambiguity or conflicting evidence with a
   structured request.
-- **Urgent:** interrupt ordinary intake for explicit injury, continuing danger, or another
-  approved safety signal and create an urgent handoff.
+- **Urgent:** create an urgent handoff for explicit injury, continuing danger, or another
+  approved safety signal. Continue recording facts and offer non-blocking questions;
+  suppress new third-party suggestions while the handoff is open.
 - **Human support:** respect the need behind a request and do not repeatedly resist
   transfer. Repeated requests, urgency, distress, or accessibility needs transfer
   immediately.

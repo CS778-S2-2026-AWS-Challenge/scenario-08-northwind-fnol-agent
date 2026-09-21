@@ -51,10 +51,10 @@ the Dynamic Form evaluator.
 | `property.habitable` | home | `family.home`; may trigger `accommodation.temporary` | boolean | claimant/staff | conditional | claimant/staff | support and accommodation work |
 | `contents.police_reference` | contents | `family.contents` + `authority.police` | text | claimant/evidence/staff | conditional | claimant/staff | authority evidence for stolen or damaged items |
 | `incident.discovered_at` | all | `common` | temporal | claimant/evidence | conditional | claimant/staff | discovery chronology |
-| `injury.persons_affected` | all | `safety.injury_or_danger` + `injury.details` | text | claimant | conditional | claimant/staff | people affected by the incident |
-| `injury.severity_reported` | all | `safety.injury_or_danger` + `injury.details` | text | claimant | conditional | claimant/staff | injury triage context |
-| `injury.medical_attention` | all | `safety.injury_or_danger` + `injury.details` | text | claimant/staff | conditional | claimant/staff | safety follow-up |
-| `theft.entry_context` | home/contents | `theft` | text | claimant/evidence | conditional | claimant/staff | theft circumstances and police routing |
+| `injury.persons_affected` | all | `injury.details` | text_list | claimant | source-dependent | claimant/staff | required now |
+| `injury.severity_reported` | all | `injury.details` | enum: minor / needs_medical_attention / serious / unknown | claimant | source-dependent | claimant/staff | required now |
+| `injury.medical_attention` | all | `injury.details` | enum: none / self_treated / gp_or_clinic / ambulance_called / hospitalised / unknown | claimant/staff | source-dependent | claimant/staff | before creation |
+| `theft.entry_context` | home/contents | `contents.theft` | enum: forced_entry / unlocked / unknown / not_applicable | claimant/evidence | source-dependent | claimant/staff | required now |
 
 ## Contents record boundary
 

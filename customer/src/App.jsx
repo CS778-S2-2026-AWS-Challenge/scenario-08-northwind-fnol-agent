@@ -438,7 +438,6 @@ function App() {
   const externalCapabilitiesDialogRef = useRef(null)
   const externalCapabilitiesHeadingRef = useRef(null)
   const externalCapabilitiesTriggerRef = useRef(null)
-  const presentedCapabilityCatalogues = useRef(new Set())
   const restoreCapabilityTriggerFocus = useRef(false)
   const followLatestMessages = useRef(true)
   const forceLatestMessages = useRef(false)
@@ -676,18 +675,6 @@ function App() {
     [claim],
   )
   const conversationActionKind = conversationAction?.kind || null
-  const externalCapabilityKey = claim?.external_capabilities?.length > 0
-    ? `${claim.claim_id}:${claim.external_capabilities
-        .map((capability) => `${capability.service_identity}:${capability.registry_version || ''}`)
-        .join('|')}`
-    : null
-
-  useEffect(() => {
-    if (!externalCapabilityKey || !isWorkspaceActive) return
-    if (presentedCapabilityCatalogues.current.has(externalCapabilityKey)) return
-    presentedCapabilityCatalogues.current.add(externalCapabilityKey)
-    setExternalCapabilitiesOpen(true)
-  }, [externalCapabilityKey, isWorkspaceActive])
 
   useEffect(() => {
     const dialog = externalCapabilitiesDialogRef.current
@@ -1440,11 +1427,11 @@ function App() {
     setStatus('error')
   }
 
-  async function sendMessage(event) {
+  async function sendMessage(event, recoveryMessage = null) {
     event.preventDefault()
-    const text = draft.trim()
-    if (!text || isBusy) return
-    const stagedAttachments = attachments.filter((attachment) => (
+    const text = recoveryMessage ? messageText(recoveryMessage) : draft.trim()
+    if ((!text && !recoveryMessage?.evidence_refs?.length) || isBusy) return
+    const stagedAttachments = recoveryMessage ? [] : attachments.filter((attachment) => (
       attachment.status === 'staged'
       && attachment.stagedFile
       && attachment.uploadAttempt
@@ -1464,6 +1451,15 @@ function App() {
     setStatus(isWorkspaceActive ? 'sending' : 'starting')
     let messageWasSubmitted = isWorkspaceActive
     try {
+      if (recoveryMessage) {
+        pendingSubmission.current = {
+          text,
+          claimKey: requestId('claim'),
+          turnKey: requestId('turn'),
+          clientMessageId: recoveryMessage.client_message_id,
+          evidenceRefs: recoveryMessage.evidence_refs || [],
+        }
+      }
       if (pendingSubmission.current?.text !== text) {
         pendingSubmission.current = {
           text,
@@ -1475,7 +1471,7 @@ function App() {
       const operation = pendingSubmission.current
       activeTurnProgressRef.current = null
       setActiveTurnProgress(null)
-      setPendingMessage({ text, turnId: operation.clientMessageId })
+      setPendingMessage({ text, turnId: operation.clientMessageId, retrying: Boolean(recoveryMessage) })
       let activeClaim = isWorkspaceActive ? claim : null
       let activeSessionId = isWorkspaceActive ? sessionId : null
       if (!activeClaim) {
@@ -1511,6 +1507,7 @@ function App() {
         modelProfileId: selectedModel,
         idempotencyKey: operation.turnKey,
         clientMessageId: operation.clientMessageId,
+        evidenceRefs: operation.evidenceRefs || [],
       })
       commitMessages((current) => mergeMessagesById(current, [
         turn.claimant_message,
@@ -2845,6 +2842,14 @@ function App() {
                       <div>
                         <div className="user-bubble">{messageText(message)}</div>
                         <div className="msg-meta">{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
+                        {message.recovery && !messages.some((reply) => reply.actor === 'agent' && reply.in_reply_to === message.message_id) && (
+                          <div role="status">
+                            <p>{message.recovery.claimant_projection}</p>
+                            {message.client_message_id && message.recovery.resume_triggers?.includes('explicit_retry_request') && (
+                              <button type="button" disabled={isBusy} onClick={(event) => sendMessage(event, message)}>Retry response</button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </article>
                   )
@@ -2911,12 +2916,12 @@ function App() {
               )}
               {pendingMessage && (
                 <>
-                  <article className="msg-user is-pending" aria-label="Message sending">
+                  {!pendingMessage.retrying && <article className="msg-user is-pending" aria-label="Message sending">
                     <div>
                       <div className="user-bubble">{pendingMessage.text}</div>
                       <div className="msg-meta">Sending…</div>
                     </div>
-                  </article>
+                  </article>}
                   <AgentTurnPlaceholder
                     progress={activeTurnProgress}
                     turnId={pendingMessage.turnId}
@@ -2927,13 +2932,13 @@ function App() {
                 <article className="message message-claimant is-failed" role="alert">
                   <p className="message-author">{failedMessage.sender}</p>
                   <p>{failedMessage.text}</p>
-                  <p className="message-state">Not sent</p>
+                  <p className="message-state">Delivery not confirmed</p>
                 </article>
               )}
               {isUrgentSupport && handoff && ['queued', 'accepted'].includes(handoff.status) && (
                 <ConversationEvent
                   icon="!"
-                  title="Urgent support · Normal intake has paused"
+                  title="Urgent support · You can keep adding details"
                   detail={handoff.summary}
                   tone="urgent"
                 />

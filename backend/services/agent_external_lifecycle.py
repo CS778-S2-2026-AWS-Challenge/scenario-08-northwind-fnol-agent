@@ -14,6 +14,7 @@ from backend.domain.external_service_registry import (
     InvalidExternalLifecycleTransition,
     assert_projection_provenance,
     build_lifecycle_projection,
+    capability_catalogue,
     capability_context,
     service_registry_entry,
 )
@@ -166,7 +167,12 @@ def build_agent_external_lifecycle_context(
             if item.service_identity not in active_identities
         ]
         if product_family is not None
-        else []
+        else [
+            item
+            for item in capability_context()
+            if item.service_identity in {entry.service_identity for entry in capability_catalogue()}
+            and item.service_identity not in active_identities
+        ]
     )
     combined = [*projections, *available]
     if len(combined) > MAX_EXTERNAL_LIFECYCLE_PROJECTIONS:
