@@ -599,6 +599,94 @@ def test_payout_contact_selection_maps_repository_conflicts_without_partial_writ
 
 
 @pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
+@pytest.mark.parametrize('race_kind', ['changed', 'unavailable'])
+def test_payout_contact_repository_rechecks_destination_at_commit(
+    adapter: str,
+    race_kind: str,
+) -> None:
+    repository: FixtureRepository | MongoDBRepository
+    if adapter == 'fixture':
+        repository = FixtureRepository()
+    else:
+        repository = MongoDBRepository(
+            mongomock.MongoClient(),
+            f'payout_repository_race_{race_kind}',
+        )
+        repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    app = create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), repository)
+
+    with TestClient(app) as client:
+        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        payment = _post(
+            client,
+            owner,
+            '/api/v1/account/payment-destinations',
+            f'payout-repository-race-{adapter}-{race_kind}',
+            {'account_type': 'cheque', 'account_number': '12-3456-7777888-00'},
+        )
+        claim = client.post(
+            '/api/v1/claims',
+            headers={
+                **owner,
+                'Idempotency-Key': f'payout-repository-claim-{adapter}-{race_kind}',
+            },
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'home'},
+        ).json()['claim']
+        ready = _advance_claim_to_payout_contact(repository, claim['claim_id'])
+        original_save = repository.save_payout_contact_selection
+        captured_args: tuple[Any, ...] | None = None
+
+        def capture_save(*args: Any, **kwargs: Any) -> None:
+            nonlocal captured_args
+            assert not kwargs
+            captured_args = args
+
+        repository.save_payout_contact_selection = capture_save  # type: ignore[method-assign]
+        prepared = client.post(
+            f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections',
+            headers={
+                **owner,
+                'Idempotency-Key': f'payout-repository-select-{adapter}-{race_kind}',
+                'If-Match': str(ready.revision),
+            },
+            json={
+                'payment_destination_id': payment['payment_destination_id'],
+                'contact_preference': 'email',
+            },
+        )
+        repository.save_payout_contact_selection = original_save  # type: ignore[method-assign]
+
+        assert prepared.status_code == 201, prepared.text
+        assert captured_args is not None
+        destination_path = (
+            f'/api/v1/account/payment-destinations/{payment["payment_destination_id"]}'
+        )
+        if race_kind == 'changed':
+            mutation = client.patch(
+                destination_path,
+                headers={**owner, 'If-Match': str(payment['revision'])},
+                json={'account_type': 'savings'},
+            )
+            assert mutation.status_code == 200, mutation.text
+        else:
+            mutation = client.delete(
+                destination_path,
+                headers={**owner, 'If-Match': str(payment['revision'])},
+            )
+            assert mutation.status_code == 204, mutation.text
+
+    with pytest.raises(PaymentDestinationSelectionConflict) as raised:
+        original_save(*captured_args)
+    assert raised.value.reason == race_kind
+
+    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    assert stored is not None
+    assert stored.revision == ready.revision
+    assert stored.payment_destination_id is None
+    assert 'claimant.contact_preference' not in stored.form
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
 def test_fixture_and_mongodb_protected_record_parity(adapter: str) -> None:
     repository: FixtureRepository | MongoDBRepository
     if adapter == 'fixture':
