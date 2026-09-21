@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from journey_runs import motor_collision
+from fastapi.testclient import TestClient
+from journey_runs import capture, motor_collision, screenshot
 from journey_runs.__main__ import main as journey_main
 from journey_runs.assessor_failures import FAILURE_CASES, run_assessor_failure
 from journey_runs.engine import PROFILE_ENV, REPOSITORY_ROOT, PackMaterial, journey_settings
@@ -56,8 +57,11 @@ from journey_runs.record import (
     cited_authority,
 )
 from pydantic import ValidationError
+from test_external_service_offers import ASSESSMENT_REQUEST
 
+from backend.app import create_app
 from backend.core.config import AgentRuntimeProfile, IdentityMode
+from backend.repositories.fixture import FixtureRepository
 
 _NOW = datetime(2026, 9, 15, tzinfo=UTC)
 
@@ -872,3 +876,74 @@ def test_a_household_material_variant_runs_and_records_its_pack(
     if scenario.scenario_id == 'home-water-ingress-illegible-note':
         assert not any(m.path == 'home/home-repair-assessment.pdf' for m in record.materials)
         assert any(m.path == 'home/home-attendance-note-illegible.pdf' for m in record.materials)
+
+
+def _poster_list() -> set[str]:
+    pack = REPOSITORY_ROOT / 'docs/status/sprint4-journey-evidence-pack.md'
+    text = pack.read_text(encoding='utf-8')
+    section = text.split('## Poster screenshot list', 1)[1].split('## Week 8 gaps', 1)[0]
+    screens = set()
+    for line in section.splitlines():
+        cells = [cell.strip() for cell in line.strip().strip('|').split('|')]
+        application = cells[0].split(' ')[0]
+        if len(cells) == 4 and application in {'Claimant', 'Workbench'}:
+            screens.add(f'{application.lower()}-{cells[1].lower().replace(" ", "-")}')
+    return screens
+
+
+def test_the_capture_harness_covers_exactly_the_evidence_pack_poster_list() -> None:
+    assert len(capture.SCREENS) == 13
+    assert set(capture.SCREENS) == _poster_list()
+
+
+# One case per poster screen: each is a separate state contract from the evidence pack's list,
+# reached through its own journey and adapter, and none can stand in for another.
+@pytest.mark.parametrize('screen_id', sorted(capture.SCREENS))
+def test_each_poster_screen_journey_reaches_the_state_it_claims(screen_id: str) -> None:
+    screen = capture.SCREENS[screen_id]
+    adapter = screen.adapter()
+    app = create_app(
+        journey_settings(), repository=FixtureRepository(), assessor_service_adapter=adapter
+    )
+    with TestClient(app) as client:
+        journey = capture._StopAfter(client, screen.stop_after)
+        screen.drive(journey)
+        if screen.application == 'claimant':
+            state = capture._claimant_state(client, journey, 'synthetic-claimant')
+        else:
+            state = capture._workbench_state(client, journey.claim_id, 'synthetic-staff')
+
+    assert journey.claim_id
+    assert screen.reached(state), state
+
+
+def test_a_capture_holds_the_state_its_named_step_leaves() -> None:
+    with TestClient(create_app(journey_settings(), repository=FixtureRepository())) as client:
+        journey = capture._StopAfter(client, 'create the claim')
+        capture._to_consent(journey)
+
+    names = [step.name for step in journey.steps]
+    assert names[-1] == 'create the claim'
+    assert 'consent to the assessor' not in names
+
+
+def test_a_screen_is_refused_when_its_state_was_not_reached() -> None:
+    assert not any(screen.reached({}) for screen in capture.SCREENS.values())
+    retry = capture.SCREENS['claimant-retry-offered'].reached
+    offered = {'external_service_action': {'status': 'retryable_failure', 'can_request': True}}
+    withheld = {'external_service_action': {'status': 'retryable_failure', 'can_request': False}}
+    assert retry(offered)
+    assert not retry(withheld)
+
+
+def test_the_permission_screen_uses_the_input_the_assessor_offer_is_tested_with() -> None:
+    assert capture.ASSESSMENT_REQUEST == ASSESSMENT_REQUEST
+
+
+def test_a_capture_without_a_browser_names_where_it_looked(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(screenshot, 'BROWSERS', (tmp_path / 'absent-browser.exe',))
+
+    with pytest.raises(RuntimeError, match='absent-browser.exe'):
+        screenshot._executable()

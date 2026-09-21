@@ -164,3 +164,29 @@ recovery: who acts next, whether staff can find the work and have a task action 
 names staff, and whether `can_request` matches what a resend does. Both ends agree at every check
 in all five cases; the retryable case agrees since #942 made the claimant the staff-side owner, as
 decided in Discussion #934. Any disagreement is `untracked` and fails the suite.
+
+## Poster screen capture
+
+`capture.py` photographs the thirteen screens in the evidence pack's poster list
+(`docs/status/sprint4-journey-evidence-pack.md`, #964). It is not a runner and writes no record:
+for one screen it builds and serves the application the runners build, drives the named
+journey into the screen's state with the runners' own functions, and refuses to continue unless
+the API projection shows that state.
+
+```text
+python -m tests.journey_runs.capture --list
+python -m tests.journey_runs.capture --screen workbench-reconcile --out <outside the repository>
+```
+
+With `--out`, `screenshot.py` opens the screen in a headless Chrome or Edge over the DevTools
+Protocol and writes `<screen>.png` only if the page also renders the screen's marker text;
+otherwise it keeps `<screen>.rejected.png` and the page text beside it and fails. The claimant and
+Workbench Vite applications must already be running on their default ports, and port 8000 must be
+free, because both applications proxy the API there.
+
+The capture authenticates as the development identity adapter's synthetic claimant and staff
+accounts, because the claimant application refuses the journeys' synthetic bearer at the account
+boundary and an anonymous session cannot upload. Its credentials go into the browser's storage and
+are not printed. The assessor-permission screen is reached through the Agent's assessor offer,
+because the recorded AT-01 journey grants consent through its route and never shows a permission
+card.
