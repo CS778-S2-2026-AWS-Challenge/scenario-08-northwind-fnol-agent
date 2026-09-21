@@ -1672,6 +1672,11 @@ describe('claimant intake projection', () => {
     expect(await screen.findByRole('status', {
       name: 'Claim NWF-2026-16ECDD created',
     })).toBeInTheDocument()
+    expect(screen.getByText('Claim created')).toBeInTheDocument()
+    expect(screen.getByRole('button', {
+      name: /Claim progress: 9 of 9 required details complete\. Claims intake review/i,
+    })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Claim progress:.*Ready to create/i })).not.toBeInTheDocument()
     const claimDetails = screen.getByRole('button', { name: /Claim details/i })
     expect(claimDetails).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByText('A claims specialist will review the submitted details.')).not.toBeVisible()

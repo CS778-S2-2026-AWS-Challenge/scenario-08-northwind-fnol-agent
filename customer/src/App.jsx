@@ -331,7 +331,7 @@ function claimProgress(nextStep, dynamicForm) {
   return {
     current,
     total,
-    label: requirements?.ready
+    label: nextStep?.status === 'ready_to_create'
       ? 'Ready to create'
       : ['human_support_queued', 'human_support_in_progress', 'urgent_support_queued']
           .includes(nextStep?.status)
@@ -2878,7 +2878,9 @@ function App() {
                   <h1 id="conversation-title">{claim.claim_id}</h1>
                 </div>
               </div>
-              <div className="claim-status">{handoff ? 'Staff assistance active' : 'In progress'}</div>
+              <div className="claim-status">{claim.external_claim?.creation_status === 'created'
+                ? 'Claim created'
+                : handoff ? 'Staff assistance active' : 'In progress'}</div>
             </div>
 
             <ClaimProgressDisclosure
