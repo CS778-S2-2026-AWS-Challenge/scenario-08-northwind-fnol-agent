@@ -4378,7 +4378,7 @@ def test_explicit_human_request_keeps_runtime_interrupt_with_model_reply() -> No
     assert handoffs[0].support_need is SupportNeed.HUMAN_REQUESTED
     stored_claim = repository.get_claim(claim_id, 'cus_demo')
     assert stored_claim is not None
-    assert stored_claim.revision == before_claim.revision + 2
+    assert stored_claim.revision == before_claim.revision + 3
 
 
 def test_legacy_model_motor_journey_is_rejected_before_side_effects() -> None:

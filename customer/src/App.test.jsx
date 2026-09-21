@@ -331,6 +331,7 @@ describe('claimant intake projection', () => {
 
   it('does not duplicate messages when realtime readback finishes before the POST response', async () => {
     const user = userEvent.setup()
+    api.requestId.mockImplementation((prefix) => `${prefix}-test`)
     let pushLiveUpdate
     let resolveTurn
     api.streamRealtimeEvents.mockImplementation(({ onEvent }) => {
@@ -345,7 +346,9 @@ describe('claimant intake projection', () => {
       revision: 2,
       primary_action: primaryAction({ revision: 2 }),
     })
-    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+    api.getClaimMessages.mockResolvedValue({ items: [
+      { ...claimantMessage, client_message_id: 'message-test' }, agentMessage,
+    ] })
 
     render(<App />)
     await user.type(
@@ -356,6 +359,7 @@ describe('claimant intake projection', () => {
     await waitFor(() => expect(pushLiveUpdate).toBeTypeOf('function'))
 
     await act(async () => pushLiveUpdate(realtimeChange(2, ['claim', 'messages'])))
+    await waitFor(() => expect(screen.queryByLabelText('Message sending')).not.toBeInTheDocument())
     await act(async () => resolveTurn(initialTurn()))
 
     expect(screen.getAllByText(claimantMessage.content.text)).toHaveLength(1)

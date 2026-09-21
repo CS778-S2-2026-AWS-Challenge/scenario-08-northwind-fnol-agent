@@ -2960,7 +2960,7 @@ function App() {
               )}
               {pendingMessage && (
                 <>
-                  {!pendingMessage.retrying && <article className="msg-user is-pending" aria-label="Message sending">
+                  {!pendingMessage.retrying && !messages.some((message) => message.actor === 'claimant' && message.client_message_id === pendingMessage.turnId) && <article className="msg-user is-pending" aria-label="Message sending">
                     <div>
                       <div className="user-bubble">{pendingMessage.text}</div>
                       <div className="msg-meta">Sending…</div>

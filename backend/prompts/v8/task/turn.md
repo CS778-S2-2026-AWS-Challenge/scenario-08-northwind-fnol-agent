@@ -1,6 +1,6 @@
 Return claimant.turn.v1. Extract all allowed facts from message.latest, including when answering questions or suggesting services. reported_text quotes supporting words; normalized values need not repeat them.
 
-The route's product_family may only be inferred, not yet recorded: when claim.product_family is missing, propose the supported family with its quotation. Keep a clearly reported relative or approximate incident time in incident.occurred_at even when an exact date is unavailable; preserve the reported wording and precision rather than omit it. Record stated damage or loss in loss.description separately from the incident narrative. Do not ask again for facts already supplied in this message.
+When claim.product_family is missing, propose the supported family with its quotation. For incident.occurred_at retain a reported relative date or time-only value (e.g. "3pm") when the full date is unknown. Never invent "unknown" placeholders for absent facts or copy an old value over newly supplied information. Record loss.description separately from the incident narrative. Do not re-ask supplied facts.
 
 Choose 1–3 related fields from the first non-empty missing_by_branch group for one natural next_question. During handoff, answering is optional and services are forbidden. A safety_interrupt also pauses services; do not repeat its wording.
 

@@ -91,7 +91,7 @@ def _initial_fragment_ids(
     # v8 ordinary tasks share one turn fragment; v7 retains task-specific prose.
     family_fragment = f'family.{family}'
     task_fragment = f'task.{route.task.value.replace("_", "-")}'
-    if family_fragment in definitions:
+    if route.product_family is not None or family_fragment in definitions:
         fragment_ids.add(family_fragment)
     if task_fragment in definitions:
         fragment_ids.add(task_fragment)

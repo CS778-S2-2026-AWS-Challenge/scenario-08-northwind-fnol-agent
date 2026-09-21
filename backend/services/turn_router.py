@@ -17,7 +17,7 @@ _STATUS = re.compile(
     re.I,
 )
 _EVIDENCE_HISTORY = re.compile(
-    r'\b(?:(?:previous|prior|earlier|old)\s+(?:photos?|images?|documents?|files?|uploads?|evidence)'
+    r'\b(?:(?:previous|prior|earlier|old)\s+(?:uploaded\s+)?(?:photos?|images?|documents?|files?|uploads?|evidence)'
     r'|(?:upload|file|evidence|document|photo)\s+history|already uploaded)\b',
     re.I,
 )

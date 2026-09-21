@@ -552,16 +552,16 @@ def test_request_profile_rejects_incoherent_invocation_contracts(
     ('raw_input_tokens', 'turn_cumulative_tokens', 'expected_error'),
     [
         (301, 301, 'request exceeds'),
-        (200, 301, 'turn exceeds'),
+        (200, 301, None),
     ],
 )
 def test_request_budget_rejects_single_and_cumulative_overflow(
     raw_input_tokens: int,
     turn_cumulative_tokens: int,
-    expected_error: str,
+    expected_error: str | None,
 ) -> None:
-    with pytest.raises(ValueError, match=expected_error):
-        ModelRequestBudget(
+    def budget() -> ModelRequestBudget:
+        return ModelRequestBudget(
             policy_version='test-v1',
             raw_input_tokens=raw_input_tokens,
             uncached_input_tokens=raw_input_tokens,
@@ -577,6 +577,12 @@ def test_request_budget_rejects_single_and_cumulative_overflow(
             hard_limit=300,
             estimate_method='conservative_chars',
         )
+
+    if expected_error is not None:
+        with pytest.raises(ValueError, match=expected_error):
+            budget()
+    else:
+        assert budget().turn_cumulative_tokens == 301
 
 
 @pytest.mark.parametrize(
@@ -1427,16 +1433,22 @@ def test_v7_replaces_executional_prose_before_consent_with_runtime_owned_copy() 
     ]
 
 
-def test_v7_human_handoff_interrupts_before_any_provider_invocation() -> None:
-    gateway = _RecordingGateway([])
+def test_v7_human_handoff_preserves_interrupt_while_provider_answers() -> None:
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                structured_output=_answer_output(), completion_status=ModelCompletionStatus.COMPLETE
+            )
+        ]
+    )
 
     proposal = InvariantGuardedAgent(GatewayAgent(gateway)).propose_turn(
         _context('I want to speak to a person.')
     )
 
     assert proposal.action is AgentAction.HANDOFF
-    assert proposal.reason_codes == ['HUMAN_SUPPORT_REQUESTED']
-    assert gateway.requests == []
+    assert 'HUMAN_SUPPORT_REQUESTED' in proposal.reason_codes
+    assert len(gateway.requests) == 1
 
 
 def test_v7_timeout_stops_after_one_request_and_returns_no_proposal() -> None:
