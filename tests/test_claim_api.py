@@ -1849,6 +1849,7 @@ def test_message_turn_deduplicates_retries_and_rejects_conflicting_client_id(
 def test_message_turn_replay_preserves_turn_revision_after_later_claim_mutation(
     client: TestClient,
     auth_headers: dict[str, str],
+    repository: FixtureRepository,
 ) -> None:
     created = create_claim(client, auth_headers, key='message-replay-history').json()
     claim_id = created['claim']['claim_id']
@@ -1875,6 +1876,24 @@ def test_message_turn_replay_preserves_turn_revision_after_later_claim_mutation(
             ]
         },
     )
+    assert first.status_code == 200
+    assert later_update.status_code == 200
+    assert later_update.json()['revision'] == 3
+    stored = repository.find_idempotency(
+        'cus_demo',
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+        'historical-turn',
+    )
+    assert stored is not None
+    decision = repository.find_agent_decision_for_trigger(
+        claim_id,
+        first.json()['claimant_message']['message_id'],
+        'cus_demo',
+    )
+    assert decision is not None
+    repository.save_idempotency(
+        replace(stored, decision_id=decision.decision_id, response_payload=first.json())
+    )
     replay = submit_message(
         client,
         auth_headers,
@@ -1884,10 +1903,6 @@ def test_message_turn_replay_preserves_turn_revision_after_later_claim_mutation(
         key='historical-turn',
         client_message_id='historical-client-message',
     )
-
-    assert first.status_code == 200
-    assert later_update.status_code == 200
-    assert later_update.json()['revision'] == 3
     assert replay.status_code == 200
     replay_body = replay.json()
     assert replay_body['claim_revision'] == 2
@@ -1895,6 +1910,49 @@ def test_message_turn_replay_preserves_turn_revision_after_later_claim_mutation(
     assert replay_body['primary_action']['claim_revision'] == 3
     assert replay_body['claimant_message'] == first.json()['claimant_message']
     assert replay_body['agent_message'] == first.json()['agent_message']
+
+
+def test_persisted_runtime_response_rehydrates_from_agent_message_record(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='runtime-replay').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+    first = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        key='runtime-replay-original',
+        client_message_id='runtime-replay-message',
+    )
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
+    stored = repository.find_idempotency('cus_demo', route, 'runtime-replay-original')
+    assert stored is not None
+    assert stored.agent_message_id == first_body['agent_message']['message_id']
+    replay_key = replace(
+        stored,
+        key='runtime-replay-agent-record',
+        decision_id=None,
+        response_payload=first_body,
+    )
+    repository.save_idempotency(replay_key)
+
+    replay = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        key='runtime-replay-agent-record',
+        client_message_id='runtime-replay-message',
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json()['claimant_message'] == first_body['claimant_message']
+    assert replay.json()['agent_message'] == first_body['agent_message']
 
 
 def test_message_only_replay_rehydrates_current_revision_from_legacy_payload(
