@@ -320,6 +320,80 @@ jobs:
             fi
             echo "Path coupling satisfied."
 
+  p12-browser-evidence:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Select browser-evidence impact
+          command: |
+            git fetch origin main
+            mkdir -p browser-evidence
+            if [ "${CIRCLE_BRANCH:-}" = "main" ] || git diff --name-only origin/main...HEAD | grep -qE '^(customer/|workbench/|backend/api/realtime.py|backend/api/workbench|backend/services/|tests/browser/|\.circleci/config\.yml$)'; then
+              echo "export BROWSER_EVIDENCE_MODE=run" >> "$BASH_ENV"
+            else
+              echo "export BROWSER_EVIDENCE_MODE=skip" >> "$BASH_ENV"
+              echo "Browser evidence unaffected; job skipped." > browser-evidence/skip.txt
+            fi
+      - run:
+          name: Install browser-evidence dependencies
+          command: |
+            if [ "$BROWSER_EVIDENCE_MODE" = "skip" ]; then exit 0; fi
+            python -m pip install -r backend/requirements-dev.txt
+            npm ci --prefix customer
+            npm ci --prefix workbench
+            npm install --prefix /tmp/p12-playwright --no-save playwright@1.55.0
+            /tmp/p12-playwright/node_modules/.bin/playwright install --with-deps chromium
+      - run:
+          name: Execute claimant ↔ Workbench interruption and recovery journey
+          no_output_timeout: 10m
+          command: |
+            if [ "$BROWSER_EVIDENCE_MODE" = "skip" ]; then exit 0; fi
+            set -euo pipefail
+
+            export PR_HEAD_SHA="$CIRCLE_SHA1"
+            export BROWSER_EVIDENCE_DIR=browser-evidence
+            export NORTHWIND_ENVIRONMENT=test
+            export NORTHWIND_IDENTITY_MODE=developer
+            export DATA_RUNTIME_PROFILE=fixture
+            export AGENT_RUNTIME_PROFILE=controlled
+            export NODE_PATH=/tmp/p12-playwright/node_modules
+
+            python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 > browser-evidence/backend.log 2>&1 &
+            BACKEND_PID=$!
+            npm run dev --prefix customer -- --host 127.0.0.1 --port 8001 > browser-evidence/customer.log 2>&1 &
+            CUSTOMER_PID=$!
+            npm run dev --prefix workbench -- --host 127.0.0.1 --port 8002 > browser-evidence/workbench.log 2>&1 &
+            WORKBENCH_PID=$!
+
+            cleanup() {
+              kill "$BACKEND_PID" "$CUSTOMER_PID" "$WORKBENCH_PID" 2>/dev/null || true
+            }
+            trap cleanup EXIT
+
+            wait_for_url() {
+              url="$1"
+              for attempt in $(seq 1 90); do
+                if curl --fail --silent --show-error "$url" > /dev/null; then
+                  return 0
+                fi
+                sleep 1
+              done
+              echo "Timed out waiting for $url"
+              return 1
+            }
+
+            wait_for_url http://127.0.0.1:8000/health
+            wait_for_url http://127.0.0.1:8001/
+            wait_for_url http://127.0.0.1:8002/workbench/
+
+            node tests/browser/p12_3_claimant_workbench_recovery.cjs
+      - store_artifacts:
+          path: browser-evidence
+          destination: p12-browser-evidence
+
 workflows:
   quality:
     jobs:
@@ -330,3 +404,4 @@ workflows:
       - customer-quality
       - workbench-quality
       - admin-quality
+      - p12-browser-evidence

@@ -66,6 +66,26 @@ website on port `8001`; “employee page” means the Workbench on port `8002`.
 | 7 | Customer page: refresh the page or reopen the saved claim | The staff reply appears and the claimant can continue from the saved claim without entering confirmed information again | Existing component check passed, 2026-08-24 |
 | 8 | Employee page: resolve the handoff; then check the customer page again | The claimant sees a plain-language next step. Internal staff notes and Agent drafting details are not visible | Existing API and visibility checks passed, 2026-08-24 |
 
+### P12.3 interruption and recovery check
+
+Use the same Claim and claimant session from the handoff journey. This check is specifically for
+projection freshness and must be run with separate claimant and Workbench browser contexts.
+
+| Step | Where and what to do | What you should see |
+| --- | --- | --- |
+| 1 | Claimant: request staff assistance and keep the Claim open | The claimant sees the authoritative waiting/queued handoff state and claimant-safe next step |
+| 2 | Interrupt the claimant realtime transport without refreshing the page | A live-update reconnecting/stale status is announced; the existing Claim projection remains visible but is explicitly described as potentially out of date |
+| 3 | Workbench: accept the same handoff and progress it while the claimant transport remains interrupted | Workbench continues from the same Claim/handoff and shows the server-projected staff reason, gaps, ownership, claimability, and actions |
+| 4 | Restore claimant realtime connectivity | A replacement subscription is established first; opening it does not clear the claimant stale status |
+| 5 | Allow the claimant authoritative Claim and current-session message refetch to complete | The same Claim/session now shows the accepted/in-progress handoff, current claimant-safe next step, and any permitted staff message; only then does the stale status clear |
+| 6 | Repeat recovery with `resync_required` or `INVALID_EVENT_CURSOR` | The stale cursor is discarded, the replacement stream is opened before the authoritative snapshot, and no claimant business command is replayed |
+| 7 | Workbench: resolve the handoff | The claimant receives the resolved/next-step projection through the same Claim/session continuity; no second intake or unlinked session is created |
+
+Component coverage in `customer/src/App.test.jsx` verifies the transport warning and the
+replacement-stream-before-snapshot recovery boundary, including the rule that the warning remains
+until both the active Claim and current-session message readback succeed. That component evidence
+supports, but does not replace, the separate browser run recorded below.
+
 ### Independent repeat
 
 A second team member repeats steps 1–8 against the same commit and records their name, date,
