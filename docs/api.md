@@ -1787,6 +1787,19 @@ event resets the fallback budget. This degraded recovery never resubmits a busin
 external side effect. Existing post-mutation authoritative readback remains a separate correctness
 check and is not replaced by realtime delivery.
 
+Claimant transport health is a browser-operational state, not Claim or Handoff business state. When
+the claimant stream loses continuity, the page makes that degraded freshness explicit: ordinary
+transport failure is shown as reconnecting, while `resync_required` or
+`409 INVALID_EVENT_CURSOR` is shown as requiring resynchronisation. Opening a replacement SSE
+connection is not sufficient to claim that the displayed Claim is current. The client first
+establishes the replacement subscription and then successfully refetches the authoritative active
+Claim and, when a session is active, that session's claimant-visible messages for the same current
+Claim/session context. Only after that readback is applied may the degraded/stale notice clear.
+A superseded, failed, or partial Claim/message readback leaves the notice visible. Bounded degraded
+refreshes during an outage may improve the displayed projection but do not, by themselves, restore
+the client's live-current claim. Authentication-context changes discard the prior principal's
+transport-health state together with replay state.
+
 ### `PATCH /api/v1/claims/{claim_id}/form`
 
 Corrects or supplies structured fields. It does not accept server-owned provenance or audit timestamps.
