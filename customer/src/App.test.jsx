@@ -435,12 +435,18 @@ describe('claimant intake projection', () => {
   it('opens the authenticated Profile deep link and replaces edits with the API projection', async () => {
     const user = userEvent.setup()
     const initialAccount = {
-      profile: { display_name: 'Iris Zhang', email: 'iris@gmail.com', phone: '+64 21 555 123' },
+      profile: {
+        display_name: 'Iris Zhang',
+        legal_name: 'Iris Zhang',
+        preferred_name: null,
+        email: 'iris@gmail.com',
+        phone: '+64 21 555 123',
+      },
       preferences: { email: true, sms: false },
     }
     const updatedAccount = {
       ...initialAccount,
-      profile: { ...initialAccount.profile, display_name: 'Iris' },
+      profile: { ...initialAccount.profile, display_name: 'Iris', preferred_name: 'Iris' },
     }
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue(initialAccount)
@@ -460,8 +466,9 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByLabelText('Preferred name'), 'Iris')
     await user.click(screen.getByRole('button', { name: 'Save profile' }))
 
-    expect(api.updateAccountProfile).toHaveBeenCalledWith({ display_name: 'Iris', phone: '+64 21 555 123' })
+    expect(api.updateAccountProfile).toHaveBeenCalledWith({ preferred_name: 'Iris' })
     expect(await screen.findByText('Iris', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(screen.getByText('Iris Zhang', { selector: '.profile-summary-row > dd' })).toBeInTheDocument()
     expect(api.createClaim).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Back' }))

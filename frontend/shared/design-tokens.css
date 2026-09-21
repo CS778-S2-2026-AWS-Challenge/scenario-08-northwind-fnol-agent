@@ -105,6 +105,11 @@
   --layer-popover: 20;
   --size-popover-viewport-max: 80vw;
 
+  /* Claimant Profile geometry stays independent of Workbench density. */
+  --claimant-profile-sidebar-width: 216px;
+  --claimant-profile-label-width: 160px;
+  --claimant-profile-address-min-height: 96px;
+
   /* Claimant entry semantic contract. Component CSS consumes these roles
      without reconstructing translucent states or page geometry. */
   --claimant-entry-heading-size: var(--font-size-display);

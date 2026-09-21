@@ -7,9 +7,13 @@ import UserProfile from './UserProfile.jsx'
 
 const account = {
   profile: {
-    display_name: 'Iris Zhang',
+    display_name: 'Iris',
+    legal_name: 'Iris Zhang',
+    preferred_name: 'Iris',
+    date_of_birth: '1990-04-12',
     email: 'iris@gmail.com',
     phone: '+64 21 555 123',
+    residential_address: '1 Queen Street, Auckland',
   },
   preferences: { email: true, sms: false },
 }
@@ -33,11 +37,23 @@ const vehicleAsset = {
 
 function ProfileHarness({ initialSection = null, profileProps }) {
   const [activeSection, setActiveSection] = useState(initialSection)
+  const [currentAccount, setCurrentAccount] = useState(profileProps.account)
 
   return (
     <UserProfile
       {...profileProps}
+      account={currentAccount}
       activeSection={activeSection}
+      onSaveProfile={async (profile) => {
+        const updated = await profileProps.onSaveProfile(profile)
+        setCurrentAccount(updated)
+        return updated
+      }}
+      onSavePreferences={async (preferences) => {
+        const updated = await profileProps.onSavePreferences(preferences)
+        setCurrentAccount(updated)
+        return updated
+      }}
       onSelectSection={(section) => {
         profileProps.onSelectSection(section)
         setActiveSection(section)
@@ -80,7 +96,7 @@ describe('UserProfile', () => {
     expect(screen.getByText('••• ••• 123')).toBeInTheDocument()
     expect(screen.getByText('Policy number')).toBeInTheDocument()
     expect(screen.queryByText(/^Saved$/)).not.toBeInTheDocument()
-    expect(screen.getByText('Iris Zhang').closest('.profile-header')).toBeInTheDocument()
+    expect(screen.getByText('Iris', { selector: '.profile-header-copy > strong' }).closest('.profile-header')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Edit profile' }).closest('.profile-header')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Edit personal information' }).closest('.profile-personal-information-heading')).toBeInTheDocument()
     expect(screen.getByText('Legal name').closest('.profile-personal-information')).toBeInTheDocument()
@@ -125,11 +141,11 @@ describe('UserProfile', () => {
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
   })
 
-  it('submits only current-contract account fields and reports the authoritative update', async () => {
+  it('updates the preferred name without changing the legal name', async () => {
     const user = userEvent.setup()
     const updatedAccount = {
       ...account,
-      profile: { ...account.profile, display_name: 'Iris' },
+      profile: { ...account.profile, display_name: 'Iris Liu', preferred_name: 'Iris Liu' },
     }
     const onSaveProfile = vi.fn().mockResolvedValue(updatedAccount)
     renderProfile({ onSaveProfile }, 'personal-details')
@@ -138,14 +154,123 @@ describe('UserProfile', () => {
     const name = screen.getByLabelText('Preferred name')
     expect(name).toHaveFocus()
     await user.clear(name)
-    await user.type(name, 'Iris')
+    await user.type(name, 'Iris Liu')
     expect(screen.queryByLabelText(/Phone number/)).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Contact preferences' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Save profile' }))
 
-    expect(onSaveProfile).toHaveBeenCalledWith({ display_name: 'Iris', phone: '+64 21 555 123' })
+    expect(onSaveProfile).toHaveBeenCalledWith({ preferred_name: 'Iris Liu' })
     expect(await screen.findByRole('status')).toHaveTextContent('updated in your saved Northwind account')
-    expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument()
+    expect(screen.getByText('Iris Liu', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(screen.getByText('Iris Zhang', { selector: '.profile-summary-row > dd' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Preferred name')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit profile' })).toHaveFocus()
+  })
+
+  it('does not show the legal-name projection as an unset preferred name', () => {
+    renderProfile({
+      account: {
+        ...account,
+        profile: { ...account.profile, display_name: 'Iris Zhang', preferred_name: null },
+      },
+    }, 'personal-details')
+
+    expect(screen.getByText('Not provided', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(screen.getByText('Iris Zhang', { selector: '.profile-summary-row > dd' })).toBeInTheDocument()
+  })
+
+  it('edits personal identity and address fields through the account projection', async () => {
+    const user = userEvent.setup()
+    const updatedAccount = {
+      ...account,
+      profile: {
+        ...account.profile,
+        legal_name: 'Iris Zhang-Smith',
+        date_of_birth: '1991-05-23',
+        email: 'iris.smith@example.com',
+        residential_address: '22 Harbour Road, Auckland',
+      },
+    }
+    const secondAccount = {
+      ...updatedAccount,
+      profile: { ...updatedAccount.profile, residential_address: '30 Harbour Road, Auckland' },
+    }
+    const onSaveProfile = vi.fn()
+      .mockResolvedValueOnce(updatedAccount)
+      .mockResolvedValueOnce(secondAccount)
+    renderProfile({ onSaveProfile }, 'personal-details')
+
+    await user.click(screen.getByRole('button', { name: 'Edit personal information' }))
+    expect(screen.getByLabelText('Legal name')).toHaveValue('Iris Zhang')
+    expect(screen.getByLabelText('Date of birth')).toHaveValue('1990-04-12')
+    expect(screen.getByLabelText('Email')).toHaveValue('iris@gmail.com')
+    expect(screen.getByLabelText(/Residential address/)).toHaveValue('1 Queen Street, Auckland')
+
+    await user.clear(screen.getByLabelText('Legal name'))
+    await user.type(screen.getByLabelText('Legal name'), 'Iris Zhang-Smith')
+    await user.clear(screen.getByLabelText('Date of birth'))
+    await user.type(screen.getByLabelText('Date of birth'), '1991-05-23')
+    await user.clear(screen.getByLabelText('Email'))
+    await user.type(screen.getByLabelText('Email'), 'iris.smith@example.com')
+    await user.clear(screen.getByLabelText(/Residential address/))
+    await user.type(screen.getByLabelText(/Residential address/), '22 Harbour Road, Auckland')
+    await user.click(screen.getByRole('button', { name: 'Save personal information' }))
+
+    expect(onSaveProfile).toHaveBeenCalledWith({
+      legal_name: 'Iris Zhang-Smith',
+      date_of_birth: '1991-05-23',
+      email: 'iris.smith@example.com',
+      phone: '+64 21 555 123',
+      residential_address: '22 Harbour Road, Auckland',
+    })
+    expect(await screen.findByRole('status')).toHaveTextContent('Profile information was updated')
+    expect(screen.getByText('Iris', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(screen.getByText('Iris Zhang-Smith', { selector: '.profile-summary-row > dd' })).toBeInTheDocument()
+    expect(screen.getByText('22 Harbour Road, Auckland')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save personal information' })).not.toBeInTheDocument()
+
+    const editButton = screen.getByRole('button', { name: 'Edit personal information' })
+    expect(editButton).toHaveFocus()
+    await user.click(editButton)
+    const address = screen.getByLabelText(/Residential address/)
+    expect(address).toHaveValue('22 Harbour Road, Auckland')
+    await user.clear(address)
+    await user.type(address, '30 Harbour Road, Auckland')
+    await user.click(screen.getByRole('button', { name: 'Save personal information' }))
+
+    expect(onSaveProfile).toHaveBeenCalledTimes(2)
+    expect(onSaveProfile).toHaveBeenLastCalledWith(expect.objectContaining({
+      residential_address: '30 Harbour Road, Auckland',
+    }))
+    expect(await screen.findByText('30 Harbour Road, Auckland')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit personal information' })).toBeInTheDocument()
+  })
+
+  it('keeps personal information saving usable after a transient save failure', async () => {
+    const user = userEvent.setup()
+    const updatedAccount = {
+      ...account,
+      profile: { ...account.profile, residential_address: '22 Harbour Road, Auckland' },
+    }
+    const onSaveProfile = vi.fn()
+      .mockRejectedValueOnce(new Error('The account service is temporarily unavailable.'))
+      .mockResolvedValueOnce(updatedAccount)
+    renderProfile({ busy: true, onSaveProfile }, 'personal-details')
+
+    await user.click(screen.getByRole('button', { name: 'Edit personal information' }))
+    const address = screen.getByLabelText(/Residential address/)
+    await user.clear(address)
+    await user.type(address, '22 Harbour Road, Auckland')
+    const saveButton = screen.getByRole('button', { name: 'Save personal information' })
+    await user.click(saveButton)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your changes were not saved')
+    expect(saveButton).not.toBeDisabled()
+    await user.click(saveButton)
+
+    expect(onSaveProfile).toHaveBeenCalledTimes(2)
+    expect(await screen.findByRole('status')).toHaveTextContent('Profile information was updated')
+    expect(screen.getByRole('button', { name: 'Edit personal information' })).toBeInTheDocument()
   })
 
   it('preserves an unsaved personal draft while the customer visits another category', async () => {
@@ -170,14 +295,45 @@ describe('UserProfile', () => {
 
     await user.click(screen.getByRole('button', { name: 'Edit personal information' }))
     expect(screen.queryByLabelText('Preferred name')).not.toBeInTheDocument()
-    expect(screen.getByLabelText(/Phone number/)).toHaveFocus()
-    await user.click(screen.getByRole('checkbox', { name: /SMS/ }))
+    expect(screen.getByLabelText('Legal name')).toHaveFocus()
+    await user.click(screen.getByRole('radio', { name: /SMS/ }))
     await user.click(screen.getByRole('button', { name: 'Save contact preferences' }))
 
-    expect(onSavePreferences).toHaveBeenCalledWith({ email: true, sms: true })
+    expect(onSavePreferences).toHaveBeenCalledWith({ email: false, sms: true })
     expect(await screen.findByRole('alert')).toHaveTextContent('Your changes were not saved')
     expect(screen.getByRole('heading', { name: 'Contact preferences' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Done editing personal information' })).toBeInTheDocument()
+  })
+
+  it('saves one contact method when an older account has both enabled', async () => {
+    const user = userEvent.setup()
+    const accountWithBoth = { ...account, preferences: { email: true, sms: true } }
+    const updatedAccount = { ...accountWithBoth, preferences: { email: false, sms: true } }
+    const onSavePreferences = vi.fn().mockResolvedValue(updatedAccount)
+    renderProfile({ account: accountWithBoth, onSavePreferences }, 'personal-details')
+
+    expect(screen.getByText('Multiple saved — choose one')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Edit personal information' }))
+    const email = screen.getByRole('radio', { name: /Email/ })
+    const sms = screen.getByRole('radio', { name: /SMS/ })
+    expect(email).not.toBeChecked()
+    expect(sms).not.toBeChecked()
+    await user.click(email)
+    expect(email).toBeChecked()
+    expect(sms).not.toBeChecked()
+    await user.click(sms)
+    expect(email).not.toBeChecked()
+    expect(sms).toBeChecked()
+    await user.click(screen.getByRole('button', { name: 'Save contact preferences' }))
+
+    expect(onSavePreferences).toHaveBeenCalledWith({ email: false, sms: true })
+    expect(await screen.findByText('SMS', { selector: '.profile-summary-row > dd' })).toBeInTheDocument()
+    expect(screen.queryByText('Multiple saved — choose one')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Contact preferences' })).not.toBeInTheDocument()
+    const editButton = screen.getByRole('button', { name: 'Edit personal information' })
+    expect(editButton).toHaveFocus()
+    await user.click(editButton)
+    expect(screen.getByRole('radio', { name: /SMS/ })).toBeChecked()
   })
 
   it('opens a saved asset in a read-only detail view before offering edit controls', async () => {

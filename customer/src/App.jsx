@@ -2287,7 +2287,9 @@ function App() {
   async function saveProfile(profile) {
     setAuthStatus('saving')
     try {
-      const updated = await updateAccountProfile(profile)
+      const updated = account?.revision == null
+        ? await updateAccountProfile(profile)
+        : await updateAccountProfile(profile, account.revision)
       setAccount(updated)
       return updated
     } finally {

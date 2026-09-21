@@ -12,6 +12,7 @@ import {
   streamClaimUpdates,
   streamRealtimeEvents,
   updateAccountAsset,
+  updateAccountProfile,
 } from './api.js'
 
 
@@ -507,6 +508,49 @@ describe('Claim history contract', () => {
       expect.objectContaining({
         signal: controller.signal,
         headers: expect.objectContaining({ Authorization: 'Bearer claimant-session-token' }),
+      }),
+    )
+  })
+})
+
+describe('Account profile contract', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken('claimant-session-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('sends the account revision when saving editable personal details', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ profile: {} }), { status: 200 }))
+
+    await updateAccountProfile(
+      {
+        legal_name: 'Iris Zhang',
+        date_of_birth: '1990-04-12',
+        email: 'iris@example.invalid',
+        residential_address: '1 Queen Street, Auckland',
+      },
+      4,
+    )
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/profile',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer claimant-session-token',
+          'If-Match': '4',
+        }),
+        body: JSON.stringify({
+          legal_name: 'Iris Zhang',
+          date_of_birth: '1990-04-12',
+          email: 'iris@example.invalid',
+          residential_address: '1 Queen Street, Auckland',
+        }),
       }),
     )
   })

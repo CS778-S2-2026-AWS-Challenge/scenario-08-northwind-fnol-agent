@@ -26,10 +26,10 @@ function initials(value = '') {
 }
 
 function contactPreference(preferences = {}) {
-  const enabled = []
-  if (preferences.email) enabled.push('Email')
-  if (preferences.sms) enabled.push('SMS')
-  return enabled.join(' and ') || 'Not provided'
+  if (preferences.email && preferences.sms) return 'Multiple saved — choose one'
+  if (preferences.email) return 'Email'
+  if (preferences.sms) return 'SMS'
+  return 'Not provided'
 }
 
 function formatAssetDate(value) {
@@ -38,6 +38,27 @@ function formatAssetDate(value) {
   return new Intl.DateTimeFormat('en-NZ', {
     day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Pacific/Auckland',
   }).format(date)
+}
+
+function formatDateOfBirth(value) {
+  if (!value) return 'Not provided'
+  const date = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return 'Not provided'
+  return new Intl.DateTimeFormat('en-NZ', {
+    day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Pacific/Auckland',
+  }).format(date)
+}
+
+function profileDraftFromAccount(account) {
+  const profile = account.profile || {}
+  return {
+    preferredName: profile.preferred_name || '',
+    legalName: profile.legal_name || '',
+    dateOfBirth: profile.date_of_birth || '',
+    email: profile.email || '',
+    phone: profile.phone || '',
+    residentialAddress: profile.residential_address || '',
+  }
 }
 
 function categoryFor(assetType) {
@@ -127,18 +148,19 @@ function SummaryRow({ label, value }) {
   return <div className="profile-summary-row"><dt>{label}</dt><dd>{value}</dd></div>
 }
 
-function ProfileHeader({ account, editing, onEdit }) {
+function ProfileHeader({ account, editButtonRef, editing, onEdit }) {
   return (
     <header className="profile-header">
       <div className="profile-avatar" aria-hidden="true">{initials(account.profile.display_name)}</div>
       <div className="profile-header-copy">
         <span className="profile-account-name-label">Preferred name</span>
-        <strong>{account.profile.display_name}</strong>
+        <strong>{account.profile.preferred_name || 'Not provided'}</strong>
         <p className="profile-header-meta">
           <span>Policy number</span><span aria-hidden="true">·</span><span>Unavailable</span>
         </p>
       </div>
       <button
+        ref={editButtonRef}
         className="profile-quiet-action"
         type="button"
         aria-expanded={editing}
@@ -392,20 +414,21 @@ export default function UserProfile({
 }) {
   const [activeEditor, setActiveEditor] = useState(null)
   const [detailsDirty, setDetailsDirty] = useState(false)
+  const [savingDetails, setSavingDetails] = useState(false)
   const [preferencesDirty, setPreferencesDirty] = useState(false)
-  const [detailDraft, setDetailDraft] = useState({
-    displayName: account.profile.display_name,
-    phone: account.profile.phone || '',
-  })
+  const [detailDraft, setDetailDraft] = useState(() => profileDraftFromAccount(account))
   const [preferenceDraft, setPreferenceDraft] = useState({
-    email: Boolean(account.preferences.email),
-    sms: Boolean(account.preferences.sms),
+    email: Boolean(account.preferences?.email),
+    sms: Boolean(account.preferences?.sms),
   })
   const [notice, setNotice] = useState(null)
   const [selectedAssetCategory, setSelectedAssetCategory] = useState(null)
   const [selectedAssetId, setSelectedAssetId] = useState(null)
   const [assetEditor, setAssetEditor] = useState(null)
   const detailInputRef = useRef(null)
+  const personalInputRef = useRef(null)
+  const profileEditButtonRef = useRef(null)
+  const personalEditButtonRef = useRef(null)
   const phoneInputRef = useRef(null)
   const SectionTitle = embedded ? 'h2' : 'h1'
   const currentSection = activeSection || 'personal-details'
@@ -414,12 +437,12 @@ export default function UserProfile({
   useEffect(() => {
     if (currentSection !== 'personal-details') return
     if (activeEditor === 'profile') detailInputRef.current?.focus()
-    if (activeEditor === 'personal') phoneInputRef.current?.focus()
+    if (activeEditor === 'personal') personalInputRef.current?.focus()
   }, [activeEditor, currentSection])
 
   function resetPersonalDrafts() {
-    setDetailDraft({ displayName: account.profile.display_name, phone: account.profile.phone || '' })
-    setPreferenceDraft({ email: Boolean(account.preferences.email), sms: Boolean(account.preferences.sms) })
+    setDetailDraft(profileDraftFromAccount(account))
+    setPreferenceDraft({ email: Boolean(account.preferences?.email), sms: Boolean(account.preferences?.sms) })
     setDetailsDirty(false)
     setPreferencesDirty(false)
   }
@@ -447,19 +470,36 @@ export default function UserProfile({
 
   async function saveDetails(event) {
     event.preventDefault()
+    if (savingDetails) return
+    const savedEditor = activeEditor
+    setSavingDetails(true)
     setNotice(null)
     try {
-      const updated = await onSaveProfile({
-        display_name: detailDraft.displayName.trim(), phone: detailDraft.phone.trim(),
-      })
-      setDetailDraft({ displayName: updated.profile.display_name, phone: updated.profile.phone || '' })
+      const payload = activeEditor === 'personal'
+        ? {
+          legal_name: detailDraft.legalName.trim(),
+          date_of_birth: detailDraft.dateOfBirth || null,
+          email: detailDraft.email.trim(),
+          phone: detailDraft.phone.trim(),
+          residential_address: detailDraft.residentialAddress.trim() || null,
+        }
+        : {
+          preferred_name: detailDraft.preferredName.trim(),
+        }
+      const updated = await onSaveProfile(payload)
+      setDetailDraft(profileDraftFromAccount(updated))
       setDetailsDirty(false)
+      setActiveEditor(null)
       setNotice({ kind: 'success', text: 'Profile information was updated in your saved Northwind account.' })
+      if (savedEditor === 'personal') personalEditButtonRef.current?.focus()
+      if (savedEditor === 'profile') profileEditButtonRef.current?.focus()
     } catch (error) {
       setNotice({
         kind: 'error',
         text: `${error.message || 'Northwind could not update these details.'} Your changes were not saved. Check the fields and try again.`,
       })
+    } finally {
+      setSavingDetails(false)
     }
   }
 
@@ -470,7 +510,9 @@ export default function UserProfile({
       const updated = await onSavePreferences(preferenceDraft)
       setPreferenceDraft({ email: Boolean(updated.preferences.email), sms: Boolean(updated.preferences.sms) })
       setPreferencesDirty(false)
+      setActiveEditor(null)
       setNotice({ kind: 'success', text: 'Contact preferences were updated in your saved Northwind account.' })
+      personalEditButtonRef.current?.focus()
     } catch (error) {
       setNotice({
         kind: 'error',
@@ -495,33 +537,35 @@ export default function UserProfile({
   }
 
   function renderPersonalDetails() {
+    const profile = account.profile || {}
     return (
       <section className="profile-section" aria-label="Personal details">
         <section className="profile-header-region" aria-label="Profile header">
           <ProfileHeader
             account={account}
+            editButtonRef={profileEditButtonRef}
             editing={activeEditor === 'profile'}
             onEdit={activeEditor === 'profile' ? closeEditor : () => openEditor('profile')}
           />
           {activeEditor === 'profile' && (
             <form id="profile-header-editor" className="profile-edit-form profile-header-editor" onSubmit={saveDetails}>
               <h3>Profile details</h3>
-              <label htmlFor="profile-display-name">Preferred name</label>
+              <label htmlFor="profile-preferred-name">Preferred name</label>
               <input
                 ref={detailInputRef}
-                id="profile-display-name"
-                name="display_name"
-                value={detailDraft.displayName}
+                id="profile-preferred-name"
+                name="preferred_name"
+                value={detailDraft.preferredName}
                 maxLength="120"
                 autoComplete="name"
                 required
                 onChange={(event) => {
-                  setDetailDraft((current) => ({ ...current, displayName: event.target.value }))
+                  setDetailDraft((current) => ({ ...current, preferredName: event.target.value }))
                   setDetailsDirty(true)
                 }}
               />
               <p className="profile-field-limit">Avatar changes are unavailable in the current account service.</p>
-              <button className="primary-button" type="submit" disabled={busy || !detailsDirty}>Save profile</button>
+              <button className="primary-button" type="submit" disabled={savingDetails || !detailsDirty}>Save profile</button>
             </form>
           )}
         </section>
@@ -530,6 +574,7 @@ export default function UserProfile({
           <header className="profile-personal-information-heading">
             <SectionTitle id="profile-personal-information-title">Personal information</SectionTitle>
             <button
+              ref={personalEditButtonRef}
               className="profile-quiet-action"
               type="button"
               aria-label={activeEditor === 'personal' ? 'Done editing personal information' : 'Edit personal information'}
@@ -541,43 +586,108 @@ export default function UserProfile({
             </button>
           </header>
           <dl className="profile-summary-list">
-            <SummaryRow label="Legal name" value="Unavailable" />
-            <SummaryRow label="Date of birth" value="Unavailable" />
-            <SummaryRow label="Phone" value={maskPhone(account.profile.phone)} />
-            <SummaryRow label="Email" value={maskEmail(account.profile.email)} />
+            <SummaryRow label="Legal name" value={profile.legal_name || 'Not provided'} />
+            <SummaryRow label="Date of birth" value={formatDateOfBirth(profile.date_of_birth)} />
+            <SummaryRow label="Phone" value={maskPhone(profile.phone)} />
+            <SummaryRow label="Email" value={maskEmail(profile.email)} />
             <SummaryRow label="Preferred contact" value={contactPreference(account.preferences)} />
-            <SummaryRow label="Residential address" value="Unavailable" />
+            <SummaryRow label="Residential address" value={profile.residential_address || 'Not provided'} />
           </dl>
           {activeEditor === 'personal' && (
             <div id="profile-personal-editor" className="profile-personal-editor">
               <form className="profile-edit-form" onSubmit={saveDetails}>
-                <h3>Contact details</h3>
-                <label htmlFor="profile-phone">Phone number <span>(optional)</span></label>
-                <input
-                  ref={phoneInputRef}
-                  id="profile-phone"
-                  name="phone"
-                  type="tel"
-                  value={detailDraft.phone}
-                  maxLength="40"
-                  autoComplete="tel"
-                  onChange={(event) => {
-                    setDetailDraft((current) => ({ ...current, phone: event.target.value }))
-                    setDetailsDirty(true)
-                  }}
-                />
-                <p className="profile-field-limit">Legal name, date of birth, email, and address changes are unavailable in the current account service.</p>
-                <button className="primary-button" type="submit" disabled={busy || !detailsDirty}>Save phone</button>
+                <h3>Personal details</h3>
+                <div className="profile-personal-field-grid">
+                  <div className="profile-personal-field">
+                    <label htmlFor="profile-legal-name">Legal name</label>
+                    <input
+                      ref={personalInputRef}
+                      id="profile-legal-name"
+                      name="legal_name"
+                      value={detailDraft.legalName}
+                      maxLength="120"
+                      autoComplete="name"
+                      required
+                      onChange={(event) => {
+                        setDetailDraft((current) => ({ ...current, legalName: event.target.value }))
+                        setDetailsDirty(true)
+                      }}
+                    />
+                  </div>
+                  <div className="profile-personal-field">
+                    <label htmlFor="profile-date-of-birth">Date of birth</label>
+                    <input
+                      id="profile-date-of-birth"
+                      name="date_of_birth"
+                      type="date"
+                      value={detailDraft.dateOfBirth}
+                      onChange={(event) => {
+                        setDetailDraft((current) => ({ ...current, dateOfBirth: event.target.value }))
+                        setDetailsDirty(true)
+                      }}
+                    />
+                  </div>
+                  <div className="profile-personal-field">
+                    <label htmlFor="profile-email">Email</label>
+                    <input
+                      id="profile-email"
+                      name="email"
+                      type="email"
+                      value={detailDraft.email}
+                      maxLength="254"
+                      autoComplete="email"
+                      required
+                      onChange={(event) => {
+                        setDetailDraft((current) => ({ ...current, email: event.target.value }))
+                        setDetailsDirty(true)
+                      }}
+                    />
+                  </div>
+                  <div className="profile-personal-field">
+                    <label htmlFor="profile-phone">Phone number <span>(optional)</span></label>
+                    <input
+                      ref={phoneInputRef}
+                      id="profile-phone"
+                      name="phone"
+                      type="tel"
+                      value={detailDraft.phone}
+                      maxLength="40"
+                      autoComplete="tel"
+                      onChange={(event) => {
+                        setDetailDraft((current) => ({ ...current, phone: event.target.value }))
+                        setDetailsDirty(true)
+                      }}
+                    />
+                  </div>
+                  <div className="profile-personal-field is-wide">
+                    <label htmlFor="profile-residential-address">Residential address <span>(optional)</span></label>
+                    <textarea
+                      id="profile-residential-address"
+                      name="residential_address"
+                      value={detailDraft.residentialAddress}
+                      maxLength="500"
+                      autoComplete="street-address"
+                      rows="3"
+                      onChange={(event) => {
+                        setDetailDraft((current) => ({ ...current, residentialAddress: event.target.value }))
+                        setDetailsDirty(true)
+                      }}
+                    />
+                  </div>
+                </div>
+                <p className="profile-field-limit">Keep these details current so Northwind can use them when you choose a contact preference.</p>
+                <button className="primary-button" type="submit" disabled={savingDetails || !detailsDirty}>Save personal information</button>
               </form>
               <form className="profile-edit-form profile-preferences-form" onSubmit={savePreferences}>
                 <h3>Contact preferences</h3>
                 <label className="profile-check-row">
                   <input
-                    name="email"
-                    type="checkbox"
-                    checked={preferenceDraft.email}
-                    onChange={(event) => {
-                      setPreferenceDraft((current) => ({ ...current, email: event.target.checked }))
+                    name="contact_preference"
+                    type="radio"
+                    value="email"
+                    checked={preferenceDraft.email && !preferenceDraft.sms}
+                    onChange={() => {
+                      setPreferenceDraft({ email: true, sms: false })
                       setPreferencesDirty(true)
                     }}
                   />
@@ -585,11 +695,12 @@ export default function UserProfile({
                 </label>
                 <label className="profile-check-row">
                   <input
-                    name="sms"
-                    type="checkbox"
-                    checked={preferenceDraft.sms}
-                    onChange={(event) => {
-                      setPreferenceDraft((current) => ({ ...current, sms: event.target.checked }))
+                    name="contact_preference"
+                    type="radio"
+                    value="sms"
+                    checked={preferenceDraft.sms && !preferenceDraft.email}
+                    onChange={() => {
+                      setPreferenceDraft({ email: false, sms: true })
                       setPreferencesDirty(true)
                     }}
                   />

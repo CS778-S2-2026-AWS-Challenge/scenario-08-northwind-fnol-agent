@@ -11,7 +11,7 @@
 
 .user-profile {
   width: 100%;
-  max-width: calc(var(--measure-reading) + var(--density-workbench-nav-width) + var(--space-16) + var(--space-16));
+  max-width: calc(var(--measure-reading) + var(--claimant-profile-sidebar-width) + var(--space-16) + var(--space-16));
   margin: 0 auto;
   color: var(--color-text-primary);
 }
@@ -57,7 +57,7 @@
 
 .profile-workspace {
   display: grid;
-  grid-template-columns: var(--density-workbench-nav-width) minmax(0, 1fr);
+  grid-template-columns: var(--claimant-profile-sidebar-width) minmax(0, 1fr);
   align-items: start;
   gap: var(--space-6);
   margin-top: 0;
@@ -231,6 +231,7 @@
 .profile-footer button:focus-visible,
 .profile-mobile-back:focus-visible,
 .profile-edit-form input:focus-visible,
+.profile-edit-form textarea:focus-visible,
 .profile-asset-category-row:focus-visible,
 .profile-asset-add-action:focus-visible,
 .profile-asset-list-row:focus-visible,
@@ -368,7 +369,7 @@
 
 .profile-summary-row {
   display: grid;
-  grid-template-columns: minmax(var(--space-16), var(--density-workbench-record-label-width)) minmax(0, 1fr);
+  grid-template-columns: minmax(var(--space-16), var(--claimant-profile-label-width)) minmax(0, 1fr);
   align-items: baseline;
   gap: var(--space-4);
   padding: var(--space-3) 0;
@@ -433,7 +434,8 @@
   font-weight: var(--font-weight-regular);
 }
 
-.profile-edit-form input:not([type='checkbox']) {
+.profile-edit-form input:not([type='checkbox']):not([type='radio']),
+.profile-edit-form textarea {
   min-height: var(--size-control-touch);
   padding: 0 var(--space-3);
   border: var(--border-component);
@@ -442,6 +444,31 @@
   background: var(--color-surface);
   font: inherit;
   font-size: var(--font-size-control);
+}
+
+.profile-edit-form textarea {
+  min-height: var(--claimant-profile-address-min-height);
+  padding-block: var(--space-2);
+  resize: vertical;
+}
+
+.profile-personal-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.profile-personal-field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.profile-personal-field label {
+  margin: 0;
+}
+
+.profile-personal-field.is-wide {
+  grid-column: 1 / -1;
 }
 
 .profile-edit-form .primary-button,
@@ -921,6 +948,14 @@
   .profile-edit-form .primary-button,
   .profile-edit-form .secondary-button {
     width: 100%;
+  }
+
+  .profile-personal-field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-personal-field.is-wide {
+    grid-column: auto;
   }
 
   .profile-assets-error,

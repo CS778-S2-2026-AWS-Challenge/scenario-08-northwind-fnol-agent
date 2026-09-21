@@ -309,9 +309,10 @@ export function getAuthenticatedAccount() {
   return apiRequest('/api/v1/account')
 }
 
-export function updateAccountProfile(profile) {
+export function updateAccountProfile(profile, revision) {
   return apiRequest('/api/v1/account/profile', {
     method: 'PATCH',
+    headers: revision == null ? undefined : { 'If-Match': String(revision) },
     body: JSON.stringify(profile),
   })
 }
