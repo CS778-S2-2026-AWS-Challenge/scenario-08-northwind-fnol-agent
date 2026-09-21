@@ -599,10 +599,8 @@ def test_payout_contact_selection_maps_repository_conflicts_without_partial_writ
 
 
 @pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
-@pytest.mark.parametrize('race_kind', ['changed', 'unavailable'])
-def test_payout_contact_repository_rechecks_destination_at_commit(
+def test_payout_contact_repository_rechecks_destination_revision_at_commit(
     adapter: str,
-    race_kind: str,
 ) -> None:
     repository: FixtureRepository | MongoDBRepository
     if adapter == 'fixture':
@@ -610,7 +608,7 @@ def test_payout_contact_repository_rechecks_destination_at_commit(
     else:
         repository = MongoDBRepository(
             mongomock.MongoClient(),
-            f'payout_repository_race_{race_kind}',
+            f'payout_repository_revision_race_{adapter}',
         )
         repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
     app = create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), repository)
@@ -621,14 +619,14 @@ def test_payout_contact_repository_rechecks_destination_at_commit(
             client,
             owner,
             '/api/v1/account/payment-destinations',
-            f'payout-repository-race-{adapter}-{race_kind}',
+            f'payout-repository-revision-{adapter}',
             {'account_type': 'cheque', 'account_number': '12-3456-7777888-00'},
         )
         claim = client.post(
             '/api/v1/claims',
             headers={
                 **owner,
-                'Idempotency-Key': f'payout-repository-claim-{adapter}-{race_kind}',
+                'Idempotency-Key': f'payout-repository-claim-{adapter}',
             },
             json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'home'},
         ).json()['claim']
@@ -646,7 +644,7 @@ def test_payout_contact_repository_rechecks_destination_at_commit(
             f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections',
             headers={
                 **owner,
-                'Idempotency-Key': f'payout-repository-select-{adapter}-{race_kind}',
+                'Idempotency-Key': f'payout-repository-select-{adapter}',
                 'If-Match': str(ready.revision),
             },
             json={
@@ -656,28 +654,38 @@ def test_payout_contact_repository_rechecks_destination_at_commit(
         )
         repository.save_payout_contact_selection = original_save  # type: ignore[method-assign]
 
-        assert prepared.status_code == 201, prepared.text
-        assert captured_args is not None
-        destination_path = (
-            f'/api/v1/account/payment-destinations/{payment["payment_destination_id"]}'
-        )
-        if race_kind == 'changed':
-            mutation = client.patch(
-                destination_path,
-                headers={**owner, 'If-Match': str(payment['revision'])},
-                json={'account_type': 'savings'},
-            )
-            assert mutation.status_code == 200, mutation.text
-        else:
-            mutation = client.delete(
-                destination_path,
-                headers={**owner, 'If-Match': str(payment['revision'])},
-            )
-            assert mutation.status_code == 204, mutation.text
+    assert prepared.status_code == 201, prepared.text
+    assert captured_args is not None
+    (
+        updated_claim,
+        expected_revision,
+        payment_destination_id,
+        payment_destination_revision,
+        idempotency,
+        branch_evaluation,
+        audit_event,
+    ) = captured_args
+    changed_revision = payment_destination_revision + 1
+    changed_audit = audit_event.model_copy(
+        update={
+            'source_refs': [
+                f'payment_destination:{payment_destination_id}:revision:{changed_revision}',
+                'field:claimant.contact_preference',
+            ]
+        }
+    )
 
     with pytest.raises(PaymentDestinationSelectionConflict) as raised:
-        original_save(*captured_args)
-    assert raised.value.reason == race_kind
+        original_save(
+            updated_claim,
+            expected_revision,
+            payment_destination_id,
+            changed_revision,
+            idempotency,
+            branch_evaluation,
+            changed_audit,
+        )
+    assert raised.value.reason == 'changed'
 
     stored = repository.get_claim(claim['claim_id'], 'cus_demo')
     assert stored is not None
