@@ -1798,6 +1798,12 @@ This endpoint is the live handler for the registered `claim.create` action. It a
 configured `claims_service.create_claim` binding before using the existing provider-neutral
 adapter. The model cannot call or authorise this endpoint by emitting an action name.
 
+If branch evaluation reports recorded (proposed) facts, the endpoint returns
+`409 CONFIRMATION_REQUIRED` with those field codes in `details`; it never attempts
+creation while the Claim is still `collecting`. The claimant may confirm those
+fields through the form-confirmation endpoint or the conversational confirmation
+path, after which the normal revision and idempotency checks apply.
+
 The claimant client MAY offer a guided Motor presentation over the same resources used by the
 conversational intake. The guided presentation creates the Working Claim before its first page is
 saved, writes registered form fields through `PATCH /form`, uses the Evidence API for materials,
