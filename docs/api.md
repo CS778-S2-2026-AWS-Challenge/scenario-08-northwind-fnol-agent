@@ -1698,6 +1698,12 @@ When the collected report only needs confirmation, `customer_next_step.status` i
 `confirmation_requested`. A conversational acknowledgement confirms only the values actually
 shown, bound to their assertion identities, fingerprint and revision before accepting the
 acknowledgement message. A same-turn correction or intervening mutation invalidates that binding.
+
+Runtime also requires the entire claimant message to be an unqualified acceptance of the
+displayed batch. A scoped answer such as `Yes we can still live here` may confirm habitability
+but cannot confirm other recorded values. The model's `confirms_batch` flag is advisory only:
+it cannot authorize a scoped answer or veto a valid explicit acceptance. UI field-confirmation
+buttons keep their explicit field selection and the same revision/value checks.
 `POST /form/confirmations` remains available for explicit selected-field confirmation.
 
 `agent_message.message_actions[]` is supplementary to `primary_action`. Runtime may attach a

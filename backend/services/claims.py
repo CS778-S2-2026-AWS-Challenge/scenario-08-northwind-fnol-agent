@@ -1280,7 +1280,7 @@ def confirm_form_fields(
         claim.form,
         explicit_confirmation,
         revision_before_message=expected_revision,
-        confirms_batch=True,
+        message_text='',
         explicit_field_selection=True,
         contents_items=claim.contents_items,
     ):

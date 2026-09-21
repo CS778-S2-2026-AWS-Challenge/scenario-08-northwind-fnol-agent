@@ -223,12 +223,20 @@ def parse_turn_proposal(raw: dict[str, object]) -> tuple[V8TurnProposal, list[di
     return V8TurnProposal.model_validate(prepared), rejected
 
 
-def truthful_reply(reply: str, rejected_services: Collection[str] = ()) -> str:
+def truthful_reply(
+    reply: str,
+    rejected_services: Collection[str] = (),
+    *,
+    batch_confirmed: bool | None = None,
+    ready_to_create: bool | None = None,
+) -> str:
     """Remove unsupported execution claims and rejected-service sentences.
 
     Args:
         reply: Model-authored reply, before Runtime's service option wording.
         rejected_services: Service identities refused by the current authority set.
+        batch_confirmed: Actual post-reduction batch outcome, when available.
+        ready_to_create: Actual post-reduction creation readiness, when available.
     Returns:
         The remaining natural reply, with a truthful non-promissory fallback.
     """
@@ -254,11 +262,43 @@ def truthful_reply(reply: str, rejected_services: Collection[str] = ()) -> str:
             }
         )
     kept = []
-    for sentence in re.split(r'(?<=[.!?])\s+|\n+', reply.strip()):
+    for sentence in re.split(r'(?<=[.!?])\s+', reply.strip()):
         if _EXECUTION_CLAIM.search(sentence):
             continue
         if any(name in sentence.casefold() for name in names):
             continue
+        if not sentence.rstrip().endswith('?'):
+            confirmation_claim = batch_confirmed is False and re.search(
+                r'\b(?:(?:all|everything)\b[^?!.]{0,80}\b(?:confirmed|correct|verified)'
+                r'|confirm(?:ed)?\b[^?!.]{0,40}\b(?:all|everything)'
+                r'|(?:recorded|marked|treated)\b[^?!.]{0,70}\bas confirmed'
+                r'|(?:the information|these details)\b[^?!.]{0,45}\bconfirmed)\b',
+                sentence,
+                re.IGNORECASE,
+            )
+            # A negated status is truthful and must not be mistaken for a
+            # positive readiness claim merely because it contains "ready".
+            readiness_claim = False
+            if ready_to_create is False:
+                for match in re.finditer(
+                    r'\bready to (?:create|submit|be (?:created|submitted))\b',
+                    sentence,
+                    re.IGNORECASE,
+                ):
+                    prefix = sentence[: match.start()]
+                    if not re.search(
+                        r"\b(?:not|never|isn't|aren't)(?:\s+yet)?\s*$", prefix, re.IGNORECASE
+                    ):
+                        readiness_claim = True
+            negated_confirmation = bool(
+                re.search(
+                    r"\b(?:not|never|haven't|hasn't)\b[^.!?]{0,50}\b(?:confirmed|verified)\b",
+                    sentence,
+                    re.IGNORECASE,
+                )
+            )
+            if (confirmation_claim and not negated_confirmation) or readiness_claim:
+                continue
         kept.append(sentence)
     return ' '.join(kept).strip() or 'I have recorded your message. We can continue your report.'
 

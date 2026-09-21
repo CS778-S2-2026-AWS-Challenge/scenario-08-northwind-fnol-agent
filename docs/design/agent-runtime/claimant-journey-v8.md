@@ -1,7 +1,7 @@
 # Claimant Journey v8
 
 This document publishes the evidence, decisions and implementation contract for claimant v8,
-including the approved v3.11 design corrections. It is the shared repository reference for
+including the approved v3.12 design corrections. It is the shared repository reference for
 the implementation in PR #977, which delivers issues #976 and #980 and the bounded recovery
 slice of #779. Its contracts can be read without a maintainer's local workspace.
 
@@ -75,9 +75,10 @@ create a new offer identity. Consent, withdrawal, dispatch, result and handoff
 mutations recompute the claimant next step.
 
 Unknown family limits the service catalogue to cross-family manual assistance.
-The independent Northwind Staff Assistance entry remains available. Manual/link/phone third-party entries such as
-Police 105 remain separate catalogue items and do not become automatic message
-offers. Presentation metadata is projected by the service registry from the current
+The independent Northwind Staff Assistance entry remains available. Manual/link/phone
+third-party entries such as Police 105 remain registered guidance; using them does not
+create an ExternalTask or imply that an external organisation accepted work.
+Presentation metadata is projected by the service registry from the current
 access and operation state. A redesign of polymorphic frontend rendering is outside this change.
 
 ## Recovery and terminal lifecycle
@@ -126,7 +127,7 @@ registry and adds the authorized Evidence reference for media input.
 | `state_proposals` | At most two whitelisted urgency/support proposals; no coverage, liability, fraud or settlement decisions. |
 | `escalation` | Advisory urgent-safety, human, accessibility, distress or professional-review request; Runtime safety takes precedence. |
 | `ready_to_create` | Advisory; Runtime requires the computed requirements to be ready. |
-| `confirms_batch` | Advisory acknowledgement, validated against the actual displayed confirmation record. |
+| `confirms_batch` | Model interpretation for wording only; it neither authorizes nor vetoes confirmation. |
 
 `V8FieldChange` quotes supporting claimant words in `reported_text`. The normalized value need
 not be a substring of that quote. The quote must belong to the current claimant message;
@@ -193,6 +194,13 @@ not the revision after saving the acknowledgement itself. The final CAS separate
 against concurrent mutations. A correction changes the fingerprint and invalidates stale
 confirmation. Recovery reloads the original checkpoint. The UI button and conversational
 confirmation remain separate entrypoints sharing these checks and fact-confirmation functions.
+
+Conversational execution additionally requires `is_explicit_batch_accept(message_text)`:
+an unqualified acceptance such as “Yes”, “All correct”, or the supported short Chinese
+acknowledgements. A field-specific answer such as “Yes we can still live here” may update
+habitability but cannot confirm the other displayed fields. The model's boolean cannot
+override this boundary in either direction. A button's explicit field selection remains
+its own acceptance signal and still passes the same revision/value binding checks.
 
 ## Durable turn sequence and failure behavior
 

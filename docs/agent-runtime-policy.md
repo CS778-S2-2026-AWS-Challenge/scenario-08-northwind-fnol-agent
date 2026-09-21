@@ -36,6 +36,12 @@ they suppress all new third-party offers until resolved. A Release Set pins prom
 schemas, profiles, rules and provider capabilities together. Successful publication is not
 evidence of a healthy provider or a passed real user journey.
 
+Batch confirmation authority comes from Runtime's complete-message acceptance check plus
+the displayed record's revision and value fingerprint. Model `confirms_batch` is only a
+wording signal. A field-specific affirmative cannot authorize the whole batch, and a false
+model flag cannot veto an unqualified acceptance. Final confirmation/readiness prose is checked
+against the actual reduced outcome using the same truthfulness policy as service claims.
+
 Full-envelope v8 input has a 6000-token hard limit and a 3000-token soft observation
 threshold. Text/lookup output is capped at 4500 and media output at 5500. These are
 operating limits, not a mathematical maximum of all legal schema values. A truncated

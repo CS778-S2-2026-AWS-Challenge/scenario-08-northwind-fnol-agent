@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from hashlib import sha256
@@ -69,6 +70,7 @@ from backend.services.external_service_offers import (
 from backend.services.fact_resolution import confirm_contents_item, confirm_form_field
 from backend.services.handoffs import prepare_support_handoff, updated_claim_for_handoff
 from backend.services.professional_reviews import build_policy_review_handoff
+from backend.services.turn_proposal_validation import truthful_reply
 
 if TYPE_CHECKING:
     from backend.services.turn_proposal_validation import ValidatedTurn
@@ -140,13 +142,29 @@ def shown_values_fingerprint(
     return sha256(json.dumps(payload, separators=(',', ':'), sort_keys=True).encode()).hexdigest()
 
 
+_EXPLICIT_BATCH_ACCEPT_PATTERN = re.compile(
+    r'^\s*(?:(?:yes|yep|yeah)(?:\s*,?\s+(?:all (?:correct|right)'
+    r"|that(?:'s| is) (?:all )?(?:correct|right)))?"
+    r"|correct|that(?:'s|s| is)? (?:all )?(?:correct|right)|all correct|confirm(?:ed)?"
+    r"|looks? good|that(?:'s|s| is)? everything|是|对|没问题)\s*[.!\u3002\uff01]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def is_explicit_batch_accept(message_text: str) -> bool:
+    """Accept only an unqualified short acceptance of the displayed batch."""
+    return bool(
+        _EXPLICIT_BATCH_ACCEPT_PATTERN.fullmatch(message_text.strip().replace('\u2019', "'"))
+    )
+
+
 def can_confirm(
     claim: WorkingClaim,
     merged_form: dict[str, StructuredFormField],
     confirmation: ConfirmationRequestRecord | None,
     *,
     revision_before_message: int,
-    confirms_batch: bool,
+    message_text: str,
     explicit_field_selection: bool = False,
     contents_items: list[ContentsItem] | None = None,
 ) -> bool:
@@ -160,7 +178,7 @@ def can_confirm(
         )
         and confirmation.shown_values_fingerprint
         == shown_values_fingerprint(merged_form, confirmation.field_codes, contents_items)
-        and confirms_batch
+        and (explicit_field_selection or is_explicit_batch_accept(message_text))
     )
 
 
@@ -404,14 +422,15 @@ def reduce_turn(
     projected_confirmation_contents = _apply_contents_item_changes(
         claim.contents_items, contents_item_changes
     )
-    if confirmation_before_message is not None and can_confirm(
+    batch_confirmed = confirmation_before_message is not None and can_confirm(
         claim,
         projected_confirmation_form,
         confirmation_before_message,
         revision_before_message=revision_before_message,
-        confirms_batch=bool(getattr(proposal, 'confirms_batch', False)),
+        message_text=message_text,
         contents_items=projected_confirmation_contents,
-    ):
+    )
+    if batch_confirmed and confirmation_before_message is not None:
         for field_code in confirmation_before_message.field_codes:
             if field_code in projected_confirmation_form:
                 form_changes[field_code] = confirm_field(
@@ -737,6 +756,12 @@ def reduce_turn(
             }
         )
     effective_next_step = progress_next_step
+    if validated is not None:
+        effective_customer_response = truthful_reply(
+            effective_customer_response,
+            batch_confirmed=batch_confirmed,
+            ready_to_create=applied_evaluation.requirements.ready,
+        )
     confirmation_request = None
     if validated is not None and applied_evaluation.requirements.ready_pending_confirmation:
         codes = list(applied_evaluation.requirements.recorded)

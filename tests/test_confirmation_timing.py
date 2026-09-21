@@ -52,8 +52,8 @@ def _confirmation() -> tuple[
 
 def test_message_own_revision_increment_does_not_invalidate_displayed_confirmation() -> None:
     claim, form, request = _confirmation()
-    assert can_confirm(claim, form, request, revision_before_message=7, confirms_batch=True)
-    assert not can_confirm(claim, form, request, revision_before_message=8, confirms_batch=True)
+    assert can_confirm(claim, form, request, revision_before_message=7, message_text='Yes')
+    assert not can_confirm(claim, form, request, revision_before_message=8, message_text='Yes')
 
 
 def test_same_turn_correction_cannot_confirm_undisplayed_replacement() -> None:
@@ -61,17 +61,19 @@ def test_same_turn_correction_cannot_confirm_undisplayed_replacement() -> None:
     changed = {
         'incident.location': form['incident.location'].model_copy(update={'value': 'Queen Street'})
     }
-    assert not can_confirm(claim, changed, request, revision_before_message=7, confirms_batch=True)
+    assert not can_confirm(claim, changed, request, revision_before_message=7, message_text='Yes')
 
 
 def test_plain_yes_cannot_confirm_without_current_displayed_request() -> None:
     claim, form, request = _confirmation()
-    assert not can_confirm(claim, form, None, revision_before_message=7, confirms_batch=True)
-    assert not can_confirm(claim, form, request, revision_before_message=7, confirms_batch=False)
+    assert not can_confirm(claim, form, None, revision_before_message=7, message_text='Yes')
+    assert not can_confirm(
+        claim, form, request, revision_before_message=7, message_text='Yes we can still live here'
+    )
     assert not can_confirm(
         claim,
         form,
         request.model_copy(update={'claim_revision': 6}),
         revision_before_message=7,
-        confirms_batch=True,
+        message_text='Yes',
     )

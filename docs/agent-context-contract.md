@@ -30,6 +30,12 @@ changes carry registered code, value, supporting quotation and precision; a medi
 turn also carries the authorised evidence reference. Runtime derives source, status,
 confirmation need and permissions. These are proposals, not execution results.
 
+`confirms_batch` is not an authorization input. Runtime independently checks whether the
+claimant's complete message accepts the displayed batch without adding specific field content,
+then checks the original revision and displayed-value fingerprint. Field-specific answers
+remain ordinary fact updates. Invalid optional question structure is dropped, with one
+registered fallback question; valid facts are not discarded with that question.
+
 Requirements separate `satisfied` facts, `recorded` facts awaiting confirmation, and
 `missing_required_now`. `missing_by_branch` orders useful questions by active branch;
 `ready_pending_confirmation` means collection is complete but creation remains blocked.
