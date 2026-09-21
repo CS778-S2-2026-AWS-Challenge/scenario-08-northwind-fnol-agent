@@ -910,7 +910,8 @@ class WorkingClaim(ContractModel):
     route: str | None = None
     assignee_id: str | None = Field(default=None, min_length=1, max_length=100)
     active_session_id: str | None = None
-    payment_destination_id: str | None = Field(default=None, pattern=r'^pyd_[a-f0-9]{20}    external_claim: ExternalClaimResult | None = None
+    payment_destination_id: str | None = Field(default=None, pattern=r'^pyd_[a-f0-9]{20}$')
+    external_claim: ExternalClaimResult | None = None
     external_claim_source_revision: int | None = Field(default=None, ge=1)
     external_claim_fingerprint: str | None = None
     external_service_consents: list[ExternalServiceConsent] = Field(default_factory=list)

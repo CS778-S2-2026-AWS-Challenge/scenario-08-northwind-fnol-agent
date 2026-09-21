@@ -763,7 +763,9 @@ def select_payout_contact(
             message='Payout and contact selection is not the current claimant action.',
         )
 
-    destination = repository.get_payment_destination(payload.payment_destination_id, principal.subject)
+    destination = repository.get_payment_destination(
+        payload.payment_destination_id, principal.subject
+    )
     if destination is None or not destination.active:
         raise _not_found('payment destination')
 

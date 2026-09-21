@@ -342,7 +342,6 @@ def test_policy_selection_conflicts_preserve_claim_revision_and_identify_policy(
     assert stored_claim.revision == claim['revision']
 
 
-
 def _advance_claim_to_payout_contact(
     repository: FixtureRepository | MongoDBRepository,
     claim_id: str,
