@@ -346,6 +346,28 @@ export function updateAccountAsset({ assetId, revision, updates }) {
   })
 }
 
+export function listAccountIdentityDocuments({ cursor, limit = 25, signal } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return apiRequest(`/api/v1/account/identity-documents?${params}`, { signal })
+}
+
+export function createAccountIdentityDocument({ documentType, documentNumber, idempotencyKey = requestId('identity-document') }) {
+  return apiRequest('/api/v1/account/identity-documents', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify({ document_type: documentType, document_number: documentNumber }),
+  })
+}
+
+export function updateAccountIdentityDocument({ identityId, revision, documentNumber }) {
+  return apiRequest(`/api/v1/account/identity-documents/${encodeURIComponent(identityId)}`, {
+    method: 'PATCH',
+    headers: { 'If-Match': String(revision) },
+    body: JSON.stringify({ document_number: documentNumber }),
+  })
+}
+
 export async function logoutClaimant() {
   try {
     await apiRequest('/api/v1/auth/session', { method: 'DELETE' })

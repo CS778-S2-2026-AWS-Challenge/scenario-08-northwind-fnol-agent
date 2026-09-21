@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   applyEvidenceHistoryAction,
   createAccountAsset,
+  createAccountIdentityDocument,
   createClaim,
   listAccountAssets,
+  listAccountIdentityDocuments,
   listEvidenceHistory,
   listClaims,
   requestEvidenceUpload,
@@ -13,7 +15,45 @@ import {
   streamRealtimeEvents,
   updateAccountAsset,
   updateAccountProfile,
+  updateAccountIdentityDocument,
 } from './api.js'
+
+describe('identity document account client', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken('synthetic-claimant-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('uses the account owner token, cursor, idempotency key and revision for protected records', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ items: [], page: { next_cursor: null } }), { status: 200 }))
+    await listAccountIdentityDocuments({ cursor: 'opaque-cursor' })
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/identity-documents?limit=25&cursor=opaque-cursor',
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token' }) }),
+    )
+
+    fetch.mockResolvedValue(new Response(JSON.stringify({ identity_id: 'idn_synthetic', masked_document_number: '****5678', revision: 1 }), { status: 201 }))
+    await createAccountIdentityDocument({ documentType: 'passport', documentNumber: 'P00005678', idempotencyKey: 'identity-test-key' })
+    expect(fetch).toHaveBeenCalledWith('/api/v1/account/identity-documents', expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token', 'Idempotency-Key': 'identity-test-key' }),
+      body: JSON.stringify({ document_type: 'passport', document_number: 'P00005678' }),
+    }))
+
+    fetch.mockResolvedValue(new Response(JSON.stringify({ identity_id: 'idn_synthetic', masked_document_number: '****9012', revision: 2 }), { status: 200 }))
+    await updateAccountIdentityDocument({ identityId: 'idn_synthetic', revision: 1, documentNumber: 'P00009012' })
+    expect(fetch).toHaveBeenCalledWith('/api/v1/account/identity-documents/idn_synthetic', expect.objectContaining({
+      method: 'PATCH',
+      headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token', 'If-Match': '1' }),
+      body: JSON.stringify({ document_number: 'P00009012' }),
+    }))
+  })
+})
 
 
 function eventStreamResponse(frames, status = 200) {

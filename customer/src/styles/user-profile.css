@@ -471,6 +471,53 @@
   grid-column: 1 / -1;
 }
 
+.profile-edit-form select {
+  min-height: var(--size-control-touch);
+  padding: 0 var(--space-3);
+  border: var(--border-component);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  font: inherit;
+  font-size: var(--font-size-control);
+}
+
+.profile-edit-form select:focus-visible {
+  outline: var(--border-focus);
+  outline-offset: var(--space-1);
+}
+
+.profile-identity-list {
+  display: grid;
+  margin: var(--space-5) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.profile-identity-row {
+  display: flex;
+  min-height: var(--size-control-touch);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-component);
+}
+
+.profile-identity-row > span {
+  display: grid;
+  gap: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+.profile-identity-row strong {
+  color: var(--color-text-primary);
+}
+
+.profile-identity-form {
+  margin-top: var(--space-4);
+}
+
 .profile-edit-form .primary-button,
 .profile-edit-form .secondary-button {
   min-height: var(--size-control-touch);

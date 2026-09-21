@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { PROFILE_CATEGORIES } from '../profileRoutes.js'
+import IdentityDocuments from './IdentityDocuments.jsx'
 
 const ASSET_CATEGORIES = [
   { key: 'vehicle', label: 'Vehicles', singular: 'vehicle', addLabel: 'Add vehicle' },
@@ -885,17 +886,15 @@ export default function UserProfile({
     }
     if (currentSection === 'identity-verification') {
       return (
-        <UnavailableSection
-          headingAs={SectionTitle}
-          id="profile-identity-verification"
-          title="Identity & verification"
-          description="Only add an identity document when Northwind needs it for a supported purpose."
-        >
-          <dl className="profile-summary-list profile-compact-summary-list">
-            <SummaryRow label="Driver licence" value="Unavailable" />
-            <SummaryRow label="Passport" value="Unavailable" />
-          </dl>
-        </UnavailableSection>
+        <section className="profile-section" aria-labelledby="profile-identity-verification">
+          <SectionHeading
+            as={SectionTitle}
+            id="profile-identity-verification"
+            title="Identity & verification"
+            description="Only add an identity document when Northwind needs it for a supported purpose."
+          />
+          <IdentityDocuments key={account.customer_id} busy={busy} />
+        </section>
       )
     }
     return (
