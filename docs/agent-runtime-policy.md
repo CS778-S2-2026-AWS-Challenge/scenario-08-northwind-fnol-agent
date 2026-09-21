@@ -51,7 +51,8 @@ content. Only v8 model-output money and quantity types have the new bounded limi
 shared domain money values retain their existing contract.
 
 Free-text `text`, `location` and `text_list` proposals cannot supply placeholder answers
-such as `>UNKNOWN<`, `N/A` or `TBD`. The existing field validator rejects that individual
+such as `>UNKNOWN<`, `N/A`, `TBD`, or a field reference such as `/property.address/`.
+The existing field validator rejects that individual
 change and retains the previous field state; other valid facts in the turn still apply.
 An absent field stays missing and is not offered for batch confirmation. Registered enum
 values such as `injury.medical_attention=unknown` remain valid; boolean and temporal

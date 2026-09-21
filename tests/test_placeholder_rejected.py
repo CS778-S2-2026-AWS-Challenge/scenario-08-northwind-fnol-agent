@@ -20,6 +20,9 @@ from tests.journey_v8_support import Journey, V8JourneyProvider, envelope, fact
         ('property.affected_areas', ['kitchen', 'TBD']),
         ('property.address', '{not_provided}'),
         ('loss.description', 'xxx'),
+        ('property.address', '/property.address/'),
+        ('incident.location', '<incident.location>'),
+        ('property.affected_areas', ['{property.affected_areas}']),
     ],
 )
 def test_placeholder_stays_missing_while_other_fact_is_saved(

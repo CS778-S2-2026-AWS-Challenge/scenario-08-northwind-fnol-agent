@@ -189,30 +189,38 @@ def _is_placeholder_text(value: str) -> bool:
 
 
 def _free_text_placeholder(field: TurnFieldDefinition, value: Any) -> bool:
+    def placeholder(text: str) -> bool:
+        # A schema reference is a stand-in, not a supplied field value.
+        return _is_placeholder_text(text) or (
+            text.strip(' <>[]{}()/\\').casefold() == field.field_code.casefold()
+        )
+
     if field.value_type in {'text', 'location'} and isinstance(value, str):
-        return _is_placeholder_text(value)
+        return placeholder(value)
     if field.value_type == 'text_list' and isinstance(value, list):
-        return any(isinstance(item, str) and _is_placeholder_text(item) for item in value)
+        return any(isinstance(item, str) and placeholder(item) for item in value)
     return False
 
 
 def _field_value_is_valid(field: TurnFieldDefinition, value: Any) -> bool:
+    if _free_text_placeholder(field, value):
+        return False
     if field.value_type == 'text':
-        return isinstance(value, str) and bool(value.strip()) and not _is_placeholder_text(value)
+        return isinstance(value, str) and bool(value.strip())
     if field.value_type == 'boolean':
         return isinstance(value, bool)
     if field.value_type == 'enum':
         return isinstance(value, str) and value in field.allowed_values
     if field.value_type == 'location':
         return (
-            isinstance(value, str) and bool(value.strip()) and not _is_placeholder_text(value)
+            isinstance(value, str) and bool(value.strip())
         ) or (isinstance(value, Mapping) and bool(value))
     if field.value_type == 'text_list':
         return (
             isinstance(value, list)
             and bool(value)
             and all(
-                isinstance(item, str) and bool(item.strip()) and not _is_placeholder_text(item)
+                isinstance(item, str) and bool(item.strip())
                 for item in value
             )
         )
