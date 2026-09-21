@@ -740,7 +740,7 @@ def test_payout_contact_repository_rechecks_destination_inside_transaction(
                     },
                     {'$set': update},
                 )
-            original_save(*args, **kwargs)
+            original_save(*args, **kwargs)  # type: ignore[arg-type]
 
         repository.save_payout_contact_selection = race_save  # type: ignore[method-assign]
         response = client.post(
