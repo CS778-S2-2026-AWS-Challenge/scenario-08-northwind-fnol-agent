@@ -13,7 +13,7 @@ from backend.domain.models import (
 _FAMILY_TERMS = {
     'motor': re.compile(
         r'\b(?:car|vehicle|motor|driv(?:e|ing|able)|road|traffic|collision|crash|'
-        r'rear[- ]?end|windscreen)\b',
+        r'rear[- ]?end(?:ed|ing|s)?|windscreen)\b',
         re.IGNORECASE,
     ),
     'home': re.compile(

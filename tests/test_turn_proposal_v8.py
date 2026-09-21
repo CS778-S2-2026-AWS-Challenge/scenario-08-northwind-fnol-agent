@@ -183,6 +183,54 @@ def test_authoritative_motor_family_survives_other_family_words(message: str) ->
     assert route.family_resolution == 'authoritative'
 
 
+@pytest.mark.parametrize(
+    'message',
+    [
+        'Rear-ended on Queen St, my passenger is injured',
+        'I was rear ended on Queen St.',
+        'I am reporting a rear-ending on Queen St.',
+    ],
+)
+def test_rear_end_word_forms_load_motor_prompt_before_family_is_recorded(message: str) -> None:
+    context = v8_context(message)
+    claim = context.claim.model_copy(update={'incident_type': None, 'form': {}})
+    assert context.runtime_policy is not None
+    context = replace(
+        context,
+        claim=claim,
+        branch_evaluation=context.runtime_policy.branch_evaluator().evaluate(
+            claim, latest_message=message, recomputation_reason='test_v8'
+        ),
+    )
+    plan = plan_model_turn(context)
+    assert plan is not None
+    assert plan.route.product_family == 'motor'
+    assert plan.route.family_resolution == 'inferred'
+    assert any(ref.startswith('family.motor@') for ref in plan.fragment_refs)
+    assert any(ref.startswith('task.turn@') for ref in plan.fragment_refs)
+    assert plan.field_contract is not None
+    assert 'vehicle.drivable' in plan.field_contract.by_code
+    assert 'incident.location' in plan.field_contract.by_code
+    assert claim.incident_type is None
+    assert claim.form == {}
+
+
+def test_ordinary_ended_word_does_not_select_motor_family() -> None:
+    context = v8_context('The appointment ended yesterday.')
+    claim = context.claim.model_copy(update={'incident_type': None, 'form': {}})
+    assert context.runtime_policy is not None
+    context = replace(
+        context,
+        claim=claim,
+        branch_evaluation=context.runtime_policy.branch_evaluator().evaluate(
+            claim, latest_message=context.message_text, recomputation_reason='test_v8'
+        ),
+    )
+    route = route_turn(context)
+    assert route.product_family is None
+    assert route.family_resolution == 'unresolved'
+
+
 def test_v8_reason_codes_and_contents_lengths_are_bounded() -> None:
     with pytest.raises(ValueError):
         V8TurnProposal(reply='Recorded.', reason_codes=['x' * 51])

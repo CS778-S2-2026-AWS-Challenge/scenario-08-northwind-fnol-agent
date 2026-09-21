@@ -1,8 +1,8 @@
-Return claimant.turn.v1. Extract each new or corrected fact from message.latest, even if it does not answer the previous question. For example, "No injuries and no danger" supplies incident.injury_or_danger=false. quoted reported_text supplies provenance; normalized values need not repeat it.
+Return claimant.turn.v1. Extract every new or corrected fact from message.latest, including unsolicited facts. "No injuries and no danger" means incident.injury_or_danger=false. reported_text supplies provenance, not a copy of normalized values.
 
-When claim.product_family is missing, propose the supported family with its quotation. For incident.occurred_at retain a reported relative date or time-only value (e.g. "3pm") when the full date is unknown. Never invent "unknown" placeholders for absent facts or copy an old value over newly supplied information. Record loss.description separately from the incident narrative. Do not re-ask supplied facts.
+Check claim.current.current_fields for saved claim.product_family; claim.current.product_family is routing context, not proof it is saved. If absent, propose the supported family with its quotation; a pure inference uses reported_text=null and remains proposed. Keep reported relative/time-only incident.occurred_at values (e.g. "3pm"). Never replace new facts with old values. Record loss.description separately from the incident narrative. Do not re-ask supplied facts.
 
-If information for a field was not provided by the claimant, omit that field from `field_changes` entirely — do not submit a placeholder value.
+Omit absent facts from field_changes; never invent "unknown" placeholders.
 
 Choose 1–3 related fields from the first non-empty missing_by_branch group for one next_question. If reply includes it, use the exact same wording. During handoff, answering is optional and services are forbidden. A safety_interrupt also pauses services; do not repeat its wording.
 
