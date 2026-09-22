@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -132,7 +132,7 @@ describe('PayoutContactPanel', () => {
     const claimB = { ...claim, claim_id: 'clm_scope_b' }
 
     const { rerender } = render(
-      <PayoutContactPanel {...sharedProps} claim={claimA} />,
+      <PayoutContactPanel key={claimA.claim_id} {...sharedProps} claim={claimA} />,
     )
 
     await user.click(screen.getByRole('radio', { name: /Everyday .*6700/i }))
@@ -141,11 +141,11 @@ describe('PayoutContactPanel', () => {
     await user.type(screen.getByLabelText('Account type'), 'Sensitive draft')
     await user.type(screen.getByLabelText('Bank account number'), '12-3456-1234567-00')
 
-    rerender(<PayoutContactPanel {...sharedProps} claim={claimB} />)
+    rerender(
+      <PayoutContactPanel key={claimB.claim_id} {...sharedProps} claim={claimB} />,
+    )
 
-    await waitFor(() => {
-      expect(screen.queryByLabelText('Bank account number')).not.toBeInTheDocument()
-    })
+    expect(screen.queryByLabelText('Bank account number')).not.toBeInTheDocument()
     expect(screen.getByRole('radio', { name: /Everyday .*6700/i })).not.toBeChecked()
     expect(screen.getByRole('radio', { name: /Email claimant@example.test/i })).not.toBeChecked()
     expect(screen.getByRole('button', { name: 'Continue to agreement' })).toBeDisabled()
