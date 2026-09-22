@@ -1,7 +1,9 @@
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
@@ -15,8 +17,9 @@ from backend.adapters.staff_identity import (
     SQLiteStaffIdentityRepository,
     _verify_password,
 )
-from backend.domain.identity import ClaimantAuthSessionRecord
+from backend.domain.identity import ClaimantAuthSessionRecord, CustomerAccountRecord
 from backend.domain.staff_identity import StaffAuthSessionRecord
+from backend.repositories.identity import DuplicateEmailConflict
 from backend.repositories.protocols import RevisionConflict
 
 
@@ -351,3 +354,104 @@ def test_claimant_identity_save_separates_profile_invariants_from_revision_confl
 
     assert conflict.value.current_revision == account.revision
     assert repository.get_account(account.customer_id) == account
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'sqlite'])
+def test_claimant_identity_save_rejects_duplicate_email_without_partial_write(
+    repository_kind: str, tmp_path: Path
+) -> None:
+    repository = (
+        FixtureIdentityRepository()
+        if repository_kind == 'fixture'
+        else SQLiteIdentityRepository(str(tmp_path / 'duplicate-email.sqlite'))
+    )
+    if repository_kind == 'sqlite':
+        first = repository.create_account('first@example.invalid', 'secret-one', 'First')
+        second = repository.create_account('second@example.invalid', 'secret-two', 'Second')
+        assert first is not None
+        assert second is not None
+    else:
+        first, second = repository.list_accounts()
+
+    duplicate = replace(
+        second,
+        email=first.email,
+        revision=second.revision + 1,
+        updated_at=datetime.now(UTC),
+    )
+    with pytest.raises(DuplicateEmailConflict):
+        repository.save_account(duplicate, second.revision)
+
+    assert repository.get_account(second.customer_id) == second
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'sqlite'])
+def test_claimant_identity_save_prioritises_revision_conflict_over_duplicate_email(
+    repository_kind: str, tmp_path: Path
+) -> None:
+    repository = (
+        FixtureIdentityRepository()
+        if repository_kind == 'fixture'
+        else SQLiteIdentityRepository(str(tmp_path / 'stale-email.sqlite'))
+    )
+    if repository_kind == 'sqlite':
+        first = repository.create_account('first@example.invalid', 'secret-one', 'First')
+        second = repository.create_account('second@example.invalid', 'secret-two', 'Second')
+        assert first is not None
+        assert second is not None
+    else:
+        first, second = repository.list_accounts()
+
+    stale_duplicate = replace(
+        second,
+        email=first.email,
+        revision=second.revision + 1,
+        updated_at=datetime.now(UTC),
+    )
+    with pytest.raises(RevisionConflict) as conflict:
+        repository.save_account(stale_duplicate, second.revision - 1)
+
+    assert conflict.value.current_revision == second.revision
+    assert repository.get_account(second.customer_id) == second
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'sqlite'])
+def test_claimant_identity_save_serialises_competing_email_updates(
+    repository_kind: str, tmp_path: Path
+) -> None:
+    repository = (
+        FixtureIdentityRepository()
+        if repository_kind == 'fixture'
+        else SQLiteIdentityRepository(str(tmp_path / 'racing-email.sqlite'))
+    )
+    if repository_kind == 'sqlite':
+        first = repository.create_account('first@example.invalid', 'secret-one', 'First')
+        second = repository.create_account('second@example.invalid', 'secret-two', 'Second')
+        assert first is not None
+        assert second is not None
+    else:
+        first, second = repository.list_accounts()
+
+    barrier = Barrier(2)
+
+    def compete(account: CustomerAccountRecord) -> Exception | None:
+        updated = replace(
+            account,
+            email='shared@example.invalid',
+            revision=account.revision + 1,
+            updated_at=datetime.now(UTC),
+        )
+        barrier.wait()
+        try:
+            repository.save_account(updated, account.revision)
+        except Exception as error:
+            return error
+        return None
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(compete, (first, second)))
+
+    assert sum(outcome is None for outcome in outcomes) == 1
+    assert sum(isinstance(outcome, DuplicateEmailConflict) for outcome in outcomes) == 1
+    saved = repository.list_accounts()
+    assert sum(account.email == 'shared@example.invalid' for account in saved) == 1

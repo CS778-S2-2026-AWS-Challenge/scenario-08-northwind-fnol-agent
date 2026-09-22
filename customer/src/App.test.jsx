@@ -5,6 +5,8 @@ import userEvent from '@testing-library/user-event'
 const api = vi.hoisted(() => ({
   ApiRequestError: class ApiRequestError extends Error {},
   confirmClaimFields: vi.fn(),
+  createAccountAsset: vi.fn(),
+  createAccountPolicy: vi.fn(),
   createExternalClaim: vi.fn(),
   createClaim: vi.fn(),
   grantAssessorConsent: vi.fn(),
@@ -14,6 +16,10 @@ const api = vi.hoisted(() => ({
   getClaimMessages: vi.fn(),
   getClaimEvidence: vi.fn(),
   getRuntimeCapabilities: vi.fn(),
+  listAccountAssets: vi.fn(),
+  listAccountIdentityDocuments: vi.fn(),
+  listAccountPaymentDestinations: vi.fn(),
+  listAccountPolicies: vi.fn(),
   listClaims: vi.fn(),
   listEvidenceHistory: vi.fn(),
   loginClaimant: vi.fn(),
@@ -34,6 +40,10 @@ const api = vi.hoisted(() => ({
   setClaimantAccessToken: vi.fn(),
   updateAccountPreferences: vi.fn(),
   updateAccountProfile: vi.fn(),
+  updateAccountAsset: vi.fn(),
+  createAccountIdentityDocument: vi.fn(),
+  updateAccountIdentityDocument: vi.fn(),
+  updateAccountPolicy: vi.fn(),
   updateClaimField: vi.fn(),
 }))
 
@@ -239,6 +249,10 @@ describe('claimant intake projection', () => {
       default_model_profile_id: 'qwen-local',
     })
     api.getClaimEvidence.mockResolvedValue({ items: [], revision: 1 })
+    api.listAccountAssets.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listAccountIdentityDocuments.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listAccountPaymentDestinations.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listAccountPolicies.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listEvidenceHistory.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.streamRealtimeEvents.mockImplementation(() => new Promise(() => {}))
     api.createClaim.mockResolvedValue({
@@ -426,6 +440,166 @@ describe('claimant intake projection', () => {
     expect(composer.compareDocumentPosition(processLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Use the traditional web form' })).not.toBeInTheDocument()
     await waitFor(() => expect(globalThis.location.pathname).toBe('/'))
+  })
+
+  it('opens the authenticated Profile deep link and replaces edits with the API projection', async () => {
+    const user = userEvent.setup()
+    const initialAccount = {
+      profile: {
+        display_name: 'Iris Zhang',
+        legal_name: 'Iris Zhang',
+        preferred_name: null,
+        email: 'iris@gmail.com',
+        phone: '+64 21 555 123',
+      },
+      preferences: { email: true, sms: false },
+    }
+    const updatedAccount = {
+      ...initialAccount,
+      profile: { ...initialAccount.profile, display_name: 'Iris', preferred_name: 'Iris' },
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue(initialAccount)
+    api.updateAccountProfile.mockResolvedValue(updatedAccount)
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    globalThis.history.replaceState({}, '', '/profile/personal-details')
+
+    render(<App />)
+
+    expect(await screen.findByRole('region', { name: 'Personal details' })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile/personal-details')
+    expect(screen.queryByRole('button', { name: 'Back to claims' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument()
+    expect(screen.getByText('i•••@gmail.com')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Edit profile' }))
+    await user.clear(screen.getByLabelText('Preferred name'))
+    await user.type(screen.getByLabelText('Preferred name'), 'Iris')
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+
+    expect(api.updateAccountProfile).toHaveBeenCalledWith({ preferred_name: 'Iris' })
+    expect(await screen.findByText('Iris', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(screen.getByText('Iris Zhang', { selector: '.profile-summary-row > dd' })).toBeInTheDocument()
+    expect(api.createClaim).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    expect(await screen.findByPlaceholderText('Tell us what happened…')).toBeVisible()
+    expect(globalThis.location.pathname).toBe('/')
+  })
+
+  it('reloads a stale Profile revision, keeps the draft, and retries only after review', async () => {
+    const user = userEvent.setup()
+    const initialAccount = {
+      customer_id: 'cus_profile_conflict',
+      revision: 3,
+      profile: {
+        display_name: 'Iris',
+        legal_name: 'Iris Zhang',
+        preferred_name: 'Iris',
+        email: 'iris@gmail.com',
+        phone: '+64 21 555 123',
+      },
+      preferences: { email: true, sms: false },
+    }
+    const latestAccount = {
+      ...initialAccount,
+      revision: 4,
+      profile: { ...initialAccount.profile, display_name: 'Shared saved name', preferred_name: 'Shared saved name' },
+    }
+    const retriedAccount = {
+      ...latestAccount,
+      revision: 5,
+      profile: { ...latestAccount.profile, display_name: 'Iris draft', preferred_name: 'Iris draft' },
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount
+      .mockResolvedValueOnce(initialAccount)
+      .mockResolvedValueOnce(latestAccount)
+    api.updateAccountProfile
+      .mockRejectedValueOnce({ code: 'REVISION_CONFLICT', status: 409 })
+      .mockResolvedValueOnce(retriedAccount)
+    globalThis.history.replaceState({}, '', '/profile/personal-details')
+
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'Edit profile' }))
+    const preferredName = screen.getByLabelText('Preferred name')
+    await user.clear(preferredName)
+    await user.type(preferredName, 'Iris draft')
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('kept your draft')
+    expect(preferredName).toHaveValue('Iris draft')
+    expect(screen.getByText('Shared saved name', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(api.updateAccountProfile).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+
+    expect(api.updateAccountProfile).toHaveBeenNthCalledWith(2, { preferred_name: 'Iris draft' }, 4)
+    expect(await screen.findByText('Iris draft', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Preferred name')).not.toBeInTheDocument()
+  })
+
+  it('opens the Policies route and restores Profile categories on popstate', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Iris Zhang', email: 'iris@gmail.com', phone: '+64 21 555 123' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listAccountAssets.mockResolvedValue({
+      items: [{
+        asset_id: 'ase_11111111111111111111',
+        asset_type: 'vehicle',
+        display_name: 'Family SUV',
+        details: { registration: 'ABC123', make: 'Toyota', model: 'RAV4', year: 2022 },
+        revision: 1,
+        active: true,
+        created_at: '2026-09-12T01:00:00Z',
+        updated_at: '2026-09-17T01:00:00Z',
+      }],
+      page: { next_cursor: null },
+    })
+    globalThis.history.replaceState({}, '', '/profile/policies')
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Policies' })).toBeInTheDocument()
+    expect(await screen.findByText('No policy numbers saved.')).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile/policies')
+    expect(api.listAccountPolicies).toHaveBeenCalled()
+
+    await user.click(screen.getAllByRole('button', { name: 'Insured assets' })[0])
+    expect(await screen.findByRole('heading', { name: 'Insured assets' })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile/insured-assets')
+    await user.click(screen.getByRole('button', { name: /^Vehicles/ }))
+    expect(await screen.findByRole('button', { name: 'Open Family SUV' })).toBeInTheDocument()
+    expect(api.listAccountAssets).toHaveBeenCalled()
+
+    await user.click(screen.getAllByRole('button', { name: 'Payment details' })[0])
+    expect(await screen.findByRole('heading', { name: 'Payment details' })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile/payment-details')
+
+    await user.click(screen.getAllByRole('button', { name: 'Identity & verification' })[0])
+    expect(await screen.findByText('No identity documents saved.')).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile/identity-verification')
+    expect(api.listAccountIdentityDocuments).toHaveBeenCalled()
+
+    globalThis.history.replaceState({}, '', '/profile/insured-assets')
+    globalThis.dispatchEvent(new PopStateEvent('popstate'))
+
+    expect(await screen.findByRole('heading', { name: 'Insured assets' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Payment details' })).not.toBeInTheDocument()
+  })
+
+  it('guards an unauthenticated Profile deep link with the existing login route', async () => {
+    globalThis.history.replaceState({}, '', '/profile/identity-verification')
+
+    render(<App />)
+
+    expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeInTheDocument()
+    await waitFor(() => expect(globalThis.location.pathname).toBe('/auth/login'))
+    expect(api.getAuthenticatedAccount).not.toHaveBeenCalled()
   })
 
   it('shows one server-confirmed delivery failure with retry guidance', async () => {

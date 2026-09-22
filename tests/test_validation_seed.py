@@ -315,6 +315,42 @@ def test_validation_seed_uses_the_same_graph_boundary_for_mongodb() -> None:
     )
 
 
+@pytest.mark.parametrize('provider', ('fixture', 'mongodb'))
+def test_validation_seed_accepts_reverse_ordered_forward_reply_chain(provider: str) -> None:
+    if provider == 'fixture':
+        repository: PersistenceRepository = FixtureRepository()
+    else:
+        mongo_repository = MongoDBRepository(
+            mongomock.MongoClient(),
+            'validation_seed_forward_replies',
+        )
+        mongo_repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+        repository = mongo_repository
+
+    graph = _validation_graph(repository, key=f'forward-replies-{provider}')
+    reversed_messages = tuple(reversed(graph.messages))
+    positions = {message.message_id: index for index, message in enumerate(reversed_messages)}
+    assert any(
+        message.in_reply_to is not None
+        and positions[message.in_reply_to] > positions[message.message_id]
+        for message in reversed_messages
+    )
+
+    repository.seed_validation_graph(replace(graph, messages=reversed_messages))
+
+    stored_messages = repository.list_messages(
+        graph.claims[0].claim_id,
+        graph.sessions[0].session_id,
+        graph.claims[0].customer_id,
+    )
+    stored_positions = {message.message_id: index for index, message in enumerate(stored_messages)}
+    assert all(
+        message.in_reply_to is None
+        or stored_positions[message.in_reply_to] < stored_positions[message.message_id]
+        for message in stored_messages
+    )
+
+
 def test_fixture_validation_seed_repository_guards_replay_conflict_and_graph_shape() -> None:
     repository = FixtureRepository()
     graph = _validation_graph(repository)

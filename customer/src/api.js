@@ -309,17 +309,91 @@ export function getAuthenticatedAccount() {
   return apiRequest('/api/v1/account')
 }
 
-export function updateAccountProfile(profile) {
+export function updateAccountProfile(profile, revision) {
   return apiRequest('/api/v1/account/profile', {
     method: 'PATCH',
+    headers: revision == null ? undefined : { 'If-Match': String(revision) },
     body: JSON.stringify(profile),
   })
 }
 
-export function updateAccountPreferences(preferences) {
+export function updateAccountPreferences(preferences, revision) {
   return apiRequest('/api/v1/account/preferences', {
     method: 'PATCH',
+    headers: revision == null ? undefined : { 'If-Match': String(revision) },
     body: JSON.stringify(preferences),
+  })
+}
+
+export function listAccountPolicies({ cursor, limit = 25, signal } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return apiRequest(`/api/v1/account/policies?${params}`, { signal })
+}
+
+export function createAccountPolicy({ policyNumber, idempotencyKey = requestId('policy') }) {
+  return apiRequest('/api/v1/account/policies', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify({ policy_number: policyNumber }),
+  })
+}
+
+export function updateAccountPolicy({ policyId, revision, policyNumber }) {
+  return apiRequest(`/api/v1/account/policies/${encodeURIComponent(policyId)}`, {
+    method: 'PATCH',
+    headers: { 'If-Match': String(revision) },
+    body: JSON.stringify({ policy_number: policyNumber }),
+  })
+}
+
+export function listAccountPaymentDestinations({ cursor, limit = 25, signal } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return apiRequest(`/api/v1/account/payment-destinations?${params}`, { signal })
+}
+
+export function listAccountAssets({ cursor, limit = 25, signal } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return apiRequest(`/api/v1/account/assets?${params}`, { signal })
+}
+
+export function createAccountAsset({ asset, idempotencyKey = requestId('asset') }) {
+  return apiRequest('/api/v1/account/assets', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(asset),
+  })
+}
+
+export function updateAccountAsset({ assetId, revision, updates }) {
+  return apiRequest(`/api/v1/account/assets/${assetId}`, {
+    method: 'PATCH',
+    headers: { 'If-Match': String(revision) },
+    body: JSON.stringify(updates),
+  })
+}
+
+export function listAccountIdentityDocuments({ cursor, limit = 25, signal } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return apiRequest(`/api/v1/account/identity-documents?${params}`, { signal })
+}
+
+export function createAccountIdentityDocument({ documentType, documentNumber, idempotencyKey = requestId('identity-document') }) {
+  return apiRequest('/api/v1/account/identity-documents', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify({ document_type: documentType, document_number: documentNumber }),
+  })
+}
+
+export function updateAccountIdentityDocument({ identityId, revision, documentNumber }) {
+  return apiRequest(`/api/v1/account/identity-documents/${encodeURIComponent(identityId)}`, {
+    method: 'PATCH',
+    headers: { 'If-Match': String(revision) },
+    body: JSON.stringify({ document_number: documentNumber }),
   })
 }
 

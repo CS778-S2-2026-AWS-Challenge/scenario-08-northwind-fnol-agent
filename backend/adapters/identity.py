@@ -5,13 +5,14 @@ from datetime import UTC, datetime
 from hashlib import scrypt
 from hmac import compare_digest
 from secrets import token_hex
+from threading import RLock
 
 from backend.domain.identity import (
     ClaimantAuthSessionRecord,
     CustomerAccountRecord,
     validate_customer_account_profile,
 )
-from backend.repositories.identity import IdentityRepository
+from backend.repositories.identity import DuplicateEmailConflict, IdentityRepository
 from backend.repositories.protocols import RevisionConflict
 
 
@@ -66,6 +67,7 @@ class FixtureIdentityRepository(IdentityRepository):
             for customer_id, email, password, display_name in seeds
         }
         self._sessions: dict[str, ClaimantAuthSessionRecord] = {}
+        self._account_lock = RLock()
 
     def authenticate(self, email: str, password: str) -> CustomerAccountRecord | None:
         normalized = email.strip().lower()
@@ -87,20 +89,21 @@ class FixtureIdentityRepository(IdentityRepository):
         self, email: str, password: str, display_name: str, phone: str = ''
     ) -> CustomerAccountRecord | None:
         normalized = email.strip().lower()
-        if any(account.email == normalized for account in self._accounts.values()):
-            return None
-        customer_id = f'cus_{token_hex(8)}'
-        account = CustomerAccountRecord(
-            customer_id=customer_id,
-            email=normalized,
-            password_hash=_password_hash(customer_id, password),
-            display_name=display_name.strip(),
-            legal_name=display_name.strip(),
-            phone=phone.strip(),
-        )
-        validate_customer_account_profile(account)
-        self._accounts[customer_id] = deepcopy(account)
-        return deepcopy(account)
+        with self._account_lock:
+            if any(account.email == normalized for account in self._accounts.values()):
+                return None
+            customer_id = f'cus_{token_hex(8)}'
+            account = CustomerAccountRecord(
+                customer_id=customer_id,
+                email=normalized,
+                password_hash=_password_hash(customer_id, password),
+                display_name=display_name.strip(),
+                legal_name=display_name.strip(),
+                phone=phone.strip(),
+            )
+            validate_customer_account_profile(account)
+            self._accounts[customer_id] = deepcopy(account)
+            return deepcopy(account)
 
     def get_account(self, customer_id: str) -> CustomerAccountRecord | None:
         account = self._accounts.get(customer_id)
@@ -108,12 +111,18 @@ class FixtureIdentityRepository(IdentityRepository):
 
     def save_account(self, account: CustomerAccountRecord, expected_revision: int) -> None:
         validate_customer_account_profile(account)
-        current = self._accounts.get(account.customer_id)
-        if current is None:
-            raise KeyError(account.customer_id)
-        if current.revision != expected_revision or account.revision != expected_revision + 1:
-            raise RevisionConflict(current.revision)
-        self._accounts[account.customer_id] = deepcopy(account)
+        with self._account_lock:
+            current = self._accounts.get(account.customer_id)
+            if current is None:
+                raise KeyError(account.customer_id)
+            if current.revision != expected_revision or account.revision != expected_revision + 1:
+                raise RevisionConflict(current.revision)
+            if any(
+                candidate.customer_id != account.customer_id and candidate.email == account.email
+                for candidate in self._accounts.values()
+            ):
+                raise DuplicateEmailConflict(account.email)
+            self._accounts[account.customer_id] = deepcopy(account)
 
     def save_session(self, session: ClaimantAuthSessionRecord) -> None:
         self._sessions[session.token_hash] = deepcopy(session)
@@ -375,33 +384,42 @@ class SQLiteIdentityRepository(IdentityRepository):
 
     def save_account(self, account: CustomerAccountRecord, expected_revision: int) -> None:
         validate_customer_account_profile(account)
-        with self._connection() as connection:
-            updated = connection.execute(
-                """
-                UPDATE accounts SET email = ?, password_hash = ?, display_name = ?,
-                    legal_name = ?, preferred_name = ?, date_of_birth = ?, phone = ?,
-                    residential_address = ?, email_updates = ?, sms_updates = ?, active = ?,
-                    revision = ?, updated_at = ?
-                WHERE customer_id = ? AND revision = ?
-                """,
-                (
-                    account.email,
-                    account.password_hash,
-                    account.display_name,
-                    account.legal_name,
-                    account.preferred_name,
-                    account.date_of_birth.isoformat() if account.date_of_birth else None,
-                    account.phone,
-                    account.residential_address,
-                    int(account.communication_preferences['email']),
-                    int(account.communication_preferences['sms']),
-                    int(account.active),
-                    account.revision,
-                    account.updated_at.isoformat(),
-                    account.customer_id,
-                    expected_revision,
-                ),
-            ).rowcount
+        try:
+            with self._connection() as connection:
+                updated = connection.execute(
+                    """
+                    UPDATE accounts SET email = ?, password_hash = ?, display_name = ?,
+                        legal_name = ?, preferred_name = ?, date_of_birth = ?, phone = ?,
+                        residential_address = ?, email_updates = ?, sms_updates = ?, active = ?,
+                        revision = ?, updated_at = ?
+                    WHERE customer_id = ? AND revision = ?
+                    """,
+                    (
+                        account.email,
+                        account.password_hash,
+                        account.display_name,
+                        account.legal_name,
+                        account.preferred_name,
+                        account.date_of_birth.isoformat() if account.date_of_birth else None,
+                        account.phone,
+                        account.residential_address,
+                        int(account.communication_preferences['email']),
+                        int(account.communication_preferences['sms']),
+                        int(account.active),
+                        account.revision,
+                        account.updated_at.isoformat(),
+                        account.customer_id,
+                        expected_revision,
+                    ),
+                ).rowcount
+        except sqlite3.IntegrityError as error:
+            with self._connection() as connection:
+                owner = connection.execute(
+                    'SELECT customer_id FROM accounts WHERE email = ?', (account.email,)
+                ).fetchone()
+            if owner is not None and owner['customer_id'] != account.customer_id:
+                raise DuplicateEmailConflict(account.email) from error
+            raise
         if updated != 1:
             current = self.get_account(account.customer_id)
             if current is None:
