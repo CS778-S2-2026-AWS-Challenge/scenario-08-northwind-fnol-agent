@@ -18,94 +18,495 @@ from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 from pymongo.read_concern import ReadConcern
 
-INVENTORY_VERSION = 'aws-migration-preparation@57100bcd'
-SOURCE_HEAD = '57100bcdff6b5184be6990cfd1aefaf729bdabe0'
+INVENTORY_VERSION = 'aws-migration-preparation@163507c6'
+SOURCE_HEAD = '163507c661d3a449006000a9a6aeb85c8f997218'
 RECONCILIATION_ISSUES = ('#984', '#985', '#986', '#987', '#786')
 ITEM_BUDGET_BYTES = 300 * 1024
+TRANSACTION_ACTION_LIMIT = 100
+TRANSACTION_BUDGET_BYTES = 4 * 1024 * 1024
 REVERSE_TIME_MAX = 99_999_999_999_999_999_999
 
-IDENTITY_FIELDS: dict[str, tuple[str, ...]] = {
-    'claim': ('claim_id',),
-    'session': ('session_id',),
-    'message': ('message_id',),
-    'conversation_summary': ('summary_id',),
-    'follow_up': ('follow_up_id',),
-    'agent_decision': ('decision_id',),
-    'branch_evaluation': ('evaluation_id',),
-    'runtime_trace': ('trace_id',),
-    'turn_plan': ('turn_id',),
-    'agent_proposal': ('proposal_id',),
-    'execution_plan': ('execution_plan_id',),
-    'action_envelope': ('envelope_id',),
-    'tool_result': ('result_id',),
-    'turn_result': ('result_id',),
-    'runtime_work_item': ('work_item_id',),
-    'asset': ('asset_id',),
-    'claim_asset_snapshot': ('snapshot_id',),
-    'motor_other_driver': ('participant_id',),
-    'contents_item_evidence_association': ('association_id',),
-    'evidence': ('evidence_id',),
-    'evidence_claim_link': ('link_id',),
-    'external_task': ('task_id',),
-    'external_task_request': ('request_id',),
-    'external_task_result': ('result_id',),
-    'external_task_evidence_link': ('claim_id', 'evidence_id'),
-    'assessor_routing_operation': ('operation_id',),
-    'handoff': ('handoff_id',),
-    'retrieval': ('retrieval_id',),
-    'review_signal': ('signal_id',),
-    'signal_decision': ('signal_decision_id',),
-    'staff_action': ('action_id',),
-    'customer_update': ('update_id',),
-    'collaboration_request': ('request_id',),
-    'claim_coworker': ('coworker_id',),
-    'staff_presence': ('staff_id',),
-    'staff_agent_session': ('session_id',),
-    'staff_agent_message': ('message_id',),
-    'staff_agent_execution': ('execution_id',),
-    'audit_event': ('event_id',),
-    'realtime_sequence': (),
-    'realtime_event': ('event_id',),
-    'idempotency': ('actor_id', 'route', 'key'),
-    'policy': ('policy_id',),
-    'identity_document': ('identity_id',),
-    'payment_destination': ('payment_destination_id',),
+
+@dataclass(frozen=True)
+class RelationshipRule:
+    """One executable source-record relationship."""
+
+    field: str
+    target_type: str
+    target_field: str
+    optional: bool = False
+    same_claim: bool = True
+    same_customer: bool = True
+
+
+@dataclass(frozen=True)
+class RecordMapping:
+    """Executable migration contract for one approved MongoDB record type."""
+
+    identity_fields: tuple[str, ...]
+    ownership: str
+    access_kinds: tuple[str, ...]
+    order_fields: tuple[str, ...]
+    uniqueness: tuple[tuple[str, ...], ...]
+    mutation_family: str
+    relationships: tuple[RelationshipRule, ...] = ()
+
+
+def _rel(
+    field: str,
+    target_type: str,
+    target_field: str,
+    *,
+    optional: bool = False,
+    same_claim: bool = True,
+    same_customer: bool = True,
+) -> RelationshipRule:
+    return RelationshipRule(field, target_type, target_field, optional, same_claim, same_customer)
+
+
+CLAIM = _rel('claim_id', 'claim', 'claim_id')
+SESSION = _rel('session_id', 'session', 'session_id')
+TURN = _rel('turn_id', 'turn_plan', 'turn_id')
+TASK = _rel('task_id', 'external_task', 'task_id')
+EVIDENCE = _rel('evidence_id', 'evidence', 'evidence_id')
+STAFF_SESSION = _rel(
+    'session_id', 'staff_agent_session', 'session_id', same_claim=False, same_customer=False
+)
+
+
+def _mapping(
+    identity: tuple[str, ...],
+    ownership: str,
+    access: tuple[str, ...],
+    order: tuple[str, ...],
+    uniqueness: tuple[tuple[str, ...], ...],
+    family: str,
+    *relationships: RelationshipRule,
+) -> RecordMapping:
+    return RecordMapping(identity, ownership, access, order, uniqueness, family, relationships)
+
+
+RECORD_MAPPINGS: dict[str, RecordMapping] = {
+    'claim': _mapping(
+        ('claim_id',),
+        'claim_owner',
+        ('claim_owner', 'customer_claim', 'global_claim', 'claim_search'),
+        ('updated_at',),
+        (),
+        'claim_creation',
+    ),
+    'session': _mapping(
+        ('session_id',),
+        'claim',
+        ('claim_order', 'session_lookup', 'session_search'),
+        ('started_at',),
+        (),
+        'session_checkpoint',
+        CLAIM,
+    ),
+    'message': _mapping(
+        ('message_id',),
+        'claim_session',
+        ('session_order', 'message_client_lookup'),
+        ('created_at',),
+        (('claim_id', 'client_message_id'),),
+        'agent_turn',
+        CLAIM,
+        SESSION,
+    ),
+    'conversation_summary': _mapping(
+        ('summary_id',),
+        'claim_session',
+        ('session_summary_order',),
+        ('created_at',),
+        (),
+        'agent_turn',
+        CLAIM,
+        SESSION,
+    ),
+    'follow_up': _mapping(
+        ('follow_up_id',),
+        'claim',
+        ('claim_order', 'open_purpose_lookup', 'open_session_lookup'),
+        ('created_at',),
+        (('claim_id', 'purpose'), ('claim_id', 'source_session_id')),
+        'session_checkpoint',
+        CLAIM,
+        _rel('source_session_id', 'session', 'session_id', optional=True),
+    ),
+    'agent_decision': _mapping(
+        ('decision_id',),
+        'claim_session',
+        ('claim_order', 'trigger_lookup'),
+        ('created_at',),
+        (),
+        'agent_turn',
+        CLAIM,
+        SESSION,
+        _rel('trigger_message_id', 'message', 'message_id'),
+    ),
+    'branch_evaluation': _mapping(
+        ('evaluation_id',),
+        'claim',
+        ('claim_order',),
+        ('created_at',),
+        (),
+        'session_checkpoint',
+        CLAIM,
+    ),
+    'runtime_trace': _mapping(
+        ('trace_id',),
+        'claim_session',
+        ('claim_order', 'trigger_lookup'),
+        ('created_at',),
+        (),
+        'agent_turn',
+        CLAIM,
+        SESSION,
+        _rel('trigger_message_id', 'message', 'message_id'),
+    ),
+    'turn_plan': _mapping(
+        ('turn_id',),
+        'claim_session',
+        ('trigger_lookup', 'turn_bundle'),
+        ('created_at',),
+        (),
+        'agent_turn',
+        CLAIM,
+        SESSION,
+        _rel('trigger_message_id', 'message', 'message_id'),
+    ),
+    'agent_proposal': _mapping(
+        ('proposal_id',),
+        'claim_session_turn',
+        ('turn_bundle',),
+        ('created_at',),
+        (),
+        'agent_turn',
+        CLAIM,
+        SESSION,
+        TURN,
+    ),
+    'execution_plan': _mapping(
+        ('execution_plan_id',),
+        'claim_turn',
+        ('turn_bundle',),
+        ('created_at',),
+        (),
+        'agent_turn',
+        CLAIM,
+        TURN,
+    ),
+    'action_envelope': _mapping(
+        ('envelope_id',),
+        'claim_turn',
+        ('turn_order',),
+        ('created_at',),
+        (),
+        'agent_turn',
+        CLAIM,
+        TURN,
+    ),
+    'tool_result': _mapping(
+        ('result_id',),
+        'claim_turn',
+        ('turn_order',),
+        ('created_at',),
+        (),
+        'agent_turn',
+        CLAIM,
+        TURN,
+    ),
+    'turn_result': _mapping(
+        ('result_id',),
+        'claim_session_turn',
+        ('turn_bundle',),
+        ('created_at',),
+        (),
+        'agent_turn',
+        CLAIM,
+        SESSION,
+        TURN,
+        _rel('trigger_message_id', 'message', 'message_id'),
+        _rel('agent_message_id', 'message', 'message_id'),
+        _rel('execution_plan_id', 'execution_plan', 'execution_plan_id'),
+    ),
+    'runtime_work_item': _mapping(
+        ('work_item_id',),
+        'claim_turn',
+        ('claim_order', 'turn_order'),
+        ('updated_at', 'created_at'),
+        (),
+        'agent_turn',
+        CLAIM,
+        TURN,
+        _rel('session_id', 'session', 'session_id', optional=True),
+    ),
+    'asset': _mapping(
+        ('asset_id',),
+        'customer',
+        ('customer_all', 'customer_active'),
+        ('updated_at', 'created_at'),
+        (),
+        'claim_child',
+    ),
+    'claim_asset_snapshot': _mapping(
+        ('snapshot_id',),
+        'claim_customer',
+        ('claim_order',),
+        ('captured_at',),
+        (),
+        'claim_child',
+        CLAIM,
+        _rel('asset_id', 'asset', 'asset_id', same_claim=False),
+    ),
+    'motor_other_driver': _mapping(
+        ('participant_id',),
+        'claim_customer',
+        ('claim_singleton',),
+        ('created_at',),
+        (('claim_id',),),
+        'claim_child',
+        CLAIM,
+    ),
+    'contents_item_evidence_association': _mapping(
+        ('association_id',),
+        'claim_customer_item',
+        ('claim_order', 'contents_item_order', 'contents_evidence_unique'),
+        ('created_at',),
+        (('claim_id', 'item_id', 'evidence_id'),),
+        'claim_child',
+        CLAIM,
+        EVIDENCE,
+    ),
+    'evidence': _mapping(
+        ('evidence_id',),
+        'claim_owner',
+        ('claim_order', 'customer_evidence'),
+        ('updated_at', 'created_at'),
+        (),
+        'claim_child',
+        CLAIM,
+    ),
+    'evidence_claim_link': _mapping(
+        ('link_id',),
+        'cross_claim_customer',
+        ('target_claim_order', 'evidence_claim_unique'),
+        ('updated_at', 'created_at'),
+        (('target_claim_id', 'evidence_id'),),
+        'claim_child',
+        _rel('source_claim_id', 'claim', 'claim_id', same_claim=False),
+        _rel('target_claim_id', 'claim', 'claim_id', same_claim=False),
+        EVIDENCE,
+    ),
+    'external_task': _mapping(
+        ('task_id',), 'claim_customer', ('claim_order',), ('created_at',), (), 'claim_child', CLAIM
+    ),
+    'external_task_request': _mapping(
+        ('request_id',),
+        'claim_task_customer',
+        ('claim_order', 'task_lookup', 'task_unique'),
+        ('prepared_at',),
+        (('task_id',),),
+        'claim_child',
+        CLAIM,
+        TASK,
+    ),
+    'external_task_result': _mapping(
+        ('result_id',),
+        'claim_task_customer',
+        ('claim_order', 'task_unique'),
+        ('received_at',),
+        (('claim_id', 'task_id'),),
+        'claim_child',
+        CLAIM,
+        TASK,
+    ),
+    'external_task_evidence_link': _mapping(
+        ('claim_id', 'evidence_id'),
+        'claim_task_evidence',
+        ('claim_order', 'task_lookup'),
+        ('linked_at',),
+        (('claim_id', 'evidence_id'),),
+        'claim_child',
+        CLAIM,
+        TASK,
+        EVIDENCE,
+    ),
+    'assessor_routing_operation': _mapping(
+        ('operation_id',),
+        'claim',
+        ('claim_order',),
+        ('created_at',),
+        (),
+        'claim_child',
+        CLAIM,
+        _rel('task_id', 'external_task', 'task_id', optional=True),
+    ),
+    'handoff': _mapping(
+        ('handoff_id',),
+        'claim_customer',
+        ('claim_order', 'handoff_queue'),
+        ('created_at',),
+        (),
+        'staff_ownership',
+        CLAIM,
+    ),
+    'retrieval': _mapping(
+        ('retrieval_id',),
+        'claim_customer',
+        ('claim_order',),
+        ('retrieved_at', 'created_at'),
+        (),
+        'retrieval_bundle',
+        CLAIM,
+    ),
+    'review_signal': _mapping(
+        ('signal_id',),
+        'claim_customer',
+        ('claim_order',),
+        ('created_at',),
+        (),
+        'retrieval_bundle',
+        CLAIM,
+    ),
+    'signal_decision': _mapping(
+        ('signal_decision_id',),
+        'claim_staff',
+        ('claim_order',),
+        ('created_at',),
+        (),
+        'staff_ownership',
+        CLAIM,
+        _rel('signal_id', 'review_signal', 'signal_id', optional=True),
+    ),
+    'staff_action': _mapping(
+        ('action_id',),
+        'claim_staff',
+        ('claim_order', 'assignee_order'),
+        ('created_at',),
+        (),
+        'staff_ownership',
+        CLAIM,
+    ),
+    'customer_update': _mapping(
+        ('update_id',), 'claim', ('claim_order',), ('created_at',), (), 'staff_ownership', CLAIM
+    ),
+    'collaboration_request': _mapping(
+        ('request_id',),
+        'claim_staff',
+        ('claim_order', 'target_staff_order'),
+        ('created_at',),
+        (),
+        'staff_ownership',
+        CLAIM,
+    ),
+    'claim_coworker': _mapping(
+        ('coworker_id',),
+        'claim_staff',
+        ('claim_all', 'claim_active'),
+        ('granted_at', 'created_at'),
+        (),
+        'staff_ownership',
+        CLAIM,
+    ),
+    'staff_presence': _mapping(
+        ('staff_id',), 'staff', ('staff_listing',), ('updated_at',), (), 'staff_ownership'
+    ),
+    'staff_agent_session': _mapping(
+        ('session_id',),
+        'staff',
+        ('staff_session_order',),
+        ('updated_at', 'created_at'),
+        (),
+        'staff_ownership',
+    ),
+    'staff_agent_message': _mapping(
+        ('message_id',),
+        'staff_session',
+        ('staff_message_order', 'staff_message_client_lookup'),
+        ('created_at',),
+        (('staff_id', 'session_id', 'client_message_id'),),
+        'staff_ownership',
+        STAFF_SESSION,
+    ),
+    'staff_agent_execution': _mapping(
+        ('execution_id',),
+        'staff_session_claim',
+        ('claim_order', 'staff_session_order'),
+        ('created_at',),
+        (),
+        'staff_ownership',
+        CLAIM,
+        STAFF_SESSION,
+        _rel(
+            'message_id', 'staff_agent_message', 'message_id', same_claim=False, same_customer=False
+        ),
+    ),
+    'audit_event': _mapping(
+        ('event_id',),
+        'audit_subject',
+        ('audit_subject_order', 'audit_global_order', 'audit_type_order', 'audit_actor_order'),
+        ('created_at',),
+        (),
+        'staff_ownership',
+        _rel('claim_id', 'claim', 'claim_id', optional=True),
+    ),
+    'realtime_sequence': _mapping((), 'system', (), (), (), 'claim_child'),
+    'realtime_event': _mapping(
+        ('event_id',),
+        'system_event',
+        ('realtime_order',),
+        ('sequence',),
+        (('sequence',),),
+        'claim_child',
+        _rel('claim_id', 'claim', 'claim_id', optional=True),
+    ),
+    'idempotency': _mapping(
+        ('actor_id', 'route', 'key'),
+        'actor_claim',
+        ('claim_actor_idempotency', 'message_turn_lookup'),
+        ('created_at',),
+        (('actor_id', 'route', 'key'),),
+        'session_checkpoint',
+        _rel('claim_id', 'claim', 'claim_id', optional=True),
+        _rel('session_id', 'session', 'session_id', optional=True),
+        _rel('message_id', 'message', 'message_id', optional=True),
+    ),
+    'policy': _mapping(
+        ('policy_id',),
+        'customer',
+        ('customer_all', 'customer_active'),
+        ('created_at',),
+        (),
+        'claim_child',
+    ),
+    'identity_document': _mapping(
+        ('identity_id',),
+        'customer_protected',
+        ('customer_all', 'customer_active'),
+        ('created_at',),
+        (),
+        'claim_child',
+    ),
+    'payment_destination': _mapping(
+        ('payment_destination_id',),
+        'customer_protected',
+        ('customer_all', 'customer_active'),
+        ('created_at',),
+        (),
+        'claim_child',
+    ),
+}
+
+IDENTITY_FIELDS = {
+    record_type: mapping.identity_fields for record_type, mapping in RECORD_MAPPINGS.items()
 }
 
 ADAPTER_ONLY_FIELDS = frozenset({'_id', 'staff_search', 'realtime_order'})
 CLAIM_SCOPED_EXCEPTIONS = frozenset({'claim', 'audit_event', 'realtime_event', 'idempotency'})
-ORDER_FIELDS: dict[str, tuple[str, ...]] = {
-    'session': ('started_at',),
-    'message': ('created_at',),
-    'conversation_summary': ('created_at',),
-    'follow_up': ('created_at',),
-    'agent_decision': ('created_at',),
-    'branch_evaluation': ('created_at',),
-    'runtime_trace': ('created_at',),
-    'turn_plan': ('created_at',),
-    'agent_proposal': ('created_at',),
-    'execution_plan': ('created_at',),
-    'action_envelope': ('created_at',),
-    'tool_result': ('created_at',),
-    'turn_result': ('created_at',),
-    'runtime_work_item': ('updated_at', 'created_at'),
-    'claim_asset_snapshot': ('captured_at',),
-    'contents_item_evidence_association': ('created_at',),
-    'evidence': ('updated_at', 'created_at'),
-    'external_task': ('created_at',),
-    'external_task_request': ('prepared_at',),
-    'external_task_result': ('received_at',),
-    'external_task_evidence_link': ('linked_at',),
-    'assessor_routing_operation': ('created_at',),
-    'handoff': ('created_at',),
-    'retrieval': ('retrieved_at', 'created_at'),
-    'review_signal': ('created_at',),
-    'signal_decision': ('created_at',),
-    'staff_action': ('created_at',),
-    'customer_update': ('created_at',),
-    'collaboration_request': ('created_at',),
-    'claim_coworker': ('granted_at', 'created_at'),
-    'staff_agent_execution': ('created_at',),
+ORDER_FIELDS = {
+    record_type: mapping.order_fields for record_type, mapping in RECORD_MAPPINGS.items()
 }
 
 
@@ -130,6 +531,17 @@ class RehearsalFinding:
 
 
 @dataclass(frozen=True)
+class AtomicMutationReport:
+    """Preflight result for one reconstructed atomic mutation."""
+
+    family: str
+    scope_ref: str
+    action_count: int
+    serialized_bytes: int
+    within_limits: bool
+
+
+@dataclass(frozen=True)
 class RehearsalReport:
     """Safe summary of a local-only transformation and readback run."""
 
@@ -143,6 +555,7 @@ class RehearsalReport:
     first_pass: dict[str, int]
     second_pass: dict[str, int]
     target_item_count: int
+    atomic_mutations: tuple[AtomicMutationReport, ...]
     completion_marker: bool
     findings: tuple[RehearsalFinding, ...]
 
@@ -192,8 +605,36 @@ class LocalTarget:
                 results['conflict'] += 1
         return results
 
-    def readback(self, items: Sequence[PlannedItem]) -> bool:
-        return all(self._items.get((item.pk, item.sk)) == item for item in items)
+    def stored_items(self) -> tuple[PlannedItem, ...]:
+        """Return a deterministic snapshot of the local target."""
+
+        return tuple(self._items[key] for key in sorted(self._items))
+
+    def readback(self, documents: Sequence[Mapping[str, Any]]) -> bool:
+        """Rehydrate source-domain records and verify payload plus projections."""
+
+        rehydrated = _rehydrate_target(self.stored_items())
+        expected = {
+            _source_ref(document): _source_domain_record(document) for document in documents
+        }
+        if rehydrated != expected:
+            return False
+        for document in documents:
+            record_type = str(document['record_type'])
+            canonical = next(
+                (
+                    item
+                    for item in self._items.values()
+                    if item.source_ref == _source_ref(document) and item.item_kind == 'canonical'
+                ),
+                None,
+            )
+            if canonical is None:
+                return False
+            expected_refs = _reference_items(document, record_type, canonical)
+            if any(self._items.get((item.pk, item.sk)) != item for item in expected_refs):
+                return False
+        return True
 
 
 def _normalise(value: Any) -> Any:
@@ -234,6 +675,66 @@ def _field(document: Mapping[str, Any], name: str) -> Any:
     if value is None and isinstance(nested, Mapping):
         value = nested.get(name)
     return value
+
+
+def _source_domain_record(document: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: _normalise(value)
+        for key, value in document.items()
+        if key not in ADAPTER_ONLY_FIELDS and key != 'record_type'
+    }
+
+
+def _rehydrate_target(items: Sequence[PlannedItem]) -> dict[str, dict[str, Any]]:
+    claim_owners = {
+        item.pk: item.payload.get('owner_customer_id')
+        for item in items
+        if item.item_kind == 'claim_owner'
+    }
+    grouped: dict[str, list[PlannedItem]] = {}
+    for item in items:
+        if item.item_kind in {'canonical', 'fragment'}:
+            grouped.setdefault(item.source_ref, []).append(item)
+    rehydrated: dict[str, dict[str, Any]] = {}
+    for source_ref, source_items in grouped.items():
+        canonical = next((item for item in source_items if item.item_kind == 'canonical'), None)
+        if canonical is None:
+            continue
+        payload = dict(canonical.payload)
+        collection_presence = payload.pop('_migration_collections_present', [])
+        owner_ref = payload.pop('owner_ref', None)
+        if isinstance(owner_ref, str) and owner_ref.startswith('claim:'):
+            owner_pk = f'ENTITY#claim#{owner_ref.removeprefix("claim:")}'
+            owner = claim_owners.get(owner_pk)
+            if owner is not None:
+                payload['customer_id'] = owner
+        if canonical.record_type == 'claim':
+            if 'form' in collection_presence:
+                payload['form'] = {
+                    item.payload['field_code']: item.payload['value']
+                    for item in source_items
+                    if item.sk.startswith('FORM#')
+                }
+            if 'contents_items' in collection_presence:
+                payload['contents_items'] = [
+                    item.payload['value']
+                    for item in sorted(source_items, key=lambda value: value.sk)
+                    if item.sk.startswith('CONTENTS#')
+                ]
+            if 'external_service_consents' in collection_presence:
+                payload['external_service_consents'] = [
+                    item.payload['value']
+                    for item in sorted(source_items, key=lambda value: value.sk)
+                    if item.sk.startswith('CONSENT#')
+                ]
+        elif canonical.record_type == 'evidence' and 'material_history' in collection_presence:
+            payload['material_history'] = [
+                item.payload['value']
+                for item in sorted(source_items, key=lambda value: value.sk)
+                if item.sk.startswith('MATERIAL_VERSION#')
+            ]
+        rehydrated[source_ref] = _normalise(payload)
+    return rehydrated
 
 
 def _timestamp(value: Any) -> datetime:
@@ -313,9 +814,16 @@ def _canonical_items(
     sk = 'COUNTER' if record_type == 'realtime_sequence' else 'META'
     fragments: list[tuple[str, dict[str, Any]]] = []
     if record_type == 'claim':
+        collection_presence = [
+            field
+            for field in ('form', 'contents_items', 'external_service_consents')
+            if field in payload
+        ]
         form = payload.pop('form', {})
         contents = payload.pop('contents_items', [])
         consents = payload.pop('external_service_consents', [])
+        if collection_presence:
+            payload['_migration_collections_present'] = collection_presence
         if (
             not isinstance(form, Mapping)
             or not isinstance(contents, list)
@@ -339,7 +847,10 @@ def _canonical_items(
         if len(fragments) != len(form) + len(contents) + len(consents):
             raise ValueError('Claim collection item identity is missing')
     elif record_type == 'evidence':
+        history_present = 'material_history' in payload
         history = payload.pop('material_history', [])
+        if history_present:
+            payload['_migration_collections_present'] = ['material_history']
         if not isinstance(history, list):
             raise ValueError('Evidence material history has an invalid persisted shape')
         fragments.extend(
@@ -383,74 +894,69 @@ def _planned_item(
 def _reference_items(
     document: Mapping[str, Any], record_type: str, canonical: PlannedItem
 ) -> list[PlannedItem]:
-    references: list[tuple[str, str, str]] = []
+    mapping = RECORD_MAPPINGS[record_type]
     claim_id = _field(document, 'claim_id')
     customer_id = _field(document, 'customer_id')
-    if record_type == 'claim' and isinstance(customer_id, str):
-        references.append((canonical.pk, 'OWNER', 'claim_owner'))
-        updated_at = _reverse_time(_field(document, 'updated_at'))
-        references.append(
-            (
-                f'ACCESS#CUSTOMER_CLAIMS#{customer_id}',
-                f'UPDATED#{updated_at}#{claim_id}',
-                'customer_claim',
-            )
-        )
-    elif isinstance(claim_id, str) and record_type not in CLAIM_SCOPED_EXCEPTIONS:
-        order_field, order_value = _order_coordinate(document, record_type)
-        references.append(
-            (
-                f'ACCESS#CLAIM#{claim_id}#{record_type}',
-                f'{order_field.upper()}#{order_value}#{canonical.pk}',
-                'claim_order',
-            )
-        )
-    if record_type == 'evidence_claim_link':
-        references.append(
-            (
-                'UNIQUE#EVIDENCE_CLAIM_LINK#'
-                + _digest(
-                    str(_field(document, 'target_claim_id')), str(_field(document, 'evidence_id'))
-                ),
-                'META',
-                'tuple_unique',
-            )
-        )
-    if record_type == 'idempotency':
-        actor = str(_field(document, 'actor_id'))
-        route = str(_field(document, 'route'))
-        key = str(_field(document, 'key'))
-        references.extend(
-            [
-                (
-                    f'ACCESS#CLAIM_IDEMPOTENCY#{_digest(str(claim_id), actor)}',
-                    f'RECORD#{_digest(route, key)}',
-                    'claim_actor_idempotency',
-                ),
-            ]
-        )
-        message_id = _field(document, 'message_id')
-        if isinstance(message_id, str) and message_id:
-            references.append(
-                (
-                    'LOOKUP#MESSAGE_TURN_IDEMPOTENCY#'
-                    + _digest(actor, route, str(claim_id), message_id),
-                    'META',
-                    'message_turn_lookup',
-                )
-            )
+    scope_fields = (
+        'claim_id',
+        'customer_id',
+        'staff_id',
+        'session_id',
+        'turn_id',
+        'task_id',
+        'target_claim_id',
+        'source_claim_id',
+        'item_id',
+        'evidence_id',
+    )
+    scope = {
+        field: _field(document, field)
+        for field in scope_fields
+        if _field(document, field) is not None
+    }
+    order_field, order_value = _order_coordinate(document, record_type)
     items: list[PlannedItem] = []
-    for pk, sk, kind in references:
+    for kind in mapping.access_kinds:
+        if kind == 'realtime_order':
+            continue
+        if kind.endswith('active') and (
+            _field(document, 'active') is False
+            or _field(document, 'status') in {'inactive', 'revoked', 'closed'}
+        ):
+            continue
+        if kind == 'claim_owner':
+            pk, sk = canonical.pk, 'OWNER'
+        elif kind == 'customer_claim':
+            pk = f'ACCESS#CUSTOMER_CLAIMS#{customer_id}'
+            sk = f'UPDATED#{_reverse_time(_field(document, "updated_at"))}#{claim_id}'
+        elif 'unique' in kind or kind.endswith('lookup'):
+            unique_values: list[str] = []
+            for fields in mapping.uniqueness:
+                unique_values.extend(str(_field(document, field)) for field in fields)
+            if not unique_values:
+                unique_values.extend(str(value) for value in scope.values())
+            pk = f'{kind.upper()}#{_digest(*unique_values, canonical.pk)}'
+            sk = 'META'
+        else:
+            scope_values = [str(value) for value in scope.values()]
+            pk = f'ACCESS#{kind.upper()}#{_digest(*(scope_values or [canonical.pk]))}'
+            sk = f'{order_field.upper()}#{order_value}#{canonical.pk}'
         payload: dict[str, Any] = {
             'canonical_pk': canonical.pk,
             'canonical_sk': canonical.sk,
+            'scope': scope,
+            'order_field': order_field,
+            'order_value': order_value,
         }
         if kind == 'claim_owner':
             payload = {'owner_customer_id': customer_id}
         elif kind == 'customer_claim':
-            payload.update({'customer_id': customer_id, 'claim_id': claim_id})
-        elif kind == 'claim_order':
-            payload.update({'claim_id': claim_id, 'record_type': record_type})
+            payload.update(
+                {
+                    'customer_id': customer_id,
+                    'claim_id': claim_id,
+                }
+            )
         elif kind == 'claim_actor_idempotency':
             payload.update(
                 {
@@ -461,14 +967,10 @@ def _reference_items(
                 }
             )
         elif kind == 'message_turn_lookup':
-            payload.update(
-                {
-                    'claim_id': claim_id,
-                    'actor_id': _field(document, 'actor_id'),
-                    'route': _field(document, 'route'),
-                    'message_id': _field(document, 'message_id'),
-                }
-            )
+            message_id = _field(document, 'message_id')
+            if not isinstance(message_id, str) or not message_id:
+                continue
+            payload.update({'message_id': message_id})
         items.append(
             _planned_item(
                 pk,
@@ -486,8 +988,35 @@ def _order_coordinate(document: Mapping[str, Any], record_type: str) -> tuple[st
     for field in ORDER_FIELDS.get(record_type, ('created_at', 'updated_at')):
         value = _field(document, field)
         if value is not None:
+            if field == 'sequence':
+                if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                    raise ValueError('ordering sequence is missing or invalid')
+                return field, f'{value:020d}'
             return field, _ascending_time(value)
     return 'identity', _source_ref(document)
+
+
+def plan_record(document: Mapping[str, Any]) -> list[PlannedItem]:
+    """Build every canonical, fragment, and access item for one approved record.
+
+    Args:
+        document: One source MongoDB record from the consistent snapshot.
+
+    Returns:
+        The deterministic local target write plan for that source record.
+
+    Raises:
+        ValueError: The record type, identity, shape, or ordering is invalid.
+    """
+
+    record_type = str(document.get('record_type', 'unknown'))
+    if record_type not in RECORD_MAPPINGS:
+        raise ValueError('record type is not allowlisted')
+    canonical_items = _canonical_items(document, record_type, _identity(document, record_type))
+    return [
+        *canonical_items,
+        *_reference_items(document, record_type, canonical_items[0]),
+    ]
 
 
 def _idempotency_generation_items(
@@ -669,42 +1198,29 @@ def rehearse_anonymous_promotion(
 
 
 def _relationship_findings(documents: Sequence[Mapping[str, Any]]) -> list[RehearsalFinding]:
-    claims = {
-        str(_field(doc, 'claim_id')): doc for doc in documents if doc.get('record_type') == 'claim'
-    }
-    sessions = {
-        str(_field(doc, 'session_id')): doc
-        for doc in documents
-        if doc.get('record_type') == 'session'
-    }
-    evidence = {
-        str(_field(doc, 'evidence_id')): doc
-        for doc in documents
-        if doc.get('record_type') == 'evidence'
-    }
-    tasks = {
-        str(_field(doc, 'task_id')): doc
-        for doc in documents
-        if doc.get('record_type') == 'external_task'
-    }
-    turns = {
-        str(_field(doc, 'turn_id')): doc
-        for doc in documents
-        if doc.get('record_type') == 'turn_plan'
-    }
-    retrievals = {
-        str(_field(doc, 'retrieval_id')): doc
-        for doc in documents
-        if doc.get('record_type') == 'retrieval'
-    }
-    staff_sessions = {
-        str(_field(doc, 'session_id')): doc
-        for doc in documents
-        if doc.get('record_type') == 'staff_agent_session'
-    }
+    indexes: dict[tuple[str, str], dict[str, Mapping[str, Any]]] = {}
+    for record_type, record_mapping in RECORD_MAPPINGS.items():
+        fields = set(record_mapping.identity_fields)
+        for candidate in RECORD_MAPPINGS.values():
+            for relationship in candidate.relationships:
+                if relationship.target_type == record_type:
+                    fields.add(relationship.target_field)
+        for field in fields:
+            index: dict[str, Mapping[str, Any]] = {}
+            for document in documents:
+                if document.get('record_type') != record_type:
+                    continue
+                value = _field(document, field)
+                if isinstance(value, str) and value:
+                    index[value] = document
+            indexes[(record_type, field)] = index
+    claims = indexes[('claim', 'claim_id')]
     findings: list[RehearsalFinding] = []
     for document in documents:
         record_type = str(document.get('record_type', 'unknown'))
+        mapping = RECORD_MAPPINGS.get(record_type)
+        if mapping is None:
+            continue
         revision = _field(document, 'revision')
         if revision is not None and (
             isinstance(revision, bool) or not isinstance(revision, int) or revision < 1
@@ -754,73 +1270,120 @@ def _relationship_findings(documents: Sequence[Mapping[str, Any]]) -> list[Rehea
                             'record context revision exceeds its Claim revision',
                         )
                     )
-        session_id = _field(document, 'session_id')
-        if isinstance(session_id, str) and record_type not in {
-            'session',
-            'staff_agent_session',
-            'staff_agent_message',
-            'staff_agent_execution',
-        }:
-            session = sessions.get(session_id)
-            if session is None or _field(session, 'claim_id') != claim_id:
+        for relationship in mapping.relationships:
+            source_value = _field(document, relationship.field)
+            if source_value is None and relationship.optional:
+                continue
+            if not isinstance(source_value, str) or not source_value:
                 findings.append(
-                    _finding('DANGLING_SESSION', document, 'Claim Session is absent or mislinked')
+                    _finding(
+                        'MISSING_RELATIONSHIP',
+                        document,
+                        f'{relationship.field} must identify {relationship.target_type}',
+                    )
                 )
-        task_id = _field(document, 'task_id')
-        if isinstance(task_id, str) and record_type != 'external_task':
-            task = tasks.get(task_id)
-            if task is None or _field(task, 'claim_id') != claim_id:
+                continue
+            target = indexes[(relationship.target_type, relationship.target_field)].get(
+                source_value
+            )
+            if target is None:
                 findings.append(
-                    _finding('DANGLING_TASK', document, 'external task is absent or mislinked')
+                    _finding(
+                        'DANGLING_RELATIONSHIP',
+                        document,
+                        f'{relationship.field} does not resolve to {relationship.target_type}',
+                    )
                 )
-        if record_type in {
-            'agent_proposal',
-            'execution_plan',
-            'action_envelope',
-            'tool_result',
-            'turn_result',
-            'runtime_work_item',
-        }:
-            turn = turns.get(str(_field(document, 'turn_id')))
-            if turn is None or _field(turn, 'claim_id') != claim_id:
-                findings.append(
-                    _finding('DANGLING_TURN', document, 'Runtime turn is absent or mislinked')
-                )
-        if record_type == 'review_signal':
-            retrieval = retrievals.get(str(_field(document, 'retrieval_id')))
-            if retrieval is None or _field(retrieval, 'claim_id') != claim_id:
-                findings.append(
-                    _finding('DANGLING_RETRIEVAL', document, 'Retrieval is absent or mislinked')
-                )
-        if record_type in {'staff_agent_message', 'staff_agent_execution'}:
-            staff_session = staff_sessions.get(str(session_id))
-            if staff_session is None or _field(staff_session, 'staff_id') != _field(
-                document, 'staff_id'
+                continue
+            target_claim = _field(target, 'claim_id')
+            if relationship.target_type == 'claim':
+                target_claim = _field(target, 'claim_id')
+            if (
+                relationship.same_claim
+                and isinstance(claim_id, str)
+                and isinstance(target_claim, str)
+                and target_claim != claim_id
             ):
                 findings.append(
                     _finding(
-                        'DANGLING_STAFF_SESSION',
+                        'CROSS_SCOPE_RELATIONSHIP',
                         document,
-                        'Staff Agent Session is absent or mislinked',
+                        f'{relationship.field} resolves outside the Claim scope',
                     )
                 )
-        if record_type in {'external_task_evidence_link', 'evidence_claim_link'}:
-            held = evidence.get(str(_field(document, 'evidence_id')))
-            expected_claim = (
-                _field(document, 'target_claim_id')
-                if record_type == 'evidence_claim_link'
-                else claim_id
-            )
-            if held is None or (
-                record_type == 'external_task_evidence_link'
-                and _field(held, 'claim_id') != expected_claim
+            owner = _field(document, 'customer_id')
+            target_owner = _field(target, 'customer_id')
+            if (
+                relationship.same_customer
+                and isinstance(owner, str)
+                and isinstance(target_owner, str)
+                and owner != target_owner
             ):
                 findings.append(
-                    _finding('DANGLING_EVIDENCE', document, 'Evidence is absent or mislinked')
+                    _finding(
+                        'CROSS_OWNER_RELATIONSHIP',
+                        document,
+                        f'{relationship.field} resolves outside the customer scope',
+                    )
                 )
-            if record_type == 'evidence_claim_link' and str(expected_claim) not in claims:
+            if relationship.target_type == 'staff_agent_session' and _field(
+                target, 'staff_id'
+            ) != _field(document, 'staff_id'):
                 findings.append(
-                    _finding('DANGLING_TARGET_CLAIM', document, 'target Claim is absent')
+                    _finding(
+                        'CROSS_SCOPE_RELATIONSHIP',
+                        document,
+                        f'{relationship.field} resolves outside the staff scope',
+                    )
+                )
+        if record_type == 'contents_item_evidence_association':
+            claim = claims.get(str(claim_id))
+            contents = _field(claim or {}, 'contents_items') or []
+            item_id = _field(document, 'item_id')
+            if not any(
+                isinstance(item, Mapping) and item.get('item_id') == item_id for item in contents
+            ):
+                findings.append(
+                    _finding(
+                        'DANGLING_CONTENTS_ITEM', document, 'Contents item is absent from Claim'
+                    )
+                )
+        if record_type == 'evidence_claim_link':
+            evidence = indexes[('evidence', 'evidence_id')].get(
+                str(_field(document, 'evidence_id'))
+            )
+            if evidence is not None and _field(evidence, 'claim_id') != _field(
+                document, 'source_claim_id'
+            ):
+                findings.append(
+                    _finding(
+                        'CROSS_SCOPE_RELATIONSHIP',
+                        document,
+                        'Evidence does not belong to the source Claim',
+                    )
+                )
+        if record_type == 'review_signal':
+            source_refs = _field(document, 'source_refs')
+            retrieval_ids = indexes[('retrieval', 'retrieval_id')]
+            linked = [
+                retrieval_ids[value]
+                for value in source_refs or []
+                if isinstance(value, str) and value in retrieval_ids
+            ]
+            if not linked or any(_field(value, 'claim_id') != claim_id for value in linked):
+                findings.append(
+                    _finding(
+                        'DANGLING_RETRIEVAL',
+                        document,
+                        'Review Signal has no same-Claim Retrieval source',
+                    )
+                )
+        if record_type == 'audit_event':
+            subject = _field(document, 'subject')
+            subject_claim = subject.get('claim_id') if isinstance(subject, Mapping) else None
+            if subject_claim is not None and str(subject_claim) not in claims:
+                findings.append(
+                    _finding('DANGLING_AUDIT_SCOPE', document, 'Audit Claim subject is absent')
                 )
     return findings
 
@@ -830,17 +1393,6 @@ def _uniqueness_findings(documents: Sequence[Mapping[str, Any]]) -> list[Rehears
     unique_tuples: dict[tuple[str, tuple[Any, ...]], Mapping[str, Any]] = {}
     message_turns: dict[tuple[str, str, str, str], Mapping[str, Any]] = {}
     findings: list[RehearsalFinding] = []
-    unique_fields: dict[str, tuple[str, ...]] = {
-        'evidence_claim_link': ('target_claim_id', 'evidence_id'),
-        'external_task_evidence_link': ('claim_id', 'evidence_id'),
-        'contents_item_evidence_association': ('claim_id', 'item_id', 'evidence_id'),
-        'external_task_result': ('claim_id', 'task_id'),
-        'external_task_request': ('task_id',),
-        'motor_other_driver': ('claim_id',),
-        'message': ('claim_id', 'client_message_id'),
-        'staff_agent_message': ('staff_id', 'session_id', 'client_message_id'),
-        'realtime_event': ('sequence',),
-    }
     for document in documents:
         record_type = str(document.get('record_type', 'unknown'))
         identity = tuple(_field(document, field) for field in IDENTITY_FIELDS.get(record_type, ()))
@@ -849,8 +1401,14 @@ def _uniqueness_findings(documents: Sequence[Mapping[str, Any]]) -> list[Rehears
             findings.append(_finding('DUPLICATE_IDENTITY', document, 'authoritative tuple repeats'))
         else:
             seen[lookup] = document
-        fields = unique_fields.get(record_type)
-        if fields is not None:
+        mapping = RECORD_MAPPINGS.get(record_type)
+        for fields in mapping.uniqueness if mapping is not None else ():
+            if record_type == 'follow_up' and _field(document, 'status') not in {
+                'open',
+                'pending',
+                'blocked',
+            }:
+                continue
             unique_identity = tuple(_field(document, field) for field in fields)
             if all(value is not None and value != '' for value in unique_identity):
                 unique_lookup = (record_type, unique_identity)
@@ -860,22 +1418,6 @@ def _uniqueness_findings(documents: Sequence[Mapping[str, Any]]) -> list[Rehears
                             'DUPLICATE_UNIQUE_TUPLE',
                             document,
                             f'unique fields {fields!r} repeat',
-                        )
-                    )
-                else:
-                    unique_tuples[unique_lookup] = document
-        if record_type == 'follow_up' and _field(document, 'status') == 'open':
-            for fields in (('claim_id', 'purpose'), ('claim_id', 'source_session_id')):
-                unique_identity = tuple(_field(document, field) for field in fields)
-                if not all(value is not None and value != '' for value in unique_identity):
-                    continue
-                unique_lookup = (f'{record_type}:{fields!r}', unique_identity)
-                if unique_lookup in unique_tuples:
-                    findings.append(
-                        _finding(
-                            'DUPLICATE_OPEN_FOLLOW_UP',
-                            document,
-                            f'open FollowUp fields {fields!r} repeat',
                         )
                     )
                 else:
@@ -917,6 +1459,89 @@ def _realtime_findings(documents: Sequence[Mapping[str, Any]]) -> list[Rehearsal
     return []
 
 
+def _mutation_scope(document: Mapping[str, Any], mapping: RecordMapping) -> str:
+    candidates: tuple[str, ...]
+    if mapping.mutation_family == 'agent_turn':
+        candidates = ('turn_id', 'session_id', 'claim_id')
+    elif mapping.mutation_family == 'retrieval_bundle':
+        candidates = ('retrieval_id', 'claim_id')
+    elif mapping.mutation_family == 'staff_ownership':
+        candidates = ('claim_id', 'session_id', 'staff_id')
+    else:
+        candidates = ('claim_id', 'session_id', 'customer_id')
+    for field in candidates:
+        value = _field(document, field)
+        if isinstance(value, str) and value:
+            return f'{field}:{value}'
+    return f'source:{_source_ref(document)}'
+
+
+def _atomic_mutation_reports(
+    documents: Sequence[Mapping[str, Any]], items: Sequence[PlannedItem]
+) -> tuple[tuple[AtomicMutationReport, ...], list[RehearsalFinding]]:
+    groups: dict[tuple[str, str], set[str]] = {}
+    documents_by_ref = {_source_ref(document): document for document in documents}
+    for document in documents:
+        mapping = RECORD_MAPPINGS.get(str(document.get('record_type', '')))
+        if mapping is None:
+            continue
+        scope = _mutation_scope(document, mapping)
+        if (
+            mapping.mutation_family == 'retrieval_bundle'
+            and document.get('record_type') == 'review_signal'
+        ):
+            source_refs = _field(document, 'source_refs') or []
+            retrieval = next(
+                (
+                    value
+                    for value in source_refs
+                    if isinstance(value, str)
+                    and any(
+                        candidate.get('record_type') == 'retrieval'
+                        and _field(candidate, 'retrieval_id') == value
+                        for candidate in documents
+                    )
+                ),
+                None,
+            )
+            if retrieval is not None:
+                scope = f'retrieval_id:{retrieval}'
+        groups.setdefault((mapping.mutation_family, scope), set()).add(_source_ref(document))
+    reports: list[AtomicMutationReport] = []
+    findings: list[RehearsalFinding] = []
+    for (family, scope), source_refs in sorted(groups.items()):
+        mutation_items = [item for item in items if item.source_ref in source_refs]
+        action_count = len(mutation_items)
+        serialized_bytes = sum(len(_json_bytes(asdict(item))) for item in mutation_items)
+        within_limits = (
+            action_count <= TRANSACTION_ACTION_LIMIT
+            and serialized_bytes <= TRANSACTION_BUDGET_BYTES
+        )
+        reports.append(
+            AtomicMutationReport(family, scope, action_count, serialized_bytes, within_limits)
+        )
+        if within_limits:
+            continue
+        source = documents_by_ref[next(iter(source_refs))]
+        if action_count > TRANSACTION_ACTION_LIMIT:
+            findings.append(
+                _finding(
+                    'ATOMIC_ACTION_LIMIT',
+                    source,
+                    f'{family} requires {action_count} actions; limit is 100',
+                )
+            )
+        if serialized_bytes > TRANSACTION_BUDGET_BYTES:
+            findings.append(
+                _finding(
+                    'ATOMIC_BYTE_LIMIT',
+                    source,
+                    f'{family} requires {serialized_bytes} bytes; limit is 4 MiB',
+                )
+            )
+    return tuple(reports), findings
+
+
 def _finding(code: str, document: Mapping[str, Any], detail: str) -> RehearsalFinding:
     return RehearsalFinding(
         code, str(document.get('record_type', 'unknown')), _source_ref(document), detail
@@ -938,6 +1563,7 @@ def transform_snapshot(
 
     findings: list[RehearsalFinding] = []
     items: list[PlannedItem] = []
+    transformed_documents: list[Mapping[str, Any]] = []
     ordered_documents = sorted(
         documents,
         key=lambda document: (
@@ -972,14 +1598,11 @@ def transform_snapshot(
             )
             continue
         try:
-            canonical_items = _canonical_items(
-                document, record_type, _identity(document, record_type)
-            )
-            canonical = canonical_items[0]
-            planned = [*canonical_items, *_reference_items(document, record_type, canonical)]
+            planned = plan_record(document)
         except (TypeError, ValueError) as error:
             findings.append(_finding('INVALID_IDENTITY', document, str(error)))
             continue
+        transformed_documents.append(document)
         for item in planned:
             if len(_json_bytes(asdict(item))) > ITEM_BUDGET_BYTES:
                 findings.append(
@@ -1007,11 +1630,17 @@ def transform_snapshot(
     findings.extend(_relationship_findings(ordered_documents))
     findings.extend(_uniqueness_findings(ordered_documents))
     findings.extend(_realtime_findings(ordered_documents))
+    atomic_mutations, atomic_findings = _atomic_mutation_reports(transformed_documents, items)
+    findings.extend(atomic_findings)
 
     target = LocalTarget()
     first = target.apply(items)
     second = target.apply(items)
-    if first.get('conflict') or second.get('conflict') or not target.readback(items):
+    if (
+        first.get('conflict')
+        or second.get('conflict')
+        or not target.readback(transformed_documents)
+    ):
         findings.append(
             RehearsalFinding('READBACK_CONFLICT', 'target', 'target', 'readback differs')
         )
@@ -1027,6 +1656,7 @@ def transform_snapshot(
         first_pass=dict(sorted(first.items())),
         second_pass=dict(sorted(second.items())),
         target_item_count=target.item_count,
+        atomic_mutations=atomic_mutations,
         completion_marker=not findings,
         findings=tuple(findings),
     )
