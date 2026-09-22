@@ -79,12 +79,16 @@ it('provides an accessible remove control and returns focus to the message', asy
   expect(screen.getByRole('textbox', { name: 'Claim message' })).toHaveFocus()
 })
 
-it('does not present a local remove action for server-persisted Evidence', () => {
-  render(<ComposerHarness initialStatus="uploaded" />)
+it('still offers a remove action once the upload has finished, since it has not been sent yet', async () => {
+  const user = userEvent.setup()
+  const onRemoved = vi.fn()
+  render(<ComposerHarness initialStatus="uploaded" onRemoved={onRemoved} />)
 
   expect(screen.getByText('kitchen-damage.jpg')).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Remove kitchen-damage.jpg' })).not.toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Select kitchen-damage.jpg' })).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Remove kitchen-damage.jpg' }))
+
+  expect(onRemoved).toHaveBeenCalledWith(expect.objectContaining({ id: 'file-1' }))
+  expect(screen.queryByText('kitchen-damage.jpg')).not.toBeInTheDocument()
 })
 
 it('keeps the claimant model selector keyboard operable', async () => {

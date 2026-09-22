@@ -2576,7 +2576,7 @@ describe('claimant intake projection', () => {
     expect(api.createClaim).not.toHaveBeenCalled()
   })
 
-  it('stages a pre-message attachment and uploads it only after the first message', async () => {
+  it('stages a pre-message attachment, uploads it before the first message, and rides its evidence_id on that turn', async () => {
     const user = userEvent.setup()
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue({
@@ -2624,13 +2624,21 @@ describe('claimant intake projection', () => {
 
     await waitFor(() => expect(api.requestEvidenceUpload).toHaveBeenCalledWith(expect.objectContaining({
       claimId: initialClaim.claim_id,
-      revision: 2,
+      revision: initialClaim.revision,
     })))
     expect(api.createClaim).toHaveBeenCalledTimes(1)
-    expect(api.submitClaimMessage).toHaveBeenCalledTimes(1)
-    expect(api.submitClaimMessage.mock.invocationCallOrder[0])
-      .toBeLessThan(api.requestEvidenceUpload.mock.invocationCallOrder[0])
-    expect(await screen.findByText('Ready')).toBeInTheDocument()
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(1))
+    // The model can only read evidence attached to the message it arrives with:
+    // the upload must complete, and its evidence_id must ride the same turn,
+    // not a follow-up message nobody sends.
+    expect(api.requestEvidenceUpload.mock.invocationCallOrder[0])
+      .toBeLessThan(api.submitClaimMessage.mock.invocationCallOrder[0])
+    expect(api.submitClaimMessage).toHaveBeenCalledWith(expect.objectContaining({
+      evidenceRefs: ['evd_staged_photo'],
+    }))
+    // Once it has ridden the message, the attachment leaves the composer
+    // tray: it is not a draft waiting to be sent any more.
+    await waitFor(() => expect(screen.queryByText('new-damage.jpg')).not.toBeInTheDocument())
   })
 
   it('restores a protected Claim Evidence deep link without creating or resuming a Claim', async () => {

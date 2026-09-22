@@ -241,11 +241,9 @@ export default function MessageComposer({
           <div className="composer-attachments" aria-label="Attached files">
             {attachments.map((attachment) => {
               const attachmentId = attachment.id || attachment.name
-              const canRemoveFromDraft = Boolean(onRemoveAttachment) && (
-                attachment.status === 'staged'
-                || attachment.status === 'uploading'
-                || (attachment.status === 'failed' && !attachment.evidenceId)
-              )
+              // Anything still sitting in this tray has not been sent yet:
+              // the claimant can always remove it, whatever its upload state.
+              const canRemoveFromDraft = Boolean(onRemoveAttachment)
               const content = (
                 <>
                   <span className="composer-file-icon" aria-hidden="true">↗</span>

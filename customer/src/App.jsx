@@ -885,13 +885,21 @@ function App() {
       if (items.length === 0 && current.some((item) => item.status === 'uploading' || item.retry || item.retryFile)) {
         return current
       }
+      // Runtime also tracks bookkeeping placeholders for documents the
+      // claimant does not have yet (file_status "not_available"): a police
+      // report the reference number is still awaited for, a repair quote
+      // nobody has requested. They carry no real file, so they must never
+      // enter the composer tray as if ready to ride the next message; the
+      // "What to provide" sidebar is where a claimant sees those.
+      const hasRealContent = (item) => (item.file_status || item.status) !== 'not_available'
       if (current.some((item) => item.status === 'uploading')) {
         return current.map((item) => {
           const evidence = items.find((candidate) => candidate.evidence_id === item.evidenceId)
-          return evidence ? attachmentForEvidence(evidence, item) : item
+          return evidence && hasRealContent(evidence) ? attachmentForEvidence(evidence, item) : item
         })
       }
       return items
+        .filter((item) => hasRealContent(item))
         .filter((item) => !dismissedComposerEvidenceIds.current.has(item.evidence_id))
         .map((item) => attachmentForEvidence(item, currentByEvidenceId.get(item.evidence_id)))
     })
@@ -1484,6 +1492,17 @@ function App() {
       && attachment.stagedFile
       && attachment.uploadAttempt
     ))
+    // Already-uploaded attachments (attached mid-conversation, before this
+    // Send) carry an evidenceId but were never linked to a message: the model
+    // only sees an attachment when its evidence_id rides on the same turn.
+    const readyAttachmentEvidenceIds = recoveryMessage ? [] : attachments
+      .filter((attachment) => (
+        attachment.evidenceId
+        && attachment.status !== 'staged'
+        && attachment.status !== 'failed'
+        && attachment.status !== 'uploading'
+      ))
+      .map((attachment) => attachment.evidenceId)
     const isAssistanceReply = assistanceState?.key === 'response_needed'
 
     forceLatestMessages.current = true
@@ -1547,6 +1566,32 @@ function App() {
         messageWasSubmitted = true
       }
 
+      // Staged attachments (selected before the claim existed) upload now,
+      // before the turn: the model can only read evidence attached to this
+      // same message, not a follow-up one nobody sends.
+      let uploadedStagedEvidenceIds = []
+      if (stagedAttachments.length) {
+        let attachmentClaim = activeClaim
+        for (const attachment of stagedAttachments) {
+          const upload = await uploadAttachment(
+            attachment.stagedFile,
+            attachment.uploadAttempt,
+            attachmentClaim,
+            { existingAttachment: true, settleStatus: false },
+          )
+          attachmentClaim = { ...attachmentClaim, revision: upload.revision }
+          if (upload.succeeded && attachment.uploadAttempt?.evidenceId) {
+            uploadedStagedEvidenceIds.push(attachment.uploadAttempt.evidenceId)
+          }
+        }
+        activeClaim = attachmentClaim
+      }
+      const turnEvidenceRefs = [
+        ...(operation.evidenceRefs || []),
+        ...readyAttachmentEvidenceIds,
+        ...uploadedStagedEvidenceIds,
+      ]
+
       const turn = await submitClaimMessage({
         claimId: activeClaim.claim_id,
         sessionId: activeSessionId,
@@ -1555,8 +1600,17 @@ function App() {
         modelProfileId: selectedModel,
         idempotencyKey: operation.turnKey,
         clientMessageId: operation.clientMessageId,
-        evidenceRefs: operation.evidenceRefs || [],
+        evidenceRefs: turnEvidenceRefs,
       })
+      for (const evidenceId of turnEvidenceRefs) dismissedComposerEvidenceIds.current.add(evidenceId)
+      // Attachments that rode this message are done being staged in the
+      // composer: drop them from the preview tray now that they are part of
+      // the sent message, rather than leaving them stuck there unremovable.
+      if (turnEvidenceRefs.length) {
+        setAttachments((current) => current.filter(
+          (item) => !item.evidenceId || !turnEvidenceRefs.includes(item.evidenceId),
+        ))
+      }
       const currentRevision = currentTurnRevision(turn)
       const historicalTurn = turn.current_claim && currentRevision > turn.claim_revision
       // Historical actions are evidence, not permission to act on today's offer.
@@ -1624,22 +1678,9 @@ function App() {
           }
         }
       }
-      let attachmentClaim = { ...activeClaim, revision: currentRevision }
-      let stagedUploadsSucceeded = true
-      for (const attachment of stagedAttachments) {
-        const upload = await uploadAttachment(
-          attachment.stagedFile,
-          attachment.uploadAttempt,
-          attachmentClaim,
-          { existingAttachment: true, settleStatus: false },
-        )
-        attachmentClaim = { ...attachmentClaim, revision: upload.revision }
-        if (!upload.succeeded) {
-          stagedUploadsSucceeded = false
-          break
-        }
-      }
-      if (stagedUploadsSucceeded) setStatus('idle')
+      // Staged attachments already uploaded above, before the turn, so their
+      // evidence_id could ride on this same message.
+      setStatus('idle')
     } catch (requestError) {
       if (isAssistanceReply) setAssistanceReplyReview(null)
       activeTurnProgressRef.current = null
