@@ -2102,6 +2102,14 @@ function App() {
     resumeSavedReport(claimId)
   }
 
+  function continueReportFromClaimHistory(claimId) {
+    // Claim history can be open as a workspace utility view; leave it for the conversation
+    // before taking the same resume path as conversation history.
+    setWorkspaceView('chat')
+    setSelectedHistoryClaimId(null)
+    resumeHomepageConversation(claimId)
+  }
+
   async function signIn(event) {
     event.preventDefault()
     const formData = new FormData(event.currentTarget)
@@ -2203,7 +2211,7 @@ function App() {
 
   function openClaimHistory() {
     setSelectedHistoryClaimId(null)
-    if (hasStarted) {
+    if (isWorkspaceActive) {
       setWorkspaceView('history')
       setMobileView('chat')
     } else {
@@ -2212,9 +2220,11 @@ function App() {
     if (account) loadSavedReports().catch(() => {})
   }
 
+  // The account pages show these Claim record views whenever the workspace is inactive, even
+  // while a conversation is still loaded, so navigation follows isWorkspaceActive as they do.
   function openClaimFeatures(selectedClaim) {
     setSelectedHistoryClaimId(selectedClaim.claim_id)
-    if (hasStarted) {
+    if (isWorkspaceActive) {
       setWorkspaceView('claim-features')
       setMobileView('chat')
     } else {
@@ -2229,7 +2239,7 @@ function App() {
 
   function openClaimEvidence() {
     if (!selectedHistoryClaim) return
-    if (hasStarted) {
+    if (isWorkspaceActive) {
       setWorkspaceView('claim-evidence')
       setMobileView('chat')
     } else {
@@ -2502,6 +2512,8 @@ function App() {
                   refreshing={status === 'loading-reports'}
                   onRetry={loadSavedReports}
                   onSelect={openClaimFeatures}
+                  onStartClaim={startNewChat}
+                  onContinueReport={continueReportFromClaimHistory}
                 />
               )}
               {page === 'claim-features' && (
@@ -2795,6 +2807,8 @@ function App() {
                     refreshing={status === 'loading-reports'}
                     onRetry={loadSavedReports}
                     onSelect={openClaimFeatures}
+                    onStartClaim={startNewChat}
+                    onContinueReport={continueReportFromClaimHistory}
                   />
                 ) : (
                   <div className="claim-history-state">
