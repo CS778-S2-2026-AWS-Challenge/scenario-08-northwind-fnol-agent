@@ -1,6 +1,7 @@
 """Compose one fully validated v7 model turn before transport."""
 
 import json
+import logging
 from copy import deepcopy
 from dataclasses import replace
 from typing import Any, cast
@@ -39,6 +40,8 @@ from backend.services.request_profile_registry import (
 from backend.services.turn_family_resolution import resolve_turn_family
 from backend.services.turn_field_contract import bind_provider_schema, compile_turn_field_contract
 from backend.services.turn_router import route_turn
+
+logger = logging.getLogger(__name__)
 
 _CONTEXT_RESOLVE_TOOL = ModelTool(
     name='context.resolve',
@@ -107,6 +110,49 @@ def prepare_model_family_context(context: AgentTurnContext) -> AgentTurnContext:
     )
 
 
+def detach_unreadable_evidence(
+    context: AgentTurnContext, model_configuration: ModelRuntimeConfiguration | None = None
+) -> AgentTurnContext:
+    """Keep files the provider cannot read out of the request, not out of the report.
+
+    The claimant's document is already saved and listed for the model as received.
+    A provider without PDF input simply is not handed the bytes; the turn still
+    runs and the claimant is never shown an error for a file Runtime accepted.
+    """
+
+    if model_configuration is None:
+        snapshot = context.runtime_configuration_snapshot
+        record = snapshot.model(context.model_profile_id) if snapshot is not None else None
+        if record is None:
+            return context
+        model_configuration = ModelRuntimeConfiguration.model_validate(record.values)
+    capability = provider_capability(model_configuration)
+    unreadable = tuple(
+        item
+        for item in context.evidence
+        if ('image/*' if item.media_type.startswith('image/') else item.media_type)
+        not in capability.supported_media_types
+    )
+    if not unreadable:
+        return context
+    logger.info(
+        'agent_turn_evidence_not_attached',
+        extra={
+            'claim_id': context.claim.claim_id,
+            'model_profile_id': context.model_profile_id,
+            'evidence': [
+                {'evidence_id': item.evidence_id, 'media_type': item.media_type}
+                for item in unreadable
+            ],
+        },
+    )
+    return replace(
+        context,
+        evidence=tuple(item for item in context.evidence if item not in unreadable),
+        unattached_evidence=(*context.unattached_evidence, *unreadable),
+    )
+
+
 def plan_model_turn(
     context: AgentTurnContext,
     *,
@@ -123,6 +169,7 @@ def plan_model_turn(
     if model_record is None:
         raise ValueError('The selected model profile is absent from the Runtime snapshot.')
     model_configuration = ModelRuntimeConfiguration.model_validate(model_record.values)
+    context = detach_unreadable_evidence(context, model_configuration)
     cross_claim_review = (
         'claim-history' in route.capability_ids
         and context.claim_history_context_loader is not None
@@ -177,14 +224,6 @@ def plan_model_turn(
     )
     validate_capability_binding(model_configuration, capability)
     validate_profile_compatibility(profile, capability)
-    selected_media = () if cross_claim_review else context.evidence
-    for evidence in selected_media:
-        required_type = (
-            'image/*' if evidence.media_type.startswith('image/') else evidence.media_type
-        )
-        if required_type not in capability.supported_media_types:
-            raise ValueError('The selected provider cannot consume the attached Evidence type.')
-
     field_contract = None
     if runtime_policy is not None and runtime_policy.instruction.composition_mode == 'fragmented':
         instruction = runtime_policy.instruction

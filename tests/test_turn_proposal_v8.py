@@ -102,16 +102,24 @@ def test_v8_multi_intent_turn_uses_one_complete_envelope_and_preserves_facts() -
         dict[str, Any], OpenAICompatibleModelGateway._strict_response_schema(plan.response_schema)
     )
     variants = strict['properties']['field_changes']['items']['anyOf']
-    boolean_variant = next(
-        item for item in variants if item['properties']['value'].get('type') == 'boolean'
-    )
+
+    def value_types(variant: dict[str, Any]) -> set[str]:
+        value = variant['properties']['value']
+        options = value.get('anyOf', [value])
+        return {str(option.get('type')) for option in options}
+
+    # A value may be null only alongside a disposition (claimant will supply /
+    # third party pending); the parser enforces that pairing.
+    boolean_variant = next(item for item in variants if value_types(item) == {'boolean', 'null'})
     assert set(boolean_variant['properties']) == {
         'field_code',
         'value',
         'reported_text',
         'precision',
+        'disposition',
+        'service_identity',
     }
-    assert set(boolean_variant['required']) == set(raw['field_changes'][0])
+    assert set(boolean_variant['required']) == set(boolean_variant['properties'])
     V8TurnProposal.model_validate(raw)
     gateway = _RecordingGateway(
         [ModelResponse(completion_status=ModelCompletionStatus.COMPLETE, structured_output=raw)]
@@ -247,7 +255,7 @@ def test_v8_reason_codes_and_contents_lengths_are_bounded() -> None:
         'property.address',
     ],
 )
-def test_malformed_optional_question_preserves_facts_and_uses_one_runtime_fallback(
+def test_malformed_optional_question_preserves_facts_and_the_model_reply(
     app: FastAPI,
     client: TestClient,
     repository: FixtureRepository,
@@ -280,14 +288,12 @@ def test_malformed_optional_question_preserves_facts_and_uses_one_runtime_fallba
     assert claim is not None
     assert claim.form['property.ongoing_risk'].value == 'active_leak'
     assert claim.form['property.affected_areas'].value == ['ceiling']
+    # The structured question was malformed, so Runtime dropped that part; the
+    # words the model chose to say to the claimant are left exactly as written.
     reply = response['agent_message']['content']['text']
-    assert wording not in reply
-    assert reply.startswith('I have recorded your message.')
-    assert reply.endswith('Tell me what happened in your own words.')
-    assert '?' not in reply
-    assert response['decision']['customer_next_step']['required_items'] == ['incident.description']
-    session = repository.get_session(journey.claim_id, journey.session_id, 'cus_demo')
-    assert session is not None and session.question_turn_count == 1
+    assert reply == wording
+    assert response['decision']['customer_next_step']['status'] == 'more_information_needed'
+    assert response['decision']['customer_next_step']['summary'] == 'Collecting details.'
     assert any(
         getattr(record, 'rejection', {}).get('part') == 'next_question' for record in caplog.records
     )

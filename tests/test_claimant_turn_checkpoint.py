@@ -279,7 +279,8 @@ def test_confirmation_failure_retry_uses_original_checkpoint_without_duplicate_i
         '12 Example Street, Wellington. The lounge ceiling and wall are affected; '
         'we can still live here.'
     )
-    assert shown['dynamic_form']['requirements']['ready_pending_confirmation'] is True
+    # The model summarised; the confirmation request is bound to that summary.
+    assert shown['decision']['customer_next_step']['status'] == 'confirmation_requested'
     original_revision = journey.revision
     complete = provider.gateway.complete
     fail = [True]

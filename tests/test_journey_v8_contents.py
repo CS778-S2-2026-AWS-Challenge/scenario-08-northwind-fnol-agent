@@ -56,10 +56,29 @@ def agent_turn_provider() -> V8JourneyProvider:
                         'reported_text': 'one Laptop computer that I own',
                     }
                 ],
+                reply=(
+                    'Here is what I will pass to the claims team: your Example Laptop 13, '
+                    'worth about NZD 1000, was stolen from your Wellington house yesterday '
+                    'afternoon; the back window was forced and you found out at 8am today; '
+                    'nobody was hurt. Shall I send it?'
+                ),
+                summary_fields=CONTENTS_SUMMARY_FIELDS,
             ),
-            envelope(confirms=True),
+            envelope(confirms=True, reply='Sent. You can add the receipt whenever you have it.'),
         ]
     )
+
+
+CONTENTS_SUMMARY_FIELDS = [
+    'incident.description',
+    'incident.occurred_at',
+    'incident.location',
+    'incident.injury_or_danger',
+    'loss.description',
+    'theft.entry_context',
+    'incident.discovered_at',
+    'contents.items',
+]
 
 
 def test_contents_item_and_theft_branch_complete_with_same_message_runtime(
@@ -78,9 +97,11 @@ def test_contents_item_and_theft_branch_complete_with_same_message_runtime(
         'It was one Laptop computer that I own, an Example Laptop 13, worth NZD 1000.'
     )
     assert journey.view()['contents_items'][0]['description'] == 'Laptop computer'
-    assert second['dynamic_form']['requirements']['ready_pending_confirmation'] is True
+    assert second['dynamic_form']['requirements']['ready'] is True
+    assert 'Please confirm these details' not in second['agent_message']['content']['text']
     final = journey.send('Yes all correct.')
     assert final['dynamic_form']['requirements']['ready'] is True
+    assert journey.view()['contents_items'][0]['status'] == 'confirmed'
     content = b'synthetic laptop receipt'
     upload = client.post(
         f'/api/v1/claims/{journey.claim_id}/evidence/uploads',

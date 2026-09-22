@@ -66,19 +66,27 @@ def _claim_projection(
         'next_action': claim.claim_state.next_action.value,
         'current_fields': current_fields,
         'contents_items': [item.model_dump(mode='json') for item in claim.contents_items],
+        # The form as it stands, bucketed by what still needs the claimant, what
+        # is awaiting someone else, and what is settled. The model reads this and
+        # decides what to do; Runtime does not pre-select a next question.
         'requirements': (
             {
-                'satisfied': branch.requirements.satisfied,
-                'recorded': branch.requirements.recorded,
-                'missing_required_now': branch.requirements.missing_required_now,
-                'missing_by_branch': branch.requirements.missing_by_branch,
-                'next_required_item': branch.requirements.next_required_item,
+                'by_state': branch.requirements.by_state,
+                'unresolved': branch.requirements.unresolved,
                 'ready': branch.requirements.ready,
-                'ready_pending_confirmation': branch.requirements.ready_pending_confirmation,
             }
             if branch is not None
             else {}
         ),
+        'last_question': getattr(context, 'last_question', None),
+        'remaining_questions': getattr(context, 'remaining_questions', None),
+        'documents': list(getattr(context, 'documents', ())),
+        # Files received this turn that this provider cannot open. They are
+        # saved for the claims team; the model acknowledges them by kind.
+        'received_but_unreadable': [
+            {'evidence_id': item.evidence_id, 'media_type': item.media_type}
+            for item in getattr(context, 'unattached_evidence', ())
+        ],
         'field_contract': field_contract.prompt_projection() if field_contract is not None else {},
     }
 

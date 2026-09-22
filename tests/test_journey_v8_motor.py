@@ -55,10 +55,35 @@ def agent_turn_provider() -> V8JourneyProvider:
                 services=['vehicle_recovery_request'],
             ),
             envelope(services=['vehicle_recovery_request']),
-            envelope(fields=[fact('parties.other_parties', True, 'another vehicle')]),
-            envelope(confirms=True),
+            envelope(
+                fields=[fact('parties.other_parties', True, 'another vehicle')],
+                reply=(
+                    'Here is what I will pass to the claims team: rear-ended on Queen St '
+                    'yesterday around 3pm, bumper damaged and the car cannot be driven, your '
+                    'passenger has a sore neck (minor, no ambulance), another vehicle was '
+                    'involved. Anything to change before I send it?'
+                ),
+                summary_fields=MOTOR_SUMMARY_FIELDS,
+            ),
+            envelope(confirms=True, reply='Sent. The claims team will take it from here.'),
         ]
     )
+
+
+MOTOR_SUMMARY_FIELDS = [
+    'claim.product_family',
+    'incident.description',
+    'incident.location',
+    'incident.occurred_at',
+    'incident.injury_or_danger',
+    'injury.persons_affected',
+    'injury.severity_reported',
+    'injury.medical_attention',
+    'vehicle.damage_description',
+    'vehicle.drivable',
+    'parties.other_parties',
+    'loss.description',
+]
 
 
 def test_motor_safety_handoff_continues_chat_then_resumes_support_and_creates(
@@ -115,9 +140,15 @@ def test_motor_safety_handoff_continues_chat_then_resumes_support_and_creates(
         for action in sixth['agent_message']['message_actions']
     )
     seventh = journey.send('There was another vehicle involved.')
-    assert seventh['dynamic_form']['requirements']['ready_pending_confirmation'] is True
+    assert seventh['dynamic_form']['requirements']['ready'] is True
+    seventh_text = seventh['agent_message']['content']['text']
+    assert seventh_text.startswith('Here is what I will pass to the claims team')
+    assert 'Please confirm these details' not in seventh_text
     final = journey.send('Yes all correct')
     assert final['dynamic_form']['requirements']['ready'] is True
+    assert final['agent_message']['content']['text'] == (
+        'Sent. The claims team will take it from here.'
+    )
     journey.create()
     record_property('planned_input_budget', json.dumps(journey.budget_measurements(repository)))
     assert len(journey.turns) <= 9

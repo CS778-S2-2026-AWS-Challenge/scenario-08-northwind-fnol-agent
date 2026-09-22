@@ -12,7 +12,7 @@ from backend.domain.model_gateway import ModelCompletionStatus, ModelResponse
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import InvariantGuardedAgent
 from backend.services.turn_reducer import is_explicit_batch_accept
-from tests.journey_v8_support import CLAIMANT, Journey, V8JourneyProvider, envelope, fact
+from tests.journey_v8_support import Journey, V8JourneyProvider, envelope, fact
 from tests.test_journey_v8_home import agent_turn_provider
 
 
@@ -29,66 +29,35 @@ def waiting_home(app: FastAPI, client: TestClient, final_proposal: dict[str, Any
         '12 Example Street, Wellington. The lounge ceiling and wall are affected; '
         'we can still live here.'
     )
-    assert turn['dynamic_form']['requirements']['ready_pending_confirmation'] is True
+    # The model summarised; Runtime bound a confirmation request to exactly the
+    # fields the summary declared. loss.description is recorded, not confirmed.
     assert 'loss.description' in turn['dynamic_form']['requirements']['recorded']
+    assert turn['dynamic_form']['requirements']['ready'] is True
     return journey
 
 
-@pytest.mark.parametrize(
-    'unsupported_prose',
-    [
-        'All details are now confirmed. Your claim is ready to create.',
-        'I have recorded the information as confirmed: - property.habitable: true '
-        '- property.ongoing_risk: active_leak Your claim is now ready to be created.',
-    ],
-)
-def test_scoped_yes_cannot_confirm_unmentioned_fields_or_claim_batch_success(
+def test_scoped_yes_confirms_only_the_field_it_answers(
     app: FastAPI,
     client: TestClient,
     repository: FixtureRepository,
-    unsupported_prose: str,
 ) -> None:
     raw = envelope(
-        fields=[fact('property.habitable', True, 'we can still live here')], confirms=True
-    )
-    raw['reply'] = (
-        f'I noted that you can still live here. {unsupported_prose} '
-        'Is there anything else you want to add?'
+        fields=[fact('property.habitable', True, 'we can still live here')],
+        confirms=True,
+        reply='I noted that you can still live here. Is there anything else you want to add?',
     )
     journey = waiting_home(app, client, raw)
     turn = journey.send('Yes we can still live here')
     claim = repository.get_claim(journey.claim_id, 'cus_demo')
     assert claim is not None
+    # The answer settles the one fact it speaks to; the model's confirms_batch
+    # flag does not turn a field-specific answer into acceptance of the summary.
     assert claim.form['property.habitable'].status.value == 'confirmed'
     assert claim.form['loss.description'].status.value == 'proposed'
-    assert turn['dynamic_form']['requirements']['ready'] is False
     reply = turn['agent_message']['content']['text']
-    assert 'All details are now confirmed.' not in reply
-    assert 'Your claim is ready to create.' not in reply
-    assert 'as confirmed' not in reply
-    assert 'ready to be created' not in reply
-    assert 'I noted that you can still live here.' in reply
-    assert 'Is there anything else you want to add?' in reply
-    blocked = client.post(
-        f'/api/v1/claims/{journey.claim_id}/creation',
-        headers={
-            **CLAIMANT,
-            'Idempotency-Key': 'scoped-premature-create',
-            'If-Match': str(journey.revision),
-        },
-    )
-    assert blocked.status_code == 409
-    assert blocked.json()['error']['code'] == 'CONFIRMATION_REQUIRED'
-
-
-def test_truthfulness_preserves_negated_readiness_and_legitimate_questions() -> None:
-    from backend.services.turn_proposal_validation import truthful_reply
-
-    reply = (
-        'The claim is not ready to be created. All details are not confirmed. '
-        'Is the claim ready to be created? Can you confirm these details?'
-    )
-    assert truthful_reply(reply, batch_confirmed=False, ready_to_create=False) == reply
+    assert reply == 'I noted that you can still live here. Is there anything else you want to add?'
+    # Recorded facts travel with the report; they no longer block creation.
+    assert turn['dynamic_form']['requirements']['ready'] is True
 
 
 @pytest.mark.parametrize('message', ['Yes', '是', '对', '没问题', 'Yes all correct.'])

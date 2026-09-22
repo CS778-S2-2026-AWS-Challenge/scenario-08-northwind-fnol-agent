@@ -312,6 +312,16 @@ class AgentTurnContext:
     external_services: tuple[ExternalServiceLifecycleProjection, ...] = ()
     tool_results: tuple[dict[str, object], ...] = ()
     progress_reporter: Callable[[AgentTurnProgressStage, str | None], None] | None = None
+    # What the model asked last turn and how many questions the session still
+    # allows — so it can pick up where it left off instead of Runtime deciding.
+    last_question: dict[str, object] | None = None
+    remaining_questions: int | None = None
+    # Documents this kind of report normally carries and which have arrived,
+    # so the model can ask for, recognise, or source the missing ones.
+    documents: tuple[dict[str, object], ...] = ()
+    # Files the claimant attached this turn that the selected provider cannot
+    # read. They stay saved and listed; the model is told they arrived.
+    unattached_evidence: tuple[AgentEvidenceReference, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

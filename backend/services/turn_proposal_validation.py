@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from backend.domain.agent_v8 import (
+    V8DocumentRequest,
     V8Escalation,
+    V8EvidenceInterpretation,
     V8FieldChange,
     V8NextQuestion,
     V8ServiceSuggestion,
@@ -23,6 +25,7 @@ from backend.domain.external_service_registry import SERVICE_REGISTRY
 from backend.domain.model_gateway import ModelGatewayError, ModelGatewayErrorCode
 from backend.domain.models import (
     BranchEvaluationResult,
+    FactPrecision,
     FieldSelectionState,
     FormSource,
     FormStatus,
@@ -41,11 +44,24 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# The claimant saying they cannot supply a fact yet. Runtime records the fact
+# as unavailable-for-now instead of asking again or storing the words as a value.
 _NON_ANSWER_PATTERN = re.compile(
-    r"\b(?:i\s+(?:do\s+not|don't)\s+know|not\s+sure|unknown|no\s+idea|"
-    r"can't\s+remember|cannot\s+remember)\b|不知道|不清楚|不确定",
+    r"\b(?:i\s+(?:do\s+not|don't)\s+know|not\s+sure|unsure|unknown|no\s+idea|"
+    r"can't\s+(?:remember|say|tell|see)|cannot\s+(?:remember|say|tell|see)|"
+    r"(?:don't|do\s+not|didn't|did\s+not)\s+(?:have|see|notice|check)|"
+    r"haven't\s+(?:got|checked|looked)|later|will\s+(?:send|check|find\s+out)|"
+    r'too\s+dark|hard\s+to\s+(?:say|tell))\b|不知道|不清楚|不确定|稍后|以后',
     re.IGNORECASE,
 )
+
+
+def _is_non_answer(value: object, reported_text: str | None) -> bool:
+    quote = ' '.join((reported_text or '').split())
+    return bool(
+        _NON_ANSWER_PATTERN.search(quote)
+        or (isinstance(value, str) and value.strip().casefold() in {'unknown', 'not known'})
+    )
 
 
 def _is_temporal_non_answer(
@@ -55,11 +71,7 @@ def _is_temporal_non_answer(
 ) -> bool:
     if field_code not in {'incident.occurred_at', 'incident.discovered_at'}:
         return False
-    quote = ' '.join((reported_text or '').split())
-    return bool(
-        _NON_ANSWER_PATTERN.search(quote)
-        or (isinstance(value, str) and value.strip().casefold() in {'unknown', 'not known'})
-    )
+    return _is_non_answer(value, reported_text)
 
 
 _STATE_WHITELIST = {
@@ -88,6 +100,13 @@ class ValidatedTurn:
     ready_to_create: bool
     confirms_batch: bool
     rejected: list[dict[str, str]]
+    action: str = 'record_and_ask'
+    # Fields the model read back to the claimant this turn (action == summarize).
+    summary_fields: tuple[str, ...] = ()
+    document_requests: tuple[V8DocumentRequest, ...] = ()
+    evidence_interpretations: tuple[V8EvidenceInterpretation, ...] = ()
+    # Service identities the model proposed but Runtime refused this turn.
+    rejected_services: tuple[str, ...] = ()
 
 
 def claimant_report_supports_value(
@@ -106,7 +125,11 @@ def claimant_report_supports_value(
     Returns:
         Whether this kind of value is supported by the direct quotation.
     """
-    quote = ' '.join((reported_text or '').split()).casefold()
+    # Some models wrap their quotation in literal quote marks as a formatting
+    # habit ("rear-ended" instead of rear-ended). That wrapper is not part of
+    # the claimant's words; strip one symmetric layer before matching, not a
+    # relaxation of the verbatim-substring requirement itself.
+    quote = ' '.join((reported_text or '').split()).casefold().strip('"‘’“”\'')
     message = ' '.join((message_text or '').split()).casefold()
     if not quote or quote not in message:
         return False
@@ -174,7 +197,11 @@ def _apply_family_semantic_boundary(
         if accepted_family is not None and accepted_family not in families:
             reject('field_change', change.field_code, 'family_field_mismatch')
             continue
-        if accepted_family is None and change.source is FormSource.CLAIMANT:
+        if (
+            accepted_family is None
+            and change.source is FormSource.CLAIMANT
+            and change.status is FormStatus.CONFIRMED
+        ):
             bounded.append(
                 change.model_copy(
                     update={
@@ -211,12 +238,19 @@ def parse_turn_proposal(raw: dict[str, object]) -> tuple[V8TurnProposal, list[di
         }
     ).reply
     if not original_reply.strip():
+        logger.warning(
+            'agent_turn_envelope_blank_reply',
+            extra={'envelope_keys': sorted(raw.keys())},
+        )
         raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
     raw_question = prepared.get('next_question')
     if raw_question is not None:
         try:
             prepared['next_question'] = V8NextQuestion.model_validate(raw_question).model_dump()
         except ValidationError:
+            # Only the structured part is dropped. The reply keeps the model's
+            # words: the claimant still hears the question, Runtime just does
+            # not record it as a bounded question against the form.
             prepared['next_question'] = None
             rejected.append(
                 {
@@ -225,10 +259,6 @@ def parse_turn_proposal(raw: dict[str, object]) -> tuple[V8TurnProposal, list[di
                     'reason': 'optional_part_invalid',
                 }
             )
-            wording = raw_question.get('wording') if isinstance(raw_question, dict) else None
-            if isinstance(wording, str) and wording:
-                remaining = original_reply.replace(wording, '').strip()
-                prepared['reply'] = remaining or 'I have recorded your message.'
     raw_fields = prepared.get('field_changes', [])
     if isinstance(raw_fields, list):
         accepted_fields = []
@@ -241,13 +271,15 @@ def parse_turn_proposal(raw: dict[str, object]) -> tuple[V8TurnProposal, list[di
             try:
                 accepted_fields.append(V8FieldChange.model_validate(value).model_dump())
             except ValidationError as error:
-                if not all(
-                    item['type'] in {'string_too_long', 'too_long'} for item in error.errors()
-                ):
-                    raise
-                rejected.append(
-                    {'part': 'field_change', 'value': str(index), 'reason': 'length_limit_exceeded'}
+                # One malformed field (too long, or a disposition/value shape
+                # that does not match) drops only that field. The core
+                # envelope must not fail because one field is malformed.
+                reason = (
+                    'length_limit_exceeded'
+                    if all(item['type'] in {'string_too_long', 'too_long'} for item in error.errors())
+                    else 'invalid_structure'
                 )
+                rejected.append({'part': 'field_change', 'value': str(index), 'reason': reason})
         prepared['field_changes'] = accepted_fields
     for part, model in (
         ('service_suggestions', V8ServiceSuggestion),
@@ -379,7 +411,9 @@ def truthful_reply(
             if (confirmation_claim and not negated_confirmation) or readiness_claim:
                 continue
         kept.append(sentence)
-    return ' '.join(kept).strip() or 'I have recorded your message. We can continue your report.'
+    # Legacy v7 path only; the v8 reducer never calls this. A fully struck v7
+    # answer falls back to its neutral runtime-owned copy.
+    return ' '.join(kept).strip() or 'Your message has been recorded. We can continue your report.'
 
 
 def validate_turn_proposal(
@@ -415,6 +449,7 @@ def validate_turn_proposal(
     """
 
     if not proposal.reply.strip():
+        logger.warning('validate_turn_proposal_blank_reply')
         raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
     rejected: list[dict[str, str]] = []
 
@@ -429,11 +464,19 @@ def validate_turn_proposal(
     if question is not None and not set(question.field_codes).issubset(
         requirements.missing_required_now
     ):
-        reject('next_question', ','.join(question.field_codes), 'field_not_missing')
-        # Remove this rejected proposal's exact wording only. Other questions
-        # remain model-authored content; never delete every question sentence.
-        proposed_reply = proposed_reply.replace(question.wording, '').strip()
-        question = None
+        # The model chose to ask about something Runtime already holds. That is
+        # the model's call to make; Runtime observes it for prompt tuning and
+        # leaves the reply exactly as written.
+        logger.info(
+            'agent_turn_observation',
+            extra={
+                'observation': {
+                    'part': 'next_question',
+                    'value': ','.join(question.field_codes),
+                    'note': 'field_not_missing',
+                }
+            },
+        )
 
     state_changes: list[StateChange] = []
     for state in proposal.state_proposals:
@@ -459,6 +502,7 @@ def validate_turn_proposal(
 
     evidence_by_id = {item.evidence_id: item for item in evidence}
     changes: list[ProposedFormChange] = []
+    pending_changes: list[tuple[V8FieldChange, NeededFor]] = []
     field_bound_rejections: list[TurnFieldViolation] = []
     validated_changes = validate_field_changes(
         field_contract, proposal.field_changes, rejected_bounds=field_bound_rejections
@@ -466,8 +510,42 @@ def validate_turn_proposal(
     for rejection in field_bound_rejections:
         reject('field_change', rejection.field_code, rejection.reason_code)
     for change in validated_changes:
-        if _is_temporal_non_answer(change.field_code, change.value, change.reported_text):
-            reject('field_change', change.field_code, 'temporal_non_answer')
+        selected = field_contract.by_code[change.field_code]
+        needed_for = (
+            NeededFor.LATER_ACTION
+            if selected.selection_state is FieldSelectionState.PENDING_LATER
+            else NeededFor.CURRENT_ACTION
+        )
+        disposition = getattr(change, 'disposition', 'value')
+        if disposition == 'value' and _is_temporal_non_answer(
+            change.field_code, change.value, change.reported_text
+        ):
+            # "I don't know when" is a disposition, not a time. Record it as such
+            # so the report carries the gap instead of a fabricated value.
+            disposition = 'claimant_will_supply'
+        if disposition == 'claimant_will_supply' and change.value is not None:
+            # The model labelled this a non-answer but also supplied a real
+            # value with a quote. The label is the model's guess; whether the
+            # quote actually supports a value is Runtime's call, not the
+            # model's. If it looks like a genuine answer, keep it as one
+            # instead of discarding what the claimant actually said.
+            if not _is_non_answer(change.value, change.reported_text):
+                disposition = 'value'
+        if disposition == 'claimant_will_supply':
+            changes.append(
+                ProposedFormChange(
+                    field_code=change.field_code,
+                    value=None,
+                    source=FormSource.CLAIMANT,
+                    status=FormStatus.UNAVAILABLE,
+                    needed_for=needed_for,
+                    precision=FactPrecision.UNKNOWN,
+                    reported_text=change.reported_text,
+                )
+            )
+            continue
+        if disposition == 'third_party_pending':
+            pending_changes.append((change, needed_for))
             continue
         source = FormSource.INFERENCE
         if change.source_evidence_id is not None:
@@ -483,7 +561,6 @@ def validate_turn_proposal(
             change.field_code, change.value, change.reported_text, message_text
         ):
             source = FormSource.CLAIMANT
-        selected = field_contract.by_code[change.field_code]
         changes.append(
             ProposedFormChange(
                 field_code=change.field_code,
@@ -492,9 +569,7 @@ def validate_turn_proposal(
                 status=FormStatus.CONFIRMED
                 if source is FormSource.CLAIMANT
                 else FormStatus.PROPOSED,
-                needed_for=NeededFor.LATER_ACTION
-                if selected.selection_state is FieldSelectionState.PENDING_LATER
-                else NeededFor.CURRENT_ACTION,
+                needed_for=needed_for,
                 confidence=1.0 if source is FormSource.CLAIMANT else None,
                 precision=change.precision,
                 reported_text=change.reported_text,
@@ -511,6 +586,24 @@ def validate_turn_proposal(
     )
     if service_eligibility_resolver is not None and not services_suppressed:
         eligible_service_ids = service_eligibility_resolver(changes)
+    # A fact the model hands to a third party needs that service to be one
+    # Runtime can actually offer this turn; otherwise the fact stays open.
+    for change, needed_for in pending_changes:
+        identity = str(change.service_identity)
+        if services_suppressed or identity not in eligible_service_ids:
+            reject('field_change', change.field_code, 'service_not_available_for_field')
+            continue
+        changes.append(
+            ProposedFormChange(
+                field_code=change.field_code,
+                value=None,
+                source=FormSource.INFERENCE,
+                status=FormStatus.PENDING_GENERATION,
+                needed_for=needed_for,
+                precision=FactPrecision.UNKNOWN,
+                reported_text=change.reported_text,
+            )
+        )
     service_ids: list[str] = []
     rejected_services: list[str] = []
     for suggestion in proposal.service_suggestions:
@@ -525,20 +618,45 @@ def validate_turn_proposal(
             rejected_services.append(identity)
         elif identity not in service_ids:
             service_ids.append(identity)
+    document_requests: list[V8DocumentRequest] = []
+    for request in proposal.document_requests:
+        if request.from_party == 'third_party' and (
+            services_suppressed or request.service_identity not in eligible_service_ids
+        ):
+            reject('document_request', request.document_kind, 'service_not_eligible')
+            continue
+        document_requests.append(request)
+    interpretations: list[V8EvidenceInterpretation] = []
+    for interpretation in proposal.evidence_interpretations:
+        if interpretation.evidence_id not in evidence_by_id:
+            reject('evidence_interpretation', interpretation.evidence_id, 'evidence_not_in_turn')
+            continue
+        interpretations.append(interpretation)
     contents = []
     for item in proposal.contents_item_changes:
         values = item.model_dump()
         if values.get('estimated_value') is not None:
             values['estimated_value'] = MoneyAmount.model_validate(values['estimated_value'])
         contents.append(ProposedContentsItem(**values))
-    reply = truthful_reply(proposed_reply, rejected_services)
-    for identity in service_ids:
-        name = SERVICE_REGISTRY[identity].service_name if identity in SERVICE_REGISTRY else identity
-        reply += f' I can also help arrange {name} — see the option below.'
+    action = proposal.action
+    summary_fields: tuple[str, ...] = ()
+    if action == 'summarize':
+        known = set(field_contract.by_code) | {'contents.items'}
+        listed = [code for code in (proposal.summary_fields or []) if code in known]
+        if not listed:
+            reject(
+                'summary_fields', ','.join(proposal.summary_fields or []), 'summary_fields_required'
+            )
+            action = 'record_and_ask'
+        else:
+            summary_fields = tuple(dict.fromkeys(listed))
     if proposal.ready_to_create and not requirements.ready:
         reject('ready_to_create', 'true', 'requirements_not_ready')
+    # The reply is the model's words to the claimant. Runtime neither appends
+    # to it nor deletes from it; a reply that contradicts the ledger is sent
+    # back to the model (reply_consistency) rather than edited here.
     return ValidatedTurn(
-        reply=reply,
+        reply=proposed_reply,
         form_changes=changes,
         contents_item_changes=contents,
         next_question=question,
@@ -548,4 +666,9 @@ def validate_turn_proposal(
         ready_to_create=proposal.ready_to_create and requirements.ready,
         confirms_batch=proposal.confirms_batch,
         rejected=rejected,
+        action=action,
+        summary_fields=summary_fields,
+        document_requests=tuple(document_requests),
+        evidence_interpretations=tuple(interpretations),
+        rejected_services=tuple(rejected_services),
     )

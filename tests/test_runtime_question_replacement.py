@@ -1,4 +1,13 @@
-"""A rejected question loses its matching prose; valid grouped questions survive."""
+"""The model's question stands as written; Runtime observes, it does not rewrite.
+
+Asking about a field Runtime already holds is the model's call and is logged for
+prompt tuning. The words the claimant reads are never edited by Runtime, and a
+model-authored turn never gets a template question appended.
+"""
+
+import logging
+
+import pytest
 
 from backend.domain.agent_v8 import V8NextQuestion, V8TurnProposal
 from backend.services.turn_field_contract import compile_turn_field_contract
@@ -24,22 +33,36 @@ def validate_question(reply: str, question: V8NextQuestion) -> ValidatedTurn:
     )
 
 
-def test_rejected_field_question_is_removed_exactly_before_runtime_fallback() -> None:
-    rejected_wording = 'Are you the owner? Can you explain the cause?'
+def test_question_about_a_held_field_is_observed_not_removed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger='backend.services.turn_proposal_validation')
+    wording = 'Are you the owner? Can you explain the cause?'
+    reply = f'I noted the damage. {wording} Is there anything else you want to tell me?'
     validated = validate_question(
-        f'I noted the damage. {rejected_wording} Is there anything else you want to tell me?',
+        reply,
         V8NextQuestion(
             field_codes=['claimant.role', 'incident.cause'],
-            wording=rejected_wording,
+            wording=wording,
             reason='natural_follow_up',
         ),
     )
-    assert validated.next_question is None
-    assert rejected_wording not in validated.reply
-    assert validated.reply == 'I noted the damage. Is there anything else you want to tell me?'
-    assert compose_reply(None, (), validated.reply, 'Was anyone injured?').endswith(
-        'Was anyone injured?'
+    assert validated.reply == reply
+    assert validated.next_question is not None
+    assert any(
+        getattr(record, 'observation', {}).get('note') == 'field_not_missing'
+        for record in caplog.records
     )
+    assert not any(
+        getattr(record, 'rejection', {}).get('part') == 'next_question' for record in caplog.records
+    )
+
+
+def test_model_authored_reply_never_gets_a_template_question_appended() -> None:
+    reply = 'I noted the damage. Is there anything else you want to tell me?'
+    assert compose_reply(None, (), reply, 'Was anyone injured?', model_authored=True) == reply
+    # The controlled (fixture) path keeps its older composition.
+    assert compose_reply(None, (), reply, 'Was anyone injured?').endswith('Was anyone injured?')
 
 
 def test_valid_grouped_model_questions_remain_verbatim_and_are_not_duplicated() -> None:
@@ -55,4 +78,7 @@ def test_valid_grouped_model_questions_remain_verbatim_and_are_not_duplicated() 
     )
     assert validated.next_question is not None
     assert validated.reply == reply
-    assert compose_reply(None, (), validated.reply, validated.next_question.wording) == reply
+    assert (
+        compose_reply(None, (), validated.reply, validated.next_question.wording, model_authored=True)
+        == reply
+    )

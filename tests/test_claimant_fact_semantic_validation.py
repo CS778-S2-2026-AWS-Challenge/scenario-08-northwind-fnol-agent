@@ -21,7 +21,7 @@ def _new_claim(client: TestClient, key: str) -> tuple[str, str, int]:
     return body['claim']['claim_id'], body['session']['session_id'], body['claim']['revision']
 
 
-def test_temporal_non_answer_is_rejected_through_persistence_and_requirements(
+def test_temporal_non_answer_is_recorded_as_unavailable_not_as_a_confirmed_time(
     app: FastAPI,
     client: TestClient,
     repository: FixtureRepository,
@@ -54,11 +54,16 @@ def test_temporal_non_answer_is_rejected_through_persistence_and_requirements(
     assert response.status_code == 200, response.text
     claim = repository.get_claim(claim_id, 'cus_demo')
     assert claim is not None
-    assert 'incident.occurred_at' not in claim.form
-    assert (
-        'incident.occurred_at'
-        in response.json()['dynamic_form']['requirements']['missing_required_now']
-    )
+    # "I do not know when" is not a time. It is the claimant telling us they
+    # cannot supply one yet: recorded as unavailable, never as a confirmed
+    # value, and it does not satisfy the occurred-at requirement.
+    field = claim.form['incident.occurred_at']
+    assert field.value is None
+    assert field.status is FormStatus.UNAVAILABLE
+    assert field.assertions[-1].reported_text == 'I do not know when'
+    requirements = response.json()['dynamic_form']['requirements']
+    assert 'incident.occurred_at' not in requirements['satisfied']
+    assert 'incident.occurred_at' in requirements['by_state']['unavailable']
     assert response.json()['agent_message'] is not None
 
 

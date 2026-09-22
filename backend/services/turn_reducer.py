@@ -13,7 +13,7 @@ from backend.core.errors import ApiError
 from backend.domain.branch_registry import BranchRuleEvaluator
 from backend.domain.external_service_registry import ExternalLifecycleStatus
 from backend.domain.ids import new_id
-from backend.domain.intake import intake_field_for_requirement, next_requirement_step
+from backend.domain.intake import next_requirement_step
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -70,7 +70,6 @@ from backend.services.external_service_offers import (
 from backend.services.fact_resolution import confirm_contents_item, confirm_form_field
 from backend.services.handoffs import prepare_support_handoff, updated_claim_for_handoff
 from backend.services.professional_reviews import build_policy_review_handoff
-from backend.services.turn_proposal_validation import truthful_reply
 
 if TYPE_CHECKING:
     from backend.services.turn_proposal_validation import ValidatedTurn
@@ -198,13 +197,25 @@ def compose_reply(
     open_handoffs: tuple[HandoffRecord, ...],
     model_reply: str,
     next_question: str | None,
+    *,
+    model_authored: bool = False,
 ) -> str:
+    """Assemble the claimant-visible text.
+
+    For a model-authored turn the model's reply is the whole conversation; the
+    only Runtime words allowed in front of it are the safety notice, which is
+    fixed wording the model is told not to repeat. Controlled fixtures keep the
+    older composition because their replies are templates, not conversation.
+    """
+
     parts = []
     if safety_interrupt is not None:
         parts.append(safety_interrupt.safety_notice)
-    elif open_handoffs:
+    elif open_handoffs and not model_authored:
         parts.append('Northwind support has your request. You can keep adding details here.')
     parts.append(model_reply.strip())
+    if model_authored:
+        return ' '.join(part for part in parts if part)
     if next_question and next_question not in model_reply:
         parts.append(next_question)
     if open_handoffs and next_question:
@@ -277,19 +288,46 @@ def recompute_progress(
         WorkflowState.READY_FOR_NEXT,
     }:
         return claim.claim_state.workflow_state, claim.customer_next_step
-    if evaluation.requirements.ready_pending_confirmation:
-        if proposed_next_step is not None and proposed_next_step.status == 'confirmation_required':
-            return WorkflowState.COLLECTING, proposed_next_step
-        return WorkflowState.COLLECTING, CustomerNextStep(
-            status='confirmation_requested',
-            summary='Please confirm the recorded details before creating the Claim.',
-            responsible_party=ResponsibleParty.CLAIMANT,
-            required_items=list(evaluation.requirements.recorded),
-        )
     state = (
         WorkflowState.READY_FOR_NEXT if evaluation.requirements.ready else WorkflowState.COLLECTING
     )
     return state, proposed_next_step or next_requirement_step(evaluation.requirements)
+
+
+def model_turn_next_step(requirements: Any, *, action: str) -> CustomerNextStep:
+    """Project a model-authored turn that asked nothing into the next-step contract.
+
+    The summary is a neutral progress label, never a question: the model owns
+    every question the claimant sees. ``required_items`` still lists what the
+    report is waiting on so the form panel can show it.
+    """
+
+    if action == 'summarize':
+        # The model read the report back; a plain "yes" next turn binds to it.
+        return CustomerNextStep(
+            status='confirmation_requested',
+            summary='Review the summary above.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+            required_items=list(requirements.recorded),
+        )
+    if requirements.ready:
+        # The report can be sent as soon as every requirement carries a
+        # disposition, but Runtime only opens the create button once the
+        # model itself decides to propose submission (after the claimant
+        # accepted its summary) -- not merely because a trailing turn
+        # happened to leave requirements.ready true.
+        return CustomerNextStep(
+            status='ready_to_create',
+            summary='Your report is ready to send to the claims team.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+            required_items=[] if action == 'propose_submit' else ['claimant_confirmation'],
+        )
+    return CustomerNextStep(
+        status='more_information_needed',
+        summary='Collecting details.',
+        responsible_party=ResponsibleParty.CLAIMANT,
+        required_items=list(requirements.unresolved),
+    )
 
 
 def apply_progress(
@@ -379,7 +417,7 @@ def reduce_turn(
         validated.reply if validated is not None else proposal.customer_response
     )
     effective_next_step = (
-        next_requirement_step(branch_evaluation.requirements)
+        model_turn_next_step(branch_evaluation.requirements, action=validated.action)
         if validated is not None
         else _effective_next_step(proposal.customer_next_step, authority.outcome)
     )
@@ -467,10 +505,14 @@ def reduce_turn(
     ]
     if clarification_items:
         effective_customer_reason = 'A material incident detail needs clarification.'
-        effective_customer_response = (
-            'I have two different versions of an incident detail. Which version should '
-            'Northwind use?'
-        )
+        if validated is None:
+            # Controlled fixtures have no conversational reply of their own.
+            # A model-authored turn keeps its reply; the disputed fields are
+            # surfaced to the model through the next turn's form projection.
+            effective_customer_response = (
+                'I have two different versions of an incident detail. Which version should '
+                'Northwind use?'
+            )
         effective_next_step = CustomerNextStep(
             status='clarification_needed',
             summary='Clarify the conflicting incident detail.',
@@ -531,10 +573,13 @@ def reduce_turn(
     proposed_family = form_changes.get('claim.product_family')
     if (
         proposed_family is not None
-        and proposed_family.status is FormStatus.CONFIRMED
+        and proposed_family.status in {FormStatus.CONFIRMED, FormStatus.PROPOSED}
         and isinstance(proposed_family.value, str)
         and proposed_family.value in {'motor', 'home', 'contents'}
+        and (claim.incident_type is None or proposed_family.status is FormStatus.CONFIRMED)
     ):
+        # The model's understood family drives the report from the first turn;
+        # a confirmed family may still correct an earlier inferred one.
         inferred_incident_type = proposed_family.value
 
     next_action = claim.claim_state.next_action
@@ -701,11 +746,10 @@ def reduce_turn(
     )
     question = None
     if validated is not None:
-        remaining = set(applied_evaluation.requirements.missing_required_now)
-        if (
-            validated.next_question is not None
-            and set(validated.next_question.field_codes) <= remaining
-        ):
+        # The model decides whether this turn asks and what it asks. Runtime
+        # projects that choice into the next step; it never substitutes a
+        # template question of its own.
+        if validated.next_question is not None:
             question = validated.next_question.wording
             effective_next_step = CustomerNextStep(
                 status='more_information_needed',
@@ -714,7 +758,9 @@ def reduce_turn(
                 required_items=list(validated.next_question.field_codes),
             )
         else:
-            effective_next_step = next_requirement_step(applied_evaluation.requirements)
+            effective_next_step = model_turn_next_step(
+                applied_evaluation.requirements, action=validated.action
+            )
     elif (
         proposal.proposal_source is AgentProposalSource.CONTROLLED_AGENT
         and authority.outcome is AuthorityOutcome.AUTHORISED
@@ -732,17 +778,6 @@ def reduce_turn(
         # Once this turn satisfies that request, project the current requirement
         # instead of retaining the answered field beside the fresh fallback text.
         effective_next_step = next_requirement_step(applied_evaluation.requirements)
-    if (
-        validated is not None
-        and question is None
-        and applied_evaluation.requirements.missing_required_now
-    ):
-        field = intake_field_for_requirement(applied_evaluation.requirements.next_required_item)
-        question = field.prompt if field is not None else None
-        if (open_handoffs or handoff) and field is not None:
-            effective_next_step = effective_next_step.model_copy(
-                update={'required_items': [field.field_code]}
-            )
     progress_state, progress_next_step = recompute_progress(
         updated_claim,
         applied_evaluation,
@@ -762,64 +797,28 @@ def reduce_turn(
             }
         )
     effective_next_step = progress_next_step
-    if validated is not None:
-        effective_customer_response = truthful_reply(
-            effective_customer_response,
-            batch_confirmed=batch_confirmed,
-            ready_to_create=applied_evaluation.requirements.ready,
-        )
     confirmation_request = None
-    if validated is not None and applied_evaluation.requirements.ready_pending_confirmation:
-        codes = list(applied_evaluation.requirements.recorded)
-        shown_parts: list[str] = []
-        shown_codes: list[str] = []
-        for code in codes:
-            if code == 'contents.items':
-                value = [
-                    item.model_dump(
-                        mode='json',
-                        include={
-                            'item_id',
-                            'description',
-                            'category',
-                            'quantity',
-                            'brand',
-                            'model',
-                            'loss_type',
-                            'ownership',
-                            'estimated_value',
-                        },
-                    )
-                    for item in updated_claim.contents_items
-                ]
-            elif code in updated_claim.form:
-                value = updated_claim.form[code].value
-            else:
-                continue
-            part = f'{code}: {json.dumps(value, ensure_ascii=False, sort_keys=True)}'
-            if sum(len(item) for item in shown_parts) + len(part) > 3800:
-                continue
-            shown_codes.append(code)
-            shown_parts.append(part)
-        confirmation_request = ConfirmationRequestRecord(
-            confirmation_id=new_id('cnf'),
-            claim_id=claim.claim_id,
-            claim_revision=updated_claim.revision,
-            field_codes=shown_codes,
-            shown_values_fingerprint=shown_values_fingerprint(
-                updated_claim.form, shown_codes, updated_claim.contents_items
-            ),
-            created_at=timestamp,
-        )
-        shown = '; '.join(shown_parts)
-        if shown:
-            effective_customer_response = (
-                f'{effective_customer_response.rstrip()} Please confirm these details: {shown}.'
+    if validated is not None and validated.action == 'summarize' and validated.summary_fields:
+        # The model read these fields back in its own words. Runtime records
+        # exactly which fields and values were shown so a later "yes" can be
+        # bound to this summary and nothing else.
+        shown_codes = [
+            code
+            for code in validated.summary_fields
+            if code in updated_claim.form
+            or (code == 'contents.items' and updated_claim.contents_items)
+        ]
+        if shown_codes:
+            confirmation_request = ConfirmationRequestRecord(
+                confirmation_id=new_id('cnf'),
+                claim_id=claim.claim_id,
+                claim_revision=updated_claim.revision,
+                field_codes=shown_codes,
+                shown_values_fingerprint=shown_values_fingerprint(
+                    updated_claim.form, shown_codes, updated_claim.contents_items
+                ),
+                created_at=timestamp,
             )
-        else:
-            confirmation_request = None
-        if len(shown_codes) != len(codes):
-            effective_customer_response += ' Please review the remaining details in your form.'
     if (
         proposal.proposal_source is not AgentProposalSource.CONTROLLED_AGENT
         or safety_interrupt is not None
@@ -829,6 +828,7 @@ def reduce_turn(
             tuple([*open_handoffs, *([handoff] if handoff is not None else [])]),
             effective_customer_response,
             question,
+            model_authored=validated is not None,
         )
     session_after_questions, accounted_next_step, effective_customer_response = (
         _apply_question_accounting(
