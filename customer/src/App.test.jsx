@@ -1778,6 +1778,7 @@ describe('claimant intake projection', () => {
           source: 'claimant',
         },
       },
+      dynamic_form: readyDynamicForm(),
       customer_next_step: {
         status: 'agreement_required',
         summary: 'Continue to agreement and confirmation.',
@@ -1812,6 +1813,9 @@ describe('claimant intake projection', () => {
 
     const agreement = await screen.findByRole('button', { name: /Agreement & confirmation/i })
     expect(agreement).toHaveTextContent('Step 4 ready')
+    expect(screen.getByRole('button', {
+      name: /Claim progress: 9 of 9 required details complete\. Continue to agreement and confirmation\./i,
+    })).toBeInTheDocument()
     await user.click(agreement)
     expect(screen.getByRole('heading', { name: 'Agreement & confirmation' })).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Step 3 complete')

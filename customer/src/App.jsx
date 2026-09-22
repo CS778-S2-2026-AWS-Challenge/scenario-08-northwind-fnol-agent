@@ -343,12 +343,7 @@ function claimProgress(nextStep, dynamicForm) {
   return {
     current,
     total,
-    label: requirements?.ready
-      ? 'Ready to create'
-      : ['human_support_queued', 'human_support_in_progress', 'urgent_support_queued']
-          .includes(nextStep?.status)
-        ? ''
-        : nextStep?.summary || '',
+    label: nextStep?.summary || '',
     available: Boolean(requirements),
     items,
   }
