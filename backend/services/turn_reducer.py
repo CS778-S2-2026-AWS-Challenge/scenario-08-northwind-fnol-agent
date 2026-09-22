@@ -311,16 +311,10 @@ def model_turn_next_step(requirements: Any, *, action: str) -> CustomerNextStep:
             required_items=list(requirements.recorded),
         )
     if requirements.ready:
-        # The report can be sent as soon as every requirement carries a
-        # disposition, but Runtime only opens the create button once the
-        # model itself decides to propose submission (after the claimant
-        # accepted its summary) -- not merely because a trailing turn
-        # happened to leave requirements.ready true.
         return CustomerNextStep(
             status='ready_to_create',
             summary='Your report is ready to send to the claims team.',
             responsible_party=ResponsibleParty.CLAIMANT,
-            required_items=[] if action == 'propose_submit' else ['claimant_confirmation'],
         )
     return CustomerNextStep(
         status='more_information_needed',
