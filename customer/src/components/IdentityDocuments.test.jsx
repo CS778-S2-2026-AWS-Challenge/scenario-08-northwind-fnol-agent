@@ -102,6 +102,23 @@ describe('IdentityDocuments account projection', () => {
     expect(screen.getByLabelText('Driver licence number')).toHaveValue('DL9999999')
   })
 
+  it('keeps an ambiguous update draft open without claiming it was saved', async () => {
+    const user = userEvent.setup()
+    const onUpdate = vi.fn().mockRejectedValue(new ProfileMutationError(
+      'Northwind reloaded saved identity documents but could not confirm that the identity-document update completed. Your draft is still here; review the latest saved list and retry when ready.',
+      { code: 'NETWORK_ERROR', kind: 'unknown' },
+    ))
+    render(<IdentityHarness initialDocuments={[licence]} onUpdate={onUpdate} />)
+
+    await user.click(screen.getByRole('button', { name: 'Edit Driver licence ****1234' }))
+    await user.type(screen.getByLabelText('Driver licence number'), 'DIFFERENT-1234')
+    await user.click(screen.getByRole('button', { name: 'Save identity document' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('could not confirm')
+    expect(screen.getByLabelText('Driver licence number')).toHaveValue('DIFFERENT-1234')
+    expect(screen.queryByText(/Driver licence saved/)).not.toBeInTheDocument()
+  })
+
   it('keeps an unsaved number editable when protected storage rejects the write', async () => {
     const user = userEvent.setup()
     const onCreate = vi.fn().mockRejectedValue({ status: 503 })

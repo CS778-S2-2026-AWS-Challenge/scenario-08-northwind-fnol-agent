@@ -107,11 +107,6 @@ function objectContains(actual, expected) {
   return Object.entries(expected).every(([key, value]) => objectContains(actual?.[key], value))
 }
 
-function maskedValueMatches(maskedValue, plaintext) {
-  const compact = String(plaintext || '').replace(/[^a-z0-9]/gi, '')
-  return compact.length >= 4 && String(maskedValue || '').endsWith(compact.slice(-4))
-}
-
 export default function useProfileController({ account, setAccount, enabled = true }) {
   const accountKey = account?.customer_id || (account ? 'authenticated-account' : null)
   const [resources, setResources] = useState(initialResources)
@@ -417,10 +412,6 @@ export default function useProfileController({ account, setAccount, enabled = tr
     resource: 'identities',
     action: 'the identity-document update',
     execute: () => updateAccountIdentityDocument({ identityId, revision, documentNumber }),
-    reconcile: (latest) => latest.find((item) => (
-      item.identity_id === identityId
-      && maskedValueMatches(item.masked_document_number, documentNumber)
-    )),
   }), [runResourceMutation])
 
   return {

@@ -293,7 +293,7 @@ describe('useProfileController mutation recovery', () => {
     }
     api.listAccountIdentityDocuments
       .mockResolvedValueOnce(emptyPage([identity]))
-      .mockResolvedValueOnce(emptyPage([identity, concurrentIdentity]))
+      .mockResolvedValue(emptyPage([identity, concurrentIdentity]))
     api.createAccountIdentityDocument
       .mockRejectedValueOnce({ code: 'NETWORK_ERROR' })
       .mockResolvedValueOnce(createdIdentity)
@@ -316,5 +316,45 @@ describe('useProfileController mutation recovery', () => {
       .toEqual(api.createAccountIdentityDocument.mock.calls[0][0])
     expect(api.listAccountIdentityDocuments).toHaveBeenCalledOnce()
     expect(result.current.controller.resources.identities.items).toEqual([createdIdentity, identity])
+  })
+
+  it('keeps an ambiguous identity update unknown when the masked suffix still matches', async () => {
+    const latestIdentity = { ...identity, revision: 2 }
+    const savedIdentity = { ...identity, revision: 3 }
+    api.listAccountIdentityDocuments
+      .mockResolvedValueOnce(emptyPage([identity]))
+      .mockResolvedValueOnce(emptyPage([latestIdentity]))
+    api.updateAccountIdentityDocument
+      .mockRejectedValueOnce({ code: 'NETWORK_ERROR' })
+      .mockResolvedValueOnce(savedIdentity)
+    const { result } = renderController()
+
+    await waitFor(() => expect(result.current.controller.resources.identities.items).toEqual([identity]))
+    await act(async () => {
+      await expect(result.current.controller.saveIdentity(
+        identity.identity_id,
+        identity.revision,
+        'DIFFERENT-1234',
+      )).rejects.toMatchObject({ kind: 'unknown' })
+    })
+
+    expect(result.current.controller.resources.identities.items).toEqual([latestIdentity])
+    expect(api.updateAccountIdentityDocument).toHaveBeenCalledOnce()
+
+    let saved
+    await act(async () => {
+      saved = await result.current.controller.saveIdentity(
+        latestIdentity.identity_id,
+        latestIdentity.revision,
+        'DIFFERENT-1234',
+      )
+    })
+
+    expect(saved).toEqual(savedIdentity)
+    expect(api.updateAccountIdentityDocument).toHaveBeenLastCalledWith({
+      identityId: latestIdentity.identity_id,
+      revision: 2,
+      documentNumber: 'DIFFERENT-1234',
+    })
   })
 })
