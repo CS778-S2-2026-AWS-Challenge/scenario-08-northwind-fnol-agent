@@ -1,4 +1,5 @@
-from typing import ContextManager, Protocol
+from contextlib import AbstractContextManager
+from typing import Protocol
 
 from backend.domain.identity import ClaimantAuthSessionRecord, CustomerAccountRecord
 from backend.repositories.protocols import RepositoryConflict
@@ -21,7 +22,7 @@ class IdentityRepository(Protocol):
 
     def hold_account_revision(
         self, customer_id: str, expected_revision: int
-    ) -> ContextManager[CustomerAccountRecord]: ...
+    ) -> AbstractContextManager[CustomerAccountRecord]: ...
 
     def save_account(self, account: CustomerAccountRecord, expected_revision: int) -> None: ...
 

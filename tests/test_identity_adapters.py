@@ -456,6 +456,7 @@ def test_claimant_identity_save_serialises_competing_email_updates(
     saved = repository.list_accounts()
     assert sum(account.email == 'shared@example.invalid' for account in saved) == 1
 
+
 @pytest.mark.parametrize('repository_kind', ['fixture', 'sqlite'])
 def test_claimant_identity_revision_guard_blocks_concurrent_account_write(
     repository_kind: str, tmp_path: Path

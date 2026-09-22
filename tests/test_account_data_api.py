@@ -881,6 +881,7 @@ def test_payout_contact_claim_failure_releases_contact_guard_without_partial_wri
     assert repository.list_audit_events_internal(subject) == audits_before
     assert repository.replay_realtime_events(None, limit=1000) == realtime_before
 
+
 def test_payout_contact_selection_rejects_stale_foreign_and_unusable_inputs(
     client: TestClient,
     repository: FixtureRepository,
