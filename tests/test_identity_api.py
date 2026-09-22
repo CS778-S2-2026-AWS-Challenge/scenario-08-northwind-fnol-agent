@@ -10,6 +10,7 @@ from backend.app import create_app
 from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
 from backend.domain.identity import ClaimantAuthSessionRecord, CustomerAccountRecord
 from backend.repositories.identity import DuplicateEmailConflict
+from backend.repositories.protocols import RevisionConflict
 
 
 def login(client: TestClient, email: str, password: str) -> dict[str, object]:
@@ -331,3 +332,68 @@ def test_profile_maps_repository_duplicate_email_conflict_to_resource_conflict()
 
     assert response.status_code == 409
     assert response.json()['error']['code'] == 'RESOURCE_CONFLICT'
+
+
+def test_preferences_update_uses_the_projected_account_revision(client: TestClient) -> None:
+    session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    authorization = {'Authorization': f'Bearer {session["access_token"]}'}
+    before = client.get('/api/v1/account', headers=authorization).json()
+
+    response = client.patch(
+        '/api/v1/account/preferences',
+        headers={**authorization, 'If-Match': str(before['revision'])},
+        json={'email': False, 'sms': True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()['preferences'] == {'email': False, 'sms': True}
+    assert response.json()['revision'] == before['revision'] + 1
+
+
+def test_preferences_rejects_a_stale_revision_without_changing_the_account(
+    client: TestClient,
+) -> None:
+    session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    authorization = {'Authorization': f'Bearer {session["access_token"]}'}
+    before = client.get('/api/v1/account', headers=authorization).json()
+
+    response = client.patch(
+        '/api/v1/account/preferences',
+        headers={**authorization, 'If-Match': str(before['revision'] + 1)},
+        json={'email': False, 'sms': True},
+    )
+    after = client.get('/api/v1/account', headers=authorization).json()
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert response.json()['error']['retryable'] is True
+    assert response.json()['error']['current_revision'] == before['revision']
+    assert after == before
+
+
+def test_preferences_maps_repository_revision_conflict_without_changing_the_account() -> None:
+    class ConflictingIdentityRepository(FixtureIdentityRepository):
+        def save_account(self, account: CustomerAccountRecord, expected_revision: int) -> None:
+            raise RevisionConflict(expected_revision + 1)
+
+    repository = ConflictingIdentityRepository()
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        identity_repository=repository,
+    )
+    with TestClient(app) as test_client:
+        session = login(test_client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        authorization = {'Authorization': f'Bearer {session["access_token"]}'}
+        before = test_client.get('/api/v1/account', headers=authorization).json()
+        response = test_client.patch(
+            '/api/v1/account/preferences',
+            headers={**authorization, 'If-Match': str(before['revision'])},
+            json={'email': False, 'sms': True},
+        )
+        after = test_client.get('/api/v1/account', headers=authorization).json()
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert response.json()['error']['retryable'] is True
+    assert response.json()['error']['current_revision'] == before['revision'] + 1
+    assert after == before

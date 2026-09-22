@@ -543,6 +543,14 @@ the stored profile or revision. Email updates are normalized to lowercase, and a
 owned by another account returns `409 RESOURCE_CONFLICT` without changing the stored profile or
 revision.
 
+Preferences PATCH accepts the Account projection's revision in `If-Match` and commits the
+communication preferences with a compare-and-set Account write. A stale supplied revision, or a
+repository conflict after the service read, returns retryable `409 REVISION_CONFLICT` with
+`current_revision`; the attempted preferences and Account revision are not committed. During the
+legacy-client transition the header remains optional and an omitted header uses the revision read
+at the start of the request, while still retaining repository compare-and-set protection. New
+clients send `If-Match` so edits made from a stale Account projection are rejected explicitly.
+
 Create requests for the three account resources require `Idempotency-Key`. List routes use the
 standard opaque cursor and default to active records. Their stable descending keyset is
 `(created_at, resource_id)`; a cursor is bound to its authenticated owner, resource collection,

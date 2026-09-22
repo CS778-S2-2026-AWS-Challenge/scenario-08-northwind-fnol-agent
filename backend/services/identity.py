@@ -188,7 +188,10 @@ def update_profile(
 
 
 def update_preferences(
-    repository: IdentityRepository, principal: Principal, payload: PreferencesPatchRequest
+    repository: IdentityRepository,
+    principal: Principal,
+    payload: PreferencesPatchRequest,
+    if_match: str | None,
 ) -> AccountProjection:
     account = repository.get_account(principal.subject)
     if account is None:
@@ -197,11 +200,31 @@ def update_preferences(
             code='RESOURCE_NOT_FOUND',
             message='The claimant account was not found.',
         )
+    # Keep compatibility with clients that predate account revision headers while allowing
+    # current clients to protect the projection they edited.
+    expected_revision = parse_if_match(if_match) if if_match is not None else account.revision
+    if account.revision != expected_revision:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The account changed after this page was loaded.',
+            retryable=True,
+            current_revision=account.revision,
+        )
     updated = replace(
         account,
         communication_preferences={'email': payload.email, 'sms': payload.sms},
         revision=account.revision + 1,
         updated_at=datetime.now(UTC),
     )
-    repository.save_account(updated, account.revision)
+    try:
+        repository.save_account(updated, expected_revision)
+    except RevisionConflict as error:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The account changed after this page was loaded.',
+            retryable=True,
+            current_revision=error.current_revision,
+        ) from error
     return account_projection(repository, principal)
