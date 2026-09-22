@@ -26,7 +26,7 @@ export default function ClaimWorkspace({ detail, resources = {}, loading, error,
   if (loading && !detail) return <main className="claim-state" role="status"><span className="loading-mark" /><p>Loading Claim...</p></main>
   if (error && !detail) return <ClaimUnavailable error={error} onRetry={onRetry} />
   if (!detail) return <EmptyWorkspace />
-  const baseInteractionDetail = loading || stale || error ? { ...detail, allowed_actions: [] } : detail
+  const baseInteractionDetail = stale || error ? { ...detail, allowed_actions: [] } : detail
   const guardedExternalTaskIds = new Set(
     externalActionNotices.map((notice) => notice.taskId).filter(Boolean),
   )
