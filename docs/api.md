@@ -3790,6 +3790,7 @@ Request:
   "working_claim_id": "clm_01J4Y7Q2AW",
   "claim_revision": 9,
   "authorised_decision_id": "dec_01J4YD82JA",
+  "evidence_snapshot_fingerprint": "4eb1...64-character-sha256...a908",
   "confirmed_form": {},
   "evidence_refs": ["evd_01J4Y7V5QJ"],
   "pending_evidence": [
@@ -3818,12 +3819,36 @@ Response `201` or `200` for an idempotent replay:
 }
 ```
 
-The adapter MUST use the working claim ID as its idempotency reference. `creation_status` is `created`, `pending`, or `failed`. Pending evidence is preserved as outstanding work rather than silently dropped.
+Before adapter invocation, Runtime reloads and validates every persisted Evidence record for the
+Claim. `evidence_refs` must be unique and exactly equal that complete snapshot;
+`pending_evidence` must exactly describe every persisted pending record, including `kind` and
+`needed_for`; and `evidence_snapshot_fingerprint` must match the canonical persisted snapshot.
+Missing, extra, foreign, duplicate, stale, or unregistered Evidence fails with `422` before any
+provider call. `route` is derived from the persisted Claim family and must be
+`standard_motor_intake`, `standard_home_intake`, or `standard_contents_intake` accordingly.
+
+Runtime durably reserves one provider-neutral Claim-creation operation before calling the adapter.
+The operation binds the Claim/customer, authorised decision and revision, complete Evidence
+snapshot, request fingerprint, route, and adapter source. A provider result is first persisted on
+that operation as `settlement_pending`; the resulting Claim, terminal disposition, Branch
+Evaluation, and transition to `accepted` are then one repository atomic mutation. If that Claim
+compare-and-set conflicts, an unchanged retry settles the durable result without invoking the
+provider again. A definitely unsubmitted timeout/unavailable failure may retry the same operation.
+A submitted timeout/unavailable failure or any partial outcome remains `unknown_outcome` and may
+only use adapter reconciliation on the same identity. Failed or inconclusive reconciliation
+preserves the original create-call delivery observation. Reconciliation never issues a second
+create call.
+
+The adapter MUST use the working claim ID as its idempotency reference. `creation_status` is
+`created`, `pending`, or `failed`. Pending Evidence is preserved as outstanding work rather than
+silently dropped.
 
 `source` is `fixture` for the explicitly selected deterministic adapter or `configured_service` for a
 confirmed provider adapter. A result MUST NOT claim `configured_service` merely because
 an integration is planned. An unavailable configured service remains explicit and MUST
-NOT silently fall through to another data runtime profile.
+NOT silently fall through to another data runtime profile. The result source must equal the
+source declared by the installed adapter, and its route must equal the authoritative request
+route, or the result is rejected without projecting the Claim as created.
 
 The request and response above are the provider-neutral boundary. Provider table names,
 partition keys, regions, SDK payloads, ARNs, credentials and vendor error bodies MUST

@@ -89,7 +89,7 @@ records remain target contracts.
 | Review | internal signals, source references, professional decisions, staff actions | `claim_id` and work identity |
 | Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps, and support continuation target (`resume_workflow_state`, `resume_next_action`) | `claim_id` and `handoff_id` |
 | Follow-up | due time, responsible party, attempt count, channel, outcome, status | `claim_id` and `follow_up_id` |
-| Integration | published provider configuration references, adapter capability/health projection, external-service consent, claim-creation result, durable routing operation intent/outcome, routing result, external participant task, returned task result and verification, idempotency result | integration identity, `claim_id`, task, result, or consent/operation identity |
+| Integration | published provider configuration references, adapter capability/health projection, external-service consent, durable Claim-creation operation and result, durable routing operation intent/outcome, routing result, external participant task, returned task result and verification, idempotency result | integration identity, `claim_id`, task, result, or consent/operation identity |
 | External request | implemented purpose, disclosed field names, consent and authority, preparation and first send identity, controlled assessor result and verification; target capability/requirement versions, attempts, and reconciliation | `claim_id`, `request_id`, linked to `task_id` |
 | Configuration | versioned Agent Policy, Registry snapshots, model profiles, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
 | Branch evaluation | immutable branch/form calculation evidence, selected family, active branches, field selection states, and Claim revision precondition | `claim_id`, `evaluation_id` |
@@ -857,8 +857,24 @@ Evidence record or protected object.
   `value`, registered `reason_code`, non-empty immutable `source_refs`, typed `recorded_by`,
   `recorded_at`, and `recorded_revision`. It does not replace `claim_state`. `completed` requires a
   created external Claim result; `abandoned` and `closed` cannot coexist with one.
-- Successful external Claim creation writes the created result and `completed` disposition in the
-  same one-revision Claim mutation, referencing the authorising decision and external Claim.
+- A provider-accepted external Claim result is first persisted on the reserved `cco_` operation as
+  `settlement_pending`, with submitted delivery and `settle_recorded_result` recovery. Runtime then
+  writes that result and the `completed` disposition in one Claim revision, referencing the
+  authorising decision and external Claim, while atomically advancing the operation to `accepted`
+  and storing the applied Branch Evaluation. If the Claim compare-and-set conflicts, the recorded
+  result remains durable and an unchanged retry settles it without another provider create call.
+- A Claim-creation operation is durable execution evidence, not a second Claim lifecycle. It binds
+  one Claim to its customer, authorised decision/revision, request and Evidence-snapshot
+  fingerprints, authoritative route, adapter source, delivery observation, status, bounded failure
+  and recovery classification, optional accepted result, and timestamps. Fixture reserves it under
+  the Claim mutation lock and MongoDB reserves it transactionally with one operation per Claim.
+- `prepared` exists before the provider call. `retryable_failure` returns to `prepared` only for the
+  same immutable operation and only after a definitely unsubmitted timeout or unavailable result.
+  A submitted timeout or unavailable result, and either delivery observation for a partial result,
+  becomes `unknown_outcome`; reconciliation on that identity never dispatches another create call
+  and cannot erase the original create-call delivery observation. `settlement_pending` carries a
+  durable provider result until atomic Claim/operation/Branch Evaluation settlement; `accepted`
+  and `terminal_failure` are terminal.
 - Reopen clears only an eligible `abandoned`/`closed` disposition. The Fixture and MongoDB
   `save_claim_mutation_with_audit` boundary accepts the authenticated operation actor (claimant or
   staff), requires the same Claim and active-session pointer, and atomically stores the resulting

@@ -1,7 +1,8 @@
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, cast
 
+import mongomock
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -13,6 +14,7 @@ from backend.adapters.claims_service import (
     AssessorResultOutcome,
     AssessorResultRequest,
     AssessorRoutingOutcome,
+    ClaimCreationAdapterFailure,
     ClaimCreationOutcome,
     ClaimsServiceAdapter,
     MockAssessorServiceAdapter,
@@ -23,6 +25,17 @@ from backend.adapters.evidence_storage import (
     MockEvidenceStorage,
 )
 from backend.app import create_app
+from backend.domain.claim_creation import (
+    ClaimCreationDelivery,
+    ClaimCreationFailureCode,
+    ClaimCreationOperationRecord,
+    ClaimCreationOperationStatus,
+    ClaimCreationRecovery,
+    assert_claim_creation_operation_transition,
+    claim_creation_operation_id,
+    classify_claim_creation_failure,
+    evidence_snapshot_fingerprint,
+)
 from backend.domain.external_services import ExternalTaskResultVerification
 from backend.domain.models import (
     ActorReference,
@@ -40,6 +53,8 @@ from backend.domain.models import (
     CreateExternalClaimRequest,
     CustomerNextStep,
     EvidenceFileStatus,
+    EvidenceRecord,
+    EvidenceSource,
     EvidenceStatus,
     ExternalClaimResult,
     ExternalServiceConsent,
@@ -50,7 +65,8 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.repositories.fixture import FixtureRepository
-from backend.repositories.protocols import IdempotencyConflict
+from backend.repositories.mongodb import MongoDBRepository
+from backend.repositories.protocols import IdempotencyConflict, PersistenceRepository
 from backend.services.support import now_utc, request_fingerprint
 
 INTEGRATION_AUTH = {'Authorization': 'Bearer synthetic-integration'}
@@ -191,7 +207,7 @@ def create_working_claim(client: TestClient, key: str = 'working-claim') -> dict
 
 
 def save_authorisation(
-    repository: FixtureRepository,
+    repository: PersistenceRepository,
     *,
     claim_id: str,
     customer_id: str,
@@ -276,11 +292,310 @@ def creation_payload(
         'working_claim_id': claim_id,
         'claim_revision': revision,
         'authorised_decision_id': decision_id,
+        'evidence_snapshot_fingerprint': evidence_snapshot_fingerprint([]),
         'confirmed_form': {},
         'evidence_refs': [],
         'pending_evidence': [],
         'route': route,
     }
+
+
+def claim_creation_operation(
+    *,
+    status: ClaimCreationOperationStatus = ClaimCreationOperationStatus.PREPARED,
+    timestamp: datetime | None = None,
+) -> ClaimCreationOperationRecord:
+    created_at = timestamp or now_utc()
+    updates: dict[str, object] = {}
+    if status in {
+        ClaimCreationOperationStatus.SETTLEMENT_PENDING,
+        ClaimCreationOperationStatus.ACCEPTED,
+    }:
+        updates = {
+            'delivery': ClaimCreationDelivery.SUBMITTED,
+            'recovery': (
+                ClaimCreationRecovery.SETTLE_RECORDED_RESULT
+                if status is ClaimCreationOperationStatus.SETTLEMENT_PENDING
+                else None
+            ),
+            'result': ExternalClaimResult(
+                external_claim_id='ext_operation',
+                claim_number='NWF-2026-OPERATION',
+                creation_status=ClaimCreationStatus.CREATED,
+                route='standard_motor_intake',
+                next_step='Claims intake review',
+                source=IntegrationSource.FIXTURE,
+                created_at=created_at,
+            ),
+        }
+    elif status is not ClaimCreationOperationStatus.PREPARED:
+        updates = {
+            'failure_code': ClaimCreationFailureCode.TIMEOUT,
+            'recovery': {
+                ClaimCreationOperationStatus.RETRYABLE_FAILURE: (
+                    ClaimCreationRecovery.RETRY_SAME_OPERATION
+                ),
+                ClaimCreationOperationStatus.TERMINAL_FAILURE: (
+                    ClaimCreationRecovery.REVIEW_REQUIRED
+                ),
+                ClaimCreationOperationStatus.UNKNOWN_OUTCOME: (
+                    ClaimCreationRecovery.RECONCILE_BEFORE_RETRY
+                ),
+            }[status],
+            'delivery': (
+                ClaimCreationDelivery.SUBMITTED
+                if status is ClaimCreationOperationStatus.UNKNOWN_OUTCOME
+                else ClaimCreationDelivery.NOT_SUBMITTED
+            ),
+        }
+    return ClaimCreationOperationRecord(
+        operation_id='cco_operation',
+        claim_id='clm_operation',
+        customer_id='cus_operation',
+        authorised_decision_id='dec_operation',
+        authorised_revision=1,
+        request_fingerprint='a' * 64,
+        evidence_snapshot_fingerprint='b' * 64,
+        route='standard_motor_intake',
+        integration_source=IntegrationSource.FIXTURE,
+        status=status,
+        created_at=created_at,
+        updated_at=created_at,
+        **updates,
+    )
+
+
+def test_claim_creation_operation_model_rejects_inconsistent_states() -> None:
+    prepared = claim_creation_operation()
+    with pytest.raises(ValidationError, match='time cannot move backwards'):
+        ClaimCreationOperationRecord.model_validate(
+            {
+                **prepared.model_dump(),
+                'updated_at': prepared.created_at - timedelta(seconds=1),
+            }
+        )
+    with pytest.raises(ValidationError, match='prepared Claim creation operation'):
+        ClaimCreationOperationRecord.model_validate(
+            {**prepared.model_dump(), 'failure_code': ClaimCreationFailureCode.TIMEOUT}
+        )
+    with pytest.raises(ValidationError, match='recorded Claim creation result'):
+        ClaimCreationOperationRecord.model_validate(
+            {
+                **prepared.model_dump(),
+                'status': ClaimCreationOperationStatus.ACCEPTED,
+                'delivery': ClaimCreationDelivery.SUBMITTED,
+            }
+        )
+    with pytest.raises(ValidationError, match='classified failure'):
+        ClaimCreationOperationRecord.model_validate(
+            {**prepared.model_dump(), 'status': ClaimCreationOperationStatus.RETRYABLE_FAILURE}
+        )
+    with pytest.raises(ValidationError, match='failure code, delivery, status, and recovery'):
+        ClaimCreationOperationRecord.model_validate(
+            {
+                **prepared.model_dump(),
+                'status': ClaimCreationOperationStatus.RETRYABLE_FAILURE,
+                'failure_code': ClaimCreationFailureCode.TIMEOUT,
+                'recovery': ClaimCreationRecovery.REVIEW_REQUIRED,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ('code', 'delivery', 'expected_status', 'expected_recovery'),
+    [
+        (
+            ClaimCreationFailureCode.TIMEOUT,
+            ClaimCreationDelivery.NOT_SUBMITTED,
+            ClaimCreationOperationStatus.RETRYABLE_FAILURE,
+            ClaimCreationRecovery.RETRY_SAME_OPERATION,
+        ),
+        (
+            ClaimCreationFailureCode.TIMEOUT,
+            ClaimCreationDelivery.SUBMITTED,
+            ClaimCreationOperationStatus.UNKNOWN_OUTCOME,
+            ClaimCreationRecovery.RECONCILE_BEFORE_RETRY,
+        ),
+        (
+            ClaimCreationFailureCode.UNAVAILABLE,
+            ClaimCreationDelivery.NOT_SUBMITTED,
+            ClaimCreationOperationStatus.RETRYABLE_FAILURE,
+            ClaimCreationRecovery.RETRY_SAME_OPERATION,
+        ),
+        (
+            ClaimCreationFailureCode.UNAVAILABLE,
+            ClaimCreationDelivery.SUBMITTED,
+            ClaimCreationOperationStatus.UNKNOWN_OUTCOME,
+            ClaimCreationRecovery.RECONCILE_BEFORE_RETRY,
+        ),
+        *[
+            (
+                ClaimCreationFailureCode.PARTIAL,
+                delivery,
+                ClaimCreationOperationStatus.UNKNOWN_OUTCOME,
+                ClaimCreationRecovery.RECONCILE_BEFORE_RETRY,
+            )
+            for delivery in ClaimCreationDelivery
+        ],
+        *[
+            (
+                code,
+                delivery,
+                ClaimCreationOperationStatus.TERMINAL_FAILURE,
+                ClaimCreationRecovery.REVIEW_REQUIRED,
+            )
+            for code in (
+                ClaimCreationFailureCode.ACCESS_DENIED,
+                ClaimCreationFailureCode.MALFORMED,
+                ClaimCreationFailureCode.CONFLICTING,
+            )
+            for delivery in ClaimCreationDelivery
+        ],
+    ],
+)
+def test_claim_creation_failure_matrix_is_authoritative(
+    code: ClaimCreationFailureCode,
+    delivery: ClaimCreationDelivery,
+    expected_status: ClaimCreationOperationStatus,
+    expected_recovery: ClaimCreationRecovery,
+) -> None:
+    """Cover every code/delivery contract because each pair has distinct retry safety."""
+
+    assert classify_claim_creation_failure(code, delivery) == (
+        expected_status,
+        expected_recovery,
+    )
+    prepared = claim_creation_operation()
+    record = ClaimCreationOperationRecord.model_validate(
+        {
+            **prepared.model_dump(),
+            'status': expected_status,
+            'delivery': delivery,
+            'failure_code': code,
+            'recovery': expected_recovery,
+        }
+    )
+    assert record.status is expected_status
+
+
+def test_claim_creation_failure_matrix_rejects_illegal_retryable_access_denied() -> None:
+    prepared = claim_creation_operation()
+    with pytest.raises(
+        ValidationError,
+        match='failure code, delivery, status, and recovery conflict',
+    ):
+        ClaimCreationOperationRecord.model_validate(
+            {
+                **prepared.model_dump(),
+                'status': ClaimCreationOperationStatus.RETRYABLE_FAILURE,
+                'delivery': ClaimCreationDelivery.SUBMITTED,
+                'failure_code': ClaimCreationFailureCode.ACCESS_DENIED,
+                'recovery': ClaimCreationRecovery.RETRY_SAME_OPERATION,
+            }
+        )
+
+
+def test_claim_creation_operation_transition_guards_identity_time_and_lifecycle() -> None:
+    prepared = claim_creation_operation()
+    assert_claim_creation_operation_transition(prepared, prepared)
+    with pytest.raises(ValueError, match='identity is immutable'):
+        assert_claim_creation_operation_transition(
+            prepared,
+            prepared.model_copy(update={'route': 'standard_home_intake'}),
+        )
+    with pytest.raises(ValueError, match='time cannot move backwards'):
+        assert_claim_creation_operation_transition(
+            prepared,
+            prepared.model_copy(update={'updated_at': prepared.created_at - timedelta(seconds=1)}),
+        )
+    accepted = claim_creation_operation(status=ClaimCreationOperationStatus.ACCEPTED)
+    with pytest.raises(ValueError, match='transition is not permitted'):
+        assert_claim_creation_operation_transition(
+            accepted,
+            accepted.model_copy(
+                update={
+                    'status': ClaimCreationOperationStatus.PREPARED,
+                    'delivery': ClaimCreationDelivery.NOT_SUBMITTED,
+                    'result': None,
+                    'updated_at': accepted.updated_at + timedelta(seconds=1),
+                }
+            ),
+        )
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'mongodb'])
+def test_claim_creation_repository_rejects_invalid_reservation_and_transitions(
+    repository_kind: str,
+) -> None:
+    repository: PersistenceRepository
+    if repository_kind == 'fixture':
+        repository = FixtureRepository()
+    else:
+        mongo = MongoDBRepository(
+            mongomock.MongoClient(),
+            f'claim_creation_guards_{repository_kind}',
+        )
+        mongo._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+        repository = mongo
+    app = create_app(repository=repository)
+    with TestClient(app) as client:
+        created = create_working_claim(client, f'operation-guards-{repository_kind}')
+    claim = cast(dict[str, object], created['claim'])
+    session = cast(dict[str, object], created['session'])
+    claim_id = str(claim['claim_id'])
+    decision_id = f'dec_operation_guards_{repository_kind}'
+    save_authorisation(
+        repository,
+        claim_id=claim_id,
+        customer_id='cus_demo',
+        session_id=str(session['session_id']),
+        decision_id=decision_id,
+        revision=1,
+        action=AgentAction.CREATE_CLAIM,
+        reason_code='CLAIM_CREATION_AUTHORISED',
+    )
+    operation = claim_creation_operation().model_copy(
+        update={
+            'operation_id': claim_creation_operation_id(claim_id, decision_id),
+            'claim_id': claim_id,
+            'customer_id': 'cus_demo',
+            'authorised_decision_id': decision_id,
+            'evidence_snapshot_fingerprint': evidence_snapshot_fingerprint([]),
+        }
+    )
+
+    with pytest.raises(KeyError):
+        repository.reserve_claim_creation_operation(
+            operation.model_copy(update={'evidence_snapshot_fingerprint': 'f' * 64})
+        )
+    assert repository.reserve_claim_creation_operation(operation) is True
+    assert repository.reserve_claim_creation_operation(operation) is False
+    with pytest.raises(IdempotencyConflict):
+        repository.reserve_claim_creation_operation(
+            operation.model_copy(
+                update={'integration_source': IntegrationSource.CONFIGURED_SERVICE}
+            )
+        )
+    with pytest.raises(KeyError):
+        repository.save_claim_creation_operation(
+            operation.model_copy(update={'operation_id': 'cco_missing'})
+        )
+    with pytest.raises(IdempotencyConflict):
+        repository.save_claim_creation_operation(
+            operation.model_copy(update={'updated_at': operation.updated_at + timedelta(seconds=1)})
+        )
+    with pytest.raises(IdempotencyConflict):
+        repository.save_claim_creation_operation(
+            operation.model_copy(
+                update={
+                    'status': ClaimCreationOperationStatus.RETRYABLE_FAILURE,
+                    'delivery': ClaimCreationDelivery.SUBMITTED,
+                    'failure_code': ClaimCreationFailureCode.ACCESS_DENIED,
+                    'recovery': ClaimCreationRecovery.RETRY_SAME_OPERATION,
+                    'updated_at': operation.updated_at + timedelta(seconds=1),
+                }
+            )
+        )
 
 
 def prepare_assessor_request(
@@ -1615,12 +1930,12 @@ class PendingClaimsAdapter(ClaimsServiceAdapter):
         command: CreateExternalClaimRequest,
         request_fingerprint: str,
     ) -> ClaimCreationOutcome:
-        del command, request_fingerprint
+        del request_fingerprint
         timestamp = now_utc()
         return ClaimCreationOutcome(
             result=ExternalClaimResult(
                 creation_status=ClaimCreationStatus.PENDING,
-                route='provider_neutral_pending',
+                route=command.route,
                 next_step='Wait for the claims service confirmation.',
                 source=IntegrationSource.CONFIGURED_SERVICE,
                 expected_by=timestamp + timedelta(hours=2),
@@ -1629,9 +1944,136 @@ class PendingClaimsAdapter(ClaimsServiceAdapter):
             replayed=False,
         )
 
+    def reconcile_claim(
+        self,
+        command: CreateExternalClaimRequest,
+        request_fingerprint: str,
+    ) -> ClaimCreationOutcome | None:
+        del command, request_fingerprint
+        return None
+
 
 class MismatchedSourceClaimsAdapter(PendingClaimsAdapter):
     integration_source = IntegrationSource.FIXTURE
+
+
+class InterruptedClaimsAdapter(MockClaimsServiceAdapter):
+    """Accept once, lose the response, then expose the accepted result to reconciliation."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.create_invocations = 0
+        self.reconcile_invocations = 0
+
+    def create_claim(
+        self,
+        command: CreateExternalClaimRequest,
+        request_fingerprint: str,
+    ) -> ClaimCreationOutcome:
+        self.create_invocations += 1
+        super().create_claim(command, request_fingerprint)
+        raise ClaimCreationAdapterFailure(
+            ClaimCreationFailureCode.TIMEOUT,
+            delivery=ClaimCreationDelivery.SUBMITTED,
+        )
+
+    def reconcile_claim(
+        self,
+        command: CreateExternalClaimRequest,
+        request_fingerprint: str,
+    ) -> ClaimCreationOutcome | None:
+        self.reconcile_invocations += 1
+        return super().reconcile_claim(command, request_fingerprint)
+
+
+class FailedReconciliationClaimsAdapter(InterruptedClaimsAdapter):
+    def reconcile_claim(
+        self,
+        command: CreateExternalClaimRequest,
+        request_fingerprint: str,
+    ) -> ClaimCreationOutcome | None:
+        del command, request_fingerprint
+        self.reconcile_invocations += 1
+        raise ClaimCreationAdapterFailure(
+            ClaimCreationFailureCode.UNAVAILABLE,
+            delivery=ClaimCreationDelivery.NOT_SUBMITTED,
+        )
+
+
+class RetryableClaimsAdapter(MockClaimsServiceAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.create_invocations = 0
+
+    def create_claim(
+        self,
+        command: CreateExternalClaimRequest,
+        request_fingerprint: str,
+    ) -> ClaimCreationOutcome:
+        self.create_invocations += 1
+        if self.create_invocations == 1:
+            raise ClaimCreationAdapterFailure(ClaimCreationFailureCode.UNAVAILABLE)
+        return super().create_claim(command, request_fingerprint)
+
+
+class TerminalFailureClaimsAdapter(MockClaimsServiceAdapter):
+    def create_claim(
+        self,
+        command: CreateExternalClaimRequest,
+        request_fingerprint: str,
+    ) -> ClaimCreationOutcome:
+        del command, request_fingerprint
+        raise ClaimCreationAdapterFailure(ClaimCreationFailureCode.ACCESS_DENIED)
+
+
+class RevisionBumpClaimsAdapter(MockClaimsServiceAdapter):
+    def __init__(self, repository: PersistenceRepository) -> None:
+        super().__init__()
+        self.repository = repository
+        self.create_invocations = 0
+
+    def create_claim(
+        self,
+        command: CreateExternalClaimRequest,
+        request_fingerprint: str,
+    ) -> ClaimCreationOutcome:
+        self.create_invocations += 1
+        outcome = super().create_claim(command, request_fingerprint)
+        claim = self.repository.get_claim_internal(command.working_claim_id)
+        assert claim is not None
+        self.repository.save_claim(
+            claim.model_copy(
+                update={
+                    'revision': claim.revision + 1,
+                    'updated_at': now_utc(),
+                }
+            ),
+            expected_revision=claim.revision,
+        )
+        return outcome
+
+
+class ReservationRaceClaimsAdapter(MockClaimsServiceAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.create_invocations = 0
+        self.reconcile_invocations = 0
+
+    def create_claim(
+        self,
+        command: CreateExternalClaimRequest,
+        request_fingerprint: str,
+    ) -> ClaimCreationOutcome:
+        self.create_invocations += 1
+        return super().create_claim(command, request_fingerprint)
+
+    def reconcile_claim(
+        self,
+        command: CreateExternalClaimRequest,
+        request_fingerprint: str,
+    ) -> ClaimCreationOutcome | None:
+        self.reconcile_invocations += 1
+        return super().reconcile_claim(command, request_fingerprint)
 
 
 def test_app_accepts_replaceable_claims_adapter_without_public_schema_changes() -> None:
@@ -1704,15 +2146,447 @@ def test_claim_creation_rejects_an_adapter_result_with_a_mismatched_source() -> 
     assert stored.revision == 1
 
 
+def test_claim_creation_reconciles_submitted_timeout_without_duplicate_creation() -> None:
+    repository = FixtureRepository()
+    adapter = InterruptedClaimsAdapter()
+    app = create_app(repository=repository, claims_service_adapter=adapter)
+    with TestClient(app) as client:
+        created = create_working_claim(client, 'interrupted-claim-creation')
+        claim = cast(dict[str, object], created['claim'])
+        session = cast(dict[str, object], created['session'])
+        claim_id = str(claim['claim_id'])
+        decision_id = 'dec_interrupted_claim_creation'
+        save_authorisation(
+            repository,
+            claim_id=claim_id,
+            customer_id='cus_demo',
+            session_id=str(session['session_id']),
+            decision_id=decision_id,
+            revision=1,
+            action=AgentAction.CREATE_CLAIM,
+            reason_code='CLAIM_CREATION_AUTHORISED',
+        )
+        payload = creation_payload(claim_id, 1, decision_id)
+
+        interrupted = client.post(
+            '/internal/v1/claims/create', headers=INTEGRATION_AUTH, json=payload
+        )
+        operation_id = claim_creation_operation_id(claim_id, decision_id)
+        unresolved = repository.get_claim_creation_operation(operation_id)
+        stored_before_reconcile = repository.get_claim_internal(claim_id)
+        recovered = client.post(
+            '/internal/v1/claims/create', headers=INTEGRATION_AUTH, json=payload
+        )
+
+    assert interrupted.status_code == 503
+    assert unresolved is not None
+    assert unresolved.status is ClaimCreationOperationStatus.UNKNOWN_OUTCOME
+    assert stored_before_reconcile is not None
+    assert stored_before_reconcile.external_claim is None
+    assert recovered.status_code == 200, recovered.text
+    assert adapter.create_invocations == 1
+    assert adapter.reconcile_invocations == 1
+    accepted = repository.get_claim_creation_operation(operation_id)
+    assert accepted is not None
+    assert accepted.status is ClaimCreationOperationStatus.ACCEPTED
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    assert stored.external_claim == accepted.result
+
+
+def test_claim_creation_reconciliation_preserves_original_submitted_delivery() -> None:
+    repository = FixtureRepository()
+    adapter = FailedReconciliationClaimsAdapter()
+    app = create_app(repository=repository, claims_service_adapter=adapter)
+    with TestClient(app) as client:
+        created = create_working_claim(client, 'failed-claim-reconciliation')
+        claim = cast(dict[str, object], created['claim'])
+        session = cast(dict[str, object], created['session'])
+        claim_id = str(claim['claim_id'])
+        decision_id = 'dec_failed_claim_reconciliation'
+        save_authorisation(
+            repository,
+            claim_id=claim_id,
+            customer_id='cus_demo',
+            session_id=str(session['session_id']),
+            decision_id=decision_id,
+            revision=1,
+            action=AgentAction.CREATE_CLAIM,
+            reason_code='CLAIM_CREATION_AUTHORISED',
+        )
+        payload = creation_payload(claim_id, 1, decision_id)
+
+        first = client.post('/internal/v1/claims/create', headers=INTEGRATION_AUTH, json=payload)
+        second = client.post('/internal/v1/claims/create', headers=INTEGRATION_AUTH, json=payload)
+
+    assert first.status_code == 503
+    assert second.status_code == 503
+    operation = repository.get_claim_creation_operation(
+        claim_creation_operation_id(claim_id, decision_id)
+    )
+    assert operation is not None
+    assert operation.status is ClaimCreationOperationStatus.UNKNOWN_OUTCOME
+    assert operation.delivery is ClaimCreationDelivery.SUBMITTED
+    assert operation.failure_code is ClaimCreationFailureCode.TIMEOUT
+    assert operation.recovery is ClaimCreationRecovery.RECONCILE_BEFORE_RETRY
+    assert adapter.create_invocations == 1
+    assert adapter.reconcile_invocations == 1
+
+
+def test_claim_creation_retries_same_operation_after_unsubmitted_failure() -> None:
+    repository = FixtureRepository()
+    adapter = RetryableClaimsAdapter()
+    app = create_app(repository=repository, claims_service_adapter=adapter)
+    with TestClient(app) as client:
+        created = create_working_claim(client, 'retryable-claim-creation')
+        claim = cast(dict[str, object], created['claim'])
+        session = cast(dict[str, object], created['session'])
+        claim_id = str(claim['claim_id'])
+        decision_id = 'dec_retryable_claim_creation'
+        save_authorisation(
+            repository,
+            claim_id=claim_id,
+            customer_id='cus_demo',
+            session_id=str(session['session_id']),
+            decision_id=decision_id,
+            revision=1,
+            action=AgentAction.CREATE_CLAIM,
+            reason_code='CLAIM_CREATION_AUTHORISED',
+        )
+        payload = creation_payload(claim_id, 1, decision_id)
+
+        unavailable = client.post(
+            '/internal/v1/claims/create', headers=INTEGRATION_AUTH, json=payload
+        )
+        operation_id = claim_creation_operation_id(claim_id, decision_id)
+        failed = repository.get_claim_creation_operation(operation_id)
+        retry = client.post('/internal/v1/claims/create', headers=INTEGRATION_AUTH, json=payload)
+
+    assert unavailable.status_code == 503
+    assert failed is not None
+    assert failed.status is ClaimCreationOperationStatus.RETRYABLE_FAILURE
+    assert retry.status_code == 201, retry.text
+    assert adapter.create_invocations == 2
+    accepted = repository.get_claim_creation_operation(operation_id)
+    assert accepted is not None
+    assert accepted.status is ClaimCreationOperationStatus.ACCEPTED
+    assert accepted.created_at == failed.created_at
+
+
+def test_claim_creation_persists_terminal_adapter_failure_without_claim_projection() -> None:
+    repository = FixtureRepository()
+    app = create_app(
+        repository=repository,
+        claims_service_adapter=TerminalFailureClaimsAdapter(),
+    )
+    with TestClient(app) as client:
+        created = create_working_claim(client, 'terminal-claim-creation')
+        claim = cast(dict[str, object], created['claim'])
+        session = cast(dict[str, object], created['session'])
+        claim_id = str(claim['claim_id'])
+        decision_id = 'dec_terminal_claim_creation'
+        save_authorisation(
+            repository,
+            claim_id=claim_id,
+            customer_id='cus_demo',
+            session_id=str(session['session_id']),
+            decision_id=decision_id,
+            revision=1,
+            action=AgentAction.CREATE_CLAIM,
+            reason_code='CLAIM_CREATION_AUTHORISED',
+        )
+
+        response = client.post(
+            '/internal/v1/claims/create',
+            headers=INTEGRATION_AUTH,
+            json=creation_payload(claim_id, 1, decision_id),
+        )
+
+    assert response.status_code == 502
+    assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
+    operation = repository.get_claim_creation_operation(
+        claim_creation_operation_id(claim_id, decision_id)
+    )
+    assert operation is not None
+    assert operation.status is ClaimCreationOperationStatus.TERMINAL_FAILURE
+    assert operation.recovery is ClaimCreationRecovery.REVIEW_REQUIRED
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    assert stored.external_claim is None
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'mongodb'])
+def test_claim_creation_recovers_recorded_result_after_settlement_revision_conflict(
+    repository_kind: str,
+) -> None:
+    repository: PersistenceRepository
+    if repository_kind == 'fixture':
+        repository = FixtureRepository()
+    else:
+        mongo = MongoDBRepository(
+            mongomock.MongoClient(),
+            f'claim_creation_settlement_{repository_kind}',
+        )
+        mongo._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+        repository = mongo
+    adapter = RevisionBumpClaimsAdapter(repository)
+    app = create_app(repository=repository, claims_service_adapter=adapter)
+    with TestClient(app) as client:
+        created = create_working_claim(client, f'settlement-conflict-{repository_kind}')
+        claim = cast(dict[str, object], created['claim'])
+        session = cast(dict[str, object], created['session'])
+        claim_id = str(claim['claim_id'])
+        decision_id = f'dec_settlement_conflict_{repository_kind}'
+        save_authorisation(
+            repository,
+            claim_id=claim_id,
+            customer_id='cus_demo',
+            session_id=str(session['session_id']),
+            decision_id=decision_id,
+            revision=1,
+            action=AgentAction.CREATE_CLAIM,
+            reason_code='CLAIM_CREATION_AUTHORISED',
+        )
+        payload = creation_payload(claim_id, 1, decision_id)
+
+        conflicted = client.post(
+            '/internal/v1/claims/create', headers=INTEGRATION_AUTH, json=payload
+        )
+        operation_id = claim_creation_operation_id(claim_id, decision_id)
+        pending = repository.get_claim_creation_operation(operation_id)
+        recovered = client.post(
+            '/internal/v1/claims/create', headers=INTEGRATION_AUTH, json=payload
+        )
+
+    assert conflicted.status_code == 409
+    assert conflicted.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert pending is not None
+    assert pending.status is ClaimCreationOperationStatus.SETTLEMENT_PENDING
+    assert pending.result is not None
+    assert pending.recovery is ClaimCreationRecovery.SETTLE_RECORDED_RESULT
+    assert recovered.status_code == 200, recovered.text
+    assert adapter.create_invocations == 1
+    accepted = repository.get_claim_creation_operation(operation_id)
+    assert accepted is not None
+    assert accepted.status is ClaimCreationOperationStatus.ACCEPTED
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    assert stored.external_claim == accepted.result
+    assert stored.revision == 3
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'mongodb'])
+def test_claim_creation_reservation_loser_reconciles_without_duplicate_provider_call(
+    repository_kind: str,
+) -> None:
+    repository: PersistenceRepository
+    if repository_kind == 'fixture':
+        repository = FixtureRepository()
+    else:
+        mongo = MongoDBRepository(
+            mongomock.MongoClient(),
+            f'claim_creation_reservation_race_{repository_kind}',
+        )
+        mongo._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+        repository = mongo
+    adapter = ReservationRaceClaimsAdapter()
+    app = create_app(repository=repository, claims_service_adapter=adapter)
+    with TestClient(app) as client:
+        created = create_working_claim(client, f'reservation-race-{repository_kind}')
+        claim = cast(dict[str, object], created['claim'])
+        session = cast(dict[str, object], created['session'])
+        claim_id = str(claim['claim_id'])
+        decision_id = f'dec_reservation_race_{repository_kind}'
+        save_authorisation(
+            repository,
+            claim_id=claim_id,
+            customer_id='cus_demo',
+            session_id=str(session['session_id']),
+            decision_id=decision_id,
+            revision=1,
+            action=AgentAction.CREATE_CLAIM,
+            reason_code='CLAIM_CREATION_AUTHORISED',
+        )
+        payload = creation_payload(claim_id, 1, decision_id)
+        command = CreateExternalClaimRequest.model_validate(payload)
+        fingerprint = request_fingerprint(command.model_dump(mode='json'))
+        reserve = repository.reserve_claim_creation_operation
+
+        def lose_reservation_race(operation: ClaimCreationOperationRecord) -> bool:
+            assert reserve(operation) is True
+            adapter.create_claim(command, fingerprint)
+            return False
+
+        repository.reserve_claim_creation_operation = lose_reservation_race  # type: ignore[method-assign]
+
+        response = client.post(
+            '/internal/v1/claims/create',
+            headers=INTEGRATION_AUTH,
+            json=payload,
+        )
+
+    assert response.status_code == 200, response.text
+    assert adapter.create_invocations == 1
+    assert adapter.reconcile_invocations == 1
+    operation = repository.get_claim_creation_operation(
+        claim_creation_operation_id(claim_id, decision_id)
+    )
+    assert operation is not None
+    assert operation.status is ClaimCreationOperationStatus.ACCEPTED
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    assert stored.external_claim == operation.result
+
+
+@pytest.mark.parametrize(
+    ('payload_override', 'field'),
+    [
+        ({'evidence_refs': ['evd_foreign']}, 'evidence_refs'),
+        ({'evidence_refs': ['evd_duplicate', 'evd_duplicate']}, 'evidence_refs'),
+        ({'evidence_snapshot_fingerprint': 'f' * 64}, 'evidence_snapshot_fingerprint'),
+        ({'route': 'standard_home_intake'}, 'route'),
+    ],
+)
+def test_claim_creation_rejects_context_mismatch_before_provider_invocation(
+    payload_override: dict[str, object],
+    field: str,
+) -> None:
+    repository = FixtureRepository()
+    adapter = RetryableClaimsAdapter()
+    app = create_app(repository=repository, claims_service_adapter=adapter)
+    with TestClient(app) as client:
+        created = create_working_claim(client, f'context-mismatch-{field}')
+        claim = cast(dict[str, object], created['claim'])
+        session = cast(dict[str, object], created['session'])
+        claim_id = str(claim['claim_id'])
+        decision_id = f'dec_context_mismatch_{field}'
+        save_authorisation(
+            repository,
+            claim_id=claim_id,
+            customer_id='cus_demo',
+            session_id=str(session['session_id']),
+            decision_id=decision_id,
+            revision=1,
+            action=AgentAction.CREATE_CLAIM,
+            reason_code='CLAIM_CREATION_AUTHORISED',
+        )
+        payload = {**creation_payload(claim_id, 1, decision_id), **payload_override}
+
+        response = client.post('/internal/v1/claims/create', headers=INTEGRATION_AUTH, json=payload)
+
+    assert response.status_code == 422
+    assert any(item['field'] == field for item in response.json()['error']['details'])
+    assert adapter.create_invocations == 0
+    assert (
+        repository.get_claim_creation_operation(claim_creation_operation_id(claim_id, decision_id))
+        is None
+    )
+
+
+def test_claim_creation_accepts_complete_nonempty_evidence_snapshot() -> None:
+    repository = FixtureRepository()
+    app = create_app(repository=repository)
+    with TestClient(app) as client:
+        created = create_working_claim(client, 'complete-evidence-snapshot')
+        claim = cast(dict[str, object], created['claim'])
+        session = cast(dict[str, object], created['session'])
+        claim_id = str(claim['claim_id'])
+        timestamp = now_utc()
+        evidence = EvidenceRecord(
+            evidence_id='evd_complete_claim_creation',
+            claim_id=claim_id,
+            kind='incident_image',
+            status=EvidenceStatus.RECEIVED,
+            file_status=EvidenceFileStatus.READY,
+            source=EvidenceSource.CLAIMANT,
+            related_fields=['incident.description'],
+            needed_for=['current_action'],
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+        repository.save_evidence(evidence, 'cus_demo')
+        decision_id = 'dec_complete_evidence_snapshot'
+        save_authorisation(
+            repository,
+            claim_id=claim_id,
+            customer_id='cus_demo',
+            session_id=str(session['session_id']),
+            decision_id=decision_id,
+            revision=1,
+            action=AgentAction.CREATE_CLAIM,
+            reason_code='CLAIM_CREATION_AUTHORISED',
+        )
+        payload = {
+            **creation_payload(claim_id, 1, decision_id),
+            'evidence_refs': [evidence.evidence_id],
+            'evidence_snapshot_fingerprint': evidence_snapshot_fingerprint([evidence]),
+        }
+
+        response = client.post('/internal/v1/claims/create', headers=INTEGRATION_AUTH, json=payload)
+
+    assert response.status_code == 201, response.text
+    operation = repository.get_claim_creation_operation(
+        claim_creation_operation_id(claim_id, decision_id)
+    )
+    assert operation is not None
+    assert operation.evidence_snapshot_fingerprint == payload['evidence_snapshot_fingerprint']
+    assert operation.status is ClaimCreationOperationStatus.ACCEPTED
+
+
+def test_mongodb_claim_creation_operation_survives_repository_restart() -> None:
+    mongo_client: Any = mongomock.MongoClient()
+    database_name = 'claim_creation_operation_restart'
+    repository = MongoDBRepository(mongo_client, database_name)
+    repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    restarted = MongoDBRepository(mongo_client, database_name)
+    restarted._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    app = create_app(repository=repository)
+    with TestClient(app) as api:
+        created = create_working_claim(api, 'mongo-operation-restart')
+        claim = cast(dict[str, object], created['claim'])
+        session = cast(dict[str, object], created['session'])
+        claim_id = str(claim['claim_id'])
+        decision_id = 'dec_mongo_operation_restart'
+        save_authorisation(
+            repository,
+            claim_id=claim_id,
+            customer_id='cus_demo',
+            session_id=str(session['session_id']),
+            decision_id=decision_id,
+            revision=1,
+            action=AgentAction.CREATE_CLAIM,
+            reason_code='CLAIM_CREATION_AUTHORISED',
+        )
+        response = api.post(
+            '/internal/v1/claims/create',
+            headers=INTEGRATION_AUTH,
+            json=creation_payload(claim_id, 1, decision_id),
+        )
+
+    operation = restarted.get_claim_creation_operation(
+        claim_creation_operation_id(claim_id, decision_id)
+    )
+    stored_claim = restarted.get_claim_internal(claim_id)
+
+    assert response.status_code == 201, response.text
+    assert operation is not None
+    assert operation.status is ClaimCreationOperationStatus.ACCEPTED
+    assert stored_claim is not None
+    assert stored_claim.external_claim == operation.result
+
+
 def test_mock_adapters_reject_changed_payload_for_the_same_provider_reference() -> None:
     claim_adapter = MockClaimsServiceAdapter()
     claim_command = CreateExternalClaimRequest.model_validate(
         creation_payload('clm_fixture', 1, 'dec_fixture')
     )
+    assert claim_adapter.reconcile_claim(claim_command, 'fingerprint-a') is None
     claim_adapter.create_claim(claim_command, 'fingerprint-a')
 
     with pytest.raises(AdapterIdempotencyConflict):
         claim_adapter.create_claim(claim_command, 'fingerprint-b')
+    with pytest.raises(AdapterIdempotencyConflict):
+        claim_adapter.reconcile_claim(claim_command, 'fingerprint-b')
 
     assessor_adapter = MockAssessorServiceAdapter()
     route_command = RouteAssessorRequest(

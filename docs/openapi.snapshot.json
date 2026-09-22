@@ -5153,6 +5153,12 @@
             "title": "Evidence Refs",
             "type": "array"
           },
+          "evidence_snapshot_fingerprint": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Evidence Snapshot Fingerprint",
+            "type": "string"
+          },
           "pending_evidence": {
             "items": {
               "$ref": "#/components/schemas/PendingEvidenceReference"
@@ -5178,6 +5184,7 @@
           "working_claim_id",
           "claim_revision",
           "authorised_decision_id",
+          "evidence_snapshot_fingerprint",
           "route"
         ],
         "title": "CreateExternalClaimRequest",

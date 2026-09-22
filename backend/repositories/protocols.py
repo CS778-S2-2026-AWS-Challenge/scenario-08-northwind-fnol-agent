@@ -14,6 +14,7 @@ from backend.domain.audit import (
     AuditSubjectType,
     AuditVisibility,
 )
+from backend.domain.claim_creation import ClaimCreationOperationRecord
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
@@ -722,6 +723,46 @@ class PersistenceRepository(ClaimRepository, Protocol):
         claim_id: str,
         customer_id: str,
     ) -> list[BranchEvaluationRecord]:
+        raise NotImplementedError
+
+    def get_claim_creation_operation(
+        self,
+        operation_id: str,
+    ) -> ClaimCreationOperationRecord | None:
+        """Return one provider-neutral Claim creation operation."""
+
+        raise NotImplementedError
+
+    def reserve_claim_creation_operation(
+        self,
+        operation: ClaimCreationOperationRecord,
+    ) -> bool:
+        """Atomically reserve the right to invoke Claim creation.
+
+        Returns ``True`` only to the caller that may contact the provider. An
+        identical persisted reservation returns ``False`` so the caller reconciles
+        instead of issuing a second side effect.
+        """
+
+        raise NotImplementedError
+
+    def save_claim_creation_operation(
+        self,
+        operation: ClaimCreationOperationRecord,
+    ) -> None:
+        """Persist a valid failure or unresolved operation transition."""
+
+        raise NotImplementedError
+
+    def save_claim_creation_outcome(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        operation: ClaimCreationOperationRecord,
+        branch_evaluation: BranchEvaluationRecord,
+    ) -> None:
+        """Atomically accept one provider result with the resulting Claim revision."""
+
         raise NotImplementedError
 
     def get_assessor_routing_operation(

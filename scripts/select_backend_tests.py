@@ -40,6 +40,7 @@ JOURNEY_CRITICAL_PATHS = frozenset(
         'backend/api/integrations.py',
         'backend/api/workbench.py',
         'backend/domain/branch_registry.py',
+        'backend/domain/claim_creation.py',
         'backend/domain/evidence.py',
         'backend/domain/external_service_registry.py',
         'backend/domain/external_services.py',
@@ -188,6 +189,7 @@ BACKEND_CONSUMER_RULES = (
     ),
     (
         (
+            'backend/domain/claim_creation.py',
             'backend/domain/external_service_registry.py',
             'backend/domain/external_services.py',
             'backend/services/external_services.py',
