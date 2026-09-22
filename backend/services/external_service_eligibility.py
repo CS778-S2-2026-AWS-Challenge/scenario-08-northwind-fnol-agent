@@ -40,6 +40,17 @@ def eligible_service_ids(
         for item in detected_service_intents(current_text, [], product_family=family)
     }
     for consent in claim.external_service_consents:
+        if consent.status.value == 'granted':
+            # The claimant already said yes. The lifecycle projection normally
+            # reflects that (a dispatched task moves off CONSENT_REQUIRED), but a
+            # service can still surface here through the CONSENT_REQUIRED
+            # fallback for identities with no task yet -- dispatch pending,
+            # skipped in this deployment, or a prior attempt whose failure was
+            # swallowed. Re-offering an already-granted permission is never
+            # correct; only an explicit fresh request reopens it.
+            if consent.service_identity not in renewed:
+                available.discard(consent.service_identity)
+            continue
         if consent.status.value not in {'declined', 'withdrawn'}:
             continue
         decided_at = consent.withdrawn_at or consent.granted_at

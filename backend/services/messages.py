@@ -19,6 +19,7 @@ from backend.domain.agent_action_registry import (
 )
 from backend.domain.audit import AuditEventEnvelope
 from backend.domain.branch_registry import (
+    BranchRegistrySnapshot,
     BranchRuleEvaluator,
     validate_registered_field_value,
 )
@@ -62,6 +63,7 @@ from backend.domain.models import (
     RuntimeTraceRecord,
     SessionRecord,
     StructuredFormField,
+    WorkflowState,
     WorkingClaim,
 )
 from backend.domain.realtime import AgentTurnProgressStage
@@ -126,6 +128,7 @@ from backend.services.external_service_offers import (
 )
 from backend.services.external_services import claimant_assessor_action, claimant_next_step
 from backend.services.fact_resolution import (
+    disposition_form_field,
     provenance_messages_for_fields,
     resolve_contents_item_change,
     resolve_form_change,
@@ -749,26 +752,10 @@ def _build_form_changes(
     evidence_media_types: dict[str, str] | None = None,
 ) -> dict[str, StructuredFormField]:
     form_changes: dict[str, StructuredFormField] = {}
-    normalised_proposals = list(proposals)
-    proposed_codes = {proposal.field_code for proposal in proposals}
-    if (
-        'vehicle.damage_description' in proposed_codes
-        and 'loss.description' not in proposed_codes
-        and (
-            'loss.description' not in existing_form
-            or existing_form['loss.description'].status is not FormStatus.CONFIRMED
-        )
-    ):
-        vehicle_damage = next(
-            proposal
-            for proposal in proposals
-            if proposal.field_code == 'vehicle.damage_description'
-        )
-        normalised_proposals.append(
-            vehicle_damage.model_copy(update={'field_code': 'loss.description'})
-        )
-
-    for proposal in normalised_proposals:
+    # Each registered fact is written only when the model proposes it. Copying
+    # one field's value into another (vehicle damage into loss description)
+    # produced facts the claimant never stated.
+    for proposal in proposals:
         if proposal.relation is AssertionRelation.IRRELEVANT:
             continue
         if proposal.field_code not in REGISTERED_FIELD_CODES:
@@ -836,6 +823,24 @@ def _build_form_changes(
             and proposal.source is not FormSource.CLAIMANT
             and proposal.value == existing_field.value
         ):
+            continue
+        if proposal.status in {FormStatus.UNAVAILABLE, FormStatus.PENDING_GENERATION}:
+            # A disposition, not a value: the claimant cannot supply this yet, or
+            # a third party will. It never overrides a fact already confirmed.
+            if existing_field is not None and existing_field.status is FormStatus.CONFIRMED:
+                continue
+            if authority_outcome is not AuthorityOutcome.AUTHORISED:
+                continue
+            form_changes[proposal.field_code] = disposition_form_field(
+                existing_field,
+                proposal,
+                source_ref=proposal.source_evidence_id or claimant_message.message_id,
+                timestamp=timestamp,
+                updated_by=ActorReference(
+                    actor_type=ActorType.AGENT,
+                    actor_id=proposal_source.value,
+                ),
+            )
             continue
         accepted_status = (
             proposal.status
@@ -1225,10 +1230,18 @@ def _apply_question_accounting(
             responsible_party=ResponsibleParty.CLAIMS_PROFESSIONAL,
             required_items=list(next_step.required_items),
         )
+        # The budget is a fact about the session, projected into next_step and
+        # shown to the model as remaining_questions. A model-authored reply
+        # stays intact; only the controlled template is replaced.
         return (
             session.model_copy(update={'post_session_follow_up_required': True}),
             paused_step,
-            'I have saved what you shared. Northwind may follow up on the remaining information.',
+            response_text
+            if proposal.validated_turn is not None
+            else (
+                'I have saved what you shared. '
+                'Northwind may follow up on the remaining information.'
+            ),
         )
 
     previously_requested = {
@@ -1707,6 +1720,43 @@ def _submit_namespaced_runtime_turn(
     return response
 
 
+def _document_projection(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    branch_evaluation: BranchEvaluationResult,
+    registry: BranchRegistrySnapshot,
+) -> tuple[dict[str, object], ...]:
+    """Which documents this report should carry and which have arrived.
+
+    Kinds come from the active branches' registry entries; arrival is read from
+    the claim's evidence. The model decides whether to ask the claimant, wait,
+    or source a document from a third party; Runtime only reports the state.
+    """
+
+    wanted: dict[str, str] = {}
+    for branch_id in branch_evaluation.active_branches:
+        branch = registry.branch_by_id.get(branch_id)
+        if branch is None:
+            continue
+        for kind in sorted(branch.document_requirements):
+            wanted.setdefault(kind, branch_id)
+    if not wanted:
+        return ()
+    received: dict[str, list[str]] = {}
+    for item in repository.list_evidence(claim.claim_id, claim.customer_id):
+        if item.status is EvidenceStatus.RECEIVED:
+            received.setdefault(item.kind, []).append(item.evidence_id)
+    return tuple(
+        {
+            'kind': kind,
+            'branch': branch_id,
+            'status': 'received' if kind in received else 'not_received',
+            'evidence_ids': received.get(kind, []),
+        }
+        for kind, branch_id in wanted.items()
+    )
+
+
 def _live_mutation_command(
     *,
     claim: WorkingClaim,
@@ -1736,7 +1786,13 @@ def _live_mutation_command(
             'expected_revision': claim.revision,
         }
     elif form_changes or contents_item_changes:
-        action_code = 'claim.apply_fact_patch'
+        # Once the report has been created, later facts are corrections that
+        # keep every earlier assertion; before that they are ordinary patches.
+        action_code = (
+            'claim.correct_fact'
+            if claim.claim_state.workflow_state is WorkflowState.CREATED
+            else 'claim.apply_fact_patch'
+        )
         payload = {
             'claim_id': claim.claim_id,
             'fact_patches': [
@@ -2326,10 +2382,28 @@ def submit_message(
             AuthorityOutcome.AUTHORISED,
             AgentProposalSource.MODEL_GATEWAY,
             None,
+            None,
+            {item.evidence_id: item.media_type for item in turn_evidence},
         )
         projected_claim = claim.model_copy(update={'form': {**claim.form, **resolved}})
         family = resolve_turn_family(projected_claim, None, None, model_family_judgment=True)
-        accepted_family = family.product_family if family.status == 'authoritative' else None
+        # D9/INV-14: the model's understood family unlocks family-specific
+        # capability this same turn, even before the claimant confirms it —
+        # but only when it is backed by the claimant's own words. A field
+        # already CONFIRMED settles the question outright; a same-turn
+        # PROPOSED value only counts if its source is CLAIMANT (a real quote
+        # supports it), never a bare model inference with no quote behind it.
+        proposed_family_field = resolved.get('claim.product_family')
+        accepted_family = (
+            family.product_family
+            if family.status == 'authoritative'
+            or (
+                family.status == 'inferred'
+                and proposed_family_field is not None
+                and proposed_family_field.source is FormSource.CLAIMANT
+            )
+            else None
+        )
         try:
             return eligible_service_ids(
                 repository,
@@ -2409,6 +2483,18 @@ def submit_message(
             item
             for item in repository.list_handoffs(claim_id, principal.subject)
             if item.status.value not in {'resolved', 'cancelled'}
+        ),
+        last_question=(
+            {
+                'field_codes': list(session.question_history[-1].field_codes),
+                'asked_at': session.question_history[-1].asked_at.isoformat(),
+            }
+            if session.question_history
+            else None
+        ),
+        remaining_questions=max(0, session.question_budget - session.question_turn_count),
+        documents=_document_projection(
+            repository, claim, branch_evaluation, branch_evaluator.registry
         ),
     )
     agent_context = replace(agent_context, safety_interrupt=safety_interrupt)

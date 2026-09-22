@@ -131,6 +131,9 @@ class ClaimContextHandlerBinding:
 _CLAIMANT_RUNTIME_BINDINGS: Mapping[str, str | None] = MappingProxyType(
     {
         'claim.apply_fact_patch': 'claim_store.compare_and_set',
+        # Post-creation facts and corrections: same CAS write, appended to the
+        # field's assertion history rather than replacing the created snapshot.
+        'claim.correct_fact': 'claim_store.compare_and_set',
         'claim.register_evidence': 'claim_store.compare_and_set',
         'claim.prepare_creation': None,
         'claim.create': 'claims_service.create_claim',
