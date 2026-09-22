@@ -926,7 +926,10 @@ class FixtureRepository(PersistenceRepository):
                 for evidence_id in message.evidence_refs
                 if (item := available_evidence.get(evidence_id)) is not None
             ]
-            reply = available_messages.get(message.in_reply_to or '')
+            reply = pending_by_id.get(
+                message.in_reply_to or '',
+                available_messages.get(message.in_reply_to or ''),
+            )
             duplicate_client_message = next(
                 (
                     item
@@ -1007,10 +1010,14 @@ class FixtureRepository(PersistenceRepository):
             messages_by_id = {message.message_id: message for message in graph.messages}
             if len(messages_by_id) != len(graph.messages):
                 raise ValueError('Validation seed messages must be unique.')
-            validate_message_graph(graph.messages)
             evidence_by_id = {item.evidence_id: item for item in graph.evidence}
             if len(evidence_by_id) != len(graph.evidence):
                 raise ValueError('Validation seed evidence must be unique.')
+            self._preflight_messages(
+                graph.messages,
+                sessions=graph.sessions,
+                evidence=graph.evidence,
+            )
 
             self.save_staff_presence(graph.staff_presence, graph.expected_presence_revision)
             sessions_by_claim: dict[str, list[SessionRecord]] = {
@@ -1033,7 +1040,7 @@ class FixtureRepository(PersistenceRepository):
                     self.save_session(session)
             for evidence in graph.evidence:
                 self.save_evidence(evidence, claims_by_id[evidence.claim_id].customer_id)
-            for message in graph.messages:
+            for message in order_messages(graph.messages):
                 self.save_message(message, claims_by_id[message.claim_id].customer_id)
             self.save_idempotency(graph.idempotency)
         except Exception:
