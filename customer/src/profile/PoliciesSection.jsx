@@ -24,8 +24,9 @@ export default function PoliciesSection({
   const [notice, setNotice] = useState(null)
   const inputRef = useRef(null)
   const policies = resource.items
+  const authoritative = policies !== null && !resource.error && !resource.loading && !resource.stale
 
-  useEffect(() => { if (editor) inputRef.current?.focus() }, [editor])
+  useEffect(() => { if (editor && authoritative) inputRef.current?.focus() }, [authoritative, editor])
 
   function closeEditor() {
     if (editor?.mode === 'create') onAbandonCreate('policy', editor.attemptId)
@@ -78,33 +79,39 @@ export default function PoliciesSection({
         title="Policies"
         description="Review the policy numbers saved to your account. A saved number does not confirm coverage."
       />
-      <ResourceError message={resource.error} onRetry={onReload} />
+      <ResourceError
+        message={resource.error}
+        onRetry={onReload}
+        retainedLabel={resource.stale ? 'saved policy numbers' : ''}
+      />
       {policies === null && !resource.error && <p className="profile-assets-loading" role="status">Loading saved policy numbers…</p>}
-      {policies && policies.length === 0 && !editor && <p className="profile-assets-empty">No policy numbers saved.</p>}
-      {policies && policies.length > 0 && (
+      {authoritative && policies.length === 0 && !editor && <p className="profile-assets-empty">No policy numbers saved.</p>}
+      {policies !== null && policies.length > 0 && (
         <ul className="profile-record-list" aria-label="Saved policy numbers">
           {policies.map((policy) => (
             <li key={policy.policy_id} className="profile-record-row">
               <span><strong>Policy number</strong><span>{maskPolicyNumber(policy.policy_number)}</span></span>
-              <button
-                className="profile-quiet-action"
-                type="button"
-                disabled={Boolean(pending[`policy:${policy.policy_id}`])}
-                aria-label={`Edit policy number ${maskPolicyNumber(policy.policy_number)}`}
-                onClick={() => beginEdit(policy)}
-              >
-                Edit
-              </button>
+              {authoritative && (
+                <button
+                  className="profile-quiet-action"
+                  type="button"
+                  disabled={Boolean(pending[`policy:${policy.policy_id}`])}
+                  aria-label={`Edit policy number ${maskPolicyNumber(policy.policy_number)}`}
+                  onClick={() => beginEdit(policy)}
+                >
+                  Edit
+                </button>
+              )}
             </li>
           ))}
         </ul>
       )}
-      {policies && !editor && (
+      {authoritative && !editor && (
         <button className="profile-asset-add-action" type="button" disabled={Boolean(pending['policy-create'])} onClick={beginCreate}>
           <span aria-hidden="true">+</span> Add policy number
         </button>
       )}
-      {policies && editor && (
+      {authoritative && editor && (
         <form className="profile-edit-form profile-record-form" onSubmit={save}>
           <h3>{editor.mode === 'create' ? 'Add policy number' : 'Edit policy number'}</h3>
           <label htmlFor="profile-policy-number">Policy number</label>

@@ -22,6 +22,7 @@ export default function IdentityDocuments({
   onUpdate,
 }) {
   const documents = resource.items
+  const authoritative = documents !== null && !resource.error && !resource.loading && !resource.stale
   const [editor, setEditor] = useState(null)
   const [draft, setDraft] = useState('')
   const [notice, setNotice] = useState(null)
@@ -32,8 +33,8 @@ export default function IdentityDocuments({
   const returnFocusRef = useRef(null)
 
   useEffect(() => {
-    if (editor?.mode === 'add') selectRef.current?.focus()
-    if (editor?.mode === 'edit') inputRef.current?.focus()
+    if (authoritative && editor?.mode === 'add') selectRef.current?.focus()
+    if (authoritative && editor?.mode === 'edit') inputRef.current?.focus()
     if (!editor && documents && returnFocusRef.current) {
       const target = returnFocusRef.current.mode === 'add'
         ? addButtonRef.current
@@ -41,7 +42,7 @@ export default function IdentityDocuments({
       target?.focus()
       returnFocusRef.current = null
     }
-  }, [editor, documents])
+  }, [authoritative, editor, documents])
 
   function closeEditor() {
     if (editor?.mode === 'add') onAbandonCreate('identity', editor.attemptId)
@@ -109,40 +110,46 @@ export default function IdentityDocuments({
     <div className="profile-identity-documents">
       <p className="profile-helper-copy">Saved numbers are shown only in masked form. Saving a number does not verify your identity.</p>
       <FeatureNotice notice={notice} />
-      <ResourceError message={resource.error} onRetry={onReload} />
+      <ResourceError
+        message={resource.error}
+        onRetry={onReload}
+        retainedLabel={resource.stale ? 'saved identity documents' : ''}
+      />
       {documents === null && !resource.error && <p className="profile-assets-loading" role="status">Loading saved identity documents…</p>}
-      {documents && (
+      {documents !== null && (
         <>
-          {documents.length === 0
+          {authoritative && documents.length === 0
             ? <p className="profile-assets-empty">No identity documents saved.</p>
-            : (
+            : documents.length > 0 && (
               <ul className="profile-identity-list" aria-label="Saved identity documents">
                 {documents.map((document) => (
                   <li key={document.identity_id} className="profile-identity-row">
                     <span><strong>{documentLabel(document.document_type)}</strong><span>{document.masked_document_number}</span></span>
-                    <button
-                      ref={(node) => {
-                        if (node) editButtonRefs.current.set(document.identity_id, node)
-                        else editButtonRefs.current.delete(document.identity_id)
-                      }}
-                      className="profile-quiet-action"
-                      type="button"
-                      disabled={Boolean(pending[`identity:${document.identity_id}`])}
-                      onClick={() => beginEdit(document)}
-                      aria-label={`Edit ${documentLabel(document.document_type)} ${document.masked_document_number}`}
-                    >Edit</button>
+                    {authoritative && (
+                      <button
+                        ref={(node) => {
+                          if (node) editButtonRefs.current.set(document.identity_id, node)
+                          else editButtonRefs.current.delete(document.identity_id)
+                        }}
+                        className="profile-quiet-action"
+                        type="button"
+                        disabled={Boolean(pending[`identity:${document.identity_id}`])}
+                        onClick={() => beginEdit(document)}
+                        aria-label={`Edit ${documentLabel(document.document_type)} ${document.masked_document_number}`}
+                      >Edit</button>
+                    )}
                   </li>
                 ))}
               </ul>
             )}
-          {!editor && (
+          {authoritative && !editor && (
             <button ref={addButtonRef} className="profile-asset-add-action" type="button" disabled={Boolean(pending['identity-create'])} onClick={beginAdd}>
               <span aria-hidden="true">+</span> Add identity document
             </button>
           )}
         </>
       )}
-      {editor && documents && (
+      {authoritative && editor && (
         <form className="profile-edit-form profile-identity-form" onSubmit={save}>
           <h3>{editor.mode === 'add' ? 'Add identity document' : `Edit ${documentLabel(editingDocument?.document_type)}`}</h3>
           {editor.mode === 'add' ? (

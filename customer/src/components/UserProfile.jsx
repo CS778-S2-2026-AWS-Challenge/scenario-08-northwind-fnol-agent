@@ -89,10 +89,10 @@ export default function UserProfile({
   const SectionTitle = activeSection ? 'h1' : 'h2'
   const resolvedController = controller || {
     resources: {
-      assets: { items: assets, error: assetsError, loading: assets === null },
-      policies: { items: [], error: '', loading: false },
-      payments: { items: [], error: '', loading: false },
-      identities: { items: [], error: '', loading: false },
+      assets: { items: assets, error: assetsError, loading: assets === null, stale: false },
+      policies: { items: [], error: '', loading: false, stale: false },
+      payments: { items: [], error: '', loading: false, stale: false },
+      identities: { items: [], error: '', loading: false, stale: false },
     },
     pending: {},
     beginCreate: (resource) => `${resource}-attempt-${globalThis.crypto?.randomUUID?.() || Date.now()}`,

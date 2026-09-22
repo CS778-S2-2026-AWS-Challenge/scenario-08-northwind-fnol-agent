@@ -310,7 +310,7 @@ export default function AssetsSection({
   const category = categoryFor(selectedCategory)
   if (category) {
     const categoryAssets = (assets || []).filter((asset) => asset.asset_type === category.key)
-    const ready = assets !== null && !resource.error
+    const ready = assets !== null && !resource.error && !resource.loading && !resource.stale
     const creating = editor?.mode === 'create' && editor.type === category.key
     return (
       <section className="profile-section" aria-labelledby={`profile-assets-${category.key}-title`}>
@@ -337,9 +337,13 @@ export default function AssetsSection({
             <span aria-hidden="true">+</span> {category.addLabel}
           </button>
         </header>
-        <ResourceError message={resource.error} onRetry={onReload} />
+        <ResourceError
+          message={resource.error}
+          onRetry={onReload}
+          retainedLabel={resource.stale ? 'saved assets' : ''}
+        />
         {assets === null && !resource.error && <p className="profile-assets-loading" role="status">Loading saved assets…</p>}
-        {creating && (
+        {creating && ready && (
           <AssetEditor
             key={editor.attemptId}
             assetType={category.key}
@@ -374,7 +378,11 @@ export default function AssetsSection({
     <section className="profile-section" aria-labelledby="profile-insured-assets">
       <FeatureNotice notice={notice} />
       <SectionHeading as={Heading} id="profile-insured-assets" title="Insured assets" description="Review the vehicles, properties, and valuable items saved to your Profile." />
-      <ResourceError message={resource.error} onRetry={onReload} />
+      <ResourceError
+        message={resource.error}
+        onRetry={onReload}
+        retainedLabel={resource.stale ? 'saved assets' : ''}
+      />
       {assets === null && !resource.error && <p className="profile-assets-loading" role="status">Loading saved assets…</p>}
       <div className="profile-category-list" aria-label="Insured asset categories">
         {ASSET_CATEGORIES.map((assetCategory) => {

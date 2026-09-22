@@ -23,11 +23,14 @@ export function FeatureNotice({ notice }) {
   )
 }
 
-export function ResourceError({ message, onRetry }) {
+export function ResourceError({ message, onRetry, retainedLabel = '' }) {
   if (!message) return null
   return (
     <div className="profile-assets-error" role="alert">
-      <p>{message}</p>
+      <p>
+        {message}
+        {retainedLabel && ` Previously loaded ${retainedLabel} are shown below and may be out of date. Reload before making changes.`}
+      </p>
       <button className="profile-quiet-action" type="button" onClick={() => { void onRetry() }}>
         Try again
       </button>

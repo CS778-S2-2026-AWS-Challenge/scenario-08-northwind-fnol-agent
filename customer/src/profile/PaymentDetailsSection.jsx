@@ -10,6 +10,7 @@ function accountTypeLabel(value = '') {
 
 export default function PaymentDetailsSection({ resource, headingAs: Heading = 'h1', onReload }) {
   const destinations = resource.items
+  const authoritative = destinations !== null && !resource.error && !resource.loading && !resource.stale
   return (
     <section className="profile-section" aria-labelledby="profile-payment-details">
       <SectionHeading
@@ -21,9 +22,13 @@ export default function PaymentDetailsSection({ resource, headingAs: Heading = '
       <p className="profile-helper-copy">
         Northwind can store an account type and masked account number. Bank name, account holder, and a designated Claim payment destination are not part of the current account contract.
       </p>
-      <ResourceError message={resource.error} onRetry={onReload} />
+      <ResourceError
+        message={resource.error}
+        onRetry={onReload}
+        retainedLabel={resource.stale ? 'saved payment details' : ''}
+      />
       {destinations === null && !resource.error && <p className="profile-assets-loading" role="status">Loading saved payment details…</p>}
-      {destinations && (
+      {destinations !== null && (
         <>
           <dl className="profile-summary-list profile-compact-summary-list">
             <SummaryRow label="Saved accounts" value={`${destinations.length}`} />
@@ -31,9 +36,9 @@ export default function PaymentDetailsSection({ resource, headingAs: Heading = '
             <SummaryRow label="Account holder" value="Not supported" />
             <SummaryRow label="Claim payment destination" value="Not designated" />
           </dl>
-          {destinations.length === 0
+          {authoritative && destinations.length === 0
             ? <p className="profile-assets-empty">No payment details saved.</p>
-            : (
+            : destinations.length > 0 && (
               <ul className="profile-record-list" aria-label="Saved payment details">
                 {destinations.map((destination) => (
                   <li key={destination.payment_destination_id} className="profile-record-row">

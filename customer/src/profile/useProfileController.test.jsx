@@ -44,6 +44,50 @@ const asset = {
   revision: 1,
 }
 
+const policy = {
+  policy_id: 'pol_11111111111111111111',
+  policy_number: 'NTH-1234',
+  revision: 1,
+}
+
+const payment = {
+  payment_destination_id: 'pay_11111111111111111111',
+  account_type: 'everyday',
+  masked_account_number: '•••• 4321',
+  revision: 1,
+}
+
+const identity = {
+  identity_id: 'idn_11111111111111111111',
+  document_type: 'driver_licence',
+  masked_document_number: '****1234',
+  revision: 1,
+}
+
+const resourceCases = [
+  {
+    label: 'Policies',
+    resource: 'policies',
+    listMethod: 'listAccountPolicies',
+    reloadMethod: 'reloadPolicies',
+    records: [policy],
+  },
+  {
+    label: 'Identity',
+    resource: 'identities',
+    listMethod: 'listAccountIdentityDocuments',
+    reloadMethod: 'reloadIdentities',
+    records: [identity],
+  },
+  {
+    label: 'Payment',
+    resource: 'payments',
+    listMethod: 'listAccountPaymentDestinations',
+    reloadMethod: 'reloadPayments',
+    records: [payment],
+  },
+]
+
 function emptyPage(items = []) {
   return { items, page: { next_cursor: null } }
 }
@@ -117,6 +161,41 @@ describe('useProfileController mutation recovery', () => {
     expect(api.updateAccountProfile).toHaveBeenCalledOnce()
   })
 
+  it.each(resourceCases)('keeps $label unavailable when its initial load fails', async ({ listMethod, resource }) => {
+    api[listMethod].mockRejectedValueOnce({ code: 'NETWORK_ERROR' })
+    const { result } = renderController()
+
+    await waitFor(() => expect(result.current.controller.resources[resource].error).not.toBe(''))
+
+    expect(result.current.controller.resources[resource]).toMatchObject({
+      items: null,
+      loading: false,
+      stale: false,
+    })
+  })
+
+  it.each(resourceCases)(
+    'marks retained $label data stale when a reload fails',
+    async ({ listMethod, records, reloadMethod, resource }) => {
+      api[listMethod]
+        .mockResolvedValueOnce(emptyPage(records))
+        .mockRejectedValueOnce({ code: 'NETWORK_ERROR' })
+      const { result } = renderController()
+
+      await waitFor(() => expect(result.current.controller.resources[resource].items).toEqual(records))
+      await act(async () => {
+        await expect(result.current.controller[reloadMethod]()).rejects.toMatchObject({ code: 'NETWORK_ERROR' })
+      })
+
+      expect(result.current.controller.resources[resource]).toMatchObject({
+        items: records,
+        loading: false,
+        stale: true,
+      })
+      expect(result.current.controller.resources[resource].error).not.toBe('')
+    },
+  )
+
   it('reuses the same idempotency key when an asset response is lost and readback cannot find it', async () => {
     api.createAccountAsset
       .mockRejectedValueOnce({ code: 'NETWORK_ERROR' })
@@ -181,5 +260,43 @@ describe('useProfileController mutation recovery', () => {
 
     expect(result.current.controller.resources.assets.items).toEqual([latestAsset])
     expect(api.updateAccountAsset).toHaveBeenCalledOnce()
+  })
+
+  it('replays an ambiguous identity create with the same key instead of matching masked collisions', async () => {
+    const concurrentIdentity = {
+      ...identity,
+      identity_id: 'idn_22222222222222222222',
+      revision: 2,
+    }
+    const createdIdentity = {
+      ...identity,
+      identity_id: 'idn_33333333333333333333',
+      revision: 1,
+    }
+    api.listAccountIdentityDocuments
+      .mockResolvedValueOnce(emptyPage([identity]))
+      .mockResolvedValueOnce(emptyPage([identity, concurrentIdentity]))
+    api.createAccountIdentityDocument
+      .mockRejectedValueOnce({ code: 'NETWORK_ERROR' })
+      .mockResolvedValueOnce(createdIdentity)
+    const { result } = renderController()
+
+    await waitFor(() => expect(result.current.controller.resources.identities.items).toEqual([identity]))
+    const attemptId = result.current.controller.beginCreate('identity')
+    let saved
+    await act(async () => {
+      saved = await result.current.controller.createIdentity({
+        documentType: 'driver_licence',
+        documentNumber: 'DL9991234',
+        attemptId,
+      })
+    })
+
+    expect(saved).toEqual(createdIdentity)
+    expect(api.createAccountIdentityDocument).toHaveBeenCalledTimes(2)
+    expect(api.createAccountIdentityDocument.mock.calls[1][0])
+      .toEqual(api.createAccountIdentityDocument.mock.calls[0][0])
+    expect(api.listAccountIdentityDocuments).toHaveBeenCalledOnce()
+    expect(result.current.controller.resources.identities.items).toEqual([createdIdentity, identity])
   })
 })

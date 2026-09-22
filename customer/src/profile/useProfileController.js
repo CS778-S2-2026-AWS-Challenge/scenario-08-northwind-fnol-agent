@@ -45,7 +45,7 @@ const RESOURCE_CONFIG = {
 }
 
 function emptyResource() {
-  return { items: null, error: '', loading: false }
+  return { items: null, error: '', loading: false, stale: false }
 }
 
 function initialResources() {
@@ -145,6 +145,7 @@ export default function useProfileController({ account, setAccount, enabled = tr
         items: preserveItems ? current[name].items : null,
         error: '',
         loading: true,
+        stale: preserveItems ? current[name].stale : false,
       },
     }))
     try {
@@ -152,7 +153,7 @@ export default function useProfileController({ account, setAccount, enabled = tr
       if (controller.signal.aborted) return previousItems || []
       setResources((current) => ({
         ...current,
-        [name]: { items, error: '', loading: false },
+        [name]: { items, error: '', loading: false, stale: false },
       }))
       return items
     } catch (error) {
@@ -160,9 +161,10 @@ export default function useProfileController({ account, setAccount, enabled = tr
       setResources((current) => ({
         ...current,
         [name]: {
-          items: preserveItems ? (current[name].items || []) : [],
+          items: preserveItems ? current[name].items : null,
           error: loadFailureMessage(error, config.label),
           loading: false,
+          stale: preserveItems && current[name].items !== null,
         },
       }))
       throw error
@@ -243,7 +245,7 @@ export default function useProfileController({ account, setAccount, enabled = tr
       const nextItems = items.some((item) => item[idField] === record[idField])
         ? items.map((item) => item[idField] === record[idField] ? record : item)
         : [record, ...items]
-      return { ...current, [name]: { items: nextItems, error: '', loading: false } }
+      return { ...current, [name]: { items: nextItems, error: '', loading: false, stale: false } }
     })
   }, [])
 
@@ -253,6 +255,7 @@ export default function useProfileController({ account, setAccount, enabled = tr
     action,
     execute,
     reconcile,
+    recoverUnknown,
   }) => {
     const before = resourcesRef.current[resource].items || []
     setPendingScope(scope, true)
@@ -266,6 +269,18 @@ export default function useProfileController({ account, setAccount, enabled = tr
       const unknownOutcome = error?.code === 'NETWORK_ERROR'
       if (!revisionConflict && !changedResource && !unknownOutcome) throw error
 
+      let outcomeError = error
+      if (unknownOutcome && recoverUnknown) {
+        try {
+          const recovered = await recoverUnknown()
+          upsertResource(resource, recovered)
+          return recovered
+        } catch (recoveryError) {
+          if (recoveryError?.code !== 'NETWORK_ERROR') throw recoveryError
+          outcomeError = recoveryError
+        }
+      }
+
       let latest
       try {
         latest = await loadResource(resource, { preserveItems: true })
@@ -276,11 +291,11 @@ export default function useProfileController({ account, setAccount, enabled = tr
         )
       }
       if (unknownOutcome) {
-        const reconciled = reconcile(latest, before)
+        const reconciled = reconcile?.(latest, before)
         if (reconciled) return reconciled
         throw new ProfileMutationError(
           `Northwind reloaded ${RESOURCE_CONFIG[resource].label} after the connection was lost but could not confirm that ${action} completed. Your draft is still here; review the latest saved list and retry when ready.`,
-          { code: error.code, kind: 'unknown', cause: error },
+          { code: outcomeError.code, kind: 'unknown', cause: outcomeError },
         )
       }
       throw new ProfileMutationError(
@@ -380,23 +395,18 @@ export default function useProfileController({ account, setAccount, enabled = tr
   }, [runResourceMutation])
 
   const createIdentity = useCallback(async ({ documentType, documentNumber, attemptId }) => {
+    const idempotencyKey = createKey('identity', attemptId)
+    const create = () => createAccountIdentityDocument({
+      documentType,
+      documentNumber,
+      idempotencyKey,
+    })
     const saved = await runResourceMutation({
       scope: 'identity-create',
       resource: 'identities',
       action: 'the identity-document save',
-      execute: () => createAccountIdentityDocument({
-        documentType,
-        documentNumber,
-        idempotencyKey: createKey('identity', attemptId),
-      }),
-      reconcile: (latest, before) => {
-        const previousIds = new Set(before.map((item) => item.identity_id))
-        return latest.find((item) => (
-          !previousIds.has(item.identity_id)
-          && item.document_type === documentType
-          && maskedValueMatches(item.masked_document_number, documentNumber)
-        ))
-      },
+      execute: create,
+      recoverUnknown: create,
     })
     abandonCreate('identity', attemptId)
     return saved
@@ -426,9 +436,9 @@ export default function useProfileController({ account, setAccount, enabled = tr
     savePolicy,
     createIdentity,
     saveIdentity,
-    reloadAssets: () => loadResource('assets'),
-    reloadPolicies: () => loadResource('policies'),
-    reloadPayments: () => loadResource('payments'),
-    reloadIdentities: () => loadResource('identities'),
+    reloadAssets: () => loadResource('assets', { preserveItems: true }),
+    reloadPolicies: () => loadResource('policies', { preserveItems: true }),
+    reloadPayments: () => loadResource('payments', { preserveItems: true }),
+    reloadIdentities: () => loadResource('identities', { preserveItems: true }),
   }
 }
