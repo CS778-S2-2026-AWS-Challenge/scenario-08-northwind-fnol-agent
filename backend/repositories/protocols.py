@@ -123,6 +123,7 @@ class IdempotencyRecord:
     message_turn_kind: Literal['legacy_agent', 'message_only'] | None = None
     message_turn_revision: int | None = None
     response_payload: dict[str, Any] | None = None
+    retired: bool = False
 
     def __post_init__(self) -> None:
         if (self.message_turn_kind is None) != (self.message_turn_revision is None):

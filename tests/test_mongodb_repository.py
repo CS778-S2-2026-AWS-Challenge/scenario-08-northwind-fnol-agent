@@ -632,6 +632,162 @@ def test_message_turn_alias_reservation_has_provider_parity(
         )
 
 
+class _BlockingIdempotencyStore(dict[tuple[str, str, str], IdempotencyRecord]):
+    def __init__(
+        self,
+        records: dict[tuple[str, str, str], IdempotencyRecord],
+        blocked_key: tuple[str, str, str],
+    ) -> None:
+        super().__init__(records)
+        self.blocked_key = blocked_key
+        self.reached = Event()
+        self.release = Event()
+        self._blocked = False
+
+    def __deepcopy__(
+        self, memo: dict[int, object]
+    ) -> dict[tuple[str, str, str], IdempotencyRecord]:
+        return dict(self)
+
+    def get(
+        self,
+        key: tuple[str, str, str],
+        default: IdempotencyRecord | None = None,
+    ) -> IdempotencyRecord | None:
+        if key == self.blocked_key and not self._blocked:
+            self._blocked = True
+            self.reached.set()
+            assert self.release.wait(timeout=2)
+        return super().get(key, default)
+
+
+def test_fixture_promotion_serializes_conflicting_target_key_write() -> None:
+    repository = FixtureRepository()
+    claim = _claim().model_copy(update={'customer_id': 'anonymous:promotion'})
+    session = _session(claim).model_copy(update={'customer_id': claim.customer_id})
+    repository.create_claim(claim, session)
+    original = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/api/v1/claims',
+        key='promotion-key',
+        request_fingerprint='original-request',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+    )
+    repository.save_idempotency(original)
+    target_key = ('cus_promoted', original.route, original.key)
+    blocking_store = _BlockingIdempotencyStore(repository._idempotency, target_key)
+    repository._idempotency = blocking_store
+    promotion_errors: list[BaseException] = []
+    writer_errors: list[BaseException] = []
+    writer_attempting = Event()
+
+    def promote() -> None:
+        try:
+            repository.promote_claim_owner(claim.claim_id, claim.customer_id, 'cus_promoted')
+        except BaseException as error:
+            promotion_errors.append(error)
+
+    def write_conflict() -> None:
+        writer_attempting.set()
+        try:
+            repository.save_idempotency(
+                replace(
+                    original,
+                    actor_id='cus_promoted',
+                    request_fingerprint='conflicting-request',
+                )
+            )
+        except BaseException as error:
+            writer_errors.append(error)
+
+    promotion_thread = Thread(target=promote)
+    promotion_thread.start()
+    assert blocking_store.reached.wait(timeout=2), promotion_errors
+    writer_thread = Thread(target=write_conflict)
+    writer_thread.start()
+    assert writer_attempting.wait(timeout=2)
+    blocking_store.release.set()
+    promotion_thread.join(timeout=2)
+    writer_thread.join(timeout=2)
+
+    assert not promotion_thread.is_alive()
+    assert not writer_thread.is_alive()
+    assert promotion_errors == []
+    assert len(writer_errors) == 1
+    assert isinstance(writer_errors[0], IdempotencyConflict)
+    assert repository.find_idempotency(*target_key) == replace(original, actor_id='cus_promoted')
+
+
+def test_fixture_alias_reservation_serializes_conflicting_key_write() -> None:
+    repository = FixtureRepository()
+    original = IdempotencyRecord(
+        actor_id='cus_alias_lock',
+        route='/api/v1/claims/clm_alias/sessions/ses_alias/messages',
+        key='original-key',
+        request_fingerprint='original-request',
+        claim_id='clm_alias',
+        session_id='ses_alias',
+        message_id='msg_alias',
+        message_turn_kind='message_only',
+        message_turn_revision=2,
+    )
+    repository.save_idempotency(original)
+    alias_key = (original.actor_id, original.route, 'alias-key')
+    blocking_store = _BlockingIdempotencyStore(repository._idempotency, alias_key)
+    repository._idempotency = blocking_store
+    alias_results: list[IdempotencyRecord | None] = []
+    alias_errors: list[BaseException] = []
+    writer_errors: list[BaseException] = []
+    writer_attempting = Event()
+
+    def reserve_alias() -> None:
+        try:
+            alias_results.append(
+                repository.reserve_message_turn_idempotency_alias(
+                    original.actor_id,
+                    original.route,
+                    original.claim_id,
+                    original.message_id or '',
+                    alias_key[2],
+                    original.request_fingerprint,
+                )
+            )
+        except BaseException as error:
+            alias_errors.append(error)
+
+    def write_conflict() -> None:
+        writer_attempting.set()
+        try:
+            repository.save_idempotency(
+                replace(
+                    original,
+                    key=alias_key[2],
+                    request_fingerprint='conflicting-request',
+                )
+            )
+        except BaseException as error:
+            writer_errors.append(error)
+
+    alias_thread = Thread(target=reserve_alias)
+    alias_thread.start()
+    assert blocking_store.reached.wait(timeout=2)
+    writer_thread = Thread(target=write_conflict)
+    writer_thread.start()
+    assert writer_attempting.wait(timeout=2)
+    blocking_store.release.set()
+    alias_thread.join(timeout=2)
+    writer_thread.join(timeout=2)
+
+    assert not alias_thread.is_alive()
+    assert not writer_thread.is_alive()
+    assert alias_errors == []
+    assert alias_results == [replace(original, key=alias_key[2])]
+    assert len(writer_errors) == 1
+    assert isinstance(writer_errors[0], IdempotencyConflict)
+    assert repository.find_idempotency(*alias_key) == replace(original, key=alias_key[2])
+
+
 def test_handoff_mutation_persists_atomic_audit_for_fixture_and_mongo(
     mutation_contract_repository: PersistenceRepository,
 ) -> None:

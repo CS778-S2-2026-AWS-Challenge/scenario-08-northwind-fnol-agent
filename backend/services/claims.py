@@ -659,6 +659,12 @@ def start_claim(
                 code='IDEMPOTENCY_CONFLICT',
                 message='The idempotency key was reused with a different request.',
             )
+        if existing.retired:
+            raise ApiError(
+                status_code=409,
+                code='IDEMPOTENCY_CONFLICT',
+                message='The idempotency key belongs to a promoted anonymous Claim.',
+            )
         claim = repository.get_claim(existing.claim_id, principal.subject)
         session = repository.get_session(existing.claim_id, existing.session_id, principal.subject)
         if claim is None or session is None:

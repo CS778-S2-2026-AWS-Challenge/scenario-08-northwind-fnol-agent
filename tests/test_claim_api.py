@@ -1594,8 +1594,16 @@ def test_anonymous_claim_promotion_rekeys_message_replay_authority(
         headers={**auth_headers, 'X-Northwind-Anonymous-Session': anonymous_session},
     )
     assert promoted.status_code == 200, promoted.text
-    assert repository.find_idempotency(anonymous_actor, route, 'anonymous-promotion-turn') is None
+    retired_turn = repository.find_idempotency(anonymous_actor, route, 'anonymous-promotion-turn')
+    assert retired_turn is not None
+    assert retired_turn.retired is True
     assert repository.find_idempotency('cus_demo', route, 'anonymous-promotion-turn') is not None
+
+    delayed_create_retry = create_claim(
+        client,
+        anonymous_headers,
+        key='anonymous-promotion-claim',
+    )
 
     replay = submit_message(
         client,
@@ -1618,6 +1626,9 @@ def test_anonymous_claim_promotion_rekeys_message_replay_authority(
 
     assert replay.status_code == 200, replay.text
     assert replay.json() == first.json()
+    assert delayed_create_retry.status_code == 409
+    assert delayed_create_retry.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert len(repository.list_claims_internal()) == 1
     assert stale_anonymous_replay.status_code == 404
     assert repository.find_idempotency('cus_demo', route, 'promoted-replay-alias') is not None
 
@@ -2257,19 +2268,23 @@ def test_mongodb_promotion_rekeys_replay_authority_across_restart(
     restarted_repository = MongoDBRepository(mongo_client, database_name)
     monkeypatch.setattr(restarted_repository, '_atomic', lambda operation: operation(None))
     route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
-    assert (
-        restarted_repository.find_idempotency(
-            anonymous_actor,
-            route,
-            'mongo-promotion-turn',
-        )
-        is None
+    retired_turn = restarted_repository.find_idempotency(
+        anonymous_actor,
+        route,
+        'mongo-promotion-turn',
     )
+    assert retired_turn is not None
+    assert retired_turn.retired is True
     assert (
         restarted_repository.find_idempotency('cus_demo', route, 'mongo-promotion-turn') is not None
     )
 
     with TestClient(create_app(settings, repository=restarted_repository)) as restarted_client:
+        delayed_create_retry = create_claim(
+            restarted_client,
+            anonymous_headers,
+            key='mongo-promotion-claim',
+        )
         replay = submit_message(
             restarted_client,
             authenticated_headers,
@@ -2282,6 +2297,9 @@ def test_mongodb_promotion_rekeys_replay_authority_across_restart(
 
     assert replay.status_code == 200, replay.text
     assert replay.json() == first.json()
+    assert delayed_create_retry.status_code == 409
+    assert delayed_create_retry.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert len(restarted_repository.list_claims_internal()) == 1
     assert (
         restarted_repository.find_idempotency('cus_demo', route, 'mongo-promotion-alias')
         is not None
@@ -2367,9 +2385,25 @@ def test_mongodb_replay_fails_closed_for_corrupted_runtime_and_handoff_links(
         )
         assert runtime_idempotency is not None
         assert runtime_idempotency.runtime_result_id is not None
+        runtime_records = repository.get_runtime_turn_for_trigger(
+            runtime_claim_id,
+            runtime_idempotency.message_id or '',
+            'cus_demo',
+        )
+        assert runtime_records is not None
         repository._collection.update_one(
-            {'_id': f'turn_result:{runtime_idempotency.runtime_result_id}'},
-            {'$set': {'trigger_message_id': 'msg_unrelated'}},
+            {
+                'record_type': 'execution_plan',
+                'turn_id': runtime_records.turn_plan.turn_id,
+            },
+            {'$set': {'expected_revision': 99}},
+        )
+        repository._collection.update_many(
+            {
+                'record_type': 'action_envelope',
+                'turn_id': runtime_records.turn_plan.turn_id,
+            },
+            {'$set': {'expected_revision': 99}},
         )
         runtime_replay = submit_message(
             client,

@@ -1837,6 +1837,7 @@ class MongoDBRepository:
                     'record_type': 'idempotency',
                     'actor_id': anonymous_customer_id,
                     'payload.claim_id': claim_id,
+                    'payload.retired': {'$ne': True},
                 },
                 session=mongo_session,
             )
@@ -1844,7 +1845,7 @@ class MongoDBRepository:
         promoted_idempotency: list[tuple[dict[str, Any], dict[str, Any], bool]] = []
         for document in idempotency_documents:
             record = IdempotencyRecord(**document['payload'])
-            promoted_record = replace(record, actor_id=customer_id)
+            promoted_record = replace(record, actor_id=customer_id, retired=False)
             target_id = self._record_id(
                 'idempotency',
                 f'{customer_id}:{record.route}:{record.key}',
@@ -1878,7 +1879,15 @@ class MongoDBRepository:
             if original['_id'] != target['_id']:
                 if should_insert:
                     self._collection.insert_one(target, session=mongo_session)
-                self._collection.delete_one({'_id': original['_id']}, session=mongo_session)
+                retired = replace(
+                    IdempotencyRecord(**original['payload']),
+                    retired=True,
+                )
+                self._collection.update_one(
+                    {'_id': original['_id'], 'record_type': 'idempotency'},
+                    {'$set': {'payload': retired.__dict__}},
+                    session=mongo_session,
+                )
         promoted = self._get(
             'claim',
             claim_id,
@@ -5803,6 +5812,7 @@ class MongoDBRepository:
                 'route': route,
                 'payload.claim_id': claim_id,
                 'payload.message_id': message_id,
+                'payload.retired': {'$ne': True},
             },
             sort=[('_id', -1)],
         )
@@ -5825,6 +5835,7 @@ class MongoDBRepository:
                     'route': route,
                     'payload.claim_id': claim_id,
                     'payload.message_id': message_id,
+                    'payload.retired': {'$ne': True},
                 },
                 sort=[('_id', -1)],
                 session=mongo_session,

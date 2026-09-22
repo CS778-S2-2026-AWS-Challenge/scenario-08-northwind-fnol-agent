@@ -625,7 +625,7 @@ def _replay_persisted_response(
                     session_id=session_id,
                     trigger_message_id=claimant_message.message_id,
                     agent_message_id=agent_message.message_id,
-                    expected_revision=runtime_records.execution_plan.expected_revision,
+                    expected_revision=historical_revision - 1,
                     resulting_revision=historical_revision,
                 )
             except ValueError:
@@ -1808,6 +1808,8 @@ def submit_message(
                 code='IDEMPOTENCY_CONFLICT',
                 message='The idempotency key was reused with a different request.',
             )
+        if existing_idempotency.retired:
+            raise _session_not_found()
         return _replay_persisted_response(
             repository,
             principal,

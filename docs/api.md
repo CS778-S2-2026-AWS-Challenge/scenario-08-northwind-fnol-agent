@@ -1410,7 +1410,9 @@ Attaches a browser-session Claim to the authenticated claimant identified by the
 session. The request carries the former browser identity in `X-Northwind-Anonymous-Session`.
 Promotion atomically moves the Claim records and every Claim-scoped idempotency authority to the
 authenticated subject. Existing message retries continue under that subject; the anonymous subject
-cannot replay them afterward. A conflicting target retry key returns `409 IDEMPOTENCY_CONFLICT`
+cannot replay them afterward. The anonymous key remains as a non-replayable retirement marker so a
+delayed create retry cannot create a second Claim; reuse returns `409 IDEMPOTENCY_CONFLICT` without
+disclosing the promoted Claim. A conflicting target retry key returns `409 IDEMPOTENCY_CONFLICT`
 without a partial ownership change. A missing or already-promoted anonymous Claim returns `404`.
 
 ### `GET /api/v1/claims`
@@ -1730,7 +1732,8 @@ an explicit turn kind and committed turn revision with each accepted message. A 
 original turn before returning it. Reusing the alias for different input returns
 `409 IDEMPOTENCY_CONFLICT`. A missing or mislinked declared decision, Agent message, Runtime result,
 Runtime trace, or Handoff is a bounded `500 INTERNAL_ERROR`; replay never downgrades a damaged turn
-to a partial successful response.
+to a partial successful response. Runtime plan and ActionEnvelope revisions are checked against the
+independently persisted message-turn revision rather than against another Runtime child record.
 
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
 

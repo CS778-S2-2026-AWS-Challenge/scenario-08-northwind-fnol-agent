@@ -495,7 +495,8 @@ the append-only audit collection through a bounded, filterable projection.
   records are children of the Agent turn, not a separate response kind. Current Agent records also
   retain `runtime_result_id`; replay verifies the Runtime bundle, result, decision, Agent reply,
   optional trace, and optional Handoff against the same Claim, Session, trigger message, response
-  message, and committed revision. Fixture and MongoDB atomically reserve a new retry key as an
+  message, and committed revision. The stored message-turn revision is the independent authority
+  for the Runtime plan and ActionEnvelope expected revision. Fixture and MongoDB atomically reserve a new retry key as an
   alias when the same `client_message_id` replays the original request. That alias is thereafter
   unavailable to different content. A missing or mislinked declared child is an integrity failure
   and cannot be returned as a partial message-only success. Legacy records without the newer
@@ -782,8 +783,9 @@ Anonymous browser sessions may own a temporary conversation Claim, but Evidence
 upload mutations require an authenticated claimant. Selecting a file before
 login is not a persistence operation; promotion transfers the existing Claim
 and its records only after authentication. Promotion atomically re-keys every Claim-scoped
-idempotency record from the anonymous subject to the authenticated claimant in Fixture and MongoDB;
-the stale anonymous subject no longer has replay authority. A target-key conflict rejects the whole
+idempotency record from the anonymous subject to the authenticated claimant in Fixture and MongoDB.
+The original anonymous key becomes a retired tombstone: it cannot reveal or replay the promoted
+Claim, but it still prevents a delayed request from repeating the original side effect. A target-key conflict rejects the whole
 promotion without a partial owner change. Abandoned selections leave no
 Evidence record or protected object.
 
