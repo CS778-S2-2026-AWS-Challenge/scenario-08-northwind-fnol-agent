@@ -3,8 +3,6 @@
 from datetime import datetime
 from typing import Protocol
 
-from backend.repositories.identity import IdentityRepository
-
 from backend.domain.account_data import (
     IdentityDocumentRecord,
     PaymentDestinationRecord,
@@ -18,6 +16,7 @@ from backend.domain.audit import (
     AuditVisibility,
 )
 from backend.domain.models import ActorType, BranchEvaluationRecord, FormStatus, WorkingClaim
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import IdempotencyRecord, RepositoryConflict
 
 AccountRecord = PolicyNumberRecord | PaymentDestinationRecord | IdentityDocumentRecord

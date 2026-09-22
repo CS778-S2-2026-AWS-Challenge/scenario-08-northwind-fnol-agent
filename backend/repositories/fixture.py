@@ -101,7 +101,6 @@ from backend.repositories.account_data import (
     policy_selection_audit_matches,
     validate_claimant_contact_authority,
 )
-from backend.repositories.identity import IdentityRepository
 from backend.repositories.assets import (
     AssetSelectionRevisionConflictError,
     AssetSelectionSnapshotConflictError,
@@ -110,6 +109,7 @@ from backend.repositories.assets import (
     asset_matches_snapshot,
     asset_selection_audit_matches,
 )
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import (
     DemoSeedConflict,
     IdempotencyConflict,
