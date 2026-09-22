@@ -26,6 +26,12 @@ from backend.domain.account_data import (
 from backend.domain.agent_context_runtime import VerifiedConversationSummary
 from backend.domain.assets import AssetRecord, AssetType, ClaimAssetSnapshot
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
+from backend.domain.claim_creation import (
+    ClaimCreationOperationRecord,
+    ClaimCreationOperationStatus,
+    assert_claim_creation_operation_transition,
+    evidence_snapshot_fingerprint,
+)
 from backend.domain.evidence import (
     assert_material_history_is_append_only,
     validate_evidence_record,
@@ -365,6 +371,12 @@ class MongoDBRepository:
             [('record_type', 1), ('actor_id', 1), ('route', 1), ('key', 1)],
             unique=True,
             partialFilterExpression={'record_type': 'idempotency'},
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('claim_id', 1)],
+            unique=True,
+            name='claim_creation_operation_claim_unique',
+            partialFilterExpression={'record_type': 'claim_creation_operation'},
         )
         self._collection.create_index(
             [('record_type', 1), ('claim_id', 1), ('client_message_id', 1)],
@@ -2447,6 +2459,229 @@ class MongoDBRepository:
                 record.evaluation_id,
             ),
         )
+
+    def get_claim_creation_operation(
+        self,
+        operation_id: str,
+    ) -> ClaimCreationOperationRecord | None:
+        return self._get(
+            'claim_creation_operation',
+            operation_id,
+            ClaimCreationOperationRecord,
+        )
+
+    def reserve_claim_creation_operation(
+        self,
+        operation: ClaimCreationOperationRecord,
+    ) -> bool:
+        def reserve(mongo_session: Any) -> bool:
+            claim = self._get(
+                'claim',
+                operation.claim_id,
+                WorkingClaim,
+                customer_id=operation.customer_id,
+                session=mongo_session,
+            )
+            decision = self._get(
+                'agent_decision',
+                operation.authorised_decision_id,
+                AgentDecisionRecord,
+                customer_id=operation.customer_id,
+                session=mongo_session,
+            )
+            evidence = self._list(
+                'evidence',
+                EvidenceRecord,
+                {
+                    'claim_id': operation.claim_id,
+                    'customer_id': operation.customer_id,
+                },
+                'created_at',
+                session=mongo_session,
+            )
+            if (
+                operation.status is not ClaimCreationOperationStatus.PREPARED
+                or claim is None
+                or claim.revision != operation.authorised_revision
+                or claim.external_claim is not None
+                or claim.terminal_disposition is not None
+                or decision is None
+                or decision.claim_id != operation.claim_id
+                or decision.resulting_revision != operation.authorised_revision
+                or evidence_snapshot_fingerprint(evidence)
+                != operation.evidence_snapshot_fingerprint
+            ):
+                raise KeyError(operation.claim_id)
+
+            document = self._collection.find_one(
+                {
+                    'record_type': 'claim_creation_operation',
+                    'claim_id': operation.claim_id,
+                },
+                session=mongo_session,
+            )
+            current = self._model_from_document(document, ClaimCreationOperationRecord)
+            if current is None:
+                try:
+                    self._put(
+                        'claim_creation_operation',
+                        operation.operation_id,
+                        operation,
+                        customer_id=operation.customer_id,
+                        claim_id=operation.claim_id,
+                        session=mongo_session,
+                    )
+                except DuplicateKeyError as conflict:
+                    raise IdempotencyConflict(operation.operation_id) from conflict
+                return True
+            if current.operation_id != operation.operation_id:
+                raise IdempotencyConflict(operation.operation_id)
+            if current.status is ClaimCreationOperationStatus.RETRYABLE_FAILURE:
+                try:
+                    assert_claim_creation_operation_transition(current, operation)
+                except ValueError as conflict:
+                    raise IdempotencyConflict(operation.operation_id) from conflict
+                result = self._collection.replace_one(
+                    {
+                        '_id': self._record_id('claim_creation_operation', operation.operation_id),
+                        'record_type': 'claim_creation_operation',
+                        'status': ClaimCreationOperationStatus.RETRYABLE_FAILURE.value,
+                        'request_fingerprint': operation.request_fingerprint,
+                    },
+                    {
+                        **operation.model_dump(mode='json'),
+                        '_id': self._record_id('claim_creation_operation', operation.operation_id),
+                        'record_type': 'claim_creation_operation',
+                        'customer_id': operation.customer_id,
+                        'claim_id': operation.claim_id,
+                    },
+                    session=mongo_session,
+                )
+                if result.modified_count != 1:
+                    raise IdempotencyConflict(operation.operation_id)
+                return True
+            if (
+                current.request_fingerprint != operation.request_fingerprint
+                or current.evidence_snapshot_fingerprint != operation.evidence_snapshot_fingerprint
+                or current.route != operation.route
+                or current.integration_source is not operation.integration_source
+            ):
+                raise IdempotencyConflict(operation.operation_id)
+            return False
+
+        return self._atomic(reserve)
+
+    def save_claim_creation_operation(
+        self,
+        operation: ClaimCreationOperationRecord,
+    ) -> None:
+        def persist(mongo_session: Any) -> None:
+            current = self._get(
+                'claim_creation_operation',
+                operation.operation_id,
+                ClaimCreationOperationRecord,
+                customer_id=operation.customer_id,
+                session=mongo_session,
+            )
+            if current is None:
+                raise KeyError(operation.operation_id)
+            try:
+                assert_claim_creation_operation_transition(current, operation)
+            except ValueError as conflict:
+                raise IdempotencyConflict(operation.operation_id) from conflict
+            result = self._collection.replace_one(
+                {
+                    '_id': self._record_id('claim_creation_operation', operation.operation_id),
+                    'record_type': 'claim_creation_operation',
+                    'status': current.status.value,
+                    'updated_at': current.model_dump(mode='json')['updated_at'],
+                },
+                {
+                    **operation.model_dump(mode='json'),
+                    '_id': self._record_id('claim_creation_operation', operation.operation_id),
+                    'record_type': 'claim_creation_operation',
+                    'customer_id': operation.customer_id,
+                    'claim_id': operation.claim_id,
+                },
+                session=mongo_session,
+            )
+            if result.matched_count != 1:
+                raise IdempotencyConflict(operation.operation_id)
+
+        self._atomic(persist)
+
+    def save_claim_creation_outcome(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        operation: ClaimCreationOperationRecord,
+        branch_evaluation: BranchEvaluationRecord,
+    ) -> None:
+        def persist(mongo_session: Any) -> None:
+            self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
+            self._validate_branch_evaluation(claim, branch_evaluation)
+            self._reject_branch_evaluation_identity_conflict(
+                branch_evaluation,
+                mongo_session=mongo_session,
+            )
+            current = self._get(
+                'claim_creation_operation',
+                operation.operation_id,
+                ClaimCreationOperationRecord,
+                customer_id=claim.customer_id,
+                session=mongo_session,
+            )
+            evidence = self._list(
+                'evidence',
+                EvidenceRecord,
+                {'claim_id': claim.claim_id, 'customer_id': claim.customer_id},
+                'created_at',
+                session=mongo_session,
+            )
+            if (
+                current is None
+                or operation.status is not ClaimCreationOperationStatus.ACCEPTED
+                or operation.result is None
+                or claim.external_claim != operation.result
+                or claim.external_claim_source_revision != operation.authorised_revision
+                or claim.external_claim_fingerprint != operation.request_fingerprint
+                or evidence_snapshot_fingerprint(evidence)
+                != operation.evidence_snapshot_fingerprint
+            ):
+                raise KeyError(claim.claim_id)
+            try:
+                assert_claim_creation_operation_transition(current, operation)
+            except ValueError as conflict:
+                raise IdempotencyConflict(operation.operation_id) from conflict
+            if (
+                self._replace_claim_revision(claim, expected_revision, mongo_session=mongo_session)
+                == 0
+            ):
+                self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
+            self._put(
+                'claim_creation_operation',
+                operation.operation_id,
+                operation,
+                customer_id=claim.customer_id,
+                claim_id=claim.claim_id,
+                session=mongo_session,
+            )
+            self._put(
+                'branch_evaluation',
+                branch_evaluation.evaluation_id,
+                branch_evaluation,
+                customer_id=claim.customer_id,
+                claim_id=claim.claim_id,
+                session=mongo_session,
+            )
+            self._append_realtime_mutation(
+                RealtimeMutation.CLAIM_CHANGED,
+                claim,
+                mongo_session=mongo_session,
+                operation_correlation=operation.operation_id,
+            )
+
+        self._atomic(persist)
 
     def get_agent_decision(
         self,

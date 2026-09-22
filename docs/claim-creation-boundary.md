@@ -64,6 +64,14 @@ persisted and projected to the claimant; no model draft can describe creation as
   Decision may satisfy this boundary only through an explicit, tested mapping to the new
   action contract.
 - The provider-neutral operation identity and fingerprint enforce idempotency.
+- Runtime validates the complete persisted Evidence snapshot before reservation. References are
+  unique and exact, pending metadata is exact, every Evidence record passes the shared vocabulary
+  and lifecycle validator, and the canonical snapshot fingerprint must match the command.
+- The persisted Claim family is the sole route authority. Both the command and accepted adapter
+  result must match its `standard_<family>_intake` route, and the result source must match the
+  installed adapter source.
+- One durable `cco_` operation binds the decision/revision, request, Evidence snapshot, route, and
+  adapter source before any external side effect. It is execution evidence, not another Claim.
 - An identical retry returns the accepted claim identity and current authorised
   projection; changed input under the same key is a conflict.
 - Once a terminal disposition exists, a new Claim-creation attempt is an invalid transition;
@@ -88,24 +96,34 @@ reference before retrying. The claimant is told only the real known state and re
 path; the system must not create a duplicate formal Claim because acknowledgement was
 lost.
 
+For Claim creation, a definitely unsubmitted timeout or unavailable result transitions the same
+operation to `retryable_failure`; retry re-prepares that immutable identity. A submitted timeout or
+unavailable result, and every partial response, transitions it to `unknown_outcome`. Every later
+request for a prepared or unknown operation calls `reconcile_claim` and never `create_claim`; an
+inconclusive reconciliation remains unknown and preserves the original create-call delivery and
+failure observations. A provider result is first persisted as `settlement_pending`. Runtime then
+atomically persists the resulting Claim and terminal disposition, applied Branch Evaluation, and
+`accepted` operation. A revision conflict leaves the recorded result recoverable, so an unchanged
+retry settles it against the latest Claim without another provider create call.
+
 The provider-neutral external-task recovery matrix is:
 
 | Failure | Delivery | Operation status | Recovery | Retryable |
 | --- | --- | --- | --- | --- |
 | `timeout` | `not_submitted` | `retryable_failure` | `retry_same_operation` | Yes |
 | `timeout` | `submitted` | `unknown_outcome` | `reconcile_before_retry` | No |
-| `unavailable` | Any | `retryable_failure` | `retry_same_operation` | Yes |
+| `unavailable` | `not_submitted` | `retryable_failure` | `retry_same_operation` | Yes |
+| `unavailable` | `submitted` | `unknown_outcome` | `reconcile_before_retry` | No |
 | `partial` | Any | `unknown_outcome` | `reconcile_before_retry` | No |
 | `access_denied` | Any | `terminal_failure` | `review_required` | No |
 | `malformed` | Any | `terminal_failure` | `review_required` | No |
 | `conflicting` | Any | `terminal_failure` | `review_required` | No |
 
-`unavailable` retains the controlled assessor contract: an unchanged attempt may retry with
-the same operation identity even when the failed invocation reached the provider. This is not
-permission to create a new operation or to retry automatically. `partial` records an observed
-side effect whose completion is uncertain, so Runtime reconciles it before another attempt.
-The `recovery` value determines both operation status and retryability; implementations must
-reject combinations that disagree with this matrix.
+Only an explicitly `not_submitted` timeout or unavailable failure may retry the same immutable
+operation. Any submitted or otherwise uncertain side effect must be reconciled first. A failed or
+inconclusive reconciliation cannot replace the original create-call delivery observation with the
+reconciliation call's delivery. The failure code and delivery together determine operation status
+and recovery; implementations must reject combinations that disagree with this matrix.
 
 The assessor runtime now records delivery and represents `unknown_outcome`. The adapter boundary
 reports whether a failed attempt reached the provider, and the runtime records what it was told:
