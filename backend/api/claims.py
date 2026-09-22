@@ -559,6 +559,7 @@ def pause_claim_session(
             session_id,
             idempotency_key,
             if_match,
+            identity_repository_for(request),
         )
     except ApiError as error:
         logger.info(
@@ -652,6 +653,7 @@ def create_message(
             assessor_entry=_assessor_entry_for(request),
             external_capability_dispatcher=external_capability_dispatcher_for(request),
             progress_reporter=reporter,
+            identity_repository=identity_repository_for(request),
         )
     except ApiError as error:
         reporter.failed(retryable=error.retryable)

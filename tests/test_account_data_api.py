@@ -452,6 +452,63 @@ def test_payout_contact_selection_is_atomic_masked_and_resumable(adapter: str) -
     ]
 
 
+def test_payout_contact_in_app_progresses_to_agreement(
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+
+    payment = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        'payout-in-app-payment',
+        {'account_type': 'cheque', 'account_number': '12-3456-1111222-00'},
+    )
+
+    created = client.post(
+        '/api/v1/claims',
+        headers={**owner, 'Idempotency-Key': 'payout-in-app-claim'},
+        json={
+            'channel': 'web_agent',
+            'locale': 'en-NZ',
+            'incident_type': 'home',
+        },
+    ).json()
+
+    claim = created['claim']
+    ready = _advance_claim_to_payout_contact(repository, claim['claim_id'])
+
+    selected = client.post(
+        f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections',
+        headers={
+            **owner,
+            'Idempotency-Key': 'payout-in-app-select',
+            'If-Match': str(ready.revision),
+        },
+        json={
+            'payment_destination_id': payment['payment_destination_id'],
+            'contact_preference': 'in_app',
+        },
+    )
+
+    detail = client.get(
+        f'/api/v1/claims/{claim["claim_id"]}',
+        headers=owner,
+    )
+
+    assert selected.status_code == 201, selected.text
+    assert selected.json()['contact_preference']['value'] == 'in_app'
+    assert selected.json()['customer_next_step']['status'] == 'agreement_required'
+    assert selected.json()['primary_action']['action_code'] == 'claimant.review_agreement'
+    assert selected.json()['primary_action']['available'] is True
+
+    assert detail.status_code == 200, detail.text
+    assert detail.json()['customer_next_step']['status'] == 'agreement_required'
+    assert detail.json()['primary_action']['action_code'] == 'claimant.review_agreement'
+    assert detail.json()['primary_action']['available'] is True
+
+
 def test_payout_contact_progression_fails_closed_after_phone_is_removed(
     client: TestClient,
     repository: FixtureRepository,

@@ -438,6 +438,8 @@ def _payout_contact_is_complete(
         return False
 
     selected_channel = str(contact_preference.value).strip().lower()
+    if selected_channel == 'in_app':
+        return True
     if selected_channel == 'email':
         return bool(account.email.strip())
     if selected_channel in {'phone', 'sms'}:

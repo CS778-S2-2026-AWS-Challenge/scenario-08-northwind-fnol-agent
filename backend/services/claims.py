@@ -483,6 +483,7 @@ def pause_session(
     session_id: str,
     idempotency_key: str | None,
     if_match: str | None,
+    identity_repository: IdentityRepository | None = None,
 ) -> PauseSessionResponse:
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
@@ -594,6 +595,7 @@ def pause_session(
     claimant_after = claimant_claim(
         repository,
         updated_claim,
+        identity_repository,
     )
 
     response = PauseSessionResponse(

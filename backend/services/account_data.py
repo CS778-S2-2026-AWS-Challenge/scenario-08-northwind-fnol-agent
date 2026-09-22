@@ -856,8 +856,7 @@ def select_payout_contact(
         f'payment_destination:{destination.payment_destination_id}:revision:{destination.revision}'
     )
     contact_field_ref = (
-        f'claim:{claim.claim_id}:revision:{claim.revision + 1}:field:'
-        'claimant.contact_preference'
+        f'claim:{claim.claim_id}:revision:{claim.revision + 1}:field:claimant.contact_preference'
     )
     contact_authority_ref = f'claimant_profile:revision:{account.revision}'
     contact_field = resolve_form_change(
