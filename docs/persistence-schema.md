@@ -587,10 +587,18 @@ the append-only audit collection through a bounded, filterable projection.
   An identical idempotent replay is accepted; different content under the same identity is
   rejected. A summary that conflicts with current Claim State is omitted and recorded as a
   `summary_state_mismatch`; it never overwrites Claim facts.
-- Complete messages remain durable outside the bounded summary. Message lists use the stable
-  `(created_at, message_id)` ascending order, including when timestamps are equal.
+- Complete messages remain durable outside the bounded summary. Message lists use persisted
+  `in_reply_to` edges as the authoritative causal order, placing each reply after its target;
+  independent messages use the stable `(created_at, message_id)` ascending tie-break in
+  repositories, claimant history, and Workbench, including when timestamps are equal.
 - A message `in_reply_to` reference may identify only a message belonging to the same claim and
   interaction session.
+- Fixture and MongoDB writes fail closed when Message Evidence references are missing, duplicated,
+  or owned by another Claim; when a reply crosses Claim or Session boundaries; or when actor,
+  visibility, and claimant retry identity disagree.
+- Fixture and MongoDB writes apply the shared Evidence registry and lifecycle rules before every
+  Evidence persistence path. Kinds, related field codes, and `needed_for` purposes must be
+  registered and unique, and status/file-status combinations must describe a coherent lifecycle.
 - Resuming creates or activates an interaction session for the same `claim_id`; it does
   not create a duplicate working claim.
 - At most one claimant interaction session is active for a working claim unless a later

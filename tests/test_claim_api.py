@@ -2615,9 +2615,10 @@ def test_message_reads_hide_internal_records_and_validate_session_state(
         listed.json()['items'][0]['message_id'],
         second_page.json()['items'][0]['message_id'],
     ]
-    expected_ids = sorted(
-        [turn['claimant_message']['message_id'], turn['agent_message']['message_id']]
-    )
+    expected_ids = [
+        turn['claimant_message']['message_id'],
+        turn['agent_message']['message_id'],
+    ]
     assert returned_ids == expected_ids
     assert missing_session.status_code == 404
 

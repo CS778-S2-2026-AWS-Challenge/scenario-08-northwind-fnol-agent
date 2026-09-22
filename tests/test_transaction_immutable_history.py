@@ -248,6 +248,7 @@ def test_agent_turn_rejects_same_claim_immutable_identity_collision(
         original_message = agent_message.model_copy(
             update={'content': {'type': 'text', 'text': 'Original agent history.'}}
         )
+        repository.save_message(claimant_message, claim.customer_id)
         repository.save_message(original_message, claim.customer_id)
     else:
         original_decision = decision.model_copy(

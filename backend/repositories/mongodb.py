@@ -26,7 +26,10 @@ from backend.domain.account_data import (
 from backend.domain.agent_context_runtime import VerifiedConversationSummary
 from backend.domain.assets import AssetRecord, AssetType, ClaimAssetSnapshot
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
-from backend.domain.evidence import assert_material_history_is_append_only
+from backend.domain.evidence import (
+    assert_material_history_is_append_only,
+    validate_evidence_record,
+)
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
@@ -40,6 +43,12 @@ from backend.domain.external_services import (
     assert_result_evidence_is_linked,
     assert_result_matches_task,
     assert_task_transition_is_permitted,
+)
+from backend.domain.message import (
+    DuplicateClientMessage,
+    order_messages,
+    validate_message_graph,
+    validate_message_record,
 )
 from backend.domain.models import (
     ActorType,
@@ -1501,6 +1510,34 @@ class MongoDBRepository:
             or len(evidence_by_id) != len(graph.evidence)
         ):
             raise ValueError('Validation seed record identifiers must be unique and non-empty.')
+        validate_message_graph(graph.messages)
+        for evidence in graph.evidence:
+            validate_evidence_record(evidence)
+        for message in graph.messages:
+            seed_session = sessions_by_id.get(message.session_id)
+            if seed_session is None:
+                raise ValueError('Every validation seed Message needs a known Session.')
+            validate_message_record(
+                message,
+                session=seed_session,
+                evidence=[
+                    evidence_by_id[evidence_id]
+                    for evidence_id in message.evidence_refs
+                    if evidence_id in evidence_by_id
+                ],
+                reply=messages_by_id.get(message.in_reply_to or ''),
+                duplicate_client_message=next(
+                    (
+                        item
+                        for item in graph.messages
+                        if message.client_message_id is not None
+                        and item.message_id != message.message_id
+                        and item.claim_id == message.claim_id
+                        and item.client_message_id == message.client_message_id
+                    ),
+                    None,
+                ),
+            )
 
         presence_id = self._record_id('staff_presence', graph.staff_presence.staff_id)
         current_presence = self._collection.find_one(
@@ -2149,6 +2186,55 @@ class MongoDBRepository:
         )
         if claim is None or session is None or session.claim_id != message.claim_id:
             raise KeyError(message.claim_id)
+        evidence = [
+            item
+            for evidence_id in message.evidence_refs
+            if (
+                item := self._get(
+                    'evidence',
+                    evidence_id,
+                    EvidenceRecord,
+                    customer_id=customer_id,
+                    session=mongo_session,
+                )
+            )
+            is not None
+        ]
+        reply = (
+            self._get(
+                'message',
+                message.in_reply_to,
+                MessageRecord,
+                customer_id=customer_id,
+                session=mongo_session,
+            )
+            if message.in_reply_to is not None
+            else None
+        )
+        duplicate_client_message = None
+        if message.client_message_id is not None:
+            duplicate_client_message = self._model_from_document(
+                self._collection.find_one(
+                    {
+                        'record_type': 'message',
+                        'claim_id': message.claim_id,
+                        'customer_id': customer_id,
+                        'client_message_id': message.client_message_id,
+                    },
+                    session=mongo_session,
+                ),
+                MessageRecord,
+            )
+        try:
+            validate_message_record(
+                message,
+                session=session,
+                evidence=evidence,
+                reply=reply,
+                duplicate_client_message=duplicate_client_message,
+            )
+        except DuplicateClientMessage as conflict:
+            raise IdempotencyConflict(message.client_message_id or message.message_id) from conflict
         existing = self._get(
             'message',
             message.message_id,
@@ -2222,11 +2308,13 @@ class MongoDBRepository:
     ) -> list[MessageRecord]:
         if not self._claim_owned(claim_id, customer_id):
             return []
-        return self._list(
-            'message',
-            MessageRecord,
-            {'claim_id': claim_id, 'session_id': session_id, 'customer_id': customer_id},
-            'created_at',
+        return order_messages(
+            self._list(
+                'message',
+                MessageRecord,
+                {'claim_id': claim_id, 'session_id': session_id, 'customer_id': customer_id},
+                'created_at',
+            )
         )
 
     def list_recent_messages(
@@ -2236,26 +2324,7 @@ class MongoDBRepository:
         customer_id: str,
         limit: int,
     ) -> list[MessageRecord]:
-        documents = (
-            self._collection.find(
-                {
-                    'record_type': 'message',
-                    'claim_id': claim_id,
-                    'session_id': session_id,
-                    'customer_id': customer_id,
-                }
-            )
-            .sort([('created_at', -1), ('_id', -1)])
-            .limit(limit)
-        )
-        messages = [
-            message
-            for message in (
-                self._model_from_document(document, MessageRecord) for document in documents
-            )
-            if message is not None
-        ]
-        return list(reversed(messages))
+        return self.list_messages(claim_id, session_id, customer_id)[-limit:]
 
     def save_conversation_summary(
         self,
@@ -2624,6 +2693,7 @@ class MongoDBRepository:
                 or claim.assessor_routing_fingerprint != operation.request_fingerprint
             ):
                 raise KeyError(claim.claim_id)
+            validate_evidence_record(evidence)
             try:
                 assert_task_transition_is_permitted(current_task, task)
             except ValueError as conflict:
@@ -2835,6 +2905,7 @@ class MongoDBRepository:
         customer_id: str,
         mongo_session: Any,
     ) -> None:
+        validate_evidence_record(evidence)
         claim = self._get(
             'claim',
             evidence.claim_id,
@@ -4591,6 +4662,62 @@ class MongoDBRepository:
             )
             if duplicate is not None:
                 raise IdempotencyConflict(claimant_message.client_message_id)
+        claimant_evidence = [
+            item
+            for evidence_id in claimant_message.evidence_refs
+            if (
+                item := self._get(
+                    'evidence',
+                    evidence_id,
+                    EvidenceRecord,
+                    customer_id=claim.customer_id,
+                    session=mongo_session,
+                )
+            )
+            is not None
+        ]
+        validate_message_record(
+            claimant_message,
+            session=stored_session,
+            evidence=claimant_evidence,
+            reply=(
+                self._get(
+                    'message',
+                    claimant_message.in_reply_to,
+                    MessageRecord,
+                    customer_id=claim.customer_id,
+                    session=mongo_session,
+                )
+                if claimant_message.in_reply_to is not None
+                else None
+            ),
+            duplicate_client_message=None,
+        )
+        agent_evidence = [
+            item
+            for evidence_id in agent_message.evidence_refs
+            if (
+                item := self._get(
+                    'evidence',
+                    evidence_id,
+                    EvidenceRecord,
+                    customer_id=claim.customer_id,
+                    session=mongo_session,
+                )
+            )
+            is not None
+        ]
+        validate_message_record(
+            agent_message,
+            session=stored_session,
+            evidence=agent_evidence,
+            reply=(
+                claimant_message
+                if agent_message.in_reply_to == claimant_message.message_id
+                else None
+            ),
+            duplicate_client_message=None,
+        )
         records = (
             ('message', claimant_message.message_id, claimant_message),
             ('message', agent_message.message_id, agent_message),
@@ -5069,6 +5196,16 @@ class MongoDBRepository:
                 or claim.active_session_id != session.session_id
             ):
                 raise KeyError(claim.claim_id)
+        pending_messages = {
+            record.message_id: record
+            for kind, _identifier, record in records
+            if kind == 'message' and isinstance(record, MessageRecord)
+        }
+        pending_evidence = {
+            record.evidence_id: record
+            for kind, _identifier, record in records
+            if kind == 'evidence' and isinstance(record, EvidenceRecord)
+        }
         for kind, identifier, record in records:
             if kind == 'staff_agent_execution':
                 if not isinstance(record, StaffAgentExecutionRecord):
@@ -5113,6 +5250,53 @@ class MongoDBRepository:
                     not in {idempotency.message_id, idempotency.agent_message_id}
                 ):
                     raise KeyError(claim.claim_id)
+                evidence = []
+                for evidence_id in record.evidence_refs:
+                    item = pending_evidence.get(evidence_id) or self._get(
+                        'evidence',
+                        evidence_id,
+                        EvidenceRecord,
+                        customer_id=claim.customer_id,
+                        session=mongo_session,
+                    )
+                    if item is not None:
+                        evidence.append(item)
+                reply = pending_messages.get(record.in_reply_to or '')
+                if reply is None and record.in_reply_to is not None:
+                    reply = self._get(
+                        'message',
+                        record.in_reply_to,
+                        MessageRecord,
+                        customer_id=claim.customer_id,
+                        session=mongo_session,
+                    )
+                duplicate_client_message = None
+                if record.client_message_id is not None:
+                    duplicate_document = self._collection.find_one(
+                        {
+                            'record_type': 'message',
+                            'claim_id': claim.claim_id,
+                            'customer_id': claim.customer_id,
+                            'client_message_id': record.client_message_id,
+                        },
+                        session=mongo_session,
+                    )
+                    duplicate_client_message = self._model_from_document(
+                        duplicate_document,
+                        MessageRecord,
+                    )
+                try:
+                    validate_message_record(
+                        record,
+                        session=message_session,
+                        evidence=evidence,
+                        reply=reply,
+                        duplicate_client_message=duplicate_client_message,
+                    )
+                except DuplicateClientMessage as conflict:
+                    raise IdempotencyConflict(
+                        record.client_message_id or record.message_id
+                    ) from conflict
             document = record.model_dump(mode='json')
             document.update(
                 {
@@ -5136,6 +5320,7 @@ class MongoDBRepository:
             if kind == 'evidence':
                 if not isinstance(record, EvidenceRecord):
                     raise KeyError(claim.claim_id)
+                validate_evidence_record(record)
                 current_evidence = (
                     self._model_from_document(existing, EvidenceRecord)
                     if existing is not None
