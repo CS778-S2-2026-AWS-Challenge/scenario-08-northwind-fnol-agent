@@ -138,7 +138,10 @@ def bind_provider_schema(
                 'properties': {
                     **shared_properties,
                     'field_code': field_code_schema,
-                    'value': value_schema,
+                    # null carries a disposition (claimant will supply / third
+                    # party pending) instead of a value; the parser enforces
+                    # that pairing.
+                    'value': {'anyOf': [value_schema, {'type': 'null'}]},
                 },
                 'required': list(base_item.get('required', list(base_properties))),
                 'additionalProperties': False,
@@ -280,6 +283,13 @@ def validate_field_changes(
                 rejected_bounds.append(violation)
             else:
                 violations.append(violation)
+            continue
+        # A disposition other than 'value' carries no value by design (the
+        # claimant will supply it later, or a third party will); the strict
+        # type check only applies to a fact the model is actually supplying.
+        disposition = getattr(change, 'disposition', 'value')
+        if disposition != 'value':
+            validated.append(change.model_copy(update={'value': None}))
             continue
         if not _field_value_is_valid(field, value):
             violation = TurnFieldViolation(

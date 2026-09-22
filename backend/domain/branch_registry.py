@@ -15,6 +15,7 @@ from backend.domain.models import (
     BranchEvaluationRecord,
     BranchEvaluationResult,
     BranchResult,
+    FactPrecision,
     FieldSelectionResult,
     FieldSelectionState,
     FormStatus,
@@ -127,6 +128,13 @@ COMMON_REQUIRED = frozenset(
         'loss.description',
     }
 )
+# Documents each kind of report normally carries, named by existing
+# EvidenceRecord.kind values already read by tag_projection / demo_materials.
+FAMILY_DOCUMENTS = {
+    'motor': frozenset({'incident_image', 'repair_quote'}),
+    'home': frozenset({'incident_image', 'repair_quote'}),
+    'contents': frozenset({'incident_image', 'proof_of_ownership'}),
+}
 FAMILY_REQUIRED = {
     'motor': frozenset({'vehicle.damage_description', 'vehicle.drivable'}),
     'home': frozenset(
@@ -219,6 +227,9 @@ class ContentBranch:
         default_factory=lambda: MappingProxyType({})
     )
     record_intents: tuple[str, ...] = ()
+    # Documents a report on this branch normally carries. These name existing
+    # EvidenceRecord.kind values; the model asks for, recognises, or sources them.
+    document_requirements: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,6 +285,7 @@ def build_default_registry() -> BranchRegistrySnapshot:
             collection_policy=MappingProxyType(
                 dict.fromkeys(FAMILY_REQUIRED[family], 'required_now')
             ),
+            document_requirements=FAMILY_DOCUMENTS[family],
         )
         for family in FAMILY_NAMES
     ]
@@ -313,6 +325,7 @@ def build_default_registry() -> BranchRegistrySnapshot:
                     {'authorities.police_report_reference': 'optional'}
                 ),
                 record_intents=('evidence_pending_police_report',),
+                document_requirements=frozenset({'police_report'}),
             ),
             ContentBranch(
                 'evidence.pending',
@@ -344,6 +357,7 @@ def build_default_registry() -> BranchRegistrySnapshot:
                         'contents.police_reference': 'optional',
                     }
                 ),
+                document_requirements=frozenset({'police_report', 'proof_of_ownership'}),
             ),
             ContentBranch(
                 'safety.injury_or_danger',
@@ -372,6 +386,7 @@ def build_default_registry() -> BranchRegistrySnapshot:
                         'injury.medical_attention': 'before_creation',
                     }
                 ),
+                document_requirements=frozenset({'other_document'}),
             ),
             ContentBranch(
                 'mitigation.emergency',
@@ -1047,9 +1062,17 @@ class BranchRuleEvaluator:
         elif definition.code == 'claim.product_family' and claim.incident_type in FAMILY_NAMES:
             selection_state = FieldSelectionState.CANDIDATE_NOW
             reason = 'The persisted Claim already supplies the authoritative family.'
-        elif value_state in {FormStatus.CONFIRMED, FormStatus.PROPOSED}:
+        elif value_state in {
+            FormStatus.CONFIRMED,
+            FormStatus.PROPOSED,
+            FormStatus.DISPUTED,
+            FormStatus.UNAVAILABLE,
+            FormStatus.PENDING_GENERATION,
+        }:
+            # A fact the claimant could not supply earlier, or one awaiting a
+            # third party, stays writable so a later message can settle it.
             selection_state = FieldSelectionState.CANDIDATE_NOW
-            reason = 'The current requirement already has an accepted or recorded Claim fact.'
+            reason = 'The current requirement already has a recorded Claim fact or disposition.'
         elif definition.code in required:
             selection_state = FieldSelectionState.REQUIRED_NOW
             reason = (
@@ -1106,31 +1129,68 @@ class BranchRuleEvaluator:
         recorded: list[str] = []
         missing: list[str] = []
         pending: list[str] = []
+        by_state: dict[str, list[str]] = {
+            'missing': [],
+            'proposed': [],
+            'confirmed_exact': [],
+            'confirmed_approx': [],
+            'disputed': [],
+            'unavailable': [],
+            'pending_generation': [],
+        }
+
+        def bucket(requirement: str, status: FormStatus) -> None:
+            if status is FormStatus.CONFIRMED:
+                stored = claim.form.get(requirement)
+                approx = stored is not None and stored.precision is not FactPrecision.EXACT
+                by_state['confirmed_approx' if approx else 'confirmed_exact'].append(requirement)
+                satisfied.append(requirement)
+            elif status is FormStatus.PROPOSED:
+                by_state['proposed'].append(requirement)
+                recorded.append(requirement)
+            elif status is FormStatus.DISPUTED:
+                by_state['disputed'].append(requirement)
+                recorded.append(requirement)
+            elif status is FormStatus.UNAVAILABLE:
+                by_state['unavailable'].append(requirement)
+            elif status is FormStatus.PENDING_GENERATION:
+                by_state['pending_generation'].append(requirement)
+            else:
+                by_state['missing'].append(requirement)
+                missing.append(requirement)
+
         for requirement in REQUIREMENT_PRIORITY:
             if requirement not in required:
                 continue
-            if requirement == 'claim.product_family' and claim.incident_type in FAMILY_NAMES:
+            if (
+                requirement == 'claim.product_family'
+                and claim.incident_type in FAMILY_NAMES
+                and requirement not in claim.form
+            ):
+                # Legacy claims carry the family only on incident_type. When the
+                # form holds the fact, its own status decides the bucket below.
+                by_state['confirmed_exact'].append(requirement)
                 satisfied.append(requirement)
                 continue
             if requirement == 'contents.items':
                 if any(item.status is FormStatus.CONFIRMED for item in claim.contents_items):
+                    by_state['confirmed_exact'].append(requirement)
                     satisfied.append(requirement)
                 elif any(item.status is FormStatus.PROPOSED for item in claim.contents_items):
+                    by_state['proposed'].append(requirement)
                     recorded.append(requirement)
                 else:
+                    by_state['missing'].append(requirement)
                     missing.append(requirement)
                 continue
             selection = selection_by_code.get(requirement)
             if selection is None:
+                by_state['missing'].append(requirement)
                 missing.append(requirement)
             elif selection.selection_state is FieldSelectionState.PENDING_LATER:
                 pending.append(requirement)
-            elif selection.value_state is FormStatus.CONFIRMED:
-                satisfied.append(requirement)
-            elif selection.value_state is FormStatus.PROPOSED:
-                recorded.append(requirement)
             else:
-                missing.append(requirement)
+                bucket(requirement, selection.value_state)
 
         missing_by_branch: list[dict[str, object]] = []
         fact_branches = [
@@ -1166,28 +1226,24 @@ class BranchRuleEvaluator:
         common_missing = [code for code in missing if code in ungrouped]
         if common_missing:
             missing_by_branch.append({'branch': 'common', 'fields': common_missing})
-        ready = (
-            not missing
-            and not recorded
-            and not unresolved_family_conflict
-            and selected_family is not None
-        )
+        ready = not missing and not unresolved_family_conflict and selected_family is not None
         return RequirementResolution(
             satisfied=satisfied,
             recorded=recorded,
             missing_required_now=missing,
             missing_by_branch=missing_by_branch,
             pending_later=pending,
+            by_state=by_state,
+            unresolved=list(by_state['missing']),
             next_required_item=missing[0] if missing else None,
             ready=ready,
-            ready_pending_confirmation=(
-                not missing
-                and bool(recorded)
-                and not unresolved_family_conflict
-                and selected_family is not None
-            ),
-            current_action_total=len(satisfied) + len(recorded) + len(missing),
-            current_action_satisfied=len(satisfied),
+            # Recorded facts travel to the Workbench with their state; they no
+            # longer gate creation behind a separate confirmation stage.
+            ready_pending_confirmation=False,
+            current_action_total=sum(len(items) for items in by_state.values()),
+            current_action_satisfied=len(satisfied)
+            + len(by_state['unavailable'])
+            + len(by_state['pending_generation']),
         )
 
     @staticmethod

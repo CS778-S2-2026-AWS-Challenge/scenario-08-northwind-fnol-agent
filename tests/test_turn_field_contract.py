@@ -83,7 +83,9 @@ def test_one_turn_contract_drives_all_registered_value_shapes_and_schema() -> No
         for item in variants
         if item['properties']['field_code'].get('const') == 'claim.product_family'
     )
-    assert product_family['properties']['value']['enum'] == ['contents', 'home', 'motor']
+    value_options = product_family['properties']['value']['anyOf']
+    assert value_options[0]['enum'] == ['contents', 'home', 'motor']
+    assert value_options[1] == {'type': 'null'}
     assert schema['properties']['field_changes']['maxItems'] == len(contract.fields)  # type: ignore[index]
 
 

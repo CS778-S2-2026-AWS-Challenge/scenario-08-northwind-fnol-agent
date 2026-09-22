@@ -56,7 +56,14 @@ def test_full_schema_is_satisfiable_after_both_provider_translations(
         Draft202012Validator.check_schema(schema)
         Draft202012Validator(schema).validate(raw)
     variants = plan.response_schema['properties']['field_changes']['items']['anyOf']
-    expected_keys = {'field_code', 'value', 'reported_text', 'precision'}
+    expected_keys = {
+        'field_code',
+        'value',
+        'reported_text',
+        'precision',
+        'disposition',
+        'service_identity',
+    }
     if media:
         expected_keys.add('source_evidence_id')
     assert all(set(item['properties']) == expected_keys for item in variants)

@@ -165,7 +165,9 @@ def test_model_can_save_family_and_damage_in_one_turn_but_cannot_forge_provenanc
         assert claim.form[code].value == value
         assert claim.form[code].status is expected_status
         assert claim.form[code].source is expected_source
-    assert claim.incident_type == ('motor' if supported_quote else None)
+    # The model's understood family opens the motor branch from the first turn
+    # either way; the form field carries whether the claimant's words back it.
+    assert claim.incident_type == 'motor'
 
 
 def test_controlled_path_still_uses_its_existing_family_inference() -> None:

@@ -27,8 +27,42 @@ CLAIMANT = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF = {'Authorization': 'Bearer synthetic-staff'}
 
 
-def fact(code: str, value: Any, quote: str | None = None) -> dict[str, Any]:
-    return {'field_code': code, 'value': value, 'reported_text': quote, 'precision': 'exact'}
+def fact(
+    code: str,
+    value: Any,
+    quote: str | None = None,
+    *,
+    precision: str = 'exact',
+    disposition: str = 'value',
+    service_identity: str | None = None,
+) -> dict[str, Any]:
+    return {
+        'field_code': code,
+        'value': value,
+        'reported_text': quote,
+        'precision': precision,
+        'disposition': disposition,
+        'service_identity': service_identity,
+    }
+
+
+def unknown_for_now(code: str, quote: str) -> dict[str, Any]:
+    """The claimant said they cannot supply this fact yet."""
+
+    return fact(code, None, quote, precision='unknown', disposition='claimant_will_supply')
+
+
+def third_party_fills(code: str, service_identity: str, quote: str | None = None) -> dict[str, Any]:
+    """The fact should come from a registered service, not the claimant."""
+
+    return fact(
+        code,
+        None,
+        quote,
+        precision='unknown',
+        disposition='third_party_pending',
+        service_identity=service_identity,
+    )
 
 
 def envelope(
@@ -38,9 +72,26 @@ def envelope(
     services: Sequence[str] = (),
     items: Sequence[dict[str, Any]] = (),
     confirms: bool = False,
+    action: str | None = None,
+    reply: str = 'I have recorded these details.',
+    summary_fields: Sequence[str] | None = None,
+    documents: Sequence[dict[str, Any]] = (),
+    interpretations: Sequence[dict[str, Any]] = (),
+    ready: bool = False,
 ) -> dict[str, Any]:
+    if action is None:
+        action = (
+            'summarize'
+            if summary_fields is not None
+            else 'propose_submit'
+            if ready
+            else 'offer_service'
+            if services
+            else 'record_and_ask'
+        )
     return {
-        'reply': 'I have recorded these details.',
+        'action': action,
+        'reply': reply,
         'reason_codes': ['FACT_RECORDED'],
         'field_changes': list(fields),
         'contents_item_changes': list(items),
@@ -55,9 +106,12 @@ def envelope(
             {'service_identity': service, 'rationale': 'This support fits the reported situation.'}
             for service in services
         ],
+        'document_requests': list(documents),
+        'evidence_interpretations': list(interpretations),
+        'summary_fields': list(summary_fields) if summary_fields is not None else None,
         'state_proposals': [],
         'escalation': None,
-        'ready_to_create': False,
+        'ready_to_create': ready,
         'confirms_batch': confirms,
     }
 

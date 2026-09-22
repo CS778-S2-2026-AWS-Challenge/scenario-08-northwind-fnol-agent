@@ -2324,6 +2324,12 @@ class RequirementResolution(ContractModel):
     missing_required_now: list[str] = Field(default_factory=list)
     missing_by_branch: list[dict[str, object]] = Field(default_factory=list)
     pending_later: list[str] = Field(default_factory=list)
+    # Every required field lands in exactly one bucket. Only ``missing`` blocks
+    # creation: a fact the claimant cannot supply yet, a fact awaiting a third
+    # party, a disputed fact, or a recorded-but-unconfirmed fact all travel to
+    # the Workbench with their state rather than holding the report hostage.
+    by_state: dict[str, list[str]] = Field(default_factory=dict)
+    unresolved: list[str] = Field(default_factory=list)
     next_required_item: str | None = None
     ready: bool = False
     ready_pending_confirmation: bool = False

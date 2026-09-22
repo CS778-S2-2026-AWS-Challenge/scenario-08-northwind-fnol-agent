@@ -29,7 +29,20 @@ def test_inferred_home_reaches_batch_confirmation_without_family_deadlock(
                     fact('property.affected_areas', ['lounge ceiling']),
                     fact('property.ongoing_risk', 'none'),
                     fact('property.habitable', True),
-                ]
+                ],
+                reply='Here is what I have so far for your home claim. Is it all correct?',
+                summary_fields=[
+                    'claim.product_family',
+                    'incident.description',
+                    'incident.occurred_at',
+                    'incident.location',
+                    'loss.description',
+                    'incident.injury_or_danger',
+                    'property.address',
+                    'property.affected_areas',
+                    'property.ongoing_risk',
+                    'property.habitable',
+                ],
             ),
             envelope(confirms=True),
         ]
@@ -78,16 +91,17 @@ def test_inferred_home_reaches_batch_confirmation_without_family_deadlock(
 
     assert turns[0]['dynamic_form']['selected_family'] == 'home'
     assert 'property.address' in turns[0]['dynamic_form']['requirements']['missing_required_now']
-    assert turns[1]['dynamic_form']['requirements']['ready_pending_confirmation'] is True
+    # Recorded facts no longer hold the report hostage behind a confirmation
+    # stage: every required fact has a disposition, so the report is ready and
+    # the recorded facts travel to the Workbench carrying their state.
+    requirements = turns[1]['dynamic_form']['requirements']
+    assert requirements['ready_pending_confirmation'] is False
+    assert requirements['ready'] is True
+    assert requirements['unresolved'] == []
+    assert set(requirements['by_state']['proposed']) >= {'claim.product_family'}
     view = client.get(f'/api/v1/claims/{claim_id}', headers=CLAIMANT).json()
     assert view['form']['claim.product_family']['status'] == 'proposed'
-    blocked = client.post(
-        f'/api/v1/claims/{claim_id}/creation',
-        headers={**CLAIMANT, 'Idempotency-Key': 'inferred-premature', 'If-Match': str(revision)},
-    )
-    assert blocked.status_code == 409, blocked.text
-    assert blocked.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
-    assert 'family must be confirmed' in blocked.json()['error']['message']
+    assert view['incident_type'] == 'home'
     confirmed = submit_message(
         client,
         CLAIMANT,

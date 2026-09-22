@@ -1,6 +1,20 @@
 {
   "additionalProperties": false,
   "properties": {
+    "action": {
+      "enum": [
+        "record_and_ask",
+        "clarify",
+        "offer_service",
+        "request_document",
+        "obtain_document",
+        "summarize",
+        "propose_submit",
+        "escalate",
+        "answer_only"
+      ],
+      "type": "string"
+    },
     "reply": {
       "maxLength": 500,
       "minLength": 1,
@@ -13,7 +27,6 @@
         "type": "string"
       },
       "maxItems": 5,
-      "minItems": 1,
       "type": "array"
     },
     "field_changes": {
@@ -46,13 +59,34 @@
               "unknown"
             ],
             "type": "string"
+          },
+          "disposition": {
+            "enum": [
+              "value",
+              "claimant_will_supply",
+              "third_party_pending"
+            ],
+            "type": "string"
+          },
+          "service_identity": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "field_code",
           "value",
           "reported_text",
-          "precision"
+          "precision",
+          "disposition",
+          "service_identity"
         ],
         "type": "object"
       },
@@ -249,6 +283,84 @@
       "maxItems": 3,
       "type": "array"
     },
+    "document_requests": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "document_kind": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "from_party": {
+            "enum": [
+              "claimant",
+              "third_party"
+            ],
+            "type": "string"
+          },
+          "service_identity": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "document_kind",
+          "from_party",
+          "service_identity"
+        ],
+        "type": "object"
+      },
+      "maxItems": 2,
+      "type": "array"
+    },
+    "evidence_interpretations": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "document_kind": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "document_kind"
+        ],
+        "type": "object"
+      },
+      "maxItems": 4,
+      "type": "array"
+    },
+    "summary_fields": {
+      "anyOf": [
+        {
+          "items": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 30,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "state_proposals": {
       "items": {
         "additionalProperties": false,
@@ -321,8 +433,8 @@
     }
   },
   "required": [
-    "reply",
-    "reason_codes"
+    "action",
+    "reply"
   ],
   "type": "object"
 }
