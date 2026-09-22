@@ -468,6 +468,43 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.getByRole('heading', { name: 'No staff action is currently authorised' })).toBeVisible()
   })
 
+  it('keeps the current conversation action available during a background Claim refresh', () => {
+    const sendAction = {
+      action_code: 'conversation.send_claimant_message',
+      target_type: 'session',
+      target_ref: 'ses_1',
+      availability: 'available',
+      based_on_revision: 4,
+    }
+    render(<ClaimWorkspace
+      {...props}
+      loading
+      section="conversation"
+      conversationSessionId="ses_1"
+      draft="A claimant-safe update"
+      detail={{
+        ...detail,
+        active_session_id: 'ses_1',
+        allowed_actions: [sendAction],
+      }}
+      resources={{
+        handoffs: { status: 'available', items: [] },
+        messages: {
+          status: 'available',
+          items: [],
+          requested_session_id: 'ses_1',
+          resolved_session_id: 'ses_1',
+        },
+      }}
+    />)
+
+    expect(screen.getByText('Refreshing this Claim')).toBeVisible()
+    expect(screen.getByText('The current projection remains visible while the latest revision is loaded.')).toBeVisible()
+    expect(screen.getByLabelText('Message to claimant')).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled()
+    expect(screen.queryByText('Staff messaging not available yet')).not.toBeInTheDocument()
+  })
+
   it('keeps a stale Claim readable but withdraws projected actions until refresh', () => {
     const acceptAction = {
       action_code: 'human.accept_handoff',
