@@ -1,5 +1,7 @@
 import os
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import UTC, datetime
 from hashlib import scrypt
@@ -108,6 +110,18 @@ class FixtureIdentityRepository(IdentityRepository):
     def get_account(self, customer_id: str) -> CustomerAccountRecord | None:
         account = self._accounts.get(customer_id)
         return deepcopy(account) if account else None
+
+    @contextmanager
+    def hold_account_revision(
+        self, customer_id: str, expected_revision: int
+    ) -> Iterator[CustomerAccountRecord]:
+        with self._account_lock:
+            account = self._accounts.get(customer_id)
+            if account is None:
+                raise KeyError(customer_id)
+            if account.revision != expected_revision:
+                raise RevisionConflict(account.revision)
+            yield deepcopy(account)
 
     def save_account(self, account: CustomerAccountRecord, expected_revision: int) -> None:
         validate_customer_account_profile(account)
@@ -376,6 +390,29 @@ class SQLiteIdentityRepository(IdentityRepository):
                 'SELECT * FROM accounts WHERE customer_id = ?', (customer_id,)
             ).fetchone()
         return self._account(row) if row is not None else None
+
+    @contextmanager
+    def hold_account_revision(
+        self, customer_id: str, expected_revision: int
+    ) -> Iterator[CustomerAccountRecord]:
+        connection = self._connection()
+        try:
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute(
+                'SELECT * FROM accounts WHERE customer_id = ?', (customer_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(customer_id)
+            account = self._account(row)
+            if account.revision != expected_revision:
+                raise RevisionConflict(account.revision)
+            yield account
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def list_accounts(self) -> list[CustomerAccountRecord]:
         with self._connection() as connection:

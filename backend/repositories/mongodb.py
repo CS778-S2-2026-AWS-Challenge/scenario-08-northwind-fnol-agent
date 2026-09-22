@@ -133,7 +133,6 @@ from backend.repositories.account_data import (
     account_record_identity,
     payout_contact_selection_audit_matches,
     policy_selection_audit_matches,
-    validate_claimant_contact_authority,
 )
 from backend.repositories.assets import (
     AssetSelectionRevisionConflictError,
@@ -143,7 +142,6 @@ from backend.repositories.assets import (
     asset_matches_snapshot,
     asset_selection_audit_matches,
 )
-from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import (
     DemoSeedConflict,
     IdempotencyConflict,
@@ -869,9 +867,7 @@ class MongoDBRepository:
         expected_revision: int,
         payment_destination_id: str,
         payment_destination_revision: int,
-        identity_repository: IdentityRepository,
         contact_authority_revision: int,
-        contact_preference: str,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord,
         audit_event: AuditEventEnvelope,
@@ -910,12 +906,6 @@ class MongoDBRepository:
                     reason='changed',
                     current_revision=destination.revision,
                 )
-            validate_claimant_contact_authority(
-                identity_repository,
-                claim.customer_id,
-                contact_authority_revision,
-                contact_preference,
-            )
             prepared_audit = self._prepare_audit_events(
                 claim, (audit_event,), mongo_session=mongo_session
             )

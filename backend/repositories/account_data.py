@@ -15,8 +15,8 @@ from backend.domain.audit import (
     AuditSubjectType,
     AuditVisibility,
 )
+from backend.domain.identity import CustomerAccountRecord
 from backend.domain.models import ActorType, BranchEvaluationRecord, FormStatus, WorkingClaim
-from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import IdempotencyRecord, RepositoryConflict
 
 AccountRecord = PolicyNumberRecord | PaymentDestinationRecord | IdentityDocumentRecord
@@ -56,13 +56,12 @@ class ClaimantContactSelectionConflict(RepositoryConflict):
 
 
 def validate_claimant_contact_authority(
-    identity_repository: IdentityRepository,
+    account: CustomerAccountRecord,
     customer_id: str,
     expected_revision: int,
     contact_preference: str,
 ) -> None:
-    account = identity_repository.get_account(customer_id)
-    if account is None or not account.active:
+    if account.customer_id != customer_id or not account.active:
         raise ClaimantContactSelectionConflict(customer_id, reason='unavailable')
     if account.revision != expected_revision:
         raise ClaimantContactSelectionConflict(
@@ -257,9 +256,7 @@ class AccountDataRepository(Protocol):
         expected_revision: int,
         payment_destination_id: str,
         payment_destination_revision: int,
-        identity_repository: IdentityRepository,
         contact_authority_revision: int,
-        contact_preference: str,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord,
         audit_event: AuditEventEnvelope,

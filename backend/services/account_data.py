@@ -65,6 +65,7 @@ from backend.repositories.account_data import (
     PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
     account_record_identity,
+    validate_claimant_contact_authority,
 )
 from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import (
@@ -945,18 +946,54 @@ def select_payout_contact(
         created_at=timestamp,
     )
     try:
-        repository.save_payout_contact_selection(
-            updated_claim,
-            expected,
-            destination.payment_destination_id,
-            destination.revision,
-            identity_repository,
-            account.revision,
-            contact_preference,
-            idempotency,
-            evaluation,
-            audit,
-        )
+        with identity_repository.hold_account_revision(
+            principal.subject, account.revision
+        ) as guarded_account:
+            validate_claimant_contact_authority(
+                guarded_account,
+                principal.subject,
+                account.revision,
+                contact_preference,
+            )
+            try:
+                repository.save_payout_contact_selection(
+                    updated_claim,
+                    expected,
+                    destination.payment_destination_id,
+                    destination.revision,
+                    account.revision,
+                    idempotency,
+                    evaluation,
+                    audit,
+                )
+            except PaymentDestinationSelectionConflict as error:
+                raise ApiError(
+                    status_code=409,
+                    code='PAYMENT_DESTINATION_SELECTION_CONFLICT',
+                    message=(
+                        'The selected payment destination changed or is no longer available. '
+                        'Reload payout details.'
+                    ),
+                    details=[
+                        ErrorDetail(field='payment_destination_id', reason=error.reason)
+                    ],
+                    retryable=True,
+                ) from error
+            except RevisionConflict as error:
+                raise _revision_conflict(error.current_revision) from error
+            except (IdempotencyConflict, KeyError) as error:
+                replay = persistence.find_idempotency(principal.subject, route, key)
+                if (
+                    replay is None
+                    or replay.request_fingerprint != fingerprint
+                    or replay.response_payload is None
+                ):
+                    if isinstance(error, KeyError):
+                        raise _not_found('payment destination') from error
+                    raise _idempotency_conflict() from error
+                return ClaimPayoutContactSelectionResponse.model_validate(
+                    replay.response_payload
+                )
     except ClaimantContactSelectionConflict as error:
         raise ApiError(
             status_code=409,
@@ -968,30 +1005,28 @@ def select_payout_contact(
             details=[ErrorDetail(field='contact_preference', reason=error.reason)],
             retryable=True,
         ) from error
-    except PaymentDestinationSelectionConflict as error:
+    except RevisionConflict as error:
         raise ApiError(
             status_code=409,
-            code='PAYMENT_DESTINATION_SELECTION_CONFLICT',
+            code='CONTACT_AUTHORITY_CONFLICT',
             message=(
-                'The selected payment destination changed or is no longer available. '
-                'Reload payout details.'
+                'The claimant contact details changed before the selection was saved. '
+                'Reload contact details and try again.'
             ),
-            details=[ErrorDetail(field='payment_destination_id', reason=error.reason)],
+            details=[ErrorDetail(field='contact_preference', reason='changed')],
             retryable=True,
         ) from error
-    except RevisionConflict as error:
-        raise _revision_conflict(error.current_revision) from error
-    except (IdempotencyConflict, KeyError) as error:
-        replay = persistence.find_idempotency(principal.subject, route, key)
-        if (
-            replay is None
-            or replay.request_fingerprint != fingerprint
-            or replay.response_payload is None
-        ):
-            if isinstance(error, KeyError):
-                raise _not_found('payment destination') from error
-            raise _idempotency_conflict() from error
-        return ClaimPayoutContactSelectionResponse.model_validate(replay.response_payload)
+    except KeyError as error:
+        raise ApiError(
+            status_code=409,
+            code='CONTACT_AUTHORITY_CONFLICT',
+            message=(
+                'The claimant contact details changed before the selection was saved. '
+                'Reload contact details and try again.'
+            ),
+            details=[ErrorDetail(field='contact_preference', reason='unavailable')],
+            retryable=True,
+        ) from error
 
     persisted_claim = persistence.get_claim(claim_id, principal.subject)
     if persisted_claim is None:
