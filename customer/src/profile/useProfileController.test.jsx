@@ -161,6 +161,24 @@ describe('useProfileController mutation recovery', () => {
     expect(api.updateAccountProfile).toHaveBeenCalledOnce()
   })
 
+  it('sends the loaded account revision when saving contact preferences', async () => {
+    const savedAccount = {
+      ...account,
+      revision: 5,
+      preferences: { email: false, sms: true },
+    }
+    api.updateAccountPreferences.mockResolvedValue(savedAccount)
+    const { result } = renderController()
+
+    await waitFor(() => expect(api.listAccountAssets).toHaveBeenCalledOnce())
+    await act(async () => {
+      await result.current.controller.savePreferences({ email: false, sms: true })
+    })
+
+    expect(api.updateAccountPreferences).toHaveBeenCalledWith({ email: false, sms: true }, 4)
+    expect(result.current.account).toEqual(savedAccount)
+  })
+
   it.each(resourceCases)('keeps $label unavailable when its initial load fails', async ({ listMethod, resource }) => {
     api[listMethod].mockRejectedValueOnce({ code: 'NETWORK_ERROR' })
     const { result } = renderController()

@@ -18,6 +18,7 @@ import {
   streamRealtimeEvents,
   updateAccountAsset,
   updateAccountProfile,
+  updateAccountPreferences,
   updateAccountIdentityDocument,
   updateAccountPolicy,
 } from './api.js'
@@ -605,7 +606,7 @@ describe('Claim history contract', () => {
   })
 })
 
-describe('Account profile contract', () => {
+describe('Account mutation contract', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
     setClaimantAccessToken('claimant-session-token')
@@ -643,6 +644,24 @@ describe('Account profile contract', () => {
           email: 'iris@example.invalid',
           residential_address: '1 Queen Street, Auckland',
         }),
+      }),
+    )
+  })
+
+  it('sends the account revision when saving contact preferences', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ preferences: {} }), { status: 200 }))
+
+    await updateAccountPreferences({ email: false, sms: true }, 4)
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/preferences',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer claimant-session-token',
+          'If-Match': '4',
+        }),
+        body: JSON.stringify({ email: false, sms: true }),
       }),
     )
   })

@@ -335,7 +335,7 @@ export default function useProfileController({ account, setAccount, enabled = tr
   const savePreferences = useCallback((preferences) => runAccountMutation({
     scope: 'preferences',
     action: 'your contact preference',
-    execute: () => updateAccountPreferences(preferences),
+    execute: () => updateAccountPreferences(preferences, accountRef.current?.revision),
     matches: (latest) => accountMatchesPreferences(latest, preferences),
   }), [runAccountMutation])
 
