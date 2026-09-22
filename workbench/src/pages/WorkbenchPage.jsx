@@ -25,6 +25,7 @@ export default function WorkbenchPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const tabs = usePersistentTabs()
   const openTab = tabs.open
+  const syncTabIdentities = tabs.syncIdentities
   const [claims, setClaims] = useState([])
   const [viewCounts, setViewCounts] = useState(UNAVAILABLE_VIEW_COUNTS)
   const [filterMetadata, setFilterMetadata] = useState(null)
@@ -112,6 +113,10 @@ export default function WorkbenchPage() {
   const activeExternalActionRecoveries = claimId
     ? Object.values(externalActionRecoveries[claimId] || {})
     : []
+
+  useEffect(() => {
+    syncTabIdentities?.(claims)
+  }, [claims, syncTabIdentities])
 
   const openConversation = useCallback((conversation) => {
     if (conversation.kind === 'staff_agent') {

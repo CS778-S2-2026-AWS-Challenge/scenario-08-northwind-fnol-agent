@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { claimIdentity } from '../claim-identity.js'
 
 const STORAGE_KEY = 'northwind.workbench.tabs.v1'
 
@@ -6,7 +7,8 @@ function initialState() {
   try {
     const value = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null')
     if (Array.isArray(value?.tabs)) {
-      return { tabs: value.tabs, activeId: value.activeId || value.tabs[0]?.claimId || null }
+      const tabs = value.tabs.map(normalizePersistedTab)
+      return { tabs, activeId: value.activeId || tabs[0]?.claimId || null }
     }
   } catch {
     // A malformed local preference must not prevent staff from opening the Workbench.
@@ -24,16 +26,44 @@ export function usePersistentTabs() {
   const open = useCallback((claim) => {
     setState((current) => {
       const existing = current.tabs.find((tab) => tab.claimId === claim.claim_id)
-      if (existing) return { ...current, activeId: existing.claimId }
+      const identityFields = tabIdentityFields(claim)
+      if (existing) {
+        return {
+          tabs: current.tabs.map((tab) => (
+            tab.claimId === existing.claimId ? { ...tab, ...identityFields } : tab
+          )),
+          activeId: existing.claimId,
+        }
+      }
       const tab = {
         claimId: claim.claim_id,
-        label: claim.display_reference || claim.claim_id,
+        ...identityFields,
         section: 'summary',
         draft: '',
         expandedRecords: [],
         pendingAction: null,
       }
       return { tabs: [...current.tabs, tab], activeId: tab.claimId }
+    })
+  }, [])
+
+  const syncIdentities = useCallback((claims = []) => {
+    const claimById = new Map(claims.map((claim) => [claim.claim_id, claim]))
+    setState((current) => {
+      let changed = false
+      const tabs = current.tabs.map((tab) => {
+        const claim = claimById.get(tab.claimId)
+        if (!claim) return tab
+        const identityFields = tabIdentityFields(claim)
+        if (
+          tab.label === identityFields.label
+          && tab.reference === identityFields.reference
+          && tab.referenceLabel === identityFields.referenceLabel
+        ) return tab
+        changed = true
+        return { ...tab, ...identityFields }
+      })
+      return changed ? { ...current, tabs } : current
     })
   }, [])
 
@@ -66,5 +96,29 @@ export function usePersistentTabs() {
     [state],
   )
 
-  return { ...state, activeTab, open, activate, close, update }
+  return { ...state, activeTab, open, syncIdentities, activate, close, update }
+}
+
+function tabIdentityFields(claim) {
+  const identity = claimIdentity(claim)
+  return {
+    label: identity.tabLabel,
+    reference: identity.reference,
+    referenceLabel: identity.referenceLabel,
+  }
+}
+
+function normalizePersistedTab(tab) {
+  if (tab.reference && tab.referenceLabel) return tab
+  const legacyReference = tab.label || tab.claimId
+  const identity = claimIdentity({
+    claim_id: tab.claimId,
+    display_reference: legacyReference,
+  })
+  return {
+    ...tab,
+    label: 'Claim in progress',
+    reference: legacyReference,
+    referenceLabel: identity.referenceLabel,
+  }
 }

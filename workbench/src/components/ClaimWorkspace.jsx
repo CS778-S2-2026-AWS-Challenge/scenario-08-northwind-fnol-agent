@@ -1,4 +1,5 @@
 import { AlertTriangle, Clock3, FileSearch } from 'lucide-react'
+import { claimIdentity } from '../claim-identity.js'
 import { failureReason, failureReference } from '../failure.js'
 import { formatDateTime, words } from '../format.js'
 import Activity from './Activity.jsx'
@@ -90,7 +91,41 @@ function resourceActionContextUnavailable(resource) {
 }
 
 function ClaimHeader({ detail }) {
-  return <header className="claim-heading"><div><p className="eyebrow">Claim {detail.display_reference}</p><h1>{detail.claimant?.display_name || detail.claimant?.customer_id}</h1><div className="claim-heading__meta"><span>{words(detail.incident?.family)} claim</span>{detail.terminal_disposition && <span>Terminal: {words(detail.terminal_disposition.value)}</span>}<span>{words(detail.lifecycle_state)}</span><span>Revision {detail.revision}</span></div></div><div className="claim-heading__status"><span className="status-indicator"><Clock3 size={16} /> Updated {formatDateTime(detail.updated_at)}</span></div></header>
+  const identity = claimIdentity(detail)
+  return (
+    <header className="claim-heading">
+      <div className="claim-heading__identity">
+        <p className="eyebrow">{identity.typeLabel}</p>
+        <h1>{identity.title}</h1>
+        {identity.incidentSummary && identity.incidentSummary !== identity.title
+          ? <p className="claim-heading__summary">{identity.incidentSummary}</p>
+          : null}
+        <div className="claim-heading__meta">
+          {detail.terminal_disposition && <span>Terminal: {words(detail.terminal_disposition.value)}</span>}
+          <span>{words(detail.lifecycle_state)}</span>
+          <span>Revision {detail.revision}</span>
+          <span className="claim-heading__reference">Claim {identity.referenceLabel}</span>
+        </div>
+        {(identity.reference || detail.claimant?.customer_id) ? (
+          <details className="claim-heading__references">
+            <summary>Record references<span className="sr-only"> for {identity.title}</span></summary>
+            <dl>
+              {identity.reference ? <div><dt>Claim reference</dt><dd><code>{identity.reference}</code></dd></div> : null}
+              {identity.claimId && identity.claimId !== identity.reference
+                ? <div><dt>Working Claim ID</dt><dd><code>{identity.claimId}</code></dd></div>
+                : null}
+              {detail.claimant?.customer_id
+                ? <div><dt>Claimant reference</dt><dd><code>{detail.claimant.customer_id}</code></dd></div>
+                : null}
+            </dl>
+          </details>
+        ) : null}
+      </div>
+      <div className="claim-heading__status">
+        <span className="status-indicator"><Clock3 size={16} /> Updated {formatDateTime(detail.updated_at)}</span>
+      </div>
+    </header>
+  )
 }
 
 function moveTabFocus(event, currentIndex, onSection) {

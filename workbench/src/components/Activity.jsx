@@ -1,4 +1,3 @@
-import { MessageCircle } from 'lucide-react'
 import { formatDate, formatDateTime, formatTime, words } from '../format.js'
 import { HandoffResolution, StaffActions } from './ReviewActions.jsx'
 import { findProjectedAction } from '../projected-action.js'
@@ -7,37 +6,45 @@ import ResourceBoundary from './ResourceBoundary.jsx'
 export default function Activity({ detail, resources, onResolve, onUpdateAction, onRetry }) {
   const openHandoff = [...(resources.handoffs?.items || [])].reverse().find((item) => !['resolved', 'cancelled'].includes(item.status))
   const resolveAction = findProjectedAction(detail.allowed_actions, 'human.resolve_handoff', openHandoff?.handoff_id)
+  const events = resources.events?.items || []
+  const updates = resources.customerUpdates?.items || []
+  const sourceItems = detail.source_summary?.items || []
   return (
     <div className="activity-view">
       <HandoffResolution handoff={openHandoff} allowedAction={resolveAction} onResolve={onResolve} />
-      <ResourceBoundary resource={resources.workItems} onRetry={onRetry}><StaffActions actions={resources.workItems?.items || []} allowedActions={detail.allowed_actions || []} onUpdate={onUpdateAction} /></ResourceBoundary>
+      <ResourceBoundary resource={resources.workItems} onRetry={onRetry}><StaffActions actions={resources.workItems?.items || []} hasMore={Boolean(resources.workItems?.page?.next_cursor)} allowedActions={detail.allowed_actions || []} onUpdate={onUpdateAction} /></ResourceBoundary>
       <ResourceBoundary resource={resources.events} onRetry={onRetry}>
         <section className="resource-view activity-section" aria-labelledby="claim-activity-title">
           <header className="content-header activity-section__header">
-            <div><p className="eyebrow">Audit trail</p><h2 id="claim-activity-title">Claim activity</h2></div>
+            <p className="eyebrow">Audit trail</p>
+            <h2 id="claim-activity-title">Claim activity</h2>
+            <span className="activity-section__count">{resourceCountLabel(events.length, 'event', Boolean(resources.events?.page?.next_cursor))}</span>
           </header>
-          <EventTimeline events={resources.events?.items} />
+          <EventTimeline events={events} sourceItems={sourceItems} />
         </section>
       </ResourceBoundary>
       <ResourceBoundary resource={resources.customerUpdates} onRetry={onRetry}>
         <section className="resource-view activity-section" aria-labelledby="customer-updates-title">
           <header className="content-header activity-section__header">
-            <div><p className="eyebrow">Claimant-visible</p><h2 id="customer-updates-title">Customer updates</h2></div>
+            <p className="eyebrow">Claimant-visible</p>
+            <h2 id="customer-updates-title">Customer updates</h2>
+            <span className="activity-section__count">{resourceCountLabel(updates.length, 'update', Boolean(resources.customerUpdates?.page?.next_cursor))}</span>
           </header>
-          <CustomerUpdateList updates={resources.customerUpdates?.items} />
+          <CustomerUpdateList updates={updates} />
         </section>
       </ResourceBoundary>
     </div>
   )
 }
 
-function EventTimeline({ events = [] }) {
+function EventTimeline({ events = [], sourceItems = [] }) {
   if (!events.length) {
     return (
       <div className="activity-empty activity-empty--compact">
+        <span className="activity-empty__marker" aria-hidden="true" />
         <div>
           <strong>No claim activity yet</strong>
-          <p>Audit events will appear here as this Claim progresses.</p>
+          <p>Audit events will appear here as this claim progresses.</p>
         </div>
       </div>
     )
@@ -53,15 +60,17 @@ function EventTimeline({ events = [] }) {
             <ol className="audit-timeline__events">
               {group.events.map((event) => {
                 const timestamp = eventTimestamp(event)
+                const title = event.summary || eventTitle(event.event_type)
                 return (
                   <li className="audit-event" key={event.event_id}>
                     <span className="audit-event__rail" aria-hidden="true"><span /></span>
                     <article className="audit-event__content">
-                      <h4>{event.summary || eventTitle(event.event_type)}</h4>
-                      <div className="audit-event__meta">
-                        <span>{words(event.event_type)}</span>
+                      <div className="audit-event__primary">
+                        <h4>{title}</h4>
                         <time dateTime={timestamp || undefined}>{formatTime(timestamp)}</time>
                       </div>
+                      <p className="audit-event__code">{words(event.event_type)}</p>
+                      <EventContext event={event} sourceItems={sourceItems} title={title} />
                     </article>
                   </li>
                 )
@@ -78,7 +87,7 @@ function CustomerUpdateList({ updates = [] }) {
   if (!updates.length) {
     return (
       <div className="activity-empty">
-        <span className="activity-empty__icon" aria-hidden="true"><MessageCircle /></span>
+        <span className="activity-empty__marker" aria-hidden="true" />
         <div>
           <strong>No customer updates yet</strong>
           <p>Claimant-visible updates will appear here after they are recorded.</p>
@@ -104,6 +113,113 @@ function CustomerUpdateList({ updates = [] }) {
   )
 }
 
+function EventContext({ event, sourceItems, title }) {
+  const sourceRefs = event.source_refs || []
+  const actor = actorLabel(event.actor_id)
+  const sourceLabels = [...new Set(sourceRefs.map((reference, index) => (
+    sourceReferenceLabel(event, reference, index, sourceItems)
+  )))]
+  return (
+    <>
+      {(actor || event.resulting_revision != null || sourceLabels.length) ? (
+        <dl className="audit-event__context" aria-label="Event context">
+          {actor ? <div><dt>Recorded by</dt><dd>{actor}</dd></div> : null}
+          {sourceLabels.length ? <div><dt>{sourceRefs.length === 1 ? 'Related record' : 'Related records'}</dt><dd>{sourceLabels.join(' · ')}</dd></div> : null}
+          {event.resulting_revision != null ? <div><dt>Claim version</dt><dd>{event.resulting_revision}</dd></div> : null}
+        </dl>
+      ) : null}
+      <details className="audit-event__technical">
+        <summary>Technical details<span className="sr-only"> for {title}</span></summary>
+        <dl>
+          <div><dt>Event reference</dt><dd><code>{event.event_id}</code></dd></div>
+          <div><dt>Event code</dt><dd><code>{event.event_type}</code></dd></div>
+          {event.actor_id ? <div><dt>Actor reference</dt><dd><code>{event.actor_id}</code></dd></div> : null}
+          {sourceRefs.length ? (
+            <div>
+              <dt>Source references</dt>
+              <dd>
+                <ul className="audit-event__reference-list">
+                  {sourceRefs.map((reference, index) => (
+                    <li key={`${reference}-${index}`}>
+                      <span>{sourceReferenceLabel(event, reference, index, sourceItems)}</span>
+                      <code>{reference}</code>
+                    </li>
+                  ))}
+                </ul>
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+      </details>
+    </>
+  )
+}
+
+function actorLabel(actorId) {
+  const actor = String(actorId || '').toLowerCase()
+  if (actor === 'claimant' || actor.startsWith('cus_')) return 'Claimant'
+  if (actor === 'agent') return 'Agent'
+  if (actor === 'staff' || actor.startsWith('stf_')) return 'Claims professional'
+  if (actor === 'system') return 'System'
+  if (actor.startsWith('adm_')) return 'Administrator'
+  return null
+}
+
+function sourceReferenceLabel(event, reference, index, sourceItems) {
+  const authoritativeItem = sourceItems.find((item) => item.record_ref === reference)
+  if (authoritativeItem?.label) return authoritativeItem.label
+
+  const projectedLabel = projectedSourceLabel(event.event_type, index)
+  if (projectedLabel) return projectedLabel
+
+  const matchedPrefix = REFERENCE_LABELS.find(([prefix]) => String(reference).startsWith(prefix))
+  return matchedPrefix?.[1] || 'Supporting record'
+}
+
+function projectedSourceLabel(eventType, index) {
+  const type = String(eventType || '')
+  if (type === 'claim.created' && index === 0) return 'Claim record'
+  if (type === 'message.appended' && index === 0) return 'Message'
+  if (type === 'message.appended' && index === 1) return 'Conversation'
+  if (type.startsWith('handoff.') && index === 0) return 'Handoff record'
+  if (type.startsWith('work_item.') && index === 0) return 'Staff work item'
+  if (type === 'customer_update.recorded' && index === 0) return 'Customer update'
+  if (type.startsWith('ownership.') && index === 0) {
+    const requestKind = type.split('.')[1]
+    return {
+      cowork: 'Cowork request',
+      transfer: 'Transfer request',
+      requeue: 'Queue return',
+    }[requestKind] || 'Ownership request'
+  }
+  return null
+}
+
+const REFERENCE_LABELS = [
+  ['claim:', 'Claim record'],
+  ['field:', 'Claim field'],
+  ['session:', 'Conversation'],
+  ['evidence:', 'Evidence item'],
+  ['asset:', 'Asset revision'],
+  ['retrieval:', 'Reference check'],
+  ['handoff:', 'Handoff record'],
+  ['clm_', 'Claim record'],
+  ['ses_', 'Conversation'],
+  ['msg_', 'Message'],
+  ['hnd_', 'Handoff record'],
+  ['act_', 'Staff work item'],
+  ['upd_', 'Customer update'],
+  ['col_', 'Ownership request'],
+  ['evd_', 'Evidence item'],
+  ['tsk_', 'External service task'],
+  ['asr_op_', 'External service operation'],
+  ['res_', 'Result record'],
+  ['pol_', 'Policy record'],
+  ['his_', 'Claim history record'],
+  ['sig_', 'Review signal'],
+  ['sdec_', 'Signal decision'],
+]
+
 function groupEventsByDate(events) {
   return events.reduce((groups, event) => {
     const date = formatDate(eventTimestamp(event))
@@ -123,4 +239,9 @@ function eventTimestamp(event) {
 
 function eventTitle(eventType) {
   return words(String(eventType || '').replaceAll('.', '_'))
+}
+
+function resourceCountLabel(count, singular, hasMore = false) {
+  const noun = count === 1 && !hasMore ? singular : `${singular}s`
+  return `${count}${hasMore ? '+' : ''} ${noun}`
 }
