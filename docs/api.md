@@ -513,6 +513,7 @@ version with another published version.
 | `POST`, `GET` | `/account/identity-documents` | Idempotently create or cursor-page masked identity documents |
 | `PATCH`, `DELETE` | `/account/identity-documents/{identity_id}` | Revision-update or soft-retire one owned identity document |
 | `POST` | `/claims/{claim_id}/policy-selections` | Propose one active owned policy number into the registered Claim field |
+| `POST` | `/claims/{claim_id}/payout-contact-selections` | Atomically bind one active owned Payment Destination and confirm the registered Claim contact preference |
 
 Profile email writes accept a supported Internet-style address with one local part and a dotted
 domain. The backend trims surrounding whitespace and lowercases the complete address before it
@@ -726,9 +727,10 @@ assessor-consent, assessor-request, and support-request responses. `customer_nex
 browser's primary action or its precedence.
 
 The versioned claimant action registry contains only claimant-safe `claimant.*` codes:
-`claimant.create_claim`, `claimant.review_details`, `claimant.request_assessment`,
-`claimant.retry_assessment`, `claimant.track_assessment`, `claimant.await_staff_review`,
-`claimant.await_reconciliation`, and `claimant.continue_conversation`. These codes are separate
+`claimant.create_claim`, `claimant.review_details`, `claimant.review_payout_contact`,
+`claimant.review_agreement`, `claimant.request_assessment`, `claimant.retry_assessment`,
+`claimant.track_assessment`, `claimant.await_staff_review`, `claimant.await_reconciliation`, and
+`claimant.continue_conversation`. These codes are separate
 from staff and Agent Runtime action registries; a browser must not execute an internal
 `external.*`, `human.*`, or other Runtime command because a similarly named lifecycle state is
 visible.
@@ -742,13 +744,21 @@ the registry contract, claimant-safe visibility, and server-side operation bound
 `claim_revision` is the Claim revision used to derive the projection and `projection_version` is
 currently `v1`.
 
-Until the server-owned staged progression contracts for Issue #926 and Issue #928 are implemented,
-`customer_next_step.status=ready_to_create` is not permission to invoke legacy claim creation. In
-that state the projection retains `action_code=claimant.create_claim` as the action identity but
-MUST set `available=false`. Claimant/browser consumers MUST NOT present or execute that unavailable
-action and MUST NOT infer permission from `ready_to_create`, `workflow_state`, `required_inputs`,
-or other supporting fields. Only the backend-owned `primary_action.available` value authorises
-presentation as actionable.
+When intake reaches `customer_next_step.status=ready_to_create`, the claimant projection exposes
+`action_code=claimant.review_payout_contact` as the available primary action. The Step 3 save uses
+`POST /api/v1/claims/{claim_id}/payout-contact-selections` with `If-Match` and
+`Idempotency-Key`. The server validates the selected active owner-scoped Payment Destination,
+validates `claimant.contact_preference` against the Field Registry, and requires the corresponding
+profile destination for email, phone, or SMS. The Claim stores only `payment_destination_id`; the
+protected account number remains outside Claim State and ordinary reads remain masked.
+
+After a valid Step 3 selection, claimant reads derive
+`customer_next_step.status=agreement_required` and expose
+`action_code=claimant.review_agreement` as the available primary action. This authorises
+navigation to Step 4 only. It does not authorise formal submission, supply declaration wording, or
+make legacy `claimant.create_claim` available; Issue #928 owns that later contract. Browser
+consumers MUST use `primary_action` and MUST NOT infer progression from workflow state or local
+completion flags.
 
 The backend emits exactly one projection and gives external-service state precedence over Claim
 creation and conversation continuation. `terminal_failure` maps to staff review, while an unknown

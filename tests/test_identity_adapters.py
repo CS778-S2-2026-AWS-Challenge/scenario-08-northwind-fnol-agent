@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from threading import Barrier
+from threading import Barrier, Event
 
 import pytest
 
@@ -455,3 +455,127 @@ def test_claimant_identity_save_serialises_competing_email_updates(
     assert sum(isinstance(outcome, DuplicateEmailConflict) for outcome in outcomes) == 1
     saved = repository.list_accounts()
     assert sum(account.email == 'shared@example.invalid' for account in saved) == 1
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'sqlite'])
+def test_claimant_identity_revision_guard_blocks_concurrent_account_write(
+    repository_kind: str, tmp_path: Path
+) -> None:
+    repository = (
+        FixtureIdentityRepository()
+        if repository_kind == 'fixture'
+        else SQLiteIdentityRepository(str(tmp_path / 'revision-guard.sqlite'))
+    )
+    account = (
+        repository.get_account('cus_demo')
+        if repository_kind == 'fixture'
+        else repository.create_account('guard@example.invalid', 'secret', 'Guarded')
+    )
+    assert account is not None
+
+    guard_entered = Event()
+    release_guard = Event()
+    writer_started = Event()
+    writer_finished = Event()
+
+    def hold_guard() -> None:
+        with repository.hold_account_revision(account.customer_id, account.revision):
+            guard_entered.set()
+            assert release_guard.wait(timeout=2)
+
+    def update_account() -> None:
+        assert guard_entered.wait(timeout=2)
+        current = repository.get_account(account.customer_id)
+        assert current is not None
+        updated = replace(
+            current,
+            phone='021 555 0188',
+            revision=current.revision + 1,
+            updated_at=datetime.now(UTC),
+        )
+        writer_started.set()
+        repository.save_account(updated, current.revision)
+        writer_finished.set()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        guard_future = executor.submit(hold_guard)
+        assert guard_entered.wait(timeout=2)
+        writer_future = executor.submit(update_account)
+        assert writer_started.wait(timeout=2)
+        assert not writer_finished.wait(timeout=0.1)
+        release_guard.set()
+        guard_future.result(timeout=2)
+        writer_future.result(timeout=2)
+
+    saved = repository.get_account(account.customer_id)
+    assert saved is not None
+    assert saved.phone == '021 555 0188'
+    assert saved.revision == account.revision + 1
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'sqlite'])
+def test_claimant_identity_revision_guard_rejects_prior_profile_write(
+    repository_kind: str, tmp_path: Path
+) -> None:
+    repository = (
+        FixtureIdentityRepository()
+        if repository_kind == 'fixture'
+        else SQLiteIdentityRepository(str(tmp_path / 'revision-guard-stale.sqlite'))
+    )
+    account = (
+        repository.get_account('cus_demo')
+        if repository_kind == 'fixture'
+        else repository.create_account('stale-guard@example.invalid', 'secret', 'Guarded')
+    )
+    assert account is not None
+    updated = replace(
+        account,
+        phone='021 555 0199',
+        revision=account.revision + 1,
+        updated_at=datetime.now(UTC),
+    )
+    repository.save_account(updated, account.revision)
+
+    with (
+        pytest.raises(RevisionConflict) as conflict,
+        repository.hold_account_revision(account.customer_id, account.revision),
+    ):
+        raise AssertionError('stale guard must not yield')
+
+    assert conflict.value.current_revision == updated.revision
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'sqlite'])
+def test_claimant_identity_revision_guard_releases_after_exception(
+    repository_kind: str, tmp_path: Path
+) -> None:
+    repository = (
+        FixtureIdentityRepository()
+        if repository_kind == 'fixture'
+        else SQLiteIdentityRepository(str(tmp_path / 'revision-guard-release.sqlite'))
+    )
+    account = (
+        repository.get_account('cus_demo')
+        if repository_kind == 'fixture'
+        else repository.create_account('release-guard@example.invalid', 'secret', 'Guarded')
+    )
+    assert account is not None
+
+    with (
+        pytest.raises(RuntimeError, match='claim write failed'),
+        repository.hold_account_revision(account.customer_id, account.revision),
+    ):
+        raise RuntimeError('claim write failed')
+
+    current = repository.get_account(account.customer_id)
+    assert current is not None
+    updated = replace(
+        current,
+        phone='021 555 0177',
+        revision=current.revision + 1,
+        updated_at=datetime.now(UTC),
+    )
+    repository.save_account(updated, current.revision)
+    saved = repository.get_account(account.customer_id)
+    assert saved is not None
+    assert saved.phone == '021 555 0177'

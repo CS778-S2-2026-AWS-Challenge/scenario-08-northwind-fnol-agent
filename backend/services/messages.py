@@ -86,6 +86,7 @@ from backend.domain.runtime import (
     TurnResultRecord,
 )
 from backend.domain.support_intent import detect_support_intent, support_need_for_intent
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -386,6 +387,7 @@ def _message_turn_response(
     claim_id: str,
     claimant_message: MessageRecord,
     decision: AgentDecisionRecord,
+    identity_repository: IdentityRepository | None = None,
 ) -> MessageTurnResponse:
     messages = repository.list_messages(
         claim_id,
@@ -416,7 +418,7 @@ def _message_turn_response(
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _session_not_found()
-    current_claim = claimant_claim(repository, claim)
+    current_claim = claimant_claim(repository, claim, identity_repository)
     dynamic_form = current_claim.dynamic_form
     projected_form_changes = (
         project_claimant_form_fields(
@@ -429,7 +431,7 @@ def _message_turn_response(
     )
     external_service_action = claimant_assessor_action(repository, claim) if claim else None
     next_step = (
-        claimant_next_step(repository, claim, external_service_action)
+        claimant_next_step(repository, claim, external_service_action, identity_repository)
         if claim is not None
         else decision.customer_next_step
     )
@@ -486,18 +488,19 @@ def _message_only_response(
     message: MessageRecord,
     *,
     claim: WorkingClaim | None = None,
+    identity_repository: IdentityRepository | None = None,
 ) -> MessageTurnResponse:
     claim = claim or repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _session_not_found()
     external_service_action = claimant_assessor_action(repository, claim)
-    next_step = claimant_next_step(repository, claim, external_service_action)
+    next_step = claimant_next_step(repository, claim, external_service_action, identity_repository)
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=session_id,
         claim_revision=revision,
         current_claim_revision=claim.revision,
-        current_claim=claimant_claim(repository, claim),
+        current_claim=claimant_claim(repository, claim, identity_repository),
         claimant_message=_claimant_message(message),
         form_changes=[],
         handoff=None,
@@ -519,19 +522,20 @@ def _namespaced_turn_response(
     claim_revision: int,
     claimant_message: MessageRecord,
     agent_message: MessageRecord,
+    identity_repository: IdentityRepository | None = None,
 ) -> MessageTurnResponse:
     """Build the claimant projection for a Runtime trace without a legacy decision."""
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _session_not_found()
     external_service_action = claimant_assessor_action(repository, claim)
-    next_step = claimant_next_step(repository, claim, external_service_action)
+    next_step = claimant_next_step(repository, claim, external_service_action, identity_repository)
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=claimant_message.session_id,
         claim_revision=claim_revision,
         current_claim_revision=claim.revision,
-        current_claim=claimant_claim(repository, claim),
+        current_claim=claimant_claim(repository, claim, identity_repository),
         claimant_message=_claimant_message(claimant_message),
         agent_message=_claimant_message(
             agent_message,
@@ -556,6 +560,7 @@ def _replay_persisted_response(
     claim_id: str,
     session_id: str,
     idempotency: IdempotencyRecord,
+    identity_repository: IdentityRepository | None = None,
 ) -> MessageTurnResponse:
     """Rebuild a persisted response against the current Claim projection.
 
@@ -628,7 +633,14 @@ def _replay_persisted_response(
                 or runtime_trace.trigger_message_id != claimant_message.message_id
             ):
                 raise _persisted_turn_integrity_error()
-        return _message_turn_response(repository, principal, claim_id, claimant_message, decision)
+        return _message_turn_response(
+            repository,
+            principal,
+            claim_id,
+            claimant_message,
+            decision,
+            identity_repository,
+        )
     if replay_kind == 'runtime':
         if idempotency.agent_message_id is None or idempotency.runtime_trace_id is None:
             raise _persisted_turn_integrity_error()
@@ -652,6 +664,7 @@ def _replay_persisted_response(
             historical_revision,
             claimant_message,
             agent_message,
+            identity_repository,
         )
     if any(
         value is not None
@@ -673,6 +686,7 @@ def _replay_persisted_response(
         historical_revision,
         claimant_message,
         claim=claim,
+        identity_repository=identity_repository,
     )
 
 
@@ -1892,6 +1906,7 @@ def submit_message(
     assessor_entry: ExternalServiceEntryDecision | None = None,
     external_capability_dispatcher: ExternalCapabilityDispatcher | None = None,
     progress_reporter: AgentTurnProgressReporter | None = None,
+    identity_repository: IdentityRepository | None = None,
 ) -> MessageTurnResponse:
     live_dispatcher = action_dispatcher or ClaimantRuntimeActionDispatcher()
     key = require_idempotency_key(idempotency_key)
@@ -1912,6 +1927,7 @@ def submit_message(
             claim_id,
             session_id,
             existing_idempotency,
+            identity_repository,
         )
 
     existing_client_message = repository.find_message_by_client_id(
@@ -1949,6 +1965,7 @@ def submit_message(
                 claim_id,
                 session_id,
                 turn_idempotency,
+                identity_repository,
             )
         raise ApiError(
             status_code=409,
@@ -2033,6 +2050,7 @@ def submit_message(
             updated_claim.revision,
             claimant_message,
             claim=updated_claim,
+            identity_repository=identity_repository,
         )
         idempotency = IdempotencyRecord(
             **{
@@ -3160,4 +3178,11 @@ def submit_message(
             assessor_entry=assessor_entry,
             capability_dispatcher=external_capability_dispatcher,
         )
-    return _message_turn_response(repository, principal, claim_id, claimant_message, decision)
+    return _message_turn_response(
+        repository,
+        principal,
+        claim_id,
+        claimant_message,
+        decision,
+        identity_repository,
+    )

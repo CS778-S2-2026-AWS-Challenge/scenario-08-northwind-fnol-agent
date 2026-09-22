@@ -777,7 +777,7 @@ def test_cross_path_other_party_proposal_passes_branch_validation(
         ),
     ],
 )
-def test_vp_family_journey_confirms_registered_facts_and_creates_claim(
+def test_vp_family_journey_confirms_registered_facts_and_enters_payout_contact(
     app: FastAPI,
     client: TestClient,
     auth_headers: dict[str, str],
@@ -833,25 +833,20 @@ def test_vp_family_journey_confirms_registered_facts_and_creates_claim(
     assert confirmed['dynamic_form']['requirements']['ready'] is True
     assert confirmed['dynamic_form']['requirements']['missing_required_now'] == []
     assert confirmed['customer_next_step']['status'] == 'ready_to_create'
-    assert confirmed['primary_action']['action_code'] == 'claimant.create_claim'
+    assert confirmed['primary_action']['action_code'] == 'claimant.review_payout_contact'
+    assert confirmed['primary_action']['available'] is True
+    assert confirmed['primary_action']['required_inputs'] == [
+        'payment_destination_id',
+        'claimant.contact_preference',
+    ]
     assert confirmed['primary_action']['claim_revision'] == confirmed['revision']
 
-    external = client.post(
-        f'/api/v1/claims/{claim_id}/creation',
-        headers={
-            **auth_headers,
-            'Idempotency-Key': f'{family}-vp-create',
-            'If-Match': str(confirmed['revision']),
-        },
-    )
-
-    assert external.status_code == 201, external.text
-    external_body = external.json()
-    assert external_body['external_claim']['route'] == f'standard_{family}_intake'
-    assert external_body['external_claim']['creation_status'] == 'created'
     claimant_view = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers).json()
-    assert claimant_view['workflow_state'] == 'created'
+    assert claimant_view['workflow_state'] == 'ready_for_next'
     assert claimant_view['dynamic_form']['requirements']['ready'] is True
+    assert claimant_view['customer_next_step']['status'] == 'ready_to_create'
+    assert claimant_view['primary_action']['action_code'] == 'claimant.review_payout_contact'
+    assert claimant_view['external_claim'] is None
     final_session = repository.get_session(claim_id, session_id, 'cus_demo')
     assert final_session is not None
     assert final_session.repeated_question_count == 0

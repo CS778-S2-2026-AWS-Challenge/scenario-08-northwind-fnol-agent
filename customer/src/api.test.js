@@ -10,9 +10,12 @@ import {
   listAccountIdentityDocuments,
   listAccountPaymentDestinations,
   listAccountPolicies,
+  createPaymentDestination,
   listEvidenceHistory,
   listClaims,
+  listPaymentDestinations,
   requestEvidenceUpload,
+  selectClaimPayoutContact,
   setClaimantAccessToken,
   streamClaimUpdates,
   streamRealtimeEvents,
@@ -248,6 +251,78 @@ describe('claimant live-update stream', () => {
 })
 
 describe('claim creation contract', () => {
+  it('uses the protected payout and Claim selection contracts without changing field names', async () => {
+    fetch
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        items: [{
+          payment_destination_id: 'pyd_1234567890abcdef1234',
+          account_type: 'cheque',
+          masked_account_number: '***************6700',
+          active: true,
+          revision: 1,
+        }],
+        page: { next_cursor: null },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_destination_id: 'pyd_1234567890abcdef1234',
+        account_type: 'cheque',
+        masked_account_number: '***************6700',
+        active: true,
+        revision: 1,
+      }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        claim_id: 'clm_1',
+        revision: 4,
+      }), { status: 201 }))
+
+    await listPaymentDestinations({ limit: 100 })
+    await createPaymentDestination({
+      accountType: 'cheque',
+      accountNumber: '12-3456-1234567-00',
+      idempotencyKey: 'payment-key',
+    })
+    await selectClaimPayoutContact({
+      claimId: 'clm_1',
+      revision: 3,
+      paymentDestinationId: 'pyd_1234567890abcdef1234',
+      contactPreference: 'email',
+      idempotencyKey: 'selection-key',
+    })
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/account/payment-destinations?limit=100',
+      expect.objectContaining({ signal: undefined }),
+    )
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/account/payment-destinations',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'Idempotency-Key': 'payment-key' }),
+        body: JSON.stringify({
+          account_type: 'cheque',
+          account_number: '12-3456-1234567-00',
+        }),
+      }),
+    )
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      '/api/v1/claims/clm_1/payout-contact-selections',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Idempotency-Key': 'selection-key',
+          'If-Match': '3',
+        }),
+        body: JSON.stringify({
+          payment_destination_id: 'pyd_1234567890abcdef1234',
+          contact_preference: 'email',
+        }),
+      }),
+    )
+  })
+
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
     setClaimantAccessToken(null)

@@ -1,18 +1,27 @@
 import logging
 from base64 import urlsafe_b64decode
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from dataclasses import replace
+from threading import Event
 from typing import Any, cast
 
 import mongomock
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.adapters.identity import FixtureIdentityRepository
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
 from backend.domain.audit import AuditSubject, AuditSubjectType
-from backend.repositories.account_data import PolicySelectionConflict
+from backend.domain.models import CustomerNextStep, ResponsibleParty, WorkingClaim
+from backend.repositories.account_data import (
+    PaymentDestinationSelectionConflict,
+    PolicySelectionConflict,
+)
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
-from backend.repositories.protocols import RevisionConflict
+from backend.repositories.protocols import IdempotencyConflict, RevisionConflict
 from backend.services.protected_values import UnavailableProtectedValueAdapter
 
 
@@ -339,6 +348,787 @@ def test_policy_selection_conflicts_preserve_claim_revision_and_identify_policy(
     stored_claim = repository.get_claim(claim['claim_id'], 'cus_demo')
     assert stored_claim is not None
     assert stored_claim.revision == claim['revision']
+
+
+def _advance_claim_to_payout_contact(
+    repository: FixtureRepository | MongoDBRepository,
+    claim_id: str,
+    customer_id: str = 'cus_demo',
+) -> WorkingClaim:
+    claim = repository.get_claim(claim_id, customer_id)
+    assert claim is not None
+    ready = claim.model_copy(
+        update={
+            'revision': claim.revision + 1,
+            'customer_next_step': CustomerNextStep(
+                status='ready_to_create',
+                summary='Your reviewed claim information is ready for payout and contact details.',
+                responsible_party=ResponsibleParty.CLAIMANT,
+            ),
+        }
+    )
+    repository.save_claim(ready, expected_revision=claim.revision)
+    return ready
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
+def test_payout_contact_selection_is_atomic_masked_and_resumable(adapter: str) -> None:
+    bank_number = '12-3456-1111222-00'
+    repository: FixtureRepository | MongoDBRepository
+    if adapter == 'fixture':
+        repository = FixtureRepository()
+    else:
+        repository = MongoDBRepository(mongomock.MongoClient(), f'payout_contact_{adapter}')
+        repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    app = create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), repository)
+
+    with TestClient(app) as client:
+        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        payment = _post(
+            client,
+            owner,
+            '/api/v1/account/payment-destinations',
+            f'payout-payment-{adapter}',
+            {'account_type': 'cheque', 'account_number': bank_number},
+        )
+        claim = client.post(
+            '/api/v1/claims',
+            headers={**owner, 'Idempotency-Key': f'payout-claim-{adapter}'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'home'},
+        ).json()['claim']
+        ready = _advance_claim_to_payout_contact(repository, claim['claim_id'])
+        before = client.get(f'/api/v1/claims/{claim["claim_id"]}', headers=owner)
+        route = f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections'
+        headers = {
+            **owner,
+            'Idempotency-Key': f'payout-select-{adapter}',
+            'If-Match': str(ready.revision),
+        }
+        payload = {
+            'payment_destination_id': payment['payment_destination_id'],
+            'contact_preference': 'email',
+        }
+        selected = client.post(route, headers=headers, json=payload)
+        replay = client.post(route, headers=headers, json=payload)
+        detail = client.get(f'/api/v1/claims/{claim["claim_id"]}', headers=owner)
+
+    assert before.status_code == 200
+    assert before.json()['primary_action']['action_code'] == 'claimant.review_payout_contact'
+    assert before.json()['primary_action']['available'] is True
+    assert selected.status_code == 201, selected.text
+    assert replay.status_code == 201
+    assert replay.json() == selected.json()
+    body = selected.json()
+    assert body['payment_destination_id'] == payment['payment_destination_id']
+    assert body['contact_preference']['value'] == 'email'
+    assert body['contact_preference']['status'] == 'confirmed'
+    assert body['customer_next_step']['status'] == 'agreement_required'
+    assert body['primary_action']['action_code'] == 'claimant.review_agreement'
+    assert body['primary_action']['available'] is True
+    assert detail.status_code == 200
+    assert detail.json()['payment_destination_id'] == payment['payment_destination_id']
+    assert detail.json()['form']['claimant.contact_preference']['value'] == 'email'
+    assert detail.json()['customer_next_step']['status'] == 'agreement_required'
+    assert detail.json()['primary_action']['action_code'] == 'claimant.review_agreement'
+    assert bank_number not in selected.text
+    assert bank_number not in detail.text
+
+    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    assert stored is not None
+    assert stored.payment_destination_id == payment['payment_destination_id']
+    assert stored.form['claimant.contact_preference'].status.value == 'confirmed'
+    assert 'claimant_profile:revision:1' in stored.form['claimant.contact_preference'].source_refs
+    events = repository.list_audit_events_internal(
+        AuditSubject(
+            subject_type=AuditSubjectType.CLAIM,
+            subject_id=claim['claim_id'],
+            claim_id=claim['claim_id'],
+        )
+    )
+    selection_events = [
+        event for event in events if event.idempotency_key == f'payout-select-{adapter}'
+    ]
+    assert len(selection_events) == 1
+    assert bank_number not in selection_events[0].model_dump_json()
+    assert selection_events[0].source_refs == [
+        f'payment_destination:{payment["payment_destination_id"]}:revision:1',
+        'field:claimant.contact_preference',
+        'claimant_profile:revision:1',
+    ]
+
+
+def test_payout_contact_in_app_progresses_to_agreement(
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+
+    payment = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        'payout-in-app-payment',
+        {'account_type': 'cheque', 'account_number': '12-3456-1111222-00'},
+    )
+
+    created = client.post(
+        '/api/v1/claims',
+        headers={**owner, 'Idempotency-Key': 'payout-in-app-claim'},
+        json={
+            'channel': 'web_agent',
+            'locale': 'en-NZ',
+            'incident_type': 'home',
+        },
+    ).json()
+
+    claim = created['claim']
+    ready = _advance_claim_to_payout_contact(repository, claim['claim_id'])
+
+    selected = client.post(
+        f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections',
+        headers={
+            **owner,
+            'Idempotency-Key': 'payout-in-app-select',
+            'If-Match': str(ready.revision),
+        },
+        json={
+            'payment_destination_id': payment['payment_destination_id'],
+            'contact_preference': 'in_app',
+        },
+    )
+
+    detail = client.get(
+        f'/api/v1/claims/{claim["claim_id"]}',
+        headers=owner,
+    )
+
+    assert selected.status_code == 201, selected.text
+    assert selected.json()['contact_preference']['value'] == 'in_app'
+    assert selected.json()['customer_next_step']['status'] == 'agreement_required'
+    assert selected.json()['primary_action']['action_code'] == 'claimant.review_agreement'
+    assert selected.json()['primary_action']['available'] is True
+
+    assert detail.status_code == 200, detail.text
+    assert detail.json()['customer_next_step']['status'] == 'agreement_required'
+    assert detail.json()['primary_action']['action_code'] == 'claimant.review_agreement'
+    assert detail.json()['primary_action']['available'] is True
+
+
+def test_payout_contact_progression_fails_closed_after_phone_is_removed(
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    account = client.get('/api/v1/account', headers=owner)
+    with_phone = client.patch(
+        '/api/v1/account/profile',
+        headers={**owner, 'If-Match': str(account.json()['revision'])},
+        json={'phone': '020 000 0000'},
+    )
+    assert with_phone.status_code == 200, with_phone.text
+
+    payment = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        'payout-profile-change-payment',
+        {'account_type': 'cheque', 'account_number': '12-3456-1111222-00'},
+    )
+    claim = client.post(
+        '/api/v1/claims',
+        headers={**owner, 'Idempotency-Key': 'payout-profile-change-claim'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'home'},
+    ).json()['claim']
+    ready = _advance_claim_to_payout_contact(repository, claim['claim_id'])
+    route = f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections'
+    selected = client.post(
+        route,
+        headers={
+            **owner,
+            'Idempotency-Key': 'payout-profile-change-select',
+            'If-Match': str(ready.revision),
+        },
+        json={
+            'payment_destination_id': payment['payment_destination_id'],
+            'contact_preference': 'sms',
+        },
+    )
+    assert selected.status_code == 201, selected.text
+    assert selected.json()['customer_next_step']['status'] == 'agreement_required'
+
+    removed = client.patch(
+        '/api/v1/account/profile',
+        headers={**owner, 'If-Match': str(with_phone.json()['revision'])},
+        json={'phone': ''},
+    )
+    assert removed.status_code == 200, removed.text
+
+    detail = client.get(f'/api/v1/claims/{claim["claim_id"]}', headers=owner)
+
+    assert detail.status_code == 200, detail.text
+    assert detail.json()['customer_next_step']['status'] == 'ready_to_create'
+    assert detail.json()['primary_action']['action_code'] == 'claimant.review_payout_contact'
+    assert detail.json()['primary_action']['available'] is True
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
+def test_payout_contact_selection_rejects_profile_write_that_wins_before_guard(
+    adapter: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository: FixtureRepository | MongoDBRepository
+    if adapter == 'fixture':
+        repository = FixtureRepository()
+    else:
+        repository = MongoDBRepository(
+            mongomock.MongoClient(),
+            f'payout_contact_profile_wins_{adapter}',
+        )
+        repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    identity_repository = FixtureIdentityRepository()
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        repository,
+        identity_repository=identity_repository,
+    )
+
+    with TestClient(app) as client:
+        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        account = client.get('/api/v1/account', headers=owner)
+        with_phone = client.patch(
+            '/api/v1/account/profile',
+            headers={**owner, 'If-Match': str(account.json()['revision'])},
+            json={'phone': '020 000 0000'},
+        )
+        assert with_phone.status_code == 200, with_phone.text
+
+        payment = _post(
+            client,
+            owner,
+            '/api/v1/account/payment-destinations',
+            f'payout-profile-wins-payment-{adapter}',
+            {'account_type': 'cheque', 'account_number': '12-3456-1111222-00'},
+        )
+        claim = client.post(
+            '/api/v1/claims',
+            headers={**owner, 'Idempotency-Key': f'payout-profile-wins-claim-{adapter}'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'home'},
+        ).json()['claim']
+        ready = _advance_claim_to_payout_contact(repository, claim['claim_id'])
+        route = f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections'
+        key = f'payout-profile-wins-select-{adapter}'
+        headers = {
+            **owner,
+            'Idempotency-Key': key,
+            'If-Match': str(ready.revision),
+        }
+        payload = {
+            'payment_destination_id': payment['payment_destination_id'],
+            'contact_preference': 'sms',
+        }
+
+        subject = AuditSubject(
+            subject_type=AuditSubjectType.CLAIM,
+            subject_id=claim['claim_id'],
+            claim_id=claim['claim_id'],
+        )
+        evaluations_before = repository.list_branch_evaluations(claim['claim_id'], 'cus_demo')
+        audits_before = repository.list_audit_events_internal(subject)
+        realtime_before = repository.replay_realtime_events(None, limit=1000)
+
+        original_hold = identity_repository.hold_account_revision
+        guard_requested = Event()
+        allow_guard = Event()
+
+        @contextmanager
+        def delayed_hold(customer_id: str, expected_revision: int):  # type: ignore[no-untyped-def]
+            guard_requested.set()
+            assert allow_guard.wait(timeout=2)
+            with original_hold(customer_id, expected_revision) as guarded_account:
+                yield guarded_account
+
+        monkeypatch.setattr(identity_repository, 'hold_account_revision', delayed_hold)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            response_future = executor.submit(client.post, route, headers=headers, json=payload)
+            assert guard_requested.wait(timeout=2)
+            current = identity_repository.get_account('cus_demo')
+            assert current is not None
+            identity_repository.save_account(
+                replace(current, phone='', revision=current.revision + 1),
+                current.revision,
+            )
+            allow_guard.set()
+            selected = response_future.result(timeout=3)
+
+        detail = client.get(f'/api/v1/claims/{claim["claim_id"]}', headers=owner)
+
+    assert selected.status_code == 409, selected.text
+    assert selected.json()['error']['code'] == 'CONTACT_AUTHORITY_CONFLICT'
+    assert selected.json()['error']['details'] == [
+        {'field': 'contact_preference', 'reason': 'changed'}
+    ]
+    assert detail.status_code == 200, detail.text
+    assert detail.json()['customer_next_step']['status'] == 'ready_to_create'
+    assert detail.json()['primary_action']['action_code'] == 'claimant.review_payout_contact'
+
+    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    assert stored is not None
+    assert stored.revision == ready.revision
+    assert stored.payment_destination_id is None
+    assert 'claimant.contact_preference' not in stored.form
+    assert repository.list_branch_evaluations(claim['claim_id'], 'cus_demo') == evaluations_before
+    assert repository.find_idempotency('cus_demo', route, key) is None
+    assert repository.list_audit_events_internal(subject) == audits_before
+    assert repository.replay_realtime_events(None, limit=1000) == realtime_before
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
+def test_payout_contact_guard_blocks_profile_write_until_claim_commit(
+    adapter: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository: FixtureRepository | MongoDBRepository
+    if adapter == 'fixture':
+        repository = FixtureRepository()
+    else:
+        repository = MongoDBRepository(
+            mongomock.MongoClient(),
+            f'payout_contact_guard_wins_{adapter}',
+        )
+        repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    identity_repository = FixtureIdentityRepository()
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        repository,
+        identity_repository=identity_repository,
+    )
+
+    with TestClient(app) as client:
+        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        account = client.get('/api/v1/account', headers=owner)
+        with_phone = client.patch(
+            '/api/v1/account/profile',
+            headers={**owner, 'If-Match': str(account.json()['revision'])},
+            json={'phone': '020 000 0000'},
+        )
+        assert with_phone.status_code == 200, with_phone.text
+
+        payment = _post(
+            client,
+            owner,
+            '/api/v1/account/payment-destinations',
+            f'payout-guard-wins-payment-{adapter}',
+            {'account_type': 'cheque', 'account_number': '12-3456-1111222-00'},
+        )
+        claim = client.post(
+            '/api/v1/claims',
+            headers={**owner, 'Idempotency-Key': f'payout-guard-wins-claim-{adapter}'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'home'},
+        ).json()['claim']
+        ready = _advance_claim_to_payout_contact(repository, claim['claim_id'])
+        route = f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections'
+        key = f'payout-guard-wins-select-{adapter}'
+        headers = {
+            **owner,
+            'Idempotency-Key': key,
+            'If-Match': str(ready.revision),
+        }
+        payload = {
+            'payment_destination_id': payment['payment_destination_id'],
+            'contact_preference': 'sms',
+        }
+
+        claim_write_entered = Event()
+        allow_claim_write = Event()
+        profile_write_started = Event()
+        profile_write_finished = Event()
+        original_save = repository.save_payout_contact_selection
+
+        def paused_save(*args: Any, **kwargs: Any) -> None:
+            claim_write_entered.set()
+            assert allow_claim_write.wait(timeout=2)
+            original_save(*args, **kwargs)
+
+        monkeypatch.setattr(repository, 'save_payout_contact_selection', paused_save)
+
+        def update_profile() -> None:
+            current = identity_repository.get_account('cus_demo')
+            assert current is not None
+            updated = replace(current, phone='', revision=current.revision + 1)
+            profile_write_started.set()
+            identity_repository.save_account(updated, current.revision)
+            profile_write_finished.set()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            selection_future = executor.submit(client.post, route, headers=headers, json=payload)
+            assert claim_write_entered.wait(timeout=2)
+            profile_future = executor.submit(update_profile)
+            assert profile_write_started.wait(timeout=2)
+            assert not profile_write_finished.wait(timeout=0.1)
+            allow_claim_write.set()
+            selected = selection_future.result(timeout=3)
+            profile_future.result(timeout=3)
+
+        detail = client.get(f'/api/v1/claims/{claim["claim_id"]}', headers=owner)
+
+    assert selected.status_code == 201, selected.text
+    assert profile_write_finished.is_set()
+    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    assert stored is not None
+    assert stored.revision == ready.revision + 1
+    assert stored.payment_destination_id == payment['payment_destination_id']
+    assert stored.form['claimant.contact_preference'].value == 'sms'
+    assert repository.find_idempotency('cus_demo', route, key) is not None
+    assert detail.status_code == 200, detail.text
+    assert detail.json()['customer_next_step']['status'] == 'ready_to_create'
+    assert detail.json()['primary_action']['action_code'] == 'claimant.review_payout_contact'
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
+def test_payout_contact_claim_failure_releases_contact_guard_without_partial_write(
+    adapter: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository: FixtureRepository | MongoDBRepository
+    if adapter == 'fixture':
+        repository = FixtureRepository()
+    else:
+        repository = MongoDBRepository(
+            mongomock.MongoClient(),
+            f'payout_contact_claim_failure_{adapter}',
+        )
+        repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    identity_repository = FixtureIdentityRepository()
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        repository,
+        identity_repository=identity_repository,
+    )
+
+    with TestClient(app) as client:
+        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        account = client.get('/api/v1/account', headers=owner)
+        with_phone = client.patch(
+            '/api/v1/account/profile',
+            headers={**owner, 'If-Match': str(account.json()['revision'])},
+            json={'phone': '020 000 0000'},
+        )
+        assert with_phone.status_code == 200, with_phone.text
+
+        payment = _post(
+            client,
+            owner,
+            '/api/v1/account/payment-destinations',
+            f'payout-claim-failure-payment-{adapter}',
+            {'account_type': 'cheque', 'account_number': '12-3456-1111222-00'},
+        )
+        claim = client.post(
+            '/api/v1/claims',
+            headers={**owner, 'Idempotency-Key': f'payout-claim-failure-claim-{adapter}'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'home'},
+        ).json()['claim']
+        ready = _advance_claim_to_payout_contact(repository, claim['claim_id'])
+        route = f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections'
+        key = f'payout-claim-failure-select-{adapter}'
+
+        subject = AuditSubject(
+            subject_type=AuditSubjectType.CLAIM,
+            subject_id=claim['claim_id'],
+            claim_id=claim['claim_id'],
+        )
+        evaluations_before = repository.list_branch_evaluations(claim['claim_id'], 'cus_demo')
+        audits_before = repository.list_audit_events_internal(subject)
+        realtime_before = repository.replay_realtime_events(None, limit=1000)
+        claim_write_called = Event()
+
+        def fail_claim_write(*args: Any, **kwargs: Any) -> None:
+            del args, kwargs
+            claim_write_called.set()
+            raise RevisionConflict(ready.revision + 1)
+
+        monkeypatch.setattr(repository, 'save_payout_contact_selection', fail_claim_write)
+        selected = client.post(
+            route,
+            headers={
+                **owner,
+                'Idempotency-Key': key,
+                'If-Match': str(ready.revision),
+            },
+            json={
+                'payment_destination_id': payment['payment_destination_id'],
+                'contact_preference': 'sms',
+            },
+        )
+
+        assert claim_write_called.is_set()
+        current = identity_repository.get_account('cus_demo')
+        assert current is not None
+        identity_repository.save_account(
+            replace(current, phone='', revision=current.revision + 1),
+            current.revision,
+        )
+
+    assert selected.status_code == 409, selected.text
+    assert selected.json()['error']['code'] == 'REVISION_CONFLICT'
+    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    assert stored is not None
+    assert stored.revision == ready.revision
+    assert stored.payment_destination_id is None
+    assert 'claimant.contact_preference' not in stored.form
+    assert repository.list_branch_evaluations(claim['claim_id'], 'cus_demo') == evaluations_before
+    assert repository.find_idempotency('cus_demo', route, key) is None
+    assert repository.list_audit_events_internal(subject) == audits_before
+    assert repository.replay_realtime_events(None, limit=1000) == realtime_before
+
+
+def test_payout_contact_selection_rejects_stale_foreign_and_unusable_inputs(
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    other = _login(client, 'claimant.two@example.invalid', 'northwind-demo-two')
+    owner_payment = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        'payout-owner-payment',
+        {'account_type': 'cheque', 'account_number': '12-3456-2222333-00'},
+    )
+    other_payment = _post(
+        client,
+        other,
+        '/api/v1/account/payment-destinations',
+        'payout-other-payment',
+        {'account_type': 'savings', 'account_number': '98-7654-9999000-00'},
+    )
+    claim = client.post(
+        '/api/v1/claims',
+        headers={**owner, 'Idempotency-Key': 'payout-failure-claim'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'home'},
+    ).json()['claim']
+    ready = _advance_claim_to_payout_contact(repository, claim['claim_id'])
+    route = f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections'
+
+    stale = client.post(
+        route,
+        headers={**owner, 'Idempotency-Key': 'payout-stale', 'If-Match': str(ready.revision - 1)},
+        json={
+            'payment_destination_id': owner_payment['payment_destination_id'],
+            'contact_preference': 'email',
+        },
+    )
+    foreign = client.post(
+        route,
+        headers={**owner, 'Idempotency-Key': 'payout-foreign', 'If-Match': str(ready.revision)},
+        json={
+            'payment_destination_id': other_payment['payment_destination_id'],
+            'contact_preference': 'email',
+        },
+    )
+    invalid_contact = client.post(
+        route,
+        headers={**owner, 'Idempotency-Key': 'payout-invalid', 'If-Match': str(ready.revision)},
+        json={
+            'payment_destination_id': owner_payment['payment_destination_id'],
+            'contact_preference': 'pager',
+        },
+    )
+    missing_phone = client.post(
+        route,
+        headers={**owner, 'Idempotency-Key': 'payout-no-phone', 'If-Match': str(ready.revision)},
+        json={
+            'payment_destination_id': owner_payment['payment_destination_id'],
+            'contact_preference': 'sms',
+        },
+    )
+
+    assert stale.status_code == 409
+    assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert foreign.status_code == 404
+    assert invalid_contact.status_code == 422
+    assert invalid_contact.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert missing_phone.status_code == 422
+    assert missing_phone.json()['error']['details'] == [
+        {'field': 'contact_preference', 'reason': 'Add a phone number first.'}
+    ]
+    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    assert stored is not None
+    assert stored.revision == ready.revision
+    assert stored.payment_destination_id is None
+    assert 'claimant.contact_preference' not in stored.form
+
+
+@pytest.mark.parametrize(
+    ('conflict_kind', 'expected_code'),
+    [
+        ('selection', 'PAYMENT_DESTINATION_SELECTION_CONFLICT'),
+        ('revision', 'REVISION_CONFLICT'),
+        ('idempotency', 'IDEMPOTENCY_CONFLICT'),
+        ('missing_destination', 'RESOURCE_NOT_FOUND'),
+    ],
+)
+def test_payout_contact_selection_maps_repository_conflicts_without_partial_write(
+    conflict_kind: str,
+    expected_code: str,
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    payment = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        f'payout-conflict-payment-{conflict_kind}',
+        {'account_type': 'cheque', 'account_number': '12-3456-5555666-00'},
+    )
+    claim = client.post(
+        '/api/v1/claims',
+        headers={**owner, 'Idempotency-Key': f'payout-conflict-claim-{conflict_kind}'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'home'},
+    ).json()['claim']
+    ready = _advance_claim_to_payout_contact(repository, claim['claim_id'])
+    route = f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections'
+
+    def conflict_save(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        if conflict_kind == 'selection':
+            raise PaymentDestinationSelectionConflict(
+                payment['payment_destination_id'],
+                reason='changed',
+                current_revision=payment['revision'] + 1,
+            )
+        if conflict_kind == 'revision':
+            raise RevisionConflict(ready.revision + 1)
+        if conflict_kind == 'idempotency':
+            raise IdempotencyConflict('payout-conflict')
+        raise KeyError(payment['payment_destination_id'])
+
+    original_save = repository.save_payout_contact_selection
+    repository.save_payout_contact_selection = conflict_save  # type: ignore[method-assign]
+    response = client.post(
+        route,
+        headers={
+            **owner,
+            'Idempotency-Key': f'payout-conflict-{conflict_kind}',
+            'If-Match': str(ready.revision),
+        },
+        json={
+            'payment_destination_id': payment['payment_destination_id'],
+            'contact_preference': 'email',
+        },
+    )
+    repository.save_payout_contact_selection = original_save  # type: ignore[method-assign]
+
+    expected_status = 404 if conflict_kind == 'missing_destination' else 409
+    assert response.status_code == expected_status
+    assert response.json()['error']['code'] == expected_code
+    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    assert stored is not None
+    assert stored.revision == ready.revision
+    assert stored.payment_destination_id is None
+    assert 'claimant.contact_preference' not in stored.form
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
+def test_payout_contact_repository_rechecks_destination_revision_at_commit(
+    adapter: str,
+) -> None:
+    repository: FixtureRepository | MongoDBRepository
+    if adapter == 'fixture':
+        repository = FixtureRepository()
+    else:
+        repository = MongoDBRepository(
+            mongomock.MongoClient(),
+            f'payout_repository_revision_race_{adapter}',
+        )
+        repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    app = create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), repository)
+
+    with TestClient(app) as client:
+        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        payment = _post(
+            client,
+            owner,
+            '/api/v1/account/payment-destinations',
+            f'payout-repository-revision-{adapter}',
+            {'account_type': 'cheque', 'account_number': '12-3456-7777888-00'},
+        )
+        claim = client.post(
+            '/api/v1/claims',
+            headers={
+                **owner,
+                'Idempotency-Key': f'payout-repository-claim-{adapter}',
+            },
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'home'},
+        ).json()['claim']
+        ready = _advance_claim_to_payout_contact(repository, claim['claim_id'])
+        original_save = repository.save_payout_contact_selection
+        captured_args: tuple[Any, ...] | None = None
+
+        def capture_save(*args: Any, **kwargs: Any) -> None:
+            nonlocal captured_args
+            assert not kwargs
+            captured_args = args
+
+        repository.save_payout_contact_selection = capture_save  # type: ignore[method-assign]
+        # This no-op save deliberately leaves persistence unchanged. The request is
+        # used only to capture the fully prepared repository transaction arguments;
+        # the authoritative post-save readback therefore cannot produce a 201 response.
+        client.post(
+            f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections',
+            headers={
+                **owner,
+                'Idempotency-Key': f'payout-repository-select-{adapter}',
+                'If-Match': str(ready.revision),
+            },
+            json={
+                'payment_destination_id': payment['payment_destination_id'],
+                'contact_preference': 'email',
+            },
+        )
+        repository.save_payout_contact_selection = original_save  # type: ignore[method-assign]
+
+    assert captured_args is not None
+    (
+        updated_claim,
+        expected_revision,
+        payment_destination_id,
+        payment_destination_revision,
+        contact_authority_revision,
+        idempotency,
+        branch_evaluation,
+        audit_event,
+    ) = captured_args
+    changed_revision = payment_destination_revision + 1
+    changed_audit = audit_event.model_copy(
+        update={
+            'source_refs': [
+                f'payment_destination:{payment_destination_id}:revision:{changed_revision}',
+                'field:claimant.contact_preference',
+                f'claimant_profile:revision:{contact_authority_revision}',
+            ]
+        }
+    )
+
+    with pytest.raises(PaymentDestinationSelectionConflict) as raised:
+        original_save(
+            updated_claim,
+            expected_revision,
+            payment_destination_id,
+            changed_revision,
+            contact_authority_revision,
+            idempotency,
+            branch_evaluation,
+            changed_audit,
+        )
+    assert raised.value.reason == 'changed'
+
+    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    assert stored is not None
+    assert stored.revision == ready.revision
+    assert stored.payment_destination_id is None
+    assert 'claimant.contact_preference' not in stored.form
 
 
 @pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
