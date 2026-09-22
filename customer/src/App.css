@@ -1475,7 +1475,7 @@ textarea:focus-visible {
 
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
-@media (max-width: 900px) {
+@media (max-width: 640px) {
   .intake-page { display: block; height: auto; min-height: 100svh; overflow: visible; }
   .intake-history { display: none; }
   .conversation-panel { height: auto; min-height: 100svh; }
