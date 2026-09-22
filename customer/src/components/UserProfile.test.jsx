@@ -35,6 +35,39 @@ const vehicleAsset = {
   updated_at: '2026-09-17T01:00:00Z',
 }
 
+const policy = {
+  policy_id: 'pol_11111111111111111111',
+  policy_number: 'NTH-1234',
+  revision: 2,
+}
+
+function profileController(policyResource, overrides = {}) {
+  return {
+    resources: {
+      assets: { items: [], error: '', loading: false, stale: false },
+      policies: policyResource,
+      payments: { items: [], error: '', loading: false, stale: false },
+      identities: { items: [], error: '', loading: false, stale: false },
+    },
+    pending: {},
+    beginCreate: vi.fn().mockReturnValue('policy-attempt-1'),
+    abandonCreate: vi.fn(),
+    saveProfile: vi.fn().mockResolvedValue(account),
+    savePreferences: vi.fn().mockResolvedValue(account),
+    createAsset: vi.fn(),
+    saveAsset: vi.fn(),
+    createPolicy: vi.fn().mockResolvedValue(policy),
+    savePolicy: vi.fn().mockResolvedValue(policy),
+    createIdentity: vi.fn(),
+    saveIdentity: vi.fn(),
+    reloadAssets: vi.fn().mockResolvedValue([]),
+    reloadPolicies: vi.fn().mockResolvedValue(policyResource.items || []),
+    reloadPayments: vi.fn().mockResolvedValue([]),
+    reloadIdentities: vi.fn().mockResolvedValue([]),
+    ...overrides,
+  }
+}
+
 function ProfileHarness({ initialSection = null, profileProps }) {
   const [activeSection, setActiveSection] = useState(initialSection)
   const [currentAccount, setCurrentAccount] = useState(profileProps.account)
@@ -91,10 +124,13 @@ describe('UserProfile', () => {
     expect(screen.queryByText('Account summary')).not.toBeInTheDocument()
     expect(screen.queryByText('Review the information Northwind can currently show for this account.')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'My profile' })).not.toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: 'Policies' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Personal details' })).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: 'Policies' })).not.toBeInTheDocument()
     expect(screen.getByText('i•••@gmail.com')).toBeInTheDocument()
     expect(screen.getByText('••• ••• 123')).toBeInTheDocument()
-    expect(screen.queryByText('Policy number')).not.toBeInTheDocument()
+    expect(screen.getByText('Policy number')).toBeInTheDocument()
+    expect(screen.getByText('Not provided', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
+    expect(screen.getByText('Add policy number', { selector: 'summary' })).toBeInTheDocument()
     expect(screen.queryByText(/^Saved$/)).not.toBeInTheDocument()
     expect(screen.getByText('Iris', { selector: '.profile-header-copy > strong' }).closest('.profile-header')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Edit profile' }).closest('.profile-header')).toBeInTheDocument()
@@ -142,6 +178,95 @@ describe('UserProfile', () => {
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
     expect(screen.getAllByText('Not configured')).toHaveLength(5)
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+  })
+
+  it('shows and edits the account policy number through Personal details disclosure', async () => {
+    const user = userEvent.setup()
+    const savePolicy = vi.fn().mockResolvedValue({ ...policy, policy_number: 'NTH-9876', revision: 3 })
+    const controller = profileController(
+      { items: [policy], error: '', loading: false, stale: false },
+      { savePolicy },
+    )
+    renderProfile({ controller }, 'personal-details')
+
+    expect(screen.getByText('••••1234', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
+    await user.click(screen.getByText('View or edit policy number', { selector: 'summary' }))
+    await user.click(screen.getByRole('button', { name: 'Edit policy number ••••1234' }))
+
+    const input = screen.getByLabelText('Policy number', { selector: 'input' })
+    expect(input).toHaveFocus()
+    await user.clear(input)
+    await user.type(input, 'NTH-9876')
+    await user.click(screen.getByRole('button', { name: 'Save policy number' }))
+
+    expect(savePolicy).toHaveBeenCalledWith(policy.policy_id, policy.revision, 'NTH-9876')
+    expect(await screen.findByRole('status')).toHaveTextContent('••••9876 was saved')
+  })
+
+  it('adds an account policy number through the Personal details disclosure', async () => {
+    const user = userEvent.setup()
+    const createPolicy = vi.fn().mockResolvedValue(policy)
+    const controller = profileController(
+      { items: [], error: '', loading: false, stale: false },
+      { createPolicy },
+    )
+    renderProfile({ controller }, 'personal-details')
+
+    await user.click(screen.getByText('Add policy number', { selector: 'summary' }))
+    await user.click(screen.getByRole('button', { name: 'Add policy number' }))
+
+    const input = screen.getByLabelText('Policy number', { selector: 'input' })
+    expect(input).toHaveFocus()
+    await user.type(input, 'NTH-1234')
+    await user.click(screen.getByRole('button', { name: 'Save policy number' }))
+
+    expect(createPolicy).toHaveBeenCalledWith({
+      policyNumber: 'NTH-1234',
+      attemptId: 'policy-attempt-1',
+    })
+    expect(await screen.findByRole('status')).toHaveTextContent('••••1234 was saved')
+  })
+
+  it('keeps every historical policy record visible without inventing a primary policy', async () => {
+    const user = userEvent.setup()
+    const secondPolicy = { ...policy, policy_id: 'pol_22222222222222222222', policy_number: 'NTH-5678' }
+    const controller = profileController({
+      items: [policy, secondPolicy], error: '', loading: false, stale: false,
+    })
+    renderProfile({ controller }, 'personal-details')
+
+    expect(screen.getByText('2 policy numbers saved', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
+    await user.click(screen.getByText('View or edit policy number', { selector: 'summary' }))
+    expect(screen.getByText('••••1234')).toBeInTheDocument()
+    expect(screen.getByText('••••5678')).toBeInTheDocument()
+  })
+
+  it('keeps policy loading and retryable errors inside Personal details', async () => {
+    const user = userEvent.setup()
+    const reloadPolicies = vi.fn().mockResolvedValue([])
+    const controller = profileController(
+      { items: null, error: 'Northwind could not load saved policy numbers. Reload this section and try again.', loading: false, stale: false },
+      { reloadPolicies },
+    )
+    renderProfile({ controller }, 'personal-details')
+
+    expect(screen.getByText('Unavailable', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
+    await user.click(screen.getByText('Add policy number', { selector: 'summary' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('could not load saved policy numbers')
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(reloadPolicies).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows policy loading feedback inside Personal details', async () => {
+    const user = userEvent.setup()
+    const controller = profileController({
+      items: null, error: '', loading: true, stale: false,
+    })
+    renderProfile({ controller }, 'personal-details')
+
+    expect(screen.getByText('Loading…', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
+    await user.click(screen.getByText('Add policy number', { selector: 'summary' }))
+    expect(screen.getByRole('status')).toHaveTextContent('Loading saved policy numbers…')
   })
 
   it('shows the prepared Claim choices only when account-backed handlers are supplied', async () => {

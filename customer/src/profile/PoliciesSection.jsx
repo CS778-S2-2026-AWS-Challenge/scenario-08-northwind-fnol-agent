@@ -1,18 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { FeatureNotice, ResourceError, SectionHeading } from './ProfilePrimitives.jsx'
+import { FeatureNotice, ResourceError } from './ProfilePrimitives.jsx'
+import { maskPolicyNumber } from './policyNumber.js'
 import { profileMutationMessage } from './profileMutation.js'
 
-function maskPolicyNumber(value = '') {
-  const compact = value.replace(/\s/g, '')
-  if (!compact) return 'Not provided'
-  return `••••${compact.slice(-4)}`
-}
-
-export default function PoliciesSection({
+export default function PolicyNumberDetails({
   resource,
   pending,
-  headingAs: Heading = 'h1',
   onBeginCreate,
   onAbandonCreate,
   onCreate,
@@ -71,14 +65,9 @@ export default function PoliciesSection({
     : Boolean(pending[`policy:${editor?.policyId}`])
 
   return (
-    <section className="profile-section" aria-labelledby="profile-policies">
+    <div className="profile-policy-details" role="group" aria-label="Saved policy number controls">
       <FeatureNotice notice={notice} />
-      <SectionHeading
-        as={Heading}
-        id="profile-policies"
-        title="Policies"
-        description="Review the policy numbers saved to your account. A saved number does not confirm coverage."
-      />
+      <p className="profile-helper-copy">A saved policy number does not confirm coverage or attach it to a Claim.</p>
       <ResourceError
         message={resource.error}
         onRetry={onReload}
@@ -134,6 +123,6 @@ export default function PoliciesSection({
           </div>
         </form>
       )}
-    </section>
+    </div>
   )
 }

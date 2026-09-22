@@ -543,7 +543,7 @@ describe('claimant intake projection', () => {
     expect(screen.queryByLabelText('Preferred name')).not.toBeInTheDocument()
   })
 
-  it('opens the Policies route and restores Profile categories on popstate', async () => {
+  it('recovers the legacy Policies route into Personal details and restores Profile categories on popstate', async () => {
     const user = userEvent.setup()
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue({
@@ -568,9 +568,10 @@ describe('claimant intake projection', () => {
 
     render(<App />)
 
-    expect(await screen.findByRole('heading', { name: 'Policies' })).toBeInTheDocument()
-    expect(await screen.findByText('No policy numbers saved.')).toBeInTheDocument()
-    expect(globalThis.location.pathname).toBe('/profile/policies')
+    expect(await screen.findByRole('region', { name: 'Personal details' })).toBeInTheDocument()
+    await waitFor(() => expect(globalThis.location.pathname).toBe('/profile/personal-details'))
+    expect(screen.queryByRole('button', { name: 'Policies' })).not.toBeInTheDocument()
+    expect(screen.getByText('Not provided', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
     expect(api.listAccountPolicies).toHaveBeenCalled()
 
     await user.click(screen.getAllByRole('button', { name: 'Insured assets' })[0])
