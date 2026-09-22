@@ -24,6 +24,7 @@ from backend.domain.evidence import (
     validate_evidence_record,
 )
 from backend.domain.external_services import (
+    ExternalTaskAttempt,
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
     ExternalTaskRequest,
@@ -172,6 +173,7 @@ class FixtureRepository(PersistenceRepository):
         self._motor_other_drivers: dict[str, MotorOtherDriverRecord] = {}
         self._contents_item_evidence_associations: dict[str, ContentsItemEvidenceAssociation] = {}
         self._external_tasks: dict[str, ExternalTaskRecord] = {}
+        self._external_task_attempts: dict[str, ExternalTaskAttempt] = {}
         self._external_task_requests: dict[str, ExternalTaskRequest] = {}
         self._external_task_evidence_links: dict[tuple[str, str], ExternalTaskEvidenceLink] = {}
         self._external_task_results: dict[str, ExternalTaskResult] = {}
@@ -795,6 +797,7 @@ class FixtureRepository(PersistenceRepository):
         self._motor_other_drivers.clear()
         self._contents_item_evidence_associations.clear()
         self._external_tasks.clear()
+        self._external_task_attempts.clear()
         self._external_task_requests.clear()
         self._external_task_evidence_links.clear()
         self._external_task_results.clear()
@@ -3536,6 +3539,49 @@ class FixtureRepository(PersistenceRepository):
             self._external_task_requests[request_id] = deepcopy(reserved)
             return reserved
 
+    def save_external_task_attempt(
+        self,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Append one claim-owned attempt without replacing prior history."""
+        with self._claim_mutation_lock:
+            if self.get_claim(attempt.claim_id, customer_id) is None:
+                raise KeyError(attempt.claim_id)
+            task = self._external_tasks.get(attempt.task_id)
+            if task is None or task.claim_id != attempt.claim_id:
+                raise KeyError(attempt.task_id)
+            request = next(
+                (
+                    item
+                    for item in self._external_task_requests.values()
+                    if item.task_id == attempt.task_id
+                ),
+                None,
+            )
+            if request is None or request.operation_id != attempt.operation_id:
+                raise KeyError(attempt.operation_id)
+            existing = self._external_task_attempts.get(attempt.attempt_id)
+            if existing is not None:
+                if existing != attempt:
+                    raise IdempotencyConflict(attempt.attempt_id)
+                return
+            for stored in self._external_task_attempts.values():
+                if (
+                    stored.task_id == attempt.task_id
+                    and stored.attempt_number == attempt.attempt_number
+                ):
+                    raise IdempotencyConflict(attempt.attempt_id)
+            prior = [
+                stored.attempt_number
+                for stored in self._external_task_attempts.values()
+                if stored.task_id == attempt.task_id
+            ]
+            expected_number = max(prior, default=0) + 1
+            if attempt.attempt_number != expected_number:
+                raise IdempotencyConflict(attempt.attempt_id)
+            self._external_task_attempts[attempt.attempt_id] = deepcopy(attempt)
+
     def release_external_dispatch(
         self,
         claim_id: str,
@@ -3836,6 +3882,20 @@ class FixtureRepository(PersistenceRepository):
             deepcopy(task) for task in self._external_tasks.values() if task.claim_id == claim_id
         ]
         return sorted(tasks, key=lambda task: (task.created_at, task.task_id))
+
+    def list_external_task_attempts_internal(
+        self,
+        claim_id: str,
+    ) -> list[ExternalTaskAttempt]:
+        """Return immutable attempts in task/sequence order."""
+        attempts = [
+            deepcopy(attempt)
+            for attempt in self._external_task_attempts.values()
+            if attempt.claim_id == claim_id
+        ]
+        return sorted(
+            attempts, key=lambda item: (item.task_id, item.attempt_number, item.attempt_id)
+        )
 
     def list_external_task_results_internal(self, claim_id: str) -> list[ExternalTaskResult]:
         """List returned results for an already-authorised internal claim read.
@@ -4404,6 +4464,7 @@ for _material_claim_mutation in (
     'save_evidence_action_mutation',
     'save_evidence_mutation',
     'save_external_task',
+    'save_external_task_attempt',
     'save_external_task_request',
     'save_external_task_evidence_link',
     'save_external_task_result',

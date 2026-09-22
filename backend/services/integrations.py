@@ -45,6 +45,7 @@ from backend.domain.evidence import (
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
     ASSESSOR_SERVICE_IDENTITY,
+    ExternalTaskAttempt,
     ExternalTaskAuthorisation,
     ExternalTaskDelivery,
     ExternalTaskEvidenceLink,
@@ -300,6 +301,46 @@ def _record_external_send(
     except (IdempotencyConflict, KeyError) as conflict:
         raise _idempotency_error() from conflict
     return sent
+
+
+def _record_external_attempt(
+    repository: PersistenceRepository,
+    *,
+    task: ExternalTaskRecord,
+    request: ExternalTaskRequest,
+    customer_id: str,
+    claim_revision: int,
+    outcome: ExternalTaskOperationStatus,
+    failure_code: ExternalTaskFailureCode | None,
+    delivery: ExternalTaskDelivery,
+    delivery_evidence: str | None,
+) -> None:
+    """Append the provider outcome for the next immutable task attempt."""
+    if request.operation_id is None:
+        raise _idempotency_error()
+    attempts = repository.list_external_task_attempts_internal(task.claim_id)
+    task_attempts = [item for item in attempts if item.task_id == task.task_id]
+    attempt_number = max((item.attempt_number for item in task_attempts), default=0) + 1
+    attempt_id = (
+        f'att_{request_fingerprint({"task_id": task.task_id, "number": attempt_number})[:24]}'
+    )
+    attempt = ExternalTaskAttempt(
+        attempt_id=attempt_id,
+        task_id=task.task_id,
+        claim_id=task.claim_id,
+        operation_id=request.operation_id,
+        attempt_number=attempt_number,
+        claim_revision=claim_revision,
+        started_at=request.sent_at or now_utc(),
+        outcome=outcome,
+        failure_code=failure_code,
+        delivery=delivery,
+        delivery_evidence=delivery_evidence,
+    )
+    try:
+        repository.save_external_task_attempt(attempt, customer_id)
+    except (IdempotencyConflict, KeyError) as conflict:
+        raise _idempotency_error() from conflict
 
 
 def _record_external_acceptance(
@@ -2275,6 +2316,17 @@ def route_assessor(
             delivery=failure.delivery,
             delivery_evidence=failure.delivery_evidence,
         )
+        _record_external_attempt(
+            repository,
+            task=task,
+            request=external_request,
+            customer_id=claim.customer_id,
+            claim_revision=operation.authorised_revision,
+            outcome=failed_task.status,
+            failure_code=ExternalTaskFailureCode(failure.code.value),
+            delivery=failed_task.delivery,
+            delivery_evidence=failed_task.delivery_evidence,
+        )
         # The operation takes the status the task was given rather than deciding a
         # second time from the failure code. The two used to be settled by separate
         # rules, which is how the same attempt could be an unknown outcome on the task
@@ -2324,6 +2376,17 @@ def route_assessor(
                 f'{outcome.result.routing_status.value}'
             ),
         )
+        _record_external_attempt(
+            repository,
+            task=task,
+            request=external_request,
+            customer_id=claim.customer_id,
+            claim_revision=operation.authorised_revision,
+            outcome=refused_task.status,
+            failure_code=ExternalTaskFailureCode.MALFORMED,
+            delivery=refused_task.delivery,
+            delivery_evidence=refused_task.delivery_evidence,
+        )
         repository.save_assessor_routing_operation(
             operation.model_copy(
                 update={
@@ -2362,6 +2425,17 @@ def route_assessor(
         task=task,
         customer_id=claim.customer_id,
         provider_reference=provider_reference,
+    )
+    _record_external_attempt(
+        repository,
+        task=task,
+        request=external_request,
+        customer_id=claim.customer_id,
+        claim_revision=operation.authorised_revision,
+        outcome=ExternalTaskOperationStatus.ACCEPTED,
+        failure_code=None,
+        delivery=accepted_task.delivery,
+        delivery_evidence=accepted_task.delivery_evidence,
     )
     _record_awaited_material(repository, task=accepted_task, claim=claim)
     # Acceptance is a settled outcome too. Leaving the hold would leave the stored

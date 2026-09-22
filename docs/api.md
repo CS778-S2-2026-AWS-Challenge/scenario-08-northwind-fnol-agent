@@ -3051,7 +3051,8 @@ returns `404 RESOURCE_NOT_FOUND` through the existing staff-safe boundary.
 
 ### `GET /api/v1/workbench/claims/{claim_id}/external-requests`
 
-Returns each raw external task/request together with a backend-projected `lifecycle`. The lifecycle
+Returns each raw external task/request together with a backend-projected `lifecycle` and the
+append-only `attempts` recorded for that task. The lifecycle
 contains stakeholder and service labels, the lifecycle registry version and canonical lifecycle
 status, the catalogue reference, capability provenance, access form, and actual request provenance,
 request type, authority, consent, delivery and verification
@@ -3066,6 +3067,14 @@ completion. `result_received_at` records ingestion time, while `result_verified_
 check. `result_evidence_ids` is empty when the returned result has no linked evidence;
 `result_evidence` projects each linked Evidence ID with its current `status` and `file_status` for
 staff without exposing storage keys or provider payloads.
+
+`attempts` is ordered by `attempt_number` and contains the durable execution history for the task.
+Each entry records the stable `attempt_id`, `operation_id`, Claim revision, start time, delivery
+evidence, and one of the registered `accepted`, `retryable_failure`, `terminal_failure`, or
+`unknown_outcome` results. Attempts are append-only: an exact replay is idempotent, while a changed
+record, reused sequence number, skipped sequence, mismatched task/Claim/request identity, or
+different operation identity is rejected. `unknown_outcome` remains distinct from both retryable and
+terminal failure and requires reconciliation before another dispatch; it is never provider success.
 
 `catalogue_reference` names the merged third-party service catalogue row that authorises this
 service identity, so a persisted task can be traced to the entry permitting it. It is null for a

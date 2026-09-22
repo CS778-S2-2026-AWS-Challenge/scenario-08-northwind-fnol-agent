@@ -12,6 +12,7 @@ from backend.domain.external_service_registry import (
 )
 from backend.domain.external_services import (
     ExternalRequestProvenance,
+    ExternalTaskAttempt,
     ExternalTaskRecord,
     ExternalTaskRequest,
     ExternalTaskResultVerification,
@@ -568,6 +569,7 @@ class WorkbenchExternalLifecycle(ContractModel):
 class WorkbenchExternalRequest(ContractModel):
     request: ExternalTaskRequest | None = None
     task: ExternalTaskRecord
+    attempts: list[ExternalTaskAttempt] = Field(default_factory=list)
     lifecycle: WorkbenchExternalLifecycle
 
 

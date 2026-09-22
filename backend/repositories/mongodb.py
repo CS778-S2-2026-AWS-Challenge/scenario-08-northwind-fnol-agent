@@ -37,6 +37,7 @@ from backend.domain.evidence import (
     validate_evidence_record,
 )
 from backend.domain.external_services import (
+    ExternalTaskAttempt,
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
     ExternalTaskRequest,
@@ -455,6 +456,12 @@ class MongoDBRepository:
             unique=True,
             name='external_task_result_task_unique',
             partialFilterExpression={'record_type': 'external_task_result'},
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('claim_id', 1), ('task_id', 1), ('attempt_number', 1)],
+            unique=True,
+            name='external_task_attempt_sequence_unique',
+            partialFilterExpression={'record_type': 'external_task_attempt'},
         )
         for search_field in (
             'external_reference',
@@ -3655,6 +3662,97 @@ class MongoDBRepository:
             mongo_session=mongo_session,
         )
 
+    def save_external_task_attempt(
+        self,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Append one immutable claim-owned external-task attempt."""
+        self._atomic(
+            lambda mongo_session: self._save_external_task_attempt(
+                attempt,
+                customer_id,
+                mongo_session,
+            )
+        )
+
+    def _save_external_task_attempt(
+        self,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            attempt.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        task = self._get(
+            'external_task',
+            attempt.task_id,
+            ExternalTaskRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        request = self._get(
+            'external_task_request',
+            attempt.task_id,
+            ExternalTaskRequest,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        if (
+            claim is None
+            or task is None
+            or task.claim_id != attempt.claim_id
+            or request is None
+            or request.operation_id != attempt.operation_id
+        ):
+            raise KeyError(attempt.operation_id)
+        existing = self._get(
+            'external_task_attempt',
+            attempt.attempt_id,
+            ExternalTaskAttempt,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        if existing is not None:
+            if existing != attempt:
+                raise IdempotencyConflict(attempt.attempt_id)
+            return
+        prior = self._list(
+            'external_task_attempt',
+            ExternalTaskAttempt,
+            {'claim_id': attempt.claim_id, 'task_id': attempt.task_id},
+            'attempt_number',
+            session=mongo_session,
+        )
+        expected_number = max((item.attempt_number for item in prior), default=0) + 1
+        if attempt.attempt_number != expected_number:
+            raise IdempotencyConflict(attempt.attempt_id)
+        document = {
+            **attempt.model_dump(mode='json'),
+            '_id': self._record_id('external_task_attempt', attempt.attempt_id),
+            'record_type': 'external_task_attempt',
+            'customer_id': customer_id,
+            'claim_id': attempt.claim_id,
+        }
+        try:
+            self._collection.insert_one(document, session=mongo_session)
+        except DuplicateKeyError as error:
+            winner = self._get(
+                'external_task_attempt',
+                attempt.attempt_id,
+                ExternalTaskAttempt,
+                customer_id=customer_id,
+                session=mongo_session,
+            )
+            if winner == attempt:
+                return
+            raise IdempotencyConflict(attempt.attempt_id) from error
+
     def reserve_external_dispatch(
         self,
         claim_id: str,
@@ -4301,6 +4399,18 @@ class MongoDBRepository:
             ExternalTaskRecord,
             {'claim_id': claim_id},
             'created_at',
+        )
+
+    def list_external_task_attempts_internal(
+        self,
+        claim_id: str,
+    ) -> list[ExternalTaskAttempt]:
+        """List immutable task attempts in stable sequence order."""
+        return self._list(
+            'external_task_attempt',
+            ExternalTaskAttempt,
+            {'claim_id': claim_id},
+            'attempt_number',
         )
 
     def list_external_task_results_internal(self, claim_id: str) -> list[ExternalTaskResult]:
