@@ -433,6 +433,9 @@ def test_payout_contact_selection_is_atomic_masked_and_resumable(adapter: str) -
     assert stored is not None
     assert stored.payment_destination_id == payment['payment_destination_id']
     assert stored.form['claimant.contact_preference'].status.value == 'confirmed'
+    assert 'claimant_profile:revision:1' in stored.form[
+        'claimant.contact_preference'
+    ].source_refs
     events = repository.list_audit_events_internal(
         AuditSubject(
             subject_type=AuditSubjectType.CLAIM,
@@ -448,7 +451,6 @@ def test_payout_contact_selection_is_atomic_masked_and_resumable(adapter: str) -
     assert selection_events[0].source_refs == [
         f'payment_destination:{payment["payment_destination_id"]}:revision:1',
         'field:claimant.contact_preference',
-        'claimant_profile:revision:1',
     ]
 
 

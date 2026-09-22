@@ -936,11 +936,7 @@ def select_payout_contact(
             auth_source=principal.auth_source,
         ),
         reason='Claimant selected a protected payout destination and preferred contact channel.',
-        source_refs=[
-            payment_source_ref,
-            'field:claimant.contact_preference',
-            contact_authority_ref,
-        ],
+        source_refs=[payment_source_ref, 'field:claimant.contact_preference'],
         visibility=AuditVisibility.AUDIT_ONLY,
         idempotency_key=key,
         claim_revision=updated_claim.revision,
