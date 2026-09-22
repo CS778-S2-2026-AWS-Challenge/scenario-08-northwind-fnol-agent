@@ -579,4 +579,3 @@ def test_claimant_identity_revision_guard_releases_after_exception(
     saved = repository.get_account(account.customer_id)
     assert saved is not None
     assert saved.phone == '021 555 0177'
-
