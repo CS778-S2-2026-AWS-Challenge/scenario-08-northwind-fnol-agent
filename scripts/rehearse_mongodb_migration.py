@@ -18,8 +18,8 @@ from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 from pymongo.read_concern import ReadConcern
 
-INVENTORY_VERSION = 'aws-migration-preparation@163507c6'
-SOURCE_HEAD = '163507c661d3a449006000a9a6aeb85c8f997218'
+INVENTORY_VERSION = 'aws-migration-preparation@2264fa79'
+SOURCE_HEAD = '2264fa7905dc0fa4fa51d90415350f69b69cb568'
 RECONCILIATION_ISSUES = ('#984', '#985', '#986', '#987', '#786')
 ITEM_BUDGET_BYTES = 300 * 1024
 TRANSACTION_ACTION_LIMIT = 100
@@ -446,7 +446,13 @@ RECORD_MAPPINGS: dict[str, RecordMapping] = {
     'audit_event': _mapping(
         ('event_id',),
         'audit_subject',
-        ('audit_subject_order', 'audit_global_order', 'audit_type_order', 'audit_actor_order'),
+        (
+            'audit_subject_order',
+            'audit_global_order',
+            'audit_type_order',
+            'audit_subject_type_order',
+            'audit_actor_order',
+        ),
         ('created_at',),
         (),
         'staff_ownership',
@@ -539,6 +545,8 @@ class AtomicMutationReport:
     action_count: int
     serialized_bytes: int
     within_limits: bool
+    source_refs: tuple[str, ...]
+    item_keys: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -579,6 +587,7 @@ class PromotionRehearsal:
 
     items: tuple[PlannedItem, ...]
     restored_source_ref: str
+    atomic_mutation: AtomicMutationReport
 
 
 class LocalTarget:
@@ -895,93 +904,508 @@ def _reference_items(
     document: Mapping[str, Any], record_type: str, canonical: PlannedItem
 ) -> list[PlannedItem]:
     mapping = RECORD_MAPPINGS[record_type]
-    claim_id = _field(document, 'claim_id')
-    customer_id = _field(document, 'customer_id')
-    scope_fields = (
-        'claim_id',
-        'customer_id',
-        'staff_id',
-        'session_id',
-        'turn_id',
-        'task_id',
-        'target_claim_id',
-        'source_claim_id',
-        'item_id',
-        'evidence_id',
-    )
-    scope = {
-        field: _field(document, field)
-        for field in scope_fields
-        if _field(document, field) is not None
-    }
-    order_field, order_value = _order_coordinate(document, record_type)
     items: list[PlannedItem] = []
     for kind in mapping.access_kinds:
-        if kind == 'realtime_order':
-            continue
-        if kind.endswith('active') and (
-            _field(document, 'active') is False
-            or _field(document, 'status') in {'inactive', 'revoked', 'closed'}
-        ):
-            continue
-        if kind == 'claim_owner':
-            pk, sk = canonical.pk, 'OWNER'
-        elif kind == 'customer_claim':
-            pk = f'ACCESS#CUSTOMER_CLAIMS#{customer_id}'
-            sk = f'UPDATED#{_reverse_time(_field(document, "updated_at"))}#{claim_id}'
-        elif 'unique' in kind or kind.endswith('lookup'):
-            unique_values: list[str] = []
-            for fields in mapping.uniqueness:
-                unique_values.extend(str(_field(document, field)) for field in fields)
-            if not unique_values:
-                unique_values.extend(str(value) for value in scope.values())
-            pk = f'{kind.upper()}#{_digest(*unique_values, canonical.pk)}'
-            sk = 'META'
-        else:
-            scope_values = [str(value) for value in scope.values()]
-            pk = f'ACCESS#{kind.upper()}#{_digest(*(scope_values or [canonical.pk]))}'
-            sk = f'{order_field.upper()}#{order_value}#{canonical.pk}'
-        payload: dict[str, Any] = {
+        items.extend(_build_access_items(document, record_type, canonical, kind))
+    return items
+
+
+def _required_text(document: Mapping[str, Any], field: str) -> str:
+    value = _field(document, field)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f'{field} is required for target access projection')
+    return value
+
+
+def _projection_item(
+    document: Mapping[str, Any],
+    canonical: PlannedItem,
+    kind: str,
+    pk: str,
+    sk: str,
+    scope: Mapping[str, Any],
+) -> PlannedItem:
+    return _planned_item(
+        pk,
+        sk,
+        canonical.record_type,
+        kind,
+        document,
+        {
             'canonical_pk': canonical.pk,
             'canonical_sk': canonical.sk,
-            'scope': scope,
-            'order_field': order_field,
-            'order_value': order_value,
-        }
-        if kind == 'claim_owner':
-            payload = {'owner_customer_id': customer_id}
-        elif kind == 'customer_claim':
-            payload.update(
-                {
-                    'customer_id': customer_id,
-                    'claim_id': claim_id,
-                }
-            )
-        elif kind == 'claim_actor_idempotency':
-            payload.update(
-                {
-                    'claim_id': claim_id,
-                    'actor_id': _field(document, 'actor_id'),
-                    'route': _field(document, 'route'),
-                    'key': _field(document, 'key'),
-                }
-            )
-        elif kind == 'message_turn_lookup':
-            message_id = _field(document, 'message_id')
-            if not isinstance(message_id, str) or not message_id:
-                continue
-            payload.update({'message_id': message_id})
-        items.append(
+            'scope': dict(scope),
+        },
+    )
+
+
+def _record_identity_text(document: Mapping[str, Any], record_type: str) -> str:
+    identity = _identity(document, record_type)
+    return identity[0] if len(identity) == 1 else _digest(*identity)
+
+
+def _claim_search_values(document: Mapping[str, Any]) -> dict[str, str]:
+    claim_id = _required_text(document, 'claim_id')
+    values = {
+        'claim_reference': claim_id,
+        'customer_reference': _required_text(document, 'customer_id'),
+    }
+    search = document.get('staff_search')
+    if not isinstance(search, Mapping):
+        search = {}
+    for field in (
+        'external_reference',
+        'created_date',
+        'incident_date',
+        'product_family',
+        'lifecycle_state',
+        'assignee_id',
+        'queue',
+    ):
+        value = search.get(field)
+        if value is not None and str(value):
+            values[field] = str(value)
+    external = values.get('external_reference')
+    if external is not None:
+        values['claim_reference_external'] = external
+    return values
+
+
+def _build_access_items(
+    document: Mapping[str, Any],
+    record_type: str,
+    canonical: PlannedItem,
+    kind: str,
+) -> list[PlannedItem]:
+    entity_id = _record_identity_text(document, record_type)
+    order_field, order_value = _order_coordinate(document, record_type)
+    claim_id = _field(document, 'claim_id')
+    customer_id = _field(document, 'customer_id')
+    if kind == 'realtime_order':
+        return []
+    if kind == 'claim_owner':
+        return [
             _planned_item(
-                pk,
-                sk,
+                canonical.pk,
+                'OWNER',
                 record_type,
                 kind,
                 document,
-                payload,
+                {'owner_customer_id': _required_text(document, 'customer_id')},
             )
+        ]
+    if kind == 'customer_claim':
+        pk = f'ACCESS#CUSTOMER_CLAIMS#{_required_text(document, "customer_id")}'
+        sk = f'UPDATED#{_reverse_time(_field(document, "updated_at"))}#{entity_id}'
+        return [
+            _projection_item(
+                document,
+                canonical,
+                kind,
+                pk,
+                sk,
+                {'customer_id': customer_id, 'claim_id': claim_id},
+            )
+        ]
+    if kind == 'global_claim':
+        sk = f'UPDATED#{_reverse_time(_field(document, "updated_at"))}#{entity_id}'
+        return [
+            _projection_item(
+                document, canonical, kind, 'ACCESS#CLAIMS#ALL', sk, {'claim_id': claim_id}
+            )
+        ]
+    if kind == 'claim_search':
+        sk = f'UPDATED#{_reverse_time(_field(document, "updated_at"))}#{entity_id}'
+        output: list[PlannedItem] = []
+        for field, value in sorted(_claim_search_values(document).items()):
+            public_field = 'claim_reference' if field == 'claim_reference_external' else field
+            pk = f'ACCESS#CLAIM_SEARCH#{public_field}#{_digest(value)}'
+            output.append(
+                _projection_item(
+                    document,
+                    canonical,
+                    kind,
+                    pk,
+                    sk,
+                    {'field': public_field, 'value': value, 'claim_id': claim_id},
+                )
+            )
+        return output
+    if kind == 'claim_order':
+        claim = _required_text(document, 'claim_id')
+        pk = f'ACCESS#CLAIM#{claim}#{record_type}'
+        sk = f'{order_field.upper()}#{order_value}#{entity_id}'
+        return [_projection_item(document, canonical, kind, pk, sk, {'claim_id': claim})]
+    if kind in {'session_order', 'session_summary_order'}:
+        session = _required_text(document, 'session_id')
+        pk = f'ACCESS#SESSION#{session}#{record_type}'
+        sk = f'CREATED#{_ascending_time(_field(document, "created_at"))}#{entity_id}'
+        return [_projection_item(document, canonical, kind, pk, sk, {'session_id': session})]
+    if kind in {'turn_order', 'turn_bundle'}:
+        turn = _required_text(document, 'turn_id')
+        pk = f'ACCESS#TURN#{turn}#{record_type}'
+        sk = f'CREATED#{_ascending_time(_field(document, "created_at"))}#{entity_id}'
+        return [_projection_item(document, canonical, kind, pk, sk, {'turn_id': turn})]
+    if kind in {'customer_all', 'customer_active'}:
+        if kind == 'customer_active' and (
+            _field(document, 'active') is False
+            or _field(document, 'status') in {'inactive', 'revoked', 'closed'}
+        ):
+            return []
+        customer = _required_text(document, 'customer_id')
+        state = 'ACTIVE' if kind == 'customer_active' else 'ALL'
+        configured_field = (
+            'updated_at' if _field(document, 'updated_at') is not None else 'created_at'
         )
-    return items
+        configured_time = _ascending_time(_field(document, configured_field))
+        pk = f'ACCESS#CUSTOMER#{customer}#{record_type}#{state}'
+        sk = f'{configured_field.upper()}#{configured_time}#{entity_id}'
+        return [
+            _projection_item(
+                document, canonical, kind, pk, sk, {'customer_id': customer, 'state': state}
+            )
+        ]
+    if kind == 'staff_session_order':
+        staff = _required_text(document, 'staff_id')
+        session = _required_text(document, 'session_id')
+        pk = f'ACCESS#STAFF_AGENT#{staff}#SESSIONS'
+        sk = f'UPDATED#{_reverse_time(_field(document, "updated_at"))}#{session}'
+        return [_projection_item(document, canonical, kind, pk, sk, {'staff_id': staff})]
+    if kind == 'staff_message_order':
+        session = _required_text(document, 'session_id')
+        message = _required_text(document, 'message_id')
+        pk = f'ACCESS#STAFF_AGENT_SESSION#{session}#MESSAGES'
+        sk = f'CREATED#{_ascending_time(_field(document, "created_at"))}#{message}'
+        return [_projection_item(document, canonical, kind, pk, sk, {'session_id': session})]
+    if kind == 'claim_actor_idempotency':
+        claim = _required_text(document, 'claim_id')
+        actor = _required_text(document, 'actor_id')
+        route = _required_text(document, 'route')
+        key = _required_text(document, 'key')
+        pk = f'ACCESS#CLAIM_IDEMPOTENCY#{_digest(claim, actor)}'
+        sk = f'RECORD#{_digest(route, key)}'
+        return [
+            _projection_item(
+                document,
+                canonical,
+                kind,
+                pk,
+                sk,
+                {'claim_id': claim, 'actor_id': actor, 'route': route, 'key': key},
+            )
+        ]
+    return _build_exact_lookup_or_special_access(
+        document, record_type, canonical, kind, entity_id, order_field, order_value
+    )
+
+
+def _lookup_item(
+    document: Mapping[str, Any],
+    canonical: PlannedItem,
+    kind: str,
+    lookup_type: str,
+    components: Sequence[str],
+    scope: Mapping[str, Any],
+) -> PlannedItem:
+    pk = f'LOOKUP#{lookup_type}#{_digest(*components)}'
+    return _projection_item(document, canonical, kind, pk, 'META', scope)
+
+
+def _unique_item(
+    document: Mapping[str, Any],
+    canonical: PlannedItem,
+    kind: str,
+    constraint: str,
+    components: Sequence[str],
+    scope: Mapping[str, Any],
+) -> PlannedItem:
+    pk = f'UNIQUE#{constraint}#{_digest(*components)}'
+    return _projection_item(document, canonical, kind, pk, 'META', scope)
+
+
+def _build_exact_lookup_or_special_access(
+    document: Mapping[str, Any],
+    record_type: str,
+    canonical: PlannedItem,
+    kind: str,
+    entity_id: str,
+    order_field: str,
+    order_value: str,
+) -> list[PlannedItem]:
+    claim = _field(document, 'claim_id')
+    session = _field(document, 'session_id')
+    if kind == 'message_client_lookup':
+        client = _field(document, 'client_message_id')
+        if not isinstance(client, str) or not client:
+            return []
+        claim_text = _required_text(document, 'claim_id')
+        return [
+            _lookup_item(
+                document,
+                canonical,
+                kind,
+                'MESSAGE_CLIENT',
+                (claim_text, client),
+                {'claim_id': claim_text, 'client_message_id': client},
+            )
+        ]
+    if kind == 'staff_message_client_lookup':
+        client = _field(document, 'client_message_id')
+        if not isinstance(client, str) or not client:
+            return []
+        staff = _required_text(document, 'staff_id')
+        session_text = _required_text(document, 'session_id')
+        return [
+            _lookup_item(
+                document,
+                canonical,
+                kind,
+                'STAFF_AGENT_CLIENT',
+                (staff, session_text, client),
+                {'staff_id': staff, 'session_id': session_text, 'client_message_id': client},
+            )
+        ]
+    if kind == 'message_turn_lookup':
+        message = _field(document, 'message_id')
+        if not isinstance(message, str) or not message:
+            return []
+        actor = _required_text(document, 'actor_id')
+        route = _required_text(document, 'route')
+        claim_text = _required_text(document, 'claim_id')
+        pk = f'LOOKUP#MESSAGE_TURN_IDEMPOTENCY#{_digest(actor, route, claim_text, message)}'
+        return [
+            _projection_item(
+                document,
+                canonical,
+                kind,
+                pk,
+                'META',
+                {'actor_id': actor, 'route': route, 'claim_id': claim_text, 'message_id': message},
+            )
+        ]
+    if kind == 'session_lookup':
+        claim_text = _required_text(document, 'claim_id')
+        session_text = _required_text(document, 'session_id')
+        return [
+            _lookup_item(
+                document,
+                canonical,
+                kind,
+                'CLAIM_SESSION',
+                (claim_text, session_text),
+                {'claim_id': claim_text, 'session_id': session_text},
+            )
+        ]
+    if kind == 'session_search':
+        claim_text = _required_text(document, 'claim_id')
+        session_text = _required_text(document, 'session_id')
+        started = _timestamp(_field(document, 'started_at'))
+        reverse_started = _reverse_time(started)
+        sk = f'STARTED#{reverse_started}#{session_text}'
+        date_value = started.date().isoformat()
+        output = [
+            _projection_item(
+                document,
+                canonical,
+                kind,
+                f'ACCESS#CLAIM_SESSIONS_DATE#{claim_text}#{date_value}',
+                sk,
+                {'claim_id': claim_text, 'started_date': date_value},
+            )
+        ]
+        status = _field(document, 'status')
+        if status is not None and str(status):
+            output.append(
+                _projection_item(
+                    document,
+                    canonical,
+                    kind,
+                    f'ACCESS#CLAIM_SESSIONS_STATUS#{claim_text}#{status}',
+                    sk,
+                    {'claim_id': claim_text, 'status': str(status)},
+                )
+            )
+        return output
+    if kind == 'trigger_lookup':
+        trigger = _required_text(document, 'trigger_message_id')
+        components = (str(claim or ''), str(session or ''), trigger, record_type)
+        return [
+            _lookup_item(
+                document,
+                canonical,
+                kind,
+                'TRIGGER',
+                components,
+                {
+                    'claim_id': claim,
+                    'session_id': session,
+                    'trigger_message_id': trigger,
+                    'record_type': record_type,
+                },
+            )
+        ]
+    uniqueness: dict[str, tuple[str, tuple[str, ...], dict[str, Any]]] = {}
+    if kind == 'claim_singleton':
+        claim_text = _required_text(document, 'claim_id')
+        uniqueness[kind] = ('MOTOR_OTHER_DRIVER_CLAIM', (claim_text,), {'claim_id': claim_text})
+    elif kind == 'contents_evidence_unique':
+        values = tuple(
+            _required_text(document, field) for field in ('claim_id', 'item_id', 'evidence_id')
+        )
+        uniqueness[kind] = (
+            'CONTENTS_ITEM_EVIDENCE',
+            values,
+            {'claim_id': values[0], 'item_id': values[1], 'evidence_id': values[2]},
+        )
+    elif kind == 'evidence_claim_unique':
+        values = tuple(
+            _required_text(document, field) for field in ('target_claim_id', 'evidence_id')
+        )
+        uniqueness[kind] = (
+            'EVIDENCE_CLAIM_TARGET',
+            values,
+            {'target_claim_id': values[0], 'evidence_id': values[1]},
+        )
+    elif kind == 'task_unique':
+        task = _required_text(document, 'task_id')
+        constraint = (
+            'EXTERNAL_TASK_REQUEST'
+            if record_type == 'external_task_request'
+            else 'EXTERNAL_TASK_RESULT'
+        )
+        task_values = (
+            (task,)
+            if record_type == 'external_task_request'
+            else (_required_text(document, 'claim_id'), task)
+        )
+        uniqueness[kind] = (constraint, task_values, {'task_id': task, 'claim_id': claim})
+    elif kind in {'open_purpose_lookup', 'open_session_lookup'}:
+        status = str(_field(document, 'status') or '')
+        if status not in {'open', 'pending', 'blocked'}:
+            return []
+        claim_text = _required_text(document, 'claim_id')
+        field = 'purpose' if kind == 'open_purpose_lookup' else 'source_session_id'
+        value = _field(document, field)
+        if not isinstance(value, str) or not value:
+            return []
+        constraint = 'OPEN_FOLLOW_UP_PURPOSE' if field == 'purpose' else 'OPEN_FOLLOW_UP_SESSION'
+        uniqueness[kind] = (constraint, (claim_text, value), {'claim_id': claim_text, field: value})
+    if kind in uniqueness:
+        constraint, unique_components, scope = uniqueness[kind]
+        return [_unique_item(document, canonical, kind, constraint, unique_components, scope)]
+    if kind == 'contents_item_order':
+        claim_text = _required_text(document, 'claim_id')
+        item = _required_text(document, 'item_id')
+        pk = f'ACCESS#CLAIM_CONTENTS_ITEM#{claim_text}#{item}'
+        sk = f'CREATED#{_ascending_time(_field(document, "created_at"))}#{entity_id}'
+        return [
+            _projection_item(
+                document, canonical, kind, pk, sk, {'claim_id': claim_text, 'item_id': item}
+            )
+        ]
+    if kind == 'target_claim_order':
+        target = _required_text(document, 'target_claim_id')
+        pk = f'ACCESS#CLAIM#{target}#{record_type}'
+        sk = f'{order_field.upper()}#{order_value}#{entity_id}'
+        return [_projection_item(document, canonical, kind, pk, sk, {'target_claim_id': target})]
+    if kind == 'task_lookup':
+        task = _required_text(document, 'task_id')
+        pk = f'ACCESS#TASK#{task}#{record_type}'
+        sk = f'{order_field.upper()}#{order_value}#{entity_id}'
+        return [_projection_item(document, canonical, kind, pk, sk, {'task_id': task})]
+    if kind == 'customer_evidence':
+        customer = _required_text(document, 'customer_id')
+        pk = f'ACCESS#CUSTOMER#{customer}#evidence#ALL'
+        sk = f'{order_field.upper()}#{order_value}#{entity_id}'
+        return [_projection_item(document, canonical, kind, pk, sk, {'customer_id': customer})]
+    if kind in {'claim_all', 'claim_active'}:
+        if kind == 'claim_active' and _field(document, 'active') is False:
+            return []
+        claim_text = _required_text(document, 'claim_id')
+        state = 'ACTIVE' if kind == 'claim_active' else 'ALL'
+        pk = f'ACCESS#CLAIM#{claim_text}#{record_type}#{state}'
+        sk = f'{order_field.upper()}#{order_value}#{entity_id}'
+        return [
+            _projection_item(
+                document, canonical, kind, pk, sk, {'claim_id': claim_text, 'state': state}
+            )
+        ]
+    if kind == 'staff_listing':
+        staff = _required_text(document, 'staff_id')
+        sk = f'UPDATED#{_reverse_time(_field(document, "updated_at"))}#{staff}'
+        return [
+            _projection_item(
+                document, canonical, kind, 'ACCESS#STAFF_PRESENCE#ALL', sk, {'staff_id': staff}
+            )
+        ]
+    if kind in {'assignee_order', 'target_staff_order'}:
+        field = 'assignee_id' if kind == 'assignee_order' else 'target_staff_id'
+        staff = _field(document, field)
+        if not isinstance(staff, str) or not staff:
+            return []
+        pk = f'ACCESS#STAFF#{staff}#{record_type}'
+        sk = f'{order_field.upper()}#{order_value}#{entity_id}'
+        return [_projection_item(document, canonical, kind, pk, sk, {field: staff})]
+    if kind == 'handoff_queue':
+        queue = _field(document, 'queue')
+        if not isinstance(queue, str) or not queue:
+            return []
+        pk = f'ACCESS#HANDOFF_QUEUE#{queue}'
+        sk = f'{order_field.upper()}#{order_value}#{entity_id}'
+        return [_projection_item(document, canonical, kind, pk, sk, {'queue': queue})]
+    if kind.startswith('audit_'):
+        return _build_audit_access_items(document, canonical, kind, entity_id)
+    raise ValueError(f'unsupported access projection kind: {kind}')
+
+
+def _build_audit_access_items(
+    document: Mapping[str, Any], canonical: PlannedItem, kind: str, event_id: str
+) -> list[PlannedItem]:
+    created = _ascending_time(_field(document, 'created_at'))
+    sk = f'TIME#{created}#{event_id}'
+    subject = _field(document, 'subject')
+    actor = _field(document, 'actor')
+    if kind == 'audit_subject_order':
+        if not isinstance(subject, Mapping):
+            raise ValueError('Audit subject is required for subject projection')
+        values = (
+            str(subject.get('subject_type') or ''),
+            str(subject.get('subject_id') or ''),
+            str(subject.get('claim_id') or ''),
+        )
+        if not values[0] or not values[1]:
+            raise ValueError('Audit subject identity is incomplete')
+        pk = f'ACCESS#AUDIT_SUBJECT#{_digest(*values)}'
+        return [
+            _projection_item(
+                document,
+                canonical,
+                kind,
+                pk,
+                sk,
+                {'subject_type': values[0], 'subject_id': values[1], 'claim_id': values[2] or None},
+            )
+        ]
+    if kind == 'audit_global_order':
+        return [_projection_item(document, canonical, kind, 'ACCESS#AUDIT#ALL', sk, {})]
+    if kind == 'audit_type_order':
+        field = 'event_type'
+        filter_name = 'EVENT_TYPE'
+    elif kind == 'audit_subject_type_order':
+        field = 'subject_type'
+        filter_name = 'SUBJECT_TYPE'
+    else:
+        field = 'actor_id'
+        filter_name = 'ACTOR'
+    value = _field(document, field)
+    if field == 'subject_type' and isinstance(subject, Mapping):
+        value = subject.get('subject_type')
+    if field == 'actor_id' and isinstance(actor, Mapping):
+        value = actor.get('actor_id')
+    if not isinstance(value, str) or not value:
+        return []
+    pk = f'ACCESS#AUDIT#{filter_name}#{_digest(value)}'
+    return [_projection_item(document, canonical, kind, pk, sk, {field: value})]
 
 
 def _order_coordinate(document: Mapping[str, Any], record_type: str) -> tuple[str, str]:
@@ -1194,7 +1618,35 @@ def rehearse_anonymous_promotion(
     )
     if matching_lookup is None or matching_lookup.source_ref != restored_source_ref:
         raise ValueError('authenticated historical message turn cannot be restored')
-    return PromotionRehearsal(tuple(output), restored_source_ref)
+    base_actions = (
+        'claim_meta_update',
+        'claim_owner_update',
+        'old_customer_projection_delete',
+        'new_customer_projection_put',
+        'realtime_counter_update',
+        'realtime_event_put',
+    )
+    serialized_bytes = sum(len(_json_bytes(asdict(item))) for item in output) + sum(
+        len(_json_bytes({'action': action, 'claim_id': claim_id})) for action in base_actions
+    )
+    action_count = len(output) + len(base_actions)
+    atomic_mutation = AtomicMutationReport(
+        'anonymous_promotion',
+        f'claim:{claim_id}',
+        action_count,
+        serialized_bytes,
+        action_count <= TRANSACTION_ACTION_LIMIT and serialized_bytes <= TRANSACTION_BUDGET_BYTES,
+        tuple(sorted({_source_ref(claim), *(_source_ref(record) for record in selected)})),
+        tuple(
+            [
+                *(f'{item.pk}|{item.sk}' for item in output),
+                *(f'ACTION|{action}' for action in base_actions),
+            ]
+        ),
+    )
+    if not atomic_mutation.within_limits:
+        raise ValueError('anonymous promotion exceeds the target transaction budget')
+    return PromotionRehearsal(tuple(output), restored_source_ref, atomic_mutation)
 
 
 def _relationship_findings(documents: Sequence[Mapping[str, Any]]) -> list[RehearsalFinding]:
@@ -1459,58 +1911,271 @@ def _realtime_findings(documents: Sequence[Mapping[str, Any]]) -> list[Rehearsal
     return []
 
 
-def _mutation_scope(document: Mapping[str, Any], mapping: RecordMapping) -> str:
-    candidates: tuple[str, ...]
-    if mapping.mutation_family == 'agent_turn':
-        candidates = ('turn_id', 'session_id', 'claim_id')
-    elif mapping.mutation_family == 'retrieval_bundle':
-        candidates = ('retrieval_id', 'claim_id')
-    elif mapping.mutation_family == 'staff_ownership':
-        candidates = ('claim_id', 'session_id', 'staff_id')
-    else:
-        candidates = ('claim_id', 'session_id', 'customer_id')
-    for field in candidates:
-        value = _field(document, field)
-        if isinstance(value, str) and value:
-            return f'{field}:{value}'
-    return f'source:{_source_ref(document)}'
+@dataclass(frozen=True)
+class _AtomicOperation:
+    family: str
+    scope_ref: str
+    documents: tuple[Mapping[str, Any], ...]
+
+
+_CLAIM_CHILD_TYPES = frozenset(
+    {
+        'asset',
+        'claim_asset_snapshot',
+        'motor_other_driver',
+        'contents_item_evidence_association',
+        'evidence',
+        'evidence_claim_link',
+        'external_task',
+        'external_task_request',
+        'external_task_result',
+        'external_task_evidence_link',
+        'assessor_routing_operation',
+        'policy',
+        'identity_document',
+        'payment_destination',
+    }
+)
+_AGENT_TURN_TYPES = frozenset(
+    {
+        'message',
+        'agent_decision',
+        'handoff',
+        'evidence',
+        'branch_evaluation',
+        'runtime_trace',
+        'turn_plan',
+        'agent_proposal',
+        'execution_plan',
+        'action_envelope',
+        'tool_result',
+        'turn_result',
+        'runtime_work_item',
+    }
+)
+_STAFF_MUTATION_TYPES = frozenset(
+    {
+        'staff_action',
+        'collaboration_request',
+        'claim_coworker',
+        'customer_update',
+        'signal_decision',
+        'handoff',
+        'staff_agent_execution',
+    }
+)
+
+
+def _records_of_type(
+    documents: Sequence[Mapping[str, Any]], record_types: frozenset[str]
+) -> list[Mapping[str, Any]]:
+    return [document for document in documents if document.get('record_type') in record_types]
+
+
+def _reconstruct_claim_operations(
+    claim: Mapping[str, Any], scoped: Sequence[Mapping[str, Any]]
+) -> tuple[list[_AtomicOperation], list[RehearsalFinding]]:
+    claim_id = _required_text(claim, 'claim_id')
+    operations: list[_AtomicOperation] = []
+    findings: list[RehearsalFinding] = []
+    sessions = _records_of_type(scoped, frozenset({'session'}))
+    realtime = _records_of_type(scoped, frozenset({'realtime_sequence', 'realtime_event'}))
+    active_session_id = _field(claim, 'active_session_id')
+    if isinstance(active_session_id, str) and active_session_id:
+        active = [
+            record for record in sessions if _field(record, 'session_id') == active_session_id
+        ]
+        if len(active) != 1:
+            findings.append(
+                _finding(
+                    'AMBIGUOUS_ATOMIC_MUTATION',
+                    claim,
+                    'Claim creation cannot resolve exactly one active Session',
+                )
+            )
+        else:
+            operations.append(
+                _AtomicOperation(
+                    'claim_creation', f'claim:{claim_id}', tuple([claim, active[0], *realtime])
+                )
+            )
+    checkpoint = _records_of_type(scoped, frozenset({'follow_up', 'branch_evaluation'}))
+    if checkpoint:
+        supporting = _records_of_type(
+            scoped, frozenset({'session', 'idempotency', 'realtime_sequence', 'realtime_event'})
+        )
+        operations.append(
+            _AtomicOperation(
+                'session_checkpoint',
+                f'claim:{claim_id}',
+                tuple([claim, *supporting, *checkpoint]),
+            )
+        )
+    children = _records_of_type(scoped, _CLAIM_CHILD_TYPES)
+    if children:
+        supporting = _records_of_type(
+            scoped,
+            frozenset(
+                {'session', 'idempotency', 'audit_event', 'realtime_sequence', 'realtime_event'}
+            ),
+        )
+        operations.append(
+            _AtomicOperation(
+                'claim_child', f'claim:{claim_id}', tuple([claim, *supporting, *children])
+            )
+        )
+    for turn in _records_of_type(scoped, frozenset({'turn_plan'})):
+        turn_id = _required_text(turn, 'turn_id')
+        turn_records = [
+            record
+            for record in _records_of_type(scoped, _AGENT_TURN_TYPES)
+            if record.get('record_type')
+            in {
+                'message',
+                'agent_decision',
+                'handoff',
+                'evidence',
+                'branch_evaluation',
+                'runtime_trace',
+            }
+            or _field(record, 'turn_id') == turn_id
+        ]
+        supporting = _records_of_type(
+            scoped, frozenset({'session', 'idempotency', 'realtime_sequence', 'realtime_event'})
+        )
+        operations.append(
+            _AtomicOperation(
+                'agent_turn', f'turn:{turn_id}', tuple([claim, *supporting, *turn_records])
+            )
+        )
+    staff_records = _records_of_type(scoped, _STAFF_MUTATION_TYPES)
+    if staff_records:
+        supporting = _records_of_type(
+            scoped, frozenset({'idempotency', 'audit_event', 'realtime_sequence', 'realtime_event'})
+        )
+        operations.append(
+            _AtomicOperation(
+                'staff_ownership', f'claim:{claim_id}', tuple([claim, *supporting, *staff_records])
+            )
+        )
+    return operations, findings
+
+
+def _reconstruct_atomic_operations(
+    documents: Sequence[Mapping[str, Any]],
+) -> tuple[list[_AtomicOperation], list[RehearsalFinding]]:
+    operations: list[_AtomicOperation] = []
+    findings: list[RehearsalFinding] = []
+    claims = [document for document in documents if document.get('record_type') == 'claim']
+    for claim in claims:
+        claim_id = _required_text(claim, 'claim_id')
+        scoped = [
+            document
+            for document in documents
+            if _field(document, 'claim_id') == claim_id
+            or document.get('record_type') == 'realtime_sequence'
+        ]
+        claim_operations, claim_findings = _reconstruct_claim_operations(claim, scoped)
+        operations.extend(claim_operations)
+        findings.extend(claim_findings)
+    for retrieval in _records_of_type(documents, frozenset({'retrieval'})):
+        retrieval_id = _required_text(retrieval, 'retrieval_id')
+        claim_id = _required_text(retrieval, 'claim_id')
+        signals = [
+            document
+            for document in documents
+            if document.get('record_type') == 'review_signal'
+            and _field(document, 'claim_id') == claim_id
+            and retrieval_id in (_field(document, 'source_refs') or [])
+        ]
+        operations.append(
+            _AtomicOperation(
+                'retrieval_bundle', f'retrieval:{retrieval_id}', tuple([retrieval, *signals])
+            )
+        )
+    assigned = {id(document) for operation in operations for document in operation.documents}
+    for document in documents:
+        record_type = str(document.get('record_type', ''))
+        if id(document) in assigned or record_type not in RECORD_MAPPINGS:
+            continue
+        mapping = RECORD_MAPPINGS[record_type]
+        if mapping.mutation_family == 'claim_child' and isinstance(
+            _field(document, 'customer_id'), str
+        ):
+            operations.append(
+                _AtomicOperation(
+                    'claim_child',
+                    f'source:{_source_ref(document)}',
+                    (document,),
+                )
+            )
+            assigned.add(id(document))
+        elif mapping.mutation_family == 'staff_ownership' and record_type in {
+            'staff_presence',
+            'staff_agent_session',
+            'staff_agent_message',
+        }:
+            operations.append(
+                _AtomicOperation(
+                    'staff_ownership',
+                    f'source:{_source_ref(document)}',
+                    (document,),
+                )
+            )
+            assigned.add(id(document))
+        else:
+            findings.append(
+                _finding(
+                    'UNRECONSTRUCTED_ATOMIC_MUTATION',
+                    document,
+                    'record cannot be assigned to one approved atomic boundary',
+                )
+            )
+    for document in documents:
+        memberships = [
+            operation
+            for operation in operations
+            if any(candidate is document for candidate in operation.documents)
+        ]
+        if len(memberships) > 1:
+            findings.append(
+                _finding(
+                    'AMBIGUOUS_ATOMIC_MUTATION',
+                    document,
+                    'shared record maps to multiple reconstructed operations',
+                )
+            )
+    return operations, findings
+
+
+def _operation_items(
+    operation: _AtomicOperation, items: Sequence[PlannedItem]
+) -> list[PlannedItem]:
+    source_refs = {_source_ref(document) for document in operation.documents}
+    selected = [item for item in items if item.source_ref in source_refs]
+    idempotency_scopes = {
+        (_field(document, 'claim_id'), _field(document, 'actor_id'))
+        for document in operation.documents
+        if document.get('record_type') == 'idempotency'
+    }
+    selected.extend(
+        item
+        for item in items
+        if item.item_kind == 'claim_actor_generation'
+        and (item.payload.get('claim_id'), item.payload.get('actor_id')) in idempotency_scopes
+    )
+    return selected
 
 
 def _atomic_mutation_reports(
     documents: Sequence[Mapping[str, Any]], items: Sequence[PlannedItem]
 ) -> tuple[tuple[AtomicMutationReport, ...], list[RehearsalFinding]]:
-    groups: dict[tuple[str, str], set[str]] = {}
+    operations, findings = _reconstruct_atomic_operations(documents)
     documents_by_ref = {_source_ref(document): document for document in documents}
-    for document in documents:
-        mapping = RECORD_MAPPINGS.get(str(document.get('record_type', '')))
-        if mapping is None:
-            continue
-        scope = _mutation_scope(document, mapping)
-        if (
-            mapping.mutation_family == 'retrieval_bundle'
-            and document.get('record_type') == 'review_signal'
-        ):
-            source_refs = _field(document, 'source_refs') or []
-            retrieval = next(
-                (
-                    value
-                    for value in source_refs
-                    if isinstance(value, str)
-                    and any(
-                        candidate.get('record_type') == 'retrieval'
-                        and _field(candidate, 'retrieval_id') == value
-                        for candidate in documents
-                    )
-                ),
-                None,
-            )
-            if retrieval is not None:
-                scope = f'retrieval_id:{retrieval}'
-        groups.setdefault((mapping.mutation_family, scope), set()).add(_source_ref(document))
     reports: list[AtomicMutationReport] = []
-    findings: list[RehearsalFinding] = []
-    for (family, scope), source_refs in sorted(groups.items()):
-        mutation_items = [item for item in items if item.source_ref in source_refs]
+    for operation in sorted(operations, key=lambda value: (value.family, value.scope_ref)):
+        source_refs = {_source_ref(document) for document in operation.documents}
+        mutation_items = _operation_items(operation, items)
         action_count = len(mutation_items)
         serialized_bytes = sum(len(_json_bytes(asdict(item))) for item in mutation_items)
         within_limits = (
@@ -1518,7 +2183,15 @@ def _atomic_mutation_reports(
             and serialized_bytes <= TRANSACTION_BUDGET_BYTES
         )
         reports.append(
-            AtomicMutationReport(family, scope, action_count, serialized_bytes, within_limits)
+            AtomicMutationReport(
+                operation.family,
+                operation.scope_ref,
+                action_count,
+                serialized_bytes,
+                within_limits,
+                tuple(sorted(source_refs)),
+                tuple(sorted(f'{item.pk}|{item.sk}' for item in mutation_items)),
+            )
         )
         if within_limits:
             continue
@@ -1528,7 +2201,7 @@ def _atomic_mutation_reports(
                 _finding(
                     'ATOMIC_ACTION_LIMIT',
                     source,
-                    f'{family} requires {action_count} actions; limit is 100',
+                    f'{operation.family} requires {action_count} actions; limit is 100',
                 )
             )
         if serialized_bytes > TRANSACTION_BUDGET_BYTES:
@@ -1536,7 +2209,7 @@ def _atomic_mutation_reports(
                 _finding(
                     'ATOMIC_BYTE_LIMIT',
                     source,
-                    f'{family} requires {serialized_bytes} bytes; limit is 4 MiB',
+                    f'{operation.family} requires {serialized_bytes} bytes; limit is 4 MiB',
                 )
             )
     return tuple(reports), findings
