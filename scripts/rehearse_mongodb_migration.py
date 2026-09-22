@@ -18,13 +18,25 @@ from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 from pymongo.read_concern import ReadConcern
 
-INVENTORY_VERSION = 'aws-migration-preparation@2d6499a7'
-SOURCE_HEAD = '2d6499a7fb22a1e3a872f32241f8cdfa78e2dcf5'
+INVENTORY_VERSION = 'aws-migration-preparation@05e8f7d3'
+SOURCE_HEAD = '05e8f7d394b0fcaadd09a083bd4faa476106c7ad'
 RECONCILIATION_ISSUES = ('#984', '#985', '#986', '#987', '#786')
 ITEM_BUDGET_BYTES = 300 * 1024
 TRANSACTION_ACTION_LIMIT = 100
 TRANSACTION_BUDGET_BYTES = 4 * 1024 * 1024
 REVERSE_TIME_MAX = 99_999_999_999_999_999_999
+MUTATION_FAMILIES = frozenset(
+    {
+        'claim_creation',
+        'session_checkpoint',
+        'claim_child',
+        'agent_turn',
+        'staff_ownership',
+        'retrieval_bundle',
+        'anonymous_promotion',
+    }
+)
+MUTATION_ACTIONS = frozenset({'put', 'delete', 'update', 'condition_check'})
 
 
 @dataclass(frozen=True)
@@ -547,8 +559,29 @@ class RehearsalFinding:
 
 
 @dataclass(frozen=True)
+class MutationAction:
+    """One explicit DynamoDB transaction action from a current mutation manifest."""
+
+    action: str
+    pk: str
+    sk: str
+    payload: dict[str, Any]
+    condition: str | None = None
+
+
+@dataclass(frozen=True)
+class MutationManifest:
+    """An explicit operation boundary; never inferred from a final source snapshot."""
+
+    family: str
+    operation_ref: str
+    actions: tuple[MutationAction, ...]
+    source_refs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class AtomicMutationReport:
-    """Preflight result for one reconstructed atomic mutation."""
+    """Capacity preflight for one explicit current-operation manifest."""
 
     family: str
     scope_ref: str
@@ -556,7 +589,7 @@ class AtomicMutationReport:
     serialized_bytes: int
     within_limits: bool
     source_refs: tuple[str, ...]
-    item_keys: tuple[str, ...]
+    action_keys: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -573,7 +606,7 @@ class RehearsalReport:
     first_pass: dict[str, int]
     second_pass: dict[str, int]
     target_item_count: int
-    atomic_mutations: tuple[AtomicMutationReport, ...]
+    atomic_evidence_level: str
     completion_marker: bool
     findings: tuple[RehearsalFinding, ...]
 
@@ -677,6 +710,47 @@ def _json_bytes(value: Any) -> bytes:
     return json.dumps(
         _normalise(value), sort_keys=True, separators=(',', ':'), ensure_ascii=True
     ).encode()
+
+
+def rehearse_mutation_manifest(manifest: MutationManifest) -> AtomicMutationReport:
+    """Measure one explicit operation manifest without claiming snapshot reconstruction."""
+
+    if manifest.family not in MUTATION_FAMILIES:
+        raise ValueError(f'unsupported mutation family: {manifest.family}')
+    if not manifest.operation_ref or not manifest.actions:
+        raise ValueError('mutation manifest requires an operation reference and actions')
+    action_keys: list[str] = []
+    target_keys: set[tuple[str, str]] = set()
+    serialized_bytes = 0
+    for action in manifest.actions:
+        if action.action not in MUTATION_ACTIONS:
+            raise ValueError(f'unsupported mutation action: {action.action}')
+        if not action.pk or not action.sk:
+            raise ValueError('mutation action requires a complete target key')
+        if action.action == 'condition_check' and not action.condition:
+            raise ValueError('condition_check requires a condition')
+        target_key = (action.pk, action.sk)
+        if target_key in target_keys:
+            raise ValueError(
+                f'mutation manifest targets one item more than once: {action.pk}|{action.sk}'
+            )
+        target_keys.add(target_key)
+        action_key = f'{action.action.upper()}|{action.pk}|{action.sk}'
+        action_keys.append(action_key)
+        serialized_bytes += len(_json_bytes(asdict(action)))
+    action_count = len(manifest.actions)
+    return AtomicMutationReport(
+        family=manifest.family,
+        scope_ref=manifest.operation_ref,
+        action_count=action_count,
+        serialized_bytes=serialized_bytes,
+        within_limits=(
+            action_count <= TRANSACTION_ACTION_LIMIT
+            and serialized_bytes <= TRANSACTION_BUDGET_BYTES
+        ),
+        source_refs=tuple(sorted(manifest.source_refs)),
+        action_keys=tuple(action_keys),
+    )
 
 
 def _digest(*components: str) -> str:
@@ -1635,31 +1709,81 @@ def rehearse_anonymous_promotion(
     )
     if matching_lookup is None or matching_lookup.source_ref != restored_source_ref:
         raise ValueError('authenticated historical message turn cannot be restored')
-    base_actions = (
-        'claim_meta_update',
-        'claim_owner_update',
-        'old_customer_projection_delete',
-        'new_customer_projection_put',
-        'realtime_counter_update',
-        'realtime_event_put',
-    )
-    serialized_bytes = sum(len(_json_bytes(asdict(item))) for item in output) + sum(
-        len(_json_bytes({'action': action, 'claim_id': claim_id})) for action in base_actions
-    )
-    action_count = len(output) + len(base_actions)
-    atomic_mutation = AtomicMutationReport(
-        'anonymous_promotion',
-        f'claim:{claim_id}',
-        action_count,
-        serialized_bytes,
-        action_count <= TRANSACTION_ACTION_LIMIT and serialized_bytes <= TRANSACTION_BUDGET_BYTES,
-        tuple(sorted({_source_ref(claim), *(_source_ref(record) for record in selected)})),
-        tuple(
-            [
-                *(f'{item.pk}|{item.sk}' for item in output),
-                *(f'ACTION|{action}' for action in base_actions),
-            ]
+    claim_pk = f'ENTITY#claim#{claim_id}'
+    customer_projection_sk = f'UPDATED#{_reverse_time(_field(claim, "updated_at"))}#{claim_id}'
+    current_sequence = max(
+        (
+            int(_field(document, 'sequence'))
+            for document in documents
+            if document.get('record_type') == 'realtime_event'
         ),
+        default=0,
+    )
+    actions = [
+        MutationAction(
+            'update',
+            claim_pk,
+            'META',
+            {'customer_id': authenticated_actor},
+            'owner_customer_id = :anonymous_actor',
+        ),
+        MutationAction(
+            'update',
+            claim_pk,
+            'OWNER',
+            {'owner_customer_id': authenticated_actor},
+            'owner_customer_id = :anonymous_actor',
+        ),
+        MutationAction(
+            'delete',
+            f'ACCESS#CUSTOMER_CLAIMS#{anonymous_actor}',
+            customer_projection_sk,
+            {},
+            'attribute_exists(PK)',
+        ),
+        MutationAction(
+            'put',
+            f'ACCESS#CUSTOMER_CLAIMS#{authenticated_actor}',
+            customer_projection_sk,
+            {'canonical_pk': claim_pk, 'canonical_sk': 'META'},
+            'attribute_not_exists(PK)',
+        ),
+        MutationAction(
+            'update',
+            'SYSTEM#REALTIME',
+            'COUNTER',
+            {'next_sequence': current_sequence + 1},
+            'sequence = :current_sequence',
+        ),
+        MutationAction(
+            'put',
+            'SYSTEM#REALTIME',
+            f'EVENT#{current_sequence + 1:020d}#promotion#{claim_id}',
+            {'claim_id': claim_id, 'sequence': current_sequence + 1},
+            'attribute_not_exists(PK)',
+        ),
+    ]
+    actions.extend(
+        MutationAction(
+            'put',
+            item.pk,
+            item.sk,
+            asdict(item),
+            (
+                'generation = :expected_generation'
+                if item.item_kind == 'promotion_retirement'
+                else 'attribute_not_exists(PK)'
+            ),
+        )
+        for item in output
+    )
+    atomic_mutation = rehearse_mutation_manifest(
+        MutationManifest(
+            'anonymous_promotion',
+            f'claim:{claim_id}',
+            tuple(actions),
+            tuple(sorted({_source_ref(claim), *(_source_ref(record) for record in selected)})),
+        )
     )
     if not atomic_mutation.within_limits:
         raise ValueError('anonymous promotion exceeds the target transaction budget')
@@ -1928,322 +2052,6 @@ def _realtime_findings(documents: Sequence[Mapping[str, Any]]) -> list[Rehearsal
     return []
 
 
-@dataclass(frozen=True)
-class _AtomicOperation:
-    family: str
-    scope_ref: str
-    documents: tuple[Mapping[str, Any], ...]
-
-
-_CLAIM_CHILD_TYPES = frozenset(
-    {
-        'asset',
-        'claim_asset_snapshot',
-        'motor_other_driver',
-        'contents_item_evidence_association',
-        'evidence',
-        'evidence_claim_link',
-        'external_task',
-        'external_task_request',
-        'external_task_result',
-        'external_task_evidence_link',
-        'assessor_routing_operation',
-        'policy',
-        'identity_document',
-        'payment_destination',
-        'claim_creation_operation',
-    }
-)
-_AGENT_TURN_TYPES = frozenset(
-    {
-        'message',
-        'agent_decision',
-        'handoff',
-        'evidence',
-        'branch_evaluation',
-        'runtime_trace',
-        'turn_plan',
-        'agent_proposal',
-        'execution_plan',
-        'action_envelope',
-        'tool_result',
-        'turn_result',
-        'runtime_work_item',
-    }
-)
-_STAFF_MUTATION_TYPES = frozenset(
-    {
-        'staff_action',
-        'collaboration_request',
-        'claim_coworker',
-        'customer_update',
-        'signal_decision',
-        'handoff',
-        'staff_agent_execution',
-    }
-)
-
-
-def _records_of_type(
-    documents: Sequence[Mapping[str, Any]], record_types: frozenset[str]
-) -> list[Mapping[str, Any]]:
-    return [document for document in documents if document.get('record_type') in record_types]
-
-
-def _reconstruct_claim_operations(
-    claim: Mapping[str, Any], scoped: Sequence[Mapping[str, Any]]
-) -> tuple[list[_AtomicOperation], list[RehearsalFinding]]:
-    claim_id = _required_text(claim, 'claim_id')
-    operations: list[_AtomicOperation] = []
-    findings: list[RehearsalFinding] = []
-    sessions = _records_of_type(scoped, frozenset({'session'}))
-    realtime = _records_of_type(scoped, frozenset({'realtime_sequence', 'realtime_event'}))
-    active_session_id = _field(claim, 'active_session_id')
-    if isinstance(active_session_id, str) and active_session_id:
-        active = [
-            record for record in sessions if _field(record, 'session_id') == active_session_id
-        ]
-        if len(active) != 1:
-            findings.append(
-                _finding(
-                    'AMBIGUOUS_ATOMIC_MUTATION',
-                    claim,
-                    'Claim creation cannot resolve exactly one active Session',
-                )
-            )
-        else:
-            operations.append(
-                _AtomicOperation(
-                    'claim_creation', f'claim:{claim_id}', tuple([claim, active[0], *realtime])
-                )
-            )
-    checkpoint = _records_of_type(scoped, frozenset({'follow_up', 'branch_evaluation'}))
-    if checkpoint:
-        supporting = _records_of_type(
-            scoped, frozenset({'session', 'idempotency', 'realtime_sequence', 'realtime_event'})
-        )
-        operations.append(
-            _AtomicOperation(
-                'session_checkpoint',
-                f'claim:{claim_id}',
-                tuple([claim, *supporting, *checkpoint]),
-            )
-        )
-    children = _records_of_type(scoped, _CLAIM_CHILD_TYPES)
-    if children:
-        supporting = _records_of_type(
-            scoped,
-            frozenset(
-                {'session', 'idempotency', 'audit_event', 'realtime_sequence', 'realtime_event'}
-            ),
-        )
-        operations.append(
-            _AtomicOperation(
-                'claim_child', f'claim:{claim_id}', tuple([claim, *supporting, *children])
-            )
-        )
-    for turn in _records_of_type(scoped, frozenset({'turn_plan'})):
-        turn_id = _required_text(turn, 'turn_id')
-        turn_records = [
-            record
-            for record in _records_of_type(scoped, _AGENT_TURN_TYPES)
-            if record.get('record_type')
-            in {
-                'message',
-                'agent_decision',
-                'handoff',
-                'evidence',
-                'branch_evaluation',
-                'runtime_trace',
-            }
-            or _field(record, 'turn_id') == turn_id
-        ]
-        supporting = _records_of_type(
-            scoped, frozenset({'session', 'idempotency', 'realtime_sequence', 'realtime_event'})
-        )
-        operations.append(
-            _AtomicOperation(
-                'agent_turn', f'turn:{turn_id}', tuple([claim, *supporting, *turn_records])
-            )
-        )
-    staff_records = _records_of_type(scoped, _STAFF_MUTATION_TYPES)
-    if staff_records:
-        supporting = _records_of_type(
-            scoped, frozenset({'idempotency', 'audit_event', 'realtime_sequence', 'realtime_event'})
-        )
-        operations.append(
-            _AtomicOperation(
-                'staff_ownership', f'claim:{claim_id}', tuple([claim, *supporting, *staff_records])
-            )
-        )
-    return operations, findings
-
-
-def _reconstruct_atomic_operations(
-    documents: Sequence[Mapping[str, Any]],
-) -> tuple[list[_AtomicOperation], list[RehearsalFinding]]:
-    operations: list[_AtomicOperation] = []
-    findings: list[RehearsalFinding] = []
-    claims = [document for document in documents if document.get('record_type') == 'claim']
-    for claim in claims:
-        claim_id = _required_text(claim, 'claim_id')
-        scoped = [
-            document
-            for document in documents
-            if _field(document, 'claim_id') == claim_id
-            or document.get('record_type') == 'realtime_sequence'
-        ]
-        claim_operations, claim_findings = _reconstruct_claim_operations(claim, scoped)
-        operations.extend(claim_operations)
-        findings.extend(claim_findings)
-    for retrieval in _records_of_type(documents, frozenset({'retrieval'})):
-        retrieval_id = _required_text(retrieval, 'retrieval_id')
-        claim_id = _required_text(retrieval, 'claim_id')
-        signals = [
-            document
-            for document in documents
-            if document.get('record_type') == 'review_signal'
-            and _field(document, 'claim_id') == claim_id
-            and retrieval_id in (_field(document, 'source_refs') or [])
-        ]
-        operations.append(
-            _AtomicOperation(
-                'retrieval_bundle', f'retrieval:{retrieval_id}', tuple([retrieval, *signals])
-            )
-        )
-    assigned = {id(document) for operation in operations for document in operation.documents}
-    for document in documents:
-        record_type = str(document.get('record_type', ''))
-        if id(document) in assigned or record_type not in RECORD_MAPPINGS:
-            continue
-        mapping = RECORD_MAPPINGS[record_type]
-        if mapping.mutation_family == 'claim_child' and isinstance(
-            _field(document, 'customer_id'), str
-        ):
-            operations.append(
-                _AtomicOperation(
-                    'claim_child',
-                    f'source:{_source_ref(document)}',
-                    (document,),
-                )
-            )
-            assigned.add(id(document))
-        elif mapping.mutation_family == 'staff_ownership' and record_type in {
-            'staff_presence',
-            'staff_agent_session',
-            'staff_agent_message',
-        }:
-            operations.append(
-                _AtomicOperation(
-                    'staff_ownership',
-                    f'source:{_source_ref(document)}',
-                    (document,),
-                )
-            )
-            assigned.add(id(document))
-        else:
-            findings.append(
-                _finding(
-                    'UNRECONSTRUCTED_ATOMIC_MUTATION',
-                    document,
-                    'record cannot be assigned to one approved atomic boundary',
-                )
-            )
-    ambiguous_types = {
-        'idempotency',
-        'audit_event',
-        'realtime_sequence',
-        'realtime_event',
-        'handoff',
-        'evidence',
-        'branch_evaluation',
-    }
-    for document in documents:
-        if document.get('record_type') not in ambiguous_types:
-            continue
-        memberships = [
-            operation
-            for operation in operations
-            if any(candidate is document for candidate in operation.documents)
-        ]
-        if len(memberships) > 1:
-            findings.append(
-                _finding(
-                    'AMBIGUOUS_ATOMIC_MUTATION',
-                    document,
-                    'shared record maps to multiple reconstructed operations',
-                )
-            )
-    return operations, findings
-
-
-def _operation_items(
-    operation: _AtomicOperation, items: Sequence[PlannedItem]
-) -> list[PlannedItem]:
-    source_refs = {_source_ref(document) for document in operation.documents}
-    selected = [item for item in items if item.source_ref in source_refs]
-    idempotency_scopes = {
-        (_field(document, 'claim_id'), _field(document, 'actor_id'))
-        for document in operation.documents
-        if document.get('record_type') == 'idempotency'
-    }
-    selected.extend(
-        item
-        for item in items
-        if item.item_kind == 'claim_actor_generation'
-        and (item.payload.get('claim_id'), item.payload.get('actor_id')) in idempotency_scopes
-    )
-    return selected
-
-
-def _atomic_mutation_reports(
-    documents: Sequence[Mapping[str, Any]], items: Sequence[PlannedItem]
-) -> tuple[tuple[AtomicMutationReport, ...], list[RehearsalFinding]]:
-    operations, findings = _reconstruct_atomic_operations(documents)
-    documents_by_ref = {_source_ref(document): document for document in documents}
-    reports: list[AtomicMutationReport] = []
-    for operation in sorted(operations, key=lambda value: (value.family, value.scope_ref)):
-        source_refs = {_source_ref(document) for document in operation.documents}
-        mutation_items = _operation_items(operation, items)
-        action_count = len(mutation_items)
-        serialized_bytes = sum(len(_json_bytes(asdict(item))) for item in mutation_items)
-        within_limits = (
-            action_count <= TRANSACTION_ACTION_LIMIT
-            and serialized_bytes <= TRANSACTION_BUDGET_BYTES
-        )
-        reports.append(
-            AtomicMutationReport(
-                operation.family,
-                operation.scope_ref,
-                action_count,
-                serialized_bytes,
-                within_limits,
-                tuple(sorted(source_refs)),
-                tuple(sorted(f'{item.pk}|{item.sk}' for item in mutation_items)),
-            )
-        )
-        if within_limits:
-            continue
-        source = documents_by_ref[next(iter(source_refs))]
-        if action_count > TRANSACTION_ACTION_LIMIT:
-            findings.append(
-                _finding(
-                    'ATOMIC_ACTION_LIMIT',
-                    source,
-                    f'{operation.family} requires {action_count} actions; limit is 100',
-                )
-            )
-        if serialized_bytes > TRANSACTION_BUDGET_BYTES:
-            findings.append(
-                _finding(
-                    'ATOMIC_BYTE_LIMIT',
-                    source,
-                    f'{operation.family} requires {serialized_bytes} bytes; limit is 4 MiB',
-                )
-            )
-    return tuple(reports), findings
-
-
 def _finding(code: str, document: Mapping[str, Any], detail: str) -> RehearsalFinding:
     return RehearsalFinding(
         code, str(document.get('record_type', 'unknown')), _source_ref(document), detail
@@ -2332,8 +2140,6 @@ def transform_snapshot(
     findings.extend(_relationship_findings(ordered_documents))
     findings.extend(_uniqueness_findings(ordered_documents))
     findings.extend(_realtime_findings(ordered_documents))
-    atomic_mutations, atomic_findings = _atomic_mutation_reports(transformed_documents, items)
-    findings.extend(atomic_findings)
 
     target = LocalTarget()
     first = target.apply(items)
@@ -2358,7 +2164,7 @@ def transform_snapshot(
         first_pass=dict(sorted(first.items())),
         second_pass=dict(sorted(second.items())),
         target_item_count=target.item_count,
-        atomic_mutations=atomic_mutations,
+        atomic_evidence_level='not_reconstructable_from_final_snapshot',
         completion_marker=not findings,
         findings=tuple(findings),
     )

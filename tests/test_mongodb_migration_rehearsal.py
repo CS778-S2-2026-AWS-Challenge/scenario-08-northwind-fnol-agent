@@ -16,10 +16,13 @@ from scripts.rehearse_mongodb_migration import (
     RECORD_MAPPINGS,
     SOURCE_HEAD,
     LocalTarget,
+    MutationAction,
+    MutationManifest,
     SnapshotMetadata,
     plan_record,
     read_snapshot,
     rehearse_anonymous_promotion,
+    rehearse_mutation_manifest,
     transform_snapshot,
 )
 
@@ -1006,8 +1009,7 @@ def test_rehearsal_transforms_reads_back_and_repeats_without_duplicates() -> Non
         'customer_id': 'cus_rehearsal',
         'claim_id': 'clm_rehearsal',
     }
-    assert report.atomic_mutations
-    assert all(mutation.within_limits for mutation in report.atomic_mutations)
+    assert report.atomic_evidence_level == 'not_reconstructable_from_final_snapshot'
     assert any(
         item.record_type == 'external_task_evidence_link'
         and item.pk.startswith('ENTITY#external_task_evidence_link#')
@@ -1228,137 +1230,20 @@ def test_reverse_readback_preserves_fragments_nulls_and_empty_collections() -> N
     assert target.readback(changed_source) is False
 
 
-def _claim_creation_snapshot() -> list[dict[str, Any]]:
-    records = [
-        record
-        for record in _representative_snapshot()
-        if record['record_type'] in {'claim', 'session', 'realtime_sequence', 'realtime_event'}
-    ]
-    _by_type(records, 'claim').update(
-        active_session_id='ses_rehearsal', form={'incident_description': 'Rear impact'}
-    )
-    return records
-
-
-def _session_checkpoint_snapshot() -> list[dict[str, Any]]:
-    records = [
-        record
-        for record in _representative_snapshot()
-        if record['record_type']
-        in {'claim', 'session', 'idempotency', 'realtime_sequence', 'realtime_event'}
-    ]
-    _by_type(records, 'claim')['form'] = {'incident_description': 'Rear impact'}
+def test_rehearsal_includes_merged_claim_creation_operation_contract() -> None:
+    records = _agent_turn_snapshot()
     records.append(
         _document(
-            'follow_up',
-            'fu_rehearsal',
-            follow_up_id='fu_rehearsal',
-            claim_id='clm_rehearsal',
-            customer_id='cus_rehearsal',
-            status='pending',
-            purpose='resume_incomplete_claim',
-            source_session_id='ses_rehearsal',
-            created_at=NOW,
-        )
-    )
-    return records
-
-
-def _complete_agent_turn_snapshot() -> list[dict[str, Any]]:
-    records = _agent_turn_snapshot()
-    second_message = deepcopy(_by_type(records, 'message'))
-    second_message.update(
-        _id='message:msg_second',
-        message_id='msg_second',
-        client_message_id='client-second',
-    )
-    records.append(second_message)
-    identity_fields = {
-        'agent_decision': ('decision_id', 'dec_rehearsal'),
-        'runtime_trace': ('trace_id', 'trc_rehearsal'),
-        'agent_proposal': ('proposal_id', 'prp_rehearsal'),
-        'execution_plan': ('execution_plan_id', 'exp_rehearsal'),
-        'action_envelope': ('envelope_id', 'env_rehearsal'),
-        'tool_result': ('result_id', 'tol_rehearsal'),
-        'turn_result': ('result_id', 'res_rehearsal'),
-        'runtime_work_item': ('work_item_id', 'wrk_rehearsal'),
-    }
-    for record_type, (identity_field, identity_value) in identity_fields.items():
-        record = _mapping_document(record_type)
-        record.update(
-            _id=f'{record_type}:{identity_value}',
+            'agent_decision',
+            'dec_rehearsal',
+            decision_id='dec_rehearsal',
             claim_id='clm_rehearsal',
             customer_id='cus_rehearsal',
             session_id='ses_rehearsal',
-            turn_id='turn_rehearsal',
             trigger_message_id='msg_rehearsal',
             created_at=NOW,
-            updated_at=NOW,
-        )
-        record[identity_field] = identity_value
-        if record_type == 'turn_result':
-            record.update(
-                agent_message_id='msg_second',
-                execution_plan_id='exp_rehearsal',
-            )
-        records.append(record)
-    return records
-
-
-def _staff_ownership_snapshot() -> list[dict[str, Any]]:
-    records = [
-        record
-        for record in _representative_snapshot()
-        if record['record_type']
-        in {'claim', 'idempotency', 'audit_event', 'realtime_sequence', 'realtime_event'}
-    ]
-    records.append(
-        _document(
-            'staff_action',
-            'act_rehearsal',
-            action_id='act_rehearsal',
-            claim_id='clm_rehearsal',
-            customer_id='cus_rehearsal',
-            staff_id='staff_rehearsal',
-            assignee_id='staff_rehearsal',
-            created_at=NOW,
         )
     )
-    return records
-
-
-def _retrieval_bundle_snapshot() -> list[dict[str, Any]]:
-    records = _representative_snapshot()
-    records.extend(
-        [
-            _document(
-                'retrieval',
-                'ret_rehearsal',
-                retrieval_id='ret_rehearsal',
-                claim_id='clm_rehearsal',
-                customer_id='cus_rehearsal',
-                retrieved_at=NOW,
-            ),
-            _document(
-                'review_signal',
-                'sig_rehearsal',
-                signal_id='sig_rehearsal',
-                claim_id='clm_rehearsal',
-                customer_id='cus_rehearsal',
-                source_refs=['ret_rehearsal'],
-                created_at=NOW,
-            ),
-        ]
-    )
-    return records
-
-
-def test_rehearsal_includes_merged_claim_creation_operation_contract() -> None:
-    records = [
-        record
-        for record in _complete_agent_turn_snapshot()
-        if record['record_type'] not in {'idempotency', 'realtime_sequence', 'realtime_event'}
-    ]
     records.append(
         _document(
             'claim_creation_operation',
@@ -1378,194 +1263,265 @@ def test_rehearsal_includes_merged_claim_creation_operation_contract() -> None:
         )
     )
 
-    _, report = transform_snapshot(records, _metadata(len(records)))
+    items, report = transform_snapshot(records, _metadata(len(records)))
 
     assert report.completion_marker is True
-    mutation = next(item for item in report.atomic_mutations if item.family == 'claim_child')
-    assert 'ENTITY#claim_creation_operation#cco_rehearsal|META' in mutation.item_keys
+    item_keys = {f'{item.pk}|{item.sk}' for item in items}
+    assert 'ENTITY#claim_creation_operation#cco_rehearsal|META' in item_keys
     assert (
         'UNIQUE#CLAIM_CREATION_OPERATION_CLAIM#' + _contract_digest('clm_rehearsal') + '|META'
-        in mutation.item_keys
+        in item_keys
+    )
+
+
+def _action(
+    action: str,
+    key: str,
+    *,
+    condition: str | None = None,
+    payload_size: int = 0,
+) -> MutationAction:
+    return MutationAction(
+        action,
+        f'MANIFEST#{key}',
+        'META',
+        {'value': 'x' * payload_size} if payload_size else {'ref': key},
+        condition,
+    )
+
+
+FAMILY_ACTIONS = {
+    'claim_creation': (
+        _action('put', 'CLAIM'),
+        _action('put', 'OWNER'),
+        _action('put', 'SESSION'),
+        _action('put', 'CUSTOMER_PROJECTION'),
+        _action('put', 'GLOBAL_PROJECTION'),
+        _action('update', 'REALTIME_COUNTER', condition='sequence = :expected'),
+        _action('put', 'REALTIME_EVENT', condition='attribute_not_exists(PK)'),
+    ),
+    'session_checkpoint': (
+        _action('update', 'CLAIM', condition='revision = :expected'),
+        _action('put', 'SESSION'),
+        _action('put', 'FOLLOW_UP'),
+        _action('put', 'IDEMPOTENCY', condition='attribute_not_exists(PK)'),
+        _action('update', 'REALTIME_COUNTER', condition='sequence = :expected'),
+        _action('put', 'REALTIME_EVENT', condition='attribute_not_exists(PK)'),
+    ),
+    'claim_child': (
+        _action('update', 'CLAIM', condition='revision = :expected'),
+        _action('put', 'EVIDENCE'),
+        _action('put', 'AUDIT', condition='attribute_not_exists(PK)'),
+        _action('put', 'IDEMPOTENCY', condition='attribute_not_exists(PK)'),
+        _action('update', 'REALTIME_COUNTER', condition='sequence = :expected'),
+        _action('put', 'REALTIME_EVENT', condition='attribute_not_exists(PK)'),
+    ),
+    'agent_turn': (
+        _action('update', 'CLAIM', condition='revision = :expected'),
+        _action('update', 'SESSION', condition='context_revision = :expected'),
+        _action('put', 'USER_MESSAGE', condition='attribute_not_exists(PK)'),
+        _action('put', 'AGENT_MESSAGE', condition='attribute_not_exists(PK)'),
+        _action('put', 'TURN_PLAN', condition='attribute_not_exists(PK)'),
+        _action('put', 'TURN_RESULT', condition='attribute_not_exists(PK)'),
+        _action('put', 'IDEMPOTENCY', condition='attribute_not_exists(PK)'),
+        _action('update', 'REALTIME_COUNTER', condition='sequence = :expected'),
+        _action('put', 'REALTIME_EVENT', condition='attribute_not_exists(PK)'),
+    ),
+    'staff_ownership': (
+        _action('condition_check', 'STAFF_PRESENCE', condition='revision = :expected'),
+        _action('update', 'CLAIM', condition='revision = :expected'),
+        _action('put', 'STAFF_ACTION'),
+        _action('put', 'AUDIT', condition='attribute_not_exists(PK)'),
+        _action('put', 'IDEMPOTENCY', condition='attribute_not_exists(PK)'),
+        _action('update', 'REALTIME_COUNTER', condition='sequence = :expected'),
+        _action('put', 'REALTIME_EVENT', condition='attribute_not_exists(PK)'),
+    ),
+    'retrieval_bundle': (
+        _action('put', 'RETRIEVAL', condition='attribute_not_exists(PK)'),
+        _action('put', 'REVIEW_SIGNAL', condition='attribute_not_exists(PK)'),
+        _action('put', 'RETRIEVAL_PROJECTION'),
+        _action('put', 'SIGNAL_PROJECTION'),
+    ),
+}
+
+
+@pytest.mark.parametrize('family', sorted(FAMILY_ACTIONS))
+def test_explicit_manifests_measure_current_atomic_family_actions(family: str) -> None:
+    actions = FAMILY_ACTIONS[family]
+
+    report = rehearse_mutation_manifest(MutationManifest(family, f'operation:{family}', actions))
+
+    assert report.action_count == len(actions)
+    assert report.action_count == len(report.action_keys)
+    assert report.action_keys == tuple(
+        f'{action.action.upper()}|{action.pk}|{action.sk}' for action in actions
+    )
+    assert report.within_limits is True
+
+
+def test_final_snapshot_does_not_assign_global_counter_to_each_claim() -> None:
+    documents = _representative_snapshot()
+    _by_type(documents, 'realtime_sequence')['sequence'] = 2
+    documents.extend(
+        [
+            _document(
+                'claim',
+                'clm_second',
+                claim_id='clm_second',
+                customer_id='cus_second',
+                revision=1,
+                created_at=NOW,
+                updated_at=NOW,
+            ),
+            _document(
+                'session',
+                'ses_second',
+                session_id='ses_second',
+                claim_id='clm_second',
+                customer_id='cus_second',
+                context_revision=1,
+                started_at=NOW,
+            ),
+            _document(
+                'realtime_event',
+                'rte_second',
+                event_id='rte_second',
+                sequence=2,
+                claim_id='clm_second',
+                customer_id='cus_second',
+                occurred_at=NOW,
+            ),
+        ]
+    )
+
+    _, report = transform_snapshot(documents, _metadata(len(documents)))
+
+    assert report.completion_marker is True
+    assert report.atomic_evidence_level == 'not_reconstructable_from_final_snapshot'
+
+
+def test_two_agent_turn_manifests_do_not_copy_cross_turn_records() -> None:
+    first = rehearse_mutation_manifest(
+        MutationManifest(
+            'agent_turn',
+            'turn:one',
+            (
+                _action('put', 'TURN_ONE_USER_MESSAGE'),
+                _action('put', 'TURN_ONE_AGENT_MESSAGE'),
+                _action('update', 'REALTIME_COUNTER', condition='sequence = :expected'),
+            ),
+        )
+    )
+    second = rehearse_mutation_manifest(
+        MutationManifest(
+            'agent_turn',
+            'turn:two',
+            (
+                _action('put', 'TURN_TWO_USER_MESSAGE'),
+                _action('put', 'TURN_TWO_AGENT_MESSAGE'),
+                _action('update', 'REALTIME_COUNTER', condition='sequence = :expected'),
+            ),
+        )
+    )
+
+    first_messages = {key for key in first.action_keys if 'MESSAGE' in key}
+    second_messages = {key for key in second.action_keys if 'MESSAGE' in key}
+    assert first_messages.isdisjoint(second_messages)
+    assert first.action_keys.count('UPDATE|MANIFEST#REALTIME_COUNTER|META') == 1
+    assert second.action_keys.count('UPDATE|MANIFEST#REALTIME_COUNTER|META') == 1
+
+
+def test_projection_replacement_counts_delete_and_put_actions() -> None:
+    report = rehearse_mutation_manifest(
+        MutationManifest(
+            'claim_child',
+            'claim:projection-change',
+            (
+                _action('delete', 'OLD_ORDER_PROJECTION', condition='attribute_exists(PK)'),
+                _action('put', 'NEW_ORDER_PROJECTION'),
+                _action('update', 'REALTIME_COUNTER', condition='sequence = :expected'),
+            ),
+        )
+    )
+
+    assert report.action_count == 3
+    assert report.action_keys == (
+        'DELETE|MANIFEST#OLD_ORDER_PROJECTION|META',
+        'PUT|MANIFEST#NEW_ORDER_PROJECTION|META',
+        'UPDATE|MANIFEST#REALTIME_COUNTER|META',
     )
 
 
 @pytest.mark.parametrize(
-    ('family', 'snapshot_factory', 'expected_count', 'required_keys'),
+    ('manifest', 'message'),
     [
         (
-            'claim_creation',
-            _claim_creation_snapshot,
-            13,
-            {
-                'ENTITY#claim#clm_rehearsal|FORM#incident_description',
-                'ENTITY#claim#clm_rehearsal|OWNER',
-                'ENTITY#session#ses_rehearsal|META',
-                'ACCESS#CUSTOMER_CLAIMS#cus_rehearsal|UPDATED#99998210029599999999#clm_rehearsal',
-                'SYSTEM#REALTIME|COUNTER',
-                'SYSTEM#REALTIME|EVENT#00000000000000000001#rte_rehearsal',
-            },
+            MutationManifest('unknown', 'operation:unknown', (_action('put', 'ITEM'),)),
+            'unsupported mutation family',
         ),
         (
-            'session_checkpoint',
-            _session_checkpoint_snapshot,
-            20,
-            {
-                'ENTITY#claim#clm_rehearsal|FORM#incident_description',
-                'ENTITY#follow_up#fu_rehearsal|META',
-                'IDEMPOTENCY_ACTOR#e6e6c6f7c04d8cfb274afbeaa647fc63f70da19dd5d0efbd57912b68110fd339|STATE',
-                'SYSTEM#REALTIME|COUNTER',
-            },
+            MutationManifest('claim_child', '', (_action('put', 'ITEM'),)),
+            'requires an operation reference and actions',
         ),
         (
-            'claim_child',
-            _representative_snapshot,
-            29,
-            {
-                'ENTITY#evidence#evd_rehearsal|META',
-                'ENTITY#external_task#tsk_rehearsal|META',
-                'ENTITY#audit_event#aud_rehearsal|META',
-                'ACCESS#AUDIT#SUBJECT_TYPE#084dc920f87fdd1b71d6e7f991364c577c98def38170c584623580f0bcedfe09|TIME#2026-09-21T06:00:00.000000Z#aud_rehearsal',
-                'IDEMPOTENCY_ACTOR#e6e6c6f7c04d8cfb274afbeaa647fc63f70da19dd5d0efbd57912b68110fd339|STATE',
-            },
+            MutationManifest('claim_child', 'operation:empty', ()),
+            'requires an operation reference and actions',
         ),
         (
-            'agent_turn',
-            _complete_agent_turn_snapshot,
-            46,
-            {
-                'ENTITY#message#msg_rehearsal|META',
-                'ENTITY#message#msg_second|META',
-                'ENTITY#agent_decision#dec_rehearsal|META',
-                'ENTITY#runtime_trace#trc_rehearsal|META',
-                'ENTITY#action_envelope#env_rehearsal|META',
-                'IDEMPOTENCY_ACTOR#e6e6c6f7c04d8cfb274afbeaa647fc63f70da19dd5d0efbd57912b68110fd339|STATE',
-                'SYSTEM#REALTIME|COUNTER',
-            },
+            MutationManifest(
+                'claim_child', 'operation:unknown-action', (_action('merge', 'ITEM'),)
+            ),
+            'unsupported mutation action',
         ),
         (
-            'staff_ownership',
-            _staff_ownership_snapshot,
-            20,
-            {
-                'ENTITY#staff_action#act_rehearsal|META',
-                'ENTITY#audit_event#aud_rehearsal|META',
-                'ACCESS#STAFF#staff_rehearsal#staff_action|CREATED_AT#2026-09-21T06:00:00.000000Z#act_rehearsal',
-                'IDEMPOTENCY_ACTOR#e6e6c6f7c04d8cfb274afbeaa647fc63f70da19dd5d0efbd57912b68110fd339|STATE',
-                'SYSTEM#REALTIME|COUNTER',
-            },
+            MutationManifest(
+                'staff_ownership',
+                'operation:missing-condition',
+                (_action('condition_check', 'STAFF_PRESENCE'),),
+            ),
+            'condition_check requires a condition',
         ),
         (
-            'retrieval_bundle',
-            _retrieval_bundle_snapshot,
-            4,
-            {
-                'ENTITY#retrieval#ret_rehearsal|META',
-                'ENTITY#review_signal#sig_rehearsal|META',
-                'ACCESS#CLAIM#clm_rehearsal#retrieval|RETRIEVED_AT#2026-09-21T06:00:00.000000Z#ret_rehearsal',
-                'ACCESS#CLAIM#clm_rehearsal#review_signal|CREATED_AT#2026-09-21T06:00:00.000000Z#sig_rehearsal',
-            },
+            MutationManifest(
+                'claim_child',
+                'operation:duplicate-target',
+                (
+                    _action('delete', 'PROJECTION'),
+                    _action('put', 'PROJECTION'),
+                ),
+            ),
+            'targets one item more than once',
         ),
     ],
 )
-def test_rehearsal_reconstructs_complete_atomic_mutation_boundaries(
-    family: str,
-    snapshot_factory: Any,
-    expected_count: int,
-    required_keys: set[str],
+def test_explicit_manifest_rejects_invalid_operation_contracts(
+    manifest: MutationManifest, message: str
 ) -> None:
-    documents = snapshot_factory()
-
-    _, report = transform_snapshot(documents, _metadata(len(documents)))
-
-    assert report.completion_marker is True
-    mutations = [mutation for mutation in report.atomic_mutations if mutation.family == family]
-    assert len(mutations) == 1
-    mutation = mutations[0]
-    assert mutation.action_count == expected_count
-    assert mutation.action_count == len(mutation.item_keys)
-    assert required_keys <= set(mutation.item_keys)
-    assert mutation.within_limits is True
+    with pytest.raises(ValueError, match=message):
+        rehearse_mutation_manifest(manifest)
 
 
-def test_rehearsal_fails_closed_when_atomic_assignment_is_ambiguous() -> None:
-    documents = _representative_snapshot()
-    _by_type(documents, 'claim')['active_session_id'] = 'ses_rehearsal'
-
-    _, report = transform_snapshot(documents, _metadata(len(documents)))
-
-    assert report.completion_marker is False
-    assert 'AMBIGUOUS_ATOMIC_MUTATION' in _finding_codes(report)
-
-
-def test_rehearsal_fails_closed_when_atomic_assignment_cannot_be_reconstructed() -> None:
-    documents = _representative_snapshot()
-    documents.append(
-        _document(
-            'conversation_summary',
-            'sum_unassigned',
-            summary_id='sum_unassigned',
-            claim_id='clm_rehearsal',
-            customer_id='cus_rehearsal',
-            session_id='ses_rehearsal',
-            created_at=NOW,
+def test_explicit_manifest_rejects_action_and_byte_limit_overflow() -> None:
+    too_many = rehearse_mutation_manifest(
+        MutationManifest(
+            'agent_turn',
+            'turn:too-many-actions',
+            tuple(_action('put', f'ITEM_{index}') for index in range(101)),
+        )
+    )
+    too_large = rehearse_mutation_manifest(
+        MutationManifest(
+            'agent_turn',
+            'turn:too-large',
+            tuple(_action('put', f'LARGE_{index}', payload_size=240 * 1024) for index in range(18)),
         )
     )
 
-    _, report = transform_snapshot(documents, _metadata(len(documents)))
-
-    assert report.completion_marker is False
-    assert 'UNRECONSTRUCTED_ATOMIC_MUTATION' in _finding_codes(report)
-
-
-def test_rehearsal_rejects_atomic_action_limit() -> None:
-    documents = _agent_turn_snapshot()
-    message = _by_type(documents, 'message')
-    documents.remove(message)
-    for index in range(40):
-        documents.append(
-            {
-                **message,
-                '_id': f'message:msg_{index}',
-                'message_id': f'msg_{index}',
-                'client_message_id': f'client_{index}',
-            }
-        )
-
-    _, report = transform_snapshot(documents, _metadata(len(documents)))
-
-    assert report.completion_marker is False
-    assert 'ATOMIC_ACTION_LIMIT' in _finding_codes(report)
-    agent_turn = next(
-        mutation for mutation in report.atomic_mutations if mutation.family == 'agent_turn'
-    )
-    assert agent_turn.action_count > 100
-    assert agent_turn.within_limits is False
-
-
-def test_rehearsal_rejects_atomic_serialized_byte_limit() -> None:
-    documents = _agent_turn_snapshot()
-    message = _by_type(documents, 'message')
-    documents.remove(message)
-    for index in range(18):
-        documents.append(
-            {
-                **message,
-                '_id': f'message:large_{index}',
-                'message_id': f'msg_large_{index}',
-                'client_message_id': f'client_large_{index}',
-                'content': {'type': 'text', 'text': 'x' * (240 * 1024)},
-            }
-        )
-
-    _, report = transform_snapshot(documents, _metadata(len(documents)))
-
-    assert report.completion_marker is False
-    assert 'ATOMIC_BYTE_LIMIT' in _finding_codes(report)
-    agent_turn = next(
-        mutation for mutation in report.atomic_mutations if mutation.family == 'agent_turn'
-    )
-    assert agent_turn.action_count <= 100
-    assert agent_turn.serialized_bytes > 4 * 1024 * 1024
+    assert too_many.action_count == 101
+    assert too_many.within_limits is False
+    assert too_large.action_count <= 100
+    assert too_large.serialized_bytes > 4 * 1024 * 1024
+    assert too_large.within_limits is False
 
 
 @pytest.mark.parametrize(
@@ -1701,13 +1657,20 @@ def test_anonymous_promotion_restores_historical_turn_without_child_rewrite() ->
     assert retirement.payload['retired_to_actor_id'] == 'customer:123'
     assert promotion.atomic_mutation.family == 'anonymous_promotion'
     assert promotion.atomic_mutation.action_count == 2 + 1 + 7
-    assert promotion.atomic_mutation.action_count == len(promotion.atomic_mutation.item_keys)
-    assert 'ACTION|claim_meta_update' in promotion.atomic_mutation.item_keys
-    assert 'ACTION|old_customer_projection_delete' in promotion.atomic_mutation.item_keys
-    assert 'ACTION|new_customer_projection_put' in promotion.atomic_mutation.item_keys
+    assert promotion.atomic_mutation.action_count == len(promotion.atomic_mutation.action_keys)
+    assert 'UPDATE|ENTITY#claim#clm_rehearsal|META' in promotion.atomic_mutation.action_keys
+    assert (
+        'DELETE|ACCESS#CUSTOMER_CLAIMS#anonymous:browser|'
+        'UPDATED#99998210029599999999#clm_rehearsal' in promotion.atomic_mutation.action_keys
+    )
+    assert (
+        'PUT|ACCESS#CUSTOMER_CLAIMS#customer:123|'
+        'UPDATED#99998210029599999999#clm_rehearsal' in promotion.atomic_mutation.action_keys
+    )
+    assert 'UPDATE|SYSTEM#REALTIME|COUNTER' in promotion.atomic_mutation.action_keys
     assert any(
-        key.startswith('LOOKUP#MESSAGE_TURN_IDEMPOTENCY#')
-        for key in promotion.atomic_mutation.item_keys
+        key.startswith('PUT|LOOKUP#MESSAGE_TURN_IDEMPOTENCY#')
+        for key in promotion.atomic_mutation.action_keys
     )
     assert promotion.atomic_mutation.within_limits is True
 

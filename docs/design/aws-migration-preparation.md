@@ -7,10 +7,10 @@ exists.
 
 The mapping is derived from the current domain records, `PersistenceRepository`
 protocol, and `MongoDBRepository` implementation at `origin/main`
-`2d6499a7fb22a1e3a872f32241f8cdfa78e2dcf5`. It preserves provider-neutral record
-identity, ownership, ordering, uniqueness, revision, idempotency, audit, and atomic
-write boundaries. It does not define a new API field, state, permission, lifecycle,
-or business rule.
+`05e8f7d394b0fcaadd09a083bd4faa476106c7ad`. It preserves provider-neutral record
+identity, ownership, ordering, uniqueness, revision, idempotency, and audit semantics.
+Atomic write boundaries are represented separately by explicit mutation manifests. The
+mapping does not define a new API field, state, permission, lifecycle, or business rule.
 
 ## Migration boundary
 
@@ -404,12 +404,27 @@ serialized bytes before calling DynamoDB. Important mutation families are:
 | Retrieval bundle | Retrieval plus every Review Signal and Claim-order projections; no Claim revision change unless the current caller supplies a separate governed mutation |
 | Anonymous promotion | Owner/Claim/customer-projection/realtime actions, one immutable exact-key alias per Claim/anonymous-actor idempotency record, one authenticated message-turn lookup per selected record with `message_id`, and one Claim-scoped actor-retirement update; no child rewrite |
 
-The current domain does not bound the total number of changed Claim fragments or Runtime
-children tightly enough to prove that every valid input fits 100 actions and 4 MB. #991
-does not invent a new public error, truncate records, split a currently atomic runtime
-mutation, or weaken consistency. If preflight finds a valid runtime mutation above either
-limit, the DynamoDB capability remains `unavailable` until the Backend owner adds an
-approved bound or transaction contract. #992 must report this as `oversized`, not success.
+The final MongoDB snapshot does not identify historical operation boundaries, replaced
+projection keys, or each conditional update of the singleton realtime counter. #992 therefore
+does not reconstruct transactions by grouping final records under a Claim. Its dataset completion
+marker covers only snapshot transformation, relationships, item budgets, readback, repeatability,
+and conflict safety.
+
+Atomic-capacity conformance is a separate local preflight over an explicit mutation manifest. A
+manifest names one current operation and every `put`, `delete`, `update`, and `condition_check`
+action, including integrated conditions on writes. This proves the action-count and serialized
+request calculation without claiming that a final snapshot can recover historical writes. It
+also rejects multiple actions against the same target item because DynamoDB transactions do not
+permit that request shape. The anonymous-promotion rehearsal has an unambiguous persisted
+correlation and produces its manifest directly. The other six family tests use explicit
+current-contract manifests. The future DynamoDB adapter must generate equivalent manifests from
+the actual repository mutation before enabling the AWS profile.
+
+The current domain does not bound the total number of changed Claim fragments or Runtime children
+tightly enough to prove that every valid input fits 100 actions and 4 MB. #991 does not invent a
+new public error, truncate records, split a currently atomic runtime mutation, or weaken
+consistency. If an explicit preflight manifest exceeds either limit, the DynamoDB capability
+remains `unavailable` until the Backend owner adds an approved bound or transaction contract.
 
 ## Migration and repeatability rules
 
@@ -435,7 +450,7 @@ fingerprint on every run. Results are classified as:
 - `unchanged`: every target item and fingerprint already match;
 - `conflict`: authoritative key exists with different identity, scope, or content;
 - `invalid`: source violates identity, ownership, relationship, or ordering rules;
-- `oversized`: an item or required atomic bundle exceeds the target budget;
+- `oversized`: one transformed target item exceeds the 300 KiB migration budget;
 - `failed`: infrastructure or serialization prevented a conclusive result.
 
 The migration preserves source identity, revision, timestamps, idempotency triplets,
@@ -458,11 +473,11 @@ maintained subset.
 | Ownership | Verify every Claim child customer matches the current Claim before converting it to `owner_ref`; simulate anonymous promotion without child rewrites. Commit an anonymous message turn, promote its Claim, then retry the same `client_message_id` as the authenticated actor with a different idempotency key and restore the original historical turn through the authenticated message-turn lookup. |
 | Ordering | Prove customer Claim `updated_at`, Session, Message, child-list, audit, Staff Agent, and global realtime ordering including stable ID tie-breaks. |
 | Uniqueness | Detect duplicate idempotency triplets, promotion-alias collisions, Evidence Claim target/Evidence tuples, External Task Claim/Evidence tuples, Message client IDs, Staff Agent client IDs, Contents item/Evidence tuples, external-task results, open FollowUps, and one Motor other-driver per Claim. |
-| Size | Serialize every target item and report bytes; reject over 300 KiB; calculate action count and bytes for every reconstructed atomic mutation family. |
+| Size | Serialize every target item and reject over 300 KiB. Separately calculate action count and bytes from explicit manifests for all seven current mutation families; never infer those manifests from the final snapshot. |
 | Repeatability | Two transformations of the same snapshot produce identical keys, fingerprints, items, projections, and counts; an interrupted run resumes without duplicates. |
 | Conflict safety | Changed content under an existing authoritative identity reports `conflict`; no last-write-wins replacement is accepted. |
 | Realtime | Preserve unique contiguous source sequence and replay-after/high-watermark behavior; gaps or duplicate sequence values fail. |
-| Reporting | Record source head, inventory version, local-only evidence level, counts by result class, and every unresolved reconciliation point. |
+| Reporting | Record source head, inventory version, local-only evidence level, counts by result class, every unresolved reconciliation point, and that atomic history is not reconstructable from the final snapshot. |
 
 ## Provisional decisions and reconciliation owners
 
