@@ -13,7 +13,11 @@ from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.agent_action_commands import build_claim_context_command
 from backend.domain.agent_action_registry import ActionActorRole, ExecutionAuthority
 from backend.domain.branch_registry import validate_registered_field_value
-from backend.domain.evidence import evidence_state_for, evidence_summary_for
+from backend.domain.evidence import (
+    evidence_state_for,
+    evidence_summary_for,
+    validate_evidence_vocabulary,
+)
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
 from backend.domain.models import (
@@ -75,6 +79,30 @@ from backend.services.support import (
     request_fingerprint,
     require_idempotency_key,
 )
+
+
+def _validate_claimant_evidence_vocabulary(
+    *,
+    kind: str,
+    related_fields: list[str] | None = None,
+    needed_for: list[str] | None = None,
+) -> None:
+    """Map the shared Evidence vocabulary contract to the public API envelope."""
+
+    try:
+        validate_evidence_vocabulary(
+            kind=kind,
+            related_fields=related_fields or (),
+            needed_for=needed_for or (),
+        )
+    except ValueError as error:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The evidence metadata is not registered.',
+            details=[ErrorDetail(field='evidence', reason=str(error))],
+        ) from error
+
 
 # Conditions that say something about content that exists. Registration records material
 # that has not arrived, so none of these can be declared there: they can only follow an
@@ -688,6 +716,11 @@ def register_evidence(
     if_match: str | None,
 ) -> EvidenceMutationResponse:
     require_durable_claimant(principal)
+    _validate_claimant_evidence_vocabulary(
+        kind=payload.kind,
+        related_fields=payload.related_fields,
+        needed_for=payload.needed_for,
+    )
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
     route = f'/api/v1/claims/{claim_id}/evidence'
@@ -788,6 +821,22 @@ def request_upload(
     if_match: str | None,
 ) -> EvidenceUploadResponse:
     require_durable_claimant(principal)
+    # Preserve the public media contract before validating the domain vocabulary.  An
+    # unsupported wire type is a 415 even when the caller also supplied an unknown
+    # Evidence kind; no upload target is created by this preflight.
+    if payload.media_type not in storage.allowed_media_types:
+        raise ApiError(
+            status_code=415,
+            code='UNSUPPORTED_MEDIA_TYPE',
+            message='The evidence media type is not supported.',
+            details=[
+                ErrorDetail(
+                    field='media_type',
+                    reason=f'Unsupported evidence media type: {payload.media_type}.',
+                )
+            ],
+        )
+    _validate_claimant_evidence_vocabulary(kind=payload.kind)
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
     route = f'/api/v1/claims/{claim_id}/evidence/uploads'

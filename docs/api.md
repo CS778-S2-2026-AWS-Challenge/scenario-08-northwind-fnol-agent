@@ -515,6 +515,14 @@ version with another published version.
 | `POST` | `/claims/{claim_id}/policy-selections` | Propose one active owned policy number into the registered Claim field |
 | `POST` | `/claims/{claim_id}/payout-contact-selections` | Atomically bind one active owned Payment Destination and confirm the registered Claim contact preference |
 
+Profile email writes accept a supported Internet-style address with one local part and a dotted
+domain. The backend trims surrounding whitespace and lowercases the complete address before it
+becomes authoritative. The claimant identity repository enforces normalized-email uniqueness in
+the same compare-and-set operation as the profile revision. An address already owned by another
+account returns `409 RESOURCE_CONFLICT`; a stale account revision remains `409 REVISION_CONFLICT`.
+Invalid email syntax returns the standard `422 VALIDATION_ERROR` without changing the account or
+its revision.
+
 `POST /api/v1/auth/sessions` is the only development/test authentication exception to the
 general bearer requirement. It accepts `email` and `password`, returns `201` with
 `customer_id`, `access_token`, `token_type`, `expires_at`, and `development_identity: true`,
@@ -532,7 +540,17 @@ the legal-name alias; it cannot disagree with `legal_name`. New clients send the
 revision in `If-Match`; a stale revision returns `409 REVISION_CONFLICT`.
 Profile text is whitespace-normalized before validation. Blank legal name, compatibility display
 name, preferred name, or residential address returns `422 VALIDATION_ERROR` and does not change
-the stored profile or revision.
+the stored profile or revision. Email updates are normalized to lowercase, and an email already
+owned by another account returns `409 RESOURCE_CONFLICT` without changing the stored profile or
+revision.
+
+Preferences PATCH accepts the Account projection's revision in `If-Match` and commits the
+communication preferences with a compare-and-set Account write. A stale supplied revision, or a
+repository conflict after the service read, returns retryable `409 REVISION_CONFLICT` with
+`current_revision`; the attempted preferences and Account revision are not committed. During the
+legacy-client transition the header remains optional and an omitted header uses the revision read
+at the start of the request, while still retaining repository compare-and-set protection. New
+clients send `If-Match` so edits made from a stale Account projection are rejected explicitly.
 
 Create requests for the three account resources require `Idempotency-Key`. List routes use the
 standard opaque cursor and default to active records. Their stable descending keyset is
@@ -831,14 +849,20 @@ retains the text and original idempotency identifiers so replay restores the del
 without creating a duplicate. The complete state
 and page flow is defined in `docs/claimant-staff-messaging-journey.md`.
 
+Claimant and Agent messages may be `claimant_visible` or `shared`; they cannot be `internal_only`.
+Staff and System records may use any registered visibility. Only a claimant message may carry a
+`client_message_id`, and that retry identity is unique within its Claim.
+
 The current staff reply helper is a deterministic template built from claimant-safe state; it does
 not call the Agent or model gateway and MUST NOT be labelled as Agent- or AI-generated. Template
 draft state is internal UI state, not a `MessageRecord`. Only an authenticated, assigned staff
 submission creates a shared message; building or accepting a template never sends it automatically.
 
 An `in_reply_to` reference MUST identify a message in the same claim and interaction session.
-Message lists use the stable total order `(created_at, message_id)` ascending (newest-last). Equal
-timestamps therefore cannot cause cursor pagination to duplicate or skip records.
+Message lists use persisted `in_reply_to` edges as the authoritative causal order: a reply always
+appears after its target. Independent messages use `(created_at, message_id)` as their stable
+tie-break order (newest-last). Equal timestamps therefore cannot invert a persisted reply or cause
+cursor pagination to duplicate or skip records.
 
 ### Customer Next Step
 
@@ -1012,18 +1036,20 @@ later claimant statement is resolved against existing assertions rather than sil
 
 | Field | Allowed values or rule |
 |---|---|
-| `kind` | Registered evidence type such as `incident_image`, `police_report`, `receipt`, `repair_quote`, or `other_document` |
+| `kind` | Registered evidence type: `agency_incident_record`, `assessment_report`, `claim_history`, `claimant_attachment`, `claimant_statement`, `document`, `external_assessment`, `incident_image`, `incident_photo`, `incident_report`, `internal_policy_history`, `item_photo`, `other_document`, `photo`, `policy`, `police_report`, `proof_of_ownership`, `receipt`, or `repair_quote` |
 | `status` | `missing`, `pending`, `received`, `unofficial`, `invalid`, `unavailable`, `superseded`, `expired` |
 | `file_status` | `not_available`, `awaiting_upload`, `uploading`, `uploaded`, `processing`, `ready`, `failed` |
 | `source` | `claimant`, `staff`, `external_system` |
 | `related_fields` | Registered form field codes supported or challenged by the item |
-| `needed_for` | One or more business actions; later evidence MUST NOT block an unrelated safe current action |
+| `needed_for` | Unique registered purposes: `current_action`, `later_action`, `liability_review`, `professional_review`, or `repair_authorisation`; later evidence MUST NOT block an unrelated safe current action |
 | `references` | Typed statements about a second record or claim fact. **Staff-visible only** |
 
 `status` carries the condition of the material and `file_status` the upload and
 processing lifecycle. They answer different questions and MUST NOT be read as
 alternatives to each other: `pending` with `not_available` is a document that does not
 exist yet, and `pending` with `awaiting_upload` is a file on its way in.
+Every fixture and MongoDB write boundary rejects unregistered kinds, fields, purposes,
+duplicates, and contradictory status/file-status combinations before persistence.
 
 Three conditions are statements about a *second* thing and therefore cannot be carried by
 `status` alone. Each is recorded as an `EvidenceReference`:

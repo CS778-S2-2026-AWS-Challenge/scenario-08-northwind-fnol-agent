@@ -667,6 +667,14 @@ shadow-modal: 0 16px 40px rgba(26,24,20,.18)
 
 Workbench density 需要单独定义，例如列表行高、section 内间距和 metadata 间距；允许更密，但不能用密度替代信息层级。
 
+Claimant Profile geometry uses independent semantic roles from the shared token source; it does not consume Workbench density roles:
+
+| Token | Value | Purpose |
+|---|---:|---|
+| `--claimant-profile-sidebar-width` | `216px` | Profile category navigation width |
+| `--claimant-profile-label-width` | `160px` | Profile summary and choice row label width |
+| `--claimant-profile-address-min-height` | `96px` | Address textarea minimum height |
+
 ### 6.5 Claimant entry 与 history token contract
 
 下表只记录 claimant entry/history 使用或新增的共享基础角色，以及该产品表面的完整语义角色。通用色板、间距、圆角和边框的其余成员继续以 6.2–6.4 为准。页面组件只能消费表中的语义角色或已列明的共享基础角色，不得在 selector 内重新计算透明度、blur 或交互状态颜色。
