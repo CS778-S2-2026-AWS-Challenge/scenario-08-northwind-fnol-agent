@@ -2502,6 +2502,8 @@ function App() {
                   refreshing={status === 'loading-reports'}
                   onRetry={loadSavedReports}
                   onSelect={openClaimFeatures}
+                  onStartClaim={startNewChat}
+                  onContinueReport={resumeHomepageConversation}
                 />
               )}
               {page === 'claim-features' && (
@@ -2795,6 +2797,8 @@ function App() {
                     refreshing={status === 'loading-reports'}
                     onRetry={loadSavedReports}
                     onSelect={openClaimFeatures}
+                    onStartClaim={startNewChat}
+                    onContinueReport={resumeHomepageConversation}
                   />
                 ) : (
                   <div className="claim-history-state">
