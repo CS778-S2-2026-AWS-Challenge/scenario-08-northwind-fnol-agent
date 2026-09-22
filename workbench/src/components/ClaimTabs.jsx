@@ -20,10 +20,10 @@ export default function ClaimTabs({ tabs, activeId, onActivate, onClose }) {
               onClick={() => onActivate(tab.claimId)}
               onKeyDown={(event) => moveClaimTabFocus(event, tabs, index, onActivate, onClose)}
             >
-              {tab.label}
+              <span className="claim-tab__label" title={tab.label}>{tab.label}</span>
               {tab.draft && <span className="draft-dot" title="Unsent draft" />}
             </button>
-            <button type="button" className="icon-button icon-button--small" onClick={() => onClose(tab.claimId)} aria-label={`Close ${tab.label}`}>
+            <button type="button" className="icon-button icon-button--small" onClick={() => onClose(tab.claimId)} aria-label={`Close ${tab.label}, Claim ${tab.referenceLabel || tab.reference || tab.claimId}`}>
               <X size={14} />
             </button>
           </div>
@@ -35,9 +35,7 @@ export default function ClaimTabs({ tabs, activeId, onActivate, onClose }) {
       {showList && (
         <div className="tab-menu" id="open-claim-list">
           {tabs.map((tab) => (
-            <button type="button" key={tab.claimId} onClick={() => { onActivate(tab.claimId); setShowList(false) }}>
-              {tab.label}
-            </button>
+            <button type="button" key={tab.claimId} title={tab.label} onClick={() => { onActivate(tab.claimId); setShowList(false) }}>{tab.label}</button>
           ))}
         </div>
       )}

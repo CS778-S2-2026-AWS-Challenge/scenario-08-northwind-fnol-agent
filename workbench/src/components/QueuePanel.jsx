@@ -1,8 +1,8 @@
 import { ChevronDown, Filter, Inbox, Search } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { claimIdentity } from '../claim-identity.js'
 import { failureReason, failureReference } from '../failure.js'
-import { formatDateTime, words } from '../format.js'
-import { TagList } from './TagList.jsx'
+import { formatDateTime, formatQueueDateTime, words } from '../format.js'
 
 export default function QueuePanel({ claims, loading, error, onRetry, selectedId, filterMetadata, viewCounts, view, onView, workflowState, onWorkflowState, priority, onPriority, tagFilter, onTag, search, onSearch, additionalFiltersActive, onClearFilters, nextCursor, onLoadMore, onOpen }) {
   const hasSecondaryFilters = Boolean(workflowState || priority || tagFilter)
@@ -133,94 +133,73 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
             {hasResultFilters && <button className="button button--quiet" type="button" onClick={clearFilters}>Clear filters</button>}
           </div>
         )}
-        {claims.map((claim) => (
-          <button
-            className={`queue-item${selectedId === claim.claim_id ? ' is-selected' : ''}${error ? ' is-stale' : ''}`}
-            type="button"
-            key={claim.claim_id}
-            onClick={() => onOpen(claim)}
-          >
-            <span className="queue-item__topline">
-              <strong>{claim.display_reference || claim.claim_id}</strong>
-              <span className={`priority priority--${claim.priority_projection?.level}`}>
-                Priority: {words(claim.priority_projection?.level)}
+        {claims.map((claim) => {
+          const identity = claimIdentity(claim)
+          const reason = queueReason(claim)
+          const updatedLabel = `Updated ${formatDateTime(claim.updated_at)}`
+          return (
+            <button
+              className={`queue-item${selectedId === claim.claim_id ? ' is-selected' : ''}${error ? ' is-stale' : ''}`}
+              type="button"
+              key={claim.claim_id}
+              aria-current={selectedId === claim.claim_id ? 'true' : undefined}
+              onClick={() => onOpen(claim)}
+            >
+              <span className="queue-item__topline">
+                <strong title={identity.cardTitle}>{identity.cardTitle}</strong>
+                <span
+                  className={`priority priority--${claim.priority_projection?.level}`}
+                  aria-label={`Priority ${words(claim.priority_projection?.level)}`}
+                >
+                  {words(claim.priority_projection?.level)}
+                </span>
               </span>
-            </span>
-            <span className="queue-item__incident">
-              {words(claim.incident?.family)} · {claim.terminal_disposition
-                ? `Terminal: ${words(claim.terminal_disposition.value)} · Retained status: ${words(claim.workflow_state)}`
-                : `Status: ${words(claim.workflow_state)}`}
-            </span>
-            <span className="queue-item__summary">
-              {claim.work_summary?.current_work_item?.requested_outcome || claim.incident?.summary}
-            </span>
-            <QueueAttention claim={claim} />
-            <TagList tags={claim.tags} limit={3} />
-            <span className="queue-item__meta">
-              <span>{ownershipLabel(claim.ownership)}</span>
-              <time dateTime={claim.updated_at}>Claim updated {formatDateTime(claim.updated_at)}</time>
-            </span>
-          </button>
-        ))}
+              <span className="queue-item__status">{queueStatus(claim)} · {ownershipLabel(claim.ownership)}</span>
+              {reason !== identity.cardTitle ? <span className="queue-item__reason">{reason}</span> : null}
+              <span className="queue-item__meta">
+                <span className="queue-item__reference">{identity.referenceLabel}</span>
+                <time dateTime={claim.updated_at} aria-label={updatedLabel} title={updatedLabel}>{formatQueueDateTime(claim.updated_at)}</time>
+              </span>
+            </button>
+          )
+        })}
         {!loading && !error && nextCursor && <button className="queue-load-more" type="button" onClick={onLoadMore}>Load more Claims</button>}
       </div>
     </aside>
   )
 }
 
-function QueueAttention({ claim }) {
-  const priorityReason = claim.priority_projection?.reasons?.[0]?.summary
+function queueStatus(claim) {
+  const claimType = claim.incident?.family
+    ? words(claim.incident.family)
+    : 'Type not confirmed'
+
+  if (claim.terminal_disposition) {
+    return `${words(claim.terminal_disposition.value)} · ${claimType} · ${words(claim.workflow_state)} retained`
+  }
+
+  return `${words(claim.workflow_state)} · ${claimType}`
+}
+
+function queueReason(claim) {
   const workSummary = claim.work_summary || {}
-  const incomplete = workSummary.incomplete_context
-  const externalWaitCount = workSummary.external_wait_count || 0
-  const claimantActivity = workSummary.last_claimant_activity_at
-  const hasAttentionItems = Boolean(
-    workSummary.primary_blocker
-    || incomplete
-    || externalWaitCount
-    || claimantActivity,
-  )
+  const priorityReason = claim.priority_projection?.reasons?.[0]?.summary
 
-  if (!priorityReason && !hasAttentionItems) return null
+  if (priorityReason) return priorityReason
+  if (workSummary.primary_blocker) return `Needs attention · ${workSummary.primary_blocker}`
+  if (workSummary.current_work_item?.requested_outcome) {
+    return workSummary.current_work_item.requested_outcome
+  }
+  if (workSummary.incomplete_context?.resume_point) {
+    return `Incomplete · Resume ${words(workSummary.incomplete_context.resume_point)}`
+  }
+  if (workSummary.incomplete_context) return 'Incomplete claim'
+  if (workSummary.external_wait_count > 0) {
+    const serviceLabel = workSummary.external_wait_count === 1 ? 'service' : 'services'
+    return `Waiting on ${workSummary.external_wait_count} external ${serviceLabel}`
+  }
 
-  return (
-    <span className="queue-item__attention-group">
-      {priorityReason && (
-        <span className="queue-item__reason">
-          <strong>Why now</strong>
-          <span>{priorityReason}</span>
-        </span>
-      )}
-      {hasAttentionItems && (
-        <span className="queue-item__attention">
-          {workSummary.primary_blocker && (
-            <span>
-              <strong>Needs attention</strong>
-              <span>{workSummary.primary_blocker}</span>
-            </span>
-          )}
-          {incomplete && (
-            <span>
-              <strong>Incomplete</strong>
-              {incomplete.resume_point && <span>Resume {words(incomplete.resume_point)}</span>}
-            </span>
-          )}
-          {externalWaitCount > 0 && (
-            <span>
-              <strong>External wait</strong>
-              <span>{externalWaitCount} service{externalWaitCount === 1 ? '' : 's'} waiting</span>
-            </span>
-          )}
-          {claimantActivity && (
-            <span>
-              <strong>Claimant activity</strong>
-              <time dateTime={claimantActivity}>{formatDateTime(claimantActivity)}</time>
-            </span>
-          )}
-        </span>
-      )}
-    </span>
-  )
+  return claim.incident?.summary || 'No further context available.'
 }
 
 function groupViews(views) {

@@ -128,13 +128,27 @@ function SignalRecord({ signal, allowedAction, onDecision }) {
   )
 }
 
-export function StaffActions({ actions, allowedActions = [], onUpdate }) {
+export function StaffActions({ actions, hasMore = false, allowedActions = [], onUpdate }) {
   return (
-    <section className="action-ledger" aria-labelledby="staff-actions-title">
-      <header className="content-header"><div><p className="eyebrow">Audited work</p><h2 id="staff-actions-title">Staff actions</h2></div><span>{actions.length} records</span></header>
-      <div className="record-list">
-        {actions.length ? actions.map((action) => <StaffActionRecord key={action.action_id} action={action} allowedAction={findProjectedAction(allowedActions, 'work_item.update', action.action_id)} onUpdate={onUpdate} />) : <p className="empty-note">No staff actions have been recorded.</p>}
-      </div>
+    <section className="action-ledger activity-section" aria-labelledby="staff-actions-title">
+      <header className="content-header activity-section__header">
+        <p className="eyebrow">Audited work</p>
+        <h2 id="staff-actions-title">Staff actions</h2>
+        <span className="activity-section__count">{actions.length}{hasMore ? '+' : ''} {actions.length === 1 && !hasMore ? 'record' : 'records'}</span>
+      </header>
+      {actions.length ? (
+        <div className="record-list staff-action-list">
+          {actions.map((action) => <StaffActionRecord key={action.action_id} action={action} allowedAction={findProjectedAction(allowedActions, 'work_item.update', action.action_id)} onUpdate={onUpdate} />)}
+        </div>
+      ) : (
+        <div className="activity-empty activity-empty--compact">
+          <span className="activity-empty__marker" aria-hidden="true" />
+          <div>
+            <strong>No staff actions yet</strong>
+            <p>Audited work items will appear here after they are recorded.</p>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
