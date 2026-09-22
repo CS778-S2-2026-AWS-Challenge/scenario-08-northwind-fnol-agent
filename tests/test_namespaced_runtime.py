@@ -349,6 +349,8 @@ def test_namespaced_runtime_applies_claim_mutation_and_persists_runtime_records(
         assert idempotency is not None
         assert idempotency.action_code == 'claim.apply_fact_patch'
         assert idempotency.target_ref == claim_id
+        assert idempotency.message_turn_kind == 'legacy_agent'
+        assert idempotency.runtime_result_id == runtime_turn.result.result_id
 
         assert len(gateway.requests) == 2
 
@@ -446,10 +448,8 @@ def test_namespaced_runtime_applies_claim_mutation_and_persists_runtime_records(
                 'evidence_refs': [],
             },
         )
-        assert compatibility.status_code == 200, compatibility.text
-        assert compatibility.json()['claim_revision'] == 2
-        assert compatibility.json()['current_claim_revision'] == 3
-        assert compatibility.json()['decision'] is None
+        assert compatibility.status_code == 500
+        assert compatibility.json()['error']['code'] == 'INTERNAL_ERROR'
 
         corrupted_records = {
             'decision_id': replace(
@@ -466,6 +466,11 @@ def test_namespaced_runtime_applies_claim_mutation_and_persists_runtime_records(
                 runtime_replay,
                 key='runtime-message-missing-runtime_trace_id',
                 runtime_trace_id='missing-record',
+            ),
+            'runtime_result_id': replace(
+                runtime_replay,
+                key='runtime-message-missing-runtime_result_id',
+                runtime_result_id='missing-record',
             ),
         }
         for corrupted in corrupted_records.values():

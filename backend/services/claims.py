@@ -659,6 +659,12 @@ def start_claim(
                 code='IDEMPOTENCY_CONFLICT',
                 message='The idempotency key was reused with a different request.',
             )
+        if existing.retired:
+            raise ApiError(
+                status_code=409,
+                code='IDEMPOTENCY_CONFLICT',
+                message='The idempotency key belongs to a promoted anonymous Claim.',
+            )
         claim = repository.get_claim(existing.claim_id, principal.subject)
         session = repository.get_session(existing.claim_id, existing.session_id, principal.subject)
         if claim is None or session is None:
@@ -740,11 +746,18 @@ def promote_anonymous_claim(
     """Attach the current anonymous conversation to the authenticated account."""
     if not anonymous_session:
         raise _claim_not_found()
-    promoted = repository.promote_claim_owner(
-        claim_id,
-        f'anonymous:{anonymous_session}',
-        principal.subject,
-    )
+    try:
+        promoted = repository.promote_claim_owner(
+            claim_id,
+            f'anonymous:{anonymous_session}',
+            principal.subject,
+        )
+    except IdempotencyConflict as conflict:
+        raise ApiError(
+            status_code=409,
+            code='IDEMPOTENCY_CONFLICT',
+            message='The anonymous Claim retry authority conflicts with this account.',
+        ) from conflict
     if promoted is None:
         raise _claim_not_found()
     return claimant_claim(repository, promoted)

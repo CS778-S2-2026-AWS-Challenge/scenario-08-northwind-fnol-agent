@@ -1139,50 +1139,68 @@ class FixtureRepository(PersistenceRepository):
         anonymous_customer_id: str,
         customer_id: str,
     ) -> WorkingClaim | None:
-        claim = self._claims.get(claim_id)
-        if claim is None or claim.customer_id != anonymous_customer_id:
-            return None
-        promoted_claim = claim.model_copy(update={'customer_id': customer_id})
-        realtime_event = self._prepare_realtime_mutation(
-            RealtimeMutation.CLAIM_OWNER_CHANGED,
-            promoted_claim,
-        )
-        assert realtime_event is not None
-        self._claims[claim_id] = promoted_claim
-        stores: tuple[dict[str, Any], ...] = (
-            self._sessions,
-            self._follow_ups,
-            self._messages,
-            self._decisions,
-            self._claim_creation_operations,
-            self._assessor_routing_operations,
-            self._evidence,
-            self._motor_other_drivers,
-            self._contents_item_evidence_associations,
-            self._retrievals,
-            self._review_signals,
-            self._staff_actions,
-            self._customer_updates,
-            self._signal_decisions,
-            self._collaboration_requests,
-            self._claim_coworkers,
-            self._handoffs,
-        )
-        for store in stores:
-            for record_key, record in list(store.items()):
-                if getattr(record, 'claim_id', None) == claim_id:
-                    store[record_key] = (
-                        record.model_copy(update={'customer_id': customer_id})
-                        if 'customer_id' in type(record).model_fields
-                        else record
-                    )
-        for idempotency_key, record in list(self._idempotency.items()):
-            if record.claim_id == claim_id and record.actor_id == anonymous_customer_id:
-                self._idempotency.pop(idempotency_key, None)
-                promoted_record = replace(record, actor_id=customer_id)
-                self._idempotency[(customer_id, record.route, record.key)] = promoted_record
-        self._commit_realtime_event(realtime_event)
-        return deepcopy(self._claims[claim_id])
+        with self._claim_mutation_lock:
+            claim = self._claims.get(claim_id)
+            if claim is None or claim.customer_id != anonymous_customer_id:
+                return None
+            promoted_idempotency = [
+                replace(record, actor_id=customer_id, retired=False)
+                for record in self._idempotency.values()
+                if record.claim_id == claim_id
+                and record.actor_id == anonymous_customer_id
+                and not record.retired
+            ]
+            for promoted_record in promoted_idempotency:
+                existing = self._idempotency.get(
+                    (customer_id, promoted_record.route, promoted_record.key)
+                )
+                if existing is not None and existing != promoted_record:
+                    raise IdempotencyConflict(promoted_record.key)
+            promoted_claim = claim.model_copy(update={'customer_id': customer_id})
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.CLAIM_OWNER_CHANGED,
+                promoted_claim,
+            )
+            assert realtime_event is not None
+            self._claims[claim_id] = promoted_claim
+            stores: tuple[dict[str, Any], ...] = (
+                self._sessions,
+                self._follow_ups,
+                self._messages,
+                self._decisions,
+                self._claim_creation_operations,
+                self._assessor_routing_operations,
+                self._evidence,
+                self._motor_other_drivers,
+                self._contents_item_evidence_associations,
+                self._retrievals,
+                self._review_signals,
+                self._staff_actions,
+                self._customer_updates,
+                self._signal_decisions,
+                self._collaboration_requests,
+                self._claim_coworkers,
+                self._handoffs,
+            )
+            for store in stores:
+                for record_key, record in list(store.items()):
+                    if getattr(record, 'claim_id', None) == claim_id:
+                        store[record_key] = (
+                            record.model_copy(update={'customer_id': customer_id})
+                            if 'customer_id' in type(record).model_fields
+                            else record
+                        )
+            for idempotency_key, record in list(self._idempotency.items()):
+                if (
+                    record.claim_id == claim_id
+                    and record.actor_id == anonymous_customer_id
+                    and not record.retired
+                ):
+                    self._idempotency[idempotency_key] = replace(record, retired=True)
+                    promoted_record = replace(record, actor_id=customer_id, retired=False)
+                    self._idempotency[(customer_id, record.route, record.key)] = promoted_record
+            self._commit_realtime_event(realtime_event)
+            return deepcopy(self._claims[claim_id])
 
     def get_claim_internal(self, claim_id: str) -> WorkingClaim | None:
         claim = self._claims.get(claim_id)
@@ -1614,7 +1632,9 @@ class FixtureRepository(PersistenceRepository):
         route: str,
         key: str,
     ) -> IdempotencyRecord | None:
-        return self._idempotency.get((actor_id, route, key))
+        with self._claim_mutation_lock:
+            record = self._idempotency.get((actor_id, route, key))
+            return deepcopy(record) if record is not None else None
 
     def find_message_turn_idempotency(
         self,
@@ -1623,22 +1643,61 @@ class FixtureRepository(PersistenceRepository):
         claim_id: str,
         message_id: str,
     ) -> IdempotencyRecord | None:
-        matches = [
-            record
-            for record in self._idempotency.values()
-            if record.actor_id == actor_id
-            and record.route == route
-            and record.claim_id == claim_id
-            and record.message_id == message_id
-        ]
-        return deepcopy(matches[-1]) if matches else None
+        with self._claim_mutation_lock:
+            matches = [
+                record
+                for record in self._idempotency.values()
+                if record.actor_id == actor_id
+                and record.route == route
+                and record.claim_id == claim_id
+                and record.message_id == message_id
+                and not record.retired
+            ]
+            return deepcopy(matches[-1]) if matches else None
+
+    def reserve_message_turn_idempotency_alias(
+        self,
+        actor_id: str,
+        route: str,
+        claim_id: str,
+        message_id: str,
+        key: str,
+        request_fingerprint: str,
+    ) -> IdempotencyRecord | None:
+        with self._claim_mutation_lock:
+            original = self.find_message_turn_idempotency(
+                actor_id,
+                route,
+                claim_id,
+                message_id,
+            )
+            if original is None:
+                return None
+            if original.request_fingerprint != request_fingerprint:
+                raise IdempotencyConflict(key)
+            alias = replace(
+                original,
+                key=key,
+                request_fingerprint=request_fingerprint,
+            )
+            lookup = (actor_id, route, key)
+            existing = self._idempotency.get(lookup)
+            if existing is not None:
+                if existing != alias:
+                    raise IdempotencyConflict(key)
+                return deepcopy(existing)
+            self._idempotency[lookup] = alias
+            return deepcopy(alias)
 
     def save_idempotency(self, record: IdempotencyRecord) -> None:
-        lookup = (record.actor_id, record.route, record.key)
-        existing = self._idempotency.get(lookup)
-        if existing is not None and existing.request_fingerprint != record.request_fingerprint:
-            raise IdempotencyConflict(record.key)
-        self._idempotency[lookup] = record
+        with self._claim_mutation_lock:
+            lookup = (record.actor_id, record.route, record.key)
+            existing = self._idempotency.get(lookup)
+            if existing is not None and (
+                existing.request_fingerprint != record.request_fingerprint or existing.retired
+            ):
+                raise IdempotencyConflict(record.key)
+            self._idempotency[lookup] = deepcopy(record)
 
     def list_claims_for_customer(self, customer_id: str) -> list[WorkingClaim]:
         claims = [
@@ -2568,6 +2627,13 @@ class FixtureRepository(PersistenceRepository):
             and idempotency.message_id == claimant_message.message_id
             and idempotency.agent_message_id == agent_message.message_id
             and idempotency.decision_id == decision.decision_id
+            and (
+                (runtime_records is None and idempotency.runtime_result_id is None)
+                or (
+                    runtime_records is not None
+                    and idempotency.runtime_result_id == runtime_records.result.result_id
+                )
+            )
             and (handoff is None or handoff.claim_id == claim.claim_id)
             and (handoff is None or idempotency.handoff_id == handoff.handoff_id)
             and decision.handoff_id == (handoff.handoff_id if handoff is not None else None)

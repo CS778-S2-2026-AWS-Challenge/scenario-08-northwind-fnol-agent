@@ -59,7 +59,6 @@ from backend.domain.models import (
     ProposedFormChange,
     QuestionRecord,
     ResponsibleParty,
-    RuntimeTraceRecord,
     SessionRecord,
     StructuredFormField,
     SupportNeed,
@@ -84,6 +83,7 @@ from backend.domain.runtime import (
     ToolResultRecord,
     TurnPlanRecord,
     TurnResultRecord,
+    validate_runtime_turn_links,
 )
 from backend.domain.support_intent import detect_support_intent, support_need_for_intent
 from backend.repositories.identity import IdentityRepository
@@ -515,45 +515,6 @@ def _message_only_response(
     )
 
 
-def _namespaced_turn_response(
-    repository: PersistenceRepository,
-    principal: Principal,
-    claim_id: str,
-    claim_revision: int,
-    claimant_message: MessageRecord,
-    agent_message: MessageRecord,
-    identity_repository: IdentityRepository | None = None,
-) -> MessageTurnResponse:
-    """Build the claimant projection for a Runtime trace without a legacy decision."""
-    claim = repository.get_claim(claim_id, principal.subject)
-    if claim is None:
-        raise _session_not_found()
-    external_service_action = claimant_assessor_action(repository, claim)
-    next_step = claimant_next_step(repository, claim, external_service_action, identity_repository)
-    return MessageTurnResponse(
-        claim_id=claim_id,
-        session_id=claimant_message.session_id,
-        claim_revision=claim_revision,
-        current_claim_revision=claim.revision,
-        current_claim=claimant_claim(repository, claim, identity_repository),
-        claimant_message=_claimant_message(claimant_message),
-        agent_message=_claimant_message(
-            agent_message,
-            message_external_actions(repository, claim, agent_message.message_id),
-        ),
-        form_changes=[],
-        decision=None,
-        handoff=None,
-        dynamic_form=claimant_dynamic_form_projection(repository, claim),
-        primary_action=project_claimant_primary_action(
-            claim_id=claim_id,
-            claim_revision=claim.revision,
-            next_step=next_step,
-            external_service_action=external_service_action,
-        ),
-    )
-
-
 def _replay_persisted_response(
     repository: PersistenceRepository,
     principal: Principal,
@@ -575,14 +536,20 @@ def _replay_persisted_response(
     if replay_kind is None:
         if idempotency.decision_id is not None or payload.get('decision') is not None:
             replay_kind = 'legacy_agent'
-        elif (
-            idempotency.runtime_trace_id is not None
-            or idempotency.agent_message_id is not None
-            or payload.get('agent_message') is not None
+        elif any(
+            value is not None
+            for value in (
+                idempotency.runtime_trace_id,
+                idempotency.runtime_result_id,
+                idempotency.agent_message_id,
+                payload.get('agent_message'),
+            )
         ):
-            replay_kind = 'runtime'
+            raise _persisted_turn_integrity_error()
         else:
             replay_kind = 'message_only'
+    if idempotency.claim_id != claim_id or idempotency.session_id != session_id:
+        raise _persisted_turn_integrity_error()
     claimant_message = (
         repository.get_message(
             claim_id,
@@ -593,7 +560,7 @@ def _replay_persisted_response(
         if idempotency.message_id is not None
         else None
     )
-    if claimant_message is None:
+    if claimant_message is None or claimant_message.actor is not ActorType.CLAIMANT:
         raise ApiError(
             status_code=500,
             code='INTERNAL_ERROR',
@@ -617,6 +584,8 @@ def _replay_persisted_response(
         if (
             decision is None
             or decision.trigger_message_id != claimant_message.message_id
+            or decision.session_id != session_id
+            or decision.resulting_revision != historical_revision
             or agent_message is None
             or agent_message.actor is not ActorType.AGENT
             or agent_message.in_reply_to != claimant_message.message_id
@@ -630,8 +599,46 @@ def _replay_persisted_response(
             )
             if (
                 runtime_trace is None
+                or runtime_trace.claim_id != claim_id
+                or runtime_trace.session_id != session_id
                 or runtime_trace.trigger_message_id != claimant_message.message_id
             ):
+                raise _persisted_turn_integrity_error()
+        try:
+            runtime_records = repository.get_runtime_turn_for_trigger(
+                claim_id,
+                claimant_message.message_id,
+                principal.subject,
+            )
+        except (KeyError, ValueError):
+            raise _persisted_turn_integrity_error() from None
+        if idempotency.runtime_result_id is not None and (
+            runtime_records is None
+            or runtime_records.result.result_id != idempotency.runtime_result_id
+        ):
+            raise _persisted_turn_integrity_error()
+        if runtime_records is not None:
+            try:
+                validate_runtime_turn_links(
+                    runtime_records,
+                    claim_id=claim_id,
+                    session_id=session_id,
+                    trigger_message_id=claimant_message.message_id,
+                    agent_message_id=agent_message.message_id,
+                    expected_revision=historical_revision - 1,
+                    resulting_revision=historical_revision,
+                )
+            except ValueError:
+                raise _persisted_turn_integrity_error() from None
+        if idempotency.handoff_id != decision.handoff_id:
+            raise _persisted_turn_integrity_error()
+        if decision.handoff_id is not None:
+            handoff = repository.get_handoff(
+                claim_id,
+                decision.handoff_id,
+                principal.subject,
+            )
+            if handoff is None or handoff.source_message_id != claimant_message.message_id:
                 raise _persisted_turn_integrity_error()
         return _message_turn_response(
             repository,
@@ -641,37 +648,14 @@ def _replay_persisted_response(
             decision,
             identity_repository,
         )
-    if replay_kind == 'runtime':
-        if idempotency.agent_message_id is None or idempotency.runtime_trace_id is None:
-            raise _persisted_turn_integrity_error()
-        runtime_trace = repository.get_runtime_trace(
-            claim_id,
-            idempotency.runtime_trace_id,
-            principal.subject,
-        )
-        agent_message = repository.get_message(
-            claim_id,
-            session_id,
-            idempotency.agent_message_id,
-            principal.subject,
-        )
-        if runtime_trace is None or agent_message is None or historical_revision < 1:
-            raise _persisted_turn_integrity_error()
-        return _namespaced_turn_response(
-            repository,
-            principal,
-            claim_id,
-            historical_revision,
-            claimant_message,
-            agent_message,
-            identity_repository,
-        )
     if any(
         value is not None
         for value in (
             idempotency.decision_id,
             idempotency.agent_message_id,
             idempotency.runtime_trace_id,
+            idempotency.runtime_result_id,
+            idempotency.handoff_id,
         )
     ):
         raise _persisted_turn_integrity_error()
@@ -1718,103 +1702,6 @@ def _pending_evidence_for_proposal(
     )
 
 
-def _submit_namespaced_runtime_turn(
-    repository: PersistenceRepository,
-    principal: Principal,
-    claim_id: str,
-    session_id: str,
-    claim: WorkingClaim,
-    session: SessionRecord,
-    claimant_message: MessageRecord,
-    proposal: AgentProposal,
-    authority: object,
-    runtime_policy: object,
-    branch_evaluator: BranchRuleEvaluator,
-    previous_evaluation: BranchEvaluationRecord | None,
-    message_text: str,
-    route: str,
-    key: str,
-    fingerprint: str,
-    expected_revision: int,
-) -> MessageTurnResponse:
-    """Persist the first namespaced, read-only Runtime turn.
-
-    The target Runtime path deliberately does not create an ``AgentDecisionRecord`` or
-    advance Claim revision. It records the conversation and Runtime trace while only
-    updating Session activity, so ``claim.read`` remains observational.
-    """
-
-    runtime_trace: RuntimeTraceRecord | None = proposal.runtime_trace
-    if runtime_trace is None or runtime_trace.status != 'succeeded':
-        raise ApiError(
-            status_code=503,
-            code='AGENT_RUNTIME_UNAVAILABLE',
-            message='The namespaced Agent Runtime did not produce a persistable result.',
-            retryable=True,
-        )
-    timestamp = now_utc()
-    updated_session = session.model_copy(
-        update={'last_active_at': timestamp, 'context_revision': claim.revision}
-    )
-    agent_message = MessageRecord(
-        message_id=new_id('msg'),
-        claim_id=claim_id,
-        session_id=session_id,
-        actor=ActorType.AGENT,
-        visibility=MessageVisibility.CLAIMANT_VISIBLE,
-        content={'type': 'text', 'text': proposal.customer_response},
-        in_reply_to=claimant_message.message_id,
-        created_at=timestamp,
-    )
-    response = _namespaced_turn_response(
-        repository,
-        principal,
-        claim_id,
-        claim.revision,
-        claimant_message,
-        agent_message,
-    )
-    idempotency = IdempotencyRecord(
-        actor_id=principal.subject,
-        route=route,
-        key=key,
-        request_fingerprint=fingerprint,
-        claim_id=claim_id,
-        session_id=session_id,
-        message_id=claimant_message.message_id,
-        agent_message_id=agent_message.message_id,
-        runtime_trace_id=runtime_trace.trace_id,
-        message_turn_kind='runtime',
-        message_turn_revision=claim.revision,
-        response_payload=response.model_dump(mode='json'),
-    )
-    try:
-        repository.save_runtime_turn(
-            claim,
-            expected_revision,
-            updated_session,
-            claimant_message,
-            agent_message,
-            runtime_trace,
-            idempotency,
-        )
-    except RevisionConflict as conflict:
-        raise ApiError(
-            status_code=409,
-            code='REVISION_CONFLICT',
-            message='The claim changed after this page was loaded.',
-            retryable=True,
-            current_revision=conflict.current_revision,
-        ) from conflict
-    except IdempotencyConflict as conflict:
-        raise ApiError(
-            status_code=409,
-            code='IDEMPOTENCY_CONFLICT',
-            message='The message turn was already accepted with different retry data.',
-        ) from conflict
-    return response
-
-
 def _live_mutation_command(
     *,
     claim: WorkingClaim,
@@ -1921,6 +1808,8 @@ def submit_message(
                 code='IDEMPOTENCY_CONFLICT',
                 message='The idempotency key was reused with a different request.',
             )
+        if existing_idempotency.retired:
+            raise _session_not_found()
         return _replay_persisted_response(
             repository,
             principal,
@@ -1951,12 +1840,21 @@ def submit_message(
             existing_client_message.content == expected_content
             and existing_client_message.evidence_refs == payload.evidence_refs
         ):
-            turn_idempotency = repository.find_message_turn_idempotency(
-                principal.subject,
-                route,
-                claim_id,
-                existing_client_message.message_id,
-            )
+            try:
+                turn_idempotency = repository.reserve_message_turn_idempotency_alias(
+                    principal.subject,
+                    route,
+                    claim_id,
+                    existing_client_message.message_id,
+                    key,
+                    fingerprint,
+                )
+            except IdempotencyConflict as conflict:
+                raise ApiError(
+                    status_code=409,
+                    code='IDEMPOTENCY_CONFLICT',
+                    message='The idempotency key was reused with a different request.',
+                ) from conflict
             if turn_idempotency is None:
                 raise _persisted_turn_integrity_error()
             return _replay_persisted_response(
@@ -3106,6 +3004,7 @@ def submit_message(
         result=turn_result,
         work_items=work_items,
     )
+    idempotency = replace(idempotency, runtime_result_id=turn_result.result_id)
 
     def persist_agent_turn(_command: ClaimContextCommand) -> ClaimContextHandlerOutcome:
         repository.save_agent_turn(

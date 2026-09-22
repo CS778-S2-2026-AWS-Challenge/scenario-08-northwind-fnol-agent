@@ -8,7 +8,7 @@ document details below the repository boundary.
 
 import os
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from threading import Event
 from typing import Any, NoReturn, TypeVar
@@ -1831,6 +1831,35 @@ class MongoDBRepository:
         )
         if claim is None:
             return None
+        idempotency_documents = list(
+            self._collection.find(
+                {
+                    'record_type': 'idempotency',
+                    'actor_id': anonymous_customer_id,
+                    'payload.claim_id': claim_id,
+                    'payload.retired': {'$ne': True},
+                },
+                session=mongo_session,
+            )
+        )
+        promoted_idempotency: list[tuple[dict[str, Any], dict[str, Any], bool]] = []
+        for document in idempotency_documents:
+            record = IdempotencyRecord(**document['payload'])
+            promoted_record = replace(record, actor_id=customer_id, retired=False)
+            target_id = self._record_id(
+                'idempotency',
+                f'{customer_id}:{record.route}:{record.key}',
+            )
+            existing = self._collection.find_one({'_id': target_id}, session=mongo_session)
+            target = {
+                **document,
+                '_id': target_id,
+                'actor_id': customer_id,
+                'payload': promoted_record.__dict__,
+            }
+            if existing is not None and existing != target:
+                raise IdempotencyConflict(record.key)
+            promoted_idempotency.append((document, target, existing is None))
         self._collection.update_many(
             {'claim_id': claim_id, 'customer_id': anonymous_customer_id},
             {'$set': {'customer_id': customer_id}},
@@ -1846,6 +1875,19 @@ class MongoDBRepository:
             },
             session=mongo_session,
         )
+        for original, target, should_insert in promoted_idempotency:
+            if original['_id'] != target['_id']:
+                if should_insert:
+                    self._collection.insert_one(target, session=mongo_session)
+                retired = replace(
+                    IdempotencyRecord(**original['payload']),
+                    retired=True,
+                )
+                self._collection.update_one(
+                    {'_id': original['_id'], 'record_type': 'idempotency'},
+                    {'$set': {'payload': retired.__dict__}},
+                    session=mongo_session,
+                )
         promoted = self._get(
             'claim',
             claim_id,
@@ -4779,6 +4821,13 @@ class MongoDBRepository:
             and idempotency.message_id == claimant_message.message_id
             and idempotency.agent_message_id == agent_message.message_id
             and idempotency.decision_id == decision.decision_id
+            and (
+                (runtime_records is None and idempotency.runtime_result_id is None)
+                or (
+                    runtime_records is not None
+                    and idempotency.runtime_result_id == runtime_records.result.result_id
+                )
+            )
             and (handoff is None or handoff.claim_id == claim.claim_id)
             and (handoff is None or idempotency.handoff_id == handoff.handoff_id)
             and decision.handoff_id == (handoff.handoff_id if handoff is not None else None)
@@ -5763,10 +5812,66 @@ class MongoDBRepository:
                 'route': route,
                 'payload.claim_id': claim_id,
                 'payload.message_id': message_id,
+                'payload.retired': {'$ne': True},
             },
             sort=[('_id', -1)],
         )
         return IdempotencyRecord(**document['payload']) if document is not None else None
+
+    def reserve_message_turn_idempotency_alias(
+        self,
+        actor_id: str,
+        route: str,
+        claim_id: str,
+        message_id: str,
+        key: str,
+        request_fingerprint: str,
+    ) -> IdempotencyRecord | None:
+        def reserve(mongo_session: Any) -> IdempotencyRecord | None:
+            original_document = self._collection.find_one(
+                {
+                    'record_type': 'idempotency',
+                    'actor_id': actor_id,
+                    'route': route,
+                    'payload.claim_id': claim_id,
+                    'payload.message_id': message_id,
+                    'payload.retired': {'$ne': True},
+                },
+                sort=[('_id', -1)],
+                session=mongo_session,
+            )
+            if original_document is None:
+                return None
+            if original_document['payload'].get('request_fingerprint') != request_fingerprint:
+                raise IdempotencyConflict(key)
+            alias = replace(
+                IdempotencyRecord(**original_document['payload']),
+                key=key,
+                request_fingerprint=request_fingerprint,
+            )
+            query = {
+                'record_type': 'idempotency',
+                'actor_id': actor_id,
+                'route': route,
+                'key': key,
+            }
+            existing = self._collection.find_one(query, session=mongo_session)
+            if existing is not None:
+                if existing.get('payload') != alias.__dict__:
+                    raise IdempotencyConflict(key)
+                return alias
+            document = {
+                **query,
+                '_id': self._record_id('idempotency', f'{actor_id}:{route}:{key}'),
+                'payload': alias.__dict__,
+            }
+            try:
+                self._collection.insert_one(document, session=mongo_session)
+            except DuplicateKeyError:
+                raise IdempotencyConflict(key) from None
+            return alias
+
+        return self._atomic(reserve)
 
     def save_idempotency(self, record: IdempotencyRecord) -> None:
         query = {

@@ -1404,6 +1404,17 @@ server returns `MODEL_PROFILE_UNAVAILABLE`. A resumed Session keeps the last sel
 default, and the profile may be changed explicitly on a later message when the replacement is
 published and available.
 
+### `POST /api/v1/claims/{claim_id}/promote`
+
+Attaches a browser-session Claim to the authenticated claimant identified by the current bearer
+session. The request carries the former browser identity in `X-Northwind-Anonymous-Session`.
+Promotion atomically moves the Claim records and every Claim-scoped idempotency authority to the
+authenticated subject. Existing message retries continue under that subject; the anonymous subject
+cannot replay them afterward. The anonymous key remains as a non-replayable retirement marker so a
+delayed create retry cannot create a second Claim; reuse returns `409 IDEMPOTENCY_CONFLICT` without
+disclosing the promoted Claim. A conflicting target retry key returns `409 IDEMPOTENCY_CONFLICT`
+without a partial ownership change. A missing or already-promoted anonymous Claim returns `404`.
+
 ### `GET /api/v1/claims`
 
 Returns only the authenticated claimant's reports. Each item contains `claim_id`, creation state, plain-language status, next step, last update time, and whether the report can be resumed. Internal state dimensions are excluded.
@@ -1714,11 +1725,15 @@ messages remain immutable evidence of the historical turn at `claim_revision`; t
 current-state patch during replay. When the two revisions differ, clients install `current_claim`
 and must not merge the historical deltas into live form or contents state. Current dynamic form,
 next step, primary action, handoff, contents, and `updated_at` therefore come from the same
-authoritative snapshot for legacy Agent, message-only/handoff, and namespaced Runtime responses.
-The server records an explicit turn kind and committed turn revision with each accepted message.
-A retry using the same `client_message_id` under a new idempotency key resolves that original turn
-identity. A missing declared decision, Runtime trace, or Agent message is a bounded
-`500 INTERNAL_ERROR`; replay never downgrades a damaged turn to a partial successful response.
+authoritative snapshot for Agent and message-only responses. Namespaced Runtime records are durable
+children of an Agent turn; there is no separate read-only Runtime response kind. The server records
+an explicit turn kind and committed turn revision with each accepted message. A retry using the same
+`client_message_id` under a new idempotency key atomically reserves that key as an alias of the
+original turn before returning it. Reusing the alias for different input returns
+`409 IDEMPOTENCY_CONFLICT`. A missing or mislinked declared decision, Agent message, Runtime result,
+Runtime trace, or Handoff is a bounded `500 INTERNAL_ERROR`; replay never downgrades a damaged turn
+to a partial successful response. Runtime plan and ActionEnvelope revisions are checked against the
+independently persisted message-turn revision rather than against another Runtime child record.
 
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
 
