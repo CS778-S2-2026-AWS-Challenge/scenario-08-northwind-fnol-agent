@@ -125,7 +125,7 @@ def _validation_scenario(
         file_status=EvidenceFileStatus.NOT_AVAILABLE,
         source=EvidenceSource.CLAIMANT,
         related_fields=['incident.description'],
-        needed_for=['validation_demo'],
+        needed_for=['current_action'],
         claimant_note='Synthetic evidence reference for the validation demonstration.',
         created_at=timestamp,
         updated_at=timestamp,

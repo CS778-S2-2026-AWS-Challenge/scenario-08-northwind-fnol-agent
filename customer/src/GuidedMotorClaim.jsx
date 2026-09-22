@@ -122,7 +122,7 @@ export default function GuidedMotorClaim({ initialDescription = '', onExit }) {
           claimId: ref.claimId, sessionId: ref.sessionId, revision,
           text: draft.description, idempotencyKey: requestId('guided-intake'), clientMessageId: requestId('guided-message'),
         })
-        revision = turn.claim_revision
+        revision = turn.current_claim_revision ?? turn.claim_revision
         current = await getClaim(ref.claimId)
         revision = current.revision
       }
@@ -186,7 +186,7 @@ export default function GuidedMotorClaim({ initialDescription = '', onExit }) {
         text: `I accept declaration ${DECLARATION_VERSION} and confirm the information is true and complete to the best of my knowledge.`,
         idempotencyKey: requestId('guided-declaration'), clientMessageId: requestId('guided-declaration-message'),
       })
-      const created = await createExternalClaim({ claimId: claimRef.claimId, revision: declaration.claim_revision, idempotencyKey: requestId('guided-submit') })
+      const created = await createExternalClaim({ claimId: claimRef.claimId, revision: declaration.current_claim_revision ?? declaration.claim_revision, idempotencyKey: requestId('guided-submit') })
       localStorage.removeItem(STORAGE_KEY); setResult(created.external_claim)
     } catch (requestError) { setError(requestError.message) } finally { setBusy(false) }
   }

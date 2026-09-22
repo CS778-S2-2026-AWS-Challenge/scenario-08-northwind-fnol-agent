@@ -6,6 +6,7 @@ const api = vi.hoisted(() => ({
   ApiRequestError: class ApiRequestError extends Error {},
   confirmClaimFields: vi.fn(),
   createAccountAsset: vi.fn(),
+  createAccountPolicy: vi.fn(),
   createExternalClaim: vi.fn(),
   createClaim: vi.fn(),
   grantAssessorConsent: vi.fn(),
@@ -17,6 +18,8 @@ const api = vi.hoisted(() => ({
   getRuntimeCapabilities: vi.fn(),
   listAccountAssets: vi.fn(),
   listAccountIdentityDocuments: vi.fn(),
+  listAccountPaymentDestinations: vi.fn(),
+  listAccountPolicies: vi.fn(),
   listClaims: vi.fn(),
   listEvidenceHistory: vi.fn(),
   loginClaimant: vi.fn(),
@@ -40,6 +43,7 @@ const api = vi.hoisted(() => ({
   updateAccountAsset: vi.fn(),
   createAccountIdentityDocument: vi.fn(),
   updateAccountIdentityDocument: vi.fn(),
+  updateAccountPolicy: vi.fn(),
   updateClaimField: vi.fn(),
 }))
 
@@ -247,6 +251,8 @@ describe('claimant intake projection', () => {
     api.getClaimEvidence.mockResolvedValue({ items: [], revision: 1 })
     api.listAccountAssets.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listAccountIdentityDocuments.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listAccountPaymentDestinations.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listAccountPolicies.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listEvidenceHistory.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.streamRealtimeEvents.mockImplementation(() => new Promise(() => {}))
     api.createClaim.mockResolvedValue({
@@ -439,12 +445,18 @@ describe('claimant intake projection', () => {
   it('opens the authenticated Profile deep link and replaces edits with the API projection', async () => {
     const user = userEvent.setup()
     const initialAccount = {
-      profile: { display_name: 'Iris Zhang', email: 'iris@gmail.com', phone: '+64 21 555 123' },
+      profile: {
+        display_name: 'Iris Zhang',
+        legal_name: 'Iris Zhang',
+        preferred_name: null,
+        email: 'iris@gmail.com',
+        phone: '+64 21 555 123',
+      },
       preferences: { email: true, sms: false },
     }
     const updatedAccount = {
       ...initialAccount,
-      profile: { ...initialAccount.profile, display_name: 'Iris' },
+      profile: { ...initialAccount.profile, display_name: 'Iris', preferred_name: 'Iris' },
     }
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue(initialAccount)
@@ -464,8 +476,9 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByLabelText('Preferred name'), 'Iris')
     await user.click(screen.getByRole('button', { name: 'Save profile' }))
 
-    expect(api.updateAccountProfile).toHaveBeenCalledWith({ display_name: 'Iris', phone: '+64 21 555 123' })
+    expect(api.updateAccountProfile).toHaveBeenCalledWith({ preferred_name: 'Iris' })
     expect(await screen.findByText('Iris', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(screen.getByText('Iris Zhang', { selector: '.profile-summary-row > dd' })).toBeInTheDocument()
     expect(api.createClaim).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Back' }))
@@ -473,7 +486,60 @@ describe('claimant intake projection', () => {
     expect(globalThis.location.pathname).toBe('/')
   })
 
-  it('canonicalizes the removed Policies route and restores Profile categories on popstate', async () => {
+  it('reloads a stale Profile revision, keeps the draft, and retries only after review', async () => {
+    const user = userEvent.setup()
+    const initialAccount = {
+      customer_id: 'cus_profile_conflict',
+      revision: 3,
+      profile: {
+        display_name: 'Iris',
+        legal_name: 'Iris Zhang',
+        preferred_name: 'Iris',
+        email: 'iris@gmail.com',
+        phone: '+64 21 555 123',
+      },
+      preferences: { email: true, sms: false },
+    }
+    const latestAccount = {
+      ...initialAccount,
+      revision: 4,
+      profile: { ...initialAccount.profile, display_name: 'Shared saved name', preferred_name: 'Shared saved name' },
+    }
+    const retriedAccount = {
+      ...latestAccount,
+      revision: 5,
+      profile: { ...latestAccount.profile, display_name: 'Iris draft', preferred_name: 'Iris draft' },
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount
+      .mockResolvedValueOnce(initialAccount)
+      .mockResolvedValueOnce(latestAccount)
+    api.updateAccountProfile
+      .mockRejectedValueOnce({ code: 'REVISION_CONFLICT', status: 409 })
+      .mockResolvedValueOnce(retriedAccount)
+    globalThis.history.replaceState({}, '', '/profile/personal-details')
+
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'Edit profile' }))
+    const preferredName = screen.getByLabelText('Preferred name')
+    await user.clear(preferredName)
+    await user.type(preferredName, 'Iris draft')
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('kept your draft')
+    expect(preferredName).toHaveValue('Iris draft')
+    expect(screen.getByText('Shared saved name', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(api.updateAccountProfile).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+
+    expect(api.updateAccountProfile).toHaveBeenNthCalledWith(2, { preferred_name: 'Iris draft' }, 4)
+    expect(await screen.findByText('Iris draft', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Preferred name')).not.toBeInTheDocument()
+  })
+
+  it('opens the Policies route and restores Profile categories on popstate', async () => {
     const user = userEvent.setup()
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue({
@@ -498,8 +564,10 @@ describe('claimant intake projection', () => {
 
     render(<App />)
 
-    expect(await screen.findByRole('region', { name: 'Personal details' })).toBeInTheDocument()
-    expect(globalThis.location.pathname).toBe('/profile/personal-details')
+    expect(await screen.findByRole('heading', { name: 'Policies' })).toBeInTheDocument()
+    expect(await screen.findByText('No policy numbers saved.')).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile/policies')
+    expect(api.listAccountPolicies).toHaveBeenCalled()
 
     await user.click(screen.getAllByRole('button', { name: 'Insured assets' })[0])
     expect(await screen.findByRole('heading', { name: 'Insured assets' })).toBeInTheDocument()
@@ -698,7 +766,12 @@ describe('claimant intake projection', () => {
   it('replaces Staff assistance with a waiting status and prevents duplicate requests', async () => {
     const user = userEvent.setup()
     let resolveSupport
-    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      claim_revision: 2,
+      current_claim_revision: 3,
+      primary_action: primaryAction({ revision: 3 }),
+    })
     api.requestHumanSupport.mockImplementation(() => new Promise((resolve) => {
       resolveSupport = resolve
     }))
@@ -720,6 +793,7 @@ describe('claimant intake projection', () => {
     expect(progress).not.toHaveTextContent('A Northwind support request has been queued')
     expect(screen.queryByRole('button', { name: 'Staff assistance' })).not.toBeInTheDocument()
     expect(api.requestHumanSupport).toHaveBeenCalledTimes(1)
+    expect(api.requestHumanSupport).toHaveBeenCalledWith(expect.objectContaining({ revision: 3 }))
 
     await act(async () => resolveSupport({
       revision: 3,
@@ -735,7 +809,7 @@ describe('claimant intake projection', () => {
     expect(screen.queryByText('Staff assistance requested')).not.toBeInTheDocument()
     expect(api.requestHumanSupport).toHaveBeenCalledWith(expect.objectContaining({
       claimId: initialClaim.claim_id,
-      revision: 2,
+      revision: 3,
     }))
     expect(initialClaim.external_claim).toBeNull()
   })
@@ -1930,6 +2004,69 @@ describe('claimant intake projection', () => {
     })).toHaveAttribute('aria-expanded', 'false')
   })
 
+  it('installs the current claim snapshot without merging historical replay deltas', async () => {
+    const user = userEvent.setup()
+    const currentDynamicForm = dynamicForm({ value: '9pm', valueState: 'confirmed' })
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      claim_revision: 2,
+      current_claim_revision: 3,
+      form_changes: [{
+        field_code: 'incident.occurred_at',
+        field: {
+          value: '8pm',
+          status: 'proposed',
+          source: 'claimant',
+        },
+      }],
+      contents_item_changes: [{
+        item_id: 'item-historical',
+        description: 'Historical laptop description',
+        category: 'Electronics',
+        status: 'proposed',
+        source: 'claimant',
+      }],
+      current_claim: {
+        ...initialClaim,
+        revision: 3,
+        form: {
+          'incident.occurred_at': {
+            value: '9pm',
+            status: 'confirmed',
+            source: 'claimant',
+          },
+        },
+        contents_items: [{
+          item_id: 'item-current',
+          description: 'Corrected laptop description',
+          category: 'Electronics',
+          status: 'confirmed',
+          source: 'claimant',
+        }],
+        dynamic_form: currentDynamicForm,
+        customer_next_step: {
+          status: 'continue_current_report',
+          summary: 'Continue from the corrected report.',
+          responsible_party: 'claimant',
+          required_items: [],
+        },
+        primary_action: primaryAction({ revision: 3 }),
+        updated_at: '2026-09-14T02:00:00Z',
+      },
+    })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Details' }))
+
+    expect(screen.getAllByText('9pm').length).toBeGreaterThan(0)
+    expect(screen.getByText('Corrected laptop description')).toBeInTheDocument()
+    expect(screen.queryByText('8pm')).not.toBeInTheDocument()
+    expect(screen.queryByText('Historical laptop description')).not.toBeInTheDocument()
+  })
+
   it('rejects delayed realtime Claim and message readbacks after a newer claimant mutation', async () => {
     const user = userEvent.setup()
     let pushRealtime
@@ -2585,5 +2722,83 @@ describe('claimant intake projection', () => {
     expect(await screen.findByText('repair-quote.pdf')).toBeInTheDocument()
     expect(api.createClaim).not.toHaveBeenCalled()
     expect(api.resumeClaimSession).not.toHaveBeenCalled()
+  })
+
+  it('continues the current report from the in-workspace Claim history', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Claim history' }))
+    expect(await screen.findByRole('heading', { name: 'No created Claims yet' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Continue your report' }))
+
+    expect(screen.queryByRole('heading', { name: 'Claim history' })).not.toBeInTheDocument()
+    expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
+  })
+
+  it('keeps account Claim history navigable after leaving an active conversation', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    const createdClaim = {
+      ...initialClaim,
+      claim_id: 'clm_created_after_leaving',
+      external_claim: { claim_number: 'NWF-2026-000973', creation_status: 'created' },
+      customer_next_step: {
+        status: 'claim_created',
+        summary: 'Claims intake review',
+        responsible_party: 'system',
+      },
+      updated_at: '2026-09-14T01:00:00Z',
+      can_resume: true,
+    }
+    const reportInProgress = {
+      ...initialClaim,
+      claim_id: 'clm_in_progress_history',
+      external_claim: null,
+      updated_at: '2026-09-15T01:00:00Z',
+      can_resume: true,
+    }
+    api.listClaims.mockResolvedValue({ items: [reportInProgress, createdClaim], page: { next_cursor: null } })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    // The conversation stays loaded while the claimant leaves it for the account pages.
+    await user.click(screen.getByRole('button', { name: 'Back to start' }))
+    await user.click(screen.getByRole('button', { name: 'Profile' }))
+    // The desktop navigation and the mobile index both render the same Claim history entry.
+    const [claimHistoryEntry] = await screen.findAllByRole('button', { name: 'Claim history' })
+    await user.click(claimHistoryEntry)
+    const row = await screen.findByRole('button', { name: 'Open Home claim, Claim NWF-2026-000973' })
+    // Only the created Claim is listed; the reports still in progress stay out of Claim history.
+    expect(screen.getByText('1 saved Claim')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /clm_in_progress_history|clm_ui_vp/ })).not.toBeInTheDocument()
+    await user.click(row)
+
+    expect(await screen.findByRole('heading', { name: 'Claim features' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'NWF-2026-000973' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Evidence history/ }))
+    expect(await screen.findByRole('heading', { name: 'Evidence history' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Back to Claim features' }))
+    await user.click(await screen.findByRole('button', { name: 'Back to Claim history' }))
+    expect(await screen.findByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Home claim, Claim NWF-2026-000973' })).toBeInTheDocument()
   })
 })

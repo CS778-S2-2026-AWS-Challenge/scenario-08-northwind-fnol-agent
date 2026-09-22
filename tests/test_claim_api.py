@@ -1,6 +1,7 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from typing import cast
+from typing import Any, cast
 from uuid import uuid4
 
 import mongomock
@@ -1845,6 +1846,272 @@ def test_message_turn_deduplicates_retries_and_rejects_conflicting_client_id(
     assert len(repository.list_messages(claim_id, session_id, 'cus_demo')) == 2
 
 
+def test_message_turn_replay_preserves_turn_revision_after_later_claim_mutation(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='message-replay-history').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+
+    first = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        key='historical-turn',
+        client_message_id='historical-client-message',
+    )
+    later_update = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': '2'},
+        json={
+            'updates': [
+                {
+                    'field_code': 'incident.description',
+                    'value': 'A later synthetic correction.',
+                    'correction_reason': 'The claimant clarified the description.',
+                }
+            ]
+        },
+    )
+    assert first.status_code == 200
+    assert later_update.status_code == 200
+    assert later_update.json()['revision'] == 3
+    stored = repository.find_idempotency(
+        'cus_demo',
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+        'historical-turn',
+    )
+    assert stored is not None
+    decision = repository.find_agent_decision_for_trigger(
+        claim_id,
+        first.json()['claimant_message']['message_id'],
+        'cus_demo',
+    )
+    assert decision is not None
+    repository.save_idempotency(
+        replace(
+            stored,
+            decision_id=decision.decision_id,
+            message_turn_kind=None,
+            message_turn_revision=None,
+            response_payload=first.json(),
+        )
+    )
+    replay = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=2,
+        key='historical-turn-new-key',
+        client_message_id='historical-client-message',
+    )
+    assert replay.status_code == 200
+    replay_body = replay.json()
+    assert replay_body['claim_revision'] == 2
+    assert replay_body['current_claim_revision'] == 3
+    assert replay_body['primary_action']['claim_revision'] == 3
+    assert replay_body['claimant_message'] == first.json()['claimant_message']
+    assert replay_body['agent_message'] == first.json()['agent_message']
+
+
+@pytest.mark.parametrize('missing_child', ['claimant_message', 'decision', 'agent_message'])
+def test_persisted_legacy_response_fails_closed_when_child_is_missing(
+    missing_child: str,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='runtime-replay').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+    first = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        key='runtime-replay-original',
+        client_message_id='runtime-replay-message',
+    )
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
+    stored = repository.find_idempotency('cus_demo', route, 'runtime-replay-original')
+    assert stored is not None
+    assert stored.agent_message_id == first_body['agent_message']['message_id']
+    if missing_child == 'claimant_message':
+        assert stored.message_id is not None
+        repository._messages.pop(stored.message_id)
+    elif missing_child == 'decision':
+        corrupted = replace(stored, decision_id=None, response_payload=first_body)
+        repository._idempotency[('cus_demo', route, 'runtime-replay-original')] = corrupted
+    else:
+        assert stored.agent_message_id is not None
+        repository._messages.pop(stored.agent_message_id)
+
+    replay = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        key='runtime-replay-original',
+        client_message_id='runtime-replay-message',
+    )
+    assert replay.status_code == 500
+    assert replay.json()['error']['code'] == 'INTERNAL_ERROR'
+
+
+def test_message_only_replay_rehydrates_current_revision_from_legacy_payload(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='message-only-replay').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+    claim = repository.get_claim(claim_id, 'cus_demo')
+    assert claim is not None
+    support = client.post(
+        f'/api/v1/claims/{claim_id}/support-requests',
+        headers={**auth_headers, 'Idempotency-Key': 'message-only-support', 'If-Match': '1'},
+        json={
+            'reason': 'I need a claims professional to help me continue.',
+            'support_need': 'human_requested',
+            'preferred_channel': 'in_app',
+        },
+    )
+    assert support.status_code == 201, support.text
+    first = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=support.json()['revision'],
+        key='message-only-replay-turn',
+        client_message_id='message-only-replay-message',
+        text='I am ready to provide the next detail.',
+    )
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    historical_revision = first_body['claim_revision']
+    idempotency_route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
+    stored = repository.find_idempotency('cus_demo', idempotency_route, 'message-only-replay-turn')
+    assert stored is not None
+    assert stored.response_payload is not None
+    legacy_payload = dict(stored.response_payload)
+    legacy_payload.pop('current_claim_revision', None)
+    repository.save_idempotency(
+        replace(
+            stored,
+            message_turn_kind=None,
+            message_turn_revision=None,
+            response_payload=legacy_payload,
+        )
+    )
+
+    current_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert current_claim is not None
+    later_update = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(current_claim.revision)},
+        json={
+            'updates': [
+                {
+                    'field_code': 'incident.description',
+                    'value': 'A later clarification after the handoff message.',
+                    'correction_reason': 'The claimant clarified the description.',
+                }
+            ]
+        },
+    )
+    assert later_update.status_code == 200, later_update.text
+    replay = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=historical_revision,
+        key='message-only-replay-new-key',
+        client_message_id='message-only-replay-message',
+        text='I am ready to provide the next detail.',
+    )
+    assert replay.status_code == 200, replay.text
+    replay_body = replay.json()
+    assert replay_body['claim_revision'] == historical_revision
+    assert replay_body['current_claim_revision'] == later_update.json()['revision']
+    assert replay_body['primary_action']['claim_revision'] == later_update.json()['revision']
+
+
+def test_mongodb_replay_with_new_key_survives_repository_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mongo_client: Any = mongomock.MongoClient()
+    database_name = 'message_replay_restart'
+    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    headers = {'Authorization': 'Bearer synthetic-claimant'}
+    first_repository = MongoDBRepository(mongo_client, database_name)
+    monkeypatch.setattr(first_repository, '_atomic', lambda operation: operation(None))
+
+    with TestClient(create_app(settings, repository=first_repository)) as first_client:
+        created = create_claim(first_client, headers, key='restart-claim').json()
+        claim_id = created['claim']['claim_id']
+        session_id = created['session']['session_id']
+        first = submit_message(
+            first_client,
+            headers,
+            claim_id,
+            session_id,
+            key='restart-turn',
+            client_message_id='restart-client-message',
+        )
+        assert first.status_code == 200, first.text
+        historical_revision = first.json()['claim_revision']
+        later = first_client.patch(
+            f'/api/v1/claims/{claim_id}/form',
+            headers={**headers, 'If-Match': str(historical_revision)},
+            json={
+                'updates': [
+                    {
+                        'field_code': 'incident.description',
+                        'value': 'The corrected description persisted after restart.',
+                        'correction_reason': 'The claimant corrected the original account.',
+                    }
+                ]
+            },
+        )
+        assert later.status_code == 200, later.text
+
+    # Mongomock does not reapply MongoDB partial-filter semantics while rebuilding
+    # existing indexes. A real MongoDB restart keeps these indexes, so suppress only
+    # the mock's duplicate index initialisation for the reopened adapter.
+    monkeypatch.setattr(first_repository._collection, 'create_index', lambda *args, **kwargs: None)
+    restarted_repository = MongoDBRepository(mongo_client, database_name)
+    monkeypatch.setattr(restarted_repository, '_atomic', lambda operation: operation(None))
+    with TestClient(create_app(settings, repository=restarted_repository)) as restarted_client:
+        replay = submit_message(
+            restarted_client,
+            headers,
+            claim_id,
+            session_id,
+            revision=historical_revision,
+            key='restart-turn-new-key',
+            client_message_id='restart-client-message',
+        )
+
+    assert replay.status_code == 200, replay.text
+    replay_body = replay.json()
+    assert replay_body['claim_revision'] == historical_revision
+    assert replay_body['current_claim_revision'] == later.json()['revision']
+    assert replay_body['current_claim']['revision'] == later.json()['revision']
+    assert (
+        replay_body['current_claim']['form']['incident.description']['value']
+        == 'The corrected description persisted after restart.'
+    )
+
+
 def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -2348,9 +2615,10 @@ def test_message_reads_hide_internal_records_and_validate_session_state(
         listed.json()['items'][0]['message_id'],
         second_page.json()['items'][0]['message_id'],
     ]
-    expected_ids = sorted(
-        [turn['claimant_message']['message_id'], turn['agent_message']['message_id']]
-    )
+    expected_ids = [
+        turn['claimant_message']['message_id'],
+        turn['agent_message']['message_id'],
+    ]
     assert returned_ids == expected_ids
     assert missing_session.status_code == 404
 

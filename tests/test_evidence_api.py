@@ -110,6 +110,89 @@ def test_pending_evidence_is_saved_visible_and_does_not_block_current_work(
     }
 
 
+@pytest.mark.parametrize(
+    ('payload', 'key', 'reason'),
+    [
+        (
+            {'kind': 'unregistered_kind', 'status': 'pending'},
+            'unregistered-evidence-kind',
+            'Unregistered Evidence kind: unregistered_kind.',
+        ),
+        (
+            {
+                'kind': 'other_document',
+                'status': 'pending',
+                'needed_for': ['unregistered_purpose'],
+            },
+            'unregistered-evidence-purpose',
+            "Unregistered Evidence needed_for: ['unregistered_purpose'].",
+        ),
+    ],
+)
+def test_claimant_evidence_vocabulary_rejection_uses_structured_422(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    payload: dict[str, object],
+    key: str,
+    reason: str,
+) -> None:
+    created = create_claim(client, auth_headers, 'evidence-vocabulary-claim')
+    claim = cast(dict[str, object], created['claim'])
+    claim_id = str(claim['claim_id'])
+
+    response = client.post(
+        f'/api/v1/claims/{claim_id}/evidence',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': key,
+            'If-Match': '1',
+        },
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert response.json()['error']['details'] == [
+        {
+            'field': 'evidence',
+            'reason': reason,
+        }
+    ]
+
+
+def test_claimant_upload_kind_rejection_uses_structured_422(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    created = create_claim(client, auth_headers, 'upload-vocabulary-claim')
+    claim = cast(dict[str, object], created['claim'])
+    claim_id = str(claim['claim_id'])
+
+    response = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/uploads',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'unregistered-upload-kind',
+            'If-Match': '1',
+        },
+        json={
+            'kind': 'unregistered_kind',
+            'original_filename': 'evidence.jpg',
+            'media_type': 'image/jpeg',
+            'size_bytes': 7,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert response.json()['error']['details'] == [
+        {
+            'field': 'evidence',
+            'reason': 'Unregistered Evidence kind: unregistered_kind.',
+        }
+    ]
+
+
 def test_claimant_can_read_evidence_history_across_owned_claims(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -215,6 +298,17 @@ def _seed_persisted_evidence_authority(
         created_at=base_time,
     )
     repository.save_message(trigger, customer_id)
+    proposal_message = MessageRecord(
+        message_id=f'msg_{case}_proposal',
+        claim_id=claim_id,
+        session_id=session.session_id,
+        actor=ActorType.AGENT,
+        visibility=MessageVisibility.CLAIMANT_VISIBLE,
+        content={'type': 'text', 'text': f'Please confirm that I should {action} this Evidence.'},
+        in_reply_to=trigger.message_id,
+        created_at=base_time + timedelta(seconds=1),
+    )
+    repository.save_message(proposal_message, customer_id)
     proposal_id = f'apr_{case}'
     proposal = AgentProposalRecord(
         proposal_id=proposal_id,
@@ -232,7 +326,7 @@ def _seed_persisted_evidence_authority(
         removal_scope='source_claim_history' if action == 'remove' else None,
         proposal_source=AgentProposalSource.CONTROLLED_AGENT,
         model_profile_id=session.model_profile_id,
-        created_at=base_time + timedelta(seconds=1),
+        created_at=proposal_message.created_at,
     )
     confirmation_id = f'msg_{case}_confirmation'
     confirmation = MessageRecord(
@@ -242,7 +336,7 @@ def _seed_persisted_evidence_authority(
         actor=ActorType.CLAIMANT,
         visibility=MessageVisibility.CLAIMANT_VISIBLE,
         content={'type': 'text', 'text': 'Yes, please do that.'},
-        in_reply_to=proposal_id,
+        in_reply_to=proposal_message.message_id,
         created_at=base_time + timedelta(seconds=2),
     )
     repository.save_message(confirmation, customer_id)
@@ -627,6 +721,7 @@ def test_evidence_history_is_account_scoped_and_filters_non_claimant_file_states
         customer_id='cus_demo',
         evidence_id='evd-awaiting-upload',
         file_status=EvidenceFileStatus.AWAITING_UPLOAD,
+        status=EvidenceStatus.PENDING,
     )
     _seed_history_evidence(
         repository,

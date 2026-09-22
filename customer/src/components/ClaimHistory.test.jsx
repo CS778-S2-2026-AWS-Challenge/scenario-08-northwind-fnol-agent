@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import ClaimHistory, { ClaimFeatureDirectory } from './ClaimHistory.jsx'
@@ -7,6 +7,7 @@ import ClaimHistory, { ClaimFeatureDirectory } from './ClaimHistory.jsx'
 const olderClaim = {
   claim_id: 'clm_home_older',
   incident_type: 'home',
+  external_claim: { creation_status: 'created' },
   customer_next_step: { summary: 'Add the affected property address.' },
   updated_at: '2026-09-12T01:00:00Z',
 }
@@ -15,7 +16,7 @@ const newerClaim = {
   claim_id: 'clm_motor_newer',
   incident_type: 'motor',
   workflow_state: 'professional_review',
-  external_claim: { claim_number: 'NWF-2026-001042' },
+  external_claim: { claim_number: 'NWF-2026-001042', creation_status: 'created' },
   customer_next_step: {
     status: 'claims_review',
     summary: 'Review the incident details.',
@@ -25,18 +26,91 @@ const newerClaim = {
   updated_at: '2026-09-14T03:30:00Z',
 }
 
-it('lists Claims vertically by the latest server update with formal titles and timestamps', async () => {
+// The most recently updated report is still in progress: it must stay out of Claim history.
+const reportInProgress = {
+  claim_id: 'clm_motor_in_progress',
+  incident_type: 'motor',
+  workflow_state: 'collecting',
+  external_claim: null,
+  customer_next_step: {
+    status: 'confirmation_required',
+    summary: 'Review and confirm the proposed incident information.',
+    responsible_party: 'claimant',
+  },
+  updated_at: '2026-09-15T00:00:00Z',
+}
+
+const olderReportInProgress = {
+  ...reportInProgress,
+  claim_id: 'clm_home_in_progress',
+  incident_type: 'home',
+  external_claim: { creation_status: 'pending' },
+  updated_at: '2026-09-13T00:00:00Z',
+}
+
+it('lists only created Claims, latest update first, with their reference, status, and next step', () => {
+  render(<ClaimHistory claims={[olderClaim, reportInProgress, newerClaim]} onSelect={vi.fn()} />)
+
+  const rows = screen.getAllByRole('button', { name: /^Open / })
+  expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual([
+    'Open Motor claim, Claim NWF-2026-001042',
+    'Open Home claim, Claim reference clm_home_older',
+  ])
+  expect(screen.getByText('2 saved Claims')).toBeInTheDocument()
+  expect(screen.queryByText(/clm_motor_in_progress/)).not.toBeInTheDocument()
+
+  const newest = within(rows[0])
+  expect(newest.getByText('Claims Review')).toBeInTheDocument()
+  expect(newest.getByText('Review the incident details.')).toBeInTheDocument()
+  expect(newest.getByText('Responsible now: Claims professional')).toBeInTheDocument()
+  expect(newest.getByText('Updated 14 Sept 2026, 3:30 pm')).toBeInTheDocument()
+  expect(rows[0]).toHaveAccessibleDescription(
+    'Review the incident details. Responsible now: Claims professional',
+  )
+})
+
+it('opens a created Claim from the keyboard', async () => {
   const user = userEvent.setup()
   const onSelect = vi.fn()
-  render(<ClaimHistory claims={[olderClaim, newerClaim]} onSelect={onSelect} />)
+  render(<ClaimHistory claims={[olderClaim, newerClaim]} onRetry={vi.fn()} onSelect={onSelect} />)
 
-  const claimLinks = screen.getAllByRole('button', { name: /^Open .* claim clm_/ })
-  expect(claimLinks[0]).toHaveAccessibleName('Open Motor claim clm_motor_newer')
-  expect(claimLinks[1]).toHaveAccessibleName('Open Home claim clm_home_older')
-  expect(screen.getByText('Updated 14 Sept 2026, 3:30 pm')).toBeInTheDocument()
+  await user.tab()
+  await user.tab()
+  expect(screen.getByRole('button', { name: /NWF-2026-001042/ })).toHaveFocus()
+  await user.keyboard('{Enter}')
 
-  await user.click(claimLinks[0])
   expect(onSelect).toHaveBeenCalledWith(newerClaim)
+})
+
+it('offers a route to start a Claim when the claimant has none', async () => {
+  const user = userEvent.setup()
+  const onStartClaim = vi.fn()
+  render(<ClaimHistory claims={[]} onSelect={vi.fn()} onStartClaim={onStartClaim} />)
+
+  expect(screen.getByRole('heading', { name: 'No Claims yet' })).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Start a claim' }))
+
+  expect(onStartClaim).toHaveBeenCalledOnce()
+})
+
+it('tells a claimant with reports in progress where they are instead of calling the list empty', async () => {
+  const user = userEvent.setup()
+  const onContinueReport = vi.fn()
+  render(
+    <ClaimHistory
+      claims={[olderReportInProgress, reportInProgress]}
+      onSelect={vi.fn()}
+      onStartClaim={vi.fn()}
+      onContinueReport={onContinueReport}
+    />,
+  )
+
+  expect(screen.getByRole('heading', { name: 'No created Claims yet' })).toBeInTheDocument()
+  expect(screen.getByText(/You have 2 reports in progress\./)).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Start a claim' })).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Continue your report' }))
+
+  expect(onContinueReport).toHaveBeenCalledWith('clm_motor_in_progress')
 })
 
 it('keeps earlier Claim records visible when a refresh fails', () => {
@@ -50,7 +124,34 @@ it('keeps earlier Claim records visible when a refresh fails', () => {
   )
 
   expect(screen.getByText('Showing earlier Claim records')).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Open Home claim clm_home_older' })).toBeInTheDocument()
+  expect(
+    screen.getByRole('button', { name: 'Open Home claim, Claim reference clm_home_older' }),
+  ).toBeInTheDocument()
+})
+
+it('reports a failed load with a retry when no created Claim can be shown', async () => {
+  const user = userEvent.setup()
+  const onRetry = vi.fn()
+  render(<ClaimHistory claims={[]} error="The Claim service did not respond." onRetry={onRetry} onSelect={vi.fn()} />)
+
+  expect(screen.getByRole('alert')).toHaveTextContent('Claim history could not be loaded')
+  await user.click(screen.getByRole('button', { name: 'Try again' }))
+
+  expect(onRetry).toHaveBeenCalledOnce()
+})
+
+it('does not substitute internal workflow state in a history row', () => {
+  render(
+    <ClaimHistory
+      claims={[{ ...newerClaim, customer_next_step: { summary: 'Review the incident details.' } }]}
+      onSelect={vi.fn()}
+    />,
+  )
+
+  const row = within(screen.getByRole('button', { name: /NWF-2026-001042/ }))
+  expect(row.getByText('Status unavailable')).toBeInTheDocument()
+  expect(row.getByText('Responsible now: Not available')).toBeInTheDocument()
+  expect(screen.queryByText('Professional Review')).not.toBeInTheDocument()
 })
 
 it('shows the selected Claim status summary and opens Evidence history', async () => {

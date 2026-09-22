@@ -105,5 +105,6 @@ def patch_account_preferences(
     request: Request,
     payload: PreferencesPatchRequest,
     principal: Principal = Depends(require_claimant_session),
+    if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> AccountProjection:
-    return update_preferences(identity_repository_for(request), principal, payload)
+    return update_preferences(identity_repository_for(request), principal, payload, if_match)

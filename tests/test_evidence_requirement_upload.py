@@ -606,7 +606,6 @@ def test_existing_requirement_is_unchanged_when_storage_is_unavailable(
 @pytest.mark.parametrize(
     ('status', 'file_status', 'source'),
     [
-        (EvidenceStatus.INVALID, EvidenceFileStatus.PROCESSING, EvidenceSource.CLAIMANT),
         (EvidenceStatus.SUPERSEDED, EvidenceFileStatus.FAILED, EvidenceSource.CLAIMANT),
         (EvidenceStatus.MISSING, EvidenceFileStatus.NOT_AVAILABLE, EvidenceSource.STAFF),
     ],

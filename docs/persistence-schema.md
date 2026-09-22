@@ -456,8 +456,16 @@ the append-only audit collection through a bounded, filterable projection.
   active state is persisted in the independent staff identity store. Administration reads and
   updates these records through their repository interfaces; no Control Plane route writes Claim
   State or Workbench records.
-- Customer and Staff account writes use monotonically increasing revisions. Session revocation
-  advances only the targeted session revision and preserves its prior creation and expiry times.
+- Customer profile and communication-preference writes use the expected Customer revision in the
+  same compare-and-set operation that advances the monotonically increasing revision. Staff
+  account writes also use monotonically increasing revisions. Session revocation advances only
+  the targeted session revision and preserves its prior creation and expiry times.
+- Claimant account email is stored in its trimmed lowercase form. The authoritative account save
+  checks the expected account revision and normalized-email uniqueness as one operation. Fixture
+  persistence serializes that check and write; SQLite relies on its unique email constraint and
+  maps the constraint result to the same typed repository conflict. When different accounts race
+  for one email, exactly one write succeeds and the other leaves its account and revision
+  unchanged.
 - Existing local SQLite identity databases are upgraded in place with account revisions,
   timestamps, opaque session IDs, and session revisions. The migration preserves account/session
   relationships and assigns each legacy session one stable `ias_` ID before creating its unique
@@ -478,6 +486,16 @@ the append-only audit collection through a bounded, filterable projection.
 - An idempotency record identifies an accepted operation and request fingerprint. An
   identical replay returns the current authorised projection; changed input under the
   same key is a conflict.
+- A claimant message-turn idempotency record also retains `message_turn_kind`
+  (`legacy_agent`, `runtime`, or `message_only`) and the immutable
+  `message_turn_revision`. Fixture and MongoDB can resolve the original record by actor, route,
+  Claim, and claimant `message_id`, so the same `client_message_id` under a different retry key
+  still reports the committed historical revision. The kind defines the complete required child
+  association set: legacy Agent requires its decision and Agent message, Runtime requires its
+  Runtime trace and Agent message, and message-only declares no such child. A missing declared
+  child is an integrity failure and cannot be returned as a partial message-only success. Legacy
+  records without the new coordinates use their stored response and existing durable associations
+  for compatibility; replay does not rewrite them or repeat side effects.
 - A Workbench mutation idempotency record also retains the Action Registry version, exact
   `action_code`, and exact `target_ref` resolved before execution. These fields preserve the
   runtime authorization decision with the existing atomic Claim mutation; they do not create a
@@ -577,10 +595,18 @@ the append-only audit collection through a bounded, filterable projection.
   An identical idempotent replay is accepted; different content under the same identity is
   rejected. A summary that conflicts with current Claim State is omitted and recorded as a
   `summary_state_mismatch`; it never overwrites Claim facts.
-- Complete messages remain durable outside the bounded summary. Message lists use the stable
-  `(created_at, message_id)` ascending order, including when timestamps are equal.
+- Complete messages remain durable outside the bounded summary. Message lists use persisted
+  `in_reply_to` edges as the authoritative causal order, placing each reply after its target;
+  independent messages use the stable `(created_at, message_id)` ascending tie-break in
+  repositories, claimant history, and Workbench, including when timestamps are equal.
 - A message `in_reply_to` reference may identify only a message belonging to the same claim and
   interaction session.
+- Fixture and MongoDB writes fail closed when Message Evidence references are missing, duplicated,
+  or owned by another Claim; when a reply crosses Claim or Session boundaries; or when actor,
+  visibility, and claimant retry identity disagree.
+- Fixture and MongoDB writes apply the shared Evidence registry and lifecycle rules before every
+  Evidence persistence path. Kinds, related field codes, and `needed_for` purposes must be
+  registered and unique, and status/file-status combinations must describe a coherent lifecycle.
 - Resuming creates or activates an interaction session for the same `claim_id`; it does
   not create a duplicate working claim.
 - At most one claimant interaction session is active for a working claim unless a later
