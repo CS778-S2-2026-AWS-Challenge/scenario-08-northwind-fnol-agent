@@ -61,6 +61,7 @@ from backend.repositories.account_data import (
     AccountCursorKey,
     AccountDataRepository,
     AccountRecord,
+    ClaimantContactSelectionConflict,
     PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
     account_record_identity,
@@ -933,7 +934,11 @@ def select_payout_contact(
             auth_source=principal.auth_source,
         ),
         reason='Claimant selected a protected payout destination and preferred contact channel.',
-        source_refs=[payment_source_ref, 'field:claimant.contact_preference'],
+        source_refs=[
+            payment_source_ref,
+            'field:claimant.contact_preference',
+            contact_authority_ref,
+        ],
         visibility=AuditVisibility.AUDIT_ONLY,
         idempotency_key=key,
         claim_revision=updated_claim.revision,
@@ -945,10 +950,24 @@ def select_payout_contact(
             expected,
             destination.payment_destination_id,
             destination.revision,
+            identity_repository,
+            account.revision,
+            contact_preference,
             idempotency,
             evaluation,
             audit,
         )
+    except ClaimantContactSelectionConflict as error:
+        raise ApiError(
+            status_code=409,
+            code='CONTACT_AUTHORITY_CONFLICT',
+            message=(
+                'The claimant contact details changed before the selection was saved. '
+                'Reload contact details and try again.'
+            ),
+            details=[ErrorDetail(field='contact_preference', reason=error.reason)],
+            retryable=True,
+        ) from error
     except PaymentDestinationSelectionConflict as error:
         raise ApiError(
             status_code=409,

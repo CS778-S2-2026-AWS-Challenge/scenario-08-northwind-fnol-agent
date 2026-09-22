@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './PayoutContactPanel.css'
 
 const CONTACT_METHODS = [
@@ -38,6 +38,18 @@ export default function PayoutContactPanel({
   const [accountType, setAccountType] = useState('')
   const [accountNumber, setAccountNumber] = useState('')
   const [formError, setFormError] = useState('')
+  const claimId = claim?.claim_id || ''
+  const claimPaymentDestinationId = claim?.payment_destination_id || ''
+
+  useEffect(() => {
+    setSelectedDestinationId(claimPaymentDestinationId)
+    setContactPreference(existingContact)
+    setAddingDestination(false)
+    setAccountType('')
+    setAccountNumber('')
+    setFormError('')
+  }, [claimId, claimPaymentDestinationId, existingContact])
+
   const activeDestinationIds = useMemo(
     () => new Set(activeDestinations.map((item) => item.payment_destination_id)),
     [activeDestinations],

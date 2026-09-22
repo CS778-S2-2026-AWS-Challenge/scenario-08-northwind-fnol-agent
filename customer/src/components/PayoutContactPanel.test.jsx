@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -107,6 +107,48 @@ describe('PayoutContactPanel', () => {
     expect(screen.getByRole('radio', { name: /SMS .*Add this contact detail/i })).toBeDisabled()
     expect(screen.getByRole('radio', { name: /Phone call .*Add this contact detail/i })).toBeDisabled()
     expect(screen.getByRole('radio', { name: /In-app Northwind account messages/i })).toBeEnabled()
+  })
+
+  it('clears Claim-scoped selection and sensitive draft when the active Claim changes', async () => {
+    const user = userEvent.setup()
+    const destination = {
+      payment_destination_id: 'pyd_claim_scope',
+      account_type: 'Everyday',
+      masked_account_number: '***************6700',
+      active: true,
+    }
+    const sharedProps = {
+      account,
+      destinations: [destination],
+      loading: false,
+      loadError: '',
+      busy: false,
+      onAddDestination: vi.fn(),
+      onContinue: vi.fn(),
+      onManageContact: vi.fn(),
+      onLogin: vi.fn(),
+    }
+    const claimA = { ...claim, claim_id: 'clm_scope_a' }
+    const claimB = { ...claim, claim_id: 'clm_scope_b' }
+
+    const { rerender } = render(
+      <PayoutContactPanel {...sharedProps} claim={claimA} />,
+    )
+
+    await user.click(screen.getByRole('radio', { name: /Everyday .*6700/i }))
+    await user.click(screen.getByRole('radio', { name: /Email claimant@example.test/i }))
+    await user.click(screen.getByRole('button', { name: 'Add another account' }))
+    await user.type(screen.getByLabelText('Account type'), 'Sensitive draft')
+    await user.type(screen.getByLabelText('Bank account number'), '12-3456-1234567-00')
+
+    rerender(<PayoutContactPanel {...sharedProps} claim={claimB} />)
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Bank account number')).not.toBeInTheDocument()
+    })
+    expect(screen.getByRole('radio', { name: /Everyday .*6700/i })).not.toBeChecked()
+    expect(screen.getByRole('radio', { name: /Email claimant@example.test/i })).not.toBeChecked()
+    expect(screen.getByRole('button', { name: 'Continue to agreement' })).toBeDisabled()
   })
 
   it('requires login before exposing protected payout controls', () => {

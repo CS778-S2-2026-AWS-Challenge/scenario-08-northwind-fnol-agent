@@ -3,6 +3,8 @@
 from datetime import datetime
 from typing import Protocol
 
+from backend.repositories.identity import IdentityRepository
+
 from backend.domain.account_data import (
     IdentityDocumentRecord,
     PaymentDestinationRecord,
@@ -36,6 +38,51 @@ class PaymentDestinationSelectionConflict(RepositoryConflict):
         self.payment_destination_id = payment_destination_id
         self.reason = reason
         self.current_revision = current_revision
+
+
+class ClaimantContactSelectionConflict(RepositoryConflict):
+    """The claimant profile authority changed before payout/contact commit."""
+
+    def __init__(
+        self,
+        customer_id: str,
+        *,
+        reason: str,
+        current_revision: int | None = None,
+    ) -> None:
+        super().__init__(f'Claimant contact authority for {customer_id} is {reason}.')
+        self.customer_id = customer_id
+        self.reason = reason
+        self.current_revision = current_revision
+
+
+def validate_claimant_contact_authority(
+    identity_repository: IdentityRepository,
+    customer_id: str,
+    expected_revision: int,
+    contact_preference: str,
+) -> None:
+    account = identity_repository.get_account(customer_id)
+    if account is None or not account.active:
+        raise ClaimantContactSelectionConflict(customer_id, reason='unavailable')
+    if account.revision != expected_revision:
+        raise ClaimantContactSelectionConflict(
+            customer_id,
+            reason='changed',
+            current_revision=account.revision,
+        )
+    channel = contact_preference.strip().lower()
+    if channel == 'in_app':
+        return
+    if channel == 'email' and account.email.strip():
+        return
+    if channel in {'phone', 'sms'} and account.phone.strip():
+        return
+    raise ClaimantContactSelectionConflict(
+        customer_id,
+        reason='unusable',
+        current_revision=account.revision,
+    )
 
 
 class PolicySelectionConflict(RepositoryConflict):
@@ -90,6 +137,7 @@ def payout_contact_selection_audit_matches(
     claim: WorkingClaim,
     payment_destination_id: str,
     payment_destination_revision: int,
+    contact_authority_revision: int,
     idempotency: IdempotencyRecord,
     event: AuditEventEnvelope,
 ) -> bool:
@@ -98,6 +146,8 @@ def payout_contact_selection_audit_matches(
         claim.payment_destination_id == payment_destination_id
         and contact_preference is not None
         and contact_preference.status is FormStatus.CONFIRMED
+        and f'claimant_profile:revision:{contact_authority_revision}'
+        in contact_preference.source_refs
         and event.event_type is AuditEventType.ACTION_COMPLETED
         and event.outcome is AuditOutcome.SUCCEEDED
         and event.subject.subject_type is AuditSubjectType.CLAIM
@@ -111,6 +161,7 @@ def payout_contact_selection_audit_matches(
         == [
             f'payment_destination:{payment_destination_id}:revision:{payment_destination_revision}',
             'field:claimant.contact_preference',
+            f'claimant_profile:revision:{contact_authority_revision}',
         ]
         and event.visibility is AuditVisibility.AUDIT_ONLY
     )
@@ -207,6 +258,9 @@ class AccountDataRepository(Protocol):
         expected_revision: int,
         payment_destination_id: str,
         payment_destination_revision: int,
+        identity_repository: IdentityRepository,
+        contact_authority_revision: int,
+        contact_preference: str,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord,
         audit_event: AuditEventEnvelope,

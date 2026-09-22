@@ -99,7 +99,9 @@ from backend.repositories.account_data import (
     account_record_identity,
     payout_contact_selection_audit_matches,
     policy_selection_audit_matches,
+    validate_claimant_contact_authority,
 )
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.assets import (
     AssetSelectionRevisionConflictError,
     AssetSelectionSnapshotConflictError,
@@ -506,6 +508,9 @@ class FixtureRepository(PersistenceRepository):
         expected_revision: int,
         payment_destination_id: str,
         payment_destination_revision: int,
+        identity_repository: IdentityRepository,
+        contact_authority_revision: int,
+        contact_preference: str,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord,
         audit_event: AuditEventEnvelope,
@@ -531,6 +536,12 @@ class FixtureRepository(PersistenceRepository):
                     reason='changed',
                     current_revision=destination.revision,
                 )
+            validate_claimant_contact_authority(
+                identity_repository,
+                claim.customer_id,
+                contact_authority_revision,
+                contact_preference,
+            )
             if (
                 idempotency.actor_id != claim.customer_id
                 or idempotency.claim_id != claim.claim_id
@@ -539,6 +550,7 @@ class FixtureRepository(PersistenceRepository):
                     claim,
                     payment_destination_id,
                     payment_destination_revision,
+                    contact_authority_revision,
                     idempotency,
                     audit_event,
                 )

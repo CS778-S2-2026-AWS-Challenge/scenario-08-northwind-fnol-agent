@@ -449,6 +449,7 @@ def test_payout_contact_selection_is_atomic_masked_and_resumable(adapter: str) -
     assert selection_events[0].source_refs == [
         f'payment_destination:{payment["payment_destination_id"]}:revision:1',
         'field:claimant.contact_preference',
+        'claimant_profile:revision:1',
     ]
 
 
@@ -566,71 +567,91 @@ def test_payout_contact_progression_fails_closed_after_phone_is_removed(
     assert detail.json()['primary_action']['available'] is True
 
 
+@pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
 def test_payout_contact_progression_fails_closed_when_profile_changes_before_claim_commit(
-    app: Any,
-    client: TestClient,
-    repository: FixtureRepository,
-    monkeypatch: pytest.MonkeyPatch,
+    adapter: str,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
-    account = client.get('/api/v1/account', headers=owner)
-    with_phone = client.patch(
-        '/api/v1/account/profile',
-        headers={**owner, 'If-Match': str(account.json()['revision'])},
-        json={'phone': '020 000 0000'},
-    )
-    assert with_phone.status_code == 200, with_phone.text
-
-    payment = _post(
-        client,
-        owner,
-        '/api/v1/account/payment-destinations',
-        'payout-race-payment',
-        {'account_type': 'cheque', 'account_number': '12-3456-1111222-00'},
-    )
-    claim = client.post(
-        '/api/v1/claims',
-        headers={**owner, 'Idempotency-Key': 'payout-race-claim'},
-        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'home'},
-    ).json()['claim']
-    ready = _advance_claim_to_payout_contact(repository, claim['claim_id'])
-    route = f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections'
-    headers = {
-        **owner,
-        'Idempotency-Key': 'payout-race-select',
-        'If-Match': str(ready.revision),
-    }
-    payload = {
-        'payment_destination_id': payment['payment_destination_id'],
-        'contact_preference': 'sms',
-    }
-
-    identity_repository = app.state.identity_repository
-    original_save = repository.save_payout_contact_selection
-
-    def race_save(*args: Any, **kwargs: Any) -> None:
-        current = identity_repository.get_account('cus_demo')
-        assert current is not None
-        identity_repository.save_account(
-            replace(current, phone='', revision=current.revision + 1),
-            current.revision,
+    repository: FixtureRepository | MongoDBRepository
+    if adapter == 'fixture':
+        repository = FixtureRepository()
+    else:
+        repository = MongoDBRepository(
+            mongomock.MongoClient(),
+            f'payout_contact_authority_race_{adapter}',
         )
-        original_save(*args, **kwargs)
+        repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    app = create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), repository)
 
-    monkeypatch.setattr(repository, 'save_payout_contact_selection', race_save)
-    selected = client.post(route, headers=headers, json=payload)
-    replay = client.post(route, headers=headers, json=payload)
-    detail = client.get(f'/api/v1/claims/{claim["claim_id"]}', headers=owner)
+    with TestClient(app) as client:
+        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        account = client.get('/api/v1/account', headers=owner)
+        with_phone = client.patch(
+            '/api/v1/account/profile',
+            headers={**owner, 'If-Match': str(account.json()['revision'])},
+            json={'phone': '020 000 0000'},
+        )
+        assert with_phone.status_code == 200, with_phone.text
 
-    assert selected.status_code == 201, selected.text
-    assert selected.json()['customer_next_step']['status'] == 'ready_to_create'
-    assert selected.json()['primary_action']['action_code'] == 'claimant.review_payout_contact'
-    assert replay.status_code == 201, replay.text
-    assert replay.json()['customer_next_step']['status'] == 'ready_to_create'
-    assert replay.json()['primary_action']['action_code'] == 'claimant.review_payout_contact'
+        payment = _post(
+            client,
+            owner,
+            '/api/v1/account/payment-destinations',
+            f'payout-race-payment-{adapter}',
+            {'account_type': 'cheque', 'account_number': '12-3456-1111222-00'},
+        )
+        claim = client.post(
+            '/api/v1/claims',
+            headers={**owner, 'Idempotency-Key': f'payout-race-claim-{adapter}'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'home'},
+        ).json()['claim']
+        ready = _advance_claim_to_payout_contact(repository, claim['claim_id'])
+        route = f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections'
+        headers = {
+            **owner,
+            'Idempotency-Key': f'payout-race-select-{adapter}',
+            'If-Match': str(ready.revision),
+        }
+        payload = {
+            'payment_destination_id': payment['payment_destination_id'],
+            'contact_preference': 'sms',
+        }
+
+        identity_repository = app.state.identity_repository
+        original_save = repository.save_payout_contact_selection
+
+        def race_save(*args: Any, **kwargs: Any) -> None:
+            current = identity_repository.get_account('cus_demo')
+            assert current is not None
+            identity_repository.save_account(
+                replace(current, phone='', revision=current.revision + 1),
+                current.revision,
+            )
+            original_save(*args, **kwargs)
+
+        repository.save_payout_contact_selection = race_save  # type: ignore[method-assign]
+        selected = client.post(route, headers=headers, json=payload)
+        repository.save_payout_contact_selection = original_save  # type: ignore[method-assign]
+        detail = client.get(f'/api/v1/claims/{claim["claim_id"]}', headers=owner)
+
+    assert selected.status_code == 409, selected.text
+    assert selected.json()['error']['code'] == 'CONTACT_AUTHORITY_CONFLICT'
     assert detail.status_code == 200, detail.text
     assert detail.json()['customer_next_step']['status'] == 'ready_to_create'
     assert detail.json()['primary_action']['action_code'] == 'claimant.review_payout_contact'
+
+    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    assert stored is not None
+    assert stored.revision == ready.revision
+    assert stored.payment_destination_id is None
+    assert 'claimant.contact_preference' not in stored.form
+    events = repository.list_audit_events_internal(
+        AuditSubject(
+            subject_type=AuditSubjectType.CLAIM,
+            subject_id=claim['claim_id'],
+            claim_id=claim['claim_id'],
+        )
+    )
+    assert all(event.idempotency_key != f'payout-race-select-{adapter}' for event in events)
 
 
 def test_payout_contact_selection_rejects_stale_foreign_and_unusable_inputs(
@@ -846,6 +867,9 @@ def test_payout_contact_repository_rechecks_destination_revision_at_commit(
         expected_revision,
         payment_destination_id,
         payment_destination_revision,
+        identity_repository,
+        contact_authority_revision,
+        contact_preference,
         idempotency,
         branch_evaluation,
         audit_event,
@@ -856,6 +880,7 @@ def test_payout_contact_repository_rechecks_destination_revision_at_commit(
             'source_refs': [
                 f'payment_destination:{payment_destination_id}:revision:{changed_revision}',
                 'field:claimant.contact_preference',
+                f'claimant_profile:revision:{contact_authority_revision}',
             ]
         }
     )
@@ -866,6 +891,9 @@ def test_payout_contact_repository_rechecks_destination_revision_at_commit(
             expected_revision,
             payment_destination_id,
             changed_revision,
+            identity_repository,
+            contact_authority_revision,
+            contact_preference,
             idempotency,
             branch_evaluation,
             changed_audit,

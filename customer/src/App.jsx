@@ -2544,7 +2544,7 @@ function App() {
     if (conversationActionKind === 'payout-contact') {
       return (
         <PayoutContactPanel
-          key={conversationAction.identity}
+          key={`${claim.claim_id}:${conversationAction.identity}`}
           account={account}
           claim={claim}
           destinations={paymentDestinationState.items}
