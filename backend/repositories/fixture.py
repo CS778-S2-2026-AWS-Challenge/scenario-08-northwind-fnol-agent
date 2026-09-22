@@ -1142,6 +1142,17 @@ class FixtureRepository(PersistenceRepository):
         claim = self._claims.get(claim_id)
         if claim is None or claim.customer_id != anonymous_customer_id:
             return None
+        promoted_idempotency = [
+            replace(record, actor_id=customer_id)
+            for record in self._idempotency.values()
+            if record.claim_id == claim_id and record.actor_id == anonymous_customer_id
+        ]
+        for promoted_record in promoted_idempotency:
+            existing = self._idempotency.get(
+                (customer_id, promoted_record.route, promoted_record.key)
+            )
+            if existing is not None and existing != promoted_record:
+                raise IdempotencyConflict(promoted_record.key)
         promoted_claim = claim.model_copy(update={'customer_id': customer_id})
         realtime_event = self._prepare_realtime_mutation(
             RealtimeMutation.CLAIM_OWNER_CHANGED,
@@ -1632,6 +1643,40 @@ class FixtureRepository(PersistenceRepository):
             and record.message_id == message_id
         ]
         return deepcopy(matches[-1]) if matches else None
+
+    def reserve_message_turn_idempotency_alias(
+        self,
+        actor_id: str,
+        route: str,
+        claim_id: str,
+        message_id: str,
+        key: str,
+        request_fingerprint: str,
+    ) -> IdempotencyRecord | None:
+        with self._claim_mutation_lock:
+            original = self.find_message_turn_idempotency(
+                actor_id,
+                route,
+                claim_id,
+                message_id,
+            )
+            if original is None:
+                return None
+            if original.request_fingerprint != request_fingerprint:
+                raise IdempotencyConflict(key)
+            alias = replace(
+                original,
+                key=key,
+                request_fingerprint=request_fingerprint,
+            )
+            lookup = (actor_id, route, key)
+            existing = self._idempotency.get(lookup)
+            if existing is not None:
+                if existing != alias:
+                    raise IdempotencyConflict(key)
+                return deepcopy(existing)
+            self._idempotency[lookup] = alias
+            return deepcopy(alias)
 
     def save_idempotency(self, record: IdempotencyRecord) -> None:
         lookup = (record.actor_id, record.route, record.key)
@@ -2568,6 +2613,13 @@ class FixtureRepository(PersistenceRepository):
             and idempotency.message_id == claimant_message.message_id
             and idempotency.agent_message_id == agent_message.message_id
             and idempotency.decision_id == decision.decision_id
+            and (
+                (runtime_records is None and idempotency.runtime_result_id is None)
+                or (
+                    runtime_records is not None
+                    and idempotency.runtime_result_id == runtime_records.result.result_id
+                )
+            )
             and (handoff is None or handoff.claim_id == claim.claim_id)
             and (handoff is None or idempotency.handoff_id == handoff.handoff_id)
             and decision.handoff_id == (handoff.handoff_id if handoff is not None else None)

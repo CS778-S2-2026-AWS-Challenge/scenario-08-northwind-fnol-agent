@@ -110,6 +110,7 @@ class IdempotencyRecord:
     agent_message_id: str | None = None
     decision_id: str | None = None
     runtime_trace_id: str | None = None
+    runtime_result_id: str | None = None
     handoff_id: str | None = None
     follow_up_id: str | None = None
     action_registry_version: str | None = None
@@ -119,7 +120,7 @@ class IdempotencyRecord:
     staff_agent_message_id: str | None = None
     staff_agent_draft_id: str | None = None
     staff_agent_execution_id: str | None = None
-    message_turn_kind: Literal['legacy_agent', 'runtime', 'message_only'] | None = None
+    message_turn_kind: Literal['legacy_agent', 'message_only'] | None = None
     message_turn_revision: int | None = None
     response_payload: dict[str, Any] | None = None
 
@@ -475,6 +476,18 @@ class ClaimRepository(Protocol):
         message_id: str,
     ) -> IdempotencyRecord | None:
         """Return the durable retry identity that committed one claimant message."""
+        raise NotImplementedError
+
+    def reserve_message_turn_idempotency_alias(
+        self,
+        actor_id: str,
+        route: str,
+        claim_id: str,
+        message_id: str,
+        key: str,
+        request_fingerprint: str,
+    ) -> IdempotencyRecord | None:
+        """Atomically bind a new retry key to an existing claimant message turn."""
         raise NotImplementedError
 
     def save_idempotency(self, record: IdempotencyRecord) -> None:

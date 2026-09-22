@@ -509,6 +509,7 @@ def _composite_agent_turn(
         message_id=claimant_message.message_id,
         agent_message_id=agent_message.message_id,
         decision_id=decision.decision_id,
+        runtime_result_id=runtime_records.result.result_id,
         handoff_id=handoff.handoff_id,
     )
     return (
@@ -3580,6 +3581,7 @@ def test_agent_turn_reads_back_target_runtime_records_by_turn_scope(
         message_id=claimant_message.message_id,
         agent_message_id=agent_message.message_id,
         decision_id=decision.decision_id,
+        runtime_result_id=runtime_records.result.result_id,
     )
 
     repository.save_agent_turn(
