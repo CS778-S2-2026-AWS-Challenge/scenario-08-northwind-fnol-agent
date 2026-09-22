@@ -563,6 +563,75 @@ def mutation_contract_repository(request: pytest.FixtureRequest) -> PersistenceR
     return repository
 
 
+def test_message_turn_alias_reservation_has_provider_parity(
+    mutation_contract_repository: PersistenceRepository,
+) -> None:
+    repository = mutation_contract_repository
+    original = IdempotencyRecord(
+        actor_id='cus_alias',
+        route='/api/v1/claims/clm_alias/sessions/ses_alias/messages',
+        key='original-key',
+        request_fingerprint='same-request',
+        claim_id='clm_alias',
+        session_id='ses_alias',
+        message_id='msg_alias',
+        message_turn_kind='message_only',
+        message_turn_revision=2,
+    )
+    repository.save_idempotency(original)
+
+    missing = repository.reserve_message_turn_idempotency_alias(
+        original.actor_id,
+        original.route,
+        original.claim_id,
+        'msg_missing',
+        'missing-key',
+        original.request_fingerprint,
+    )
+    assert missing is None
+    with pytest.raises(IdempotencyConflict):
+        repository.reserve_message_turn_idempotency_alias(
+            original.actor_id,
+            original.route,
+            original.claim_id,
+            original.message_id or '',
+            'fingerprint-conflict',
+            'different-request',
+        )
+
+    alias = repository.reserve_message_turn_idempotency_alias(
+        original.actor_id,
+        original.route,
+        original.claim_id,
+        original.message_id or '',
+        'alias-key',
+        original.request_fingerprint,
+    )
+    assert alias == replace(original, key='alias-key')
+    assert (
+        repository.reserve_message_turn_idempotency_alias(
+            original.actor_id,
+            original.route,
+            original.claim_id,
+            original.message_id or '',
+            'alias-key',
+            original.request_fingerprint,
+        )
+        == alias
+    )
+
+    repository.save_idempotency(replace(original, key='occupied-key', message_id='msg_other'))
+    with pytest.raises(IdempotencyConflict):
+        repository.reserve_message_turn_idempotency_alias(
+            original.actor_id,
+            original.route,
+            original.claim_id,
+            original.message_id or '',
+            'occupied-key',
+            original.request_fingerprint,
+        )
+
+
 def test_handoff_mutation_persists_atomic_audit_for_fixture_and_mongo(
     mutation_contract_repository: PersistenceRepository,
 ) -> None:
