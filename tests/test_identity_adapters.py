@@ -536,9 +536,11 @@ def test_claimant_identity_revision_guard_rejects_prior_profile_write(
     )
     repository.save_account(updated, account.revision)
 
-    with pytest.raises(RevisionConflict) as conflict:
-        with repository.hold_account_revision(account.customer_id, account.revision):
-            raise AssertionError('stale guard must not yield')
+    with (
+        pytest.raises(RevisionConflict) as conflict,
+        repository.hold_account_revision(account.customer_id, account.revision),
+    ):
+        raise AssertionError('stale guard must not yield')
 
     assert conflict.value.current_revision == updated.revision
 
@@ -559,9 +561,11 @@ def test_claimant_identity_revision_guard_releases_after_exception(
     )
     assert account is not None
 
-    with pytest.raises(RuntimeError, match='claim write failed'):
-        with repository.hold_account_revision(account.customer_id, account.revision):
-            raise RuntimeError('claim write failed')
+    with (
+        pytest.raises(RuntimeError, match='claim write failed'),
+        repository.hold_account_revision(account.customer_id, account.revision),
+    ):
+        raise RuntimeError('claim write failed')
 
     current = repository.get_account(account.customer_id)
     assert current is not None
