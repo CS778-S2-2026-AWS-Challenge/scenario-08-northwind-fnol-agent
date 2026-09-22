@@ -7,7 +7,7 @@ exists.
 
 The mapping is derived from the current domain records, `PersistenceRepository`
 protocol, and `MongoDBRepository` implementation at `origin/main`
-`2264fa7905dc0fa4fa51d90415350f69b69cb568`. It preserves provider-neutral record
+`2d6499a7fb22a1e3a872f32241f8cdfa78e2dcf5`. It preserves provider-neutral record
 identity, ownership, ordering, uniqueness, revision, idempotency, audit, and atomic
 write boundaries. It does not define a new API field, state, permission, lifecycle,
 or business rule.

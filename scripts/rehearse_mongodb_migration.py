@@ -18,8 +18,8 @@ from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 from pymongo.read_concern import ReadConcern
 
-INVENTORY_VERSION = 'aws-migration-preparation@2264fa79'
-SOURCE_HEAD = '2264fa7905dc0fa4fa51d90415350f69b69cb568'
+INVENTORY_VERSION = 'aws-migration-preparation@2d6499a7'
+SOURCE_HEAD = '2d6499a7fb22a1e3a872f32241f8cdfa78e2dcf5'
 RECONCILIATION_ISSUES = ('#984', '#985', '#986', '#987', '#786')
 ITEM_BUDGET_BYTES = 300 * 1024
 TRANSACTION_ACTION_LIMIT = 100
