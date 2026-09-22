@@ -883,7 +883,7 @@ def select_payout_contact(
     )
     contact_field = contact_field.model_copy(
         update={
-            'source_refs': list(dict.fromkeys([*contact_field.source_refs, contact_authority_ref]))
+            'source_refs': list(dict.fromkeys([*contact_field.source_refs, contact_authority_ref])),
         }
     )
     updated_claim = claim.model_copy(
