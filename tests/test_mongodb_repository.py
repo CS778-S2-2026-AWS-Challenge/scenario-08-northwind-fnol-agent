@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime
 from threading import Barrier, Event, Lock, Thread, current_thread
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, TypeVar, cast, overload
 
 import mongomock
 import pytest
@@ -632,6 +632,9 @@ def test_message_turn_alias_reservation_has_provider_parity(
         )
 
 
+_DefaultT = TypeVar('_DefaultT')
+
+
 class _BlockingIdempotencyStore(dict[tuple[str, str, str], IdempotencyRecord]):
     def __init__(
         self,
@@ -649,11 +652,27 @@ class _BlockingIdempotencyStore(dict[tuple[str, str, str], IdempotencyRecord]):
     ) -> dict[tuple[str, str, str], IdempotencyRecord]:
         return dict(self)
 
+    @overload
     def get(
         self,
         key: tuple[str, str, str],
-        default: IdempotencyRecord | None = None,
-    ) -> IdempotencyRecord | None:
+        /,
+    ) -> IdempotencyRecord | None: ...
+
+    @overload
+    def get(
+        self,
+        key: tuple[str, str, str],
+        /,
+        default: IdempotencyRecord | _DefaultT,
+    ) -> IdempotencyRecord | _DefaultT: ...
+
+    def get(
+        self,
+        key: tuple[str, str, str],
+        /,
+        default: object = None,
+    ) -> IdempotencyRecord | object:
         if key == self.blocked_key and not self._blocked:
             self._blocked = True
             self.reached.set()
