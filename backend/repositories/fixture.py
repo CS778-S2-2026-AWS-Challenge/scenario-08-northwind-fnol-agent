@@ -13,6 +13,12 @@ from backend.domain.account_data import (
 from backend.domain.agent_context_runtime import VerifiedConversationSummary
 from backend.domain.assets import AssetRecord, ClaimAssetSnapshot
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
+from backend.domain.claim_creation import (
+    ClaimCreationOperationRecord,
+    ClaimCreationOperationStatus,
+    assert_claim_creation_operation_transition,
+    evidence_snapshot_fingerprint,
+)
 from backend.domain.evidence import (
     assert_material_history_is_append_only,
     validate_evidence_record,
@@ -157,6 +163,7 @@ class FixtureRepository(PersistenceRepository):
         self._staff_agent_executions: dict[str, StaffAgentExecutionRecord] = {}
         self._decisions: dict[str, AgentDecisionRecord] = {}
         self._branch_evaluations: dict[str, BranchEvaluationRecord] = {}
+        self._claim_creation_operations: dict[str, ClaimCreationOperationRecord] = {}
         self._assessor_routing_operations: dict[str, AssessorRoutingOperation] = {}
         self._evidence: dict[str, EvidenceRecord] = {}
         self._evidence_claim_links: dict[tuple[str, str], EvidenceClaimLink] = {}
@@ -677,6 +684,7 @@ class FixtureRepository(PersistenceRepository):
             'staff_agent_executions': len(self._staff_agent_executions),
             'agent_decisions': len(self._decisions),
             'branch_evaluations': len(self._branch_evaluations),
+            'claim_creation_operations': len(self._claim_creation_operations),
             'assessor_routing_operations': len(self._assessor_routing_operations),
             'evidence': len(self._evidence),
             'evidence_claim_links': len(self._evidence_claim_links),
@@ -717,6 +725,7 @@ class FixtureRepository(PersistenceRepository):
         self._staff_agent_executions.clear()
         self._decisions.clear()
         self._branch_evaluations.clear()
+        self._claim_creation_operations.clear()
         self._assessor_routing_operations.clear()
         self._evidence.clear()
         self._evidence_claim_links.clear()
@@ -1082,6 +1091,7 @@ class FixtureRepository(PersistenceRepository):
             self._follow_ups,
             self._messages,
             self._decisions,
+            self._claim_creation_operations,
             self._assessor_routing_operations,
             self._evidence,
             self._motor_other_drivers,
@@ -1971,6 +1981,125 @@ class FixtureRepository(PersistenceRepository):
                 record.evaluation_id,
             ),
         )
+
+    def get_claim_creation_operation(
+        self,
+        operation_id: str,
+    ) -> ClaimCreationOperationRecord | None:
+        operation = self._claim_creation_operations.get(operation_id)
+        return deepcopy(operation) if operation is not None else None
+
+    def reserve_claim_creation_operation(
+        self,
+        operation: ClaimCreationOperationRecord,
+    ) -> bool:
+        with self._claim_mutation_lock:
+            claim = self._claims.get(operation.claim_id)
+            decision = self._decisions.get(operation.authorised_decision_id)
+            evidence = [
+                record
+                for record in self._evidence.values()
+                if record.claim_id == operation.claim_id
+            ]
+            if (
+                operation.status is not ClaimCreationOperationStatus.PREPARED
+                or claim is None
+                or claim.customer_id != operation.customer_id
+                or claim.revision != operation.authorised_revision
+                or claim.external_claim is not None
+                or claim.terminal_disposition is not None
+                or decision is None
+                or decision.claim_id != operation.claim_id
+                or decision.resulting_revision != operation.authorised_revision
+                or evidence_snapshot_fingerprint(evidence)
+                != operation.evidence_snapshot_fingerprint
+            ):
+                raise KeyError(operation.claim_id)
+
+            existing_for_claim = next(
+                (
+                    item
+                    for item in self._claim_creation_operations.values()
+                    if item.claim_id == operation.claim_id
+                ),
+                None,
+            )
+            if existing_for_claim is not None:
+                if existing_for_claim.operation_id != operation.operation_id:
+                    raise IdempotencyConflict(operation.operation_id)
+                if existing_for_claim.status is ClaimCreationOperationStatus.RETRYABLE_FAILURE:
+                    try:
+                        assert_claim_creation_operation_transition(existing_for_claim, operation)
+                    except ValueError as conflict:
+                        raise IdempotencyConflict(operation.operation_id) from conflict
+                    self._claim_creation_operations[operation.operation_id] = deepcopy(operation)
+                    return True
+                if (
+                    existing_for_claim.request_fingerprint != operation.request_fingerprint
+                    or existing_for_claim.evidence_snapshot_fingerprint
+                    != operation.evidence_snapshot_fingerprint
+                    or existing_for_claim.route != operation.route
+                    or existing_for_claim.integration_source is not operation.integration_source
+                ):
+                    raise IdempotencyConflict(operation.operation_id)
+                return False
+
+            self._claim_creation_operations[operation.operation_id] = deepcopy(operation)
+            return True
+
+    def save_claim_creation_operation(
+        self,
+        operation: ClaimCreationOperationRecord,
+    ) -> None:
+        with self._claim_mutation_lock:
+            current = self._claim_creation_operations.get(operation.operation_id)
+            if current is None:
+                raise KeyError(operation.operation_id)
+            try:
+                assert_claim_creation_operation_transition(current, operation)
+            except ValueError as conflict:
+                raise IdempotencyConflict(operation.operation_id) from conflict
+            self._claim_creation_operations[operation.operation_id] = deepcopy(operation)
+
+    def save_claim_creation_outcome(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        operation: ClaimCreationOperationRecord,
+        branch_evaluation: BranchEvaluationRecord,
+    ) -> None:
+        with self._claim_mutation_lock:
+            self._validate_claim_mutation(claim, expected_revision)
+            self._validate_branch_evaluation(claim, branch_evaluation)
+            current = self._claim_creation_operations.get(operation.operation_id)
+            evidence = [
+                record for record in self._evidence.values() if record.claim_id == claim.claim_id
+            ]
+            if (
+                current is None
+                or operation.status is not ClaimCreationOperationStatus.ACCEPTED
+                or operation.result is None
+                or claim.external_claim != operation.result
+                or claim.external_claim_source_revision != operation.authorised_revision
+                or claim.external_claim_fingerprint != operation.request_fingerprint
+                or evidence_snapshot_fingerprint(evidence)
+                != operation.evidence_snapshot_fingerprint
+            ):
+                raise KeyError(claim.claim_id)
+            try:
+                assert_claim_creation_operation_transition(current, operation)
+            except ValueError as conflict:
+                raise IdempotencyConflict(operation.operation_id) from conflict
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.CLAIM_CHANGED,
+                claim,
+                operation_correlation=operation.operation_id,
+            )
+            assert realtime_event is not None
+            self._claims[claim.claim_id] = deepcopy(claim)
+            self._claim_creation_operations[operation.operation_id] = deepcopy(operation)
+            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
+            self._commit_realtime_event(realtime_event)
 
     def get_assessor_routing_operation(
         self,

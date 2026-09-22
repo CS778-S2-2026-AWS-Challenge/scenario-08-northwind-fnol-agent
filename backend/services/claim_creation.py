@@ -10,6 +10,7 @@ from backend.domain.agent_action_registry import (
     action_contract,
 )
 from backend.domain.branch_registry import BranchRuleEvaluator
+from backend.domain.claim_creation import evidence_snapshot_fingerprint
 from backend.domain.models import (
     ActorType,
     AgentAction,
@@ -257,6 +258,7 @@ def create_claim_from_confirmed_report(
                 working_claim_id=claim_id,
                 claim_revision=claim.revision,
                 authorised_decision_id=decision.decision_id,
+                evidence_snapshot_fingerprint=evidence_snapshot_fingerprint(evidence),
                 confirmed_form=confirmed_form,
                 evidence_refs=[item.evidence_id for item in evidence],
                 pending_evidence=[

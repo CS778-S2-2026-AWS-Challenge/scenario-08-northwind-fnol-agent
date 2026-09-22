@@ -1776,6 +1776,7 @@ class CreateExternalClaimRequest(ContractModel):
     working_claim_id: str = Field(min_length=1, max_length=100)
     claim_revision: int = Field(ge=1)
     authorised_decision_id: str = Field(min_length=1, max_length=100)
+    evidence_snapshot_fingerprint: str = Field(min_length=64, max_length=64)
     confirmed_form: dict[str, StructuredFormField] = Field(default_factory=dict)
     evidence_refs: list[str] = Field(default_factory=list, max_length=100)
     pending_evidence: list[PendingEvidenceReference] = Field(

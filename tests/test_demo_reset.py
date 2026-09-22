@@ -93,6 +93,7 @@ def _populate_demo(
             working_claim_id='clm_reset_adapter',
             claim_revision=1,
             authorised_decision_id='dec_reset_adapter',
+            evidence_snapshot_fingerprint='0' * 64,
             route='standard_motor_intake',
         ),
         'reset-claim-fingerprint',
@@ -176,6 +177,7 @@ def test_reset_refuses_non_resettable_persistence_without_touching_mock_results(
         working_claim_id='clm_out_of_scope',
         claim_revision=1,
         authorised_decision_id='dec_out_of_scope',
+        evidence_snapshot_fingerprint='0' * 64,
         route='standard_motor_intake',
     )
     claims_adapter.create_claim(command, 'out-of-scope-fingerprint')
