@@ -145,6 +145,16 @@ RECORD_MAPPINGS: dict[str, RecordMapping] = {
         SESSION,
         _rel('trigger_message_id', 'message', 'message_id'),
     ),
+    'claim_creation_operation': _mapping(
+        ('operation_id',),
+        'claim_customer',
+        ('claim_order', 'claim_creation_unique'),
+        ('updated_at',),
+        (('claim_id',),),
+        'claim_child',
+        CLAIM,
+        _rel('authorised_decision_id', 'agent_decision', 'decision_id'),
+    ),
     'branch_evaluation': _mapping(
         ('evaluation_id',),
         'claim',
@@ -1279,6 +1289,13 @@ def _build_exact_lookup_or_special_access(
             else (_required_text(document, 'claim_id'), task)
         )
         uniqueness[kind] = (constraint, task_values, {'task_id': task, 'claim_id': claim})
+    elif kind == 'claim_creation_unique':
+        claim_text = _required_text(document, 'claim_id')
+        uniqueness[kind] = (
+            'CLAIM_CREATION_OPERATION_CLAIM',
+            (claim_text,),
+            {'claim_id': claim_text},
+        )
     elif kind in {'open_purpose_lookup', 'open_session_lookup'}:
         status = str(_field(document, 'status') or '')
         if status not in {'open', 'pending', 'blocked'}:
@@ -1934,6 +1951,7 @@ _CLAIM_CHILD_TYPES = frozenset(
         'policy',
         'identity_document',
         'payment_destination',
+        'claim_creation_operation',
     }
 )
 _AGENT_TURN_TYPES = frozenset(
@@ -2131,7 +2149,18 @@ def _reconstruct_atomic_operations(
                     'record cannot be assigned to one approved atomic boundary',
                 )
             )
+    ambiguous_types = {
+        'idempotency',
+        'audit_event',
+        'realtime_sequence',
+        'realtime_event',
+        'handoff',
+        'evidence',
+        'branch_evaluation',
+    }
     for document in documents:
+        if document.get('record_type') not in ambiguous_types:
+            continue
         memberships = [
             operation
             for operation in operations

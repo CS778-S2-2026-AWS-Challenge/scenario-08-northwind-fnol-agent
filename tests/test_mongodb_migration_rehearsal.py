@@ -218,7 +218,7 @@ def _finding_codes(report: Any) -> set[str]:
 
 
 def test_inventory_contains_every_approved_mongodb_record_type() -> None:
-    assert len(IDENTITY_FIELDS) == 45
+    assert len(IDENTITY_FIELDS) == 46
     assert 'CustomerAccountRecord' not in IDENTITY_FIELDS
     assert 'claim' in IDENTITY_FIELDS
     assert 'external_task_evidence_link' in IDENTITY_FIELDS
@@ -266,6 +266,13 @@ MAPPING_CASES = [
         'claim_session',
         'agent_turn',
         {'claim_order', 'trigger_lookup'},
+    ),
+    (
+        'claim_creation_operation',
+        ('operation_id',),
+        'claim_customer',
+        'claim_child',
+        {'claim_order', 'claim_creation_unique'},
     ),
     ('branch_evaluation', ('evaluation_id',), 'claim', 'session_checkpoint', {'claim_order'}),
     (
@@ -482,6 +489,7 @@ def _mapping_document(record_type: str) -> dict[str, Any]:
         'route': 'route_mapping',
         'key': 'key_mapping',
         'message_id': 'message_id_mapping',
+        'authorised_decision_id': 'decision_id_mapping',
     }
     for field in identity:
         document[field] = f'{field}_mapping'
@@ -564,6 +572,7 @@ def _expected_mapping_keys(
         'session': 'STARTED_AT',
         'follow_up': 'CREATED_AT',
         'agent_decision': 'CREATED_AT',
+        'claim_creation_operation': 'UPDATED_AT',
         'branch_evaluation': 'CREATED_AT',
         'runtime_trace': 'CREATED_AT',
         'runtime_work_item': 'UPDATED_AT',
@@ -695,6 +704,14 @@ def _expected_mapping_keys(
                     'trigger_message_id_mapping',
                     record_type,
                 ),
+                'META',
+            )
+        )
+    elif record_type == 'claim_creation_operation':
+        expected.add(
+            (
+                'claim_creation_unique',
+                'UNIQUE#CLAIM_CREATION_OPERATION_CLAIM#' + _contract_digest('claim_id_mapping'),
                 'META',
             )
         )
@@ -1334,6 +1351,42 @@ def _retrieval_bundle_snapshot() -> list[dict[str, Any]]:
         ]
     )
     return records
+
+
+def test_rehearsal_includes_merged_claim_creation_operation_contract() -> None:
+    records = [
+        record
+        for record in _complete_agent_turn_snapshot()
+        if record['record_type'] not in {'idempotency', 'realtime_sequence', 'realtime_event'}
+    ]
+    records.append(
+        _document(
+            'claim_creation_operation',
+            'cco_rehearsal',
+            operation_id='cco_rehearsal',
+            claim_id='clm_rehearsal',
+            customer_id='cus_rehearsal',
+            authorised_decision_id='dec_rehearsal',
+            authorised_revision=3,
+            request_fingerprint='a' * 64,
+            evidence_snapshot_fingerprint='b' * 64,
+            route='standard_motor_intake',
+            integration_source='insurer_core',
+            status='prepared',
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    )
+
+    _, report = transform_snapshot(records, _metadata(len(records)))
+
+    assert report.completion_marker is True
+    mutation = next(item for item in report.atomic_mutations if item.family == 'claim_child')
+    assert 'ENTITY#claim_creation_operation#cco_rehearsal|META' in mutation.item_keys
+    assert (
+        'UNIQUE#CLAIM_CREATION_OPERATION_CLAIM#' + _contract_digest('clm_rehearsal') + '|META'
+        in mutation.item_keys
+    )
 
 
 @pytest.mark.parametrize(

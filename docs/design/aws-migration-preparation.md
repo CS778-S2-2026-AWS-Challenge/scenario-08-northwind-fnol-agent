@@ -7,7 +7,7 @@ exists.
 
 The mapping is derived from the current domain records, `PersistenceRepository`
 protocol, and `MongoDBRepository` implementation at `origin/main`
-`e4a3f498d054154462d43f390ec72ed8267b5c16`. It preserves provider-neutral record
+`2264fa7905dc0fa4fa51d90415350f69b69cb568`. It preserves provider-neutral record
 identity, ownership, ordering, uniqueness, revision, idempotency, audit, and atomic
 write boundaries. It does not define a new API field, state, permission, lifecycle,
 or business rule.
@@ -65,6 +65,7 @@ contract requires atomic visibility.
 | `conversation_summary` | `summary_id` | Required Claim/session scope; latest by creation order | `C(ConversationSummary)`; session summary-order `R` | Immutable verified summary; never overwrites another summary identity. |
 | `follow_up` | `follow_up_id` | Claim scope; list by creation; lookup open purpose/source Session | `C(FollowUp)`; Claim-order `R`; open-purpose and source-session lookup items | At most one open `(claim_id, purpose)` and one `(claim_id, source_session_id)`; lifecycle updates replace the same identity. |
 | `agent_decision` | `decision_id` | Required Claim/session/trigger-message scope; get by ID or trigger; list by Claim | `C(AgentDecision)`; Claim-order and trigger lookup `R` | Immutable execution evidence inside Agent-turn atomic writes. |
+| `claim_creation_operation` | `operation_id`; current MongoDB storage also enforces one operation per `claim_id` | Required Claim/customer/authorised-decision scope; get by operation and list by Claim in `updated_at` order | `C(ClaimCreationOperation)`; Claim-order `R`; Claim uniqueness item | Durable provider-neutral execution evidence. Lifecycle updates replace the same identity; the operation remains separate from Claim state. |
 | `branch_evaluation` | `evaluation_id` | Claim scope; list by `created_at` | `C(BranchEvaluation)`; Claim-order `R` | Immutable; evaluated/resulting revisions must retain current validation. |
 | `runtime_trace` | `trace_id` | Required Claim/session/trigger scope; get by ID or trigger | `C(RuntimeTrace)`; Claim/session and trigger lookup `R` | Compatibility record remains separate and immutable. |
 | `turn_plan` | `turn_id` | Required Claim/session/trigger scope; first Runtime record for turn reconstruction | `C(TurnPlan)`; trigger and turn-bundle `R` | Immutable; Claim scope is required in the implemented claimant Runtime path. |
@@ -105,7 +106,7 @@ contract requires atomic visibility.
 | `identity_document` | `identity_id` | Customer-owned protected account record; active/all list by creation order | `C(IdentityDocument)`; customer active/all `R` | Preserve ciphertext and mask only; revision compare-and-set. |
 | `payment_destination` | `payment_destination_id` | Customer-owned protected account record; active/all list by creation order | `C(PaymentDestination)`; customer active/all `R` | Preserve ciphertext and mask only; revision compare-and-set. |
 
-The inventory contains 45 implemented MongoDB record types. #992 must fail if the
+The inventory contains 46 implemented MongoDB record types. #992 must fail if the
 source collection contains an unknown `record_type`, if an inventory row cannot resolve
 its authoritative identity, or if a row is silently dropped.
 
@@ -397,7 +398,7 @@ serialized bytes before calling DynamoDB. Important mutation families are:
 | --- | --- |
 | Claim creation | Claim fragments, Claim owner, Session, customer/global/search/Claim-session projections, realtime counter/event |
 | Session mutation/checkpoint | Changed Claim fragments, current/replaced Session, optional FollowUp and Branch Evaluation, idempotency, projections, realtime counter/event |
-| Claim/child mutation | Changed Claim fragments, each supplied child, optional Session, idempotency, applicable audit events, all changed projections, realtime counter/event |
+| Claim/child mutation | Changed Claim fragments, each supplied child, optional Session and durable Claim-creation operation, idempotency, applicable audit events, all changed projections, realtime counter/event |
 | Agent turn | Changed Claim fragments and Session, two Messages, Agent Decision, optional Handoff/Evidence/Branch Evaluation/Runtime Trace, every individual Runtime turn record, idempotency, projections, realtime counter/event |
 | Staff/ownership mutation | Changed Claim fragments, Staff Action/Collaboration/Coworker/Customer Update/Signal Decision/Handoff as supplied, optional Staff Agent execution, idempotency, audit, projections, realtime counter/event |
 | Retrieval bundle | Retrieval plus every Review Signal and Claim-order projections; no Claim revision change unless the current caller supplies a separate governed mutation |
@@ -451,7 +452,7 @@ maintained subset.
 
 | Assertion group | Required proof |
 | --- | --- |
-| Inventory completeness | Discover all 45 allowlisted record types; reject unknown types; prove excluded SQLite/MinIO/contract-only concepts are not read as MongoDB records. |
+| Inventory completeness | Discover all 46 allowlisted record types; reject unknown types; prove excluded SQLite/MinIO/contract-only concepts are not read as MongoDB records. |
 | Identity | Produce one deterministic canonical key per source identity; prove separator-safe compound encoding and idempotency hash collision checks. |
 | Relationships | Resolve Claim/Session/Message, Claim children, Runtime turn, Staff Agent, Evidence, external task, Retrieval/review, and audit references; reject dangling or cross-owner links. |
 | Ownership | Verify every Claim child customer matches the current Claim before converting it to `owner_ref`; simulate anonymous promotion without child rewrites. Commit an anonymous message turn, promote its Claim, then retry the same `client_message_id` as the authenticated actor with a different idempotency key and restore the original historical turn through the authenticated message-turn lookup. |
@@ -470,7 +471,7 @@ maintained subset.
 | Message historical revision (#983/#989) | #989 is merged at this baseline; `message_turn_kind` and positive `message_turn_revision` are now preserved with idempotency while Message identity and ordering remain unchanged | Message canonical, session access items, and idempotency payload | Reconciled at `origin/main` `e4a3f498d054154462d43f390ec72ed8267b5c16`; #992 must retain the added fields | Omitting either field would break historical replay revision even though Message identity still matched. |
 | Anonymous idempotency promotion | Governed exact-key aliases, authenticated message-turn lookups, and Claim-scoped anonymous retirement preserve the original triplet, different-key client-message replay, and stale-anonymous rejection | Idempotency canonical items, Claim/actor projections, message-turn lookups, aliases, retirement item, promotion action count | Backend/AWS owner in DynamoDB adapter conformance before profile enablement | Omitting private alias resolution loses exact-key or historical-turn replay, while unbounded aliases/lookups can exceed transaction limits. |
 | Evidence integrity (#986) | Stable Evidence ID and append-only material generations remain authoritative | Evidence core/version items and S3 references | Backend owner before migration tooling is frozen | Material layout or visibility could require remapping. |
-| Claim creation evidence (#987) | Current atomic creation boundary remains authoritative | Claim creation action count and provenance | Backend owner before adapter implementation | Reservation/provenance records could increase transaction cardinality. |
+| Claim creation evidence (#987) | #987 is merged at this baseline; the durable `claim_creation_operation` identity, Claim uniqueness, authorised-decision relationship, and settlement evidence are preserved | Claim-creation operation canonical/Claim-order/uniqueness items and Claim-child transaction count | Reconciled at `origin/main` `2264fa7905dc0fa4fa51d90415350f69b69cb568`; #992 must retain the record and relationship | Omitting the operation would lose provider-call recovery and could undercount settlement transactions. |
 | External task attempts (#984) | Current task/request/result identities and uniqueness remain authoritative | External-task canonical and lookup items | Backend owner before adapter implementation | A separately approved attempt record would add inventory and projections. |
 | Workbench capability (#985) | Application permissions stay separate from IAM | Search and staff access projections | Backend owner at Workbench contract reconciliation | IAM must not become application authorization. |
 | Global realtime capacity | One partition preserves the implemented total order | `SYSTEM#REALTIME` | Backend/AWS owner in #786 after real AWS load evidence | Insufficient capacity keeps AWS runtime unavailable. |
@@ -491,7 +492,7 @@ real account evidence.
 
 `#991` is complete when review confirms that:
 
-- all 45 implemented MongoDB record types and all excluded adjacent stores are explicit;
+- all 46 implemented MongoDB record types and all excluded adjacent stores are explicit;
 - each source identity, owner, read order, uniqueness rule, canonical item, access path,
   and atomic boundary is implementable without a request-path table scan;
 - idempotency uses the exact actor/route/key authority with conditional creation;
