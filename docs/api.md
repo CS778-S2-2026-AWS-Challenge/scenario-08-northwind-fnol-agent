@@ -514,6 +514,14 @@ version with another published version.
 | `PATCH`, `DELETE` | `/account/identity-documents/{identity_id}` | Revision-update or soft-retire one owned identity document |
 | `POST` | `/claims/{claim_id}/policy-selections` | Propose one active owned policy number into the registered Claim field |
 
+Profile email writes accept a supported Internet-style address with one local part and a dotted
+domain. The backend trims surrounding whitespace and lowercases the complete address before it
+becomes authoritative. The claimant identity repository enforces normalized-email uniqueness in
+the same compare-and-set operation as the profile revision. An address already owned by another
+account returns `409 RESOURCE_CONFLICT`; a stale account revision remains `409 REVISION_CONFLICT`.
+Invalid email syntax returns the standard `422 VALIDATION_ERROR` without changing the account or
+its revision.
+
 `POST /api/v1/auth/sessions` is the only development/test authentication exception to the
 general bearer requirement. It accepts `email` and `password`, returns `201` with
 `customer_id`, `access_token`, `token_type`, `expires_at`, and `development_identity: true`,
@@ -531,7 +539,17 @@ the legal-name alias; it cannot disagree with `legal_name`. New clients send the
 revision in `If-Match`; a stale revision returns `409 REVISION_CONFLICT`.
 Profile text is whitespace-normalized before validation. Blank legal name, compatibility display
 name, preferred name, or residential address returns `422 VALIDATION_ERROR` and does not change
-the stored profile or revision.
+the stored profile or revision. Email updates are normalized to lowercase, and an email already
+owned by another account returns `409 RESOURCE_CONFLICT` without changing the stored profile or
+revision.
+
+Preferences PATCH accepts the Account projection's revision in `If-Match` and commits the
+communication preferences with a compare-and-set Account write. A stale supplied revision, or a
+repository conflict after the service read, returns retryable `409 REVISION_CONFLICT` with
+`current_revision`; the attempted preferences and Account revision are not committed. During the
+legacy-client transition the header remains optional and an omitted header uses the revision read
+at the start of the request, while still retaining repository compare-and-set protection. New
+clients send `If-Match` so edits made from a stale Account projection are rejected explicitly.
 
 Create requests for the three account resources require `Idempotency-Key`. List routes use the
 standard opaque cursor and default to active records. Their stable descending keyset is
