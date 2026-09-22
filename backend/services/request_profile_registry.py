@@ -17,8 +17,10 @@ _PROFILES = {
         schema_id='claimant.turn.v1',
         max_model_invocations=1,
         max_model_selected_tools=0,
-        input_hard_limit=6000,
-        output_limit=4500,
+        input_hard_limit=7500,
+        # Dense envelope with every list at its cap estimates 6361 tokens
+        # (tests/test_request_profile_budgets.py); operating cap, not a proof.
+        output_limit=6500,
     ),
     'claimant.intake.v1': RequestProfile(
         profile_id='claimant.intake.v1',
@@ -44,8 +46,8 @@ _PROFILES = {
         schema_id='claimant.turn.v1',
         max_model_invocations=1,
         max_model_selected_tools=0,
-        input_hard_limit=6000,
-        output_limit=5500,
+        input_hard_limit=7500,
+        output_limit=7500,
         requires_media_types=['image/*', 'application/pdf'],
     ),
     'claimant.lookup.v1': RequestProfile(
@@ -55,8 +57,8 @@ _PROFILES = {
         tool_names=['context.resolve'],
         max_model_invocations=2,
         max_model_selected_tools=1,
-        input_hard_limit=6000,
-        output_limit=4500,
+        input_hard_limit=7500,
+        output_limit=6500,
         requires_tool_continuation=True,
     ),
     'claimant.evidence-history.v1': RequestProfile(

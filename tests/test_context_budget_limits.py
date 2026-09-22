@@ -37,8 +37,8 @@ def test_soft_limit_is_observable_without_refusing_a_legal_turn(
     caplog.set_level(logging.INFO, logger='backend.services.context_budget')
     plan = plan_model_turn(v8_context('My car was rear-ended yesterday.'))
     assert plan is not None
-    assert 3000 < plan.request_budget.raw_input_tokens <= 6000
-    assert plan.request_budget.hard_limit == 6000
+    assert 3000 < plan.request_budget.raw_input_tokens <= 7500
+    assert plan.request_budget.hard_limit == 7500
     assert any(
         record.message == 'agent_turn_input_budget_soft_exceeded' for record in caplog.records
     )
@@ -95,11 +95,11 @@ def test_lookup_hard_limit_is_per_request_not_cumulative_input_plus_output() -> 
         schema={},
         context={},
         tools=[],
-        prior_turn_tokens=4000,
+        prior_turn_tokens=5000,
     )
-    assert result.raw_input_tokens <= 6000
-    assert result.turn_cumulative_tokens > 6000
-    assert result.reserved_output_tokens == 4500
+    assert result.raw_input_tokens <= 7500
+    assert result.turn_cumulative_tokens > 7500
+    assert result.reserved_output_tokens == 6500
 
 
 @pytest.mark.parametrize(

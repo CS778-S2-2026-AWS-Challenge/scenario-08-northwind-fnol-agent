@@ -72,15 +72,25 @@ def test_dense_new_item_response_fits_the_operating_cap_without_reducing_fact_co
             {'path': 'claim_state.urgency', 'to': 'urgent', 'reason': 'x' * 150},
         ],
         escalation={'kind': 'professional_review', 'reason': 'x' * 150},
+        document_requests=[
+            {'document_kind': 'x' * 100, 'from_party': 'third_party', 'service_identity': 'x' * 100}
+            for _ in range(2)
+        ],
+        evidence_interpretations=[
+            {'evidence_id': 'x' * 100, 'document_kind': 'x' * 100} for _ in range(4)
+        ],
+        summary_fields=['x' * 100] * 30,
     )
+    for change in raw['field_changes']:
+        change['service_identity'] = 'x' * 100
     V8TurnProposal.model_validate(raw)
     assert len(raw['field_changes']) == 8
     assert len(raw['contents_item_changes']) == 6
-    assert estimate_json_tokens(raw) <= request_profile('claimant.turn.v1').output_limit == 4500
-    assert request_profile('claimant.lookup.v1').output_limit == 4500
+    assert estimate_json_tokens(raw) <= request_profile('claimant.turn.v1').output_limit == 6500
+    assert request_profile('claimant.lookup.v1').output_limit == 6500
     for change in raw['field_changes']:
         change['source_evidence_id'] = 'evd_' + 'f' * 20
-    assert estimate_json_tokens(raw) <= request_profile('claimant.media.v1').output_limit == 5500
+    assert estimate_json_tokens(raw) <= request_profile('claimant.media.v1').output_limit == 7500
 
 
 @pytest.mark.parametrize(

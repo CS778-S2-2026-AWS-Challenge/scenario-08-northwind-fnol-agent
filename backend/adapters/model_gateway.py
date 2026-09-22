@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 import os
 import re
 from collections.abc import Callable
@@ -42,6 +43,44 @@ _GOOGLE_PROVIDER_SCHEMA_CONSTRAINTS = frozenset(
         'pattern',
     }
 )
+
+
+logger = logging.getLogger(__name__)
+
+
+def _log_malformed_provider_response(payload: object, error: Exception) -> None:
+    """Bounded diagnostics for an unparsable provider reply: never the claimant's words.
+
+    Reports structural facts only (which key failed, JSON depth, content length) so
+    a real cause (truncation, an extra key, a schema violation the provider let through)
+    can be told apart from a transient one without ever logging message content.
+    """
+
+    message: str | None = None
+    finish_reason: object = None
+    content_length: int | None = None
+    if isinstance(payload, dict):
+        choices = payload.get('choices')
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            finish_reason = choices[0].get('finish_reason')
+            choice_message = choices[0].get('message')
+            if isinstance(choice_message, dict):
+                content = choice_message.get('content')
+                if isinstance(content, str):
+                    content_length = len(content)
+                    try:
+                        json.loads(content)
+                    except json.JSONDecodeError as parse_error:
+                        message = f'invalid_json at char {parse_error.pos}: {parse_error.msg}'
+    logger.warning(
+        'model_provider_response_unparsable',
+        extra={
+            'error_type': type(error).__name__,
+            'error_detail': message or str(error)[:200],
+            'finish_reason': finish_reason,
+            'content_length': content_length,
+        },
+    )
 
 
 def _provider_error_type(response: httpx.Response) -> str | None:
@@ -316,10 +355,12 @@ class OpenAICompatibleModelGateway:
             ) from None
 
         self._raise_for_status(response.status_code, _provider_error_type(response))
+        payload: object = None
         try:
             payload = response.json()
             return self._normalise_response(payload, request, response.headers)
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            _log_malformed_provider_response(payload, error)
             raise ModelGatewayError(
                 ModelGatewayErrorCode.MALFORMED_RESPONSE,
                 provider_model=self._config.model,
@@ -768,10 +809,12 @@ class BedrockConverseModelGateway:
             ) from None
 
         self._raise_for_status(response.status_code, _provider_error_type(response))
+        payload: object = None
         try:
             payload = response.json()
             return self._normalise_response(payload, request, response.headers)
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            _log_malformed_provider_response(payload, error)
             raise ModelGatewayError(
                 ModelGatewayErrorCode.MALFORMED_RESPONSE,
                 provider_model=self._config.model,
@@ -1005,10 +1048,12 @@ class GoogleGenerateContentModelGateway:
                 self._tool_continuations.pop(call_id, None)
 
         self._raise_for_status(response.status_code, _provider_error_type(response))
+        payload: object = None
         try:
             payload = response.json()
             return self._normalise_response(payload, request, response.headers)
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            _log_malformed_provider_response(payload, error)
             raise ModelGatewayError(
                 ModelGatewayErrorCode.MALFORMED_RESPONSE,
                 provider_model=self._config.model,

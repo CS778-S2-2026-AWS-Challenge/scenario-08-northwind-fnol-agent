@@ -177,7 +177,7 @@ class RequestProfile(ContractModel):
     max_model_invocations: int = Field(ge=1, le=2)
     max_model_selected_tools: int = Field(ge=0, le=1)
     input_hard_limit: int = Field(ge=100)
-    output_limit: int = Field(ge=1, le=6000)
+    output_limit: int = Field(ge=1, le=8000)
     requires_media_types: list[str] = Field(default_factory=list, max_length=20)
     requires_tool_continuation: bool = False
     isolated: bool = False
@@ -196,7 +196,7 @@ class RequestProfile(ContractModel):
 class ContextBudgetPolicy(ContractModel):
     policy_version: str = 'northwind-context-budget-v1'
     ordinary_input_target: int = Field(default=3000, ge=100)
-    ordinary_input_hard_limit: int = Field(default=6000, ge=100)
+    ordinary_input_hard_limit: int = Field(default=7500, ge=100)
     ordinary_output_limit: int = Field(default=180, ge=1)
     tool_path_input_hard_limit: int = Field(default=6000, ge=100)
     tool_path_output_limit: int = Field(default=300, ge=1)
