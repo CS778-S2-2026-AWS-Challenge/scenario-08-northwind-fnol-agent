@@ -309,6 +309,48 @@ export function getAuthenticatedAccount() {
   return apiRequest('/api/v1/account')
 }
 
+
+export function listPaymentDestinations({ cursor, limit = 100, signal } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return apiRequest(`/api/v1/account/payment-destinations?${params}`, { signal })
+}
+
+export function createPaymentDestination({
+  accountType,
+  accountNumber,
+  idempotencyKey = requestId('payment-destination'),
+}) {
+  return apiRequest('/api/v1/account/payment-destinations', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify({
+      account_type: accountType,
+      account_number: accountNumber,
+    }),
+  })
+}
+
+export function selectClaimPayoutContact({
+  claimId,
+  revision,
+  paymentDestinationId,
+  contactPreference,
+  idempotencyKey = requestId('payout-contact'),
+}) {
+  return apiRequest(`/api/v1/claims/${claimId}/payout-contact-selections`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+    body: JSON.stringify({
+      payment_destination_id: paymentDestinationId,
+      contact_preference: contactPreference,
+    }),
+  })
+}
+
 export function updateAccountProfile(profile, revision) {
   return apiRequest('/api/v1/account/profile', {
     method: 'PATCH',

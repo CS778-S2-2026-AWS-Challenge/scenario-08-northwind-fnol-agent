@@ -4,6 +4,7 @@ import {
   confirmClaimFields,
   createClaim,
   createExternalClaim,
+  createPaymentDestination,
   decideExternalServiceOffer,
   grantAssessorConsent,
   getAuthenticatedAccount,
@@ -13,6 +14,7 @@ import {
   getClaimEvidence,
   getRuntimeCapabilities,
   listClaims,
+  listPaymentDestinations,
   loginClaimant,
   logoutClaimant,
   requestId,
@@ -26,6 +28,7 @@ import {
   resumeClaimSession,
   streamRealtimeEvents,
   submitClaimMessage,
+  selectClaimPayoutContact,
   setClaimantAccessToken,
   updateClaimField,
 } from './api.js'
@@ -37,6 +40,7 @@ import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
 import ClaimDocuments from './components/ClaimDocuments.jsx'
 import ClaimReviewPanel from './components/ClaimReviewPanel.jsx'
+import PayoutContactPanel from './components/PayoutContactPanel.jsx'
 import ConversationHistorySidebar from './components/ConversationHistorySidebar.jsx'
 import {
   AgentTurnDisclosure,
@@ -78,6 +82,7 @@ const FIELD_LABELS = {
   'property.ongoing_risk': 'Ongoing property risk',
   'property.habitable': 'Property safe to live in',
   'contents.items': 'Damaged, lost, or stolen items',
+  'claimant.contact_preference': 'Preferred contact method',
 }
 
 const PERMANENT_ANONYMOUS_RESUME_FAILURES = new Set([
@@ -235,6 +240,8 @@ function mergeMessagesById(current, incoming) {
 const CLAIMANT_ACTION_KINDS = Object.freeze({
   'claimant.create_claim': 'create-claim',
   'claimant.review_details': 'review-details',
+  'claimant.review_payout_contact': 'payout-contact',
+  'claimant.review_agreement': 'review-agreement',
   'claimant.request_assessment': 'external-service',
   'claimant.retry_assessment': 'external-service',
   'claimant.track_assessment': 'external-service',
@@ -368,6 +375,12 @@ function App() {
   const [account, setAccount] = useState(null)
   const [authStatus, setAuthStatus] = useState('idle')
   const [authError, setAuthError] = useState('')
+  const [paymentDestinationState, setPaymentDestinationState] = useState({
+    claimId: null,
+    status: 'idle',
+    items: [],
+    error: '',
+  })
   const [claimType, setClaimType] = useState('')
   const [draft, setDraft] = useState('')
   const [claim, setClaim] = useState(null)
@@ -652,6 +665,8 @@ function App() {
     'resuming',
     'granting-service-consent',
     'requesting-assessor',
+    'saving-payment-destination',
+    'saving-payout-contact',
   ].includes(status)
   const proposedFields = useMemo(
     () => Object.entries(form).filter(([, field]) => field.status === 'proposed'),
@@ -706,6 +721,65 @@ function App() {
     [claim],
   )
   const conversationActionKind = conversationAction?.kind || null
+  const accountCustomerId = account?.customer_id || null
+  const accountRevision = account?.revision || null
+
+  useEffect(() => {
+    if (conversationActionKind !== 'payout-contact' || !claim?.claim_id) {
+      setPaymentDestinationState({
+        claimId: null,
+        status: 'idle',
+        items: [],
+        error: '',
+      })
+      return undefined
+    }
+    if (!accountCustomerId) {
+      setPaymentDestinationState({
+        claimId: claim.claim_id,
+        status: 'idle',
+        items: [],
+        error: '',
+      })
+      return undefined
+    }
+
+    let active = true
+    const controller = new AbortController()
+    setPaymentDestinationState((current) => ({
+      claimId: claim.claim_id,
+      status: 'loading',
+      items: current.claimId === claim.claim_id ? current.items : [],
+      error: '',
+    }))
+    Promise.all([
+      getAuthenticatedAccount(),
+      listPaymentDestinations({ limit: 100, signal: controller.signal }),
+    ])
+      .then(([currentAccount, destinations]) => {
+        if (!active) return
+        setAccount(currentAccount)
+        setPaymentDestinationState({
+          claimId: claim.claim_id,
+          status: 'ready',
+          items: destinations.items || [],
+          error: '',
+        })
+      })
+      .catch((requestError) => {
+        if (!active || requestError?.name === 'AbortError') return
+        setPaymentDestinationState({
+          claimId: claim.claim_id,
+          status: 'error',
+          items: [],
+          error: requestError.message || 'Payout details could not be loaded.',
+        })
+      })
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [accountCustomerId, accountRevision, claim?.claim_id, conversationActionKind])
   const externalCapabilityKey = claim?.external_capabilities?.length > 0
     ? `${claim.claim_id}:${claim.external_capabilities
         .map((capability) => `${capability.service_identity}:${capability.registry_version || ''}`)
@@ -2308,6 +2382,123 @@ function App() {
     }
   }
 
+
+  async function addPayoutDestination({ accountType, accountNumber }) {
+    if (!account) {
+      setPage('login')
+      throw new ApiRequestError('Log in before saving payout details.', {
+        code: 'AUTHENTICATION_REQUIRED',
+        status: 401,
+      })
+    }
+    setStatus('saving-payment-destination')
+    try {
+      const created = await createPaymentDestination({
+        accountType,
+        accountNumber,
+        idempotencyKey: requestId('payment-destination'),
+      })
+      setPaymentDestinationState((current) => ({
+        ...current,
+        status: 'ready',
+        error: '',
+        items: [
+          created,
+          ...current.items.filter(
+            (item) => item.payment_destination_id !== created.payment_destination_id,
+          ),
+        ],
+      }))
+      return created
+    } finally {
+      setStatus('idle')
+    }
+  }
+
+  async function continuePayoutContact({ paymentDestinationId, contactPreference }) {
+    const primaryAction = claim?.primary_action
+    if (
+      !claim
+      || !account
+      || isBusy
+      || primaryAction?.action_code !== 'claimant.review_payout_contact'
+      || !primaryAction.available
+      || Number(primaryAction.claim_revision) !== Number(claim.revision)
+    ) {
+      throw new ApiRequestError(
+        account
+          ? 'The Claim changed before payout details could be saved. Reload and try again.'
+          : 'Log in before saving payout details.',
+        {
+          code: account ? 'REVISION_CONFLICT' : 'AUTHENTICATION_REQUIRED',
+          status: account ? 409 : 401,
+          retryable: Boolean(account),
+        },
+      )
+    }
+
+    setStatus('saving-payout-contact')
+    try {
+      const response = await selectClaimPayoutContact({
+        claimId: claim.claim_id,
+        revision: claim.revision,
+        paymentDestinationId,
+        contactPreference,
+        idempotencyKey: requestId('payout-contact'),
+      })
+      rememberClaimRevision(response.revision)
+      setClaim((current) => current
+        ? {
+          ...current,
+          revision: response.revision,
+          payment_destination_id: response.payment_destination_id,
+          form: {
+            ...current.form,
+            'claimant.contact_preference': response.contact_preference,
+          },
+          customer_next_step: response.customer_next_step,
+          primary_action: response.primary_action,
+        }
+        : current)
+      setForm((current) => ({
+        ...current,
+        'claimant.contact_preference': response.contact_preference,
+      }))
+      setNextStep(response.customer_next_step)
+
+      try {
+        const snapshot = await getClaim(claim.claim_id)
+        if (!applyClaimSnapshot(snapshot, { minimumRevision: response.revision })) {
+          throw new ApiRequestError(
+            'Northwind saved your details but the latest Claim readback is not available yet.',
+            { code: 'STALE_READBACK', retryable: true },
+          )
+        }
+        setRealtimeHealth('healthy')
+      } catch (readbackError) {
+        setRealtimeHealth('stale')
+        throw readbackError
+      }
+      return response
+    } catch (requestError) {
+      if (
+        requestError instanceof ApiRequestError
+        && requestError.status === 409
+        && claim?.claim_id
+      ) {
+        try {
+          const current = await getClaim(claim.claim_id)
+          applyClaimSnapshot(current)
+        } catch {
+          setRealtimeHealth('stale')
+        }
+      }
+      throw requestError
+    } finally {
+      setStatus('idle')
+    }
+  }
+
   function conversationPanelExpanded(panel) {
     if (!claim?.claim_id) return false
     return Boolean(expandedConversationPanels[`${claim.claim_id}:${panel}`])
@@ -2365,6 +2556,35 @@ function App() {
           description={`${reviewItemCount} ${reviewItemCount === 1 ? 'detail needs' : 'details need'} your confirmation before we continue.`}
           status={`${reviewItemCount} to review`}
           onClick={openClaimDetailsFromConversation}
+        />
+      )
+    }
+    if (conversationActionKind === 'payout-contact') {
+      return (
+        <PayoutContactPanel
+          key={`${claim.claim_id}:${conversationAction.identity}`}
+          account={account}
+          claim={claim}
+          destinations={paymentDestinationState.items}
+          loading={paymentDestinationState.status === 'loading'}
+          loadError={paymentDestinationState.error}
+          busy={isBusy}
+          onAddDestination={addPayoutDestination}
+          onContinue={continuePayoutContact}
+          onManageContact={() => setWorkspaceView('account')}
+          onLogin={() => setPage('login')}
+        />
+      )
+    }
+    if (conversationActionKind === 'review-agreement') {
+      return (
+        <ConversationActionCard
+          key={conversationAction.identity}
+          icon="→"
+          title="Agreement & confirmation"
+          description="Your payout destination and contact preference are saved. Continue to Step 4."
+          status="Step 4 ready"
+          onClick={() => setWorkspaceView('agreement')}
         />
       )
     }
@@ -2781,7 +3001,9 @@ function App() {
                         ? 'External services'
                         : workspaceView === 'account'
                           ? 'Profile'
-                          : 'Evidence history'}
+                          : workspaceView === 'agreement'
+                            ? 'Agreement & confirmation'
+                            : 'Evidence history'}
               </h1>
               <p>
                 {workspaceView === 'privacy'
@@ -2794,7 +3016,9 @@ function App() {
                         ? 'See the external service currently recorded for this Claim, including what may be shared and what happens next.'
                         : workspaceView === 'account'
                           ? 'Manage the account details Northwind currently supports and review unavailable profile capabilities.'
-                          : workspaceView === 'claim-evidence'
+                          : workspaceView === 'agreement'
+                            ? 'Your payout destination and preferred contact method are saved. Agreement review and final Claim confirmation happen in Step 4.'
+                            : workspaceView === 'claim-evidence'
                             ? 'Review the files and supporting material recorded for the selected Claim.'
                             : 'Review files retained across your Northwind Claims, including where they came from and their latest processing state.'}
               </p>
@@ -2840,6 +3064,16 @@ function App() {
                     onSelectSection={openProfileSection}
                     onSignOut={signOut}
                   />
+                </div>
+              )}
+
+              {workspaceView === 'agreement' && (
+                <div className="claim-history-state" role="status">
+                  <h2>Step 3 complete</h2>
+                  <p>
+                    Northwind has saved the payout destination and preferred contact method for this Claim.
+                    Agreement content and final submission remain governed by the Step 4 flow.
+                  </p>
                 </div>
               )}
               {workspaceView === 'claim-evidence' && selectedHistoryClaim && (

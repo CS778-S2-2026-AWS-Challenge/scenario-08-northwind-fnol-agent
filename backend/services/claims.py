@@ -57,6 +57,7 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import (
     ClaimRepository,
     IdempotencyConflict,
@@ -256,7 +257,11 @@ def _claimant_incomplete_context(
     )
 
 
-def claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> ClaimantClaim:
+def claimant_claim(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    identity_repository: IdentityRepository | None = None,
+) -> ClaimantClaim:
     claimant_evidence = claimant_visible_evidence(
         repository.list_evidence(claim.claim_id, claim.customer_id)
     )
@@ -321,7 +326,12 @@ def claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> Cl
                     if customer_update is not None
                     else None,
                 )
-    next_step = claimant_next_step(repository, claim, legacy_external_service_action)
+    next_step = claimant_next_step(
+        repository,
+        claim,
+        legacy_external_service_action,
+        identity_repository=identity_repository,
+    )
     motor_other_driver = repository.get_motor_other_driver(claim.claim_id, claim.customer_id)
     return ClaimantClaim(
         claim_id=claim.claim_id,
@@ -336,6 +346,7 @@ def claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> Cl
             else None
         ),
         evidence_summary=evidence_summary_for(claimant_evidence),
+        payment_destination_id=claim.payment_destination_id,
         external_claim=claim.external_claim,
         external_service_action=legacy_external_service_action,
         external_capabilities=list(capability_catalogue(claim.incident_type)),
@@ -472,6 +483,7 @@ def pause_session(
     session_id: str,
     idempotency_key: str | None,
     if_match: str | None,
+    identity_repository: IdentityRepository | None = None,
 ) -> PauseSessionResponse:
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
@@ -583,6 +595,7 @@ def pause_session(
     claimant_after = claimant_claim(
         repository,
         updated_claim,
+        identity_repository,
     )
 
     response = PauseSessionResponse(
@@ -707,12 +720,15 @@ def start_claim(
 
 
 def get_claim(
-    repository: PersistenceRepository, principal: Principal, claim_id: str
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    identity_repository: IdentityRepository | None = None,
 ) -> ClaimantClaim:
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _claim_not_found()
-    return claimant_claim(repository, claim)
+    return claimant_claim(repository, claim, identity_repository)
 
 
 def promote_anonymous_claim(
@@ -1096,6 +1112,11 @@ def update_form(
         update={
             'form': {**claim.form, **updated_fields},
             'incident_type': incident_type,
+            'payment_destination_id': (
+                None
+                if 'claimant.contact_preference' in updated_fields
+                else claim.payment_destination_id
+            ),
         }
     )
     candidate_branch_evaluation = BranchRuleEvaluator().evaluate(

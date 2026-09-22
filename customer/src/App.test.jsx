@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   createAccountAsset: vi.fn(),
   createAccountPolicy: vi.fn(),
   createExternalClaim: vi.fn(),
+  createPaymentDestination: vi.fn(),
   createClaim: vi.fn(),
   grantAssessorConsent: vi.fn(),
   getAuthenticatedAccount: vi.fn(),
@@ -22,6 +23,7 @@ const api = vi.hoisted(() => ({
   listAccountPolicies: vi.fn(),
   listClaims: vi.fn(),
   listEvidenceHistory: vi.fn(),
+  listPaymentDestinations: vi.fn(),
   loginClaimant: vi.fn(),
   logoutClaimant: vi.fn(),
   requestId: vi.fn((prefix) => `${prefix}-test`),
@@ -30,6 +32,7 @@ const api = vi.hoisted(() => ({
   requestAssessorRouting: vi.fn(),
   registerClaimant: vi.fn(),
   requestEvidenceUpload: vi.fn(),
+  selectClaimPayoutContact: vi.fn(),
   uploadEvidenceContent: vi.fn(),
   completeEvidenceUpload: vi.fn(),
   resumeClaimSession: vi.fn(),
@@ -254,6 +257,7 @@ describe('claimant intake projection', () => {
     api.listAccountPaymentDestinations.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listAccountPolicies.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listEvidenceHistory.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listPaymentDestinations.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.streamRealtimeEvents.mockImplementation(() => new Promise(() => {}))
     api.createClaim.mockResolvedValue({
       claim: initialClaim,
@@ -1695,6 +1699,122 @@ describe('claimant intake projection', () => {
     expect(
       screen.getByText(newerAgentMessage.content.text),
     ).toBeInTheDocument()
+  })
+
+
+  it('completes payout and contact Step 3 from backend action and enters Step 4', async () => {
+    const user = userEvent.setup()
+    const paymentDestination = {
+      payment_destination_id: 'pyd_1234567890abcdef1234',
+      account_type: 'cheque',
+      masked_account_number: '***************6700',
+      revision: 1,
+      active: true,
+    }
+    const readyForPayout = primaryAction({
+      actionCode: 'claimant.review_payout_contact',
+      available: true,
+      requiredInputs: ['payment_destination_id', 'claimant.contact_preference'],
+      revision: 2,
+    })
+    const agreementAction = primaryAction({
+      actionCode: 'claimant.review_agreement',
+      available: true,
+      revision: 3,
+    })
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      customer_id: 'cus_demo',
+      profile: {
+        display_name: 'Test claimant',
+        email: 'test@example.test',
+        phone: '',
+      },
+      preferences: { email: true, sms: false },
+      revision: 2,
+    })
+    api.listPaymentDestinations.mockResolvedValue({
+      items: [paymentDestination],
+      page: { next_cursor: null },
+    })
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      dynamic_form: readyDynamicForm(),
+      claim_revision: 2,
+      decision: {
+        customer_next_step: {
+          status: 'ready_to_create',
+          summary: 'Review payout and contact details.',
+          required_items: [],
+        },
+      },
+      primary_action: readyForPayout,
+    })
+    api.selectClaimPayoutContact.mockResolvedValue({
+      claim_id: initialClaim.claim_id,
+      revision: 3,
+      payment_destination_id: paymentDestination.payment_destination_id,
+      contact_preference: {
+        value: 'email',
+        status: 'confirmed',
+        source: 'claimant',
+      },
+      customer_next_step: {
+        status: 'agreement_required',
+        summary: 'Continue to agreement and confirmation.',
+        required_items: [],
+      },
+      primary_action: agreementAction,
+    })
+    api.getClaim.mockResolvedValue({
+      ...initialClaim,
+      revision: 3,
+      payment_destination_id: paymentDestination.payment_destination_id,
+      form: {
+        ...initialClaim.form,
+        'claimant.contact_preference': {
+          value: 'email',
+          status: 'confirmed',
+          source: 'claimant',
+        },
+      },
+      customer_next_step: {
+        status: 'agreement_required',
+        summary: 'Continue to agreement and confirmation.',
+        required_items: [],
+      },
+      primary_action: agreementAction,
+    })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'My claim details are complete.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    expect(await screen.findByRole('heading', { name: 'Payout & contact' })).toBeInTheDocument()
+    expect(screen.getByText('***************6700')).toBeInTheDocument()
+    expect(screen.queryByText('12-3456-1234567-00')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('radio', { name: /cheque .*6700/i }))
+    await user.click(screen.getByRole('radio', { name: /Email test@example.test/i }))
+    const continueButton = screen.getByRole('button', { name: 'Continue to agreement' })
+    expect(continueButton).toBeEnabled()
+    await user.click(continueButton)
+
+    await waitFor(() => expect(api.selectClaimPayoutContact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        claimId: initialClaim.claim_id,
+        revision: 2,
+        paymentDestinationId: paymentDestination.payment_destination_id,
+        contactPreference: 'email',
+      }),
+    ))
+    expect(api.getClaim).toHaveBeenCalledWith(initialClaim.claim_id)
+
+    const agreement = await screen.findByRole('button', { name: /Agreement & confirmation/i })
+    expect(agreement).toHaveTextContent('Step 4 ready')
+    await user.click(agreement)
+    expect(screen.getByRole('heading', { name: 'Agreement & confirmation' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Step 3 complete')
   })
 
   it('keeps creation and assessment actions in the Agent message flow', async () => {
