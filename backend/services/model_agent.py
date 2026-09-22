@@ -100,10 +100,12 @@ from backend.services.isolated_context_executor import execute_isolated_context_
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.model_request_planner import (
     context_resolve_tool,
+    detach_unreadable_evidence,
     plan_model_turn,
     prepare_model_family_context,
 )
 from backend.services.prompt_composer import load_response_schema
+from backend.services.reply_consistency import review_reply
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationResolver,
@@ -763,6 +765,18 @@ class GatewayAgent:
         field_contract_violations: list[dict[str, str]] | None = None,
     ) -> AgentProposal:
         if response.structured_output is None:
+            logger.warning(
+                'agent_turn_envelope_missing',
+                extra={
+                    'schema_id': plan.schema_id,
+                    'completion_status': response.completion_status.value,
+                    'finish_reason': response.finish_reason,
+                    'text_present': bool(response.text),
+                    'text_length': len(response.text) if response.text else 0,
+                    'tool_call_count': len(response.tool_calls),
+                    'provider_model': response.provider_model,
+                },
+            )
             raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
         raw_output = dict(response.structured_output)
         legacy_service_offer_ids = raw_output.pop('service_offer_ids', [])
@@ -788,7 +802,22 @@ class GatewayAgent:
                 parsed = _V7_SOURCED_SUMMARY_ADAPTER.validate_python(raw_output)
             else:
                 parsed = _V7_ANSWER_ADAPTER.validate_python(raw_output)
-        except ValidationError:
+        except ValidationError as error:
+            logger.warning(
+                'agent_turn_envelope_invalid',
+                extra={
+                    'schema_id': plan.schema_id,
+                    'errors': [
+                        {
+                            'loc': '.'.join(str(part) for part in item['loc']),
+                            'type': item['type'],
+                            'msg': item.get('msg'),
+                            'input': str(item.get('input'))[:200],
+                        }
+                        for item in error.errors()[:8]
+                    ],
+                },
+            )
             raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
 
         if isinstance(parsed, V8TurnProposal):
@@ -799,7 +828,7 @@ class GatewayAgent:
                     if parsed.next_question is not None
                     else 'Continue the current report.'
                 ),
-                reason_codes=parsed.reason_codes,
+                reason_codes=parsed.reason_codes or [f'TURN_{parsed.action.upper()}'],
             )
         else:
             answer = (
@@ -1117,6 +1146,7 @@ class GatewayAgent:
 
     def _propose_v7_turn(self, context: AgentTurnContext) -> AgentProposal:
         context = prepare_model_family_context(context)
+        context = detach_unreadable_evidence(context)
         try:
             plan = plan_model_turn(context)
         except ContextBudgetExceeded:
@@ -1360,6 +1390,13 @@ class GatewayAgent:
             if response.completion_status is ModelCompletionStatus.REFUSED:
                 raise ModelGatewayError(ModelGatewayErrorCode.REFUSED_RESPONSE)
             if response.completion_status is not ModelCompletionStatus.COMPLETE:
+                logger.warning(
+                    'agent_turn_unknown_completion_status',
+                    extra={
+                        'completion_status': response.completion_status,
+                        'finish_reason': response.finish_reason,
+                    },
+                )
                 raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
             if context.progress_reporter is not None:
                 context.progress_reporter(
@@ -1378,8 +1415,104 @@ class GatewayAgent:
                     started_at=started_at,
                     request_budgets=request_budgets,
                 )
+                review = (
+                    review_reply(result.validated_turn)
+                    if result.validated_turn is not None
+                    else None
+                )
+                if review is not None and not review.consistent:
+                    # The words contradict the ledger. Hand the ruling back to
+                    # the model once; Runtime never rewrites the reply itself.
+                    logger.info(
+                        'agent_turn_consistency_recall',
+                        extra={
+                            'claim_id': context.claim.claim_id,
+                            'trigger_message_id': context.trigger_message_id,
+                            'problems': [
+                                {'kind': item.kind, 'detail': item.detail}
+                                for item in review.inconsistencies
+                            ],
+                        },
+                    )
+                    recall_messages = [
+                        *messages,
+                        ModelMessage(
+                            role=ModelRole.ASSISTANT,
+                            content=json.dumps(
+                                response.structured_output, separators=(',', ':'), sort_keys=True
+                            ),
+                        ),
+                        ModelMessage(
+                            role=ModelRole.USER,
+                            content=json.dumps(
+                                review.runtime_review(result.validated_turn.rejected),
+                                separators=(',', ':'),
+                                sort_keys=True,
+                            ),
+                        ),
+                    ]
+                    recall = self._v7_request(plan, context, recall_messages, include_tools=False)
+                    recall_budget = build_request_budget(
+                        policy=(
+                            context.runtime_policy.controlled_rules.context_budget_policy
+                            if context.runtime_policy is not None
+                            and context.runtime_policy.controlled_rules.context_budget_policy
+                            is not None
+                            else ContextBudgetPolicy()
+                        ),
+                        profile=plan.request_profile,
+                        prompt='',
+                        schema=plan.response_schema,
+                        context={
+                            'messages': [item.model_dump(mode='json') for item in recall_messages]
+                        },
+                        tools=[],
+                        prior_turn_tokens=plan.request_budget.raw_input_tokens,
+                    )
+                    request_budgets.append(recall_budget)
+                    response = self._observed_complete(
+                        recall,
+                        context,
+                        'consistency_recall',
+                        observations,
+                        exchange_completion,
+                    )
+                    invocations.append(
+                        _runtime_invocation_trace(
+                            len(invocations) + 1, response, observations[-1].latency_ms
+                        )
+                    )
+                    if response.completion_status is not ModelCompletionStatus.COMPLETE:
+                        raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+                    result = self._v7_proposal(
+                        plan,
+                        context,
+                        response,
+                        invocations,
+                        tool_call_id=tool_call_id,
+                        tool_arguments=tool_arguments,
+                        tool_output=tool_output,
+                        started_at=started_at,
+                        request_budgets=request_budgets,
+                    )
+                    if (
+                        result.validated_turn is not None
+                        and not review_reply(result.validated_turn).consistent
+                    ):
+                        # Twice inconsistent: the saved message enters the
+                        # existing persist-first recovery path unchanged.
+                        raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
             except TurnFieldContractViolation as contract_error:
                 if plan.schema_id == 'claimant.turn.v1':
+                    logger.warning(
+                        'agent_turn_field_contract_violation',
+                        extra={
+                            'violations': [
+                                item.model_dump(mode='json')
+                                for item in contract_error.violations
+                            ],
+                        },
+                    )
                     # Core v8 fact failures are atomic.  Persist-first recovery
                     # handles the saved inbound message; do not silently spend
                     # another model call or apply a partially repaired turn.
