@@ -2723,4 +2723,82 @@ describe('claimant intake projection', () => {
     expect(api.createClaim).not.toHaveBeenCalled()
     expect(api.resumeClaimSession).not.toHaveBeenCalled()
   })
+
+  it('continues the current report from the in-workspace Claim history', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Claim history' }))
+    expect(await screen.findByRole('heading', { name: 'No created Claims yet' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Continue your report' }))
+
+    expect(screen.queryByRole('heading', { name: 'Claim history' })).not.toBeInTheDocument()
+    expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
+  })
+
+  it('keeps account Claim history navigable after leaving an active conversation', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    const createdClaim = {
+      ...initialClaim,
+      claim_id: 'clm_created_after_leaving',
+      external_claim: { claim_number: 'NWF-2026-000973', creation_status: 'created' },
+      customer_next_step: {
+        status: 'claim_created',
+        summary: 'Claims intake review',
+        responsible_party: 'system',
+      },
+      updated_at: '2026-09-14T01:00:00Z',
+      can_resume: true,
+    }
+    const reportInProgress = {
+      ...initialClaim,
+      claim_id: 'clm_in_progress_history',
+      external_claim: null,
+      updated_at: '2026-09-15T01:00:00Z',
+      can_resume: true,
+    }
+    api.listClaims.mockResolvedValue({ items: [reportInProgress, createdClaim], page: { next_cursor: null } })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    // The conversation stays loaded while the claimant leaves it for the account pages.
+    await user.click(screen.getByRole('button', { name: 'Back to start' }))
+    await user.click(screen.getByRole('button', { name: 'Profile' }))
+    // The desktop navigation and the mobile index both render the same Claim history entry.
+    const [claimHistoryEntry] = await screen.findAllByRole('button', { name: 'Claim history' })
+    await user.click(claimHistoryEntry)
+    const row = await screen.findByRole('button', { name: 'Open Home claim, Claim NWF-2026-000973' })
+    // Only the created Claim is listed; the reports still in progress stay out of Claim history.
+    expect(screen.getByText('1 saved Claim')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /clm_in_progress_history|clm_ui_vp/ })).not.toBeInTheDocument()
+    await user.click(row)
+
+    expect(await screen.findByRole('heading', { name: 'Claim features' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'NWF-2026-000973' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Evidence history/ }))
+    expect(await screen.findByRole('heading', { name: 'Evidence history' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Back to Claim features' }))
+    await user.click(await screen.findByRole('button', { name: 'Back to Claim history' }))
+    expect(await screen.findByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Home claim, Claim NWF-2026-000973' })).toBeInTheDocument()
+  })
 })

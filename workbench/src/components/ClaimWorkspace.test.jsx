@@ -110,6 +110,43 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.getByRole('tab', { name: 'Claim information' })).toHaveAttribute('aria-selected', 'true')
   })
 
+  it('uses incident context when no claimant name is available and keeps exact IDs in record references', async () => {
+    const user = userEvent.setup()
+    const rawClaimId = 'clm_26ebb97a053bebb885e6'
+    const rawClaimantId = 'cus_demo'
+    const incidentSummary = 'The claimant has not yet completed the report.'
+    render(<ClaimWorkspace
+      {...props}
+      detail={{
+        ...detail,
+        claim_id: rawClaimId,
+        display_reference: rawClaimId,
+        claimant: { customer_id: rawClaimantId },
+        incident: { family: null, summary: incidentSummary },
+        created_at: '2026-09-22T01:00:00Z',
+      }}
+    />)
+
+    expect(screen.getByRole('heading', { name: incidentSummary, level: 1 })).toBeVisible()
+    expect(screen.queryByText(incidentSummary, { selector: '.claim-heading__summary' })).not.toBeInTheDocument()
+    expect(screen.getByText('Claim type not confirmed')).toBeVisible()
+    expect(screen.getByText(`Claim ${rawClaimId}`)).toBeVisible()
+    expect(screen.queryByText('Claim …b885e6')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: rawClaimantId })).not.toBeInTheDocument()
+
+    const referenceSummary = screen.getByText(/^Record references/, { selector: 'summary' })
+    const references = referenceSummary.closest('details')
+    expect(references).not.toHaveAttribute('open')
+    expect(within(references).getByText(rawClaimId)).not.toBeVisible()
+    expect(within(references).getByText(rawClaimantId)).not.toBeVisible()
+
+    await user.click(referenceSummary)
+
+    expect(references).toHaveAttribute('open')
+    expect(within(references).getByText(rawClaimId)).toBeVisible()
+    expect(within(references).getByText(rawClaimantId)).toBeVisible()
+  })
+
   it('supports arrow-key tab activation', async () => {
     const onSection = vi.fn()
     const user = userEvent.setup()
@@ -455,7 +492,7 @@ describe('ClaimWorkspace navigation', () => {
     />)
 
     expect(screen.getByText('Showing a saved Claim snapshot')).toBeInTheDocument()
-    expect(screen.getByText('Rear-end collision.')).toBeInTheDocument()
+    expect(screen.getAllByText('Rear-end collision.')).not.toHaveLength(0)
     expect(screen.queryByRole('button', { name: 'Review acceptance' })).not.toBeInTheDocument()
   })
 
