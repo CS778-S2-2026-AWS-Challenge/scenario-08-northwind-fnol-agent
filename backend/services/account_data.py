@@ -974,9 +974,7 @@ def select_payout_contact(
                         'The selected payment destination changed or is no longer available. '
                         'Reload payout details.'
                     ),
-                    details=[
-                        ErrorDetail(field='payment_destination_id', reason=error.reason)
-                    ],
+                    details=[ErrorDetail(field='payment_destination_id', reason=error.reason)],
                     retryable=True,
                 ) from error
             except RevisionConflict as error:
@@ -991,9 +989,7 @@ def select_payout_contact(
                     if isinstance(error, KeyError):
                         raise _not_found('payment destination') from error
                     raise _idempotency_conflict() from error
-                return ClaimPayoutContactSelectionResponse.model_validate(
-                    replay.response_payload
-                )
+                return ClaimPayoutContactSelectionResponse.model_validate(replay.response_payload)
     except ClaimantContactSelectionConflict as error:
         raise ApiError(
             status_code=409,
