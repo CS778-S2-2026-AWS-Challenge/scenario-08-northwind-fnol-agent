@@ -823,7 +823,10 @@ def test_payout_contact_repository_rechecks_destination_revision_at_commit(
             captured_args = args
 
         repository.save_payout_contact_selection = capture_save  # type: ignore[method-assign]
-        prepared = client.post(
+        # This no-op save deliberately leaves persistence unchanged. The request is
+        # used only to capture the fully prepared repository transaction arguments;
+        # the authoritative post-save readback therefore cannot produce a 201 response.
+        client.post(
             f'/api/v1/claims/{claim["claim_id"]}/payout-contact-selections',
             headers={
                 **owner,
@@ -837,7 +840,6 @@ def test_payout_contact_repository_rechecks_destination_revision_at_commit(
         )
         repository.save_payout_contact_selection = original_save  # type: ignore[method-assign]
 
-    assert prepared.status_code == 201, prepared.text
     assert captured_args is not None
     (
         updated_claim,
