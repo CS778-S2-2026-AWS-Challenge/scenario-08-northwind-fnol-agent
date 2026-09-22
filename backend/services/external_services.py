@@ -54,6 +54,7 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.repositories.account_data import AccountDataRepository
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -401,7 +402,11 @@ def _assessment_has_come_back(
     )
 
 
-def _payout_contact_is_complete(repository: PersistenceRepository, claim: WorkingClaim) -> bool:
+def _payout_contact_is_complete(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    identity_repository: IdentityRepository | None,
+) -> bool:
     contact_preference = claim.form.get('claimant.contact_preference')
     if (
         claim.payment_destination_id is None
@@ -409,17 +414,42 @@ def _payout_contact_is_complete(repository: PersistenceRepository, claim: Workin
         or contact_preference.status is not FormStatus.CONFIRMED
     ):
         return False
+
     account_repository = cast(AccountDataRepository, repository)
     destination = account_repository.get_payment_destination(
         claim.payment_destination_id, claim.customer_id
     )
-    return destination is not None and destination.active
+    if destination is None or not destination.active or identity_repository is None:
+        return False
+
+    account = identity_repository.get_account(claim.customer_id)
+    if account is None or not account.active:
+        return False
+
+    authority_prefix = 'claimant_profile:revision:'
+    authority_revision: int | None = None
+    for source_ref in reversed(contact_preference.source_refs):
+        if source_ref.startswith(authority_prefix):
+            revision = source_ref.removeprefix(authority_prefix)
+            if revision.isdigit():
+                authority_revision = int(revision)
+                break
+    if authority_revision is None or account.revision != authority_revision:
+        return False
+
+    selected_channel = str(contact_preference.value).strip().lower()
+    if selected_channel == 'email':
+        return bool(account.email.strip())
+    if selected_channel in {'phone', 'sms'}:
+        return bool(account.phone.strip())
+    return False
 
 
 def claimant_next_step(
     repository: PersistenceRepository,
     claim: WorkingClaim,
     action: ClaimantExternalServiceAction | None,
+    identity_repository: IdentityRepository | None = None,
 ) -> CustomerNextStep:
     """Say what the claimant does next, without contradicting the record beside it.
 
@@ -440,7 +470,7 @@ def claimant_next_step(
 
     if action is None:
         if claim.customer_next_step.status == 'ready_to_create' and _payout_contact_is_complete(
-            repository, claim
+            repository, claim, identity_repository
         ):
             return claim.customer_next_step.model_copy(
                 update={

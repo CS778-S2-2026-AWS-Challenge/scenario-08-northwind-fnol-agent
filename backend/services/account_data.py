@@ -55,6 +55,7 @@ from backend.domain.models import (
     NeededFor,
     PageInfo,
     ProposedFormChange,
+    WorkingClaim,
 )
 from backend.repositories.account_data import (
     AccountCursorKey,
@@ -706,6 +707,41 @@ def select_policy(
     return response
 
 
+def _payout_contact_response(
+    persistence: PersistenceRepository,
+    identity_repository: IdentityRepository,
+    claim: WorkingClaim,
+) -> ClaimPayoutContactSelectionResponse:
+    contact_preference = claim.form.get('claimant.contact_preference')
+    if claim.payment_destination_id is None or contact_preference is None:
+        raise ApiError(
+            status_code=500,
+            code='INTERNAL_ERROR',
+            message='The saved payout and contact selection could not be restored.',
+            retryable=True,
+        )
+    projected_next_step = claimant_next_step(
+        persistence,
+        claim,
+        None,
+        identity_repository=identity_repository,
+    )
+    primary_action = project_claimant_primary_action(
+        claim_id=claim.claim_id,
+        claim_revision=claim.revision,
+        next_step=projected_next_step,
+        external_service_action=None,
+    )
+    return ClaimPayoutContactSelectionResponse(
+        claim_id=claim.claim_id,
+        revision=claim.revision,
+        payment_destination_id=claim.payment_destination_id,
+        contact_preference=contact_preference,
+        customer_next_step=projected_next_step,
+        primary_action=primary_action,
+    )
+
+
 def select_payout_contact(
     repository: AccountDataRepository,
     persistence: PersistenceRepository,
@@ -731,7 +767,15 @@ def select_payout_contact(
     if replay is not None:
         if replay.request_fingerprint != fingerprint or replay.response_payload is None:
             raise _idempotency_conflict()
-        return ClaimPayoutContactSelectionResponse.model_validate(replay.response_payload)
+        restored = ClaimPayoutContactSelectionResponse.model_validate(replay.response_payload)
+        replay_claim = persistence.get_claim(claim_id, principal.subject)
+        if (
+            replay_claim is not None
+            and replay_claim.revision == restored.revision
+            and replay_claim.payment_destination_id == restored.payment_destination_id
+        ):
+            return _payout_contact_response(persistence, identity_repository, replay_claim)
+        return restored
 
     claim = persistence.get_claim(claim_id, principal.subject)
     if claim is None:
@@ -746,7 +790,12 @@ def select_payout_contact(
         )
 
     external_action = claimant_assessor_action(persistence, claim)
-    projected_next_step = claimant_next_step(persistence, claim, external_action)
+    projected_next_step = claimant_next_step(
+        persistence,
+        claim,
+        external_action,
+        identity_repository=identity_repository,
+    )
     current_action = project_claimant_primary_action(
         claim_id=claim.claim_id,
         claim_revision=claim.revision,
@@ -806,6 +855,11 @@ def select_payout_contact(
     payment_source_ref = (
         f'payment_destination:{destination.payment_destination_id}:revision:{destination.revision}'
     )
+    contact_field_ref = (
+        f'claim:{claim.claim_id}:revision:{claim.revision + 1}:field:'
+        'claimant.contact_preference'
+    )
+    contact_authority_ref = f'claimant_profile:revision:{account.revision}'
     contact_field = resolve_form_change(
         field_code='claimant.contact_preference',
         existing=claim.form.get('claimant.contact_preference'),
@@ -817,10 +871,7 @@ def select_payout_contact(
             needed_for=NeededFor.CURRENT_ACTION,
             reported_text='Selected the preferred contact method for this Claim.',
         ),
-        source_ref=(
-            f'claim:{claim.claim_id}:revision:{claim.revision + 1}:field:'
-            'claimant.contact_preference'
-        ),
+        source_ref=contact_field_ref,
         message_text=None,
         timestamp=timestamp,
         accepted_status=FormStatus.CONFIRMED,
@@ -829,6 +880,13 @@ def select_payout_contact(
             claim.form.get('claimant.contact_preference') is not None
             and claim.form['claimant.contact_preference'].value != contact_preference
         ),
+    )
+    contact_field = contact_field.model_copy(
+        update={
+            'source_refs': list(
+                dict.fromkeys([*contact_field.source_refs, contact_authority_ref])
+            )
+        }
     )
     updated_claim = claim.model_copy(
         update={
@@ -844,27 +902,15 @@ def select_payout_contact(
         recomputation_reason='payout_contact_selected',
         trigger_source_refs=[
             payment_source_ref,
-            (
-                f'claim:{claim.claim_id}:revision:{updated_claim.revision}:field:'
-                'claimant.contact_preference'
-            ),
+            contact_field_ref,
+            contact_authority_ref,
         ],
         created_at=timestamp,
     )
-    projected_next_step = claimant_next_step(persistence, updated_claim, None)
-    primary_action = project_claimant_primary_action(
-        claim_id=updated_claim.claim_id,
-        claim_revision=updated_claim.revision,
-        next_step=projected_next_step,
-        external_service_action=None,
-    )
-    response = ClaimPayoutContactSelectionResponse(
-        claim_id=claim_id,
-        revision=updated_claim.revision,
-        payment_destination_id=destination.payment_destination_id,
-        contact_preference=contact_field,
-        customer_next_step=projected_next_step,
-        primary_action=primary_action,
+    response = _payout_contact_response(
+        persistence,
+        identity_repository,
+        updated_claim,
     )
     idempotency = IdempotencyRecord(
         actor_id=principal.subject,
@@ -890,7 +936,11 @@ def select_payout_contact(
             auth_source=principal.auth_source,
         ),
         reason='Claimant selected a protected payout destination and preferred contact channel.',
-        source_refs=[payment_source_ref, 'field:claimant.contact_preference'],
+        source_refs=[
+            payment_source_ref,
+            'field:claimant.contact_preference',
+            contact_authority_ref,
+        ],
         visibility=AuditVisibility.AUDIT_ONLY,
         idempotency_key=key,
         claim_revision=updated_claim.revision,
@@ -930,4 +980,13 @@ def select_payout_contact(
                 raise _not_found('payment destination') from error
             raise _idempotency_conflict() from error
         return ClaimPayoutContactSelectionResponse.model_validate(replay.response_payload)
-    return response
+
+    persisted_claim = persistence.get_claim(claim_id, principal.subject)
+    if persisted_claim is None:
+        raise ApiError(
+            status_code=500,
+            code='INTERNAL_ERROR',
+            message='The saved payout and contact selection could not be restored.',
+            retryable=True,
+        )
+    return _payout_contact_response(persistence, identity_repository, persisted_claim)
