@@ -3700,6 +3700,19 @@
             "title": "Pending Owner",
             "type": "string"
           },
+          "presentation": {
+            "default": "consent_request",
+            "enum": [
+              "info_link",
+              "action_button",
+              "consent_request",
+              "tracked_task",
+              "agent_assisted",
+              "status_update"
+            ],
+            "title": "Presentation",
+            "type": "string"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
@@ -3920,6 +3933,17 @@
           "actor": {
             "$ref": "#/components/schemas/ActorType"
           },
+          "client_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Message Id"
+          },
           "content": {
             "title": "Content",
             "type": "object"
@@ -3957,6 +3981,16 @@
           "message_id": {
             "title": "Message Id",
             "type": "string"
+          },
+          "recovery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantTurnRecovery"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -4124,7 +4158,7 @@
             "type": "string"
           },
           "model_profile_id": {
-            "default": "qwen-local",
+            "default": "openrouter-gpt4o-mini",
             "maxLength": 100,
             "minLength": 1,
             "title": "Model Profile Id",
@@ -4155,6 +4189,45 @@
           "last_active_at"
         ],
         "title": "ClaimantSession",
+        "type": "object"
+      },
+      "ClaimantTurnRecovery": {
+        "additionalProperties": false,
+        "properties": {
+          "claimant_projection": {
+            "title": "Claimant Projection",
+            "type": "string"
+          },
+          "continuation": {
+            "const": "runtime.fail_safe",
+            "title": "Continuation",
+            "type": "string"
+          },
+          "resume_entrypoint": {
+            "const": "submit_message",
+            "title": "Resume Entrypoint",
+            "type": "string"
+          },
+          "resume_triggers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Resume Triggers",
+            "type": "array"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_id",
+          "continuation",
+          "claimant_projection",
+          "resume_triggers",
+          "resume_entrypoint"
+        ],
+        "title": "ClaimantTurnRecovery",
         "type": "object"
       },
       "CollaborationMutationResponse": {
@@ -5041,13 +5114,13 @@
             "type": "integer"
           },
           "ordinary_input_hard_limit": {
-            "default": 3000,
+            "default": 7500,
             "minimum": 100.0,
             "title": "Ordinary Input Hard Limit",
             "type": "integer"
           },
           "ordinary_input_target": {
-            "default": 1800,
+            "default": 3000,
             "minimum": 100.0,
             "title": "Ordinary Input Target",
             "type": "integer"
@@ -5070,7 +5143,7 @@
             "type": "integer"
           },
           "tool_path_input_hard_limit": {
-            "default": 3000,
+            "default": 6000,
             "minimum": 100.0,
             "title": "Tool Path Input Hard Limit",
             "type": "integer"
@@ -9820,6 +9893,18 @@
             "title": "Message Id",
             "type": "string"
           },
+          "recovery_rule_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Rule Id"
+          },
           "session_id": {
             "title": "Session Id",
             "type": "string"
@@ -9917,6 +10002,16 @@
           },
           "primary_action": {
             "$ref": "#/components/schemas/ClaimantPrimaryAction"
+          },
+          "recovery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantTurnRecovery"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "session_id": {
             "title": "Session Id",
@@ -11404,6 +11499,11 @@
             "title": "Asked At",
             "type": "string"
           },
+          "during_handoff": {
+            "default": false,
+            "title": "During Handoff",
+            "type": "boolean"
+          },
           "field_codes": {
             "items": {
               "type": "string"
@@ -11929,6 +12029,7 @@
             "type": "integer"
           },
           "output_limit": {
+            "maximum": 8000.0,
             "minimum": 1.0,
             "title": "Output Limit",
             "type": "integer"
@@ -12005,6 +12106,16 @@
         "additionalProperties": false,
         "description": "Deterministic information needed for the current safe action.",
         "properties": {
+          "by_state": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "By State",
+            "type": "object"
+          },
           "current_action_satisfied": {
             "default": 0,
             "minimum": 0.0,
@@ -12016,6 +12127,13 @@
             "minimum": 0.0,
             "title": "Current Action Total",
             "type": "integer"
+          },
+          "missing_by_branch": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Missing By Branch",
+            "type": "array"
           },
           "missing_required_now": {
             "items": {
@@ -12047,11 +12165,30 @@
             "title": "Ready",
             "type": "boolean"
           },
+          "ready_pending_confirmation": {
+            "default": false,
+            "title": "Ready Pending Confirmation",
+            "type": "boolean"
+          },
+          "recorded": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Recorded",
+            "type": "array"
+          },
           "satisfied": {
             "items": {
               "type": "string"
             },
             "title": "Satisfied",
+            "type": "array"
+          },
+          "unresolved": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unresolved",
             "type": "array"
           }
         },
@@ -13741,6 +13878,11 @@
           "needed_for": {
             "$ref": "#/components/schemas/NeededFor"
           },
+          "normalised": {
+            "default": false,
+            "title": "Normalised",
+            "type": "boolean"
+          },
           "precision": {
             "$ref": "#/components/schemas/FactPrecision",
             "default": "exact"
@@ -13828,6 +13970,11 @@
           },
           "needed_for": {
             "$ref": "#/components/schemas/NeededFor"
+          },
+          "normalised": {
+            "default": false,
+            "title": "Normalised",
+            "type": "boolean"
           },
           "precision": {
             "$ref": "#/components/schemas/FactPrecision",

@@ -127,7 +127,11 @@ def execute_isolated_context_plan(
     request = ModelRequest(
         model_profile_id=context.model_profile_id,
         purpose=CLAIMANT_AGENT_PURPOSE,
-        prompt_version='northwind-fnol-claimant-v7',
+        prompt_version=(
+            context.runtime_policy.instruction.prompt_version
+            if context.runtime_policy is not None
+            else 'northwind-fnol-claimant-v7'
+        ),
         privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
         required_capabilities=ModelCapabilities(
             structured_output=True,

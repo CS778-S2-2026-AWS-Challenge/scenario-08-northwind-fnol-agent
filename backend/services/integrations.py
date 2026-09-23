@@ -515,8 +515,7 @@ def _bind_returned_evidence_to_claim(
             ),
         }
     )
-    _save_claim(repository, updated_claim, claim.revision)
-    return updated_claim
+    return _save_claim(repository, updated_claim, claim.revision)
 
 
 def _checked_external_result(
@@ -1103,16 +1102,26 @@ def _save_claim(
     repository: PersistenceRepository,
     claim: WorkingClaim,
     expected_revision: int,
-) -> None:
+    *,
+    authorized_next_step: CustomerNextStep | None = None,
+) -> WorkingClaim:
+    from backend.services.turn_reducer import apply_progress
+
+    evaluation = build_applied_branch_evaluation(
+        claim, repository=repository, recomputation_reason='integration_result_changed'
+    )
+    claim = apply_progress(
+        claim,
+        evaluation,
+        open_handoffs=tuple(repository.list_handoffs(claim.claim_id, claim.customer_id)),
+        authorized_next_step=authorized_next_step,
+        proposed_next_step=authorized_next_step,
+    )
     try:
         repository.save_claim(
             claim,
             expected_revision,
-            branch_evaluation=build_applied_branch_evaluation(
-                claim,
-                repository=repository,
-                recomputation_reason='integration_result_changed',
-            ),
+            branch_evaluation=evaluation,
         )
     except RevisionConflict as conflict:
         raise ApiError(
@@ -1122,6 +1131,7 @@ def _save_claim(
             retryable=True,
             current_revision=conflict.current_revision,
         ) from conflict
+    return claim
 
 
 def reconcile_assessor_routing(
@@ -1429,6 +1439,13 @@ def reconcile_assessor_routing(
         updated_claim,
         repository=repository,
         recomputation_reason='integration_result_changed',
+    )
+    from backend.services.turn_reducer import apply_progress
+
+    updated_claim = apply_progress(
+        updated_claim,
+        branch_evaluation,
+        open_handoffs=tuple(repository.list_handoffs(claim.claim_id, claim.customer_id)),
     )
     staff_action = None
     staff_idempotency = None
@@ -2400,17 +2417,10 @@ def _claim_with_assessor_result(
         ValueError: The resulting Claim projection violates its schema.
     """
 
-    assigned = result.routing_status is AssessorRoutingStatus.ASSIGNED
     return claim.model_copy(
         update={
             'assessor_routing': result,
             'assessor_routing_fingerprint': fingerprint,
-            'customer_next_step': CustomerNextStep(
-                status='assessor_assigned' if assigned else 'awaiting_assessor_assignment',
-                summary=result.next_step,
-                responsible_party=ResponsibleParty.EXTERNAL_PARTY,
-                expected_by=result.expected_by,
-            ),
             'revision': claim.revision + 1,
             'updated_at': now_utc(),
         }

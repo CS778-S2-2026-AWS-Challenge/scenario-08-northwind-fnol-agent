@@ -87,6 +87,14 @@ def _relation(
         return AssertionRelation.EQUIVALENT
     if existing.status is not FormStatus.CONFIRMED:
         return AssertionRelation.REFINEMENT
+    if (
+        isinstance(existing.value, list)
+        and isinstance(proposal.value, list)
+        and {_normalise(item) for item in existing.value}
+        <= {_normalise(item) for item in proposal.value}
+    ):
+        # "The hallway carpet too" adds to a confirmed list; it disputes nothing.
+        return AssertionRelation.REFINEMENT
     if explicit_correction or (message_text and _CORRECTION_PATTERN.search(message_text)):
         return AssertionRelation.CORRECTION
     existing_precision = (
@@ -105,6 +113,52 @@ def _relation(
     ):
         return AssertionRelation.REFINEMENT
     return AssertionRelation.MATERIAL_CONFLICT
+
+
+def disposition_form_field(
+    existing: StructuredFormField | None,
+    proposal: ProposedFormChange,
+    *,
+    source_ref: str,
+    timestamp: datetime,
+    updated_by: ActorReference,
+) -> StructuredFormField:
+    """Record that a fact is unavailable for now or awaits a third party.
+
+    The claimant's own words ("I don't know yet", "the assessor will see") are
+    kept as the assertion so the Workbench and a later turn both know why the
+    value is absent. Earlier assertions stay in the history.
+    """
+
+    assertion = FactAssertion(
+        assertion_id=new_id('ast'),
+        reported_text=proposal.reported_text,
+        normalized_value=None,
+        source_refs=[source_ref],
+        relation=AssertionRelation.INITIAL if existing is None else AssertionRelation.REFINEMENT,
+        status=proposal.status,
+        precision=FactPrecision.UNKNOWN,
+        reason_code=(
+            'THIRD_PARTY_PENDING'
+            if proposal.status is FormStatus.PENDING_GENERATION
+            else 'CLAIMANT_WILL_SUPPLY'
+        ),
+        created_at=timestamp,
+    )
+    history = [] if existing is None else list(existing.assertions)
+    return StructuredFormField(
+        value=None,
+        source=proposal.source,
+        source_refs=list(dict.fromkeys([*(existing.source_refs if existing else []), source_ref])),
+        status=proposal.status,
+        needed_for=proposal.needed_for,
+        confidence=None,
+        precision=FactPrecision.UNKNOWN,
+        assertions=[*history, assertion],
+        current_assertion_id=assertion.assertion_id,
+        updated_at=timestamp,
+        updated_by=updated_by,
+    )
 
 
 def resolve_form_change(
@@ -156,6 +210,30 @@ def resolve_form_change(
         history.append(_legacy_assertion(field_code, existing))
 
     if relation is AssertionRelation.EQUIVALENT and existing is not None:
+        if (
+            existing.status is FormStatus.PROPOSED
+            and proposal.source is FormSource.CLAIMANT
+            and accepted_status is FormStatus.CONFIRMED
+        ):
+            # Equivalent value does not mean equivalent authority: a later
+            # direct claimant statement can settle an earlier inference. Keep
+            # the earlier assertion intact and make the new source current.
+            return existing.model_copy(
+                update={
+                    'source': FormSource.CLAIMANT,
+                    'source_refs': list(dict.fromkeys([*existing.source_refs, source_ref])),
+                    'status': FormStatus.CONFIRMED,
+                    'resolution_state': FactResolutionState.RESOLVED,
+                    'confidence': proposal.confidence,
+                    'precision': precision,
+                    'normalised': proposal.reported_text is not None
+                    and str(existing.value).strip() != proposal.reported_text.strip(),
+                    'assertions': [*history, assertion],
+                    'current_assertion_id': assertion.assertion_id,
+                    'updated_at': timestamp,
+                    'updated_by': updated_by,
+                }
+            )
         if (
             existing.resolution_state is FactResolutionState.CLARIFICATION_REQUIRED
             and accepted_status is FormStatus.CONFIRMED
@@ -234,6 +312,10 @@ def resolve_form_change(
         confidence=proposal.confidence,
         resolution_state=resolution,
         precision=precision,
+        normalised=(
+            proposal.reported_text is not None
+            and str(proposal.value).strip() != proposal.reported_text.strip()
+        ),
         current_assertion_id=assertion.assertion_id,
         assertions=[*history, assertion],
         updated_at=timestamp,
@@ -366,7 +448,11 @@ def resolve_contents_item_change(
             status=accepted_status,
             needed_for=NeededFor.CURRENT_ACTION,
             confidence=proposal.confidence,
-            resolution_state=FactResolutionState.NEEDS_CONFIRMATION,
+            resolution_state=(
+                FactResolutionState.RESOLVED
+                if accepted_status is FormStatus.CONFIRMED
+                else FactResolutionState.NEEDS_CONFIRMATION
+            ),
             current_assertion_id=assertion.assertion_id,
             assertions=[assertion],
             updated_at=timestamp,
@@ -422,7 +508,11 @@ def resolve_contents_item_change(
             'status': accepted_status,
             'needed_for': NeededFor.CURRENT_ACTION,
             'confidence': proposal.confidence,
-            'resolution_state': FactResolutionState.NEEDS_CONFIRMATION,
+            'resolution_state': (
+                FactResolutionState.RESOLVED
+                if accepted_status is FormStatus.CONFIRMED
+                else FactResolutionState.NEEDS_CONFIRMATION
+            ),
             'current_assertion_id': assertion.assertion_id,
             'assertions': [*history, assertion],
             'updated_at': timestamp,

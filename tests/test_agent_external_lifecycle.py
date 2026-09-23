@@ -115,8 +115,10 @@ def _context(
     )
 
 
-def test_empty_claim_has_no_external_context() -> None:
-    assert _context([], []) == ()
+def test_unknown_family_retains_cross_family_manual_guidance_only() -> None:
+    context = _context([], [])
+    assert [item.service_identity for item in context] == ['police_105_reporting_guidance']
+    assert context[0].uses_external_task is False
 
 
 def test_projection_keeps_operation_and_result_status_separate() -> None:

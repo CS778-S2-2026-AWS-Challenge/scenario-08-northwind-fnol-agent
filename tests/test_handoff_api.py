@@ -61,7 +61,13 @@ def test_explicit_injury_interrupts_intake_and_persists_urgent_handoff(
         key='urgent-message',
     )
 
-    assert turn['form_changes'] == []
+    # ControlledAgent's deterministic safety interrupt confirms
+    # incident.injury_or_danger itself as part of the same-turn proposal, so
+    # form_changes carries that one field rather than being empty.
+    assert [
+        item['field_code']
+        for item in turn['form_changes']  # type: ignore[attr-defined]
+    ] == ['incident.injury_or_danger']
     assert turn['decision']['action'] == 'URGENT_HANDOFF'  # type: ignore[index]
     assert 'priority' not in turn['handoff']  # type: ignore[operator]
     summary = str(turn['handoff']['summary'])  # type: ignore[index]
@@ -73,6 +79,8 @@ def test_explicit_injury_interrupts_intake_and_persists_urgent_handoff(
 
     handoffs = repository.list_handoffs(str(claim['claim_id']), 'cus_demo')
     stored_claim = repository.get_claim(str(claim['claim_id']), 'cus_demo')
+    assert stored_claim is not None
+    assert stored_claim.form['incident.injury_or_danger'].value is True
     assert len(handoffs) == 1
     assert handoffs[0].priority.value == 'urgent'
     assert handoffs[0].queue == 'urgent_support'

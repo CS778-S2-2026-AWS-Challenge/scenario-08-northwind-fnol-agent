@@ -62,6 +62,7 @@ from backend.domain.models import (
     IntegrationSource,
     ResponsibleParty,
     RouteAssessorRequest,
+    WorkflowState,
     WorkingClaim,
 )
 from backend.repositories.fixture import FixtureRepository
@@ -1086,7 +1087,10 @@ def test_assessor_routing_requires_explicit_authorisation_and_is_idempotent(
     stored = repository.get_claim_internal(claim_id)
     assert stored is not None
     assert stored.revision == 4
-    assert stored.customer_next_step.status == 'assessor_assigned'
+    assert stored.customer_next_step.status == 'claim_created'
+    assert stored.claim_state.workflow_state is WorkflowState.CREATED
+    assert stored.assessor_routing is not None
+    assert stored.assessor_routing.routing_status is AssessorRoutingStatus.ASSIGNED
 
 
 def test_assessor_result_runs_through_runtime_storage_and_verification() -> None:
@@ -1861,7 +1865,10 @@ def test_queued_assessor_result_preserves_queue_state_without_claiming_assignmen
     stored = repository.get_claim_internal(str(payload['claim_id']))
     assert stored is not None
     assert stored.revision == revision + 1
-    assert stored.customer_next_step.status == 'awaiting_assessor_assignment'
+    assert stored.customer_next_step.status == 'claim_created'
+    assert stored.claim_state.workflow_state is WorkflowState.CREATED
+    assert stored.assessor_routing is not None
+    assert stored.assessor_routing.routing_status is AssessorRoutingStatus.QUEUED
 
 
 def test_assessor_routing_is_not_authorised_by_severity_alone(

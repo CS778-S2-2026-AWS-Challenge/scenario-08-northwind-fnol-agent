@@ -58,11 +58,13 @@ CONTROLLED_REQUIREMENT_CASES = {
 }
 
 
-@pytest.mark.parametrize('field_code', REQUIREMENT_PRIORITY)
+@pytest.mark.parametrize('field_code', CONTROLLED_REQUIREMENT_CASES)
 def test_controlled_requirement_values_follow_the_field_registry(
     field_code: str,
 ) -> None:
-    assert set(CONTROLLED_REQUIREMENT_CASES) == set(REQUIREMENT_PRIORITY)
+    # The frozen controlled parser keeps its original supported scope. New v8
+    # injury/theft requirements are covered through the model field contract.
+    assert set(CONTROLLED_REQUIREMENT_CASES) <= set(REQUIREMENT_PRIORITY)
     message_text, expected = CONTROLLED_REQUIREMENT_CASES[field_code]
     value = _controlled_requirement_value(field_code, message_text)
 
@@ -183,7 +185,7 @@ def test_handoff_reason_code_alone_cannot_bypass_high_impact_review() -> None:
     assert validate_proposal(candidate).outcome is AuthorityOutcome.REVIEW_REQUIRED
 
 
-def test_invariant_guard_short_circuits_and_otherwise_delegates() -> None:
+def test_invariant_guard_preserves_interrupt_while_continuing_provider() -> None:
     class RecordingAgent:
         call_count = 0
 
@@ -219,5 +221,7 @@ def test_invariant_guard_short_circuits_and_otherwise_delegates() -> None:
 
     assert interrupt.action is AgentAction.HANDOFF
     assert interrupt.controlled_rule_authorised is True
+    assert validate_proposal(interrupt).outcome is AuthorityOutcome.AUTHORISED
     assert delegated.action is AgentAction.UPDATE
-    assert provider.call_count == 1
+    assert provider.call_count == 2
+    assert interrupt.customer_response == delegated.customer_response

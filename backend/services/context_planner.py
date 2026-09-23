@@ -12,9 +12,9 @@ from backend.domain.agent_context_runtime import (
     ContextPlan,
     ContextReference,
     TurnRoute,
-    TurnTask,
     VerifiedConversationSummary,
 )
+from backend.domain.external_service_registry import ExternalLifecycleStatus
 from backend.domain.models import MessageRecord, MessageVisibility, NeededFor
 from backend.domain.turn_field_contract import TurnFieldContract
 from backend.services.agent import AgentTurnContext
@@ -50,7 +50,6 @@ def _claim_projection(
             'value': field.value,
             'status': field.status.value,
             'precision': field.precision.value,
-            'source_refs': field.source_refs,
         }
         for code, field in claim.form.items()
         if code in allowed_fields and field.needed_for is NeededFor.CURRENT_ACTION
@@ -59,57 +58,68 @@ def _claim_projection(
         'claim_id': claim.claim_id,
         'revision': claim.revision,
         'product_family': route.product_family,
+        'family_resolution': route.family_resolution,
+        'handoff_open': bool(getattr(context, 'open_handoffs', ())),
+        'safety_interrupt': (getattr(getattr(context, 'safety_interrupt', None), 'kind', None)),
+        'eligible_services': _external_service_projection(context, route),
         'workflow_state': claim.claim_state.workflow_state.value,
         'next_action': claim.claim_state.next_action.value,
         'current_fields': current_fields,
         'contents_items': [item.model_dump(mode='json') for item in claim.contents_items],
+        # The form as it stands, bucketed by what still needs the claimant, what
+        # is awaiting someone else, and what is settled. The model reads this and
+        # decides what to do; Runtime does not pre-select a next question.
         'requirements': (
             {
-                'satisfied': branch.requirements.satisfied,
-                'missing_required_now': branch.requirements.missing_required_now,
-                'next_required_item': branch.requirements.next_required_item,
+                'by_state': branch.requirements.by_state,
+                'unresolved': branch.requirements.unresolved,
                 'ready': branch.requirements.ready,
             }
             if branch is not None
             else {}
         ),
+        'last_question': getattr(context, 'last_question', None),
+        'remaining_questions': getattr(context, 'remaining_questions', None),
+        'documents': list(getattr(context, 'documents', ())),
+        # Files received this turn that this provider cannot open. They are
+        # saved for the claims team; the model acknowledges them by kind.
+        'received_but_unreadable': [
+            {'evidence_id': item.evidence_id, 'media_type': item.media_type}
+            for item in getattr(context, 'unattached_evidence', ())
+        ],
         'field_contract': field_contract.prompt_projection() if field_contract is not None else {},
     }
 
 
 def _external_service_projection(context: AgentTurnContext, route: TurnRoute) -> list[object]:
-    if route.task is not TurnTask.EXTERNAL_SUPPORT:
+    if getattr(context, 'open_handoffs', ()):
+        return []
+    v8 = (
+        context.runtime_policy is not None
+        and context.runtime_policy.instruction.prompt_version == 'northwind-fnol-claimant-v8'
+    )
+    if not v8 and route.task.value in {'evidence_current', 'evidence_history'}:
         return []
     matched: list[object] = []
-    requested = {item.casefold() for item in route.capability_ids}
+    eligible_ids = getattr(context, 'eligible_service_ids', None)
     for service in context.external_services:
-        searchable_identity = ' '.join(
-            value
-            for value in (
-                service.service_identity,
-                service.catalogue_reference,
-                service.service_name,
-                service.purpose,
-                service.requested_action,
-                service.access_form,
-            )
-            if value
-        ).casefold()
-        if requested and not any(capability in searchable_identity for capability in requested):
+        if v8 and service.operation_status is not ExternalLifecycleStatus.CONSENT_REQUIRED:
+            continue
+        if not v8 and eligible_ids is not None and service.service_identity not in eligible_ids:
+            continue
+        if (
+            not v8
+            and context.selected_external_service_ids
+            and service.service_identity not in context.selected_external_service_ids
+        ):
             continue
         matched.append(
             {
                 'service_identity': service.service_identity,
                 'claimant_purpose': service.purpose,
-                'supported_action': service.requested_action,
-                'required_consent_scope': list(service.disclosure_fields),
-                'current_status': service.operation_status.value,
-                'next_allowed_action': service.next_action,
             }
         )
-        if len(matched) == 3:
-            break
-    return matched
+    return matched if v8 else matched[:3]
 
 
 def _catalogue(
@@ -253,7 +263,13 @@ def _catalogue(
             )
         )
     services = _external_service_projection(context, route)
-    if services:
+    # v8 includes the complete eligible set in claim.current.  Do not pay for a
+    # second copy of the same catalogue in a separate context section.
+    v8 = (
+        context.runtime_policy is not None
+        and context.runtime_policy.instruction.prompt_version == 'northwind-fnol-claimant-v8'
+    )
+    if services and not v8:
         values['external.services'] = services
         entries.append(
             ContextCatalogueEntry(

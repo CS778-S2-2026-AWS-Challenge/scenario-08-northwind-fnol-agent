@@ -7,11 +7,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from journey_runs import motor_collision
-from journey_runs.__main__ import main as journey_main
-from journey_runs.assessor_failures import FAILURE_CASES, run_assessor_failure
-from journey_runs.engine import PROFILE_ENV, REPOSITORY_ROOT, PackMaterial, journey_settings
-from journey_runs.household import (
+from pydantic import ValidationError
+
+from backend.core.config import AgentRuntimeProfile, IdentityMode
+from tests.journey_runs import motor_collision
+from tests.journey_runs.__main__ import main as journey_main
+from tests.journey_runs.assessor_failures import FAILURE_CASES, run_assessor_failure
+from tests.journey_runs.engine import PROFILE_ENV, REPOSITORY_ROOT, PackMaterial, journey_settings
+from tests.journey_runs.household import (
     CONTENTS,
     CONTENTS_CONFLICTING_OWNERSHIP,
     CONTENTS_EXPIRED_VALUATION,
@@ -27,15 +30,15 @@ from journey_runs.household import (
     household_run_cases,
     run_household,
 )
-from journey_runs.metrics import QuestionEffort, metric_coverage
-from journey_runs.motor_collision import (
+from tests.journey_runs.metrics import QuestionEffort, metric_coverage
+from tests.journey_runs.motor_collision import (
     MOTOR_COLLISION_PACK,
     MOTOR_PACKS,
     motor_run_cases,
     run_motor_collision,
     run_motor_journey,
 )
-from journey_runs.record import (
+from tests.journey_runs.record import (
     AgentTurn,
     Arrival,
     ClaimantEffort,
@@ -55,9 +58,6 @@ from journey_runs.record import (
     VisibilityCheck,
     cited_authority,
 )
-from pydantic import ValidationError
-
-from backend.core.config import AgentRuntimeProfile, IdentityMode
 
 _NOW = datetime(2026, 9, 15, tzinfo=UTC)
 

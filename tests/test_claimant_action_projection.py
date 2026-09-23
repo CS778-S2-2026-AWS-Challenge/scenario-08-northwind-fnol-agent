@@ -157,7 +157,7 @@ def test_ready_to_create_projects_payout_contact_as_the_authoritative_step() -> 
     assert projection.execution_boundary == 'conversation'
 
 
-def test_agreement_required_projects_navigation_without_enabling_submission() -> None:
+def test_agreement_required_opens_claim_creation_directly() -> None:
     projection = project_claimant_primary_action(
         claim_id='clm_2',
         claim_revision=4,
@@ -165,12 +165,11 @@ def test_agreement_required_projects_navigation_without_enabling_submission() ->
         external_service_action=None,
     )
 
-    assert projection.action_type == 'conversation'
-    assert projection.action_code == 'claimant.review_agreement'
+    assert projection.action_type == 'claim_creation'
+    assert projection.action_code == 'claimant.create_claim'
     assert projection.available is True
     assert projection.required_inputs == []
-    assert projection.execution_boundary == 'conversation'
-    assert 'claimant.create_claim' in CLAIMANT_ACTION_REGISTRY
+    assert projection.execution_boundary == 'claimant_api'
 
 
 def test_confirmation_required_projects_review_details() -> None:

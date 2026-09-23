@@ -477,6 +477,10 @@ def _claim_specs() -> list[AgentActionContract]:
             lifecycle_states = (WorkflowState.READY_FOR_NEXT,)
         elif code == 'claim.resume_draft':
             lifecycle_states = _MUTABLE_WORKFLOW_STATES
+        elif code == 'claim.correct_fact':
+            # A created report still accepts corrections and later facts; each
+            # is appended to the field's assertion history, never overwritten.
+            lifecycle_states = (*_MUTABLE_WORKFLOW_STATES, WorkflowState.CREATED)
         preconditions: tuple[str, ...] = (
             'authorised_claim_scope',
             'current_claim_revision',

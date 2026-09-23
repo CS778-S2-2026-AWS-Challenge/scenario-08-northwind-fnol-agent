@@ -63,6 +63,7 @@ def test_live_claimant_dispatcher_publishes_only_real_production_bindings() -> N
 
     assert executable == {
         'claim.apply_fact_patch': 'claim_store.compare_and_set',
+        'claim.correct_fact': 'claim_store.compare_and_set',
         'claim.create': 'claims_service.create_claim',
         'claim.prepare_creation': None,
         'claim.register_evidence': 'claim_store.compare_and_set',

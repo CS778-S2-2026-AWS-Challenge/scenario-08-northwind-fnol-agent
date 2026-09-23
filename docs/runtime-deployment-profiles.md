@@ -36,7 +36,7 @@ profile.
 
 The Backend contains the versioned initial Agent Runtime Release. When the selected Control Plane
 scope has no Release Set history, application composition installs the complete Agent policy and
-the `qwen-local`, `nowcoding-gpt55`, `bedrock-nova2-lite`, and
+the `qwen-local`, `openrouter-gpt4o-mini`, `bedrock-nova2-lite`, and
 `google-gemini35-flash-lite` model configurations as one active published Release Set. A model
 configuration can remain explicitly unavailable inside that
 Release Set; publication does not claim provider connectivity.

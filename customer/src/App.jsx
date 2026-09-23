@@ -467,9 +467,11 @@ function App() {
   const followLatestMessages = useRef(true)
   const forceLatestMessages = useRef(false)
   const confirmedClaimProjections = useRef(new Map())
+  const messagesRef = useRef(messages)
   activeClaimRef.current = claim
   activeSessionIdRef.current = sessionId
   accountRef.current = account
+  messagesRef.current = messages
   const realtimePrincipal = account ? 'authenticated' : claim?.claim_id ? 'anonymous' : 'none'
   const realtimeSyncNotice = realtimeHealth === 'stale'
     ? 'Live updates need to be resynchronised. Some claim information may be out of date while we restore the latest status.'
@@ -973,6 +975,14 @@ function App() {
     }
   }
 
+  function linkedEvidenceIds() {
+    const linked = new Set()
+    for (const item of messagesRef.current) {
+      for (const evidenceId of item.evidence_refs || []) linked.add(evidenceId)
+    }
+    return linked
+  }
+
   function syncEvidenceProjection(response) {
     const responseRevision = Number(response.revision || 0)
     const currentClaimRevision = Math.max(Number(activeClaimRef.current?.revision || 0), latestRevision.current)
@@ -991,14 +1001,31 @@ function App() {
       if (items.length === 0 && current.some((item) => item.status === 'uploading' || item.retry || item.retryFile)) {
         return current
       }
+      // Runtime also tracks bookkeeping placeholders for documents the
+      // claimant does not have yet (file_status "not_available"): a police
+      // report the reference number is still awaited for, a repair quote
+      // nobody has requested. They carry no real file, so they must never
+      // enter the composer tray as if ready to ride the next message; the
+      // "What to provide" sidebar is where a claimant sees those.
+      const hasRealContent = (item) => (item.file_status || item.status) !== 'not_available'
       if (current.some((item) => item.status === 'uploading')) {
         return current.map((item) => {
           const evidence = items.find((candidate) => candidate.evidence_id === item.evidenceId)
-          return evidence ? attachmentForEvidence(evidence, item) : item
+          return evidence && hasRealContent(evidence) ? attachmentForEvidence(evidence, item) : item
         })
       }
+      // Evidence already carried by a message in this conversation is
+      // historical: it already rode a send, so it must never resurface in
+      // the composer tray and auto-attach itself to an unrelated future
+      // message just because it is still visible in the Claim Evidence
+      // projection. The message history is the durable record of which
+      // Evidence has actually been sent; dismissedComposerEvidenceIds alone
+      // is an in-memory hint that does not survive a claim switch or reload.
+      const alreadyLinked = linkedEvidenceIds()
       return items
+        .filter((item) => hasRealContent(item))
         .filter((item) => !dismissedComposerEvidenceIds.current.has(item.evidence_id))
+        .filter((item) => !alreadyLinked.has(item.evidence_id))
         .map((item) => attachmentForEvidence(item, currentByEvidenceId.get(item.evidence_id)))
     })
     return true
@@ -1351,7 +1378,7 @@ function App() {
       })
       .catch(() => {})
     return () => { active = false }
-  }, [])
+  }, [account?.profile?.email])
 
   useEffect(() => {
     if (!claim?.claim_id) {
@@ -1389,6 +1416,25 @@ function App() {
   // The projection updater only uses stable React setters and is intentionally local to this view.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claim?.claim_id])
+
+  useEffect(() => {
+    // Evidence and message history load independently, so evidence syncing
+    // before this conversation's messages have arrived would otherwise let
+    // historical Evidence sit unfiltered in the composer tray until some
+    // later resync happens to catch it. Pruning here on every messages
+    // change closes that race: as soon as a message's evidence_refs are
+    // known, any attachment still carrying that same evidenceId is already
+    // sent and must leave the tray now, not whenever evidence next syncs.
+    const linked = new Set()
+    for (const item of messages) {
+      for (const evidenceId of item.evidence_refs || []) linked.add(evidenceId)
+    }
+    if (linked.size === 0) return
+    setAttachments((current) => {
+      const filtered = current.filter((item) => !item.evidenceId || !linked.has(item.evidenceId))
+      return filtered.length === current.length ? current : filtered
+    })
+  }, [messages])
 
   async function uploadAttachment(
     file,
@@ -1581,15 +1627,26 @@ function App() {
     setStatus('error')
   }
 
-  async function sendMessage(event) {
+  async function sendMessage(event, recoveryMessage = null) {
     event.preventDefault()
-    const text = draft.trim()
-    if (!text || isBusy) return
-    const stagedAttachments = attachments.filter((attachment) => (
+    const text = recoveryMessage ? messageText(recoveryMessage) : draft.trim()
+    if ((!text && !recoveryMessage?.evidence_refs?.length) || isBusy) return
+    const stagedAttachments = recoveryMessage ? [] : attachments.filter((attachment) => (
       attachment.status === 'staged'
       && attachment.stagedFile
       && attachment.uploadAttempt
     ))
+    // Already-uploaded attachments (attached mid-conversation, before this
+    // Send) carry an evidenceId but were never linked to a message: the model
+    // only sees an attachment when its evidence_id rides on the same turn.
+    const readyAttachmentEvidenceIds = recoveryMessage ? [] : attachments
+      .filter((attachment) => (
+        attachment.evidenceId
+        && attachment.status !== 'staged'
+        && attachment.status !== 'failed'
+        && attachment.status !== 'uploading'
+      ))
+      .map((attachment) => attachment.evidenceId)
     const isAssistanceReply = assistanceState?.key === 'response_needed'
 
     forceLatestMessages.current = true
@@ -1605,6 +1662,15 @@ function App() {
     setStatus(isWorkspaceActive ? 'sending' : 'starting')
     let messageWasSubmitted = isWorkspaceActive
     try {
+      if (recoveryMessage) {
+        pendingSubmission.current = {
+          text,
+          claimKey: requestId('claim'),
+          turnKey: requestId('turn'),
+          clientMessageId: recoveryMessage.client_message_id,
+          evidenceRefs: recoveryMessage.evidence_refs || [],
+        }
+      }
       if (pendingSubmission.current?.text !== text) {
         pendingSubmission.current = {
           text,
@@ -1616,7 +1682,7 @@ function App() {
       const operation = pendingSubmission.current
       activeTurnProgressRef.current = null
       setActiveTurnProgress(null)
-      setPendingMessage({ text, turnId: operation.clientMessageId })
+      setPendingMessage({ text, turnId: operation.clientMessageId, retrying: Boolean(recoveryMessage) })
       let activeClaim = isWorkspaceActive ? claim : null
       let activeSessionId = isWorkspaceActive ? sessionId : null
       if (!activeClaim) {
@@ -1645,6 +1711,32 @@ function App() {
         messageWasSubmitted = true
       }
 
+      // Staged attachments (selected before the claim existed) upload now,
+      // before the turn: the model can only read evidence attached to this
+      // same message, not a follow-up one nobody sends.
+      let uploadedStagedEvidenceIds = []
+      if (stagedAttachments.length) {
+        let attachmentClaim = activeClaim
+        for (const attachment of stagedAttachments) {
+          const upload = await uploadAttachment(
+            attachment.stagedFile,
+            attachment.uploadAttempt,
+            attachmentClaim,
+            { existingAttachment: true, settleStatus: false },
+          )
+          attachmentClaim = { ...attachmentClaim, revision: upload.revision }
+          if (upload.succeeded && attachment.uploadAttempt?.evidenceId) {
+            uploadedStagedEvidenceIds.push(attachment.uploadAttempt.evidenceId)
+          }
+        }
+        activeClaim = attachmentClaim
+      }
+      const turnEvidenceRefs = [
+        ...(operation.evidenceRefs || []),
+        ...readyAttachmentEvidenceIds,
+        ...uploadedStagedEvidenceIds,
+      ]
+
       const turn = await submitClaimMessage({
         claimId: activeClaim.claim_id,
         sessionId: activeSessionId,
@@ -1653,12 +1745,27 @@ function App() {
         modelProfileId: selectedModel,
         idempotencyKey: operation.turnKey,
         clientMessageId: operation.clientMessageId,
+        evidenceRefs: turnEvidenceRefs,
       })
+      for (const evidenceId of turnEvidenceRefs) dismissedComposerEvidenceIds.current.add(evidenceId)
+      // Attachments that rode this message are done being staged in the
+      // composer: drop them from the preview tray now that they are part of
+      // the sent message, rather than leaving them stuck there unremovable.
+      if (turnEvidenceRefs.length) {
+        setAttachments((current) => current.filter(
+          (item) => !item.evidenceId || !turnEvidenceRefs.includes(item.evidenceId),
+        ))
+      }
+      const currentRevision = currentTurnRevision(turn)
+      const historicalTurn = turn.current_claim && currentRevision > turn.claim_revision
+      // Historical actions are evidence, not permission to act on today's offer.
+      const responseAgentMessage = historicalTurn && turn.agent_message
+        ? { ...turn.agent_message, message_actions: [] }
+        : turn.agent_message
       commitMessages((current) => mergeMessagesById(current, [
         turn.claimant_message,
-        ...(turn.agent_message ? [turn.agent_message] : []),
+        ...(responseAgentMessage ? [responseAgentMessage] : []),
       ]))
-      const currentRevision = currentTurnRevision(turn)
       if (turn.current_claim) {
         applyClaimSnapshot(turn.current_claim, { minimumRevision: currentRevision })
         rememberClaimInHistory(turn.current_claim)
@@ -1699,22 +1806,26 @@ function App() {
       pendingSubmission.current = null
       setPendingMessage(null)
       setFailedMessage(null)
-      let attachmentClaim = { ...activeClaim, revision: currentRevision }
-      let stagedUploadsSucceeded = true
-      for (const attachment of stagedAttachments) {
-        const upload = await uploadAttachment(
-          attachment.stagedFile,
-          attachment.uploadAttempt,
-          attachmentClaim,
-          { existingAttachment: true, settleStatus: false },
-        )
-        attachmentClaim = { ...attachmentClaim, revision: upload.revision }
-        if (!upload.succeeded) {
-          stagedUploadsSucceeded = false
-          break
+      if (historicalTurn) {
+        const generation = beginMessagesReadback()
+        try {
+          const conversation = await getClaimMessages(activeClaim.claim_id, activeSessionId)
+          applyMessagesReadback(conversation.items, {
+            generation,
+            claimId: activeClaim.claim_id,
+            sessionId: activeSessionId,
+          })
+        } catch {
+          if (generation === messagesRequestGeneration.current
+            && activeClaimRef.current?.claim_id === activeClaim.claim_id
+            && activeSessionIdRef.current === activeSessionId) {
+            setError('Your message is saved, but current service actions could not be refreshed. Reopen this conversation to refresh them.')
+          }
         }
       }
-      if (stagedUploadsSucceeded) setStatus('idle')
+      // Staged attachments already uploaded above, before the turn, so their
+      // evidence_id could ride on this same message.
+      setStatus('idle')
     } catch (requestError) {
       if (isAssistanceReply) setAssistanceReplyReview(null)
       activeTurnProgressRef.current = null
@@ -1781,7 +1892,6 @@ function App() {
     setMobileView('chat')
     setWorkspaceActive(false)
     setDraft('')
-    setClaimType('')
     setError('')
     setFailedMessage(null)
     setPendingMessage(null)
@@ -2355,7 +2465,6 @@ function App() {
     clearComposerAttachments()
     pendingSubmission.current = null
     setDraft('')
-    setClaimType('')
     setError('')
     setFailedMessage(null)
     setPendingMessage(null)
@@ -3101,7 +3210,9 @@ function App() {
                   <h1 id="conversation-title">{claim.claim_id}</h1>
                 </div>
               </div>
-              <div className="claim-status">{handoff ? 'Staff assistance active' : 'In progress'}</div>
+              <div className="claim-status">{claim.external_claim?.creation_status === 'created'
+                ? 'Claim created'
+                : handoff ? 'Staff assistance active' : 'In progress'}</div>
             </div>
 
             <ClaimProgressDisclosure
@@ -3141,6 +3252,14 @@ function App() {
                       <div>
                         <div className="user-bubble">{messageText(message)}</div>
                         <div className="msg-meta">{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
+                        {message.actor === 'claimant' && message.recovery && !messages.some((reply) => reply.actor === 'agent' && !reply.recovery && reply.in_reply_to === message.message_id) && (
+                          <div role="status">
+                            <p>{message.recovery.claimant_projection}</p>
+                            {message.client_message_id && message.recovery.resume_triggers?.includes('explicit_retry_request') && (
+                              <button type="button" disabled={isBusy} onClick={(event) => sendMessage(event, message)}>Retry response</button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </article>
                   )
@@ -3207,12 +3326,12 @@ function App() {
               )}
               {pendingMessage && (
                 <>
-                  <article className="msg-user is-pending" aria-label="Message sending">
+                  {!pendingMessage.retrying && !messages.some((message) => message.actor === 'claimant' && message.client_message_id === pendingMessage.turnId) && <article className="msg-user is-pending" aria-label="Message sending">
                     <div>
                       <div className="user-bubble">{pendingMessage.text}</div>
                       <div className="msg-meta">Sending…</div>
                     </div>
-                  </article>
+                  </article>}
                   <AgentTurnPlaceholder
                     progress={activeTurnProgress}
                     turnId={pendingMessage.turnId}
@@ -3223,13 +3342,13 @@ function App() {
                 <article className="message message-claimant is-failed" role="alert">
                   <p className="message-author">{failedMessage.sender}</p>
                   <p>{failedMessage.text}</p>
-                  <p className="message-state">Not sent</p>
+                  <p className="message-state">Delivery not confirmed</p>
                 </article>
               )}
               {isUrgentSupport && handoff && ['queued', 'accepted'].includes(handoff.status) && (
                 <ConversationEvent
                   icon="!"
-                  title="Urgent support · Normal intake has paused"
+                  title="Urgent support · You can keep adding details"
                   detail={handoff.summary}
                   tone="urgent"
                 />

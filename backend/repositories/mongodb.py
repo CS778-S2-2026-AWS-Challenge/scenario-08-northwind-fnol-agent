@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from threading import Event
-from typing import Any, NoReturn, TypeVar
+from typing import Any, NoReturn, TypeVar, cast
 
 from pydantic import BaseModel, TypeAdapter
 from pymongo import MongoClient, ReturnDocument
@@ -4798,6 +4798,8 @@ class MongoDBRepository:
         branch_evaluation: BranchEvaluationRecord | None = None,
         runtime_trace: RuntimeTraceRecord | None = None,
         runtime_records: RuntimeTurnRecords | None = None,
+        *,
+        checkpointed: bool = False,
     ) -> None:
         records_match = (
             claim.revision == expected_revision + 1
@@ -4870,6 +4872,7 @@ class MongoDBRepository:
                 branch_evaluation,
                 runtime_trace,
                 runtime_records,
+                checkpointed,
                 mongo_session,
             )
         )
@@ -5265,9 +5268,23 @@ class MongoDBRepository:
         branch_evaluation: BranchEvaluationRecord | None,
         runtime_trace: RuntimeTraceRecord | None,
         runtime_records: RuntimeTurnRecords | None,
+        checkpointed: bool,
         mongo_session: Any,
     ) -> None:
-        if claimant_message.client_message_id is not None:
+        if handoff is not None:
+            from backend.repositories.handoff_guard import validate_runtime_handoff_update
+
+            stored_handoff = self._get(
+                'handoff',
+                handoff.handoff_id,
+                HandoffRecord,
+                customer_id=claim.customer_id,
+                session=mongo_session,
+            )
+            validate_runtime_handoff_update(
+                stored_handoff, handoff, claim, claimant_message, decision
+            )
+        if claimant_message.client_message_id is not None and not checkpointed:
             duplicate = self._collection.find_one(
                 {
                     'record_type': 'message',
@@ -5330,6 +5347,7 @@ class MongoDBRepository:
             mutation=RealtimeMutation.AGENT_TURN_COMMITTED,
             records=records,
             session=session,
+            checkpointed=checkpointed,
         )
 
     def save_evidence_mutation(
@@ -5436,6 +5454,8 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         audit_event: AuditEventEnvelope,
         branch_evaluation: BranchEvaluationRecord | None = None,
+        *,
+        safety_message: MessageRecord | None = None,
     ) -> None:
         if (
             claim.revision != expected_revision + 1
@@ -5454,6 +5474,28 @@ class MongoDBRepository:
             )
 
         def persist(mongo_session: Any) -> None:
+            if safety_message is not None:
+                from backend.repositories.handoff_guard import validate_preprovider_safety_handoff
+
+                validate_preprovider_safety_handoff(
+                    self._get(
+                        'handoff',
+                        handoff.handoff_id,
+                        HandoffRecord,
+                        customer_id=claim.customer_id,
+                        session=mongo_session,
+                    ),
+                    handoff,
+                    claim,
+                    safety_message,
+                    self._get(
+                        'message',
+                        safety_message.message_id,
+                        MessageRecord,
+                        customer_id=claim.customer_id,
+                        session=mongo_session,
+                    ),
+                )
             prepared_audit = self._prepare_audit_events(
                 claim,
                 (audit_event,),
@@ -5484,6 +5526,7 @@ class MongoDBRepository:
         session: SessionRecord | None = None,
         required_staff_id: str | None = None,
         required_staff_revision: int | None = None,
+        checkpointed: bool = False,
     ) -> None:
         has_internal_message = any(
             isinstance(record, MessageRecord)
@@ -5495,7 +5538,26 @@ class MongoDBRepository:
             mutation,
             tuple(kind for kind, _identifier, _record in records),
         )
-        self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
+        if checkpointed:
+            saved = self._collection.find_one(
+                {
+                    'record_type': 'idempotency',
+                    'actor_id': idempotency.actor_id,
+                    'route': idempotency.route,
+                    'key': idempotency.key,
+                },
+                session=mongo_session,
+            )
+            payload = saved.get('payload', {}) if saved else {}
+            if (
+                payload.get('request_fingerprint') != idempotency.request_fingerprint
+                or payload.get('message_id') != idempotency.message_id
+                or payload.get('decision_id') is not None
+                or payload.get('response_payload') is not None
+            ):
+                raise IdempotencyConflict(idempotency.key)
+        else:
+            self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
         self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
         if required_staff_id is not None:
             presence = self._collection.find_one(
@@ -5554,6 +5616,17 @@ class MongoDBRepository:
             if kind == 'evidence' and isinstance(record, EvidenceRecord)
         }
         for kind, identifier, record in records:
+            if checkpointed and kind == 'message' and identifier == idempotency.message_id:
+                stored_message = self._get(
+                    'message',
+                    identifier,
+                    MessageRecord,
+                    customer_id=claim.customer_id,
+                    session=mongo_session,
+                )
+                if stored_message != record:
+                    raise IdempotencyConflict(identifier)
+                continue
             if kind == 'staff_agent_execution':
                 if not isinstance(record, StaffAgentExecutionRecord):
                     raise KeyError(claim.claim_id)
@@ -5691,12 +5764,24 @@ class MongoDBRepository:
                 session=mongo_session,
             )
         for kind, identifier, record in records:
+            if checkpointed and kind == 'message' and identifier == idempotency.message_id:
+                continue
             self._put(
                 kind,
                 identifier,
                 record,
                 customer_id=claim.customer_id,
                 claim_id=claim.claim_id,
+                session=mongo_session,
+            )
+        if checkpointed:
+            self._collection.delete_one(
+                {
+                    'record_type': 'idempotency',
+                    'actor_id': idempotency.actor_id,
+                    'route': idempotency.route,
+                    'key': idempotency.key,
+                },
                 session=mongo_session,
             )
         self._save_idempotency(idempotency, mongo_session)
@@ -5805,7 +5890,9 @@ class MongoDBRepository:
         claim_id: str,
         message_id: str,
     ) -> IdempotencyRecord | None:
-        document = self._collection.find_one(
+        from backend.repositories.protocols import message_turn_result_priority
+
+        documents = self._collection.find(
             {
                 'record_type': 'idempotency',
                 'actor_id': actor_id,
@@ -5814,9 +5901,9 @@ class MongoDBRepository:
                 'payload.message_id': message_id,
                 'payload.retired': {'$ne': True},
             },
-            sort=[('_id', -1)],
         )
-        return IdempotencyRecord(**document['payload']) if document is not None else None
+        records = [IdempotencyRecord(**document['payload']) for document in documents]
+        return max(records, key=message_turn_result_priority) if records else None
 
     def reserve_message_turn_idempotency_alias(
         self,
@@ -5827,21 +5914,36 @@ class MongoDBRepository:
         key: str,
         request_fingerprint: str,
     ) -> IdempotencyRecord | None:
+        from backend.repositories.protocols import message_turn_result_priority
+
         def reserve(mongo_session: Any) -> IdempotencyRecord | None:
-            original_document = self._collection.find_one(
-                {
-                    'record_type': 'idempotency',
-                    'actor_id': actor_id,
-                    'route': route,
-                    'payload.claim_id': claim_id,
-                    'payload.message_id': message_id,
-                    'payload.retired': {'$ne': True},
-                },
-                sort=[('_id', -1)],
-                session=mongo_session,
+            original_documents = list(
+                self._collection.find(
+                    {
+                        'record_type': 'idempotency',
+                        'actor_id': actor_id,
+                        'route': route,
+                        'payload.claim_id': claim_id,
+                        'payload.message_id': message_id,
+                        'payload.retired': {'$ne': True},
+                    },
+                    session=mongo_session,
+                )
             )
-            if original_document is None:
+            if not original_documents:
                 return None
+            # The most recently written attempt at this message is not
+            # necessarily the completed one -- a failed attempt may have been
+            # recorded after an earlier success reconciled, or vice versa.
+            # The same completed-over-failed priority fixture uses via
+            # find_message_turn_idempotency must decide which attempt an
+            # alias is reserved against.
+            original_document = max(
+                original_documents,
+                key=lambda document: message_turn_result_priority(
+                    IdempotencyRecord(**document['payload'])
+                ),
+            )
             if original_document['payload'].get('request_fingerprint') != request_fingerprint:
                 raise IdempotencyConflict(key)
             alias = replace(
@@ -5895,6 +5997,101 @@ class MongoDBRepository:
             ):
                 raise IdempotencyConflict(record.key) from None
 
+    def find_message_checkpoint(
+        self, claim_id: str, message_id: str, customer_id: str
+    ) -> IdempotencyRecord | None:
+        if not self._claim_owned(claim_id, customer_id):
+            return None
+        document = self._collection.find_one(
+            {
+                'record_type': 'idempotency',
+                'actor_id': customer_id,
+                'payload.claim_id': claim_id,
+                'payload.message_id': message_id,
+                'payload.revision_before_message': {'$ne': None},
+                'payload.inbound_checkpoint': True,
+            },
+            sort=[('payload.revision_before_message', 1)],
+        )
+        return IdempotencyRecord(**document['payload']) if document is not None else None
+
+    def save_message_recovery(
+        self,
+        message: MessageRecord,
+        idempotency: IdempotencyRecord,
+        *,
+        agent_message: MessageRecord | None = None,
+    ) -> None:
+        def write(mongo_session: Any) -> None:
+            stored = self._get(
+                'message',
+                message.message_id,
+                MessageRecord,
+                customer_id=idempotency.actor_id,
+                session=mongo_session,
+            )
+            query = {
+                'record_type': 'idempotency',
+                'actor_id': idempotency.actor_id,
+                'route': idempotency.route,
+                'key': idempotency.key,
+            }
+            existing = self._collection.find_one(query, session=mongo_session)
+            if (
+                stored is None
+                or stored.model_copy(update={'recovery_rule_id': message.recovery_rule_id})
+                != message
+            ):
+                raise IdempotencyConflict(message.message_id)
+            if (
+                existing is None
+                or existing['payload']['request_fingerprint'] != idempotency.request_fingerprint
+                or existing['payload'].get('message_id') != message.message_id
+                or existing['payload'].get('claim_id') != message.claim_id
+                or existing['payload'].get('session_id') != message.session_id
+                or existing['payload'].get('response_payload') is not None
+                or existing['payload'].get('decision_id') is not None
+                or idempotency.message_id != message.message_id
+                or message.actor is not ActorType.CLAIMANT
+            ):
+                raise IdempotencyConflict(idempotency.key)
+            if agent_message is not None:
+                if (
+                    agent_message.actor is not ActorType.AGENT
+                    or agent_message.claim_id != message.claim_id
+                    or agent_message.session_id != message.session_id
+                    or agent_message.in_reply_to != message.message_id
+                    or agent_message.recovery_rule_id != message.recovery_rule_id
+                    or agent_message.recovery_rule_id is None
+                    or idempotency.agent_message_id != agent_message.message_id
+                    or self._get(
+                        'message', agent_message.message_id, MessageRecord, session=mongo_session
+                    )
+                    is not None
+                ):
+                    raise IdempotencyConflict(agent_message.message_id)
+                self._put(
+                    'message',
+                    agent_message.message_id,
+                    agent_message,
+                    customer_id=idempotency.actor_id,
+                    claim_id=message.claim_id,
+                    session=mongo_session,
+                )
+            self._put(
+                'message',
+                message.message_id,
+                message,
+                customer_id=idempotency.actor_id,
+                claim_id=message.claim_id,
+                session=mongo_session,
+            )
+            self._collection.update_one(
+                query, {'$set': {'payload': idempotency.__dict__}}, session=mongo_session
+            )
+
+        self._atomic(write)
+
     def save_incomplete_checkpoint(
         self,
         claim: WorkingClaim,
@@ -5913,6 +6110,60 @@ class MongoDBRepository:
                 mongo_session,
             )
         )
+
+    def freeze_message_response(
+        self, idempotency: IdempotencyRecord, response_payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        def freeze(mongo_session: Any) -> dict[str, Any]:
+            query = {
+                'record_type': 'idempotency',
+                'actor_id': idempotency.actor_id,
+                'route': idempotency.route,
+                'key': idempotency.key,
+            }
+            document = self._collection.find_one(query, session=mongo_session)
+            saved = IdempotencyRecord(**document['payload']) if document is not None else None
+            if (
+                saved is None
+                or saved.request_fingerprint != idempotency.request_fingerprint
+                or saved.claim_id != idempotency.claim_id
+                or saved.session_id != idempotency.session_id
+                or saved.message_id != idempotency.message_id
+                or saved.decision_id != idempotency.decision_id
+                or saved.decision_id is None
+                or saved.claim_id is None
+                or self._get(
+                    'claim',
+                    saved.claim_id,
+                    WorkingClaim,
+                    customer_id=saved.actor_id,
+                    session=mongo_session,
+                )
+                is None
+                or response_payload.get('claim_id') != saved.claim_id
+                or response_payload.get('session_id') != saved.session_id
+            ):
+                raise IdempotencyConflict(idempotency.key)
+            if saved.response_payload is not None:
+                return saved.response_payload
+            updated = self._collection.find_one_and_update(
+                {**query, 'payload.response_payload': None},
+                {
+                    '$set': {
+                        'payload.response_status': 200,
+                        'payload.response_payload': response_payload,
+                    }
+                },
+                return_document=ReturnDocument.AFTER,
+                session=mongo_session,
+            )
+            if updated is None:
+                updated = self._collection.find_one(query, session=mongo_session)
+            if updated is None or updated['payload'].get('response_payload') is None:
+                raise IdempotencyConflict(idempotency.key)
+            return cast(dict[str, Any], updated['payload']['response_payload'])
+
+        return self._atomic(freeze)
 
     def _save_incomplete_checkpoint(
         self,

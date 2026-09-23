@@ -25,9 +25,9 @@ from backend.domain.agent_v7 import (
     V7IntakeProposal,
     V7SourcedSummaryProposal,
 )
-from backend.domain.branch_registry import build_default_registry
+from backend.domain.agent_v8 import V8TurnProposal
+from backend.domain.branch_registry import BranchRuleEvaluator, build_default_registry
 from backend.domain.ids import new_id
-from backend.domain.intake import infer_controlled_product_family
 from backend.domain.knowledge import (
     KnowledgeRetrievalUnavailable,
     KnowledgeRetriever,
@@ -81,6 +81,7 @@ from backend.domain.realtime import AgentTurnProgressStage
 from backend.domain.turn_field_contract import RepairOutcome, TurnFieldContractViolation
 from backend.prompts import (
     CLAIMANT_V7_PROMPT_ID,
+    CLAIMANT_V8_PROMPT_ID,
     MOTOR_CLAIMANT_PROMPT_ID,
     load_motor_claimant_prompt,
 )
@@ -97,13 +98,26 @@ from backend.services.context_planner import ContextBudgetExceeded
 from backend.services.context_resolver import resolver_for_turn
 from backend.services.isolated_context_executor import execute_isolated_context_plan
 from backend.services.model_operations import ModelOperationsRecorder
-from backend.services.model_request_planner import context_resolve_tool, plan_model_turn
+from backend.services.model_request_planner import (
+    context_resolve_tool,
+    detach_unreadable_evidence,
+    plan_model_turn,
+    prepare_model_family_context,
+)
 from backend.services.prompt_composer import load_response_schema
+from backend.services.reply_consistency import review_reply
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationResolver,
 )
 from backend.services.turn_field_contract import bind_provider_schema, validate_field_changes
+from backend.services.turn_proposal_validation import (
+    ValidatedTurn,
+    claimant_report_supports_value,
+    parse_turn_proposal,
+    truthful_reply,
+    validate_turn_proposal,
+)
 from backend.services.turn_router import route_turn
 
 logger = logging.getLogger(__name__)
@@ -422,38 +436,12 @@ def _claimant_supports_model_change(
     change: ModelProposedFormChange,
     normalized_message: str,
 ) -> bool:
-    if not change.reported_text:
-        return False
-    quote = ' '.join(change.reported_text.split()).casefold()
-    if not quote or quote not in normalized_message:
-        return False
-    value: Any = _normalise_model_field_value(change.field_code, change.value)
-    if isinstance(value, str):
-        normalised_value = ' '.join(value.split()).casefold()
-        if normalised_value in quote:
-            return True
-        return (
-            change.field_code == 'claim.product_family'
-            and infer_controlled_product_family(change.reported_text) == normalised_value
-        )
-    if isinstance(value, list):
-        return all(
-            isinstance(item, str) and ' '.join(item.split()).casefold() in quote for item in value
-        )
-    if not isinstance(value, bool):
-        return False
-    negative = bool(
-        re.search(r"\b(?:no|none|nobody|not|never|cannot|can't|isn't|wasn't|without)\b", quote)
+    return claimant_report_supports_value(
+        change.field_code,
+        _normalise_model_field_value(change.field_code, change.value),
+        change.reported_text,
+        normalized_message,
     )
-    markers = {
-        'incident.injury_or_danger': r'\b(?:injur(?:y|ed)|hurt|danger|unsafe|emergency)\b',
-        'parties.other_parties': r'\b(?:another|other|second|person|people|vehicle|party)\b',
-        'vehicle.drivable': r'\b(?:driv(?:e|en|able)|roadworthy|safe|unsafe)\b',
-        'property.ongoing_risk': r'\b(?:risk|leak|fire|flood|exposed|unsafe|danger)\b',
-        'property.habitable': r'\b(?:habitable|live|lived|safe|unsafe|uninhabitable)\b',
-    }
-    marker = markers.get(change.field_code)
-    return marker is not None and re.search(marker, quote) is not None and value is not negative
 
 
 def _model_form_change(
@@ -739,7 +727,11 @@ class GatewayAgent:
         return ModelRequest(
             model_profile_id=context.model_profile_id,
             purpose=CLAIMANT_AGENT_PURPOSE,
-            prompt_version=CLAIMANT_V7_PROMPT_ID,
+            prompt_version=(
+                context.runtime_policy.instruction.prompt_version
+                if context.runtime_policy is not None
+                else CLAIMANT_V7_PROMPT_ID
+            ),
             privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
             required_capabilities=ModelCapabilities(
                 structured_output=True,
@@ -752,6 +744,7 @@ class GatewayAgent:
             messages=messages,
             response_schema=plan.response_schema,
             tools=tools,
+            required_tool_name='context.resolve' if tools else None,
             max_output_tokens=plan.request_profile.output_limit,
         )
 
@@ -772,39 +765,137 @@ class GatewayAgent:
         field_contract_violations: list[dict[str, str]] | None = None,
     ) -> AgentProposal:
         if response.structured_output is None:
+            logger.warning(
+                'agent_turn_envelope_missing',
+                extra={
+                    'schema_id': plan.schema_id,
+                    'completion_status': response.completion_status.value,
+                    'finish_reason': response.finish_reason,
+                    'text_present': bool(response.text),
+                    'text_length': len(response.text) if response.text else 0,
+                    'tool_call_count': len(response.tool_calls),
+                    'provider_model': response.provider_model,
+                },
+            )
             raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+        raw_output = dict(response.structured_output)
+        legacy_service_offer_ids = raw_output.pop('service_offer_ids', [])
+        model_service_offer_ids = (
+            [item for item in legacy_service_offer_ids if isinstance(item, str)]
+            if isinstance(legacy_service_offer_ids, list)
+            else []
+        )
         try:
-            if plan.schema_id == 'claimant.intake-patch.v1':
-                parsed: object = _V7_INTAKE_ADAPTER.validate_python(response.structured_output)
+            parsed: Any
+            optional_rejections: list[dict[str, str]] = []
+            if plan.schema_id == 'claimant.turn.v1':
+                parsed, optional_rejections = parse_turn_proposal(raw_output)
+            elif plan.schema_id == 'claimant.intake-patch.v1':
+                parsed = _V7_INTAKE_ADAPTER.validate_python(raw_output)
             elif plan.schema_id == 'claimant.external-offer.v1':
-                parsed = _V7_EXTERNAL_ADAPTER.validate_python(response.structured_output)
+                parsed = _V7_EXTERNAL_ADAPTER.validate_python(raw_output)
             elif plan.schema_id == 'claimant.evidence-action.v1':
-                parsed = _V7_EVIDENCE_ADAPTER.validate_python(response.structured_output)
+                parsed = _V7_EVIDENCE_ADAPTER.validate_python(raw_output)
             elif plan.schema_id == 'claimant.claim-creation.v1':
-                parsed = _V7_CREATION_ADAPTER.validate_python(response.structured_output)
+                parsed = _V7_CREATION_ADAPTER.validate_python(raw_output)
             elif plan.schema_id == 'claimant.sourced-summary.v1':
-                parsed = _V7_SOURCED_SUMMARY_ADAPTER.validate_python(response.structured_output)
+                parsed = _V7_SOURCED_SUMMARY_ADAPTER.validate_python(raw_output)
             else:
-                parsed = _V7_ANSWER_ADAPTER.validate_python(response.structured_output)
-        except ValidationError:
+                parsed = _V7_ANSWER_ADAPTER.validate_python(raw_output)
+        except ValidationError as error:
+            logger.warning(
+                'agent_turn_envelope_invalid',
+                extra={
+                    'schema_id': plan.schema_id,
+                    'errors': [
+                        {
+                            'loc': '.'.join(str(part) for part in item['loc']),
+                            'type': item['type'],
+                            'msg': item.get('msg'),
+                            'input': str(item.get('input'))[:200],
+                        }
+                        for item in error.errors()[:8]
+                    ],
+                },
+            )
             raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
 
-        answer = (
-            V7AnswerProposal(
-                reply=parsed.summary,
-                next_step='Continue the Claim with the sourced review when ready.',
-                reason_codes=['ISOLATED_CONTEXT_REVIEWED'],
+        if isinstance(parsed, V8TurnProposal):
+            answer = V7AnswerProposal(
+                reply=parsed.reply,
+                next_step=(
+                    parsed.next_question.wording
+                    if parsed.next_question is not None
+                    else 'Continue the current report.'
+                ),
+                reason_codes=parsed.reason_codes or [f'TURN_{parsed.action.upper()}'],
             )
-            if isinstance(parsed, V7SourcedSummaryProposal)
-            else cast(V7AnswerProposal, parsed)
-        )
+        else:
+            answer = (
+                V7AnswerProposal(
+                    reply=parsed.summary,
+                    next_step='Continue the Claim with the sourced review when ready.',
+                    reason_codes=['ISOLATED_CONTEXT_REVIEWED'],
+                )
+                if isinstance(parsed, V7SourcedSummaryProposal)
+                else cast(V7AnswerProposal, parsed)
+            )
         form_changes: list[ProposedFormChange] = []
         contents_changes: list[ProposedContentsItem] = []
         service_offer_ids: list[str] = []
+        model_required_items: list[str] = []
         evidence_id: str | None = None
         source_claim_id: str | None = None
         removal_scope: str | None = None
-        if isinstance(parsed, V7IntakeProposal):
+        proposal_confirms_batch = False
+        validated_turn: ValidatedTurn | None = None
+        if isinstance(parsed, V8TurnProposal):
+            if plan.field_contract is None:
+                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+            branch_evaluation = context.branch_evaluation
+            if branch_evaluation is None:
+                evaluator = (
+                    context.runtime_policy.branch_evaluator()
+                    if context.runtime_policy is not None
+                    else BranchRuleEvaluator()
+                )
+                branch_evaluation = evaluator.evaluate(
+                    context.claim,
+                    latest_message=context.message_text,
+                    recomputation_reason='turn_proposal_validation',
+                )
+            validated_turn = validate_turn_proposal(
+                parsed,
+                branch_evaluation=branch_evaluation,
+                eligible_service_ids=(
+                    cast(frozenset[str], context.eligible_service_ids)
+                    if getattr(context, 'eligible_service_ids', None) is not None
+                    else {item.service_identity for item in context.external_services}
+                ),
+                safety_interrupt=getattr(context, 'safety_interrupt', None),
+                field_contract=plan.field_contract,
+                open_handoffs=getattr(context, 'open_handoffs', ()),
+                message_text=context.message_text,
+                evidence=context.evidence,
+                service_eligibility_resolver=context.service_eligibility_resolver,
+                authorised_service_ids={
+                    consent.service_identity
+                    for consent in context.claim.external_service_consents
+                    if consent.status.value == 'granted'
+                },
+            )
+            if optional_rejections:
+                validated_turn = replace(
+                    validated_turn, rejected=[*optional_rejections, *validated_turn.rejected]
+                )
+            form_changes = validated_turn.form_changes
+            contents_changes = validated_turn.contents_item_changes
+            service_offer_ids = list(validated_turn.service_identities)
+            if validated_turn.next_question is not None:
+                model_required_items = list(validated_turn.next_question.field_codes)
+            proposal_confirms_batch = validated_turn.confirms_batch
+            answer = answer.model_copy(update={'reply': validated_turn.reply})
+        elif isinstance(parsed, V7IntakeProposal):
             if plan.field_contract is None:
                 raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
             parsed = parsed.model_copy(
@@ -825,17 +916,37 @@ class GatewayAgent:
                 _model_contents_item_change(item, evidence=context.evidence)
                 for item in parsed.contents_item_changes
             ]
-            service_offer_ids = parsed.service_offer_ids
-        elif isinstance(parsed, V7ExternalOfferProposal):
-            service_offer_ids = parsed.service_offer_ids
         elif isinstance(parsed, V7EvidenceActionProposal):
             evidence_id = parsed.evidence_id
             source_claim_id = parsed.source_claim_id
             removal_scope = parsed.removal_scope
 
         available_services = {item.service_identity for item in context.external_services}
-        if any(service_id not in available_services for service_id in service_offer_ids):
-            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+        if isinstance(parsed, V8TurnProposal):
+            service_offer_ids = [
+                service_id for service_id in service_offer_ids if service_id in available_services
+            ]
+        else:
+            service_offer_ids = [
+                service_id
+                for service_id in context.selected_external_service_ids
+                if service_id in available_services
+            ]
+        rejected_optional_ids = sorted(set(model_service_offer_ids) - set(service_offer_ids))
+        if rejected_optional_ids:
+            logger.info(
+                'agent_optional_capability_rejected',
+                extra={
+                    'claim_id': context.claim.claim_id,
+                    'session_id': context.session_id,
+                    'component': 'capability_selector',
+                    'internal_error_code': 'OPTIONAL_CAPABILITY_REJECTED',
+                    'selected_services': service_offer_ids,
+                    'rejected_count': len(rejected_optional_ids),
+                },
+            )
+        if validated_turn is None:
+            answer = answer.model_copy(update={'reply': truthful_reply(answer.reply)})
         if service_offer_ids and context.progress_reporter is not None:
             context.progress_reporter(
                 AgentTurnProgressStage.OFFER_PREPARING,
@@ -843,9 +954,11 @@ class GatewayAgent:
             )
 
         action_code = 'conversation.answer'
+        action = AgentAction.UPDATE
+        handoff_priority = None
         runtime_action = 'runtime.continue'
         status = 'continue_current_report'
-        if plan.route.task is TurnTask.EXTERNAL_SUPPORT:
+        if 'external' in plan.route.intents and service_offer_ids:
             runtime_action = 'runtime.wait_for_user'
             status = 'external_service_consent_required'
         elif plan.route.task is TurnTask.CLAIM_CREATION:
@@ -874,6 +987,24 @@ class GatewayAgent:
             if next_required is not None:
                 runtime_action = 'runtime.wait_for_user'
                 status = 'more_information_required'
+        if validated_turn is not None:
+            if validated_turn.next_question is not None:
+                answer = answer.model_copy(
+                    update={'next_step': validated_turn.next_question.wording}
+                )
+                status = 'more_information_required'
+                runtime_action = 'runtime.wait_for_user'
+            if validated_turn.ready_to_create:
+                action_code = 'claim.prepare_creation'
+                status = 'ready_to_create'
+                runtime_action = 'runtime.continue'
+            if validated_turn.escalation is not None and not context.open_handoffs:
+                urgent = validated_turn.escalation.kind == 'urgent_safety'
+                action = AgentAction.URGENT_HANDOFF if urgent else AgentAction.HANDOFF
+                action_code = 'human.create_handoff'
+                runtime_action = 'runtime.pause_for_review'
+                handoff_priority = 'urgent' if urgent else 'high'
+                status = 'waiting_for_professional'
 
         elapsed_ms = sum(item.latency_ms for item in invocations)
         cache_read_values = [
@@ -980,7 +1111,7 @@ class GatewayAgent:
             finished_at=datetime.now(UTC),
         )
         return AgentProposal(
-            action=AgentAction.UPDATE,
+            action=action,
             action_code=action_code,
             reason_codes=answer.reason_codes,
             customer_reason=f'The {plan.route.task.value} proposal passed the v7 Runtime boundary.',
@@ -989,14 +1120,16 @@ class GatewayAgent:
                 status=status,
                 summary=answer.next_step,
                 responsible_party=ResponsibleParty.CLAIMANT,
+                required_items=model_required_items,
             ),
             form_changes=form_changes,
             contents_item_changes=contents_changes,
-            state_changes=[],
+            state_changes=validated_turn.state_changes if validated_turn is not None else [],
             proposed_signals=[],
             required_tools=[],
             next_action_requirements=[],
-            controlled_rule_authorised=False,
+            controlled_rule_authorised=context.safety_interrupt is not None,
+            handoff_priority=handoff_priority,
             proposal_source=AgentProposalSource.MODEL_GATEWAY,
             model_provenance=ModelDecisionProvenance(
                 provider_model=response.provider_model,
@@ -1004,6 +1137,9 @@ class GatewayAgent:
                 prompt_id=plan.prompt_bundle_id,
             ),
             runtime_trace=trace,
+            confirms_batch=proposal_confirms_batch,
+            raw_v8_proposal=parsed if isinstance(parsed, V8TurnProposal) else None,
+            validated_turn=validated_turn,
             evidence_id=evidence_id,
             source_claim_id=source_claim_id,
             removal_scope=removal_scope,
@@ -1014,9 +1150,27 @@ class GatewayAgent:
         )
 
     def _propose_v7_turn(self, context: AgentTurnContext) -> AgentProposal:
+        context = prepare_model_family_context(context)
+        context = detach_unreadable_evidence(context)
         try:
             plan = plan_model_turn(context)
         except ContextBudgetExceeded:
+            if (
+                context.runtime_policy is not None
+                and context.runtime_policy.instruction.prompt_version == CLAIMANT_V8_PROMPT_ID
+            ):
+                logger.warning(
+                    'agent_turn_input_budget_hard_exceeded',
+                    extra={
+                        'claim_id': context.claim.claim_id,
+                        'trigger_message_id': context.trigger_message_id,
+                        'diagnostic': 'context_budget_exceeded',
+                    },
+                )
+                raise ModelGatewayError(
+                    ModelGatewayErrorCode.CONFIGURATION,
+                    provider_error_type='context_budget_exceeded',
+                ) from None
             budget_response = (
                 context.runtime_policy.controlled_rules.deterministic_responses.get(
                     'context_budget_exceeded'
@@ -1041,24 +1195,7 @@ class GatewayAgent:
                 next_action_requirements=[],
             )
         if plan is None:
-            route = route_turn(context)
-            return AgentProposal(
-                action=AgentAction.UPDATE,
-                action_code='conversation.answer',
-                reason_codes=['PRODUCT_FAMILY_REQUIRED'],
-                customer_reason='A single Claim family is required.',
-                customer_response=route.deterministic_response or 'Please choose one Claim type.',
-                customer_next_step=CustomerNextStep(
-                    status='claim_family_required',
-                    summary='Choose motor, home, or contents.',
-                    responsible_party=ResponsibleParty.CLAIMANT,
-                ),
-                form_changes=[],
-                state_changes=[],
-                proposed_signals=[],
-                required_tools=[],
-                next_action_requirements=[],
-            )
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
 
         started_at = datetime.now(UTC)
         if plan.request_profile.isolated:
@@ -1258,6 +1395,13 @@ class GatewayAgent:
             if response.completion_status is ModelCompletionStatus.REFUSED:
                 raise ModelGatewayError(ModelGatewayErrorCode.REFUSED_RESPONSE)
             if response.completion_status is not ModelCompletionStatus.COMPLETE:
+                logger.warning(
+                    'agent_turn_unknown_completion_status',
+                    extra={
+                        'completion_status': response.completion_status,
+                        'finish_reason': response.finish_reason,
+                    },
+                )
                 raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
             if context.progress_reporter is not None:
                 context.progress_reporter(
@@ -1276,7 +1420,106 @@ class GatewayAgent:
                     started_at=started_at,
                     request_budgets=request_budgets,
                 )
+                validated_turn = result.validated_turn
+                review = review_reply(validated_turn) if validated_turn is not None else None
+                if review is not None and validated_turn is not None and not review.consistent:
+                    # The words contradict the ledger. Hand the ruling back to
+                    # the model once; Runtime never rewrites the reply itself.
+                    logger.info(
+                        'agent_turn_consistency_recall',
+                        extra={
+                            'claim_id': context.claim.claim_id,
+                            'trigger_message_id': context.trigger_message_id,
+                            'problems': [
+                                {'kind': item.kind, 'detail': item.detail}
+                                for item in review.inconsistencies
+                            ],
+                        },
+                    )
+                    recall_messages = [
+                        *messages,
+                        ModelMessage(
+                            role=ModelRole.ASSISTANT,
+                            content=json.dumps(
+                                response.structured_output, separators=(',', ':'), sort_keys=True
+                            ),
+                        ),
+                        ModelMessage(
+                            role=ModelRole.USER,
+                            content=json.dumps(
+                                review.runtime_review(validated_turn.rejected),
+                                separators=(',', ':'),
+                                sort_keys=True,
+                            ),
+                        ),
+                    ]
+                    recall = self._v7_request(plan, context, recall_messages, include_tools=False)
+                    recall_budget = build_request_budget(
+                        policy=(
+                            context.runtime_policy.controlled_rules.context_budget_policy
+                            if context.runtime_policy is not None
+                            and context.runtime_policy.controlled_rules.context_budget_policy
+                            is not None
+                            else ContextBudgetPolicy()
+                        ),
+                        profile=plan.request_profile,
+                        prompt='',
+                        schema=plan.response_schema,
+                        context={
+                            'messages': [item.model_dump(mode='json') for item in recall_messages]
+                        },
+                        tools=[],
+                        prior_turn_tokens=plan.request_budget.raw_input_tokens,
+                    )
+                    request_budgets.append(recall_budget)
+                    response = self._observed_complete(
+                        recall,
+                        context,
+                        'consistency_recall',
+                        observations,
+                        exchange_completion,
+                    )
+                    invocations.append(
+                        _runtime_invocation_trace(
+                            len(invocations) + 1, response, observations[-1].latency_ms
+                        )
+                    )
+                    if response.completion_status is not ModelCompletionStatus.COMPLETE:
+                        raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+                    result = self._v7_proposal(
+                        plan,
+                        context,
+                        response,
+                        invocations,
+                        tool_call_id=tool_call_id,
+                        tool_arguments=tool_arguments,
+                        tool_output=tool_output,
+                        started_at=started_at,
+                        request_budgets=request_budgets,
+                    )
+                    if (
+                        result.validated_turn is not None
+                        and not review_reply(result.validated_turn).consistent
+                    ):
+                        # Twice inconsistent: the saved message enters the
+                        # existing persist-first recovery path unchanged.
+                        raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
             except TurnFieldContractViolation as contract_error:
+                if plan.schema_id == 'claimant.turn.v1':
+                    logger.warning(
+                        'agent_turn_field_contract_violation',
+                        extra={
+                            'violations': [
+                                item.model_dump(mode='json') for item in contract_error.violations
+                            ],
+                        },
+                    )
+                    # Core v8 fact failures are atomic.  Persist-first recovery
+                    # handles the saved inbound message; do not silently spend
+                    # another model call or apply a partially repaired turn.
+                    raise ModelGatewayError(
+                        ModelGatewayErrorCode.MALFORMED_RESPONSE
+                    ) from contract_error
                 violations = [item.model_dump(mode='json') for item in contract_error.violations]
                 logger.info(
                     'agent.field_contract.validation',
@@ -1363,7 +1606,11 @@ class GatewayAgent:
                 repair_request = ModelRequest(
                     model_profile_id=context.model_profile_id,
                     purpose=CLAIMANT_AGENT_PURPOSE,
-                    prompt_version=CLAIMANT_V7_PROMPT_ID,
+                    prompt_version=(
+                        context.runtime_policy.instruction.prompt_version
+                        if context.runtime_policy is not None
+                        else CLAIMANT_V7_PROMPT_ID
+                    ),
                     privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
                     required_capabilities=ModelCapabilities(structured_output=True),
                     messages=repair_messages,
@@ -1467,7 +1714,8 @@ class GatewayAgent:
             raise ModelGatewayError(ModelGatewayErrorCode.EVIDENCE_UNAVAILABLE)
         if (
             context.runtime_policy is not None
-            and context.runtime_policy.instruction.prompt_version == CLAIMANT_V7_PROMPT_ID
+            and context.runtime_policy.instruction.prompt_version
+            in {CLAIMANT_V7_PROMPT_ID, CLAIMANT_V8_PROMPT_ID}
         ):
             return self._propose_v7_turn(context)
         shadow_context_plan = self._shadow_v7_plan(context)
@@ -1917,7 +2165,8 @@ class KnowledgeGroundedAgent:
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         if (
             context.runtime_policy is not None
-            and context.runtime_policy.instruction.prompt_version == CLAIMANT_V7_PROMPT_ID
+            and context.runtime_policy.instruction.prompt_version
+            in {CLAIMANT_V7_PROMPT_ID, CLAIMANT_V8_PROMPT_ID}
         ):
             source_context = context
             context = replace(

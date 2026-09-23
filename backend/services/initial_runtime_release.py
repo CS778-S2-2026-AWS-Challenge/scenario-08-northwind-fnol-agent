@@ -26,6 +26,7 @@ from backend.domain.release import (
 )
 from backend.prompts import (
     CLAIMANT_V7_PROMPT_ID,
+    CLAIMANT_V8_PROMPT_ID,
     MOTOR_CLAIMANT_PROMPT_ID,
     load_motor_claimant_prompt,
 )
@@ -46,9 +47,9 @@ from backend.services.runtime_agent_policy import registered_agent_tool_names
 _AUTHOR = 'repository-initial-release-author'
 _REVIEWER = 'repository-initial-release-reviewer'
 _REQUIRED_V7_MODEL_PROFILES = frozenset(
-    {'qwen-local', 'nowcoding-gpt55', 'google-gemini35-flash-lite'}
+    {'qwen-local', 'openrouter-gpt4o-mini', 'google-gemini35-flash-lite'}
 )
-_REQUIRED_V6_MODEL_PROFILES = frozenset({'qwen-local', 'nowcoding-gpt55'})
+_REQUIRED_V6_MODEL_PROFILES = frozenset({'qwen-local', 'openrouter-gpt4o-mini'})
 _VALIDATION_EVIDENCE = (
     'Repository-defined initial Runtime release passed structural and binding validation.'
 )
@@ -111,17 +112,21 @@ def repository_v6_values(
 def repository_v7_values(
     bindings: Sequence[ModelRuntimeBinding],
 ) -> dict[str, dict[str, object]]:
-    if {binding.prompt_version for binding in bindings} != {CLAIMANT_V7_PROMPT_ID}:
-        raise ValueError('A v7 Runtime release requires only v7 deployment bindings.')
-    manifest = load_prompt_manifest()
+    prompt_versions = {binding.prompt_version for binding in bindings}
+    if prompt_versions not in ({CLAIMANT_V7_PROMPT_ID}, {CLAIMANT_V8_PROMPT_ID}):
+        raise ValueError(
+            'A claimant Runtime release requires one published claimant prompt version.'
+        )
+    prompt_version = next(iter(prompt_versions))
+    manifest = load_prompt_manifest(prompt_version)
     fragment_contents = load_fragment_contents(manifest)
     model_values = {
-        binding.profile_id: _model_values(binding, prompt_version=CLAIMANT_V7_PROMPT_ID)
+        binding.profile_id: _model_values(binding, prompt_version=prompt_version)
         for binding in bindings
     }
     values: dict[str, dict[str, object]] = {
         'agent_instruction': {
-            'prompt_version': CLAIMANT_V7_PROMPT_ID,
+            'prompt_version': prompt_version,
             'purpose': 'claimant_agent',
             'composition_mode': 'fragmented',
             'manifest_version': manifest.prompt_pack_version,
@@ -138,7 +143,7 @@ def repository_v7_values(
             'allowed_action_codes': list(registered_actions()),
             'allowed_tool_names': list(registered_agent_tool_names()),
             'request_profiles': [
-                item.model_dump(mode='json') for item in registered_request_profiles()
+                item.model_dump(mode='json') for item in registered_request_profiles(prompt_version)
             ],
             'provider_capabilities': {
                 profile_id: provider_capability(
@@ -314,15 +319,16 @@ def install_initial_runtime_release(
     prompt_versions = {binding.prompt_version for binding in bindings}
     required_profiles = (
         _REQUIRED_V7_MODEL_PROFILES
-        if prompt_versions == {CLAIMANT_V7_PROMPT_ID}
+        if prompt_versions in ({CLAIMANT_V7_PROMPT_ID}, {CLAIMANT_V8_PROMPT_ID})
         else _REQUIRED_V6_MODEL_PROFILES
     )
     profile_ids = {binding.profile_id for binding in bindings}
-    if not required_profiles.issubset(profile_ids):
-        missing = ', '.join(sorted(required_profiles - profile_ids))
+    missing_profiles = required_profiles - profile_ids
+    if missing_profiles:
+        missing = ', '.join(sorted(missing_profiles))
         raise ValueError(f'The initial Runtime release is missing required models: {missing}.')
 
-    if prompt_versions == {CLAIMANT_V7_PROMPT_ID}:
+    if prompt_versions in ({CLAIMANT_V7_PROMPT_ID}, {CLAIMANT_V8_PROMPT_ID}):
         release_values = repository_v7_values(bindings)
     elif prompt_versions == {MOTOR_CLAIMANT_PROMPT_ID}:
         release_values = repository_v6_values(bindings)
