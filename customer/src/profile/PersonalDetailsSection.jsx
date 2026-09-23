@@ -1,6 +1,8 @@
+import { useState } from 'react'
+
 import { FeatureNotice, SummaryRow } from './ProfilePrimitives.jsx'
 import PolicyNumberDetails from './PoliciesSection.jsx'
-import { policyNumberSummary } from './policyNumber.js'
+import { policyDisclosureSummary, policyNumberSummary } from './policyNumber.js'
 
 function maskEmail(value = '') {
   const [local, domain] = value.split('@')
@@ -35,7 +37,7 @@ function formatDateOfBirth(value) {
   }).format(date)
 }
 
-function ProfileHeader({ account, controller, policyResource }) {
+function ProfileHeader({ account, controller, policyEditorActive, policyResource }) {
   return (
     <header className="profile-header">
       <div className="profile-avatar" aria-hidden="true">{initials(account.profile.display_name)}</div>
@@ -51,6 +53,7 @@ function ProfileHeader({ account, controller, policyResource }) {
         id="profile-edit-button"
         className="profile-quiet-action"
         type="button"
+        disabled={policyEditorActive}
         aria-expanded={controller.activeEditor === 'profile'}
         aria-controls="profile-header-editor"
         onClick={controller.activeEditor === 'profile'
@@ -71,11 +74,17 @@ export default function PersonalDetailsSection({
   policyResource,
 }) {
   const profile = account.profile || {}
+  const [policyEditorActive, setPolicyEditorActive] = useState(false)
   return (
     <section className="profile-section" aria-label="Personal details">
       <FeatureNotice notice={controller.notice} />
       <section className="profile-header-region" aria-label="Profile header">
-        <ProfileHeader account={account} controller={controller} policyResource={policyResource} />
+        <ProfileHeader
+          account={account}
+          controller={controller}
+          policyEditorActive={policyEditorActive}
+          policyResource={policyResource}
+        />
         {controller.activeEditor === 'profile' && (
           <form id="profile-header-editor" className="profile-edit-form profile-header-editor" onSubmit={controller.saveDetails}>
             <h3>Profile details</h3>
@@ -97,8 +106,9 @@ export default function PersonalDetailsSection({
           </form>
         )}
         <details className="profile-policy-disclosure">
-          <summary>{policyResource?.items?.length ? 'View or edit policy number' : 'Add policy number'}</summary>
+          <summary>{policyDisclosureSummary(policyResource)}</summary>
           <PolicyNumberDetails
+            editingDisabled={Boolean(controller.activeEditor)}
             resource={policyResource}
             pending={policyController.pending}
             onBeginCreate={policyController.beginCreate}
@@ -106,6 +116,7 @@ export default function PersonalDetailsSection({
             onCreate={policyController.createPolicy}
             onReload={policyController.reloadPolicies}
             onUpdate={policyController.savePolicy}
+            onEditingChange={setPolicyEditorActive}
           />
         </details>
       </section>
@@ -117,6 +128,7 @@ export default function PersonalDetailsSection({
             id="profile-personal-edit-button"
             className="profile-quiet-action"
             type="button"
+            disabled={policyEditorActive}
             aria-label={controller.activeEditor === 'personal'
               ? 'Done editing personal information'
               : 'Edit personal information'}

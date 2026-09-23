@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import UserProfile from './UserProfile.jsx'
@@ -201,6 +201,7 @@ describe('UserProfile', () => {
 
     expect(savePolicy).toHaveBeenCalledWith(policy.policy_id, policy.revision, 'NTH-9876')
     expect(await screen.findByRole('status')).toHaveTextContent('••••9876 was saved')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit policy number ••••1234' })).toHaveFocus())
   })
 
   it('adds an account policy number through the Personal details disclosure', async () => {
@@ -225,6 +226,29 @@ describe('UserProfile', () => {
       attemptId: 'policy-attempt-1',
     })
     expect(await screen.findByRole('status')).toHaveTextContent('••••1234 was saved')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add policy number' })).toHaveFocus())
+  })
+
+  it('keeps Personal details forms mutually exclusive and returns focus after policy cancellation', async () => {
+    const user = userEvent.setup()
+    const controller = profileController({
+      items: [policy], error: '', loading: false, stale: false,
+    })
+    renderProfile({ controller }, 'personal-details')
+
+    await user.click(screen.getByText('View or edit policy number', { selector: 'summary' }))
+    await user.click(screen.getByRole('button', { name: 'Edit profile' }))
+    expect(screen.getByRole('button', { name: 'Edit policy number ••••1234' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Save profile' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Done' }))
+    await user.click(screen.getByRole('button', { name: 'Edit policy number ••••1234' }))
+    expect(screen.getByRole('button', { name: 'Edit profile' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Edit personal information' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Save profile' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit policy number ••••1234' })).toHaveFocus())
   })
 
   it('keeps every historical policy record visible without inventing a primary policy', async () => {
@@ -241,6 +265,33 @@ describe('UserProfile', () => {
     expect(screen.getByText('••••5678')).toBeInTheDocument()
   })
 
+  it('labels a retained policy number when its refresh fails', async () => {
+    const user = userEvent.setup()
+    const controller = profileController({
+      items: [policy], error: 'Reload failed.', loading: false, stale: true,
+    })
+    renderProfile({ controller }, 'personal-details')
+
+    expect(screen.getByText('••••1234 · Could not refresh', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
+    await user.click(screen.getByText('View or edit policy number — refresh failed', { selector: 'summary' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Reload failed')
+    expect(screen.getByText('••••1234')).toBeInTheDocument()
+  })
+
+  it('labels retained policy records while a refresh is running', async () => {
+    const user = userEvent.setup()
+    const secondPolicy = { ...policy, policy_id: 'pol_22222222222222222222', policy_number: 'NTH-5678' }
+    const controller = profileController({
+      items: [policy, secondPolicy], error: '', loading: true, stale: false,
+    })
+    renderProfile({ controller }, 'personal-details')
+
+    expect(screen.getByText('2 policy numbers saved · Refreshing…', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
+    await user.click(screen.getByText('View or edit policy number — refreshing', { selector: 'summary' }))
+    expect(screen.getByText('••••1234')).toBeInTheDocument()
+    expect(screen.getByText('••••5678')).toBeInTheDocument()
+  })
+
   it('keeps policy loading and retryable errors inside Personal details', async () => {
     const user = userEvent.setup()
     const reloadPolicies = vi.fn().mockResolvedValue([])
@@ -251,7 +302,7 @@ describe('UserProfile', () => {
     renderProfile({ controller }, 'personal-details')
 
     expect(screen.getByText('Unavailable', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
-    await user.click(screen.getByText('Add policy number', { selector: 'summary' }))
+    await user.click(screen.getByText('Add policy number — refresh failed', { selector: 'summary' }))
     expect(screen.getByRole('alert')).toHaveTextContent('could not load saved policy numbers')
     await user.click(screen.getByRole('button', { name: 'Try again' }))
     expect(reloadPolicies).toHaveBeenCalledTimes(1)
@@ -265,7 +316,7 @@ describe('UserProfile', () => {
     renderProfile({ controller }, 'personal-details')
 
     expect(screen.getByText('Loading…', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
-    await user.click(screen.getByText('Add policy number', { selector: 'summary' }))
+    await user.click(screen.getByText('Add policy number — loading', { selector: 'summary' }))
     expect(screen.getByRole('status')).toHaveTextContent('Loading saved policy numbers…')
   })
 

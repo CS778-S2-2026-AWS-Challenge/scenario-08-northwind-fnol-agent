@@ -5,6 +5,7 @@ import { maskPolicyNumber } from './policyNumber.js'
 import { profileMutationMessage } from './profileMutation.js'
 
 export default function PolicyNumberDetails({
+  editingDisabled = false,
   resource,
   pending,
   onBeginCreate,
@@ -12,15 +13,26 @@ export default function PolicyNumberDetails({
   onCreate,
   onReload,
   onUpdate,
+  onEditingChange,
 }) {
   const [editor, setEditor] = useState(null)
   const [draft, setDraft] = useState('')
   const [notice, setNotice] = useState(null)
   const inputRef = useRef(null)
+  const returnFocusIdRef = useRef(null)
   const policies = resource.items
   const authoritative = policies !== null && !resource.error && !resource.loading && !resource.stale
 
   useEffect(() => { if (editor && authoritative) inputRef.current?.focus() }, [authoritative, editor])
+
+  useEffect(() => { onEditingChange?.(Boolean(editor)) }, [editor, onEditingChange])
+
+  useEffect(() => {
+    if (editor || !returnFocusIdRef.current) return
+    const triggerId = returnFocusIdRef.current
+    returnFocusIdRef.current = null
+    globalThis.document?.getElementById(triggerId)?.focus()
+  }, [editor])
 
   function closeEditor() {
     if (editor?.mode === 'create') onAbandonCreate('policy', editor.attemptId)
@@ -28,15 +40,15 @@ export default function PolicyNumberDetails({
     setDraft('')
   }
 
-  function beginCreate() {
-    closeEditor()
+  function beginCreate(event) {
     setNotice(null)
+    returnFocusIdRef.current = event.currentTarget.id
     setEditor({ mode: 'create', attemptId: onBeginCreate('policy') })
   }
 
-  function beginEdit(policy) {
-    closeEditor()
+  function beginEdit(policy, event) {
     setNotice(null)
+    returnFocusIdRef.current = event.currentTarget.id
     setEditor({ mode: 'edit', policyId: policy.policy_id })
     setDraft(policy.policy_number)
   }
@@ -82,11 +94,12 @@ export default function PolicyNumberDetails({
               <span><strong>Policy number</strong><span>{maskPolicyNumber(policy.policy_number)}</span></span>
               {authoritative && (
                 <button
+                  id={`profile-policy-edit-${policy.policy_id}`}
                   className="profile-quiet-action"
                   type="button"
-                  disabled={Boolean(pending[`policy:${policy.policy_id}`])}
+                  disabled={editingDisabled || Boolean(pending[`policy:${policy.policy_id}`])}
                   aria-label={`Edit policy number ${maskPolicyNumber(policy.policy_number)}`}
-                  onClick={() => beginEdit(policy)}
+                  onClick={(event) => beginEdit(policy, event)}
                 >
                   Edit
                 </button>
@@ -96,7 +109,13 @@ export default function PolicyNumberDetails({
         </ul>
       )}
       {authoritative && !editor && (
-        <button className="profile-asset-add-action" type="button" disabled={Boolean(pending['policy-create'])} onClick={beginCreate}>
+        <button
+          id="profile-policy-add-button"
+          className="profile-asset-add-action"
+          type="button"
+          disabled={editingDisabled || Boolean(pending['policy-create'])}
+          onClick={beginCreate}
+        >
           <span aria-hidden="true">+</span> Add policy number
         </button>
       )}
