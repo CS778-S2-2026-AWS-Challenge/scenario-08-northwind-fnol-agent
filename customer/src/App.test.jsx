@@ -702,7 +702,11 @@ describe('claimant intake projection', () => {
     const user = userEvent.setup()
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue({
-      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      profile: {
+        display_name: 'Alexandria Montgomery-Sinclair',
+        email: 'alexandria.montgomery-sinclair@example.invalid',
+        phone: '',
+      },
       preferences: { email: true, sms: false },
     })
     api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
@@ -713,7 +717,18 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
 
-    await user.click(container.querySelector('.intake-profile'))
+    const profileButton = container.querySelector('.intake-profile')
+    expect(profileButton).toHaveAccessibleName(
+      'Open Profile for Alexandria Montgomery-Sinclair (alexandria.montgomery-sinclair@example.invalid)',
+    )
+    expect(container.querySelector('.intake-profile-name')).toHaveAttribute('title', 'Alexandria Montgomery-Sinclair')
+    expect(container.querySelector('.intake-profile-name')).toHaveTextContent('Alexand…inclair')
+    expect(container.querySelector('.intake-profile-email')).toHaveAttribute(
+      'title',
+      'alexandria.montgomery-sinclair@example.invalid',
+    )
+    expect(container.querySelector('.intake-profile-email')).toHaveTextContent('alexandr…invalid')
+    await user.click(profileButton)
 
     expect(await screen.findByRole('region', { name: 'Personal details' })).toBeInTheDocument()
     expect(globalThis.location.pathname).toBe('/profile')

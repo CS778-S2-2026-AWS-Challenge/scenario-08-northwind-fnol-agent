@@ -117,6 +117,23 @@ const FIELD_SOURCE_LABELS = {
 }
 
 const SUPPORT_HANDOFF_TYPES = new Set(['human_support', 'urgent_support'])
+const PROFILE_NAME_PREVIEW_LENGTH = 15
+const PROFILE_EMAIL_PREVIEW_LENGTH = 17
+const MIDDLE_ELLIPSIS_SEPARATORS = new Set(['.', '-', '_'])
+
+function middleEllipsis(value, maxLength) {
+  const characters = Array.from(value)
+  if (characters.length <= maxLength) return value
+
+  const visibleCharacters = maxLength - 1
+  const startLength = Math.ceil(visibleCharacters / 2)
+  const endLength = Math.floor(visibleCharacters / 2)
+  const start = characters.slice(0, startLength)
+  const end = characters.slice(-endLength)
+  while (MIDDLE_ELLIPSIS_SEPARATORS.has(start.at(-1))) start.pop()
+  while (MIDDLE_ELLIPSIS_SEPARATORS.has(end[0])) end.shift()
+  return `${start.join('')}…${end.join('')}`
+}
 
 function fieldLabel(fieldCode) {
   return FIELD_LABELS[fieldCode] || fieldCode.split('.').at(-1).replaceAll('_', ' ')
@@ -2648,6 +2665,11 @@ function App() {
 
   const isUrgentSupport = handoff?.support_need === 'urgent'
   const isProfilePage = page === 'account'
+  const profileDisplayName = account?.profile?.display_name || 'Log in to save your chat'
+  const profileEmail = account?.profile?.email || 'Profile and preferences'
+  const profileButtonLabel = account
+    ? `Open Profile for ${profileDisplayName} (${profileEmail})`
+    : 'Open Profile and preferences'
 
   return (
     <div className={`customer-app ${!isWorkspaceActive && page === 'home' ? 'entry-shell' : ''} ${isProfilePage ? 'is-profile-page' : ''}`}>
@@ -2999,11 +3021,20 @@ function App() {
               })}
             </div>
             <div className="intake-history-bottom">
-              <button className="intake-profile" type="button" onClick={() => openProfileFromWorkspace()}>
-                <span className="intake-profile-avatar">{account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}</span>
+              <button
+                className="intake-profile"
+                type="button"
+                aria-label={profileButtonLabel}
+                onClick={() => openProfileFromWorkspace()}
+              >
+                <span className="intake-profile-avatar" aria-hidden="true">{account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}</span>
                 <span className="intake-profile-copy">
-                  <span>{account?.profile?.display_name || 'Log in to save your chat'}</span>
-                  <small>{account?.profile?.email || 'Profile and preferences'}</small>
+                  <span className="intake-profile-name" title={profileDisplayName} aria-hidden="true">
+                    {middleEllipsis(profileDisplayName, PROFILE_NAME_PREVIEW_LENGTH)}
+                  </span>
+                  <small className="intake-profile-email" title={profileEmail} aria-hidden="true">
+                    {middleEllipsis(profileEmail, PROFILE_EMAIL_PREVIEW_LENGTH)}
+                  </small>
                 </span>
               </button>
             </div>
