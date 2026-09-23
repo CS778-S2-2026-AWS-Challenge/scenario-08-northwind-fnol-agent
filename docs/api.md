@@ -1001,8 +1001,12 @@ The backend MUST maintain a versioned field registry with validation and display
 
 Every claimant Dynamic Form projection includes deterministic `requirements`: `satisfied`,
 `recorded`, `missing_required_now`, `missing_by_branch`, `pending_later`, `next_required_item`, `ready`,
-`ready_pending_confirmation`,
-`current_action_total`, and `current_action_satisfied`. The backend recalculates this projection
+`ready_pending_confirmation`, `by_state`, `unresolved`,
+`current_action_total`, and `current_action_satisfied`. `by_state` groups every projected field
+code by its seven-state disposition (`missing`, `proposed`, `confirmed_exact`, `confirmed_approx`,
+`disputed`, `unavailable`, `pending_generation`); `unresolved` is the `missing` group, so a client
+can distinguish still-missing fields from fields already settled into a resting state such as
+`unavailable` or `pending_generation`. The backend recalculates this projection
 from authoritative Claim State, the selected registered branch, and the current action. Clients
 must not calculate readiness or choose required fields locally.
 

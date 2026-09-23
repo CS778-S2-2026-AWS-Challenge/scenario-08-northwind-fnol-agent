@@ -4960,7 +4960,7 @@
             "type": "integer"
           },
           "ordinary_input_hard_limit": {
-            "default": 6000,
+            "default": 7500,
             "minimum": 100.0,
             "title": "Ordinary Input Hard Limit",
             "type": "integer"
@@ -11875,7 +11875,7 @@
             "type": "integer"
           },
           "output_limit": {
-            "maximum": 6000.0,
+            "maximum": 8000.0,
             "minimum": 1.0,
             "title": "Output Limit",
             "type": "integer"
@@ -11952,6 +11952,16 @@
         "additionalProperties": false,
         "description": "Deterministic information needed for the current safe action.",
         "properties": {
+          "by_state": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "By State",
+            "type": "object"
+          },
           "current_action_satisfied": {
             "default": 0,
             "minimum": 0.0,
@@ -12018,6 +12028,13 @@
               "type": "string"
             },
             "title": "Satisfied",
+            "type": "array"
+          },
+          "unresolved": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unresolved",
             "type": "array"
           }
         },
