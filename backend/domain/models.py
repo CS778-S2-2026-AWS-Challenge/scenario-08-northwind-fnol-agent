@@ -508,6 +508,7 @@ class StructuredFormField(ContractModel):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     resolution_state: FactResolutionState | None = None
     precision: FactPrecision = FactPrecision.EXACT
+    normalised: bool = False
     current_assertion_id: str | None = Field(default=None, max_length=120)
     assertions: list[FactAssertion] = Field(default_factory=list)
     updated_at: datetime
@@ -771,6 +772,14 @@ class ClaimantExternalServiceAction(ContractModel):
     catalogue_reference: str | None = None
     capability_provenance: str = Field(min_length=1, max_length=100)
     access_form: str = Field(min_length=1, max_length=200)
+    presentation: Literal[
+        'info_link',
+        'action_button',
+        'consent_request',
+        'tracked_task',
+        'agent_assisted',
+        'status_update',
+    ] = 'consent_request'
     status_label: str = Field(min_length=1, max_length=120)
     status_detail: str = Field(min_length=1, max_length=500)
     pending_owner: str = Field(min_length=1, max_length=80)
@@ -968,6 +977,7 @@ class QuestionRecord(ContractModel):
     field_codes: list[str] = Field(default_factory=list)
     purpose: str = Field(min_length=1, max_length=120)
     repeated: bool = False
+    during_handoff: bool = False
     asked_at: datetime
 
 
@@ -1031,7 +1041,7 @@ class SessionRecord(ContractModel):
     session_id: str
     claim_id: str
     customer_id: str
-    model_profile_id: str = Field(default='qwen-local', min_length=1, max_length=100)
+    model_profile_id: str = Field(default='openrouter-gpt4o-mini', min_length=1, max_length=100)
     status: SessionStatus = SessionStatus.ACTIVE
     summary: str | None = None
     unresolved_questions: list[str] = Field(default_factory=list)
@@ -1062,6 +1072,16 @@ class MessageRecord(ContractModel):
     content: dict[str, Any]
     evidence_refs: list[str] = Field(default_factory=list)
     in_reply_to: str | None = None
+    recovery_rule_id: str | None = Field(default=None, max_length=120)
+    created_at: datetime
+
+
+class ConfirmationRequestRecord(ContractModel):
+    confirmation_id: str
+    claim_id: str
+    claim_revision: int = Field(ge=1)
+    field_codes: list[str]
+    shown_values_fingerprint: str
     created_at: datetime
 
 
@@ -1139,7 +1159,8 @@ class RuntimeTraceRecord(ContractModel):
     model_profile_id: str
     trigger_message_id: str
     evidence: list[RuntimeEvidenceTrace] = Field(default_factory=list, max_length=20)
-    invocations: list[RuntimeInvocationTrace] = Field(min_length=1, max_length=2)
+    invocations: list[RuntimeInvocationTrace] = Field(min_length=0, max_length=2)
+    deterministic_response_id: str | None = Field(default=None, max_length=120)
     tool_call_id: str | None = None
     tool_name: str | None = Field(
         default=None,
@@ -2134,7 +2155,7 @@ class ClaimantSession(ContractModel):
     session_id: str
     claim_id: str
     status: SessionStatus
-    model_profile_id: str = Field(default='qwen-local', min_length=1, max_length=100)
+    model_profile_id: str = Field(default='openrouter-gpt4o-mini', min_length=1, max_length=100)
     resume: ResumePackage
     started_at: datetime
     last_active_at: datetime
@@ -2166,6 +2187,8 @@ class ClaimantMessage(ContractModel):
     content: dict[str, Any]
     evidence_refs: list[str] = Field(default_factory=list)
     in_reply_to: str | None = None
+    client_message_id: str | None = None
+    recovery: 'ClaimantTurnRecovery | None' = None
     message_actions: list[ClaimantExternalServiceAction] = Field(default_factory=list)
     created_at: datetime
 
@@ -2182,6 +2205,14 @@ class ClaimantDecision(ContractModel):
     reason_codes: list[str]
     customer_reason: str
     customer_next_step: CustomerNextStep
+
+
+class ClaimantTurnRecovery(ContractModel):
+    rule_id: str
+    continuation: Literal['runtime.fail_safe']
+    claimant_projection: str
+    resume_triggers: list[str]
+    resume_entrypoint: Literal['submit_message']
 
 
 class MessageTurnResponse(ContractModel):
@@ -2203,6 +2234,7 @@ class MessageTurnResponse(ContractModel):
     handoff: ClaimantHandoff | None = None
     dynamic_form: 'DynamicFormProjection | None' = None
     primary_action: ClaimantPrimaryAction
+    recovery: ClaimantTurnRecovery | None = None
 
 
 class MessageListResponse(ContractModel):
@@ -2291,10 +2323,19 @@ class RequirementResolution(ContractModel):
     """Deterministic information needed for the current safe action."""
 
     satisfied: list[str] = Field(default_factory=list)
+    recorded: list[str] = Field(default_factory=list)
     missing_required_now: list[str] = Field(default_factory=list)
+    missing_by_branch: list[dict[str, object]] = Field(default_factory=list)
     pending_later: list[str] = Field(default_factory=list)
+    # Every required field lands in exactly one bucket. Only ``missing`` blocks
+    # creation: a fact the claimant cannot supply yet, a fact awaiting a third
+    # party, a disputed fact, or a recorded-but-unconfirmed fact all travel to
+    # the Workbench with their state rather than holding the report hostage.
+    by_state: dict[str, list[str]] = Field(default_factory=dict)
+    unresolved: list[str] = Field(default_factory=list)
     next_required_item: str | None = None
     ready: bool = False
+    ready_pending_confirmation: bool = False
     current_action_total: int = Field(default=0, ge=0)
     current_action_satisfied: int = Field(default=0, ge=0)
 

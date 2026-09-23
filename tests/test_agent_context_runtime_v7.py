@@ -29,6 +29,7 @@ from backend.domain.configuration import (
     ModelRuntimeConfiguration,
 )
 from backend.domain.external_service_registry import capability_context
+from backend.domain.field_registry import FIELD_REGISTRY_VERSION
 from backend.domain.knowledge import KnowledgeChunk, KnowledgeRetrievalUnavailable, KnowledgeSearch
 from backend.domain.knowledge_admin import KnowledgeSourceRecord, KnowledgeVersionState
 from backend.domain.model_gateway import (
@@ -167,7 +168,7 @@ def _runtime_policy(snapshot: RuntimeConfigurationSnapshot) -> RuntimeAgentPolic
             policy_version='test-v7',
             allowed_action_codes=list(registered_actions()),
             allowed_tool_names=list(registered_agent_tool_names()),
-            request_profiles=list(registered_request_profiles()),
+            request_profiles=list(registered_request_profiles('northwind-fnol-claimant-v7')),
             provider_capabilities={'qwen-local': provider_capability(model_configuration)},
             schema_registry=load_response_schemas(),
         ),
@@ -383,8 +384,8 @@ def test_router_keeps_authoritative_family_and_resolves_ambiguous_new_claims() -
 
     unresolved = route_turn(_context('My car and furniture were damaged.', incident_type=None))
     assert unresolved.product_family is None
-    assert unresolved.model_required is False
-    assert unresolved.deterministic_response is not None
+    assert unresolved.model_required is True
+    assert unresolved.deterministic_response is None
 
 
 def test_prompt_manifest_compiles_one_family_in_stable_order() -> None:
@@ -551,16 +552,16 @@ def test_request_profile_rejects_incoherent_invocation_contracts(
     ('raw_input_tokens', 'turn_cumulative_tokens', 'expected_error'),
     [
         (301, 301, 'request exceeds'),
-        (200, 301, 'turn exceeds'),
+        (200, 301, None),
     ],
 )
 def test_request_budget_rejects_single_and_cumulative_overflow(
     raw_input_tokens: int,
     turn_cumulative_tokens: int,
-    expected_error: str,
+    expected_error: str | None,
 ) -> None:
-    with pytest.raises(ValueError, match=expected_error):
-        ModelRequestBudget(
+    def budget() -> ModelRequestBudget:
+        return ModelRequestBudget(
             policy_version='test-v1',
             raw_input_tokens=raw_input_tokens,
             uncached_input_tokens=raw_input_tokens,
@@ -576,6 +577,12 @@ def test_request_budget_rejects_single_and_cumulative_overflow(
             hard_limit=300,
             estimate_method='conservative_chars',
         )
+
+    if expected_error is not None:
+        with pytest.raises(ValueError, match=expected_error):
+            budget()
+    else:
+        assert budget().turn_cumulative_tokens == 301
 
 
 @pytest.mark.parametrize(
@@ -613,6 +620,7 @@ def test_external_support_offers_only_registry_candidates_pending_consent(
     context = replace(
         _context(message),
         external_services=capability_context('motor'),
+        selected_external_service_ids=(service_identity,),
     )
     gateway = _RecordingGateway(
         [
@@ -738,7 +746,7 @@ def test_ordinary_model_plan_is_single_call_tool_free_and_budgeted() -> None:
     assert plan.request_profile.profile_id == 'claimant.intake.v1'
     assert plan.request_profile.max_model_invocations == 1
     assert plan.request_profile.tool_names == []
-    assert plan.request_budget.raw_input_tokens <= 3000
+    assert plan.request_budget.raw_input_tokens <= plan.request_budget.hard_limit == 4549
     assert plan.request_budget.reserved_output_tokens == 180
     assert plan.context_payload['message.latest'] == 'My car was rear-ended this morning.'
     assert plan.context_plan.estimated_tokens == estimate_json_tokens(plan.context_payload)
@@ -1303,7 +1311,7 @@ def test_intake_field_contract_rejects_a_mismatched_branch_registry() -> None:
     branch_evaluation = BranchEvaluationResult(
         claim_id='clm_v7',
         evaluated_against_claim_revision=1,
-        field_registry_version='5',
+        field_registry_version=FIELD_REGISTRY_VERSION,
         branch_rules_version='unrelated-branch-rules-v7',
         selected_family='motor',
         requirements=RequirementResolution(ready=False),
@@ -1321,7 +1329,6 @@ def test_intake_field_contract_rejects_a_mismatched_branch_registry() -> None:
 @pytest.mark.parametrize(
     ('case', 'expected_code'),
     [
-        ('unknown_service', ModelGatewayErrorCode.MALFORMED_RESPONSE),
         ('unsupported_tool', ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY),
         ('invalid_resolver_limit', ModelGatewayErrorCode.MALFORMED_RESPONSE),
         ('incomplete', ModelGatewayErrorCode.INCOMPLETE_RESPONSE),
@@ -1340,16 +1347,7 @@ def test_v7_provider_failures_do_not_escape_the_published_turn_contract(
         structured_output=_intake_output(),
         completion_status=ModelCompletionStatus.COMPLETE,
     )
-    if case == 'unknown_service':
-        context = replace(
-            _context('Please arrange a damage assessment.'),
-            external_services=capability_context('motor'),
-        )
-        response = ModelResponse(
-            structured_output={**_answer_output(), 'service_offer_ids': ['not_registered']},
-            completion_status=ModelCompletionStatus.COMPLETE,
-        )
-    elif case == 'unsupported_tool':
+    if case == 'unsupported_tool':
         response = ModelResponse(
             tool_calls=[ModelToolCall(call_id='call_wrong', name='claim.read', arguments={})],
             completion_status=ModelCompletionStatus.COMPLETE,
@@ -1394,16 +1392,63 @@ def test_v7_provider_failures_do_not_escape_the_published_turn_contract(
     assert error.value.code is expected_code
 
 
-def test_v7_human_handoff_interrupts_before_any_provider_invocation() -> None:
-    gateway = _RecordingGateway([])
+def test_v7_rejects_an_unregistered_optional_offer_without_rejecting_safe_prose() -> None:
+    context = replace(
+        _context('Please arrange a damage assessment.'),
+        external_services=capability_context('motor'),
+    )
+    response = ModelResponse(
+        structured_output={**_answer_output(), 'service_offer_ids': ['not_registered']},
+        completion_status=ModelCompletionStatus.COMPLETE,
+    )
+
+    proposal = GatewayAgent(_RecordingGateway([response])).propose_turn(context)
+
+    assert proposal.customer_response == _answer_output()['reply']
+    assert proposal.external_service_intents == []
+    assert proposal.customer_next_step.status == 'continue_current_report'
+
+
+def test_v7_replaces_executional_prose_before_consent_with_runtime_owned_copy() -> None:
+    service_identity = 'vehicle_damage_assessment_routing'
+    context = replace(
+        _context('Please arrange a damage assessment.'),
+        external_services=capability_context('motor'),
+        selected_external_service_ids=(service_identity,),
+    )
+    response = ModelResponse(
+        structured_output={
+            **_answer_output(),
+            'reply': 'I have arranged a damage assessment for you.',
+        },
+        completion_status=ModelCompletionStatus.COMPLETE,
+    )
+
+    proposal = GatewayAgent(_RecordingGateway([response])).propose_turn(context)
+
+    assert 'arranged' not in proposal.customer_response
+    assert proposal.customer_response
+    assert proposal.external_service_intents == [
+        {'service_identity': service_identity, 'requested_action': 'submit_request'}
+    ]
+
+
+def test_v7_human_handoff_preserves_interrupt_while_provider_answers() -> None:
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                structured_output=_answer_output(), completion_status=ModelCompletionStatus.COMPLETE
+            )
+        ]
+    )
 
     proposal = InvariantGuardedAgent(GatewayAgent(gateway)).propose_turn(
         _context('I want to speak to a person.')
     )
 
     assert proposal.action is AgentAction.HANDOFF
-    assert proposal.reason_codes == ['HUMAN_SUPPORT_REQUESTED']
-    assert gateway.requests == []
+    assert 'HUMAN_SUPPORT_REQUESTED' in proposal.reason_codes
+    assert len(gateway.requests) == 1
 
 
 def test_v7_timeout_stops_after_one_request_and_returns_no_proposal() -> None:

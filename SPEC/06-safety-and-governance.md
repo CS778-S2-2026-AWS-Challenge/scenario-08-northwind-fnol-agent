@@ -21,8 +21,10 @@ handoff, external request, or high-impact decision.
 
 ## Safety Escalation
 
-Explicit injury, continuing danger, or another approved urgent signal interrupts ordinary
-intake. The claimant receives concise, bounded guidance and an urgent handoff. Trigger
+Explicit injury, continuing danger, or another approved urgent signal creates an urgent
+handoff. The claimant receives concise, bounded guidance while factual collection and optional
+follow-up questions continue. All third-party suggestions pause until the handoff is resolved.
+Trigger
 rules are versioned and tested; controlled fixture rules are not automatically approved
 production policy.
 

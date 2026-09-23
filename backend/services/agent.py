@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from backend.core.errors import ApiError
 from backend.domain.agent_action_registry import action_contract
-from backend.domain.agent_context_runtime import VerifiedConversationSummary
+from backend.domain.agent_context_runtime import TurnFamilyResolution, VerifiedConversationSummary
 from backend.domain.intake import infer_controlled_product_family, next_requirement_field
 from backend.domain.knowledge import KnowledgeChunk
 from backend.domain.models import (
@@ -19,6 +19,7 @@ from backend.domain.models import (
     CustomerNextStep,
     FormSource,
     FormStatus,
+    HandoffRecord,
     MessageRecord,
     ModelDecisionProvenance,
     NeededFor,
@@ -30,6 +31,11 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.domain.realtime import AgentTurnProgressStage
+from backend.domain.safety_vocabulary import (
+    DANGER_STATE_PATTERN,
+    INJURY_NOUN_PATTERN,
+    INJURY_STATE_PATTERN,
+)
 from backend.domain.support_intent import (
     SupportIntent,
     detect_support_intent,
@@ -37,10 +43,12 @@ from backend.domain.support_intent import (
 )
 
 if TYPE_CHECKING:
+    from backend.domain.agent_v8 import V8TurnProposal
     from backend.domain.external_service_registry import ExternalServiceLifecycleProjection
     from backend.domain.model_gateway import ModelEvidenceContentResolver
     from backend.services.runtime_agent_policy import RuntimeAgentPolicySnapshot
     from backend.services.runtime_configuration import RuntimeConfigurationSnapshot
+    from backend.services.turn_proposal_validation import ValidatedTurn
 
 HIGH_IMPACT_ACTIONS = frozenset(
     {
@@ -68,41 +76,41 @@ INJURY_PATTERNS = (
     re.compile(
         rf'\b{PERSON_SUBJECT}\s+'
         r'(?:am|are|is|was|were|got|has\s+been|have\s+been)\s+'
-        r'(?:(?:seriously|badly)\s+)?(?:injured|hurt|bleeding|trapped|unconscious)\b',
+        rf'(?:(?:seriously|badly)\s+)?{INJURY_STATE_PATTERN}\b',
         re.IGNORECASE,
     ),
     re.compile(
         rf'\b{PERSON_SUBJECT}\s+(?:has|have|suffered)\s+'
-        r'(?:(?:a|an)\s+)?(?:(?:serious|minor)\s+)?injur(?:y|ies)\b',
+        rf'(?:(?:a|an)\s+)?(?:(?:serious|minor)\s+)?{INJURY_NOUN_PATTERN}\b',
         re.IGNORECASE,
     ),
     re.compile(
         r'\bthere\s+(?:is|are|was|were)\s+'
-        r'(?:(?:a|an)\s+)?(?:injured|hurt|bleeding|trapped|unconscious)\s+'
+        rf'(?:(?:a|an)\s+)?{INJURY_STATE_PATTERN}\s+'
         r'(?:person|people|passenger|driver|pedestrian|cyclist|child|adult)\b',
         re.IGNORECASE,
     ),
 )
 DANGER_PATTERNS = (
-    re.compile(r'\b(?:still|continuing|immediate)\s+(?:danger|dangerous|unsafe)\b', re.IGNORECASE),
+    re.compile(rf'\b(?:still|continuing|immediate)\s+{DANGER_STATE_PATTERN}\b', re.IGNORECASE),
     re.compile(r'\b(?:fire|smoke)\s+(?:is\s+)?(?:spreading|continuing|active)\b', re.IGNORECASE),
 )
 INJURY_NEGATION_PATTERNS = (
     re.compile(
         r'\b(?:no\s+one|nobody|none)\s+'
         r'(?:(?:is|are|was|were|got|has\s+been|have\s+been)\s+)?'
-        r'(?:(?:seriously|badly)\s+)?(?:injured|hurt|bleeding|trapped|unconscious)\b',
+        rf'(?:(?:seriously|badly)\s+)?{INJURY_STATE_PATTERN}\b',
         re.IGNORECASE,
     ),
     re.compile(
         rf'\b{PERSON_SUBJECT}\s+'
         r'(?:am|are|is|was|were|has\s+been|have\s+been)\s+not\s+'
-        r'(?:(?:seriously|badly)\s+)?(?:injured|hurt|bleeding|trapped|unconscious)\b',
+        rf'(?:(?:seriously|badly)\s+)?{INJURY_STATE_PATTERN}\b',
         re.IGNORECASE,
     ),
     re.compile(
         r'\bthere\s+(?:is|are|was|were)\s+no\s+'
-        r'(?:injured|hurt|bleeding|trapped|unconscious)\s+'
+        rf'{INJURY_STATE_PATTERN}\s+'
         r'(?:person|people|passenger|driver|pedestrian|cyclist|child|adult)\b',
         re.IGNORECASE,
     ),
@@ -110,16 +118,16 @@ INJURY_NEGATION_PATTERNS = (
 DANGER_NEGATION_PATTERNS = (
     re.compile(
         r'\b(?:there\s+(?:is|are|was|were)\s+)?no\s+'
-        r'(?:(?:still|continuing|immediate|ongoing)\s+)?(?:danger|dangerous|unsafe)\b',
+        rf'(?:(?:still|continuing|immediate|ongoing)\s+)?{DANGER_STATE_PATTERN}\b',
         re.IGNORECASE,
     ),
     re.compile(
         r'\b(?:is|are|was|were)\s+not\s+'
-        r'(?:(?:still|currently)\s+)?(?:in\s+)?(?:danger|dangerous|unsafe)\b',
+        rf'(?:(?:still|currently)\s+)?(?:in\s+)?{DANGER_STATE_PATTERN}\b',
         re.IGNORECASE,
     ),
     re.compile(
-        r'\bno\s+longer\s+(?:in\s+)?(?:danger|dangerous|unsafe)\b',
+        rf'\bno\s+longer\s+(?:in\s+)?{DANGER_STATE_PATTERN}\b',
         re.IGNORECASE,
     ),
 )
@@ -260,6 +268,14 @@ class AgentEvidenceReference:
 
 
 @dataclass(frozen=True, slots=True)
+class SafetyInterrupt:
+    kind: Literal['urgent_safety', 'human_requested', 'accessibility', 'distress']
+    reason_code: str
+    handoff_priority: Literal['urgent', 'standard']
+    safety_notice: str
+
+
+@dataclass(frozen=True, slots=True)
 class AgentTurnContext:
     claim: WorkingClaim
     session_id: str
@@ -268,9 +284,18 @@ class AgentTurnContext:
     evidence_refs: list[str]
     evidence: tuple[AgentEvidenceReference, ...] = ()
     evidence_resolver: ModelEvidenceContentResolver | None = None
-    model_profile_id: str = 'qwen-local'
+    model_profile_id: str = 'openrouter-gpt4o-mini'
     professional_review_required: bool = False
     branch_evaluation: BranchEvaluationResult | None = None
+    turn_family_resolution: TurnFamilyResolution | None = None
+    selected_external_service_ids: tuple[str, ...] = ()
+    eligible_service_ids: frozenset[str] | None = None
+    service_eligibility_resolver: Callable[[list[ProposedFormChange]], frozenset[str]] | None = None
+    external_service_context_loader: (
+        Callable[[], tuple[ExternalServiceLifecycleProjection, ...]] | None
+    ) = None
+    safety_interrupt: SafetyInterrupt | None = None
+    open_handoffs: tuple[HandoffRecord, ...] = ()
     knowledge_results: tuple[KnowledgeChunk, ...] = ()
     knowledge_status: str = 'not_requested'
     knowledge_limitations: tuple[str, ...] = ()
@@ -287,6 +312,16 @@ class AgentTurnContext:
     external_services: tuple[ExternalServiceLifecycleProjection, ...] = ()
     tool_results: tuple[dict[str, object], ...] = ()
     progress_reporter: Callable[[AgentTurnProgressStage, str | None], None] | None = None
+    # What the model asked last turn and how many questions the session still
+    # allows — so it can pick up where it left off instead of Runtime deciding.
+    last_question: dict[str, object] | None = None
+    remaining_questions: int | None = None
+    # Documents this kind of report normally carries and which have arrived,
+    # so the model can ask for, recognise, or source the missing ones.
+    documents: tuple[dict[str, object], ...] = ()
+    # Files the claimant attached this turn that the selected provider cannot
+    # read. They stay saved and listed; the model is told they arrived.
+    unattached_evidence: tuple[AgentEvidenceReference, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,10 +346,13 @@ class AgentProposal:
     # turns; ``action`` is retained only for persisted compatibility records.
     action_code: str | None = None
     runtime_trace: RuntimeTraceRecord | None = None
+    confirms_batch: bool = False
     evidence_id: str | None = None
     source_claim_id: str | None = None
     removal_scope: str | None = None
     external_service_intents: list[dict[str, str]] = field(default_factory=list)
+    raw_v8_proposal: V8TurnProposal | None = None
+    validated_turn: ValidatedTurn | None = None
 
 
 def _contains_unnegated_signal(
@@ -763,6 +801,8 @@ class AgentTurnProvider(Protocol):
 
 
 def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal | None:
+    from backend.services.runtime_trace_factory import build_controlled_runtime_trace
+
     message_text = context.message_text or ''
     active_handoff = context.claim.claim_state.next_action in {
         AgentAction.HANDOFF,
@@ -793,13 +833,29 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
                 ),
                 responsible_party=ResponsibleParty.CLAIMS_PROFESSIONAL,
             ),
-            form_changes=[],
+            form_changes=[
+                ProposedFormChange(
+                    field_code='incident.injury_or_danger',
+                    value=True,
+                    source=FormSource.CLAIMANT,
+                    status=FormStatus.CONFIRMED,
+                    reported_text=message_text,
+                )
+            ],
             state_changes=[StateChange(path='claim_state.next_action', to='URGENT_HANDOFF')],
             proposed_signals=[],
             required_tools=[],
             next_action_requirements=[],
             handoff_priority='urgent',
             controlled_rule_authorised=True,
+            action_code='human.urgent_handoff',
+            runtime_trace=build_controlled_runtime_trace(
+                context,
+                action_code='human.urgent_handoff',
+                runtime_action_code='runtime.interrupt_urgent',
+                reason_codes=['EXPLICIT_SAFETY_SIGNAL'],
+                deterministic_response_id='EXPLICIT_SAFETY_SIGNAL',
+            ),
         )
     support_intent = detect_support_intent(message_text)
     support_need = support_need_for_intent(support_intent)
@@ -863,6 +919,14 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
             next_action_requirements=[],
             handoff_priority=priority,
             controlled_rule_authorised=True,
+            action_code='human.handoff',
+            runtime_trace=build_controlled_runtime_trace(
+                context,
+                action_code='human.handoff',
+                runtime_action_code='runtime.pause_for_review',
+                reason_codes=[reason_code],
+                deterministic_response_id=reason_code,
+            ),
         )
     if any(pattern.search(message_text) for pattern in PENDING_POLICE_REPORT_PATTERNS):
         if context.professional_review_required and not active_handoff:
@@ -933,21 +997,6 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
             next_action_requirements=[],
             controlled_rule_authorised=True,
         )
-    if active_handoff:
-        return AgentProposal(
-            action=AgentAction.UPDATE,
-            reason_codes=['HANDOFF_ALREADY_QUEUED'],
-            customer_reason='Your additional information has been kept with the report.',
-            customer_response=(
-                'I have added that information to the report already waiting for Northwind support.'
-            ),
-            customer_next_step=context.claim.customer_next_step,
-            form_changes=[],
-            state_changes=[],
-            proposed_signals=[],
-            required_tools=[],
-            next_action_requirements=[],
-        )
     return None
 
 
@@ -958,8 +1007,87 @@ class InvariantGuardedAgent:
         self._provider = provider
 
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
-        interrupt = deterministic_interrupt_proposal(context)
-        return interrupt if interrupt is not None else self._provider.propose_turn(context)
+        interrupt = context.safety_interrupt or detect_safety_interrupt(context)
+        proposal = self._provider.propose_turn(replace(context, safety_interrupt=interrupt))
+        if interrupt is not None:
+            action = (
+                AgentAction.URGENT_HANDOFF
+                if interrupt.kind == 'urgent_safety'
+                else AgentAction.HANDOFF
+            )
+            safety_changes = (
+                [
+                    ProposedFormChange(
+                        field_code='incident.injury_or_danger',
+                        value=True,
+                        source=FormSource.CLAIMANT,
+                        status=FormStatus.CONFIRMED,
+                        reported_text=context.message_text,
+                    )
+                ]
+                if interrupt.kind == 'urgent_safety'
+                else []
+            )
+            proposal = replace(
+                proposal,
+                action=action,
+                reason_codes=list(dict.fromkeys([interrupt.reason_code, *proposal.reason_codes])),
+                controlled_rule_authorised=True,
+                handoff_priority=interrupt.handoff_priority,
+                form_changes=[*proposal.form_changes, *safety_changes],
+                state_changes=[
+                    *proposal.state_changes,
+                    StateChange(path='claim_state.next_action', to=action.value),
+                ],
+            )
+        if proposal.runtime_trace is None and proposal.action_code is not None:
+            from backend.services.runtime_trace_factory import build_controlled_runtime_trace
+
+            proposal = replace(
+                proposal,
+                runtime_trace=build_controlled_runtime_trace(
+                    context,
+                    action_code=proposal.action_code,
+                    runtime_action_code='runtime.wait_for_user',
+                    reason_codes=proposal.reason_codes,
+                    deterministic_response_id=proposal.reason_codes[0],
+                ),
+            )
+        return proposal
+
+
+def detect_safety_interrupt(context: AgentTurnContext) -> SafetyInterrupt | None:
+    text = context.message_text or ''
+    if _contains_unnegated_signal(
+        text, INJURY_PATTERNS, INJURY_NEGATION_PATTERNS
+    ) or _contains_unnegated_signal(text, DANGER_PATTERNS, DANGER_NEGATION_PATTERNS):
+        return SafetyInterrupt(
+            'urgent_safety',
+            'EXPLICIT_SAFETY_SIGNAL',
+            'urgent',
+            'Your safety comes first. Move to a safer place if you can do so safely, '
+            'and contact local emergency services yourself if immediate help is needed.',
+        )
+    support = support_need_for_intent(detect_support_intent(text))
+    if support is None:
+        return None
+    kind: Literal['human_requested', 'accessibility', 'distress'] = (
+        'accessibility'
+        if support.value == 'accessibility_required'
+        else 'distress'
+        if support.value == 'distress'
+        else 'human_requested'
+    )
+    reason = {
+        'accessibility': 'ACCESSIBILITY_SUPPORT_REQUESTED',
+        'distress': 'DISTRESS_SUPPORT_REQUESTED',
+    }.get(kind, 'HUMAN_SUPPORT_REQUESTED')
+    return SafetyInterrupt(
+        kind,
+        reason,
+        'standard',
+        'Northwind support has been requested. You can continue sharing details here.',
+    )
 
 
 class FeatureControlledAgent:
@@ -1133,7 +1261,47 @@ class ControlledAgent:
 
 
 def validate_proposal(proposal: AgentProposal) -> AgentAuthority:
+    # InvariantGuardedAgent prepends the registered interrupt reason while
+    # preserving provider fact reasons. The server-owned authority marker is
+    # still mandatory; a model-authored reason alone grants no handoff authority.
+    if proposal.validated_turn is not None:
+        # v8 has already validated every optional part.  Retain that boundary
+        # while checking the compatibility shell cannot add a protected write.
+        allowed_state_values = {
+            'claim_state.urgency': {'urgent'},
+            'claim_state.customer_support': {'guided', 'human_requested', 'accessibility_required'},
+            'claim_state.next_action': {proposal.action.value},
+        }
+        safe_changes = all(
+            change.path in allowed_state_values
+            and isinstance(change.to, str)
+            and change.to in allowed_state_values[change.path]
+            for change in proposal.state_changes
+        )
+        safe_action = proposal.action_code in {'conversation.answer', 'claim.prepare_creation'} or (
+            proposal.action_code == 'human.create_handoff'
+            and proposal.validated_turn.escalation is not None
+            and proposal.action in {AgentAction.HANDOFF, AgentAction.URGENT_HANDOFF}
+        )
+        return AgentAuthority(
+            proposed_by='agent',
+            validated_by='deterministic_rule_engine',
+            outcome=AuthorityOutcome.AUTHORISED
+            if safe_changes and safe_action
+            else AuthorityOutcome.BLOCKED,
+        )
     if proposal.action_code is not None:
+        if (
+            proposal.action in {AgentAction.HANDOFF, AgentAction.URGENT_HANDOFF}
+            and proposal.controlled_rule_authorised
+            and proposal.reason_codes
+            and proposal.reason_codes[0] in CONTROLLED_HANDOFF_REASONS
+        ):
+            return AgentAuthority(
+                proposed_by='agent',
+                validated_by='deterministic_rule_engine',
+                outcome=AuthorityOutcome.AUTHORISED,
+            )
         try:
             contract = action_contract(proposal.action_code)
         except ValueError:
@@ -1184,8 +1352,8 @@ def validate_proposal(proposal: AgentProposal) -> AgentAuthority:
     if (
         proposal.action in {AgentAction.HANDOFF, AgentAction.URGENT_HANDOFF}
         and proposal.controlled_rule_authorised
-        and set(proposal.reason_codes).issubset(CONTROLLED_HANDOFF_REASONS)
         and proposal.reason_codes
+        and proposal.reason_codes[0] in CONTROLLED_HANDOFF_REASONS
     ):
         return AgentAuthority(
             proposed_by='agent',

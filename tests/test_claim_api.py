@@ -220,7 +220,9 @@ class ContentsCorrectionAgent:
                     loss_type=loss_type,
                     ownership=ContentsOwnership.OWNED,
                     confidence=1.0,
-                    reported_text=message_text.rstrip('.'),
+                    # Initial item is a proposal without direct provenance;
+                    # later corrections quote the claimant and are accepted directly.
+                    reported_text=message_text.rstrip('.') if current is not None else None,
                 )
             ],
             state_changes=[StateChange(path='claim_state.next_action', to='CONFIRM')],
@@ -438,7 +440,11 @@ def test_conversation_only_turn_maps_atomic_repository_conflicts(
 
     assert response.status_code == 409
     assert response.json()['error']['code'] == expected_code
-    assert repository.list_messages(claim_id, session_id, 'cus_demo') == []
+    messages = repository.list_messages(claim_id, session_id, 'cus_demo')
+    assert len(messages) == 1
+    assert messages[0].actor.value == 'claimant'
+    assert messages[0].content['text'] == 'Thanks, there is nothing else to add.'
+    assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
 
 
 def test_message_turn_scopes_uploaded_evidence_to_the_current_claim(
@@ -1757,7 +1763,7 @@ def test_message_turn_persists_messages_proposed_field_and_validated_action(
 
     assert response.status_code == 200
     body = response.json()
-    assert body['claim_revision'] == 2
+    assert body['claim_revision'] == 3
     assert body['claimant_message']['actor'] == 'claimant'
     assert body['agent_message']['actor'] == 'agent'
     assert body['agent_message']['in_reply_to'] == body['claimant_message']['message_id']
@@ -1814,7 +1820,7 @@ def test_high_impact_agent_proposal_is_recorded_but_not_executed(
     assert claim.external_claim is None
 
 
-def test_agent_claim_history_lookup_is_persisted_without_advancing_revision(
+def test_agent_claim_history_lookup_preserves_facts_with_two_stage_message_revision(
     app: FastAPI,
     client: TestClient,
     auth_headers: dict[str, str],
@@ -1833,7 +1839,7 @@ def test_agent_claim_history_lookup_is_persisted_without_advancing_revision(
 
     assert response.status_code == 200
     body = response.json()
-    assert body['claim_revision'] == 2
+    assert body['claim_revision'] == 3
     records = repository.list_retrieval_records(claim_id, 'cus_demo')
     history_records = [
         record for record in records if isinstance(record, ClaimHistoryRetrievalRecord)
@@ -1847,7 +1853,7 @@ def test_agent_claim_history_lookup_is_persisted_without_advancing_revision(
         auth_headers,
         claim_id,
         session_id,
-        revision=2,
+        revision=body['claim_revision'],
         key='history-lookup-replay',
         client_message_id='history-lookup-replay',
     )
@@ -1903,14 +1909,18 @@ def test_invalid_claim_history_tool_arguments_fail_atomically(
     assert response.json()['error']['code'] == 'AGENT_TOOL_NOT_PERMITTED'
     assert adapter.history_calls == 0
     assert repository.list_retrieval_records(created['claim']['claim_id'], 'cus_demo') == []
-    assert (
-        repository.list_messages(
-            created['claim']['claim_id'], created['session']['session_id'], 'cus_demo'
-        )
-        == []
+    stored_messages = repository.list_messages(
+        created['claim']['claim_id'], created['session']['session_id'], 'cus_demo'
     )
+    assert len(stored_messages) == 1
+    assert stored_messages[0].actor.value == 'claimant'
     assert repository.list_agent_decisions(created['claim']['claim_id'], 'cus_demo') == []
-    assert repository.get_claim(created['claim']['claim_id'], 'cus_demo') == before_claim
+    after_claim = repository.get_claim(created['claim']['claim_id'], 'cus_demo')
+    assert after_claim is not None
+    assert after_claim.revision == before_claim.revision + 1
+    assert after_claim.model_dump(exclude={'revision', 'updated_at'}) == before_claim.model_dump(
+        exclude={'revision', 'updated_at'}
+    )
 
 
 def test_message_turn_deduplicates_retries_and_rejects_conflicting_client_id(
@@ -1978,7 +1988,7 @@ def test_message_turn_replay_preserves_turn_revision_after_later_claim_mutation(
     )
     later_update = client.patch(
         f'/api/v1/claims/{claim_id}/form',
-        headers={**auth_headers, 'If-Match': '2'},
+        headers={**auth_headers, 'If-Match': str(first.json()['current_claim_revision'])},
         json={
             'updates': [
                 {
@@ -1991,7 +2001,7 @@ def test_message_turn_replay_preserves_turn_revision_after_later_claim_mutation(
     )
     assert first.status_code == 200
     assert later_update.status_code == 200
-    assert later_update.json()['revision'] == 3
+    assert later_update.json()['revision'] == first.json()['current_claim_revision'] + 1
     stored = repository.find_idempotency(
         'cus_demo',
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
@@ -2024,9 +2034,13 @@ def test_message_turn_replay_preserves_turn_revision_after_later_claim_mutation(
     )
     assert replay.status_code == 200
     replay_body = replay.json()
-    assert replay_body['claim_revision'] == 2
-    assert replay_body['current_claim_revision'] == 3
-    assert replay_body['primary_action']['claim_revision'] == 3
+    assert replay_body['claim_revision'] == first.json()['claim_revision']
+    assert replay_body['current_claim_revision'] == later_update.json()['revision']
+    assert replay_body['primary_action'] == first.json()['primary_action']
+    assert (
+        replay_body['current_claim']['primary_action']['claim_revision']
+        == later_update.json()['revision']
+    )
     assert replay_body['claimant_message'] == first.json()['claimant_message']
     assert replay_body['agent_message'] == first.json()['agent_message']
 
@@ -2155,7 +2169,11 @@ def test_message_only_replay_rehydrates_current_revision_from_legacy_payload(
     replay_body = replay.json()
     assert replay_body['claim_revision'] == historical_revision
     assert replay_body['current_claim_revision'] == later_update.json()['revision']
-    assert replay_body['primary_action']['claim_revision'] == later_update.json()['revision']
+    assert replay_body['primary_action'] == first_body['primary_action']
+    assert (
+        replay_body['current_claim']['primary_action']['claim_revision']
+        == later_update.json()['revision']
+    )
 
 
 def test_mongodb_replay_with_new_key_survives_repository_restart(
@@ -2504,11 +2522,11 @@ def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(
     )
 
     assert confirmed.status_code == 200
-    assert confirmed.json()['revision'] == 3
+    assert confirmed.json()['revision'] == message['claim_revision'] + 1
     assert confirmed.json()['confirmed_fields']['incident.description']['status'] == 'confirmed'
     assert silent_overwrite.status_code == 409
     assert explicit_correction.status_code == 200
-    assert explicit_correction.json()['revision'] == 4
+    assert explicit_correction.json()['revision'] == confirmed.json()['revision'] + 1
     corrected = explicit_correction.json()['updated_fields']['incident.description']
     assert corrected['source'] == 'claimant'
     assert corrected['updated_by']['actor_id'] == 'cus_demo'
@@ -2519,7 +2537,7 @@ def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(
         'form_confirmed',
         'form_updated',
     ]
-    assert evaluations[-1].resulting_claim_revision == 4
+    assert evaluations[-1].resulting_claim_revision == explicit_correction.json()['revision']
 
 
 def test_contents_item_confirmation_and_natural_language_correction_preserve_history(
@@ -2581,7 +2599,7 @@ def test_contents_item_confirmation_and_natural_language_correction_preserve_his
     corrected_item = corrected_turn['contents_item_changes'][0]
     assert corrected_item['item_id'] == first_item['item_id']
     assert corrected_item['loss_type'] == 'stolen'
-    assert corrected_item['status'] == 'proposed'
+    assert corrected_item['status'] == 'confirmed'
 
     stored = repository.get_claim(claim_id, 'cus_demo')
     assert stored is not None
@@ -2593,19 +2611,8 @@ def test_contents_item_confirmation_and_natural_language_correction_preserve_his
     ]
     assert [assertion.status.value for assertion in stored.contents_items[0].assertions] == [
         'superseded',
-        'proposed',
+        'confirmed',
     ]
-
-    reconfirmed = client.post(
-        f'/api/v1/claims/{claim_id}/form/confirmations',
-        headers={
-            **auth_headers,
-            'Idempotency-Key': 'reconfirm-contents-item',
-            'If-Match': str(corrected_turn['claim_revision']),
-        },
-        json={'field_codes': ['contents.items']},
-    )
-    assert reconfirmed.status_code == 200, reconfirmed.text
     final_claim = repository.get_claim(claim_id, 'cus_demo')
     assert final_claim is not None
     final_item = final_claim.contents_items[0]
@@ -2617,7 +2624,7 @@ def test_contents_item_confirmation_and_natural_language_correction_preserve_his
         auth_headers,
         claim_id,
         session_id,
-        revision=reconfirmed.json()['revision'],
+        revision=corrected_turn['claim_revision'],
         key='contents-item-conflict',
         client_message_id='contents-item-conflict',
         text='The laptop was damaged.',

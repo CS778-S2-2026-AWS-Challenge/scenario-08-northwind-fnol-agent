@@ -123,6 +123,10 @@ class IdempotencyRecord:
     message_turn_kind: Literal['legacy_agent', 'message_only'] | None = None
     message_turn_revision: int | None = None
     response_payload: dict[str, Any] | None = None
+    revision_before_message: int | None = None
+    confirmation_checkpoint: dict[str, Any] | None = None
+    inbound_checkpoint: bool = False
+    response_status: int | None = None
     retired: bool = False
 
     def __post_init__(self) -> None:
@@ -130,6 +134,21 @@ class IdempotencyRecord:
             raise ValueError('Message turn kind and revision must be persisted together.')
         if self.message_turn_revision is not None and self.message_turn_revision < 1:
             raise ValueError('Message turn revision must be positive.')
+
+
+def message_turn_result_priority(record: IdempotencyRecord) -> tuple[int, int]:
+    """Prefer a committed response over earlier failures or an in-flight checkpoint."""
+    committed = (record.response_status or 0) < 400 and (
+        record.message_turn_kind in {'legacy_agent', 'runtime'}
+        or record.decision_id is not None
+        or record.runtime_trace_id is not None
+    )
+    rank = 2 if committed else 1 if record.response_payload is not None else 0
+    revision = record.message_turn_revision
+    if revision is None and record.response_payload is not None:
+        value = record.response_payload.get('claim_revision')
+        revision = value if isinstance(value, int) else None
+    return rank, revision or 0
 
 
 def validate_handoff_audit_link(
@@ -667,6 +686,22 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """Atomically persist a claimant or staff message and claim revision."""
         raise NotImplementedError
 
+    def find_message_checkpoint(
+        self, claim_id: str, message_id: str, customer_id: str
+    ) -> IdempotencyRecord | None:
+        """Read the original accepted inbound checkpoint, not a later retry revision."""
+        raise NotImplementedError
+
+    def save_message_recovery(
+        self,
+        message: MessageRecord,
+        idempotency: IdempotencyRecord,
+        *,
+        agent_message: MessageRecord | None = None,
+    ) -> None:
+        """Complete an accepted attempt without changing the Claim or message content."""
+        raise NotImplementedError
+
     def get_message(
         self,
         claim_id: str,
@@ -674,6 +709,14 @@ class PersistenceRepository(ClaimRepository, Protocol):
         message_id: str,
         customer_id: str,
     ) -> MessageRecord | None:
+        raise NotImplementedError
+
+    def freeze_message_response(
+        self,
+        idempotency: IdempotencyRecord,
+        response_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Atomically retain the first claimant-safe response of a committed turn."""
         raise NotImplementedError
 
     def find_message_by_client_id(
@@ -905,6 +948,8 @@ class PersistenceRepository(ClaimRepository, Protocol):
         branch_evaluation: BranchEvaluationRecord | None = None,
         runtime_trace: RuntimeTraceRecord | None = None,
         runtime_records: RuntimeTurnRecords | None = None,
+        *,
+        checkpointed: bool = False,
     ) -> None:
         """Atomically persist one validated Agent turn and optional Runtime trace."""
         raise NotImplementedError
@@ -1388,6 +1433,8 @@ class PersistenceRepository(ClaimRepository, Protocol):
         idempotency: IdempotencyRecord,
         audit_event: AuditEventEnvelope,
         branch_evaluation: BranchEvaluationRecord | None = None,
+        *,
+        safety_message: MessageRecord | None = None,
     ) -> None:
         """Atomically persist a handoff, Claim revision, retry metadata, and audit fact."""
         raise NotImplementedError

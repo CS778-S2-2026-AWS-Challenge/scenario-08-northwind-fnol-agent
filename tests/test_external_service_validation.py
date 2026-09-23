@@ -31,6 +31,7 @@ from backend.domain.models import (
     IntegrationSource,
     ResponsibleParty,
     RouteAssessorRequest,
+    WorkflowState,
 )
 from backend.domain.realtime import RealtimeResource
 from backend.repositories.fixture import FixtureRepository
@@ -334,7 +335,8 @@ def test_transient_failure_preserves_progress_then_retries_with_the_same_operati
     assert after_failure.model_dump(mode='json') == before_attempt.model_dump(mode='json')
     assert after_failure.revision == consent_revision
     assert after_failure.assessor_routing is None
-    assert after_failure.customer_next_step.status == 'assessor_request_ready'
+    assert after_failure.customer_next_step == before_attempt.customer_next_step
+    assert after_failure.customer_next_step.status == 'claim_created'
     assert claimant_after_failure.status_code == 200
     # AT-10 requires the claimant to receive an honest state and next step. This
     # projection previously returned to `ready_to_request`, offering the service
@@ -874,8 +876,9 @@ def test_a_terminal_failure_stops_telling_the_claimant_to_send_the_request() -> 
     # derived for the read, and the stored field is untouched.
     stored = repository.get_claim_internal(claim_id)
     assert stored is not None
-    assert stored.customer_next_step.responsible_party is ResponsibleParty.CLAIMANT
-    assert 'Northwind can now send' in stored.customer_next_step.summary
+    assert stored.customer_next_step.responsible_party is ResponsibleParty.SYSTEM
+    assert stored.customer_next_step.status == 'claim_created'
+    assert stored.claim_state.workflow_state is WorkflowState.CREATED
 
 
 def test_a_retryable_failure_still_tells_the_claimant_the_request_can_be_sent() -> None:
@@ -891,7 +894,11 @@ def test_a_retryable_failure_still_tells_the_claimant_the_request_can_be_sent() 
     assert claimant['external_service_action']['status'] == 'retryable_failure'
     assert claimant['external_service_action']['can_request'] is True
     assert claimant['customer_next_step']['responsible_party'] == 'claimant'
-    assert 'Northwind can now send' in claimant['customer_next_step']['summary']
+    assert claimant['customer_next_step']['status'] == 'assessor_request_ready'
+    assert (
+        claimant['customer_next_step']['summary']
+        == claimant['external_service_action']['next_action']
+    )
 
 
 def test_an_unresolved_outcome_tells_the_claimant_northwind_is_checking() -> None:

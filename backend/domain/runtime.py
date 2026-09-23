@@ -16,6 +16,7 @@ from backend.domain.external_service_registry import (
 from backend.domain.models import (
     AgentAuthority,
     AgentProposalSource,
+    ConfirmationRequestRecord,
     ContractModel,
     CustomerNextStep,
     ProposedContentsItem,
@@ -176,6 +177,7 @@ class RuntimeWorkItemRecord(ContractModel):
     updated_at: datetime
     completed_at: datetime | None = None
     external_offer: ExternalServiceOfferMetadata | None = None
+    confirmation_request: ConfirmationRequestRecord | None = None
 
 
 class RuntimeTurnRecords(ContractModel):

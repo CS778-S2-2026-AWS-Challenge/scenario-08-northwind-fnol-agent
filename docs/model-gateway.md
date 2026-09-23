@@ -12,6 +12,34 @@ supports.
 
 ## Implemented Boundary
 
+The current claimant v8 release uses a complete `claimant.turn.v1` envelope for ordinary,
+media and lookup turns. It preserves facts, questions and optional service suggestions in the
+same validated result. v7-specific schemas and routing described below remain available only
+when an explicit v7 release is selected; they are not a hidden fallback for v8.
+
+`validate_turn_proposal` validates core facts and discards individual invalid optional
+suggestions, then `reduce_turn` applies the result against the authoritative Claim. Supported
+claimant quotations retain their source after normalization. Model prose cannot authorize a
+service, claim creation or a handoff. The Runtime derives eligibility from the registry,
+active external tasks, handoff status and consent cooldown; approved suggestions become new
+message-bound offers requiring their own consent. An open handoff still receives replies and
+records facts, while all new third-party suggestions remain suppressed.
+
+The accepted inbound message is persisted before transport. A failed model attempt produces
+the saved-message recovery projection documented in [API](api.md); it does not fabricate an
+Agent reply. The original HTTP key replays its original result, while an explicit retry uses
+the same `submit_message` entrypoint and saved inbound checkpoint. Bounded provider HTTP status
+and `error.type`/`error.code` are retained for diagnosis; raw provider error messages are excluded.
+
+The v8 envelope is bounded at the model boundary: scalar text values are at most 300
+characters, text-list values have at most 50 entries of 100 characters, Contents quantity
+is 1–999, and v8 monetary amounts are finite values from zero to 10,000,000. `V8MoneyAmount`
+converts to the unchanged shared `MoneyAmount` after parsing. Runtime mirrors length and
+count constraints even for providers that do not enforce strict output; an oversized field
+is rejected individually, while a wrong core type still rejects the proposal. The 4500/5500
+token output caps rely on incomplete-response recovery for extreme responses, not a guarantee
+that arbitrary schema-legal text fits.
+
 Agent orchestration sends `ModelRequest` and receives `ModelResponse`. These contracts
 normalise:
 
@@ -27,13 +55,21 @@ normalise:
   unavailable usage fields remain explicitly unknown rather than being reported as zero; and
 - optional first-token latency when a transport can report it.
 
-The v7 claimant path selects a published Request Profile before transport. Ordinary intake,
+The explicitly selected v7 claimant path selects a published Request Profile before transport. Ordinary intake,
 answer, correction, confirmation, claim creation, and third-party offers make one tool-free model
 call over a server-built Claim projection. A lookup profile may resolve one turn-scoped
 `context.resolve` reference and make one continuation call. PDF, multi-Evidence, and cross-Claim
 review run in a mutation-incapable isolated request. The model never executes a tool, writes Claim
 State, grants consent, creates a claim, or authorises a handoff by itself; Runtime performs those
 checks.
+
+The third-party offer schema contains conversation fields only. Exact service identities are
+selected before transport by Runtime from the shared turn-family resolution and published service
+registry. Older provider responses that still include `service_offer_ids` are accepted only as a
+compatibility input: Runtime removes and ignores that field before validating the conversation.
+It never becomes execution authority. This keeps provider wording replaceable while
+GPT-compatible and Gemini transports produce the same registered service option for the same
+bounded intent.
 
 When a claimant message explicitly carries `evidence_refs`, the message boundary resolves only
 claimant-visible records on that claimant's Claim whose lifecycle and media type permit model
@@ -184,7 +220,7 @@ model and Runtime authority validation before it can affect Claim State.
 | `MODEL_BASE_URL` | Endpoint root, including a compatible version prefix when required |
 | `MODEL_IDENTIFIER` | Model identifier sent to the endpoint |
 | `MODEL_API_KEY_ENV` | Name of the environment variable containing the credential, not the credential |
-| `MODEL_TIMEOUT_SECONDS` | Positive request timeout; default `30` |
+| `MODEL_TIMEOUT_SECONDS` | Positive request timeout; default `130` |
 | `MODEL_SUPPORTS_STRUCTURED_OUTPUT` | Declared endpoint capability required by `GatewayAgent` |
 | `MODEL_SUPPORTS_TOOLS` | Declared endpoint tool-call capability |
 | `MODEL_SUPPORTS_IMAGE_INPUT` | Declared endpoint capability for image Evidence blocks; default `false` |
@@ -223,9 +259,36 @@ The published claimant profiles use this adapter contract:
 | Profile | Model | Role | Required capabilities |
 | --- | --- | --- | --- |
 | `qwen-local` | `qwen3.8-27b` through the environment-owned Qwen endpoint | deployment default through `MODEL_PROFILE_ID` | structured output (`json_object`) and tools |
-| `nowcoding-gpt55` | `gpt-5.5` through the existing nowcoding endpoint | selectable | structured output and tools |
+| `openrouter-gpt4o-mini` | `openai/gpt-4o-mini` through OpenRouter | deployment default | structured output, tools, and image input |
 | `bedrock-nova2-lite` | `global.amazon.nova-2-lite-v1:0` through Bedrock Sydney | published but unavailable until AWS account verification completes | structured output and image input |
 | `google-gemini35-flash-lite` | `gemini-3.5-flash-lite` through Google AI Studio | selectable | structured output, tools, image input, and PDF document input |
+
+The Google profile publishes `reasoning_mode=disabled`. For Gemini 3 models the native adapter
+translates that setting to `generationConfig.thinkingConfig.thinkingLevel=minimal`; it does
+not send the OpenAI-compatible `chat_template_kwargs` field.  The default
+`openrouter-gpt4o-mini` profile is a non-reasoning model and therefore carries no
+reasoning control parameter.  These are transport details of the published binding,
+not a second Runtime decision.
+
+A direct synthetic probe on 21 September 2026 returned HTTP 400 for Gemini 3.5 Flash Lite
+with `thinkingBudget=0`, and HTTP 200 with `thinkingLevel=minimal` (1.700 seconds, 25 input
+and 6 output tokens, no reported thought tokens). This establishes parameter compatibility,
+not full claimant-journey acceptance. A later production-planner probe used the synthetic
+message "My bathroom pipe burst last night and flooded the kitchen" with the corrected
+Google wire schema. `provider_default` completed in 2.825 seconds (1,349 input / 429 output
+tokens); the published `disabled` setting, translated to `minimal`, completed in 2.523 seconds
+(1,349 input / 373 output tokens). Both returned complete field proposals. This single paired
+observation establishes working transport, not a latency distribution or proof that minimal
+reasoning always speeds up responses. `minimal` is the provider's lowest reasoning level,
+not a promise of zero reasoning tokens.
+
+A separate OpenRouter output-volume probe returned 828 output tokens in 6.901 seconds,
+about 120 output tokens per second including request latency. At that observed rate, the
+4,500/5,500-token operating caps represent roughly 37.5/45.8 seconds of output; twice the
+media estimate is approximately 91.7 seconds. These are practical calibration estimates,
+not upper latency guarantees. They provide no evidence for increasing the 130-second
+bootstrap timeout or the existing 180-second published-release ceiling. Neither timeout
+was changed by the probe.
 
 The local Qwen deployment uses the OpenAI-compatible transport with `json_object` structured
 output. Its llama.cpp endpoint cannot compile the larger claimant JSON Schema grammar used by
@@ -233,10 +296,8 @@ the other providers during continuation. The Runtime still validates every retur
 against the exact claimant schema before applying a proposal; this changes only the wire-level
 grammar and does not weaken field, permission, or state validation.
 
-The nowcoding `gpt-5.5` endpoint was verified on 15 September 2026 with live strict
-structured-output and forced tool-call requests. That verifies provider compatibility, not a
-complete claimant turn or permanent availability. The credential reference is stored as an
-environment-variable name only. A Release Set binds each selectable model in a keyed
+The OpenRouter `openai/gpt-4o-mini` profile is the current default claimant model. The
+credential reference is stored as an environment-variable name only. A Release Set binds each selectable model in a keyed
 `model:<profile_id>` slot. The selected profile is the default for a Session, but each message may
 explicitly select another published profile in the same conversation. The Runtime persists the
 actual profile used for every turn and updates the Session's latest selection; it never silently
@@ -247,7 +308,7 @@ allow-list. Private endpoints are represented by environment-variable references
 inside the deployment process. The backend ships a reviewed initial Runtime Release that registers
 and publishes the complete Agent policy plus every binding in this allow-list. A Control Plane
 scope with no Release Set history installs that initial Release during application composition, so
-`qwen-local`, `nowcoding-gpt55`, and `google-gemini35-flash-lite` are available, while
+`qwen-local`, `openrouter-gpt4o-mini`, and `google-gemini35-flash-lite` are available, while
 `bedrock-nova2-lite` is published with its explicit evaluation status through the capabilities
 APIs on a clean deployment. The initializer installs a release for a never-initialised scope. It
 also replaces a stale active release only when that release was created by the repository
@@ -320,32 +381,40 @@ boundary can hold equivalent provider-private continuation metadata for another 
 changing the Runtime contract. Text, structured output, completion status, usage, cache-read usage,
 model version, and response identity are normalised into `ModelResponse`.
 
-Gemini rejects the complete claimant JSON Schema when provider-side scalar and collection
-constraints make the schema exceed its accepted complexity. The adapter therefore removes
+Live requests to the current Gemini profile reject the complete claimant JSON Schema and
+a variant restoring only array bounds with HTTP 400. The adapter therefore removes
 `additionalProperties`, string and collection length bounds, numeric bounds, and `pattern` only
-from the Gemini wire schema. It retains the field structure, required properties, types, enums,
-and union branches. The original schema and the domain validators remain authoritative after the
-response, so this compatibility projection cannot make an invalid Agent proposal executable.
+from the Gemini wire schema. For `field_changes`, the canonical object-level `anyOf` caused
+repetitive role proposals until `MAX_TOKENS`; resolving references alone did not fix it.
+The Google adapter expands local references and emits one field object with an allowed-code
+enum and a union of registered value shapes. All four text keys, or five media keys including
+`source_evidence_id`, remain required; nullable provenance remains nullable. OpenAI retains
+the canonical per-field object variants.
+
+The Google wire grammar alone no longer couples each field code to its exact value type.
+`validate_field_changes` still validates that pair against the unchanged turn field contract;
+source and Evidence checks also remain Runtime responsibilities. Tests prove that a
+code/value mismatch accepted by the broader Google wire union is rejected by Runtime.
+Unsupported provider-side length limits are likewise enforced after parsing. An incomplete
+response still enters the existing recovery path and never applies partial facts.
 
 The `google-gemini35-flash-lite` profile was verified on 2026-09-17 with live image and PDF
 `inlineData` requests, a structured-output request, and a live forced `context.resolve` call followed
 by structured continuation. This verifies transport compatibility for synthetic FNOL data. Provider
 availability and latency remain deployment observations rather than a permanent guarantee. The
-NowCoding GPT profile remains text/tool-only until its endpoint accepts the same authorised image and
-document blocks with a successful structured response; the local Qwen profile remains text-only until a
+current OpenRouter GPT-4o-mini binding supports image input but not document input;
+the local Qwen profile remains text-only until a
 vision-capable deployment is qualified.
 
-The executable claimant Prompt Pack is `northwind-fnol-claimant-v7`, authored under
-`backend/prompts/v7/` and embedded immutably in the published `agent_instruction` configuration.
-Runtime deterministically composes core, one family, one task, and matching capability fragments;
-it then injects a budgeted Claim projection, bounded references, and the selected narrow schema.
-The versioned `config/model-runtime-bindings-v6.json` manifest remains an explicit rollback
-artifact. A never-initialised scope started with that manifest publishes the complete v6 Runtime
-rather than rewriting its bindings to v7. An existing scope requires an operator to select or
-publish the matching complete v6 Release Set as well as the v6 deployment allow-list; changing
-the manifest alone never mixes it into an active v7 release. A v7 failure never activates v6
-automatically. Changing executable fragment content requires a new fragment or pack version and a
-complete atomic Release Set.
+The executable claimant Prompt Pack is `northwind-fnol-claimant-v8`, authored under
+`backend/prompts/v8/` and embedded immutably in the published `agent_instruction` configuration.
+Runtime composes bounded core, family, turn and capability instructions with one complete
+turn envelope. The v7 pack and versioned bindings remain available for an explicit complete
+Release Set rollback together with reverting/deploying the pre-v8 change set; selecting the
+old prompt alone is not the operational rollback procedure. v6 source artifacts remain
+deprecated and are not enabled as fallback.
+Changing executable fragment content requires a new fragment or pack version and a complete
+atomic Release Set; changing a manifest alone never mutates an existing active release.
 
 The repository includes configuration and transport tests, but a deployment is live only after an
 authorised model invocation succeeds in its selected AWS account and region. Model listing or

@@ -23,6 +23,7 @@ const api = vi.hoisted(() => ({
 vi.mock('../api.js', () => api)
 
 import useProfileController, { ProfileMutationError } from './useProfileController.js'
+import { policyDisclosureSummary, policyNumberSummary } from './policyNumber.js'
 
 const account = {
   customer_id: 'cus_profile_controller',
@@ -213,6 +214,89 @@ describe('useProfileController mutation recovery', () => {
       expect(result.current.controller.resources[resource].error).not.toBe('')
     },
   )
+
+  it.each([
+    {
+      label: 'one retained policy',
+      records: [policy],
+      header: '••••1234 · Refreshing…',
+      disclosure: 'View or edit policy number — refreshing',
+    },
+    {
+      label: 'a retained empty policy list',
+      records: [],
+      header: 'Loading…',
+      disclosure: 'Add policy number — loading',
+    },
+  ])('reports active loading while retrying $label after failure', async ({ records, header, disclosure }) => {
+    let resolveRetry
+    const retryResponse = new Promise((resolve) => { resolveRetry = resolve })
+    api.listAccountPolicies
+      .mockResolvedValueOnce(emptyPage(records))
+      .mockRejectedValueOnce({ code: 'NETWORK_ERROR' })
+      .mockImplementationOnce(() => retryResponse)
+    const { result } = renderController()
+
+    await waitFor(() => expect(result.current.controller.resources.policies.items).toEqual(records))
+    await act(async () => {
+      await expect(result.current.controller.reloadPolicies()).rejects.toMatchObject({ code: 'NETWORK_ERROR' })
+    })
+
+    let retryPromise
+    act(() => { retryPromise = result.current.controller.reloadPolicies() })
+    await waitFor(() => expect(result.current.controller.resources.policies).toMatchObject({
+      items: records,
+      error: '',
+      loading: true,
+      stale: true,
+    }))
+    expect(policyNumberSummary(result.current.controller.resources.policies)).toBe(header)
+    expect(policyDisclosureSummary(result.current.controller.resources.policies)).toBe(disclosure)
+
+    await act(async () => {
+      resolveRetry(emptyPage(records))
+      await retryPromise
+    })
+    expect(result.current.controller.resources.policies).toMatchObject({
+      items: records,
+      error: '',
+      loading: false,
+      stale: false,
+    })
+  })
+
+  it('retains policy records while mutation readback loads and fails', async () => {
+    let rejectReadback
+    const readback = new Promise((resolve, reject) => { rejectReadback = reject })
+    api.listAccountPolicies
+      .mockResolvedValueOnce(emptyPage([policy]))
+      .mockImplementationOnce(() => readback)
+    api.updateAccountPolicy.mockRejectedValueOnce({ code: 'NETWORK_ERROR' })
+    const { result } = renderController()
+
+    await waitFor(() => expect(result.current.controller.resources.policies.items).toEqual([policy]))
+    let mutationPromise
+    act(() => {
+      mutationPromise = result.current.controller.savePolicy(policy.policy_id, policy.revision, 'NTH-9876')
+    })
+    await waitFor(() => expect(result.current.controller.resources.policies).toMatchObject({
+      items: [policy],
+      error: '',
+      loading: true,
+      stale: false,
+    }))
+
+    await act(async () => {
+      rejectReadback({ code: 'NETWORK_ERROR' })
+      await expect(mutationPromise).rejects.toMatchObject({ kind: 'unknown' })
+    })
+    expect(result.current.controller.resources.policies).toMatchObject({
+      items: [policy],
+      loading: false,
+      stale: true,
+    })
+    expect(result.current.controller.resources.policies.error).not.toBe('')
+  })
 
   it('reuses the same idempotency key when an asset response is lost and readback cannot find it', async () => {
     api.createAccountAsset

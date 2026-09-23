@@ -39,19 +39,56 @@ class TurnTask(StrEnum):
     HUMAN_HANDOFF = 'human_handoff'
 
 
+TurnIntent = Literal[
+    'intake',
+    'correction',
+    'confirmation',
+    'status',
+    'external',
+    'policy_lookup',
+    'history_lookup',
+    'evidence_current',
+    'evidence_history',
+    'creation',
+]
+
+
+class TurnFamilyResolution(ContractModel):
+    """One bounded product-family decision shared by every turn consumer."""
+
+    product_family: Literal['motor', 'home', 'contents'] | None = None
+    status: Literal['authoritative', 'inferred', 'unresolved', 'ambiguous', 'conflicting']
+    candidate_families: tuple[Literal['motor', 'home', 'contents'], ...] = ()
+
+    @model_validator(mode='after')
+    def validate_resolution(self) -> 'TurnFamilyResolution':
+        if self.status in {'authoritative', 'inferred'} and self.product_family is None:
+            raise ValueError('A resolved family requires one product family.')
+        if self.status in {'unresolved', 'ambiguous', 'conflicting'} and self.product_family:
+            raise ValueError('An unresolved family result cannot select a product family.')
+        return self
+
+
 class TurnRoute(ContractModel):
     product_family: Literal['motor', 'home', 'contents'] | None = None
-    family_resolution: Literal['authoritative', 'inferred', 'unresolved']
+    family_resolution: Literal[
+        'authoritative', 'inferred', 'unresolved', 'ambiguous', 'conflicting'
+    ]
     task: TurnTask
+    intents: frozenset[TurnIntent] = frozenset({'intake'})
     capability_ids: list[str] = Field(default_factory=list, max_length=8)
     deterministic_response: str | None = Field(default=None, max_length=1000)
     model_required: bool = True
 
     @model_validator(mode='after')
     def validate_deterministic_route(self) -> 'TurnRoute':
+        if not self.intents:
+            raise ValueError('A turn route must contain at least one intent.')
         if not self.model_required and not self.deterministic_response:
             raise ValueError('A model-free route requires a deterministic response.')
-        if self.family_resolution == 'unresolved' and self.product_family is not None:
+        if self.family_resolution in {'unresolved', 'ambiguous', 'conflicting'} and (
+            self.product_family is not None
+        ):
             raise ValueError('An unresolved family route cannot select a product family.')
         return self
 
@@ -140,7 +177,7 @@ class RequestProfile(ContractModel):
     max_model_invocations: int = Field(ge=1, le=2)
     max_model_selected_tools: int = Field(ge=0, le=1)
     input_hard_limit: int = Field(ge=100)
-    output_limit: int = Field(ge=1)
+    output_limit: int = Field(ge=1, le=8000)
     requires_media_types: list[str] = Field(default_factory=list, max_length=20)
     requires_tool_continuation: bool = False
     isolated: bool = False
@@ -158,10 +195,10 @@ class RequestProfile(ContractModel):
 
 class ContextBudgetPolicy(ContractModel):
     policy_version: str = 'northwind-context-budget-v1'
-    ordinary_input_target: int = Field(default=1800, ge=100)
-    ordinary_input_hard_limit: int = Field(default=3000, ge=100)
+    ordinary_input_target: int = Field(default=3000, ge=100)
+    ordinary_input_hard_limit: int = Field(default=7500, ge=100)
     ordinary_output_limit: int = Field(default=180, ge=1)
-    tool_path_input_hard_limit: int = Field(default=3000, ge=100)
+    tool_path_input_hard_limit: int = Field(default=6000, ge=100)
     tool_path_output_limit: int = Field(default=300, ge=1)
     max_model_invocations: int = Field(default=2, ge=1, le=2)
     max_model_selected_tools: int = Field(default=1, ge=0, le=1)
@@ -190,8 +227,6 @@ class ModelRequestBudget(ContractModel):
     def enforce_hard_limit(self) -> 'ModelRequestBudget':
         if self.raw_input_tokens > self.hard_limit:
             raise ValueError('Model request exceeds the configured hard token limit.')
-        if self.turn_cumulative_tokens > self.hard_limit:
-            raise ValueError('Model turn exceeds the configured cumulative token limit.')
         return self
 
 

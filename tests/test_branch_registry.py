@@ -104,7 +104,7 @@ def contents_item(item_id: str = 'item_1') -> ContentsItem:
 def test_registry_includes_minimum_home_fields_and_contents_is_a_separate_record() -> None:
     registry = build_default_registry()
 
-    assert registry.field_registry_version == '5'
+    assert registry.field_registry_version == '6'
     assert registry.field_by_code['property.ongoing_risk'].value_type == 'enum'
     assert registry.field_by_code['property.habitable'].value_type == 'boolean'
     assert registry.branch_by_id['family.home'].fields >= {
@@ -115,7 +115,6 @@ def test_registry_includes_minimum_home_fields_and_contents_is_a_separate_record
         'family.motor'
     ].fields - {
         'authorities.police_report_reference',
-        'authorities.emergency_services_notified',
         'vehicle.registration',
         'vehicle.damage_description',
         'vehicle.drivable',
@@ -248,16 +247,20 @@ def test_confirmed_family_activates_exactly_one_branch(family: str) -> None:
     assert incident_type.selection_state.value == 'candidate_now'
 
 
-def test_proposed_family_is_candidate_and_cannot_select_formal_family() -> None:
+def test_proposed_family_selects_collection_without_confirming_formal_family() -> None:
     claim = make_claim().model_copy(
         update={'form': {'claim.product_family': field('contents', FormStatus.PROPOSED)}}
     )
 
     result = BranchRuleEvaluator().evaluate(claim)
 
-    assert result.selected_family is None
-    assert 'family.contents' in result.candidate_branches
-    assert 'family.contents' not in result.active_branches
+    assert result.selected_family == 'contents'
+    assert 'family.contents' in result.active_branches
+    assert 'claim.product_family' in result.requirements.recorded
+    assert 'claim.product_family' not in result.requirements.missing_required_now
+    assert 'contents.items' in result.requirements.missing_required_now
+    assert claim.form['claim.product_family'].status is FormStatus.PROPOSED
+    assert claim.incident_type is None
 
 
 @pytest.mark.parametrize('family', ['motor', 'home', 'contents'])
@@ -489,7 +492,7 @@ def test_branch_results_retain_rule_and_source_coordinates() -> None:
     assert motor.rule_id == 'BR-FAMILY-MOTOR-001'
     assert motor.source_refs == ['msg_source']
     assert result.field_registry_version == FIELD_REGISTRY_VERSION
-    assert result.branch_rules_version == 'vp-dynamic-form-branch-rules-v1'
+    assert result.branch_rules_version == 'vp-dynamic-form-branch-rules-v2'
 
 
 def test_collision_correction_suspends_previous_branch_with_both_sources() -> None:

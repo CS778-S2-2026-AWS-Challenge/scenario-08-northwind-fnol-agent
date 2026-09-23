@@ -4,6 +4,7 @@ from backend.adapters.claims_service import AssessorServiceAdapter
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.domain.audit import AuditEventEnvelope
+from backend.domain.branch_registry import BranchRuleEvaluator
 from backend.domain.external_services import (
     ExternalTaskOperationStatus,
     ExternalTaskResultVerification,
@@ -80,6 +81,29 @@ def _not_found(message: str) -> ApiError:
 
 def _validation(message: str) -> ApiError:
     return ApiError(status_code=422, code='VALIDATION_ERROR', message=message)
+
+
+def _progress_after_staff_mutation(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    authorized_next_step: CustomerNextStep | None = None,
+    *,
+    authorized_workflow_state: WorkflowState | None = None,
+) -> WorkingClaim:
+    from backend.services.turn_reducer import apply_progress
+
+    return apply_progress(
+        claim,
+        BranchRuleEvaluator().evaluate(claim, recomputation_reason='staff_action_changed'),
+        open_handoffs=(
+            tuple(repository.list_handoffs(claim.claim_id, claim.customer_id))
+            if authorized_next_step is None
+            else ()
+        ),
+        authorized_next_step=authorized_next_step,
+        proposed_next_step=authorized_next_step,
+        authorized_workflow_state=authorized_workflow_state,
+    )
 
 
 def _validate_fixed_action_payload(
@@ -263,20 +287,24 @@ def accept_handoff(
             'revision': claim.revision + 1,
             'updated_at': timestamp,
             'assignee_id': requested_assignee,
-            'customer_next_step': CustomerNextStep(
-                status=(
-                    'professional_review_in_progress'
-                    if handoff.type is HandoffType.PROFESSIONAL_REVIEW
-                    else 'human_support_in_progress'
-                ),
-                summary=(
-                    'A claims specialist is now reviewing the policy point in your report.'
-                    if handoff.type is HandoffType.PROFESSIONAL_REVIEW
-                    else 'A Northwind staff member is now assisting you.'
-                ),
-                responsible_party='claims_professional',
-            ),
         }
+    )
+    updated = _progress_after_staff_mutation(
+        repository,
+        updated,
+        CustomerNextStep(
+            status=(
+                'professional_review_in_progress'
+                if handoff.type is HandoffType.PROFESSIONAL_REVIEW
+                else 'human_support_in_progress'
+            ),
+            summary=(
+                'A claims specialist is now reviewing the policy point in your report.'
+                if handoff.type is HandoffType.PROFESSIONAL_REVIEW
+                else 'A Northwind staff member is now assisting you.'
+            ),
+            responsible_party='claims_professional',
+        ),
     )
     response = HandoffMutationResponse(
         handoff=workbench_handoff(accepted),
@@ -730,12 +758,21 @@ def resolve_handoff(
             'claim_state': resulting_state,
             'revision': claim.revision + 1,
             'updated_at': timestamp,
-            'customer_next_step': CustomerNextStep(
-                status='staff_update',
-                summary=customer_update.summary,
-                responsible_party=customer_update.responsible_party,
-            ),
         }
+    )
+    updated = _progress_after_staff_mutation(
+        repository,
+        updated,
+        CustomerNextStep(
+            status='staff_update',
+            summary=customer_update.summary,
+            responsible_party=customer_update.responsible_party,
+        ),
+        authorized_workflow_state=(
+            updated.claim_state.workflow_state
+            if any(change.path == 'claim_state.workflow_state' for change in payload.state_changes)
+            else None
+        ),
     )
     response = HandoffMutationResponse(
         handoff=workbench_handoff(resolved),
@@ -929,6 +966,7 @@ def update_staff_action(
     )
     updated_claim = _apply_state_changes(claim, payload)
     customer_update = None
+    authorized_next_step = None
     if payload.customer_update is not None:
         customer_update = CustomerUpdateRecord(
             **payload.customer_update.model_dump(),
@@ -937,15 +975,21 @@ def update_staff_action(
             created_by=principal.subject,
             created_at=timestamp,
         )
-        updated_claim = updated_claim.model_copy(
-            update={
-                'customer_next_step': CustomerNextStep(
-                    status='staff_update',
-                    summary=customer_update.summary,
-                    responsible_party=customer_update.responsible_party,
-                )
-            }
+        authorized_next_step = CustomerNextStep(
+            status='staff_update',
+            summary=customer_update.summary,
+            responsible_party=customer_update.responsible_party,
         )
+    updated_claim = _progress_after_staff_mutation(
+        repository,
+        updated_claim,
+        authorized_next_step,
+        authorized_workflow_state=(
+            updated_claim.claim_state.workflow_state
+            if any(change.path == 'claim_state.workflow_state' for change in payload.state_changes)
+            else None
+        ),
+    )
     updated_claim = updated_claim.model_copy(
         update={'revision': claim.revision + 1, 'updated_at': timestamp}
     )

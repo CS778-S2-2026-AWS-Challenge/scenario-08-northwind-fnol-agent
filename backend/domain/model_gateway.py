@@ -448,11 +448,15 @@ class ModelGatewayError(RuntimeError):
         *,
         retryable: bool = False,
         provider_model: str | None = None,
+        provider_status: int | None = None,
+        provider_error_type: str | None = None,
     ) -> None:
         super().__init__(_ERROR_MESSAGES[code])
         self.code = code
         self.retryable = retryable
         self.provider_model = provider_model
+        self.provider_status = provider_status
+        self.provider_error_type = provider_error_type
 
 
 class ModelGateway(Protocol):

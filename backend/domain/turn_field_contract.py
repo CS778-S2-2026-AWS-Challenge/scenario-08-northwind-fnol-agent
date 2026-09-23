@@ -47,6 +47,8 @@ class TurnFieldContract(ContractModel):
                     **({'allowed': item.allowed_values} if item.allowed_values else {}),
                 }
                 for item in self.fields
+                if item.selection_state
+                in {FieldSelectionState.REQUIRED_NOW, FieldSelectionState.CANDIDATE_NOW}
             ],
         }
 
@@ -54,7 +56,7 @@ class TurnFieldContract(ContractModel):
 class TurnFieldViolation(ContractModel):
     field_code: str = Field(min_length=1, max_length=100)
     expected_value_type: str = Field(min_length=1, max_length=40)
-    reason_code: Literal['field_not_allowed', 'invalid_value']
+    reason_code: Literal['field_not_allowed', 'invalid_value', 'length_limit_exceeded']
 
 
 class TurnFieldContractViolation(ValueError):

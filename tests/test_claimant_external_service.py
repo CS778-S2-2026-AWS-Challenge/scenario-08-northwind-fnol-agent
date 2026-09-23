@@ -650,6 +650,7 @@ def test_claimant_sees_retryable_failure_then_safe_success_with_the_same_request
             headers=route_headers,
         )
         after_failure = repository.get_claim_internal(claim_id)
+        failure_projection = client.get(f'/api/v1/claims/{claim_id}', headers=AUTH).json()
         decisions_after_failure = repository.list_agent_decisions(claim_id, 'cus_demo')
         routing_decision = next(
             decision
@@ -697,7 +698,9 @@ def test_claimant_sees_retryable_failure_then_safe_success_with_the_same_request
     assert after_failure is not None
     assert after_failure.revision == consent['revision']
     assert after_failure.assessor_routing is None
-    assert after_failure.customer_next_step.status == 'assessor_request_ready'
+    assert after_failure.customer_next_step.status == 'claim_created'
+    assert failure_projection['customer_next_step']['status'] == 'assessor_request_ready'
+    assert failure_projection['primary_action']['available'] is True
     assert retried.status_code == 201
     assert retried.json()['action']['status'] == 'assigned'
     routing_decisions = [

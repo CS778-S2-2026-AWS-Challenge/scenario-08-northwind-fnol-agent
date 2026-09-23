@@ -1,9 +1,11 @@
 import base64
 import json
+import logging
 import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any, cast
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -43,16 +45,135 @@ _GOOGLE_PROVIDER_SCHEMA_CONSTRAINTS = frozenset(
 )
 
 
-def _google_provider_schema(value: object) -> object:
+logger = logging.getLogger(__name__)
+
+
+def _log_malformed_provider_response(payload: object, error: Exception) -> None:
+    """Bounded diagnostics for an unparsable provider reply: never the claimant's words.
+
+    Reports structural facts only (which key failed, JSON depth, content length) so
+    a real cause (truncation, an extra key, a schema violation the provider let through)
+    can be told apart from a transient one without ever logging message content.
+    """
+
+    message: str | None = None
+    finish_reason: object = None
+    content_length: int | None = None
+    if isinstance(payload, dict):
+        choices = payload.get('choices')
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            finish_reason = choices[0].get('finish_reason')
+            choice_message = choices[0].get('message')
+            if isinstance(choice_message, dict):
+                content = choice_message.get('content')
+                if isinstance(content, str):
+                    content_length = len(content)
+                    try:
+                        json.loads(content)
+                    except json.JSONDecodeError as parse_error:
+                        message = f'invalid_json at char {parse_error.pos}: {parse_error.msg}'
+    logger.warning(
+        'model_provider_response_unparsable',
+        extra={
+            'error_type': type(error).__name__,
+            'error_detail': message or str(error)[:200],
+            'finish_reason': finish_reason,
+            'content_length': content_length,
+        },
+    )
+
+
+def _provider_error_type(response: httpx.Response) -> str | None:
+    if response.status_code < 400:
+        return None
+    try:
+        payload = response.json()
+    except (ValueError, json.JSONDecodeError):
+        return None
+    error = payload.get('error') if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return None
+    value = error.get('type') or error.get('code')
+    if isinstance(value, str | int) and re.fullmatch(r'[A-Za-z0-9_.:-]{1,120}', str(value)):
+        return str(value)
+    return None
+
+
+def _google_supported_schema(value: object) -> object:
     if isinstance(value, list):
-        return [_google_provider_schema(item) for item in value]
+        return [_google_supported_schema(item) for item in value]
     if isinstance(value, dict):
         return {
-            key: _google_provider_schema(item)
+            key: _google_supported_schema(item)
             for key, item in value.items()
             if key not in _GOOGLE_PROVIDER_SCHEMA_CONSTRAINTS
         }
     return value
+
+
+def _google_provider_schema(value: object) -> object:
+    """Translate the wire grammar without changing Runtime field authority.
+
+    Gemini 3.5 Flash Lite degenerates on the canonical field object union.
+    Use one object with an allowed-code enum and value union for this provider;
+    validate_field_changes still checks the exact code/value pair at Runtime.
+    """
+    supported = _google_supported_schema(value)
+    if not isinstance(supported, dict):
+        return supported
+    schema = cast(dict[str, Any], supported)
+    fields = schema.get('properties', {}).get('field_changes')
+    if not isinstance(fields, dict) or 'anyOf' not in fields.get('items', {}):
+        return schema
+    definitions = schema.get('$defs', {})
+
+    def inline(item: Any, resolving: frozenset[str] = frozenset()) -> Any:
+        if isinstance(item, list):
+            return [inline(member, resolving) for member in item]
+        if isinstance(item, dict):
+            if '$ref' in item:
+                ref = item['$ref']
+                if not isinstance(ref, str) or not ref.startswith('#/$defs/') or ref in resolving:
+                    raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+                name = ref.removeprefix('#/$defs/')
+                if name not in definitions:
+                    raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+                return inline(definitions[name], resolving | {ref})
+            return {
+                key: inline(member, resolving) for key, member in item.items() if key != '$defs'
+            }
+        return item
+
+    schema = cast(dict[str, Any], inline(schema))
+    fields = schema['properties']['field_changes']
+    variants = fields['items']['anyOf']
+    codes: list[str] = []
+    values: list[dict[str, Any]] = []
+    common_keys: set[str] | None = None
+    for variant in variants:
+        properties = variant.get('properties', {})
+        if not {'field_code', 'value'}.issubset(properties):
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        if common_keys is None:
+            common_keys = set(properties)
+        elif common_keys != set(properties):
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        code_schema = properties['field_code']
+        variant_codes = code_schema.get('enum', [code_schema.get('const')])
+        if not variant_codes or any(not isinstance(code, str) for code in variant_codes):
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        codes.extend(code for code in variant_codes if code not in codes)
+        if properties['value'] not in values:
+            values.append(properties['value'])
+    if not variants:
+        raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+    properties = {
+        **variants[0]['properties'],
+        'field_code': {'type': 'string', 'enum': codes},
+        'value': {'anyOf': values},
+    }
+    fields['items'] = {'type': 'object', 'properties': properties, 'required': list(properties)}
+    return schema
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,11 +354,13 @@ class OpenAICompatibleModelGateway:
                 provider_model=self._config.model,
             ) from None
 
-        self._raise_for_status(response.status_code)
+        self._raise_for_status(response.status_code, _provider_error_type(response))
+        payload: object = None
         try:
             payload = response.json()
             return self._normalise_response(payload, request, response.headers)
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            _log_malformed_provider_response(payload, error)
             raise ModelGatewayError(
                 ModelGatewayErrorCode.MALFORMED_RESPONSE,
                 provider_model=self._config.model,
@@ -454,24 +577,30 @@ class OpenAICompatibleModelGateway:
             normalised['additionalProperties'] = False
         return normalised
 
-    def _raise_for_status(self, status_code: int) -> None:
+    def _raise_for_status(self, status_code: int, error_type: str | None = None) -> None:
         if status_code < 400:
             return
         if status_code in {401, 403}:
             raise ModelGatewayError(
                 ModelGatewayErrorCode.AUTHENTICATION,
                 provider_model=self._config.model,
+                provider_status=status_code,
+                provider_error_type=error_type,
             )
         if status_code == 429:
             raise ModelGatewayError(
                 ModelGatewayErrorCode.RATE_LIMIT,
                 retryable=True,
                 provider_model=self._config.model,
+                provider_status=status_code,
+                provider_error_type=error_type,
             )
         raise ModelGatewayError(
             ModelGatewayErrorCode.PROVIDER,
             retryable=status_code >= 500,
             provider_model=self._config.model,
+            provider_status=status_code,
+            provider_error_type=error_type,
         )
 
     @staticmethod
@@ -679,11 +808,13 @@ class BedrockConverseModelGateway:
                 provider_model=self._config.model,
             ) from None
 
-        self._raise_for_status(response.status_code)
+        self._raise_for_status(response.status_code, _provider_error_type(response))
+        response_payload: object = None
         try:
-            payload = response.json()
-            return self._normalise_response(payload, request, response.headers)
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            response_payload = response.json()
+            return self._normalise_response(response_payload, request, response.headers)
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            _log_malformed_provider_response(response_payload, error)
             raise ModelGatewayError(
                 ModelGatewayErrorCode.MALFORMED_RESPONSE,
                 provider_model=self._config.model,
@@ -736,24 +867,30 @@ class BedrockConverseModelGateway:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
         return '\n\n'.join(system_parts), messages
 
-    def _raise_for_status(self, status_code: int) -> None:
+    def _raise_for_status(self, status_code: int, error_type: str | None = None) -> None:
         if status_code < 400:
             return
         if status_code in {401, 403}:
             raise ModelGatewayError(
                 ModelGatewayErrorCode.AUTHENTICATION,
                 provider_model=self._config.model,
+                provider_status=status_code,
+                provider_error_type=error_type,
             )
         if status_code == 429:
             raise ModelGatewayError(
                 ModelGatewayErrorCode.RATE_LIMIT,
                 retryable=True,
                 provider_model=self._config.model,
+                provider_status=status_code,
+                provider_error_type=error_type,
             )
         raise ModelGatewayError(
             ModelGatewayErrorCode.PROVIDER,
             retryable=status_code >= 500,
             provider_model=self._config.model,
+            provider_status=status_code,
+            provider_error_type=error_type,
         )
 
     def _normalise_response(
@@ -910,11 +1047,13 @@ class GoogleGenerateContentModelGateway:
             for call_id in consumed_call_ids:
                 self._tool_continuations.pop(call_id, None)
 
-        self._raise_for_status(response.status_code)
+        self._raise_for_status(response.status_code, _provider_error_type(response))
+        payload: object = None
         try:
             payload = response.json()
             return self._normalise_response(payload, request, response.headers)
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            _log_malformed_provider_response(payload, error)
             raise ModelGatewayError(
                 ModelGatewayErrorCode.MALFORMED_RESPONSE,
                 provider_model=self._config.model,
@@ -972,6 +1111,19 @@ class GoogleGenerateContentModelGateway:
                     'responseJsonSchema': _google_provider_schema(request.response_schema),
                 }
             )
+        # Gemini exposes reasoning controls inside generationConfig.  Keep the
+        # switch provider-specific: sending OpenAI/Qwen-only fields to this
+        # endpoint makes an otherwise valid request fail before generation.
+        if self._config.reasoning_mode == 'disabled':
+            # Gemini 3 uses thinkingLevel and rejects a zero thinkingBudget.
+            # The deployed 3.5 Flash Lite profile was verified with minimal;
+            # Gemini 2.5 retains the documented zero-budget contract.
+            thinking_config: dict[str, object] = (
+                {'thinkingLevel': 'minimal'}
+                if self._config.model.startswith('gemini-3')
+                else {'thinkingBudget': 0}
+            )
+            generation_config['thinkingConfig'] = thinking_config
         if generation_config:
             payload['generationConfig'] = generation_config
         if request.tools:
@@ -1123,30 +1275,38 @@ class GoogleGenerateContentModelGateway:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
         return provider_names
 
-    def _raise_for_status(self, status_code: int) -> None:
+    def _raise_for_status(self, status_code: int, error_type: str | None = None) -> None:
         if status_code < 400:
             return
         if status_code in {401, 403}:
             raise ModelGatewayError(
                 ModelGatewayErrorCode.AUTHENTICATION,
                 provider_model=self._config.model,
+                provider_status=status_code,
+                provider_error_type=error_type,
             )
         if status_code == 408:
             raise ModelGatewayError(
                 ModelGatewayErrorCode.TIMEOUT,
                 retryable=True,
                 provider_model=self._config.model,
+                provider_status=status_code,
+                provider_error_type=error_type,
             )
         if status_code == 429:
             raise ModelGatewayError(
                 ModelGatewayErrorCode.RATE_LIMIT,
                 retryable=True,
                 provider_model=self._config.model,
+                provider_status=status_code,
+                provider_error_type=error_type,
             )
         raise ModelGatewayError(
             ModelGatewayErrorCode.PROVIDER,
             retryable=status_code >= 500,
             provider_model=self._config.model,
+            provider_status=status_code,
+            provider_error_type=error_type,
         )
 
     def _normalise_response(

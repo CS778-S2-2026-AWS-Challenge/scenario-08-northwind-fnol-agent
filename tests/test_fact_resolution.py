@@ -39,21 +39,14 @@ from backend.services.fact_resolution import (
 from backend.services.messages import (
     _apply_question_accounting,
     _build_form_changes,
-    _with_single_runtime_question,
 )
 from backend.services.retrieval_review import persist_retrieval_record
+from backend.services.turn_reducer import compose_reply
 
 
-def test_runtime_owns_one_canonical_next_question() -> None:
-    response = _with_single_runtime_question(
-        'I recorded the kitchen damage. What is the full address? What is the address?',
-        'What is the address of the affected property?',
-    )
-
-    assert response == (
-        'I recorded the kitchen damage. What is the address of the affected property?'
-    )
-    assert response.count('?') == 1
+def test_runtime_preserves_model_questions_without_duplicating_the_selected_question() -> None:
+    reply = 'I recorded the kitchen damage. What is the address? Is anyone hurt?'
+    assert compose_reply(None, (), reply, 'What is the address?') == reply
 
 
 NOW = datetime(2026, 9, 8, 2, 0, tzinfo=UTC)
@@ -113,6 +106,61 @@ def test_equivalent_statement_preserves_resolution_without_false_conflict() -> N
         AssertionRelation.INITIAL,
         AssertionRelation.EQUIVALENT,
     ]
+
+
+@pytest.mark.parametrize('claimant_confirms', [True, False])
+def test_equivalent_fact_upgrades_claimant_provenance_but_never_downgrades_it(
+    claimant_confirms: bool,
+) -> None:
+    first_source = FormSource.INFERENCE if claimant_confirms else FormSource.CLAIMANT
+    first_status = FormStatus.PROPOSED if claimant_confirms else FormStatus.CONFIRMED
+    original = resolve_form_change(
+        field_code='property.address',
+        existing=None,
+        proposal=ProposedFormChange(
+            field_code='property.address',
+            value='12 Example Street',
+            source=first_source,
+            status=first_status,
+        ),
+        source_ref='msg_original',
+        message_text='A home claim.',
+        timestamp=NOW,
+        accepted_status=first_status,
+        updated_by=CLAIMANT,
+    )
+    source = FormSource.CLAIMANT if claimant_confirms else FormSource.INFERENCE
+    status = FormStatus.CONFIRMED if claimant_confirms else FormStatus.PROPOSED
+    result = resolve_form_change(
+        field_code='property.address',
+        existing=original,
+        proposal=ProposedFormChange(
+            field_code='property.address',
+            value='12 Example Street',
+            source=source,
+            status=status,
+            confidence=1.0 if claimant_confirms else None,
+            reported_text='12 Example Street',
+        ),
+        source_ref='msg_update',
+        message_text='The address is 12 Example Street.',
+        timestamp=NOW,
+        accepted_status=status,
+        updated_by=CLAIMANT,
+    )
+    assert result.status is FormStatus.CONFIRMED
+    assert result.source is FormSource.CLAIMANT
+    assert result.resolution_state is FactResolutionState.RESOLVED
+    assert result.value == original.value
+    assert result.assertions[:-1] == original.assertions
+    assert result.assertions[-1].relation is AssertionRelation.EQUIVALENT
+    assert result.source_refs == ['msg_original', 'msg_update']
+    if claimant_confirms:
+        assert result.current_assertion_id == result.assertions[-1].assertion_id
+        assert result.assertions[-1].source_refs == ['msg_update']
+        assert result.confidence == 1.0
+    else:
+        assert result.current_assertion_id == original.current_assertion_id
 
 
 def test_explicit_correction_supersedes_prior_assertion() -> None:

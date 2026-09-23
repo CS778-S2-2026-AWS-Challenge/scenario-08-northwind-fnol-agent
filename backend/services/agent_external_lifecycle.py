@@ -14,6 +14,7 @@ from backend.domain.external_service_registry import (
     InvalidExternalLifecycleTransition,
     assert_projection_provenance,
     build_lifecycle_projection,
+    capability_catalogue,
     capability_context,
     service_registry_entry,
 )
@@ -55,6 +56,8 @@ def build_agent_external_lifecycle_context(
     claim_id: str,
     assessor_routing: AssessorRoutingResult | None = None,
     product_family: str | None = None,
+    *,
+    all_families: bool = False,
 ) -> tuple[ExternalServiceLifecycleProjection, ...]:
     """Return the complete bounded lifecycle context for one Claim.
 
@@ -165,8 +168,13 @@ def build_agent_external_lifecycle_context(
             for item in capability_context(product_family)
             if item.service_identity not in active_identities
         ]
-        if product_family is not None
-        else []
+        if product_family is not None or all_families
+        else [
+            item
+            for item in capability_context()
+            if item.service_identity in {entry.service_identity for entry in capability_catalogue()}
+            and item.service_identity not in active_identities
+        ]
     )
     combined = [*projections, *available]
     if len(combined) > MAX_EXTERNAL_LIFECYCLE_PROJECTIONS:

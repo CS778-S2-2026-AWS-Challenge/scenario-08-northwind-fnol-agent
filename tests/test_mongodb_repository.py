@@ -77,6 +77,7 @@ from backend.domain.models import (
     SessionStatus,
     StaffActionRecord,
     StaffActionStatus,
+    StructuredFormField,
     SupportNeed,
     WorkingClaim,
 )
@@ -3848,6 +3849,160 @@ def test_agent_turn_persists_linked_records_as_one_mutation(
         repository.get_agent_decision(claim.claim_id, decision.decision_id, claim.customer_id)
         == decision
     )
+
+
+def test_checkpointed_agent_turn_updates_claim_and_retains_one_inbound(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    inbound = _message(claim, session)
+    checkpoint = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/agent-turn',
+        key='checkpoint-turn',
+        request_fingerprint='saved-request',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        message_id=inbound.message_id,
+        revision_before_message=1,
+        inbound_checkpoint=True,
+    )
+    accepted = claim.model_copy(update={'revision': 2})
+    accepted_session = session.model_copy(update={'context_revision': 2})
+    repository.save_message_mutation(accepted, 1, accepted_session, inbound, checkpoint)
+    result = accepted.model_copy(update={'revision': 3})
+    result_session = session.model_copy(update={'context_revision': 3})
+    reply = inbound.model_copy(
+        update={
+            'message_id': 'msg_checkpoint_reply',
+            'client_message_id': None,
+            'actor': ActorType.AGENT,
+            'in_reply_to': inbound.message_id,
+            'content': {'type': 'text', 'text': 'Saved.'},
+        }
+    )
+    decision = _decision(result, result_session, inbound)
+    final = replace(checkpoint, agent_message_id=reply.message_id, decision_id=decision.decision_id)
+    repository.save_agent_turn(
+        result, 2, result_session, inbound, reply, decision, final, checkpointed=True
+    )
+    stored_claim = repository.get_claim(claim.claim_id, claim.customer_id)
+    assert stored_claim is not None and stored_claim.revision == 3
+    messages = repository.list_messages(claim.claim_id, session.session_id, claim.customer_id)
+    assert {message.message_id: message for message in messages} == {
+        inbound.message_id: inbound,
+        reply.message_id: reply,
+    }
+    assert repository.find_idempotency(claim.customer_id, '/agent-turn', 'checkpoint-turn') == final
+    original_checkpoint = repository.find_message_checkpoint(
+        claim.claim_id, inbound.message_id, claim.customer_id
+    )
+    assert original_checkpoint is not None and original_checkpoint.revision_before_message == 1
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
+@pytest.mark.parametrize(
+    'case', ['upgrade', 'new_disputed_signal', 'owner', 'missing_fact', 'closed', 'downgrade']
+)
+def test_runtime_handoff_upgrade_keeps_identity_ownership_and_source_guard(
+    repository: MongoDBRepository,
+    adapter: str,
+    case: str,
+) -> None:
+    from backend.repositories.handoff_guard import HandoffPersistenceConflict
+
+    store: PersistenceRepository = FixtureRepository() if adapter == 'fixture' else repository
+    claim = _claim()
+    session = _session(claim)
+    store.create_claim(claim, session)
+    stored_handoff = _handoff(claim)
+    if case == 'closed':
+        stored_handoff = stored_handoff.model_copy(update={'status': HandoffStatus.RESOLVED})
+    if case == 'downgrade':
+        stored_handoff = stored_handoff.model_copy(update={'priority': HandoffPriority.IMMEDIATE})
+    store.save_handoff(stored_handoff, claim.customer_id)
+    inbound = _message(claim, session)
+    fact = StructuredFormField(
+        value=True,
+        source='claimant',
+        status='confirmed',
+        source_refs=[inbound.message_id],
+        needed_for='current_action',
+        updated_at=claim.updated_at,
+        updated_by={'actor_type': 'claimant', 'actor_id': claim.customer_id},
+    )
+    if case == 'new_disputed_signal':
+        from backend.domain.models import FactAssertion, FormStatus
+
+        fact = fact.model_copy(
+            update={
+                'value': False,
+                'status': FormStatus.DISPUTED,
+                'assertions': [
+                    FactAssertion(
+                        assertion_id='ast_new_safety',
+                        normalized_value=True,
+                        source_refs=[inbound.message_id],
+                        status=FormStatus.DISPUTED,
+                        created_at=claim.updated_at,
+                    )
+                ],
+            }
+        )
+    result = claim.model_copy(
+        update={
+            'revision': 2,
+            'form': {} if case == 'missing_fact' else {'incident.injury_or_danger': fact},
+        }
+    )
+    result_session = session.model_copy(update={'context_revision': 2})
+    handoff = stored_handoff.model_copy(
+        update={'priority': HandoffPriority.URGENT, 'support_need': SupportNeed.URGENT}
+    )
+    if case == 'owner':
+        handoff = handoff.model_copy(update={'assigned_to': 'stf_unauthorised'})
+    reply = inbound.model_copy(
+        update={
+            'message_id': 'msg_safety_reply',
+            'client_message_id': None,
+            'actor': ActorType.AGENT,
+            'in_reply_to': inbound.message_id,
+        }
+    )
+    decision = _decision(result, result_session, inbound).model_copy(
+        update={'action': AgentAction.URGENT_HANDOFF, 'handoff_id': handoff.handoff_id}
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/agent-turn',
+        key='upgrade',
+        request_fingerprint='upgrade',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        message_id=inbound.message_id,
+        agent_message_id=reply.message_id,
+        decision_id=decision.decision_id,
+        handoff_id=handoff.handoff_id,
+    )
+    if case in {'upgrade', 'new_disputed_signal'}:
+        store.save_agent_turn(
+            result, 1, result_session, inbound, reply, decision, idempotency, handoff
+        )
+        saved = store.get_handoff(claim.claim_id, handoff.handoff_id, claim.customer_id)
+        assert saved == handoff
+        assert len(store.list_handoffs(claim.claim_id, claim.customer_id)) == 1
+    else:
+        with pytest.raises(HandoffPersistenceConflict):
+            store.save_agent_turn(
+                result, 1, result_session, inbound, reply, decision, idempotency, handoff
+            )
+        assert (
+            store.get_handoff(claim.claim_id, handoff.handoff_id, claim.customer_id)
+            == stored_handoff
+        )
+        assert store.get_claim(claim.claim_id, claim.customer_id) == claim
 
 
 def test_agent_turn_reads_back_target_runtime_records_by_turn_scope(

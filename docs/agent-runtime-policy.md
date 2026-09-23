@@ -20,21 +20,49 @@ The target object catalogue, FNOL problem mapping, and delivery levels are recor
 recorded in [Agent Runtime Migration](design/agent-runtime/agent-runtime-migration.md). Current
 implementation evidence is tracked in [Agent Runtime Progress](status/agent-runtime-progress.md).
 
-The current model-backed claimant path uses the v7 fragmented Prompt Pack, deterministic routing,
-budgeted context, stable Request Profiles, narrow schemas, and at most one bounded read-only
-`context.resolve` call. Ordinary turns make exactly one tool-free model call. The legacy static eight-action schema remains only as a
-rejected compatibility boundary; it cannot regain execution authority. The provider-neutral Model
-Gateway implements `ModelRequest` and `ModelResponse`, OpenAI-compatible and Bedrock adapters,
-strict structured proposal validation, bounded context projection, server-rendered claimant
-responses, and normalised failure mapping. It does not yet implement every action handler,
-qualified fallback, or complete target trajectory capability defined here. The Control Plane
-publishes four independently versioned
-Agent configuration components and one Release Set pins the exact revisions used by a turn. This
-is the implemented policy-loading boundary, not evidence that the target `TurnPlan`,
-`ExecutionPlan`, or `TurnResult` migration is complete.
-The current field registry contains 18 allowed field codes, while controlled intake
-actively sequences only incident description, incident location, loss description, and
-incident type. It does not yet implement policy-driven dynamic branches.
+The v8 claimant release uses one complete turn envelope for conversation, facts, questions,
+service suggestions and escalation. `TurnIntents` accumulates concerns rather than selecting a
+schema that drops facts when external help is requested. `ValidatedTurn` separates valid facts
+from rejected optional suggestions; `reduce_turn` determines the resulting Claim, messages,
+work, confirmation and audit records. Ordinary turns make one tool-free call; bounded lookup
+allows one `context.resolve` and one continuation. Evidence history and isolated review retain
+their separate restricted contracts. The v7 pack remains an explicit rollback version; v6 is
+deprecated and never an implicit fallback.
+
+The current scalar registry has 28 fields. Branch collection policies determine what is
+required now, before creation or before dispatch, while Contents items remain independent
+records. Open safety/support handoffs preserve factual collection and non-blocking questions;
+they suppress all new third-party offers until resolved. A Release Set pins prompt bodies,
+schemas, profiles, rules and provider capabilities together. Successful publication is not
+evidence of a healthy provider or a passed real user journey.
+
+Batch confirmation authority comes from Runtime's complete-message acceptance check plus
+the displayed record's revision and value fingerprint. Model `confirms_batch` is only a
+wording signal. A field-specific affirmative cannot authorize the whole batch, and a false
+model flag cannot veto an unqualified acceptance. Final confirmation/readiness prose is checked
+against the actual reduced outcome using the same truthfulness policy as service claims.
+
+Full-envelope v8 input has a 6000-token hard limit and a 3000-token soft observation
+threshold. Text/lookup output is capped at 4500 and media output at 5500. These are
+operating limits, not a mathematical maximum of all legal schema values. A truncated
+provider result is rejected and follows the existing saved-message recovery flow; partial
+JSON never applies partial Claim changes. Unicode budget estimates use unescaped UTF-8
+content. Only v8 model-output money and quantity types have the new bounded limits;
+shared domain money values retain their existing contract.
+
+Free-text `text`, `location` and `text_list` proposals cannot supply placeholder answers
+such as `>UNKNOWN<`, `N/A`, `TBD`, or a field reference such as `/property.address/`.
+The existing field validator rejects that individual
+change and retains the previous field state; other valid facts in the turn still apply.
+An absent field stays missing and is not offered for batch confirmation. Registered enum
+values such as `injury.medical_attention=unknown` remain valid; boolean and temporal
+validation are unchanged. The versioned `task.turn` fragment instructs the model to omit an
+unprovided field instead of fabricating a placeholder, alongside the Runtime check.
+
+A malformed `next_question`, including a group larger than three fields, is rejected as an
+optional part; valid facts still apply and the existing single-field Runtime fallback is used.
+Only its exact rejected wording is removed from reply prose; an originally empty reply or an
+invalid core fact still rejects the turn and uses saved-message recovery.
 
 ## Policy Is Not a Prompt
 
@@ -54,6 +82,30 @@ Product requirements and approved operating rules
 
 Changing the model provider, compatible API, relay, custom endpoint, or local model must
 not change this sequence or the namespaced Agent action semantics.
+
+### One turn, one family and capability decision
+
+The claimant starts with a natural-language description; the claimant UI does not expose a
+product-family selector. A working Claim may therefore remain unresolved until the first useful
+message. At the message boundary Runtime resolves one `TurnFamilyResolution` and gives that same
+result to routing, context planning, field-contract compilation, and capability selection.
+Confirmed Claim facts take precedence. One clear current-turn candidate may be inferred;
+ambiguous or conflicting candidates produce a controlled clarification and no external offer.
+Runtime never invents a default family.
+
+The model does not select external-service identities. Runtime recognizes a bounded intent, then
+selects exact identities from the published external-service registry for the resolved family and
+current lifecycle. The model may write conversational prose around the selected option, but an
+unknown or model-invented service ID is ignored as optional data and cannot reject an otherwise
+safe reply. Consent, disclosure, authority, idempotency, and lifecycle checks still run before any
+side effect.
+
+Conversation persistence and external dispatch have separate outcomes. Once the claimant and
+Agent messages are committed, an unavailable, rejected, or failing optional adapter is recorded
+on the external-task lifecycle and in privacy-safe structured diagnostics; it does not turn the
+committed chat response into a transport failure. Claimant prose may say that an option is
+available or awaiting consent, but it may not claim that Northwind arranged, submitted,
+contacted, approved, or completed external work without matching Runtime evidence.
 
 ## Policy Layers
 
@@ -86,14 +138,15 @@ knowledge selection, model transport, action/tool restrictions, and persisted pr
 publication affects the next turn and cannot mutate the snapshot already selected for an active
 turn.
 
-The executable claimant instruction is `northwind-fnol-claimant-v7`. Runtime chooses a stable
-profile and schema, converts its narrow response into an internal proposal, and validates the
+The executable claimant instruction is `northwind-fnol-claimant-v8`. Runtime chooses a stable
+profile and schema, converts its complete response into an internal proposal, and validates the
 result through the Action Registry and authority boundary. Model output cannot select a Release
 Set, construct arbitrary context references, enlarge a token budget, or perform a side effect.
 Deprecated flat actions, invented directives, stale references, incompatible provider/profile
-combinations, and published-rule-only interrupts fail before Claim State mutation. v6 remains an
-immutable explicit rollback target through its complete binding manifest and matching Release Set;
-an operator must select both, and Runtime never uses it as an automatic fallback.
+combinations fail before applying model facts. Safety actions may already be durably committed.
+Operational rollback requires the previous v7 Release Set and the pre-v8 code deployment/revert,
+as documented in [Claimant Journey v8](design/agent-runtime/claimant-journey-v8.md).
+v6 artifacts remain deprecated and inactive; Runtime never selects them as a failure fallback.
 
 The configuration layer may restrict capabilities but cannot invent them. Action codes, tool
 names, and branch rule IDs must already exist in their server Registries. The policy must retain
@@ -115,7 +168,7 @@ turn. It stores coordinates, not copied prompts, configuration values, or secret
 
 ## Published policy bundle
 
-The v7 machine-readable bundle identifies at least:
+The machine-readable Runtime bundle identifies at least:
 
 - `policy_id`, semantic version, lifecycle status, and effective time;
 - author, change reason, approver when required, and previous version;

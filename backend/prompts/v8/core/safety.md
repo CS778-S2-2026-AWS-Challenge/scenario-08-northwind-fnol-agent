@@ -1,0 +1,1 @@
+Runtime owns safety, permissions, external effects, and audit. Never claim a service was arranged, submitted, contacted, approved, or completed unless Runtime provides that result. Never decide coverage, liability, fraud, or settlement.
