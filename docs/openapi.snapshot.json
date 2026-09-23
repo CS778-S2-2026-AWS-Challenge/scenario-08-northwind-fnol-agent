@@ -85,6 +85,9 @@
       },
       "AccountProjection": {
         "properties": {
+          "claim_auto_fill_preferences": {
+            "$ref": "#/components/schemas/ClaimAutoFillPreferences"
+          },
           "customer_id": {
             "title": "Customer Id",
             "type": "string"
@@ -115,6 +118,7 @@
           "customer_id",
           "profile",
           "preferences",
+          "claim_auto_fill_preferences",
           "revision",
           "updated_at"
         ],
@@ -1996,6 +2000,156 @@
           "source_refs"
         ],
         "title": "ClaimAssetSnapshotProjection",
+        "type": "object"
+      },
+      "ClaimAutoFillAction": {
+        "enum": [
+          "review_and_confirm",
+          "select_policy",
+          "select_asset",
+          "confirm_separately"
+        ],
+        "title": "ClaimAutoFillAction",
+        "type": "string"
+      },
+      "ClaimAutoFillCategory": {
+        "enum": [
+          "personal_details",
+          "policy_number",
+          "saved_assets",
+          "payment_details",
+          "identity_information"
+        ],
+        "title": "ClaimAutoFillCategory",
+        "type": "string"
+      },
+      "ClaimAutoFillPreferences": {
+        "properties": {
+          "identity_information": {
+            "default": false,
+            "title": "Identity Information",
+            "type": "boolean"
+          },
+          "payment_details": {
+            "default": false,
+            "title": "Payment Details",
+            "type": "boolean"
+          },
+          "personal_details": {
+            "default": false,
+            "title": "Personal Details",
+            "type": "boolean"
+          },
+          "policy_number": {
+            "default": false,
+            "title": "Policy Number",
+            "type": "boolean"
+          },
+          "saved_assets": {
+            "default": false,
+            "title": "Saved Assets",
+            "type": "boolean"
+          }
+        },
+        "title": "ClaimAutoFillPreferences",
+        "type": "object"
+      },
+      "ClaimAutoFillPreferencesPatchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "identity_information": {
+            "title": "Identity Information",
+            "type": "boolean"
+          },
+          "payment_details": {
+            "title": "Payment Details",
+            "type": "boolean"
+          },
+          "personal_details": {
+            "title": "Personal Details",
+            "type": "boolean"
+          },
+          "policy_number": {
+            "title": "Policy Number",
+            "type": "boolean"
+          },
+          "saved_assets": {
+            "title": "Saved Assets",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "personal_details",
+          "policy_number",
+          "saved_assets",
+          "payment_details",
+          "identity_information"
+        ],
+        "title": "ClaimAutoFillPreferencesPatchRequest",
+        "type": "object"
+      },
+      "ClaimAutoFillSuggestion": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ClaimAutoFillAction"
+          },
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "category": {
+            "$ref": "#/components/schemas/ClaimAutoFillCategory"
+          },
+          "eligible": {
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "category",
+          "enabled",
+          "available",
+          "eligible",
+          "action"
+        ],
+        "title": "ClaimAutoFillSuggestion",
+        "type": "object"
+      },
+      "ClaimAutoFillSuggestionManifest": {
+        "properties": {
+          "account_revision": {
+            "minimum": 1.0,
+            "title": "Account Revision",
+            "type": "integer"
+          },
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "claim_revision": {
+            "minimum": 1.0,
+            "title": "Claim Revision",
+            "type": "integer"
+          },
+          "suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimAutoFillSuggestion"
+            },
+            "title": "Suggestions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "claim_id",
+          "claim_revision",
+          "account_revision",
+          "suggestions"
+        ],
+        "title": "ClaimAutoFillSuggestionManifest",
         "type": "object"
       },
       "ClaimCollaborationRequest": {
@@ -18191,6 +18345,81 @@
         ]
       }
     },
+    "/api/v1/account/claim-auto-fill-preferences": {
+      "patch": {
+        "operationId": "patch_account_claim_auto_fill_preferences_api_v1_account_claim_auto_fill_preferences_patch",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimAutoFillPreferencesPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Account Claim Auto Fill Preferences",
+        "tags": [
+          "claimant identity"
+        ]
+      }
+    },
     "/api/v1/account/identity-documents": {
       "get": {
         "operationId": "get_identity_documents_api_v1_account_identity_documents_get",
@@ -20209,6 +20438,64 @@
         "tags": [
           "claimant",
           "claimant assets"
+        ]
+      }
+    },
+    "/api/v1/claims/{claim_id}/auto-fill-suggestions": {
+      "get": {
+        "operationId": "read_claim_auto_fill_suggestions_api_v1_claims__claim_id__auto_fill_suggestions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimAutoFillSuggestionManifest"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Claim Auto Fill Suggestions",
+        "tags": [
+          "claimant"
         ]
       }
     },

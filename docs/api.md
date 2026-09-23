@@ -503,9 +503,10 @@ version with another published version.
 | `POST` | `/auth/sessions` | Authenticate a development/test synthetic claimant and create an opaque session |
 | `GET` | `/auth/session` | Read the current authenticated claimant session |
 | `DELETE` | `/auth/session` | Revoke the current claimant session |
-| `GET` | `/account` | Read the authenticated claimant's profile and communication preferences |
+| `GET` | `/account` | Read the authenticated claimant's profile, communication preferences, and Claim auto-fill preferences |
 | `PATCH` | `/account/profile` | Update the authenticated claimant's approved profile fields |
 | `PATCH` | `/account/preferences` | Update the authenticated claimant's communication preferences |
+| `PATCH` | `/account/claim-auto-fill-preferences` | Replace the five Claim auto-fill category preferences using Account revision concurrency |
 | `POST`, `GET` | `/account/policies` | Idempotently create or cursor-page reusable account policy numbers |
 | `PATCH`, `DELETE` | `/account/policies/{policy_id}` | Revision-update or soft-retire one owned policy number |
 | `POST`, `GET` | `/account/payment-destinations` | Idempotently create or cursor-page masked bank-account destinations, including claimant bank and holder names and the authoritative common-destination marker |
@@ -514,6 +515,7 @@ version with another published version.
 | `PATCH`, `DELETE` | `/account/identity-documents/{identity_id}` | Revision-update or soft-retire one owned identity document |
 | `POST` | `/claims/{claim_id}/policy-selections` | Propose one active owned policy number into the registered Claim field |
 | `POST` | `/claims/{claim_id}/payout-contact-selections` | Atomically bind one active owned Payment Destination and confirm the registered Claim contact preference |
+| `GET` | `/claims/{claim_id}/auto-fill-suggestions` | Read preference-gated saved-data availability and the safe action for each category |
 
 Profile email writes accept a supported Internet-style address with one local part and a dotted
 domain. The backend trims surrounding whitespace and lowercases the complete address before it
@@ -560,6 +562,26 @@ repository conflict after the service read, returns retryable `409 REVISION_CONF
 legacy-client transition the header remains optional and an omitted header uses the revision read
 at the start of the request, while still retaining repository compare-and-set protection. New
 clients send `If-Match` so edits made from a stale Account projection are rejected explicitly.
+
+The `claim_auto_fill_preferences` Account member contains exactly five booleans:
+`personal_details`, `policy_number`, `saved_assets`, `payment_details`, and
+`identity_information`. Every category defaults to `false` for new and migrated accounts.
+`PATCH /api/v1/account/claim-auto-fill-preferences` replaces the complete five-member object and
+requires `If-Match` with the Account revision. Missing or malformed revision authority returns
+`409 REVISION_REQUIRED`; stale or concurrently changed authority returns retryable `409
+REVISION_CONFLICT` without changing any preference or Account revision.
+
+`GET /api/v1/claims/{claim_id}/auto-fill-suggestions` requires an authenticated session and an
+owned Claim; inaccessible and unknown Claims both return concealed `404 RESOURCE_NOT_FOUND`. The
+response contains `claim_id`, the unchanged Claim revision, the Account revision, and one item for
+each category with `enabled`, `available`, `eligible`, and `action`. Eligibility is true only when
+the preference is enabled and a supported active owner-scoped source exists. Personal details use
+`review_and_confirm`; Policies and Assets use their existing `select_policy` and `select_asset`
+contracts; Payment and Identity use `confirm_separately`. Reading the manifest does not change the
+Claim, Dynamic Form, Branch Evaluation, idempotency, audit, realtime, Agent, or external services.
+The response contains no saved record IDs, raw values, masked values, or ciphertext. A preference
+is suggestion permission only: it is not claimant confirmation, coverage authority, payment
+authority, identity verification, or third-party disclosure consent.
 
 Create requests for the three account resources require `Idempotency-Key`. List routes use the
 standard opaque cursor and default to active records. Their stable descending keyset is

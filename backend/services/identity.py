@@ -10,6 +10,8 @@ from backend.domain.identity import (
     AccountProjection,
     AuthenticatedSession,
     ClaimantAuthSessionRecord,
+    ClaimAutoFillPreferences,
+    ClaimAutoFillPreferencesPatchRequest,
     CommunicationPreferences,
     CurrentAuthSession,
     LoginRequest,
@@ -113,6 +115,7 @@ def account_projection(repository: IdentityRepository, principal: Principal) -> 
             residential_address=account.residential_address,
         ),
         preferences=CommunicationPreferences(**account.communication_preferences),
+        claim_auto_fill_preferences=ClaimAutoFillPreferences(**account.claim_auto_fill_preferences),
         revision=account.revision,
         updated_at=account.updated_at,
         development_identity=principal.synthetic,
@@ -214,6 +217,47 @@ def update_preferences(
     updated = replace(
         account,
         communication_preferences={'email': payload.email, 'sms': payload.sms},
+        revision=account.revision + 1,
+        updated_at=datetime.now(UTC),
+    )
+    try:
+        repository.save_account(updated, expected_revision)
+    except RevisionConflict as error:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The account changed after this page was loaded.',
+            retryable=True,
+            current_revision=error.current_revision,
+        ) from error
+    return account_projection(repository, principal)
+
+
+def update_claim_auto_fill_preferences(
+    repository: IdentityRepository,
+    principal: Principal,
+    payload: ClaimAutoFillPreferencesPatchRequest,
+    if_match: str | None,
+) -> AccountProjection:
+    account = repository.get_account(principal.subject)
+    if account is None:
+        raise ApiError(
+            status_code=404,
+            code='RESOURCE_NOT_FOUND',
+            message='The claimant account was not found.',
+        )
+    expected_revision = parse_if_match(if_match)
+    if account.revision != expected_revision:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The account changed after this page was loaded.',
+            retryable=True,
+            current_revision=account.revision,
+        )
+    updated = replace(
+        account,
+        claim_auto_fill_preferences=payload.model_dump(),
         revision=account.revision + 1,
         updated_at=datetime.now(UTC),
     )

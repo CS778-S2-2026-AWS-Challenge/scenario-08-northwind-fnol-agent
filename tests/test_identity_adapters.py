@@ -109,6 +109,30 @@ def test_sqlite_claimant_identity_persists_accounts_and_sessions(tmp_path: Path)
     assert _verify_sqlite_password('not-a-password-hash', 'secret') is False
 
 
+def test_sqlite_claim_auto_fill_preferences_persist_across_repository_instances(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / 'claim-auto-fill.sqlite'
+    repository = SQLiteIdentityRepository(str(path))
+    account = repository.create_account('saved@example.invalid', 'secret', 'Saved User')
+    assert account is not None
+    enabled = {key: True for key in account.claim_auto_fill_preferences}
+    repository.save_account(
+        replace(
+            account,
+            claim_auto_fill_preferences=enabled,
+            revision=account.revision + 1,
+            updated_at=datetime.now(UTC),
+        ),
+        account.revision,
+    )
+
+    reopened = SQLiteIdentityRepository(str(path)).get_account(account.customer_id)
+
+    assert reopened is not None
+    assert reopened.claim_auto_fill_preferences == enabled
+
+
 def test_fixture_staff_identity_covers_provision_and_session_lifecycle() -> None:
     repository = FixtureStaffIdentityRepository()
     account = repository.authenticate('STAFF.ONE@EXAMPLE.INVALID', 'northwind-demo-staff')
@@ -246,6 +270,13 @@ def test_sqlite_identity_adapters_upgrade_legacy_account_and_session_tables(
     assert claimant.preferred_name is None
     assert claimant.date_of_birth is None
     assert claimant.residential_address is None
+    assert claimant.claim_auto_fill_preferences == {
+        'personal_details': False,
+        'policy_number': False,
+        'saved_assets': False,
+        'payment_details': False,
+        'identity_information': False,
+    }
     assert claimant.active is True
     assert claimant.revision == 1
     assert claimant.updated_at.tzinfo is not None
