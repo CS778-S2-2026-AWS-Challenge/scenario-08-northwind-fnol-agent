@@ -377,6 +377,19 @@ class _GenericDispatcher(ExternalCapabilityDispatcher):
         )
 
 
+class _RaisingDispatcher(ExternalCapabilityDispatcher):
+    def execute(
+        self,
+        service_identity: str,
+        operation: str,
+        payload: Mapping[str, Any],
+        *,
+        product_family: str,
+    ) -> ExternalCapabilityResult:
+        del service_identity, operation, payload, product_family
+        raise RuntimeError('simulated provider outage')
+
+
 def _generic_claim() -> tuple[WorkingClaim, ExternalServiceConsent, ExternalServiceOfferMetadata]:
     consent = (
         _claim()
@@ -428,6 +441,19 @@ def test_generic_dispatch_persists_each_provider_outcome(
     attempts = repository.list_external_task_attempts_internal(CLAIM)
     assert len(attempts) == 1
     assert attempts[0].outcome is expected
+
+
+def test_generic_dispatch_exception_persists_retryable_attempt() -> None:
+    repository = FixtureRepository()
+    claim, consent, offer = _generic_claim()
+    repository.create_claim(claim, _session(claim))
+    _dispatch_generic_offer(repository, claim, consent, offer, _RaisingDispatcher())
+
+    tasks = repository.list_external_tasks_internal(CLAIM)
+    attempts = repository.list_external_task_attempts_internal(CLAIM)
+    assert tasks[0].status is ExternalTaskOperationStatus.RETRYABLE_FAILURE
+    assert len(attempts) == 1
+    assert attempts[0].outcome is ExternalTaskOperationStatus.RETRYABLE_FAILURE
 
 
 def test_generic_settlement_rolls_back_task_when_attempt_write_fails(
