@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -13,7 +13,16 @@ from backend.domain.account_data import (
 from backend.domain.agent_context_runtime import VerifiedConversationSummary
 from backend.domain.assets import AssetRecord, ClaimAssetSnapshot
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
-from backend.domain.evidence import assert_material_history_is_append_only
+from backend.domain.claim_creation import (
+    ClaimCreationOperationRecord,
+    ClaimCreationOperationStatus,
+    assert_claim_creation_operation_transition,
+    evidence_snapshot_fingerprint,
+)
+from backend.domain.evidence import (
+    assert_material_history_is_append_only,
+    validate_evidence_record,
+)
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
@@ -27,6 +36,12 @@ from backend.domain.external_services import (
     assert_result_evidence_is_linked,
     assert_result_matches_task,
     assert_task_transition_is_permitted,
+)
+from backend.domain.message import (
+    DuplicateClientMessage,
+    order_messages,
+    validate_message_graph,
+    validate_message_record,
 )
 from backend.domain.models import (
     ActorType,
@@ -93,9 +108,11 @@ from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.account_data import (
     AccountCursorKey,
     AccountRecord,
+    PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
     account_record_audit_matches,
     account_record_identity,
+    payout_contact_selection_audit_matches,
     policy_selection_audit_matches,
 )
 from backend.repositories.assets import (
@@ -148,6 +165,7 @@ class FixtureRepository(PersistenceRepository):
         self._staff_agent_executions: dict[str, StaffAgentExecutionRecord] = {}
         self._decisions: dict[str, AgentDecisionRecord] = {}
         self._branch_evaluations: dict[str, BranchEvaluationRecord] = {}
+        self._claim_creation_operations: dict[str, ClaimCreationOperationRecord] = {}
         self._assessor_routing_operations: dict[str, AssessorRoutingOperation] = {}
         self._evidence: dict[str, EvidenceRecord] = {}
         self._evidence_claim_links: dict[tuple[str, str], EvidenceClaimLink] = {}
@@ -498,6 +516,67 @@ class FixtureRepository(PersistenceRepository):
             self._audit_events[audit_event.event_id] = deepcopy(audit_event)
             self._commit_realtime_event(realtime_event)
 
+    def save_payout_contact_selection(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        payment_destination_id: str,
+        payment_destination_revision: int,
+        contact_authority_revision: int,
+        idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        with self._claim_mutation_lock:
+            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            if lookup in self._idempotency:
+                raise IdempotencyConflict(idempotency.key)
+            self._validate_claim_mutation(claim, expected_revision)
+            self._validate_branch_evaluation(claim, branch_evaluation)
+            destination = self._payment_destinations.get(payment_destination_id)
+            if (
+                destination is None
+                or destination.customer_id != claim.customer_id
+                or not destination.active
+            ):
+                raise PaymentDestinationSelectionConflict(
+                    payment_destination_id, reason='unavailable'
+                )
+            if destination.revision != payment_destination_revision:
+                raise PaymentDestinationSelectionConflict(
+                    payment_destination_id,
+                    reason='changed',
+                    current_revision=destination.revision,
+                )
+            if (
+                idempotency.actor_id != claim.customer_id
+                or idempotency.claim_id != claim.claim_id
+                or idempotency.session_id != (claim.active_session_id or '')
+                or not payout_contact_selection_audit_matches(
+                    claim,
+                    payment_destination_id,
+                    payment_destination_revision,
+                    contact_authority_revision,
+                    idempotency,
+                    audit_event,
+                )
+            ):
+                raise KeyError(claim.claim_id)
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.CLAIM_CHANGED,
+                claim,
+                operation_correlation=idempotency.key,
+                resources=realtime_resources_for_records(
+                    RealtimeMutation.CLAIM_CHANGED, ('branch_evaluation',)
+                ),
+            )
+            assert realtime_event is not None
+            self._claims[claim.claim_id] = deepcopy(claim)
+            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
+            self._idempotency[lookup] = deepcopy(idempotency)
+            self._audit_events[audit_event.event_id] = deepcopy(audit_event)
+            self._commit_realtime_event(realtime_event)
+
     def create_asset(
         self,
         asset: AssetRecord,
@@ -668,6 +747,7 @@ class FixtureRepository(PersistenceRepository):
             'staff_agent_executions': len(self._staff_agent_executions),
             'agent_decisions': len(self._decisions),
             'branch_evaluations': len(self._branch_evaluations),
+            'claim_creation_operations': len(self._claim_creation_operations),
             'assessor_routing_operations': len(self._assessor_routing_operations),
             'evidence': len(self._evidence),
             'evidence_claim_links': len(self._evidence_claim_links),
@@ -708,6 +788,7 @@ class FixtureRepository(PersistenceRepository):
         self._staff_agent_executions.clear()
         self._decisions.clear()
         self._branch_evaluations.clear()
+        self._claim_creation_operations.clear()
         self._assessor_routing_operations.clear()
         self._evidence.clear()
         self._evidence_claim_links.clear()
@@ -886,16 +967,70 @@ class FixtureRepository(PersistenceRepository):
     def _store_message(self, message: MessageRecord) -> None:
         """Store a message and maintain the bounded-search child index."""
 
+        self._preflight_messages((message,))
         self._messages[message.message_id] = deepcopy(message)
         message_ids = self._message_ids_by_session.setdefault(message.session_id, [])
         if message.message_id not in message_ids:
             message_ids.append(message.message_id)
-        message_ids.sort(
-            key=lambda message_id: (
-                self._messages[message_id].created_at,
-                message_id,
+        ordered = order_messages([self._messages[message_id] for message_id in message_ids])
+        message_ids[:] = [message.message_id for message in ordered]
+
+    def _preflight_messages(
+        self,
+        messages: Sequence[MessageRecord],
+        *,
+        sessions: Sequence[SessionRecord] = (),
+        evidence: Sequence[EvidenceRecord] = (),
+    ) -> None:
+        """Validate a complete pending message set without mutating Fixture state."""
+
+        available_sessions = {**self._sessions, **{item.session_id: item for item in sessions}}
+        available_evidence = {**self._evidence, **{item.evidence_id: item for item in evidence}}
+        available_messages = dict(self._messages)
+        pending_by_id = {message.message_id: message for message in messages}
+        validate_message_graph(tuple(available_messages.values()) + tuple(pending_by_id.values()))
+        for message in messages:
+            session = available_sessions.get(message.session_id)
+            if session is None:
+                raise ValueError('Message Session does not exist.')
+            referenced_evidence = [
+                item
+                for evidence_id in message.evidence_refs
+                if (item := available_evidence.get(evidence_id)) is not None
+            ]
+            reply = pending_by_id.get(
+                message.in_reply_to or '',
+                available_messages.get(message.in_reply_to or ''),
             )
-        )
+            duplicate_client_message = next(
+                (
+                    item
+                    for item in available_messages.values()
+                    if message.client_message_id is not None
+                    and item.claim_id == message.claim_id
+                    and item.client_message_id == message.client_message_id
+                ),
+                None,
+            )
+            try:
+                validate_message_record(
+                    message,
+                    session=session,
+                    evidence=referenced_evidence,
+                    reply=reply,
+                    duplicate_client_message=duplicate_client_message,
+                )
+            except DuplicateClientMessage as conflict:
+                raise IdempotencyConflict(
+                    message.client_message_id or message.message_id
+                ) from conflict
+            available_messages[message.message_id] = message
+
+    def _store_evidence(self, evidence: EvidenceRecord) -> None:
+        """Validate and store one provider-neutral Evidence record."""
+
+        validate_evidence_record(evidence)
+        self._evidence[evidence.evidence_id] = deepcopy(evidence)
 
     def _store_session(self, session: SessionRecord) -> None:
         self._sessions[session.session_id] = deepcopy(session)
@@ -950,6 +1085,11 @@ class FixtureRepository(PersistenceRepository):
             evidence_by_id = {item.evidence_id: item for item in graph.evidence}
             if len(evidence_by_id) != len(graph.evidence):
                 raise ValueError('Validation seed evidence must be unique.')
+            self._preflight_messages(
+                graph.messages,
+                sessions=graph.sessions,
+                evidence=graph.evidence,
+            )
 
             self.save_staff_presence(graph.staff_presence, graph.expected_presence_revision)
             sessions_by_claim: dict[str, list[SessionRecord]] = {
@@ -972,7 +1112,7 @@ class FixtureRepository(PersistenceRepository):
                     self.save_session(session)
             for evidence in graph.evidence:
                 self.save_evidence(evidence, claims_by_id[evidence.claim_id].customer_id)
-            for message in graph.messages:
+            for message in order_messages(graph.messages):
                 self.save_message(message, claims_by_id[message.claim_id].customer_id)
             self.save_idempotency(graph.idempotency)
         except Exception:
@@ -1014,6 +1154,7 @@ class FixtureRepository(PersistenceRepository):
             self._follow_ups,
             self._messages,
             self._decisions,
+            self._claim_creation_operations,
             self._assessor_routing_operations,
             self._evidence,
             self._motor_other_drivers,
@@ -1849,6 +1990,7 @@ class FixtureRepository(PersistenceRepository):
         existing = self._idempotency.get(lookup)
         if existing is not None and existing.request_fingerprint != idempotency.request_fingerprint:
             raise IdempotencyConflict(idempotency.key)
+        self._preflight_messages((message,), sessions=(session,))
         realtime_event = self._prepare_realtime_mutation(
             RealtimeMutation.MESSAGE_MUTATION_COMMITTED,
             claim,
@@ -1905,7 +2047,7 @@ class FixtureRepository(PersistenceRepository):
             for message in self._messages.values()
             if message.claim_id == claim_id and message.session_id == session_id
         ]
-        return sorted(messages, key=lambda message: (message.created_at, message.message_id))
+        return order_messages(messages)
 
     def list_recent_messages(
         self,
@@ -2001,6 +2143,125 @@ class FixtureRepository(PersistenceRepository):
                 record.evaluation_id,
             ),
         )
+
+    def get_claim_creation_operation(
+        self,
+        operation_id: str,
+    ) -> ClaimCreationOperationRecord | None:
+        operation = self._claim_creation_operations.get(operation_id)
+        return deepcopy(operation) if operation is not None else None
+
+    def reserve_claim_creation_operation(
+        self,
+        operation: ClaimCreationOperationRecord,
+    ) -> bool:
+        with self._claim_mutation_lock:
+            claim = self._claims.get(operation.claim_id)
+            decision = self._decisions.get(operation.authorised_decision_id)
+            evidence = [
+                record
+                for record in self._evidence.values()
+                if record.claim_id == operation.claim_id
+            ]
+            if (
+                operation.status is not ClaimCreationOperationStatus.PREPARED
+                or claim is None
+                or claim.customer_id != operation.customer_id
+                or claim.revision != operation.authorised_revision
+                or claim.external_claim is not None
+                or claim.terminal_disposition is not None
+                or decision is None
+                or decision.claim_id != operation.claim_id
+                or decision.resulting_revision != operation.authorised_revision
+                or evidence_snapshot_fingerprint(evidence)
+                != operation.evidence_snapshot_fingerprint
+            ):
+                raise KeyError(operation.claim_id)
+
+            existing_for_claim = next(
+                (
+                    item
+                    for item in self._claim_creation_operations.values()
+                    if item.claim_id == operation.claim_id
+                ),
+                None,
+            )
+            if existing_for_claim is not None:
+                if existing_for_claim.operation_id != operation.operation_id:
+                    raise IdempotencyConflict(operation.operation_id)
+                if existing_for_claim.status is ClaimCreationOperationStatus.RETRYABLE_FAILURE:
+                    try:
+                        assert_claim_creation_operation_transition(existing_for_claim, operation)
+                    except ValueError as conflict:
+                        raise IdempotencyConflict(operation.operation_id) from conflict
+                    self._claim_creation_operations[operation.operation_id] = deepcopy(operation)
+                    return True
+                if (
+                    existing_for_claim.request_fingerprint != operation.request_fingerprint
+                    or existing_for_claim.evidence_snapshot_fingerprint
+                    != operation.evidence_snapshot_fingerprint
+                    or existing_for_claim.route != operation.route
+                    or existing_for_claim.integration_source is not operation.integration_source
+                ):
+                    raise IdempotencyConflict(operation.operation_id)
+                return False
+
+            self._claim_creation_operations[operation.operation_id] = deepcopy(operation)
+            return True
+
+    def save_claim_creation_operation(
+        self,
+        operation: ClaimCreationOperationRecord,
+    ) -> None:
+        with self._claim_mutation_lock:
+            current = self._claim_creation_operations.get(operation.operation_id)
+            if current is None:
+                raise KeyError(operation.operation_id)
+            try:
+                assert_claim_creation_operation_transition(current, operation)
+            except ValueError as conflict:
+                raise IdempotencyConflict(operation.operation_id) from conflict
+            self._claim_creation_operations[operation.operation_id] = deepcopy(operation)
+
+    def save_claim_creation_outcome(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        operation: ClaimCreationOperationRecord,
+        branch_evaluation: BranchEvaluationRecord,
+    ) -> None:
+        with self._claim_mutation_lock:
+            self._validate_claim_mutation(claim, expected_revision)
+            self._validate_branch_evaluation(claim, branch_evaluation)
+            current = self._claim_creation_operations.get(operation.operation_id)
+            evidence = [
+                record for record in self._evidence.values() if record.claim_id == claim.claim_id
+            ]
+            if (
+                current is None
+                or operation.status is not ClaimCreationOperationStatus.ACCEPTED
+                or operation.result is None
+                or claim.external_claim != operation.result
+                or claim.external_claim_source_revision != operation.authorised_revision
+                or claim.external_claim_fingerprint != operation.request_fingerprint
+                or evidence_snapshot_fingerprint(evidence)
+                != operation.evidence_snapshot_fingerprint
+            ):
+                raise KeyError(claim.claim_id)
+            try:
+                assert_claim_creation_operation_transition(current, operation)
+            except ValueError as conflict:
+                raise IdempotencyConflict(operation.operation_id) from conflict
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.CLAIM_CHANGED,
+                claim,
+                operation_correlation=operation.operation_id,
+            )
+            assert realtime_event is not None
+            self._claims[claim.claim_id] = deepcopy(claim)
+            self._claim_creation_operations[operation.operation_id] = deepcopy(operation)
+            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
+            self._commit_realtime_event(realtime_event)
 
     def get_assessor_routing_operation(
         self,
@@ -2118,6 +2379,7 @@ class FixtureRepository(PersistenceRepository):
         """
 
         with self._claim_mutation_lock:
+            validate_evidence_record(evidence)
             current_claim = self._validate_claim_mutation(claim, expected_revision)
             if (staff_action is None) is not (idempotency is None):
                 raise KeyError(claim.claim_id)
@@ -2218,7 +2480,7 @@ class FixtureRepository(PersistenceRepository):
             self._external_tasks[task.task_id] = deepcopy(task)
             self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
             self._external_task_requests[request.request_id] = deepcopy(request)
-            self._evidence[evidence.evidence_id] = deepcopy(evidence)
+            self._store_evidence(evidence)
             self._external_task_evidence_links[(link.claim_id, link.evidence_id)] = deepcopy(link)
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
             if staff_action is not None and idempotency is not None and presence is not None:
@@ -2506,6 +2768,15 @@ class FixtureRepository(PersistenceRepository):
         ):
             raise IdempotencyConflict(idempotency.key)
 
+        pending_evidence = (evidence,) if evidence is not None else ()
+        for item in pending_evidence:
+            validate_evidence_record(item)
+        self._preflight_messages(
+            (claimant_message, agent_message),
+            sessions=(session,),
+            evidence=pending_evidence,
+        )
+
         public_messages = all(
             item.visibility is not MessageVisibility.INTERNAL_ONLY
             for item in (claimant_message, agent_message)
@@ -2549,7 +2820,7 @@ class FixtureRepository(PersistenceRepository):
         if handoff is not None:
             self._handoffs[handoff.handoff_id] = deepcopy(handoff)
         if evidence is not None:
-            self._evidence[evidence.evidence_id] = deepcopy(evidence)
+            self._store_evidence(evidence)
         if branch_evaluation is not None:
             if branch_evaluation.evaluation_id in self._branch_evaluations:
                 raise IdempotencyConflict(branch_evaluation.evaluation_id)
@@ -2650,6 +2921,10 @@ class FixtureRepository(PersistenceRepository):
         )
         if duplicate_client_message is not None:
             raise IdempotencyConflict(claimant_message.client_message_id or '')
+        self._preflight_messages(
+            (claimant_message, agent_message),
+            sessions=(session,),
+        )
         public_messages = all(
             item.visibility is not MessageVisibility.INTERNAL_ONLY
             for item in (claimant_message, agent_message)
@@ -2749,6 +3024,7 @@ class FixtureRepository(PersistenceRepository):
         claim = self._claims.get(evidence.claim_id)
         if claim is None or claim.customer_id != customer_id:
             raise KeyError(evidence.claim_id)
+        validate_evidence_record(evidence)
         existing = self._evidence.get(evidence.evidence_id)
         try:
             assert_material_history_is_append_only(existing, evidence)
@@ -2766,7 +3042,7 @@ class FixtureRepository(PersistenceRepository):
             claim,
         )
         assert realtime_event is not None
-        self._evidence[evidence.evidence_id] = deepcopy(evidence)
+        self._store_evidence(evidence)
         self._commit_realtime_event(realtime_event)
 
     def get_evidence(
@@ -2995,6 +3271,8 @@ class FixtureRepository(PersistenceRepository):
         branch_evaluation: BranchEvaluationRecord,
     ) -> None:
         with self._claim_mutation_lock:
+            if evidence is not None:
+                validate_evidence_record(evidence)
             self._validate_claim_mutation(claim, expected_revision)
             self._validate_branch_evaluation(claim, branch_evaluation)
             prepared = self._prepare_audit_events(claim, (audit_event,))
@@ -3045,7 +3323,7 @@ class FixtureRepository(PersistenceRepository):
             assert realtime_event is not None
             self._claims[claim.claim_id] = deepcopy(claim)
             if evidence is not None:
-                self._evidence[evidence.evidence_id] = deepcopy(evidence)
+                self._store_evidence(evidence)
             if link is not None:
                 self._evidence_claim_links[(link.target_claim_id, link.evidence_id)] = deepcopy(
                     link
@@ -3065,6 +3343,7 @@ class FixtureRepository(PersistenceRepository):
         branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         self._validate_claim_mutation(claim, expected_revision)
+        validate_evidence_record(evidence)
         self._validate_branch_evaluation(claim, branch_evaluation)
         existing_evidence = self._evidence.get(evidence.evidence_id)
         if (
@@ -3098,7 +3377,7 @@ class FixtureRepository(PersistenceRepository):
         )
         assert realtime_event is not None
         self._claims[claim.claim_id] = deepcopy(claim)
-        self._evidence[evidence.evidence_id] = deepcopy(evidence)
+        self._store_evidence(evidence)
         if branch_evaluation is not None:
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
         self._idempotency[lookup] = idempotency
@@ -3850,6 +4129,9 @@ class FixtureRepository(PersistenceRepository):
         existing = self._idempotency.get(lookup)
         if existing is not None and existing.request_fingerprint != idempotency.request_fingerprint:
             raise IdempotencyConflict(idempotency.key)
+        if message is not None:
+            assert stored_session is not None
+            self._preflight_messages((message,), sessions=(stored_session,))
         prepared_audit = (
             self._prepare_audit_events(claim, (audit_event,)) if audit_event is not None else ()
         )
@@ -4019,12 +4301,25 @@ class FixtureRepository(PersistenceRepository):
 
 
 def _serialize_material_claim_mutation(method_name: str) -> None:
-    """Wrap an existing Fixture mutation in the shared Claim mutation lock."""
+    """Run one Fixture mutation under the lock with complete rollback on failure."""
     method = getattr(FixtureRepository, method_name)
 
     def serialized(self: FixtureRepository, *args: Any, **kwargs: Any) -> Any:
         with self._claim_mutation_lock:
-            return method(self, *args, **kwargs)
+            excluded = {'_validation_seed_lock', '_claim_mutation_lock', '_realtime_condition'}
+            snapshot = {
+                key: deepcopy(value, {id(self): self})
+                for key, value in self.__dict__.items()
+                if key not in excluded
+            }
+            try:
+                return method(self, *args, **kwargs)
+            except Exception:
+                retained = {key: self.__dict__[key] for key in excluded}
+                self.__dict__.clear()
+                self.__dict__.update(snapshot)
+                self.__dict__.update(retained)
+                raise
 
     serialized.__name__ = method.__name__
     serialized.__qualname__ = method.__qualname__
@@ -4038,7 +4333,9 @@ for _material_claim_mutation in (
     'save_message_mutation',
     'save_agent_turn',
     'save_runtime_turn',
+    'save_assessor_reconciliation',
     'save_evidence',
+    'save_evidence_action_mutation',
     'save_evidence_mutation',
     'save_external_task',
     'save_external_task_request',

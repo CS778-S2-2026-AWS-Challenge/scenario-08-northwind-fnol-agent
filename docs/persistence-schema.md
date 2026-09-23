@@ -20,8 +20,12 @@ here.
 The account-data slice also persists account-owned `pol_`, `idn_`, and `pyd_` records with
 Fixture/MongoDB parity. Policy selection is an authoritative Claim transaction containing the
 proposed registered fact, Branch Evaluation, Claim revision, idempotency result, and value-free
-audit event. Protected records persist authenticated ciphertext and a last-four mask; plaintext
-bank and identity-document numbers never cross the protected-value adapter into repositories.
+audit event. Payout/contact selection follows the same transaction boundary: the Claim stores only
+the selected `payment_destination_id` plus the confirmed registered
+`claimant.contact_preference` fact, while the selected Payment Destination is rechecked for
+ownership, active state, and revision inside the transaction. Protected records persist
+authenticated ciphertext and a last-four mask; plaintext bank and identity-document numbers never
+cross the protected-value adapter into repositories or Claim State.
 
 The adapter owns bounded environment parsing and verified client construction through
 `MongoDBConnectionConfig` and `connect_mongodb_repository`. A connection is exposed to the
@@ -89,7 +93,7 @@ records remain target contracts.
 | Review | internal signals, source references, professional decisions, staff actions | `claim_id` and work identity |
 | Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps, and support continuation target (`resume_workflow_state`, `resume_next_action`) | `claim_id` and `handoff_id` |
 | Follow-up | due time, responsible party, attempt count, channel, outcome, status | `claim_id` and `follow_up_id` |
-| Integration | published provider configuration references, adapter capability/health projection, external-service consent, claim-creation result, durable routing operation intent/outcome, routing result, external participant task, returned task result and verification, idempotency result | integration identity, `claim_id`, task, result, or consent/operation identity |
+| Integration | published provider configuration references, adapter capability/health projection, external-service consent, durable Claim-creation operation and result, durable routing operation intent/outcome, routing result, external participant task, returned task result and verification, idempotency result | integration identity, `claim_id`, task, result, or consent/operation identity |
 | External request | implemented purpose, disclosed field names, consent and authority, preparation and first send identity, controlled assessor result and verification; target capability/requirement versions, attempts, and reconciliation | `claim_id`, `request_id`, linked to `task_id` |
 | Configuration | versioned Agent Policy, Registry snapshots, model profiles, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
 | Branch evaluation | immutable branch/form calculation evidence, selected family, active branches, field selection states, and Claim revision precondition | `claim_id`, `evaluation_id` |
@@ -456,8 +460,16 @@ the append-only audit collection through a bounded, filterable projection.
   active state is persisted in the independent staff identity store. Administration reads and
   updates these records through their repository interfaces; no Control Plane route writes Claim
   State or Workbench records.
-- Customer and Staff account writes use monotonically increasing revisions. Session revocation
-  advances only the targeted session revision and preserves its prior creation and expiry times.
+- Customer profile and communication-preference writes use the expected Customer revision in the
+  same compare-and-set operation that advances the monotonically increasing revision. Staff
+  account writes also use monotonically increasing revisions. Session revocation advances only
+  the targeted session revision and preserves its prior creation and expiry times.
+- Claimant account email is stored in its trimmed lowercase form. The authoritative account save
+  checks the expected account revision and normalized-email uniqueness as one operation. Fixture
+  persistence serializes that check and write; SQLite relies on its unique email constraint and
+  maps the constraint result to the same typed repository conflict. When different accounts race
+  for one email, exactly one write succeeds and the other leaves its account and revision
+  unchanged.
 - Existing local SQLite identity databases are upgraded in place with account revisions,
   timestamps, opaque session IDs, and session revisions. The migration preserves account/session
   relationships and assigns each legacy session one stable `ias_` ID before creating its unique
@@ -587,10 +599,18 @@ the append-only audit collection through a bounded, filterable projection.
   An identical idempotent replay is accepted; different content under the same identity is
   rejected. A summary that conflicts with current Claim State is omitted and recorded as a
   `summary_state_mismatch`; it never overwrites Claim facts.
-- Complete messages remain durable outside the bounded summary. Message lists use the stable
-  `(created_at, message_id)` ascending order, including when timestamps are equal.
+- Complete messages remain durable outside the bounded summary. Message lists use persisted
+  `in_reply_to` edges as the authoritative causal order, placing each reply after its target;
+  independent messages use the stable `(created_at, message_id)` ascending tie-break in
+  repositories, claimant history, and Workbench, including when timestamps are equal.
 - A message `in_reply_to` reference may identify only a message belonging to the same claim and
   interaction session.
+- Fixture and MongoDB writes fail closed when Message Evidence references are missing, duplicated,
+  or owned by another Claim; when a reply crosses Claim or Session boundaries; or when actor,
+  visibility, and claimant retry identity disagree.
+- Fixture and MongoDB writes apply the shared Evidence registry and lifecycle rules before every
+  Evidence persistence path. Kinds, related field codes, and `needed_for` purposes must be
+  registered and unique, and status/file-status combinations must describe a coherent lifecycle.
 - Resuming creates or activates an interaction session for the same `claim_id`; it does
   not create a duplicate working claim.
 - At most one claimant interaction session is active for a working claim unless a later
@@ -841,8 +861,24 @@ Evidence record or protected object.
   `value`, registered `reason_code`, non-empty immutable `source_refs`, typed `recorded_by`,
   `recorded_at`, and `recorded_revision`. It does not replace `claim_state`. `completed` requires a
   created external Claim result; `abandoned` and `closed` cannot coexist with one.
-- Successful external Claim creation writes the created result and `completed` disposition in the
-  same one-revision Claim mutation, referencing the authorising decision and external Claim.
+- A provider-accepted external Claim result is first persisted on the reserved `cco_` operation as
+  `settlement_pending`, with submitted delivery and `settle_recorded_result` recovery. Runtime then
+  writes that result and the `completed` disposition in one Claim revision, referencing the
+  authorising decision and external Claim, while atomically advancing the operation to `accepted`
+  and storing the applied Branch Evaluation. If the Claim compare-and-set conflicts, the recorded
+  result remains durable and an unchanged retry settles it without another provider create call.
+- A Claim-creation operation is durable execution evidence, not a second Claim lifecycle. It binds
+  one Claim to its customer, authorised decision/revision, request and Evidence-snapshot
+  fingerprints, authoritative route, adapter source, delivery observation, status, bounded failure
+  and recovery classification, optional accepted result, and timestamps. Fixture reserves it under
+  the Claim mutation lock and MongoDB reserves it transactionally with one operation per Claim.
+- `prepared` exists before the provider call. `retryable_failure` returns to `prepared` only for the
+  same immutable operation and only after a definitely unsubmitted timeout or unavailable result.
+  A submitted timeout or unavailable result, and either delivery observation for a partial result,
+  becomes `unknown_outcome`; reconciliation on that identity never dispatches another create call
+  and cannot erase the original create-call delivery observation. `settlement_pending` carries a
+  durable provider result until atomic Claim/operation/Branch Evaluation settlement; `accepted`
+  and `terminal_failure` are terminal.
 - Reopen clears only an eligible `abandoned`/`closed` disposition. The Fixture and MongoDB
   `save_claim_mutation_with_audit` boundary accepts the authenticated operation actor (claimant or
   staff), requires the same Claim and active-session pointer, and atomically stores the resulting

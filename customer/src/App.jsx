@@ -4,6 +4,7 @@ import {
   confirmClaimFields,
   createClaim,
   createExternalClaim,
+  createPaymentDestination,
   decideExternalServiceOffer,
   grantAssessorConsent,
   getAuthenticatedAccount,
@@ -13,6 +14,7 @@ import {
   getClaimEvidence,
   getRuntimeCapabilities,
   listClaims,
+  listPaymentDestinations,
   loginClaimant,
   logoutClaimant,
   requestId,
@@ -26,9 +28,8 @@ import {
   resumeClaimSession,
   streamRealtimeEvents,
   submitClaimMessage,
+  selectClaimPayoutContact,
   setClaimantAccessToken,
-  updateAccountPreferences,
-  updateAccountProfile,
   updateClaimField,
 } from './api.js'
 import './App.css'
@@ -39,12 +40,20 @@ import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
 import ClaimDocuments from './components/ClaimDocuments.jsx'
 import ClaimReviewPanel from './components/ClaimReviewPanel.jsx'
+import PayoutContactPanel from './components/PayoutContactPanel.jsx'
 import ConversationHistorySidebar from './components/ConversationHistorySidebar.jsx'
 import {
   AgentTurnDisclosure,
   AgentTurnPlaceholder,
 } from './components/AgentTurnActivity.jsx'
 import { completeTurnProgress, reduceTurnProgress } from './agentTurnProgress.js'
+import UserProfile from './components/UserProfile.jsx'
+import './styles/profile-shell.css'
+import './styles/profile-records.css'
+import './styles/profile-assets.css'
+import './styles/profile-responsive.css'
+import { profilePathForSection, profileSectionFromPath } from './profileRoutes.js'
+import useProfileController from './profile/useProfileController.js'
 import { documentAttentionCount } from './claimDocumentProjection.js'
 import {
   forgetAnonymousConversation,
@@ -73,6 +82,7 @@ const FIELD_LABELS = {
   'property.ongoing_risk': 'Ongoing property risk',
   'property.habitable': 'Property safe to live in',
   'contents.items': 'Damaged, lost, or stolen items',
+  'claimant.contact_preference': 'Preferred contact method',
 }
 
 const PERMANENT_ANONYMOUS_RESUME_FAILURES = new Set([
@@ -230,6 +240,8 @@ function mergeMessagesById(current, incoming) {
 const CLAIMANT_ACTION_KINDS = Object.freeze({
   'claimant.create_claim': 'create-claim',
   'claimant.review_details': 'review-details',
+  'claimant.review_payout_contact': 'payout-contact',
+  'claimant.review_agreement': 'review-agreement',
   'claimant.request_assessment': 'external-service',
   'claimant.retry_assessment': 'external-service',
   'claimant.track_assessment': 'external-service',
@@ -343,11 +355,14 @@ function claimProgress(nextStep, dynamicForm) {
 }
 
 function App() {
+  const initialProfileSection = profileSectionFromPath(globalThis.location?.pathname)
   const initialPage = (() => {
     const path = globalThis.location?.pathname || '/'
     if (path === '/auth/login') return 'login'
     if (path === '/auth/register') return 'register'
-    if (path === '/account') return 'account'
+    if (path === '/profile' || path === '/account' || initialProfileSection) {
+      return hasClaimantAccessToken() ? 'account' : 'login'
+    }
     if (/^\/account\/claims\/[^/]+\/evidence$/.test(path)) return 'claim-evidence'
     if (/^\/account\/claims\/[^/]+$/.test(path)) return 'claim-features'
     if (path === '/account/claims') return 'claim-history'
@@ -356,9 +371,17 @@ function App() {
     return 'home'
   })()
   const [page, setPageState] = useState(initialPage)
+  const [profileSection, setProfileSection] = useState(initialProfileSection)
   const [account, setAccount] = useState(null)
   const [authStatus, setAuthStatus] = useState('idle')
   const [authError, setAuthError] = useState('')
+  const [paymentDestinationState, setPaymentDestinationState] = useState({
+    claimId: null,
+    status: 'idle',
+    items: [],
+    error: '',
+  })
+  const [claimType, setClaimType] = useState('')
   const [draft, setDraft] = useState('')
   const [claim, setClaim] = useState(null)
   const [sessionId, setSessionId] = useState(null)
@@ -387,6 +410,11 @@ function App() {
   const [mobileView, setMobileView] = useState('chat')
   const [workspaceView, setWorkspaceView] = useState('chat')
   const [workspaceActive, setWorkspaceActive] = useState(false)
+  const profileController = useProfileController({
+    account,
+    setAccount,
+    enabled: page === 'account' || workspaceView === 'account',
+  })
   const [runtimeCapabilities, setRuntimeCapabilities] = useState({
     claim_types: ['motor', 'home', 'contents'],
     models: [],
@@ -439,6 +467,7 @@ function App() {
   const externalCapabilitiesDialogRef = useRef(null)
   const externalCapabilitiesHeadingRef = useRef(null)
   const externalCapabilitiesTriggerRef = useRef(null)
+  const presentedCapabilityCatalogues = useRef(new Set())
   const restoreCapabilityTriggerFocus = useRef(false)
   const followLatestMessages = useRef(true)
   const forceLatestMessages = useRef(false)
@@ -500,7 +529,11 @@ function App() {
       .catch(() => {
         setClaimantAccessToken(null)
         setClaimHistory(readAnonymousConversationHistory())
-        if (globalThis.location?.pathname === '/files' || globalThis.location?.pathname?.startsWith('/account/claims')) {
+        if (
+          ['/profile', '/account', '/files'].includes(globalThis.location?.pathname)
+          || globalThis.location?.pathname?.startsWith('/profile/')
+          || globalThis.location?.pathname?.startsWith('/account/claims')
+        ) {
           setPageState('login')
           globalThis.history?.replaceState({ northwindRoute: 'login' }, '', '/auth/login')
         }
@@ -539,7 +572,7 @@ function App() {
   function routeForPage(nextPage) {
     if (nextPage === 'login') return '/auth/login'
     if (nextPage === 'register') return '/auth/register'
-    if (nextPage === 'account') return '/account'
+    if (nextPage === 'account') return profilePathForSection(profileSection)
     if (nextPage === 'claim-history') return '/account/claims'
     if (nextPage === 'claim-features' && selectedHistoryClaimId) return `/account/claims/${encodeURIComponent(selectedHistoryClaimId)}`
     if (nextPage === 'claim-evidence' && selectedHistoryClaimId) return `/account/claims/${encodeURIComponent(selectedHistoryClaimId)}/evidence`
@@ -551,7 +584,8 @@ function App() {
 
   function setPage(nextPage, { replace = false } = {}) {
     setPageState(nextPage)
-    const nextPath = routeForPage(nextPage)
+    if (nextPage === 'account') setProfileSection(null)
+    const nextPath = nextPage === 'account' ? '/profile' : routeForPage(nextPage)
     if (globalThis.location?.pathname !== nextPath) {
       globalThis.history?.[replace ? 'replaceState' : 'pushState']({ northwindRoute: nextPage }, '', nextPath)
     }
@@ -560,7 +594,7 @@ function App() {
   function pageForPath(pathname) {
     if (pathname === '/auth/login') return 'login'
     if (pathname === '/auth/register') return 'register'
-    if (pathname === '/account') return account ? 'account' : 'login'
+    if (pathname === '/profile' || pathname === '/account' || profileSectionFromPath(pathname)) return account ? 'account' : 'login'
     if (pathname === '/account/claims') return account ? 'claim-history' : 'login'
     if (/^\/account\/claims\/[^/]+\/evidence$/.test(pathname)) return account ? 'claim-evidence' : 'login'
     if (/^\/account\/claims\/[^/]+$/.test(pathname)) return account ? 'claim-features' : 'login'
@@ -573,16 +607,20 @@ function App() {
   useEffect(() => {
     const onPopState = () => {
       const path = globalThis.location?.pathname || '/'
+      const nextProfileSection = profileSectionFromPath(path)
       const nextPage = pageForPath(path)
       setWorkspaceActive(path.startsWith('/claims/') && Boolean(claim))
+      setProfileSection(nextProfileSection)
       const historyClaimMatch = path.match(/^\/account\/claims\/([^/]+)/)
       setSelectedHistoryClaimId(historyClaimMatch ? decodeURIComponent(historyClaimMatch[1]) : null)
       setPageState(nextPage)
       const canonicalPath = ['claim-history', 'claim-features', 'claim-evidence'].includes(nextPage)
         ? path
-        : nextPage === 'home' && path.startsWith('/claims/') && claim?.claim_id
-          ? `/claims/${claim.claim_id}`
-          : routeForPage(nextPage)
+        : nextPage === 'account'
+          ? profilePathForSection(nextProfileSection)
+          : nextPage === 'home' && path.startsWith('/claims/') && claim?.claim_id
+            ? `/claims/${claim.claim_id}`
+            : routeForPage(nextPage)
       if (path !== canonicalPath) {
         globalThis.history?.replaceState({ northwindRoute: nextPage }, '', canonicalPath)
       }
@@ -599,7 +637,7 @@ function App() {
       : page === 'register'
         ? '/auth/register'
         : page === 'account'
-          ? '/account'
+          ? profilePathForSection(profileSection)
           : page === 'claim-history'
             ? '/account/claims'
             : page === 'claim-features' && selectedHistoryClaimId
@@ -614,7 +652,7 @@ function App() {
     if (globalThis.location?.pathname !== expectedPath) {
       globalThis.history?.replaceState({ northwindRoute: page }, '', expectedPath)
     }
-  }, [isWorkspaceActive, page, claim?.claim_id, selectedHistoryClaimId])
+  }, [isWorkspaceActive, page, claim?.claim_id, profileSection, selectedHistoryClaimId])
 
   const isBusy = [
     'starting',
@@ -627,6 +665,8 @@ function App() {
     'resuming',
     'granting-service-consent',
     'requesting-assessor',
+    'saving-payment-destination',
+    'saving-payout-contact',
   ].includes(status)
   const proposedFields = useMemo(
     () => Object.entries(form).filter(([, field]) => field.status === 'proposed'),
@@ -681,6 +721,77 @@ function App() {
     [claim],
   )
   const conversationActionKind = conversationAction?.kind || null
+  const accountCustomerId = account?.customer_id || null
+  const accountRevision = account?.revision || null
+
+  useEffect(() => {
+    if (conversationActionKind !== 'payout-contact' || !claim?.claim_id) {
+      setPaymentDestinationState({
+        claimId: null,
+        status: 'idle',
+        items: [],
+        error: '',
+      })
+      return undefined
+    }
+    if (!accountCustomerId) {
+      setPaymentDestinationState({
+        claimId: claim.claim_id,
+        status: 'idle',
+        items: [],
+        error: '',
+      })
+      return undefined
+    }
+
+    let active = true
+    const controller = new AbortController()
+    setPaymentDestinationState((current) => ({
+      claimId: claim.claim_id,
+      status: 'loading',
+      items: current.claimId === claim.claim_id ? current.items : [],
+      error: '',
+    }))
+    Promise.all([
+      getAuthenticatedAccount(),
+      listPaymentDestinations({ limit: 100, signal: controller.signal }),
+    ])
+      .then(([currentAccount, destinations]) => {
+        if (!active) return
+        setAccount(currentAccount)
+        setPaymentDestinationState({
+          claimId: claim.claim_id,
+          status: 'ready',
+          items: destinations.items || [],
+          error: '',
+        })
+      })
+      .catch((requestError) => {
+        if (!active || requestError?.name === 'AbortError') return
+        setPaymentDestinationState({
+          claimId: claim.claim_id,
+          status: 'error',
+          items: [],
+          error: requestError.message || 'Payout details could not be loaded.',
+        })
+      })
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [accountCustomerId, accountRevision, claim?.claim_id, conversationActionKind])
+  const externalCapabilityKey = claim?.external_capabilities?.length > 0
+    ? `${claim.claim_id}:${claim.external_capabilities
+        .map((capability) => `${capability.service_identity}:${capability.registry_version || ''}`)
+        .join('|')}`
+    : null
+
+  useEffect(() => {
+    if (!externalCapabilityKey || !isWorkspaceActive) return
+    if (presentedCapabilityCatalogues.current.has(externalCapabilityKey)) return
+    presentedCapabilityCatalogues.current.add(externalCapabilityKey)
+    setExternalCapabilitiesOpen(true)
+  }, [externalCapabilityKey, isWorkspaceActive])
 
   useEffect(() => {
     const dialog = externalCapabilitiesDialogRef.current
@@ -1544,6 +1655,7 @@ function App() {
       if (!activeClaim) {
         const created = await createClaim({
           idempotencyKey: operation.claimKey,
+          incidentType: claimType || null,
           modelProfileId: selectedModel,
         })
         activeClaim = created.claim
@@ -2136,6 +2248,14 @@ function App() {
     resumeSavedReport(claimId)
   }
 
+  function continueReportFromClaimHistory(claimId) {
+    // Claim history can be open as a workspace utility view; leave it for the conversation
+    // before taking the same resume path as conversation history.
+    setWorkspaceView('chat')
+    setSelectedHistoryClaimId(null)
+    resumeHomepageConversation(claimId)
+  }
+
   async function signIn(event) {
     event.preventDefault()
     const formData = new FormData(event.currentTarget)
@@ -2237,7 +2357,7 @@ function App() {
 
   function openClaimHistory() {
     setSelectedHistoryClaimId(null)
-    if (hasStarted) {
+    if (isWorkspaceActive) {
       setWorkspaceView('history')
       setMobileView('chat')
     } else {
@@ -2246,9 +2366,11 @@ function App() {
     if (account) loadSavedReports().catch(() => {})
   }
 
+  // The account pages show these Claim record views whenever the workspace is inactive, even
+  // while a conversation is still loaded, so navigation follows isWorkspaceActive as they do.
   function openClaimFeatures(selectedClaim) {
     setSelectedHistoryClaimId(selectedClaim.claim_id)
-    if (hasStarted) {
+    if (isWorkspaceActive) {
       setWorkspaceView('claim-features')
       setMobileView('chat')
     } else {
@@ -2263,7 +2385,7 @@ function App() {
 
   function openClaimEvidence() {
     if (!selectedHistoryClaim) return
-    if (hasStarted) {
+    if (isWorkspaceActive) {
       setWorkspaceView('claim-evidence')
       setMobileView('chat')
     } else {
@@ -2322,28 +2444,130 @@ function App() {
     }
   }
 
-  async function saveProfile(event) {
-    event.preventDefault()
-    const formData = new FormData(event.currentTarget)
-    setAuthStatus('saving'); setAuthError('')
-    try {
-      setAccount(await updateAccountProfile({
-        display_name: formData.get('display_name'), phone: formData.get('phone'),
-      }))
-    } catch (requestError) { setAuthError(requestError.message) }
-    finally { setAuthStatus('idle') }
+  function openProfileSection(section) {
+    setProfileSection(section)
+    setPageState('account')
+    const nextPath = profilePathForSection(section)
+    if (globalThis.location?.pathname !== nextPath) {
+      globalThis.history?.pushState({ northwindRoute: 'account', profileSection: section }, '', nextPath)
+    }
   }
 
-  async function savePreferences(event) {
-    event.preventDefault()
-    const formData = new FormData(event.currentTarget)
-    setAuthStatus('saving'); setAuthError('')
+
+  async function addPayoutDestination({ accountType, accountNumber }) {
+    if (!account) {
+      setPage('login')
+      throw new ApiRequestError('Log in before saving payout details.', {
+        code: 'AUTHENTICATION_REQUIRED',
+        status: 401,
+      })
+    }
+    setStatus('saving-payment-destination')
     try {
-      setAccount(await updateAccountPreferences({
-        email: formData.get('email') === 'on', sms: formData.get('sms') === 'on',
+      const created = await createPaymentDestination({
+        accountType,
+        accountNumber,
+        idempotencyKey: requestId('payment-destination'),
+      })
+      setPaymentDestinationState((current) => ({
+        ...current,
+        status: 'ready',
+        error: '',
+        items: [
+          created,
+          ...current.items.filter(
+            (item) => item.payment_destination_id !== created.payment_destination_id,
+          ),
+        ],
       }))
-    } catch (requestError) { setAuthError(requestError.message) }
-    finally { setAuthStatus('idle') }
+      return created
+    } finally {
+      setStatus('idle')
+    }
+  }
+
+  async function continuePayoutContact({ paymentDestinationId, contactPreference }) {
+    const primaryAction = claim?.primary_action
+    if (
+      !claim
+      || !account
+      || isBusy
+      || primaryAction?.action_code !== 'claimant.review_payout_contact'
+      || !primaryAction.available
+      || Number(primaryAction.claim_revision) !== Number(claim.revision)
+    ) {
+      throw new ApiRequestError(
+        account
+          ? 'The Claim changed before payout details could be saved. Reload and try again.'
+          : 'Log in before saving payout details.',
+        {
+          code: account ? 'REVISION_CONFLICT' : 'AUTHENTICATION_REQUIRED',
+          status: account ? 409 : 401,
+          retryable: Boolean(account),
+        },
+      )
+    }
+
+    setStatus('saving-payout-contact')
+    try {
+      const response = await selectClaimPayoutContact({
+        claimId: claim.claim_id,
+        revision: claim.revision,
+        paymentDestinationId,
+        contactPreference,
+        idempotencyKey: requestId('payout-contact'),
+      })
+      rememberClaimRevision(response.revision)
+      setClaim((current) => current
+        ? {
+          ...current,
+          revision: response.revision,
+          payment_destination_id: response.payment_destination_id,
+          form: {
+            ...current.form,
+            'claimant.contact_preference': response.contact_preference,
+          },
+          customer_next_step: response.customer_next_step,
+          primary_action: response.primary_action,
+        }
+        : current)
+      setForm((current) => ({
+        ...current,
+        'claimant.contact_preference': response.contact_preference,
+      }))
+      setNextStep(response.customer_next_step)
+
+      try {
+        const snapshot = await getClaim(claim.claim_id)
+        if (!applyClaimSnapshot(snapshot, { minimumRevision: response.revision })) {
+          throw new ApiRequestError(
+            'Northwind saved your details but the latest Claim readback is not available yet.',
+            { code: 'STALE_READBACK', retryable: true },
+          )
+        }
+        setRealtimeHealth('healthy')
+      } catch (readbackError) {
+        setRealtimeHealth('stale')
+        throw readbackError
+      }
+      return response
+    } catch (requestError) {
+      if (
+        requestError instanceof ApiRequestError
+        && requestError.status === 409
+        && claim?.claim_id
+      ) {
+        try {
+          const current = await getClaim(claim.claim_id)
+          applyClaimSnapshot(current)
+        } catch {
+          setRealtimeHealth('stale')
+        }
+      }
+      throw requestError
+    } finally {
+      setStatus('idle')
+    }
   }
 
   function conversationPanelExpanded(panel) {
@@ -2406,6 +2630,35 @@ function App() {
         />
       )
     }
+    if (conversationActionKind === 'payout-contact') {
+      return (
+        <PayoutContactPanel
+          key={`${claim.claim_id}:${conversationAction.identity}`}
+          account={account}
+          claim={claim}
+          destinations={paymentDestinationState.items}
+          loading={paymentDestinationState.status === 'loading'}
+          loadError={paymentDestinationState.error}
+          busy={isBusy}
+          onAddDestination={addPayoutDestination}
+          onContinue={continuePayoutContact}
+          onManageContact={() => setWorkspaceView('account')}
+          onLogin={() => setPage('login')}
+        />
+      )
+    }
+    if (conversationActionKind === 'review-agreement') {
+      return (
+        <ConversationActionCard
+          key={conversationAction.identity}
+          icon="→"
+          title="Agreement & confirmation"
+          description="Your payout destination and contact preference are saved. Continue to Step 4."
+          status="Step 4 ready"
+          onClick={() => setWorkspaceView('agreement')}
+        />
+      )
+    }
     if (conversationActionKind === 'create-claim') {
       return (
         <ConversationActionCard
@@ -2423,9 +2676,10 @@ function App() {
   }
 
   const isUrgentSupport = handoff?.support_need === 'urgent'
+  const isProfilePage = page === 'account'
 
   return (
-    <div className={`customer-app ${!isWorkspaceActive && page === 'home' ? 'entry-shell' : ''}`}>
+    <div className={`customer-app ${!isWorkspaceActive && page === 'home' ? 'entry-shell' : ''} ${isProfilePage ? 'is-profile-page' : ''}`}>
       <header className={`product-header ${isWorkspaceActive && !['login', 'register'].includes(page) ? 'is-intake-header' : ''}`}>
         <div className="header-leading">
           <a className="brand" href="/" onClick={(event) => { event.preventDefault(); setPage('home') }} aria-label="Northwind home">
@@ -2448,7 +2702,7 @@ function App() {
         {!isWorkspaceActive && page === 'home' && (
           <nav className="entry-header-actions" aria-label="Account">
             <button className="entry-header-link" type="button" onClick={() => setPage(account ? 'account' : 'login')}>
-              {account ? 'My account' : 'Log in'}
+              {account ? 'Profile' : 'Log in'}
             </button>
             {!account && (
               <button className="entry-header-account" type="button" onClick={() => setPage('register')}>
@@ -2458,8 +2712,12 @@ function App() {
           </nav>
         )}
         {!isWorkspaceActive && page !== 'home' && page !== 'how-it-works' && (
-          <button className="login-button" type="button" onClick={() => setPage(account ? 'account' : 'login')}>
-            {account ? 'My account' : 'Log in'}
+          <button
+            className="login-button"
+            type="button"
+            onClick={() => setPage(isProfilePage ? 'home' : account ? 'account' : 'login')}
+          >
+            {isProfilePage ? 'Back' : account ? 'Profile' : 'Log in'}
           </button>
         )}
         {isWorkspaceActive && !['login', 'register'].includes(page) && (
@@ -2545,6 +2803,8 @@ function App() {
                   refreshing={status === 'loading-reports'}
                   onRetry={loadSavedReports}
                   onSelect={openClaimFeatures}
+                  onStartClaim={startNewChat}
+                  onContinueReport={continueReportFromClaimHistory}
                 />
               )}
               {page === 'claim-features' && (
@@ -2595,36 +2855,20 @@ function App() {
             <p className="evidence-history-state" role="status">Checking your account…</p>
           )}
         </main>
-      ) : !isWorkspaceActive && page === 'account' && account ? (
-        <main className="auth-page auth-page-account">
-          <section className="login-card account-card" aria-labelledby="account-title">
-            <button className="back-link" type="button" onClick={() => setPage('home')}>← Back to claims</button>
-            <p className="eyebrow">Northwind account</p>
-            <h1 id="account-title">Your account</h1>
-            <p className="prototype-note" role="note">Manage your profile and communication preferences.</p>
-            <form className="login-form" onSubmit={saveProfile}>
-              <label htmlFor="account-name">Display name</label>
-              <input id="account-name" name="display_name" defaultValue={account.profile.display_name} required />
-              <label htmlFor="account-email">Email address</label>
-              <input id="account-email" value={account.profile.email} readOnly />
-              <label htmlFor="account-phone">Phone</label>
-              <input id="account-phone" name="phone" defaultValue={account.profile.phone} />
-              <button className="primary-button" disabled={authStatus !== 'idle'}>Save profile</button>
-            </form>
-            <form className="login-form" onSubmit={savePreferences}>
-              <label><input name="email" type="checkbox" defaultChecked={account.preferences.email} /> Email updates</label>
-              <label><input name="sms" type="checkbox" defaultChecked={account.preferences.sms} /> SMS updates</label>
-              <button className="secondary-button" disabled={authStatus !== 'idle'}>Save preferences</button>
-            </form>
-            {authError && <p className="backend-status is-error" role="alert">{authError}</p>}
-            <button className="secondary-button" type="button" onClick={openSavedClaims} disabled={isBusy}>
-              View Claim history
-            </button>
-            <button className="secondary-button" type="button" onClick={() => setPage('files')}>
-              View evidence history
-            </button>
-            <button className="secondary-button" type="button" onClick={signOut} disabled={authStatus !== 'idle'}>Log out</button>
-          </section>
+      ) : !isWorkspaceActive && page === 'account' ? (
+        <main className="profile-page">
+          {account ? (
+            <UserProfile
+              account={account}
+              activeSection={profileSection}
+              controller={profileController}
+              onOpenClaims={openSavedClaims}
+              onSelectSection={openProfileSection}
+              onSignOut={signOut}
+            />
+          ) : (
+            <p className="profile-loading" role="status">Checking your account…</p>
+          )}
         </main>
       ) : (page === 'login' || page === 'register') ? (
         <main className="auth-page auth-page-login">
@@ -2694,10 +2938,15 @@ function App() {
                   buttonLabel={status === 'starting' ? 'Starting claim...' : failedMessage ? 'Retry claim message' : 'Start claim'}
                   error={error}
                   placeholder="Tell us what happened…"
+                  showClaimTypeControl
                   showModelControl
+                  claimType={claimType}
+                  setClaimType={setClaimType}
+                  claimTypes={runtimeCapabilities.claim_types}
                   models={runtimeCapabilities.models}
                   selectedModel={selectedModel}
                   setSelectedModel={setSelectedModel}
+                  claimTypeLocked={isWorkspaceActive && Boolean(sessionId)}
                   attachments={attachments}
                   onFileSelected={handleFileSelected}
                   onRemoveAttachment={removeComposerAttachment}
@@ -2786,7 +3035,7 @@ function App() {
                 <span className="intake-profile-avatar">{account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}</span>
                 <span className="intake-profile-copy">
                   <span>{account?.profile?.display_name || 'Log in to save your chat'}</span>
-                  <small>{account?.profile?.email || 'Account and preferences'}</small>
+                  <small>{account?.profile?.email || 'Profile and preferences'}</small>
                 </span>
               </button>
             </div>
@@ -2822,8 +3071,10 @@ function App() {
                       : workspaceView === 'external-services'
                         ? 'External services'
                         : workspaceView === 'account'
-                          ? 'Your account'
-                          : 'Evidence history'}
+                          ? 'Profile'
+                          : workspaceView === 'agreement'
+                            ? 'Agreement & confirmation'
+                            : 'Evidence history'}
               </h1>
               <p>
                 {workspaceView === 'privacy'
@@ -2835,8 +3086,10 @@ function App() {
                       : workspaceView === 'external-services'
                         ? 'See the external service currently recorded for this Claim, including what may be shared and what happens next.'
                         : workspaceView === 'account'
-                          ? 'Manage your profile and communication preferences.'
-                          : workspaceView === 'claim-evidence'
+                          ? 'Manage the account details Northwind currently supports and review unavailable profile capabilities.'
+                          : workspaceView === 'agreement'
+                            ? 'Your payout destination and preferred contact method are saved. Agreement review and final Claim confirmation happen in Step 4.'
+                            : workspaceView === 'claim-evidence'
                             ? 'Review the files and supporting material recorded for the selected Claim.'
                             : 'Review files retained across your Northwind Claims, including where they came from and their latest processing state.'}
               </p>
@@ -2849,6 +3102,8 @@ function App() {
                     refreshing={status === 'loading-reports'}
                     onRetry={loadSavedReports}
                     onSelect={openClaimFeatures}
+                    onStartClaim={startNewChat}
+                    onContinueReport={continueReportFromClaimHistory}
                   />
                 ) : (
                   <div className="claim-history-state">
@@ -2871,22 +3126,25 @@ function App() {
               )}
               {workspaceView === 'account' && account && (
                 <div className="workspace-account-content">
-                  <form className="login-form" onSubmit={saveProfile}>
-                    <label htmlFor="workspace-account-name">Display name</label>
-                    <input id="workspace-account-name" name="display_name" defaultValue={account.profile.display_name} required />
-                    <label htmlFor="workspace-account-email">Email address</label>
-                    <input id="workspace-account-email" value={account.profile.email} readOnly />
-                    <label htmlFor="workspace-account-phone">Phone</label>
-                    <input id="workspace-account-phone" name="phone" defaultValue={account.profile.phone} />
-                    <button className="primary-button" disabled={authStatus !== 'idle'}>Save profile</button>
-                  </form>
-                  <form className="login-form" onSubmit={savePreferences}>
-                    <label><input name="email" type="checkbox" defaultChecked={account.preferences.email} /> Email updates</label>
-                    <label><input name="sms" type="checkbox" defaultChecked={account.preferences.sms} /> SMS updates</label>
-                    <button className="secondary-button" disabled={authStatus !== 'idle'}>Save preferences</button>
-                  </form>
-                  <button className="secondary-button" type="button" onClick={signOut} disabled={authStatus !== 'idle'}>Log out</button>
-                  {authError && <p className="backend-status is-error" role="alert">{authError}</p>}
+                  <UserProfile
+                    account={account}
+                    activeSection={profileSection}
+                    controller={profileController}
+                    embedded
+                    onOpenClaims={openClaimHistory}
+                    onSelectSection={openProfileSection}
+                    onSignOut={signOut}
+                  />
+                </div>
+              )}
+
+              {workspaceView === 'agreement' && (
+                <div className="claim-history-state" role="status">
+                  <h2>Step 3 complete</h2>
+                  <p>
+                    Northwind has saved the payout destination and preferred contact method for this Claim.
+                    Agreement content and final submission remain governed by the Step 4 flow.
+                  </p>
                 </div>
               )}
               {workspaceView === 'claim-evidence' && selectedHistoryClaim && (
@@ -3140,9 +3398,13 @@ function App() {
                     : 'Send'}
               error={failedMessage?.message || error}
               variant="workspace"
+              claimType={claimType}
+              setClaimType={setClaimType}
+              claimTypes={runtimeCapabilities.claim_types}
               models={runtimeCapabilities.models}
               selectedModel={selectedModel}
               setSelectedModel={setSelectedModel}
+              claimTypeLocked={Boolean(sessionId)}
               attachments={attachments}
               onFileSelected={handleFileSelected}
               onRemoveAttachment={removeComposerAttachment}

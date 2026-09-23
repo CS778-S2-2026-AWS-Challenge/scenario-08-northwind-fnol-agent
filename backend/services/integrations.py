@@ -6,6 +6,7 @@ from backend.adapters.claims_service import (
     AssessorReconciliationRequest,
     AssessorResultRequest,
     AssessorServiceAdapter,
+    ClaimCreationAdapterFailure,
     ClaimsServiceAdapter,
 )
 from backend.adapters.evidence_storage import (
@@ -26,7 +27,21 @@ from backend.domain.audit import (
     AuditSubjectType,
     AuditVisibility,
 )
-from backend.domain.evidence import evidence_state_for, evidence_summary_for
+from backend.domain.claim_creation import (
+    ClaimCreationDelivery,
+    ClaimCreationFailureCode,
+    ClaimCreationOperationRecord,
+    ClaimCreationOperationStatus,
+    ClaimCreationRecovery,
+    claim_creation_operation_id,
+    classify_claim_creation_failure,
+    evidence_snapshot_fingerprint,
+)
+from backend.domain.evidence import (
+    evidence_state_for,
+    evidence_summary_for,
+    validate_evidence_record,
+)
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
     ASSESSOR_SERVICE_IDENTITY,
@@ -1507,6 +1522,259 @@ def reconcile_assessor_routing(
     return result, outcome.replayed
 
 
+def _validate_claim_creation_result(
+    adapter: ClaimsServiceAdapter,
+    operation: ClaimCreationOperationRecord,
+    result: ExternalClaimResult,
+) -> str | None:
+    if result.source is not adapter.integration_source:
+        raise ApiError(
+            status_code=502,
+            code='DEPENDENCY_FAILED',
+            message='The claims service returned a result with an invalid source.',
+            details=[
+                ErrorDetail(
+                    field='source',
+                    reason='The result source must match the installed claims adapter.',
+                )
+            ],
+            retryable=False,
+        )
+    if result.route != operation.route:
+        raise ApiError(
+            status_code=502,
+            code='DEPENDENCY_FAILED',
+            message='The claims service returned a result for an invalid route.',
+            details=[
+                ErrorDetail(
+                    field='route',
+                    reason='The result route must match the authoritative Claim route.',
+                )
+            ],
+            retryable=False,
+        )
+    external_claim_ref = result.external_claim_id or result.claim_number
+    if result.creation_status is ClaimCreationStatus.CREATED and external_claim_ref is None:
+        raise ApiError(
+            status_code=502,
+            code='DEPENDENCY_FAILED',
+            message='The claims service created a Claim without a stable reference.',
+            details=[
+                ErrorDetail(
+                    field='external_claim',
+                    reason='A created result requires an external Claim identifier.',
+                )
+            ],
+        )
+    return external_claim_ref
+
+
+def _record_claim_creation_result(
+    repository: PersistenceRepository,
+    adapter: ClaimsServiceAdapter,
+    operation: ClaimCreationOperationRecord,
+    result: ExternalClaimResult,
+) -> ClaimCreationOperationRecord:
+    _validate_claim_creation_result(adapter, operation, result)
+    recorded = operation.model_copy(
+        update={
+            'status': ClaimCreationOperationStatus.SETTLEMENT_PENDING,
+            'delivery': ClaimCreationDelivery.SUBMITTED,
+            'failure_code': None,
+            'recovery': ClaimCreationRecovery.SETTLE_RECORDED_RESULT,
+            'result': result,
+            'updated_at': now_utc(),
+        }
+    )
+    try:
+        repository.save_claim_creation_operation(recorded)
+    except (IdempotencyConflict, KeyError) as conflict:
+        raise _idempotency_error() from conflict
+    return recorded
+
+
+def _settle_recorded_claim_creation(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    decision: AgentDecisionRecord,
+    operation: ClaimCreationOperationRecord,
+    *,
+    replayed: bool,
+) -> tuple[ExternalClaimResult, bool]:
+    result = operation.result
+    if result is None or operation.status is not ClaimCreationOperationStatus.SETTLEMENT_PENDING:
+        raise _idempotency_error()
+    if claim.external_claim is not None or claim.terminal_disposition is not None:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='The recorded Claim creation result cannot settle this terminal Claim.',
+        )
+    timestamp = now_utc()
+    created = result.creation_status is ClaimCreationStatus.CREATED
+    external_claim_ref = result.external_claim_id or result.claim_number
+    resulting_revision = claim.revision + 1
+    updated_claim = claim.model_copy(
+        update={
+            'external_claim': result,
+            'external_claim_source_revision': operation.authorised_revision,
+            'external_claim_fingerprint': operation.request_fingerprint,
+            'terminal_disposition': (
+                ClaimTerminalDisposition(
+                    value=TerminalDispositionValue.COMPLETED,
+                    reason_code=TerminalDispositionReasonCode.CLAIM_CREATED,
+                    source_refs=[decision.decision_id, external_claim_ref],
+                    recorded_by=ActorReference(
+                        actor_type=ActorType.SYSTEM,
+                        actor_id='claims_service_integration',
+                    ),
+                    recorded_at=timestamp,
+                    recorded_revision=resulting_revision,
+                )
+                if created and external_claim_ref is not None
+                else None
+            ),
+            'route': result.route,
+            'assignee_id': claim.assignee_id,
+            'claim_state': claim.claim_state.model_copy(
+                update={
+                    'workflow_state': (
+                        WorkflowState.CREATED if created else claim.claim_state.workflow_state
+                    ),
+                    'next_action': AgentAction.PROCEED,
+                }
+            ),
+            'customer_next_step': CustomerNextStep(
+                status='claim_created' if created else 'claim_creation_pending',
+                summary=result.next_step,
+                responsible_party=ResponsibleParty.SYSTEM,
+                expected_by=result.expected_by,
+            ),
+            'revision': resulting_revision,
+            'updated_at': timestamp,
+        }
+    )
+    accepted = operation.model_copy(
+        update={
+            'status': ClaimCreationOperationStatus.ACCEPTED,
+            'recovery': None,
+            'updated_at': timestamp,
+        }
+    )
+    try:
+        repository.save_claim_creation_outcome(
+            updated_claim,
+            claim.revision,
+            accepted,
+            build_applied_branch_evaluation(
+                updated_claim,
+                repository=repository,
+                recomputation_reason='integration_result_changed',
+            ),
+        )
+    except RevisionConflict as conflict:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The Claim changed while the recorded provider result was settling.',
+            retryable=True,
+            current_revision=conflict.current_revision,
+        ) from conflict
+    except (IdempotencyConflict, KeyError) as conflict:
+        raise _idempotency_error() from conflict
+    return result, replayed
+
+
+def _unknown_claim_creation_operation(
+    operation: ClaimCreationOperationRecord,
+) -> ClaimCreationOperationRecord:
+    if operation.status is ClaimCreationOperationStatus.UNKNOWN_OUTCOME:
+        return operation.model_copy(update={'updated_at': now_utc()})
+    status, recovery = classify_claim_creation_failure(
+        ClaimCreationFailureCode.PARTIAL,
+        ClaimCreationDelivery.SUBMITTED,
+    )
+    return operation.model_copy(
+        update={
+            'status': status,
+            'delivery': ClaimCreationDelivery.SUBMITTED,
+            'failure_code': ClaimCreationFailureCode.PARTIAL,
+            'recovery': recovery,
+            'updated_at': now_utc(),
+        }
+    )
+
+
+def _recover_claim_creation_operation(
+    repository: PersistenceRepository,
+    adapter: ClaimsServiceAdapter,
+    payload: CreateExternalClaimRequest,
+    fingerprint: str,
+    claim: WorkingClaim,
+    decision: AgentDecisionRecord,
+    operation: ClaimCreationOperationRecord,
+) -> tuple[ExternalClaimResult, bool] | None:
+    if (
+        operation.request_fingerprint != fingerprint
+        or operation.integration_source is not adapter.integration_source
+    ):
+        raise _idempotency_error()
+    if operation.status is ClaimCreationOperationStatus.SETTLEMENT_PENDING:
+        return _settle_recorded_claim_creation(
+            repository,
+            claim,
+            decision,
+            operation,
+            replayed=True,
+        )
+    if operation.status in {
+        ClaimCreationOperationStatus.PREPARED,
+        ClaimCreationOperationStatus.UNKNOWN_OUTCOME,
+    }:
+        try:
+            reconciled = adapter.reconcile_claim(payload, fingerprint)
+        except AdapterIdempotencyConflict as conflict:
+            raise _idempotency_error() from conflict
+        except ClaimCreationAdapterFailure as failure:
+            unresolved = _unknown_claim_creation_operation(operation)
+            repository.save_claim_creation_operation(unresolved)
+            raise ApiError(
+                status_code=503,
+                code='DEPENDENCY_UNAVAILABLE',
+                message='The Claim creation outcome remains unknown after reconciliation.',
+                details=[ErrorDetail(field='claims_service', reason=failure.code.value)],
+                retryable=True,
+            ) from failure
+        if reconciled is None:
+            unresolved = _unknown_claim_creation_operation(operation)
+            repository.save_claim_creation_operation(unresolved)
+            raise ApiError(
+                status_code=503,
+                code='DEPENDENCY_UNAVAILABLE',
+                message='The Claim creation outcome remains unknown after reconciliation.',
+                retryable=True,
+            )
+        recorded = _record_claim_creation_result(
+            repository,
+            adapter,
+            operation,
+            reconciled.result,
+        )
+        latest_claim = repository.get_claim_internal(claim.claim_id)
+        if latest_claim is None:
+            raise _claim_not_found()
+        return _settle_recorded_claim_creation(
+            repository,
+            latest_claim,
+            decision,
+            recorded,
+            replayed=True,
+        )
+    if operation.status is ClaimCreationOperationStatus.RETRYABLE_FAILURE:
+        return None
+    raise _idempotency_error()
+
+
 def create_external_claim(
     repository: PersistenceRepository,
     adapter: ClaimsServiceAdapter,
@@ -1516,27 +1784,31 @@ def create_external_claim(
     claim = repository.get_claim_internal(payload.working_claim_id)
     if claim is None:
         raise _claim_not_found()
-
     if claim.external_claim is not None:
         if claim.external_claim_fingerprint != fingerprint:
             raise _idempotency_error()
         return claim.external_claim, True
 
-    if claim.terminal_disposition is not None:
-        raise ApiError(
-            status_code=409,
-            code='INVALID_STATE_TRANSITION',
-            message='A terminal Claim cannot start Claim creation.',
-        )
-
-    if claim.revision != payload.claim_revision:
-        raise ApiError(
-            status_code=409,
-            code='REVISION_CONFLICT',
-            message='The claim changed after claim creation was authorised.',
-            retryable=True,
-            current_revision=claim.revision,
-        )
+    operation_id = claim_creation_operation_id(
+        claim.claim_id,
+        payload.authorised_decision_id,
+    )
+    existing = repository.get_claim_creation_operation(operation_id)
+    if existing is None:
+        if claim.terminal_disposition is not None:
+            raise ApiError(
+                status_code=409,
+                code='INVALID_STATE_TRANSITION',
+                message='A terminal Claim cannot start Claim creation.',
+            )
+        if claim.revision != payload.claim_revision:
+            raise ApiError(
+                status_code=409,
+                code='REVISION_CONFLICT',
+                message='The claim changed after claim creation was authorised.',
+                retryable=True,
+                current_revision=claim.revision,
+            )
 
     decision = repository.get_agent_decision_internal(
         payload.working_claim_id,
@@ -1547,13 +1819,50 @@ def create_external_claim(
         or decision.action is not AgentAction.CREATE_CLAIM
         or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
         or 'CLAIM_CREATION_AUTHORISED' not in decision.reason_codes
+        or decision.resulting_revision != payload.claim_revision
     ):
         raise _authorisation_error(
-            'Claim creation requires an authorised CREATE_CLAIM decision.',
+            'Claim creation requires an authorised decision for this Claim revision.',
         )
-    if decision.resulting_revision != payload.claim_revision:
-        raise _authorisation_error('The authorising decision does not match this claim revision.')
 
+    if existing is not None:
+        recovered = _recover_claim_creation_operation(
+            repository,
+            adapter,
+            payload,
+            fingerprint,
+            claim,
+            decision,
+            existing,
+        )
+        if recovered is not None:
+            return recovered
+
+    if claim.terminal_disposition is not None:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='A terminal Claim cannot start Claim creation.',
+        )
+    if claim.revision != payload.claim_revision:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The claim changed after claim creation was authorised.',
+            retryable=True,
+            current_revision=claim.revision,
+        )
+
+    expected_route = f'standard_{claim.incident_type}_intake'
+    if payload.route != expected_route:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The Claim creation route does not match the persisted Claim family.',
+            details=[
+                ErrorDetail(field='route', reason=f'Use the authoritative route {expected_route}.')
+            ],
+        )
     confirmed_form = {
         field_code: field
         for field_code, field in claim.form.items()
@@ -1572,110 +1881,145 @@ def create_external_claim(
             ],
         )
 
-    evidence_records = {
-        evidence_id: repository.get_evidence(
-            payload.working_claim_id,
-            evidence_id,
-            claim.customer_id,
+    evidence = repository.list_evidence(payload.working_claim_id, claim.customer_id)
+    evidence_errors: list[ErrorDetail] = []
+    try:
+        for item in evidence:
+            validate_evidence_record(item)
+    except ValueError as invalid_evidence:
+        evidence_errors.append(ErrorDetail(field='evidence_refs', reason=str(invalid_evidence)))
+    if len(payload.evidence_refs) != len(set(payload.evidence_refs)):
+        evidence_errors.append(
+            ErrorDetail(field='evidence_refs', reason='Evidence references must be unique.')
         )
-        for evidence_id in payload.evidence_refs
+    if set(payload.evidence_refs) != {item.evidence_id for item in evidence}:
+        evidence_errors.append(
+            ErrorDetail(
+                field='evidence_refs',
+                reason='Send the complete persisted Evidence snapshot for this Claim.',
+            )
+        )
+    expected_pending = {
+        (item.evidence_id, item.kind, tuple(item.needed_for))
+        for item in evidence
+        if item.status is EvidenceStatus.PENDING
     }
-    missing_evidence = [
-        evidence_id for evidence_id, record in evidence_records.items() if record is None
-    ]
-    pending_invalid: list[str] = []
-    for item in payload.pending_evidence:
-        evidence = evidence_records.get(item.evidence_id)
-        if evidence is None or evidence.kind != item.kind:
-            pending_invalid.append(item.evidence_id)
-    if missing_evidence or pending_invalid:
-        invalid = sorted(set(missing_evidence + pending_invalid))
+    supplied_pending = {
+        (item.evidence_id, item.kind, tuple(item.needed_for)) for item in payload.pending_evidence
+    }
+    if (
+        len(payload.pending_evidence) != len(supplied_pending)
+        or supplied_pending != expected_pending
+    ):
+        evidence_errors.append(
+            ErrorDetail(
+                field='pending_evidence',
+                reason='Pending Evidence must exactly match the persisted Evidence snapshot.',
+            )
+        )
+    snapshot_fingerprint = evidence_snapshot_fingerprint(evidence)
+    if payload.evidence_snapshot_fingerprint != snapshot_fingerprint:
+        evidence_errors.append(
+            ErrorDetail(
+                field='evidence_snapshot_fingerprint',
+                reason='The Evidence snapshot changed after Claim creation was authorised.',
+            )
+        )
+    if evidence_errors:
         raise ApiError(
             status_code=422,
             code='VALIDATION_ERROR',
-            message='One or more evidence references do not match the working claim.',
-            details=[
-                ErrorDetail(field='evidence_refs', reason=f'Invalid evidence: {evidence_id}.')
-                for evidence_id in invalid
-            ],
-        )
-
-    try:
-        outcome = adapter.create_claim(payload, fingerprint)
-    except AdapterIdempotencyConflict as conflict:
-        raise _idempotency_error() from conflict
-    if outcome.result.source is not adapter.integration_source:
-        raise ApiError(
-            status_code=502,
-            code='DEPENDENCY_FAILED',
-            message='The claims service returned a result with an invalid source.',
-            details=[
-                ErrorDetail(
-                    field='source',
-                    reason='The result source must match the installed claims adapter.',
-                )
-            ],
-            retryable=False,
+            message='The Evidence snapshot does not match the persisted Claim Evidence.',
+            details=evidence_errors,
         )
 
     timestamp = now_utc()
-    created = outcome.result.creation_status is ClaimCreationStatus.CREATED
-    external_claim_ref = outcome.result.external_claim_id or outcome.result.claim_number
-    if created and external_claim_ref is None:
-        raise ApiError(
-            status_code=502,
-            code='DEPENDENCY_FAILED',
-            message='The claims service created a Claim without a stable reference.',
-            details=[
-                ErrorDetail(
-                    field='external_claim',
-                    reason='A created result requires an external Claim identifier.',
-                )
-            ],
+    operation = ClaimCreationOperationRecord(
+        operation_id=operation_id,
+        claim_id=claim.claim_id,
+        customer_id=claim.customer_id,
+        authorised_decision_id=decision.decision_id,
+        authorised_revision=payload.claim_revision,
+        request_fingerprint=fingerprint,
+        evidence_snapshot_fingerprint=snapshot_fingerprint,
+        route=expected_route,
+        integration_source=adapter.integration_source,
+        status=ClaimCreationOperationStatus.PREPARED,
+        created_at=(existing.created_at if existing is not None else timestamp),
+        updated_at=timestamp,
+    )
+    try:
+        may_contact_provider = repository.reserve_claim_creation_operation(operation)
+        if not may_contact_provider:
+            persisted = repository.get_claim_creation_operation(operation_id)
+            latest_claim = repository.get_claim_internal(claim.claim_id)
+            if persisted is None or latest_claim is None:
+                raise _idempotency_error()
+            recovered = _recover_claim_creation_operation(
+                repository,
+                adapter,
+                payload,
+                fingerprint,
+                latest_claim,
+                decision,
+                persisted,
+            )
+            if recovered is None:
+                raise _idempotency_error()
+            return recovered
+        outcome = adapter.create_claim(payload, fingerprint)
+    except AdapterIdempotencyConflict as conflict:
+        raise _idempotency_error() from conflict
+    except ClaimCreationAdapterFailure as failure:
+        status, recovery = classify_claim_creation_failure(failure.code, failure.delivery)
+        failed = operation.model_copy(
+            update={
+                'status': status,
+                'delivery': failure.delivery,
+                'failure_code': failure.code,
+                'recovery': recovery,
+                'updated_at': now_utc(),
+            }
         )
-    resulting_revision = claim.revision + 1
-    updated_claim = claim.model_copy(
-        update={
-            'external_claim': outcome.result,
-            'external_claim_source_revision': payload.claim_revision,
-            'external_claim_fingerprint': fingerprint,
-            'terminal_disposition': (
-                ClaimTerminalDisposition(
-                    value=TerminalDispositionValue.COMPLETED,
-                    reason_code=TerminalDispositionReasonCode.CLAIM_CREATED,
-                    source_refs=[decision.decision_id, external_claim_ref],
-                    recorded_by=ActorReference(
-                        actor_type=ActorType.SYSTEM,
-                        actor_id='claims_service_integration',
-                    ),
-                    recorded_at=timestamp,
-                    recorded_revision=resulting_revision,
-                )
-                if created and external_claim_ref is not None
-                else None
-            ),
-            'route': outcome.result.route,
-            'assignee_id': claim.assignee_id,
-            'claim_state': claim.claim_state.model_copy(
-                update={
-                    'workflow_state': (
-                        WorkflowState.CREATED if created else claim.claim_state.workflow_state
-                    ),
-                    'next_action': AgentAction.PROCEED,
-                }
-            ),
-            'revision': resulting_revision,
-            'updated_at': timestamp,
+        repository.save_claim_creation_operation(failed)
+        retryable = status in {
+            ClaimCreationOperationStatus.RETRYABLE_FAILURE,
+            ClaimCreationOperationStatus.UNKNOWN_OUTCOME,
         }
+        raise ApiError(
+            status_code=503 if retryable else 502,
+            code='DEPENDENCY_UNAVAILABLE' if retryable else 'DEPENDENCY_FAILED',
+            message='The claims service did not return a safely accepted result.',
+            details=[ErrorDetail(field='claims_service', reason=failure.code.value)],
+            retryable=retryable,
+        ) from failure
+    except RevisionConflict as conflict:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The Claim changed before Claim creation could be reserved.',
+            retryable=True,
+            current_revision=conflict.current_revision,
+        ) from conflict
+    except (IdempotencyConflict, KeyError) as conflict:
+        raise _idempotency_error() from conflict
+
+    persisted = repository.get_claim_creation_operation(operation_id)
+    if persisted is None:
+        raise ApiError(
+            status_code=500,
+            code='INTERNAL_ERROR',
+            message='The Claim creation operation could not be restored.',
+            retryable=True,
+        )
+    recorded = _record_claim_creation_result(repository, adapter, persisted, outcome.result)
+    return _settle_recorded_claim_creation(
+        repository,
+        claim,
+        decision,
+        recorded,
+        replayed=outcome.replayed,
     )
-    creation_step = CustomerNextStep(
-        status='claim_created' if created else 'claim_creation_pending',
-        summary=outcome.result.next_step,
-        responsible_party=ResponsibleParty.SYSTEM,
-        expected_by=outcome.result.expected_by,
-    )
-    _save_claim(repository, updated_claim, claim.revision, authorized_next_step=creation_step)
-    return outcome.result, outcome.replayed
 
 
 def route_assessor(

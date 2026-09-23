@@ -13,6 +13,7 @@ from backend.domain.knowledge import (
     KnowledgeRetriever,
     KnowledgeSearch,
 )
+from backend.domain.message import order_messages
 from backend.domain.model_gateway import (
     STAFF_AGENT_PRIVACY_CLASS,
     STAFF_AGENT_PURPOSE,
@@ -313,7 +314,7 @@ def _claim_context(repository: PersistenceRepository, claim: WorkingClaim) -> di
         messages.extend(
             repository.list_messages(claim.claim_id, session.session_id, claim.customer_id)
         )
-    messages.sort(key=lambda item: (item.created_at, item.message_id))
+    messages = order_messages(messages)
     retrievals = repository.list_retrieval_records(claim.claim_id, claim.customer_id)
     review_signals = repository.list_review_signals(claim.claim_id, claim.customer_id)
     handoffs = repository.list_handoffs(claim.claim_id, claim.customer_id)

@@ -5,6 +5,7 @@ from datetime import datetime
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.message import order_messages
 from backend.domain.models import (
     ActorType,
     ClaimantMessage,
@@ -46,10 +47,6 @@ def _claimant_message(message: MessageRecord) -> ClaimantMessage:
         recovery=claimant_recovery_projection(message.recovery_rule_id),
         created_at=message.created_at,
     )
-
-
-def _message_key(message: MessageRecord) -> tuple[datetime, str]:
-    return message.created_at, message.message_id
 
 
 def _encode_message_cursor(message: MessageRecord) -> str:
@@ -110,8 +107,8 @@ def list_claim_messages(
                 ],
             )
 
-    visible_messages = sorted(
-        (
+    visible_messages = order_messages(
+        [
             message
             for message in repository.list_messages(
                 claim_id,
@@ -119,8 +116,7 @@ def list_claim_messages(
                 principal.subject,
             )
             if message.visibility is not MessageVisibility.INTERNAL_ONLY
-        ),
-        key=_message_key,
+        ]
     )
     answered_ids = {
         message.in_reply_to
@@ -134,9 +130,17 @@ def list_claim_messages(
 
     cursor_key = _decode_message_cursor(cursor)
     if cursor_key is not None:
-        visible_messages = [
-            message for message in visible_messages if _message_key(message) > cursor_key
-        ]
+        cursor_index = next(
+            (
+                index
+                for index, message in enumerate(visible_messages)
+                if (message.created_at, message.message_id) == cursor_key
+            ),
+            None,
+        )
+        if cursor_index is None:
+            raise _invalid_cursor()
+        visible_messages = visible_messages[cursor_index + 1 :]
 
     page_messages = visible_messages[:limit]
     next_cursor = (

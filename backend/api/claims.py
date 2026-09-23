@@ -44,6 +44,7 @@ from backend.domain.models import (
     StartSessionRequest,
     WorkflowState,
 )
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider
 from backend.services.agent_action_execution import ClaimantRuntimeActionDispatcher
@@ -140,6 +141,10 @@ def repository_for(request: Request) -> PersistenceRepository:
     return cast(PersistenceRepository, request.app.state.claim_repository)
 
 
+def identity_repository_for(request: Request) -> IdentityRepository:
+    return cast(IdentityRepository, request.app.state.identity_repository)
+
+
 def agent_for(request: Request) -> AgentTurnProvider:
     return cast(AgentTurnProvider, request.app.state.agent_turn_provider)
 
@@ -225,7 +230,12 @@ def read_claim(
     request: Request,
     principal: Principal = Depends(require_claimant),
 ) -> ClaimantClaim:
-    return get_claim(repository_for(request), principal, claim_id)
+    return get_claim(
+        repository_for(request),
+        principal,
+        claim_id,
+        identity_repository_for(request),
+    )
 
 
 @router.post(
@@ -326,7 +336,12 @@ def read_external_capabilities(
 ) -> list[ExternalCapabilityProjection]:
     """Return the claimant-safe capability catalogue for one authorised Claim."""
 
-    claim = get_claim(repository_for(request), principal, claim_id)
+    claim = get_claim(
+        repository_for(request),
+        principal,
+        claim_id,
+        identity_repository_for(request),
+    )
     return list(capability_catalogue(claim.incident_type))
 
 
@@ -544,6 +559,7 @@ def pause_claim_session(
             session_id,
             idempotency_key,
             if_match,
+            identity_repository_for(request),
         )
     except ApiError as error:
         logger.info(
@@ -637,6 +653,7 @@ def create_message(
             assessor_entry=_assessor_entry_for(request),
             external_capability_dispatcher=external_capability_dispatcher_for(request),
             progress_reporter=reporter,
+            identity_repository=identity_repository_for(request),
         )
     except ApiError as error:
         reporter.failed(retryable=error.retryable)

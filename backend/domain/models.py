@@ -919,6 +919,7 @@ class WorkingClaim(ContractModel):
     route: str | None = None
     assignee_id: str | None = Field(default=None, min_length=1, max_length=100)
     active_session_id: str | None = None
+    payment_destination_id: str | None = Field(default=None, pattern=r'^pyd_[a-f0-9]{20}$')
     external_claim: ExternalClaimResult | None = None
     external_claim_source_revision: int | None = Field(default=None, ge=1)
     external_claim_fingerprint: str | None = None
@@ -1797,6 +1798,7 @@ class CreateExternalClaimRequest(ContractModel):
     working_claim_id: str = Field(min_length=1, max_length=100)
     claim_revision: int = Field(ge=1)
     authorised_decision_id: str = Field(min_length=1, max_length=100)
+    evidence_snapshot_fingerprint: str = Field(min_length=64, max_length=64)
     confirmed_form: dict[str, StructuredFormField] = Field(default_factory=dict)
     evidence_refs: list[str] = Field(default_factory=list, max_length=100)
     pending_evidence: list[PendingEvidenceReference] = Field(
@@ -2106,6 +2108,7 @@ class ClaimantClaim(ContractModel):
     contents_items: list[ClaimantContentsItem] = Field(default_factory=list)
     motor_other_driver: MotorOtherDriverProjection | None = None
     evidence_summary: EvidenceSummary
+    payment_destination_id: str | None = Field(default=None, pattern=r'^pyd_[a-f0-9]{20}$')
     external_claim: ExternalClaimResult | None = None
     external_service_action: ClaimantExternalServiceAction | None = None
     external_capabilities: list[ExternalCapabilityProjection] = Field(default_factory=list)

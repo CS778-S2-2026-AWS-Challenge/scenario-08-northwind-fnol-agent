@@ -5,7 +5,10 @@ import userEvent from '@testing-library/user-event'
 const api = vi.hoisted(() => ({
   ApiRequestError: class ApiRequestError extends Error {},
   confirmClaimFields: vi.fn(),
+  createAccountAsset: vi.fn(),
+  createAccountPolicy: vi.fn(),
   createExternalClaim: vi.fn(),
+  createPaymentDestination: vi.fn(),
   createClaim: vi.fn(),
   grantAssessorConsent: vi.fn(),
   getAuthenticatedAccount: vi.fn(),
@@ -14,8 +17,13 @@ const api = vi.hoisted(() => ({
   getClaimMessages: vi.fn(),
   getClaimEvidence: vi.fn(),
   getRuntimeCapabilities: vi.fn(),
+  listAccountAssets: vi.fn(),
+  listAccountIdentityDocuments: vi.fn(),
+  listAccountPaymentDestinations: vi.fn(),
+  listAccountPolicies: vi.fn(),
   listClaims: vi.fn(),
   listEvidenceHistory: vi.fn(),
+  listPaymentDestinations: vi.fn(),
   loginClaimant: vi.fn(),
   logoutClaimant: vi.fn(),
   requestId: vi.fn((prefix) => `${prefix}-test`),
@@ -24,6 +32,7 @@ const api = vi.hoisted(() => ({
   requestAssessorRouting: vi.fn(),
   registerClaimant: vi.fn(),
   requestEvidenceUpload: vi.fn(),
+  selectClaimPayoutContact: vi.fn(),
   uploadEvidenceContent: vi.fn(),
   completeEvidenceUpload: vi.fn(),
   resumeClaimSession: vi.fn(),
@@ -34,6 +43,10 @@ const api = vi.hoisted(() => ({
   setClaimantAccessToken: vi.fn(),
   updateAccountPreferences: vi.fn(),
   updateAccountProfile: vi.fn(),
+  updateAccountAsset: vi.fn(),
+  createAccountIdentityDocument: vi.fn(),
+  updateAccountIdentityDocument: vi.fn(),
+  updateAccountPolicy: vi.fn(),
   updateClaimField: vi.fn(),
 }))
 
@@ -239,7 +252,12 @@ describe('claimant intake projection', () => {
       default_model_profile_id: 'qwen-local',
     })
     api.getClaimEvidence.mockResolvedValue({ items: [], revision: 1 })
+    api.listAccountAssets.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listAccountIdentityDocuments.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listAccountPaymentDestinations.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listAccountPolicies.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listEvidenceHistory.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listPaymentDestinations.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.streamRealtimeEvents.mockImplementation(() => new Promise(() => {}))
     api.createClaim.mockResolvedValue({
       claim: initialClaim,
@@ -452,6 +470,166 @@ describe('claimant intake projection', () => {
     expect(composer.compareDocumentPosition(processLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Use the traditional web form' })).not.toBeInTheDocument()
     await waitFor(() => expect(globalThis.location.pathname).toBe('/'))
+  })
+
+  it('opens the authenticated Profile deep link and replaces edits with the API projection', async () => {
+    const user = userEvent.setup()
+    const initialAccount = {
+      profile: {
+        display_name: 'Iris Zhang',
+        legal_name: 'Iris Zhang',
+        preferred_name: null,
+        email: 'iris@gmail.com',
+        phone: '+64 21 555 123',
+      },
+      preferences: { email: true, sms: false },
+    }
+    const updatedAccount = {
+      ...initialAccount,
+      profile: { ...initialAccount.profile, display_name: 'Iris', preferred_name: 'Iris' },
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue(initialAccount)
+    api.updateAccountProfile.mockResolvedValue(updatedAccount)
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    globalThis.history.replaceState({}, '', '/profile/personal-details')
+
+    render(<App />)
+
+    expect(await screen.findByRole('region', { name: 'Personal details' })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile/personal-details')
+    expect(screen.queryByRole('button', { name: 'Back to claims' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument()
+    expect(screen.getByText('i•••@gmail.com')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Edit profile' }))
+    await user.clear(screen.getByLabelText('Preferred name'))
+    await user.type(screen.getByLabelText('Preferred name'), 'Iris')
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+
+    expect(api.updateAccountProfile).toHaveBeenCalledWith({ preferred_name: 'Iris' })
+    expect(await screen.findByText('Iris', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(screen.getByText('Iris Zhang', { selector: '.profile-summary-row > dd' })).toBeInTheDocument()
+    expect(api.createClaim).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    expect(await screen.findByPlaceholderText('Tell us what happened…')).toBeVisible()
+    expect(globalThis.location.pathname).toBe('/')
+  })
+
+  it('reloads a stale Profile revision, keeps the draft, and retries only after review', async () => {
+    const user = userEvent.setup()
+    const initialAccount = {
+      customer_id: 'cus_profile_conflict',
+      revision: 3,
+      profile: {
+        display_name: 'Iris',
+        legal_name: 'Iris Zhang',
+        preferred_name: 'Iris',
+        email: 'iris@gmail.com',
+        phone: '+64 21 555 123',
+      },
+      preferences: { email: true, sms: false },
+    }
+    const latestAccount = {
+      ...initialAccount,
+      revision: 4,
+      profile: { ...initialAccount.profile, display_name: 'Shared saved name', preferred_name: 'Shared saved name' },
+    }
+    const retriedAccount = {
+      ...latestAccount,
+      revision: 5,
+      profile: { ...latestAccount.profile, display_name: 'Iris draft', preferred_name: 'Iris draft' },
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount
+      .mockResolvedValueOnce(initialAccount)
+      .mockResolvedValueOnce(latestAccount)
+    api.updateAccountProfile
+      .mockRejectedValueOnce({ code: 'REVISION_CONFLICT', status: 409 })
+      .mockResolvedValueOnce(retriedAccount)
+    globalThis.history.replaceState({}, '', '/profile/personal-details')
+
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'Edit profile' }))
+    const preferredName = screen.getByLabelText('Preferred name')
+    await user.clear(preferredName)
+    await user.type(preferredName, 'Iris draft')
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('kept your draft')
+    expect(preferredName).toHaveValue('Iris draft')
+    expect(screen.getByText('Shared saved name', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(api.updateAccountProfile).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+
+    expect(api.updateAccountProfile).toHaveBeenNthCalledWith(2, { preferred_name: 'Iris draft' }, 4)
+    expect(await screen.findByText('Iris draft', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Preferred name')).not.toBeInTheDocument()
+  })
+
+  it('opens the Policies route and restores Profile categories on popstate', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Iris Zhang', email: 'iris@gmail.com', phone: '+64 21 555 123' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listAccountAssets.mockResolvedValue({
+      items: [{
+        asset_id: 'ase_11111111111111111111',
+        asset_type: 'vehicle',
+        display_name: 'Family SUV',
+        details: { registration: 'ABC123', make: 'Toyota', model: 'RAV4', year: 2022 },
+        revision: 1,
+        active: true,
+        created_at: '2026-09-12T01:00:00Z',
+        updated_at: '2026-09-17T01:00:00Z',
+      }],
+      page: { next_cursor: null },
+    })
+    globalThis.history.replaceState({}, '', '/profile/policies')
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Policies' })).toBeInTheDocument()
+    expect(await screen.findByText('No policy numbers saved.')).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile/policies')
+    expect(api.listAccountPolicies).toHaveBeenCalled()
+
+    await user.click(screen.getAllByRole('button', { name: 'Insured assets' })[0])
+    expect(await screen.findByRole('heading', { name: 'Insured assets' })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile/insured-assets')
+    await user.click(screen.getByRole('button', { name: /^Vehicles/ }))
+    expect(await screen.findByRole('button', { name: 'Open Family SUV' })).toBeInTheDocument()
+    expect(api.listAccountAssets).toHaveBeenCalled()
+
+    await user.click(screen.getAllByRole('button', { name: 'Payment details' })[0])
+    expect(await screen.findByRole('heading', { name: 'Payment details' })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile/payment-details')
+
+    await user.click(screen.getAllByRole('button', { name: 'Identity & verification' })[0])
+    expect(await screen.findByText('No identity documents saved.')).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile/identity-verification')
+    expect(api.listAccountIdentityDocuments).toHaveBeenCalled()
+
+    globalThis.history.replaceState({}, '', '/profile/insured-assets')
+    globalThis.dispatchEvent(new PopStateEvent('popstate'))
+
+    expect(await screen.findByRole('heading', { name: 'Insured assets' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Payment details' })).not.toBeInTheDocument()
+  })
+
+  it('guards an unauthenticated Profile deep link with the existing login route', async () => {
+    globalThis.history.replaceState({}, '', '/profile/identity-verification')
+
+    render(<App />)
+
+    expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeInTheDocument()
+    await waitFor(() => expect(globalThis.location.pathname).toBe('/auth/login'))
+    expect(api.getAuthenticatedAccount).not.toHaveBeenCalled()
   })
 
   it('shows one server-confirmed delivery failure with retry guidance', async () => {
@@ -1594,6 +1772,152 @@ describe('claimant intake projection', () => {
     ).toBeInTheDocument()
   })
 
+
+  it('completes payout and contact Step 3 from backend action and opens claim creation directly', async () => {
+    const user = userEvent.setup()
+    const paymentDestination = {
+      payment_destination_id: 'pyd_1234567890abcdef1234',
+      account_type: 'cheque',
+      masked_account_number: '***************6700',
+      revision: 1,
+      active: true,
+    }
+    const readyForPayout = primaryAction({
+      actionCode: 'claimant.review_payout_contact',
+      available: true,
+      requiredInputs: ['payment_destination_id', 'claimant.contact_preference'],
+      revision: 2,
+    })
+    const createClaimAction = primaryAction({
+      actionCode: 'claimant.create_claim',
+      actionType: 'claim_creation',
+      available: true,
+      revision: 3,
+    })
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      customer_id: 'cus_demo',
+      profile: {
+        display_name: 'Test claimant',
+        email: 'test@example.test',
+        phone: '',
+      },
+      preferences: { email: true, sms: false },
+      revision: 2,
+    })
+    api.listPaymentDestinations.mockResolvedValue({
+      items: [paymentDestination],
+      page: { next_cursor: null },
+    })
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      dynamic_form: readyDynamicForm(),
+      claim_revision: 2,
+      decision: {
+        customer_next_step: {
+          status: 'ready_to_create',
+          summary: 'Review payout and contact details.',
+          required_items: [],
+        },
+      },
+      primary_action: readyForPayout,
+    })
+    api.selectClaimPayoutContact.mockResolvedValue({
+      claim_id: initialClaim.claim_id,
+      revision: 3,
+      payment_destination_id: paymentDestination.payment_destination_id,
+      contact_preference: {
+        value: 'email',
+        status: 'confirmed',
+        source: 'claimant',
+      },
+      customer_next_step: {
+        status: 'agreement_required',
+        summary: 'Continue to agreement and confirmation.',
+        required_items: [],
+      },
+      primary_action: createClaimAction,
+    })
+    api.getClaim.mockResolvedValue({
+      ...initialClaim,
+      revision: 3,
+      payment_destination_id: paymentDestination.payment_destination_id,
+      form: {
+        ...initialClaim.form,
+        'claimant.contact_preference': {
+          value: 'email',
+          status: 'confirmed',
+          source: 'claimant',
+        },
+      },
+      customer_next_step: {
+        status: 'agreement_required',
+        summary: 'Continue to agreement and confirmation.',
+        required_items: [],
+      },
+      primary_action: createClaimAction,
+    })
+    api.createExternalClaim.mockResolvedValue({
+      revision: 4,
+      external_claim: {
+        claim_number: 'NWF-2026-16ECDD',
+        creation_status: 'created',
+        route: 'Claims intake review',
+        next_step: 'A claims specialist will review the submitted details.',
+        expected_by: '2026-09-16T01:00:00Z',
+      },
+      external_service_action: null,
+      customer_next_step: {
+        status: 'claim_created',
+        summary: 'Claims intake review',
+        required_items: [],
+      },
+      primary_action: primaryAction({
+        actionCode: 'claimant.continue_conversation',
+        available: false,
+        revision: 4,
+      }),
+    })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'My claim details are complete.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    expect(await screen.findByRole('heading', { name: 'Payout & contact' })).toBeInTheDocument()
+    expect(screen.getByText('***************6700')).toBeInTheDocument()
+    expect(screen.queryByText('12-3456-1234567-00')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('radio', { name: /cheque .*6700/i }))
+    await user.click(screen.getByRole('radio', { name: /Email test@example.test/i }))
+    const continueButton = screen.getByRole('button', { name: 'Continue to agreement' })
+    expect(continueButton).toBeEnabled()
+    await user.click(continueButton)
+
+    await waitFor(() => expect(api.selectClaimPayoutContact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        claimId: initialClaim.claim_id,
+        revision: 2,
+        paymentDestinationId: paymentDestination.payment_destination_id,
+        contactPreference: 'email',
+      }),
+    ))
+    expect(api.getClaim).toHaveBeenCalledWith(initialClaim.claim_id)
+
+    const createAction = await screen.findByRole('button', { name: /Create your claim/i })
+    expect(createAction).toHaveTextContent('Ready')
+    await user.click(createAction)
+
+    await waitFor(() => expect(api.createExternalClaim).toHaveBeenCalledWith(
+      expect.objectContaining({
+        claimId: initialClaim.claim_id,
+        revision: 3,
+      }),
+    ))
+    expect(await screen.findByRole('status', {
+      name: 'Claim NWF-2026-16ECDD created',
+    })).toBeInTheDocument()
+  })
+
   it('keeps creation and assessment actions in the Agent message flow', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage.mockResolvedValue({
@@ -2677,5 +3001,83 @@ describe('claimant intake projection', () => {
     expect(await screen.findByText('repair-quote.pdf')).toBeInTheDocument()
     expect(api.createClaim).not.toHaveBeenCalled()
     expect(api.resumeClaimSession).not.toHaveBeenCalled()
+  })
+
+  it('continues the current report from the in-workspace Claim history', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Claim history' }))
+    expect(await screen.findByRole('heading', { name: 'No created Claims yet' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Continue your report' }))
+
+    expect(screen.queryByRole('heading', { name: 'Claim history' })).not.toBeInTheDocument()
+    expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
+  })
+
+  it('keeps account Claim history navigable after leaving an active conversation', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    const createdClaim = {
+      ...initialClaim,
+      claim_id: 'clm_created_after_leaving',
+      external_claim: { claim_number: 'NWF-2026-000973', creation_status: 'created' },
+      customer_next_step: {
+        status: 'claim_created',
+        summary: 'Claims intake review',
+        responsible_party: 'system',
+      },
+      updated_at: '2026-09-14T01:00:00Z',
+      can_resume: true,
+    }
+    const reportInProgress = {
+      ...initialClaim,
+      claim_id: 'clm_in_progress_history',
+      external_claim: null,
+      updated_at: '2026-09-15T01:00:00Z',
+      can_resume: true,
+    }
+    api.listClaims.mockResolvedValue({ items: [reportInProgress, createdClaim], page: { next_cursor: null } })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    // The conversation stays loaded while the claimant leaves it for the account pages.
+    await user.click(screen.getByRole('button', { name: 'Back to start' }))
+    await user.click(screen.getByRole('button', { name: 'Profile' }))
+    // The desktop navigation and the mobile index both render the same Claim history entry.
+    const [claimHistoryEntry] = await screen.findAllByRole('button', { name: 'Claim history' })
+    await user.click(claimHistoryEntry)
+    const row = await screen.findByRole('button', { name: 'Open Home claim, Claim NWF-2026-000973' })
+    // Only the created Claim is listed; the reports still in progress stay out of Claim history.
+    expect(screen.getByText('1 saved Claim')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /clm_in_progress_history|clm_ui_vp/ })).not.toBeInTheDocument()
+    await user.click(row)
+
+    expect(await screen.findByRole('heading', { name: 'Claim features' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'NWF-2026-000973' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Evidence history/ }))
+    expect(await screen.findByRole('heading', { name: 'Evidence history' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Back to Claim features' }))
+    await user.click(await screen.findByRole('button', { name: 'Back to Claim history' }))
+    expect(await screen.findByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Home claim, Claim NWF-2026-000973' })).toBeInTheDocument()
   })
 })

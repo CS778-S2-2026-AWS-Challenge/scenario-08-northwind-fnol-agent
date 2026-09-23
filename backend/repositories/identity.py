@@ -1,6 +1,12 @@
+from contextlib import AbstractContextManager
 from typing import Protocol
 
 from backend.domain.identity import ClaimantAuthSessionRecord, CustomerAccountRecord
+from backend.repositories.protocols import RepositoryConflict
+
+
+class DuplicateEmailConflict(RepositoryConflict):
+    """Another claimant account owns the normalized email address."""
 
 
 class IdentityRepository(Protocol):
@@ -13,6 +19,10 @@ class IdentityRepository(Protocol):
     ) -> CustomerAccountRecord | None: ...
 
     def get_account(self, customer_id: str) -> CustomerAccountRecord | None: ...
+
+    def hold_account_revision(
+        self, customer_id: str, expected_revision: int
+    ) -> AbstractContextManager[CustomerAccountRecord]: ...
 
     def save_account(self, account: CustomerAccountRecord, expected_revision: int) -> None: ...
 

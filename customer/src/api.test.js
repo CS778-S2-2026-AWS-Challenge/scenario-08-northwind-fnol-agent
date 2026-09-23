@@ -2,14 +2,114 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   applyEvidenceHistoryAction,
+  createAccountAsset,
+  createAccountIdentityDocument,
+  createAccountPolicy,
   createClaim,
+  listAccountAssets,
+  listAccountIdentityDocuments,
+  listAccountPaymentDestinations,
+  listAccountPolicies,
+  createPaymentDestination,
   listEvidenceHistory,
   listClaims,
+  listPaymentDestinations,
   requestEvidenceUpload,
+  selectClaimPayoutContact,
   setClaimantAccessToken,
   streamClaimUpdates,
   streamRealtimeEvents,
+  updateAccountAsset,
+  updateAccountProfile,
+  updateAccountPreferences,
+  updateAccountIdentityDocument,
+  updateAccountPolicy,
 } from './api.js'
+
+describe('policy and payment account clients', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken('synthetic-claimant-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('uses the plural policy contract with cursor, create key, and revision', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ items: [], page: { next_cursor: null } }), { status: 200 }))
+    await listAccountPolicies({ cursor: 'policy-cursor' })
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/policies?limit=25&cursor=policy-cursor',
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token' }) }),
+    )
+
+    fetch.mockResolvedValue(new Response(JSON.stringify({ policy_id: 'pol_synthetic', policy_number: 'NW-1234', revision: 1 }), { status: 201 }))
+    await createAccountPolicy({ policyNumber: 'NW-1234', idempotencyKey: 'policy-test-key' })
+    expect(fetch).toHaveBeenCalledWith('/api/v1/account/policies', expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ 'Idempotency-Key': 'policy-test-key' }),
+      body: JSON.stringify({ policy_number: 'NW-1234' }),
+    }))
+
+    fetch.mockResolvedValue(new Response(JSON.stringify({ policy_id: 'pol_synthetic', policy_number: 'NW-5678', revision: 2 }), { status: 200 }))
+    await updateAccountPolicy({ policyId: 'pol_synthetic', revision: 1, policyNumber: 'NW-5678' })
+    expect(fetch).toHaveBeenCalledWith('/api/v1/account/policies/pol_synthetic', expect.objectContaining({
+      method: 'PATCH',
+      headers: expect.objectContaining({ 'If-Match': '1' }),
+      body: JSON.stringify({ policy_number: 'NW-5678' }),
+    }))
+  })
+
+  it('loads only the masked payment destination projection', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ items: [], page: { next_cursor: null } }), { status: 200 }))
+
+    await listAccountPaymentDestinations({ cursor: 'payment-cursor' })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/payment-destinations?limit=25&cursor=payment-cursor',
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token' }) }),
+    )
+  })
+})
+
+describe('identity document account client', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken('synthetic-claimant-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('uses the account owner token, cursor, idempotency key and revision for protected records', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ items: [], page: { next_cursor: null } }), { status: 200 }))
+    await listAccountIdentityDocuments({ cursor: 'opaque-cursor' })
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/identity-documents?limit=25&cursor=opaque-cursor',
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token' }) }),
+    )
+
+    fetch.mockResolvedValue(new Response(JSON.stringify({ identity_id: 'idn_synthetic', masked_document_number: '****5678', revision: 1 }), { status: 201 }))
+    await createAccountIdentityDocument({ documentType: 'passport', documentNumber: 'P00005678', idempotencyKey: 'identity-test-key' })
+    expect(fetch).toHaveBeenCalledWith('/api/v1/account/identity-documents', expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token', 'Idempotency-Key': 'identity-test-key' }),
+      body: JSON.stringify({ document_type: 'passport', document_number: 'P00005678' }),
+    }))
+
+    fetch.mockResolvedValue(new Response(JSON.stringify({ identity_id: 'idn_synthetic', masked_document_number: '****9012', revision: 2 }), { status: 200 }))
+    await updateAccountIdentityDocument({ identityId: 'idn_synthetic', revision: 1, documentNumber: 'P00009012' })
+    expect(fetch).toHaveBeenCalledWith('/api/v1/account/identity-documents/idn_synthetic', expect.objectContaining({
+      method: 'PATCH',
+      headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token', 'If-Match': '1' }),
+      body: JSON.stringify({ document_number: 'P00009012' }),
+    }))
+  })
+})
 
 
 function eventStreamResponse(frames, status = 200) {
@@ -151,6 +251,78 @@ describe('claimant live-update stream', () => {
 })
 
 describe('claim creation contract', () => {
+  it('uses the protected payout and Claim selection contracts without changing field names', async () => {
+    fetch
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        items: [{
+          payment_destination_id: 'pyd_1234567890abcdef1234',
+          account_type: 'cheque',
+          masked_account_number: '***************6700',
+          active: true,
+          revision: 1,
+        }],
+        page: { next_cursor: null },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        payment_destination_id: 'pyd_1234567890abcdef1234',
+        account_type: 'cheque',
+        masked_account_number: '***************6700',
+        active: true,
+        revision: 1,
+      }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        claim_id: 'clm_1',
+        revision: 4,
+      }), { status: 201 }))
+
+    await listPaymentDestinations({ limit: 100 })
+    await createPaymentDestination({
+      accountType: 'cheque',
+      accountNumber: '12-3456-1234567-00',
+      idempotencyKey: 'payment-key',
+    })
+    await selectClaimPayoutContact({
+      claimId: 'clm_1',
+      revision: 3,
+      paymentDestinationId: 'pyd_1234567890abcdef1234',
+      contactPreference: 'email',
+      idempotencyKey: 'selection-key',
+    })
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/account/payment-destinations?limit=100',
+      expect.objectContaining({ signal: undefined }),
+    )
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/account/payment-destinations',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'Idempotency-Key': 'payment-key' }),
+        body: JSON.stringify({
+          account_type: 'cheque',
+          account_number: '12-3456-1234567-00',
+        }),
+      }),
+    )
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      '/api/v1/claims/clm_1/payout-contact-selections',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Idempotency-Key': 'selection-key',
+          'If-Match': '3',
+        }),
+        body: JSON.stringify({
+          payment_destination_id: 'pyd_1234567890abcdef1234',
+          contact_preference: 'email',
+        }),
+      }),
+    )
+  })
+
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
     setClaimantAccessToken(null)
@@ -504,6 +676,142 @@ describe('Claim history contract', () => {
       expect.objectContaining({
         signal: controller.signal,
         headers: expect.objectContaining({ Authorization: 'Bearer claimant-session-token' }),
+      }),
+    )
+  })
+})
+
+describe('Account mutation contract', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken('claimant-session-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('sends the account revision when saving editable personal details', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ profile: {} }), { status: 200 }))
+
+    await updateAccountProfile(
+      {
+        legal_name: 'Iris Zhang',
+        date_of_birth: '1990-04-12',
+        email: 'iris@example.invalid',
+        residential_address: '1 Queen Street, Auckland',
+      },
+      4,
+    )
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/profile',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer claimant-session-token',
+          'If-Match': '4',
+        }),
+        body: JSON.stringify({
+          legal_name: 'Iris Zhang',
+          date_of_birth: '1990-04-12',
+          email: 'iris@example.invalid',
+          residential_address: '1 Queen Street, Auckland',
+        }),
+      }),
+    )
+  })
+
+  it('sends the account revision when saving contact preferences', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ preferences: {} }), { status: 200 }))
+
+    await updateAccountPreferences({ email: false, sms: true }, 4)
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/preferences',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer claimant-session-token',
+          'If-Match': '4',
+        }),
+        body: JSON.stringify({ email: false, sms: true }),
+      }),
+    )
+  })
+})
+
+describe('Claimant asset contract', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken('claimant-session-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('lists account assets with the bearer identity, opaque cursor, and abort signal', async () => {
+    const controller = new AbortController()
+    fetch.mockResolvedValue(new Response(JSON.stringify({
+      items: [],
+      page: { next_cursor: null },
+    }), { status: 200 }))
+
+    await listAccountAssets({ cursor: 'asset-cursor', limit: 10, signal: controller.signal })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/assets?limit=10&cursor=asset-cursor',
+      expect.objectContaining({
+        signal: controller.signal,
+        headers: expect.objectContaining({ Authorization: 'Bearer claimant-session-token' }),
+      }),
+    )
+  })
+
+  it('creates an account asset with the required idempotency identity', async () => {
+    const asset = {
+      asset_type: 'vehicle',
+      display_name: 'Family SUV',
+      details: { registration: 'ABC123' },
+    }
+    fetch.mockResolvedValue(new Response(JSON.stringify({ asset_id: 'ase_1' }), { status: 201 }))
+
+    await createAccountAsset({ asset, idempotencyKey: 'asset-create-1' })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/assets',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer claimant-session-token',
+          'Idempotency-Key': 'asset-create-1',
+        }),
+        body: JSON.stringify(asset),
+      }),
+    )
+  })
+
+  it('updates an account asset with its authoritative revision', async () => {
+    const updates = {
+      display_name: 'Family vehicle',
+      details: { registration: 'ABC123', make: 'Toyota', model: 'RAV4' },
+    }
+    fetch.mockResolvedValue(new Response(JSON.stringify({ asset_id: 'ase_1' }), { status: 200 }))
+
+    await updateAccountAsset({ assetId: 'ase_1', revision: 4, updates })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/assets/ase_1',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer claimant-session-token',
+          'If-Match': '4',
+        }),
+        body: JSON.stringify(updates),
       }),
     )
   })

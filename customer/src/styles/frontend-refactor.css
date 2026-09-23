@@ -250,11 +250,16 @@
 .claim-history-card:hover, .claim-feature-card:hover { border-color: var(--color-accent); background: var(--color-accent-soft); }
 .claim-history-card:focus-visible, .claim-feature-card:focus-visible { outline: var(--border-focus); outline-offset: var(--space-1); }
 .claim-history-card { display: grid; gap: var(--space-3); }
-.claim-history-card-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); }
+.claim-history-card-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-4); }
 .claim-history-card-heading strong { font-size: var(--font-size-section); }
-.claim-history-card-heading > span { color: var(--color-accent-strong); font-size: var(--font-size-section); }
+.claim-history-card .claim-status-badge { font-size: var(--font-size-body); }
+.claim-history-card-reference { color: var(--color-text-secondary); font-size: var(--font-size-body); font-variant-numeric: tabular-nums; }
+.claim-history-card-details { display: grid; gap: var(--space-1); }
 .claim-history-card-summary { max-width: var(--measure-reading); color: var(--color-text-secondary); font-size: var(--font-size-body); line-height: var(--line-height-body); }
+.claim-history-card-responsible { color: var(--color-text-primary); font-size: var(--font-size-body); line-height: var(--line-height-body); }
 .claim-history-card-meta { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); color: var(--color-text-muted); font-size: var(--font-size-caption); font-variant-numeric: tabular-nums; }
+.claim-history-card-meta > span { color: var(--color-accent-strong); }
+.claim-history-state .primary-button { min-height: var(--size-control-touch); }
 .claim-history-state, .claim-history-stale { margin-top: var(--space-6); padding: var(--space-5); border-radius: var(--radius-xl); background: var(--color-surface); }
 .claim-history-state.is-error { border: var(--border-component); border-color: var(--color-danger); background: var(--color-danger-soft); }
 .claim-history-state h2 { margin: 0; font-size: var(--font-size-section); }

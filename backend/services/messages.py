@@ -26,6 +26,7 @@ from backend.domain.branch_registry import (
 from backend.domain.external_service_registry import ExternalServiceLifecycleProjection
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
+from backend.domain.message import order_messages
 from backend.domain.model_gateway import ModelGatewayError
 from backend.domain.models import (
     ActorReference,
@@ -82,6 +83,7 @@ from backend.domain.retrieval import (
 from backend.domain.runtime import (
     RuntimeWorkItemRecord,
 )
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -387,6 +389,7 @@ def _message_turn_response(
     claim_id: str,
     claimant_message: MessageRecord,
     decision: AgentDecisionRecord,
+    identity_repository: IdentityRepository | None = None,
 ) -> MessageTurnResponse:
     messages = repository.list_messages(
         claim_id,
@@ -418,7 +421,7 @@ def _message_turn_response(
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _session_not_found()
-    current_claim = claimant_claim(repository, claim)
+    current_claim = claimant_claim(repository, claim, identity_repository)
     dynamic_form = current_claim.dynamic_form
     projected_form_changes = (
         project_claimant_form_fields(
@@ -431,7 +434,7 @@ def _message_turn_response(
     )
     external_service_action = claimant_assessor_action(repository, claim) if claim else None
     next_step = (
-        claimant_next_step(repository, claim, external_service_action)
+        claimant_next_step(repository, claim, external_service_action, identity_repository)
         if claim is not None
         else decision.customer_next_step
     )
@@ -531,6 +534,7 @@ def _replay_persisted_response(
     claim_id: str,
     session_id: str,
     idempotency: IdempotencyRecord,
+    identity_repository: IdentityRepository | None = None,
 ) -> MessageTurnResponse:
     payload = idempotency.response_payload
     if (
@@ -655,16 +659,32 @@ def _replay_persisted_response(
         return _freeze_message_turn_response(
             repository,
             idempotency,
-            _message_turn_response(repository, principal, claim_id, inbound, decision),
+            _message_turn_response(
+                repository, principal, claim_id, inbound, decision, identity_repository
+            ),
         )
     revision = idempotency.message_turn_revision
     if revision is None:
         raise _persisted_turn_integrity_error()
     if kind == 'runtime' and agent_message is not None:
         return _namespaced_turn_response(
-            repository, principal, claim_id, revision, inbound, agent_message
+            repository,
+            principal,
+            claim_id,
+            revision,
+            inbound,
+            agent_message,
+            identity_repository,
         )
-    return _message_only_response(repository, principal, claim_id, session_id, revision, inbound)
+    return _message_only_response(
+        repository,
+        principal,
+        claim_id,
+        session_id,
+        revision,
+        inbound,
+        identity_repository=identity_repository,
+    )
 
 
 def _message_only_response(
@@ -676,18 +696,19 @@ def _message_only_response(
     message: MessageRecord,
     *,
     claim: WorkingClaim | None = None,
+    identity_repository: IdentityRepository | None = None,
 ) -> MessageTurnResponse:
     claim = claim or repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _session_not_found()
     external_service_action = claimant_assessor_action(repository, claim)
-    next_step = claimant_next_step(repository, claim, external_service_action)
+    next_step = claimant_next_step(repository, claim, external_service_action, identity_repository)
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=session_id,
         claim_revision=revision,
         current_claim_revision=claim.revision,
-        current_claim=claimant_claim(repository, claim),
+        current_claim=claimant_claim(repository, claim, identity_repository),
         claimant_message=_claimant_message(message),
         form_changes=[],
         handoff=None,
@@ -709,19 +730,20 @@ def _namespaced_turn_response(
     claim_revision: int,
     claimant_message: MessageRecord,
     agent_message: MessageRecord,
+    identity_repository: IdentityRepository | None = None,
 ) -> MessageTurnResponse:
     """Build the claimant projection for a Runtime trace without a legacy decision."""
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _session_not_found()
     external_service_action = claimant_assessor_action(repository, claim)
-    next_step = claimant_next_step(repository, claim, external_service_action)
+    next_step = claimant_next_step(repository, claim, external_service_action, identity_repository)
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=claimant_message.session_id,
         claim_revision=claim_revision,
         current_claim_revision=claim.revision,
-        current_claim=claimant_claim(repository, claim),
+        current_claim=claimant_claim(repository, claim, identity_repository),
         claimant_message=_claimant_message(claimant_message),
         agent_message=_claimant_message(
             agent_message,
@@ -1607,7 +1629,7 @@ def _pending_evidence_for_proposal(
     return EvidenceRecord(
         evidence_id=new_id('evd'),
         claim_id=claim_id,
-        kind=str(pending.get('kind') or 'document'),
+        kind=str(pending.get('kind') or 'other_document'),
         status=EvidenceStatus.PENDING,
         file_status=EvidenceFileStatus.NOT_AVAILABLE,
         source=EvidenceSource.CLAIMANT,
@@ -1914,6 +1936,7 @@ def submit_message(
     assessor_entry: ExternalServiceEntryDecision | None = None,
     external_capability_dispatcher: ExternalCapabilityDispatcher | None = None,
     progress_reporter: AgentTurnProgressReporter | None = None,
+    identity_repository: IdentityRepository | None = None,
 ) -> MessageTurnResponse:
     live_dispatcher = action_dispatcher or ClaimantRuntimeActionDispatcher()
     key = require_idempotency_key(idempotency_key)
@@ -1929,7 +1952,12 @@ def submit_message(
                 message='The idempotency key was reused with a different request.',
             )
         return _replay_persisted_response(
-            repository, principal, claim_id, session_id, existing_idempotency
+            repository,
+            principal,
+            claim_id,
+            session_id,
+            existing_idempotency,
+            identity_repository,
         )
 
     existing_client_message = repository.find_message_by_client_id(
@@ -1998,7 +2026,12 @@ def submit_message(
             if turn_idempotency is None:
                 raise _persisted_turn_integrity_error()
             return _replay_persisted_response(
-                repository, principal, claim_id, session_id, turn_idempotency
+                repository,
+                principal,
+                claim_id,
+                session_id,
+                turn_idempotency,
+                identity_repository,
             )
         raise ApiError(
             status_code=409,
@@ -2090,10 +2123,75 @@ def submit_message(
         None,
     )
     handoff_open = active_handoff is not None
-    # Handoff ownership changes responsibility, but it does not make the
-    # conversation silent.  The turn below must still reach the Agent path so
-    # later claimant messages can be recorded and answered.
+    # An active handoff means a human is being brought in for a support
+    # request, accessibility need, distress signal, or urgent safety risk.
+    # The claimant is told support has their request; the Agent is not
+    # invoked again until the handoff resolves, so the model never continues
+    # an escalated conversation a human is expected to own.
     message_text = payload.content.text if payload.content is not None else ''
+    if active_handoff is not None:
+        if progress_reporter is not None:
+            progress_reporter.accepted()
+        timestamp = now_utc()
+        claimant_message = MessageRecord(
+            message_id=new_id('msg'),
+            claim_id=claim_id,
+            session_id=session_id,
+            client_message_id=payload.client_message_id,
+            actor=ActorType.CLAIMANT,
+            visibility=MessageVisibility.SHARED,
+            content=payload.content.model_dump(mode='json')
+            if payload.content is not None
+            else {'type': 'evidence_reference'},
+            evidence_refs=payload.evidence_refs,
+            created_at=timestamp,
+        )
+        updated_claim = claim.model_copy(
+            update={'revision': claim.revision + 1, 'updated_at': timestamp}
+        )
+        updated_session = session.model_copy(
+            update={'last_active_at': timestamp, 'context_revision': updated_claim.revision}
+        )
+        idempotency = IdempotencyRecord(
+            actor_id=principal.subject,
+            route=route,
+            key=key,
+            request_fingerprint=fingerprint,
+            claim_id=claim_id,
+            session_id=session_id,
+            message_id=claimant_message.message_id,
+            message_turn_kind='message_only',
+            message_turn_revision=updated_claim.revision,
+        )
+        response = _message_only_response(
+            repository,
+            principal,
+            claim_id,
+            session_id,
+            updated_claim.revision,
+            claimant_message,
+            claim=updated_claim,
+            identity_repository=identity_repository,
+        )
+        idempotency = IdempotencyRecord(
+            **{
+                **idempotency.__dict__,
+                'response_payload': response.model_dump(mode='json'),
+            }
+        )
+        try:
+            repository.save_message_mutation(
+                updated_claim, expected_revision, updated_session, claimant_message, idempotency
+            )
+        except RevisionConflict as conflict:
+            raise ApiError(
+                status_code=409,
+                code='REVISION_CONFLICT',
+                message='The claim changed after this page was loaded.',
+                retryable=True,
+                current_revision=conflict.current_revision,
+            ) from conflict
+        return response
     if claim.revision != expected_revision:
         raise ApiError(
             status_code=409,
@@ -2284,9 +2382,8 @@ def submit_message(
     )
     conversation_messages = tuple(
         message
-        for message in sorted(
-            repository.list_recent_messages(claim_id, session_id, principal.subject, 14),
-            key=lambda item: (item.created_at, item.message_id),
+        for message in order_messages(
+            repository.list_recent_messages(claim_id, session_id, principal.subject, 14)
         )
         if message.visibility is not MessageVisibility.INTERNAL_ONLY
         and message.message_id != claimant_message.message_id
@@ -2933,5 +3030,7 @@ def submit_message(
     return _freeze_message_turn_response(
         repository,
         idempotency,
-        _message_turn_response(repository, principal, claim_id, claimant_message, decision),
+        _message_turn_response(
+            repository, principal, claim_id, claimant_message, decision, identity_repository
+        ),
     )

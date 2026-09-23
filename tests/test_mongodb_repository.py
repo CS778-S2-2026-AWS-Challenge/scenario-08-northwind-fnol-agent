@@ -1839,7 +1839,8 @@ def test_mongodb_realtime_replay_preserves_internal_message_visibility(
     message = _message(claim, session).model_copy(
         update={
             'message_id': 'msg_mongo_internal_realtime',
-            'client_message_id': 'client-mongo-internal-realtime',
+            'client_message_id': None,
+            'actor': ActorType.SYSTEM,
             'visibility': MessageVisibility.INTERNAL_ONLY,
         }
     )

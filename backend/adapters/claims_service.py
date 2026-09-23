@@ -4,6 +4,10 @@ from datetime import datetime, timedelta
 from hashlib import sha256
 from typing import Protocol
 
+from backend.domain.claim_creation import (
+    ClaimCreationDelivery,
+    ClaimCreationFailureCode,
+)
 from backend.domain.external_services import ExternalTaskDelivery
 from backend.domain.models import (
     AssessorRoutingFailureCode,
@@ -22,6 +26,20 @@ AssessorFixtureFailure = AssessorRoutingFailureCode
 
 class AdapterIdempotencyConflict(Exception):
     """The same provider-neutral idempotency reference was reused differently."""
+
+
+class ClaimCreationAdapterFailure(Exception):
+    """A classified Claim creation failure with an observed delivery boundary."""
+
+    def __init__(
+        self,
+        code: ClaimCreationFailureCode,
+        *,
+        delivery: ClaimCreationDelivery = ClaimCreationDelivery.NOT_SUBMITTED,
+    ) -> None:
+        super().__init__(code.value)
+        self.code = code
+        self.delivery = delivery
 
 
 class AssessorAdapterFailure(Exception):
@@ -151,6 +169,15 @@ class ClaimsServiceAdapter(Protocol):
     ) -> ClaimCreationOutcome:
         raise NotImplementedError
 
+    def reconcile_claim(
+        self,
+        command: CreateExternalClaimRequest,
+        request_fingerprint: str,
+    ) -> ClaimCreationOutcome | None:
+        """Return an already accepted result without issuing another create request."""
+
+        raise NotImplementedError
+
 
 class AssessorServiceAdapter(Protocol):
     """Stable assessor boundary without assumptions about a future AWS schema.
@@ -261,6 +288,19 @@ class MockClaimsServiceAdapter(ClaimsServiceAdapter):
         )
         self._created[command.working_claim_id] = (request_fingerprint, result)
         return ClaimCreationOutcome(result=result, replayed=False)
+
+    def reconcile_claim(
+        self,
+        command: CreateExternalClaimRequest,
+        request_fingerprint: str,
+    ) -> ClaimCreationOutcome | None:
+        existing = self._created.get(command.working_claim_id)
+        if existing is None:
+            return None
+        fingerprint, result = existing
+        if fingerprint != request_fingerprint:
+            raise AdapterIdempotencyConflict(command.working_claim_id)
+        return ClaimCreationOutcome(result=result, replayed=True)
 
 
 class MockAssessorServiceAdapter(AssessorServiceAdapter):

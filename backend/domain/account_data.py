@@ -7,7 +7,13 @@ from typing import Annotated, cast
 from pydantic import Field, StringConstraints, field_validator, model_validator
 from pydantic_core import PydanticUndefined
 
-from backend.domain.models import ContractModel, PageInfo, StructuredFormField
+from backend.domain.models import (
+    ClaimantPrimaryAction,
+    ContractModel,
+    CustomerNextStep,
+    PageInfo,
+    StructuredFormField,
+)
 
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 ProtectedNumber = Annotated[
@@ -196,6 +202,20 @@ class ClaimPolicySelectionResponse(ContractModel):
     claim_id: str
     revision: int
     proposed_field: StructuredFormField
+
+
+class SelectPayoutContactRequest(ContractModel):
+    payment_destination_id: str = Field(pattern=r'^pyd_[a-f0-9]{20}$')
+    contact_preference: ShortText
+
+
+class ClaimPayoutContactSelectionResponse(ContractModel):
+    claim_id: str
+    revision: int
+    payment_destination_id: str
+    contact_preference: StructuredFormField
+    customer_next_step: CustomerNextStep
+    primary_action: ClaimantPrimaryAction
 
 
 def project_policy(record: PolicyNumberRecord) -> PolicyNumberProjection:

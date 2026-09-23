@@ -199,7 +199,7 @@ class Journey:
         self.revision = body['claim']['revision']
         self.turns: list[dict[str, Any]] = []
 
-    def send(self, message: str) -> dict[str, Any]:
+    def send(self, message: str, *, expect_agent_message: bool = True) -> dict[str, Any]:
         count = len(self.turns) + 1
         response = submit_message(
             self.client,
@@ -213,7 +213,10 @@ class Journey:
         )
         assert response.status_code == 200, response.text
         body = cast(dict[str, Any], response.json())
-        assert body['agent_message'] is not None, body
+        if expect_agent_message:
+            assert body['agent_message'] is not None, body
+        else:
+            assert body['agent_message'] is None, body
         self.revision = body['claim_revision']
         self.turns.append(body)
         return body
@@ -224,8 +227,12 @@ class Journey:
         return cast(dict[str, Any], response.json())
 
     def budget_measurements(self, repository: FixtureRepository) -> list[dict[str, Any]]:
+        # A turn silenced by an active handoff never invokes the model, so it
+        # never creates a RuntimeTraceRecord; it contributes no budget usage.
         measurements: list[dict[str, Any]] = []
         for turn in self.turns:
+            if turn['agent_message'] is None:
+                continue
             trace = repository.find_runtime_trace_for_trigger(
                 self.claim_id, turn['claimant_message']['message_id'], 'cus_demo'
             )

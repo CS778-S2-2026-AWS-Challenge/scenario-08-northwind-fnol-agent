@@ -26,7 +26,16 @@ from backend.domain.account_data import (
 from backend.domain.agent_context_runtime import VerifiedConversationSummary
 from backend.domain.assets import AssetRecord, AssetType, ClaimAssetSnapshot
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
-from backend.domain.evidence import assert_material_history_is_append_only
+from backend.domain.claim_creation import (
+    ClaimCreationOperationRecord,
+    ClaimCreationOperationStatus,
+    assert_claim_creation_operation_transition,
+    evidence_snapshot_fingerprint,
+)
+from backend.domain.evidence import (
+    assert_material_history_is_append_only,
+    validate_evidence_record,
+)
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
@@ -40,6 +49,12 @@ from backend.domain.external_services import (
     assert_result_evidence_is_linked,
     assert_result_matches_task,
     assert_task_transition_is_permitted,
+)
+from backend.domain.message import (
+    DuplicateClientMessage,
+    order_messages,
+    validate_message_graph,
+    validate_message_record,
 )
 from backend.domain.models import (
     ActorType,
@@ -118,9 +133,11 @@ from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.account_data import (
     AccountCursorKey,
     AccountRecord,
+    PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
     account_record_audit_matches,
     account_record_identity,
+    payout_contact_selection_audit_matches,
     policy_selection_audit_matches,
 )
 from backend.repositories.assets import (
@@ -356,6 +373,12 @@ class MongoDBRepository:
             [('record_type', 1), ('actor_id', 1), ('route', 1), ('key', 1)],
             unique=True,
             partialFilterExpression={'record_type': 'idempotency'},
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('claim_id', 1)],
+            unique=True,
+            name='claim_creation_operation_claim_unique',
+            partialFilterExpression={'record_type': 'claim_creation_operation'},
         )
         self._collection.create_index(
             [('record_type', 1), ('claim_id', 1), ('client_message_id', 1)],
@@ -833,6 +856,67 @@ class MongoDBRepository:
             if policy.revision != policy_revision:
                 raise PolicySelectionConflict(
                     policy_id, reason='changed', current_revision=policy.revision
+                )
+            prepared_audit = self._prepare_audit_events(
+                claim, (audit_event,), mongo_session=mongo_session
+            )
+            self._save_child_mutation(
+                claim,
+                expected_revision,
+                idempotency,
+                mongo_session,
+                mutation=RealtimeMutation.CLAIM_CHANGED,
+                records=[('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation)],
+            )
+            for event in prepared_audit:
+                self._insert_audit_event(event, mongo_session=mongo_session)
+
+        self._atomic(persist)
+
+    def save_payout_contact_selection(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        payment_destination_id: str,
+        payment_destination_revision: int,
+        contact_authority_revision: int,
+        idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        if (
+            idempotency.actor_id != claim.customer_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.session_id != (claim.active_session_id or '')
+            or not payout_contact_selection_audit_matches(
+                claim,
+                payment_destination_id,
+                payment_destination_revision,
+                contact_authority_revision,
+                idempotency,
+                audit_event,
+            )
+        ):
+            raise KeyError(claim.claim_id)
+        self._validate_branch_evaluation(claim, branch_evaluation)
+
+        def persist(mongo_session: Any) -> None:
+            destination = self._get(
+                'payment_destination',
+                payment_destination_id,
+                PaymentDestinationRecord,
+                customer_id=claim.customer_id,
+                session=mongo_session,
+            )
+            if destination is None or not destination.active:
+                raise PaymentDestinationSelectionConflict(
+                    payment_destination_id, reason='unavailable'
+                )
+            if destination.revision != payment_destination_revision:
+                raise PaymentDestinationSelectionConflict(
+                    payment_destination_id,
+                    reason='changed',
+                    current_revision=destination.revision,
                 )
             prepared_audit = self._prepare_audit_events(
                 claim, (audit_event,), mongo_session=mongo_session
@@ -1501,6 +1585,34 @@ class MongoDBRepository:
             or len(evidence_by_id) != len(graph.evidence)
         ):
             raise ValueError('Validation seed record identifiers must be unique and non-empty.')
+        validate_message_graph(graph.messages)
+        for evidence in graph.evidence:
+            validate_evidence_record(evidence)
+        for message in graph.messages:
+            seed_session = sessions_by_id.get(message.session_id)
+            if seed_session is None:
+                raise ValueError('Every validation seed Message needs a known Session.')
+            validate_message_record(
+                message,
+                session=seed_session,
+                evidence=[
+                    evidence_by_id[evidence_id]
+                    for evidence_id in message.evidence_refs
+                    if evidence_id in evidence_by_id
+                ],
+                reply=messages_by_id.get(message.in_reply_to or ''),
+                duplicate_client_message=next(
+                    (
+                        item
+                        for item in graph.messages
+                        if message.client_message_id is not None
+                        and item.message_id != message.message_id
+                        and item.claim_id == message.claim_id
+                        and item.client_message_id == message.client_message_id
+                    ),
+                    None,
+                ),
+            )
 
         presence_id = self._record_id('staff_presence', graph.staff_presence.staff_id)
         current_presence = self._collection.find_one(
@@ -2149,6 +2261,55 @@ class MongoDBRepository:
         )
         if claim is None or session is None or session.claim_id != message.claim_id:
             raise KeyError(message.claim_id)
+        evidence = [
+            item
+            for evidence_id in message.evidence_refs
+            if (
+                item := self._get(
+                    'evidence',
+                    evidence_id,
+                    EvidenceRecord,
+                    customer_id=customer_id,
+                    session=mongo_session,
+                )
+            )
+            is not None
+        ]
+        reply = (
+            self._get(
+                'message',
+                message.in_reply_to,
+                MessageRecord,
+                customer_id=customer_id,
+                session=mongo_session,
+            )
+            if message.in_reply_to is not None
+            else None
+        )
+        duplicate_client_message = None
+        if message.client_message_id is not None:
+            duplicate_client_message = self._model_from_document(
+                self._collection.find_one(
+                    {
+                        'record_type': 'message',
+                        'claim_id': message.claim_id,
+                        'customer_id': customer_id,
+                        'client_message_id': message.client_message_id,
+                    },
+                    session=mongo_session,
+                ),
+                MessageRecord,
+            )
+        try:
+            validate_message_record(
+                message,
+                session=session,
+                evidence=evidence,
+                reply=reply,
+                duplicate_client_message=duplicate_client_message,
+            )
+        except DuplicateClientMessage as conflict:
+            raise IdempotencyConflict(message.client_message_id or message.message_id) from conflict
         existing = self._get(
             'message',
             message.message_id,
@@ -2222,11 +2383,13 @@ class MongoDBRepository:
     ) -> list[MessageRecord]:
         if not self._claim_owned(claim_id, customer_id):
             return []
-        return self._list(
-            'message',
-            MessageRecord,
-            {'claim_id': claim_id, 'session_id': session_id, 'customer_id': customer_id},
-            'created_at',
+        return order_messages(
+            self._list(
+                'message',
+                MessageRecord,
+                {'claim_id': claim_id, 'session_id': session_id, 'customer_id': customer_id},
+                'created_at',
+            )
         )
 
     def list_recent_messages(
@@ -2236,26 +2399,7 @@ class MongoDBRepository:
         customer_id: str,
         limit: int,
     ) -> list[MessageRecord]:
-        documents = (
-            self._collection.find(
-                {
-                    'record_type': 'message',
-                    'claim_id': claim_id,
-                    'session_id': session_id,
-                    'customer_id': customer_id,
-                }
-            )
-            .sort([('created_at', -1), ('_id', -1)])
-            .limit(limit)
-        )
-        messages = [
-            message
-            for message in (
-                self._model_from_document(document, MessageRecord) for document in documents
-            )
-            if message is not None
-        ]
-        return list(reversed(messages))
+        return self.list_messages(claim_id, session_id, customer_id)[-limit:]
 
     def save_conversation_summary(
         self,
@@ -2378,6 +2522,229 @@ class MongoDBRepository:
                 record.evaluation_id,
             ),
         )
+
+    def get_claim_creation_operation(
+        self,
+        operation_id: str,
+    ) -> ClaimCreationOperationRecord | None:
+        return self._get(
+            'claim_creation_operation',
+            operation_id,
+            ClaimCreationOperationRecord,
+        )
+
+    def reserve_claim_creation_operation(
+        self,
+        operation: ClaimCreationOperationRecord,
+    ) -> bool:
+        def reserve(mongo_session: Any) -> bool:
+            claim = self._get(
+                'claim',
+                operation.claim_id,
+                WorkingClaim,
+                customer_id=operation.customer_id,
+                session=mongo_session,
+            )
+            decision = self._get(
+                'agent_decision',
+                operation.authorised_decision_id,
+                AgentDecisionRecord,
+                customer_id=operation.customer_id,
+                session=mongo_session,
+            )
+            evidence = self._list(
+                'evidence',
+                EvidenceRecord,
+                {
+                    'claim_id': operation.claim_id,
+                    'customer_id': operation.customer_id,
+                },
+                'created_at',
+                session=mongo_session,
+            )
+            if (
+                operation.status is not ClaimCreationOperationStatus.PREPARED
+                or claim is None
+                or claim.revision != operation.authorised_revision
+                or claim.external_claim is not None
+                or claim.terminal_disposition is not None
+                or decision is None
+                or decision.claim_id != operation.claim_id
+                or decision.resulting_revision != operation.authorised_revision
+                or evidence_snapshot_fingerprint(evidence)
+                != operation.evidence_snapshot_fingerprint
+            ):
+                raise KeyError(operation.claim_id)
+
+            document = self._collection.find_one(
+                {
+                    'record_type': 'claim_creation_operation',
+                    'claim_id': operation.claim_id,
+                },
+                session=mongo_session,
+            )
+            current = self._model_from_document(document, ClaimCreationOperationRecord)
+            if current is None:
+                try:
+                    self._put(
+                        'claim_creation_operation',
+                        operation.operation_id,
+                        operation,
+                        customer_id=operation.customer_id,
+                        claim_id=operation.claim_id,
+                        session=mongo_session,
+                    )
+                except DuplicateKeyError as conflict:
+                    raise IdempotencyConflict(operation.operation_id) from conflict
+                return True
+            if current.operation_id != operation.operation_id:
+                raise IdempotencyConflict(operation.operation_id)
+            if current.status is ClaimCreationOperationStatus.RETRYABLE_FAILURE:
+                try:
+                    assert_claim_creation_operation_transition(current, operation)
+                except ValueError as conflict:
+                    raise IdempotencyConflict(operation.operation_id) from conflict
+                result = self._collection.replace_one(
+                    {
+                        '_id': self._record_id('claim_creation_operation', operation.operation_id),
+                        'record_type': 'claim_creation_operation',
+                        'status': ClaimCreationOperationStatus.RETRYABLE_FAILURE.value,
+                        'request_fingerprint': operation.request_fingerprint,
+                    },
+                    {
+                        **operation.model_dump(mode='json'),
+                        '_id': self._record_id('claim_creation_operation', operation.operation_id),
+                        'record_type': 'claim_creation_operation',
+                        'customer_id': operation.customer_id,
+                        'claim_id': operation.claim_id,
+                    },
+                    session=mongo_session,
+                )
+                if result.modified_count != 1:
+                    raise IdempotencyConflict(operation.operation_id)
+                return True
+            if (
+                current.request_fingerprint != operation.request_fingerprint
+                or current.evidence_snapshot_fingerprint != operation.evidence_snapshot_fingerprint
+                or current.route != operation.route
+                or current.integration_source is not operation.integration_source
+            ):
+                raise IdempotencyConflict(operation.operation_id)
+            return False
+
+        return self._atomic(reserve)
+
+    def save_claim_creation_operation(
+        self,
+        operation: ClaimCreationOperationRecord,
+    ) -> None:
+        def persist(mongo_session: Any) -> None:
+            current = self._get(
+                'claim_creation_operation',
+                operation.operation_id,
+                ClaimCreationOperationRecord,
+                customer_id=operation.customer_id,
+                session=mongo_session,
+            )
+            if current is None:
+                raise KeyError(operation.operation_id)
+            try:
+                assert_claim_creation_operation_transition(current, operation)
+            except ValueError as conflict:
+                raise IdempotencyConflict(operation.operation_id) from conflict
+            result = self._collection.replace_one(
+                {
+                    '_id': self._record_id('claim_creation_operation', operation.operation_id),
+                    'record_type': 'claim_creation_operation',
+                    'status': current.status.value,
+                    'updated_at': current.model_dump(mode='json')['updated_at'],
+                },
+                {
+                    **operation.model_dump(mode='json'),
+                    '_id': self._record_id('claim_creation_operation', operation.operation_id),
+                    'record_type': 'claim_creation_operation',
+                    'customer_id': operation.customer_id,
+                    'claim_id': operation.claim_id,
+                },
+                session=mongo_session,
+            )
+            if result.matched_count != 1:
+                raise IdempotencyConflict(operation.operation_id)
+
+        self._atomic(persist)
+
+    def save_claim_creation_outcome(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        operation: ClaimCreationOperationRecord,
+        branch_evaluation: BranchEvaluationRecord,
+    ) -> None:
+        def persist(mongo_session: Any) -> None:
+            self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
+            self._validate_branch_evaluation(claim, branch_evaluation)
+            self._reject_branch_evaluation_identity_conflict(
+                branch_evaluation,
+                mongo_session=mongo_session,
+            )
+            current = self._get(
+                'claim_creation_operation',
+                operation.operation_id,
+                ClaimCreationOperationRecord,
+                customer_id=claim.customer_id,
+                session=mongo_session,
+            )
+            evidence = self._list(
+                'evidence',
+                EvidenceRecord,
+                {'claim_id': claim.claim_id, 'customer_id': claim.customer_id},
+                'created_at',
+                session=mongo_session,
+            )
+            if (
+                current is None
+                or operation.status is not ClaimCreationOperationStatus.ACCEPTED
+                or operation.result is None
+                or claim.external_claim != operation.result
+                or claim.external_claim_source_revision != operation.authorised_revision
+                or claim.external_claim_fingerprint != operation.request_fingerprint
+                or evidence_snapshot_fingerprint(evidence)
+                != operation.evidence_snapshot_fingerprint
+            ):
+                raise KeyError(claim.claim_id)
+            try:
+                assert_claim_creation_operation_transition(current, operation)
+            except ValueError as conflict:
+                raise IdempotencyConflict(operation.operation_id) from conflict
+            if (
+                self._replace_claim_revision(claim, expected_revision, mongo_session=mongo_session)
+                == 0
+            ):
+                self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
+            self._put(
+                'claim_creation_operation',
+                operation.operation_id,
+                operation,
+                customer_id=claim.customer_id,
+                claim_id=claim.claim_id,
+                session=mongo_session,
+            )
+            self._put(
+                'branch_evaluation',
+                branch_evaluation.evaluation_id,
+                branch_evaluation,
+                customer_id=claim.customer_id,
+                claim_id=claim.claim_id,
+                session=mongo_session,
+            )
+            self._append_realtime_mutation(
+                RealtimeMutation.CLAIM_CHANGED,
+                claim,
+                mongo_session=mongo_session,
+                operation_correlation=operation.operation_id,
+            )
+
+        self._atomic(persist)
 
     def get_agent_decision(
         self,
@@ -2624,6 +2991,7 @@ class MongoDBRepository:
                 or claim.assessor_routing_fingerprint != operation.request_fingerprint
             ):
                 raise KeyError(claim.claim_id)
+            validate_evidence_record(evidence)
             try:
                 assert_task_transition_is_permitted(current_task, task)
             except ValueError as conflict:
@@ -2835,6 +3203,7 @@ class MongoDBRepository:
         customer_id: str,
         mongo_session: Any,
     ) -> None:
+        validate_evidence_record(evidence)
         claim = self._get(
             'claim',
             evidence.claim_id,
@@ -4594,6 +4963,62 @@ class MongoDBRepository:
             )
             if duplicate is not None:
                 raise IdempotencyConflict(claimant_message.client_message_id)
+        claimant_evidence = [
+            item
+            for evidence_id in claimant_message.evidence_refs
+            if (
+                item := self._get(
+                    'evidence',
+                    evidence_id,
+                    EvidenceRecord,
+                    customer_id=claim.customer_id,
+                    session=mongo_session,
+                )
+            )
+            is not None
+        ]
+        validate_message_record(
+            claimant_message,
+            session=stored_session,
+            evidence=claimant_evidence,
+            reply=(
+                self._get(
+                    'message',
+                    claimant_message.in_reply_to,
+                    MessageRecord,
+                    customer_id=claim.customer_id,
+                    session=mongo_session,
+                )
+                if claimant_message.in_reply_to is not None
+                else None
+            ),
+            duplicate_client_message=None,
+        )
+        agent_evidence = [
+            item
+            for evidence_id in agent_message.evidence_refs
+            if (
+                item := self._get(
+                    'evidence',
+                    evidence_id,
+                    EvidenceRecord,
+                    customer_id=claim.customer_id,
+                    session=mongo_session,
+                )
+            )
+            is not None
+        ]
+        validate_message_record(
+            agent_message,
+            session=stored_session,
+            evidence=agent_evidence,
+            reply=(
+                claimant_message
+                if agent_message.in_reply_to == claimant_message.message_id
+                else None
+            ),
+            duplicate_client_message=None,
+        )
         records = (
             ('message', claimant_message.message_id, claimant_message),
             ('message', agent_message.message_id, agent_message),
@@ -5131,6 +5556,16 @@ class MongoDBRepository:
                 or claim.active_session_id != session.session_id
             ):
                 raise KeyError(claim.claim_id)
+        pending_messages = {
+            record.message_id: record
+            for kind, _identifier, record in records
+            if kind == 'message' and isinstance(record, MessageRecord)
+        }
+        pending_evidence = {
+            record.evidence_id: record
+            for kind, _identifier, record in records
+            if kind == 'evidence' and isinstance(record, EvidenceRecord)
+        }
         for kind, identifier, record in records:
             if checkpointed and kind == 'message' and identifier == idempotency.message_id:
                 stored_message = self._get(
@@ -5186,6 +5621,53 @@ class MongoDBRepository:
                     not in {idempotency.message_id, idempotency.agent_message_id}
                 ):
                     raise KeyError(claim.claim_id)
+                evidence = []
+                for evidence_id in record.evidence_refs:
+                    item = pending_evidence.get(evidence_id) or self._get(
+                        'evidence',
+                        evidence_id,
+                        EvidenceRecord,
+                        customer_id=claim.customer_id,
+                        session=mongo_session,
+                    )
+                    if item is not None:
+                        evidence.append(item)
+                reply = pending_messages.get(record.in_reply_to or '')
+                if reply is None and record.in_reply_to is not None:
+                    reply = self._get(
+                        'message',
+                        record.in_reply_to,
+                        MessageRecord,
+                        customer_id=claim.customer_id,
+                        session=mongo_session,
+                    )
+                duplicate_client_message = None
+                if record.client_message_id is not None:
+                    duplicate_document = self._collection.find_one(
+                        {
+                            'record_type': 'message',
+                            'claim_id': claim.claim_id,
+                            'customer_id': claim.customer_id,
+                            'client_message_id': record.client_message_id,
+                        },
+                        session=mongo_session,
+                    )
+                    duplicate_client_message = self._model_from_document(
+                        duplicate_document,
+                        MessageRecord,
+                    )
+                try:
+                    validate_message_record(
+                        record,
+                        session=message_session,
+                        evidence=evidence,
+                        reply=reply,
+                        duplicate_client_message=duplicate_client_message,
+                    )
+                except DuplicateClientMessage as conflict:
+                    raise IdempotencyConflict(
+                        record.client_message_id or record.message_id
+                    ) from conflict
             document = record.model_dump(mode='json')
             document.update(
                 {
@@ -5209,6 +5691,7 @@ class MongoDBRepository:
             if kind == 'evidence':
                 if not isinstance(record, EvidenceRecord):
                     raise KeyError(claim.claim_id)
+                validate_evidence_record(record)
                 current_evidence = (
                     self._model_from_document(existing, EvidenceRecord)
                     if existing is not None

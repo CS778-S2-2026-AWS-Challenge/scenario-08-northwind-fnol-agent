@@ -1,38 +1,132 @@
 import {
+  claimStatusLabel,
   claimTitle,
   formatDateTime,
-  formatIdentifierLabel,
+  responsiblePartyLabel,
   sortClaimsByLatestUpdate,
 } from '../formatters.js'
 
-export default function ClaimHistory({ claims, error, loading, refreshing, onRetry, onSelect }) {
+// Claim history lists Claims that completed external creation. An unfinished Working Claim stays
+// in conversation history and resume, which receive the same complete list (#972).
+function isCreatedClaim(claim) {
+  return claim.external_claim?.creation_status === 'created'
+}
+
+function claimReference(claim) {
+  const claimNumber = claim.external_claim?.claim_number
+  return claimNumber ? `Claim ${claimNumber}` : `Claim reference ${claim.claim_id}`
+}
+
+function ClaimHistoryRow({ claim, onSelect }) {
+  const nextStep = claim.customer_next_step || {}
+  const detailsId = `claim-history-${claim.claim_id}-details`
+  return (
+    <li>
+      <button
+        className="claim-history-card"
+        type="button"
+        onClick={() => onSelect(claim)}
+        aria-label={`Open ${claimTitle(claim)}, ${claimReference(claim)}`}
+        aria-describedby={detailsId}
+      >
+        <span className="claim-history-card-heading">
+          <strong>{claimTitle(claim)}</strong>
+          <span className="claim-status-badge">
+            <span aria-hidden="true" />
+            {claimStatusLabel(nextStep.status)}
+          </span>
+        </span>
+        <span className="claim-history-card-reference">{claimReference(claim)}</span>
+        <span className="claim-history-card-details" id={detailsId}>
+          <span className="claim-history-card-summary">
+            {nextStep.summary || 'No next step is available yet.'}
+          </span>
+          {/* Keeps the two sentences apart in the accessible description. */}
+          {' '}
+          <span className="claim-history-card-responsible">
+            Responsible now: {responsiblePartyLabel(nextStep.responsible_party)}
+          </span>
+        </span>
+        <span className="claim-history-card-meta">
+          <time dateTime={claim.updated_at}>Updated {formatDateTime(claim.updated_at)}</time>
+          <span aria-hidden="true">Open →</span>
+        </span>
+      </button>
+    </li>
+  )
+}
+
+function ClaimHistoryEmpty({ inProgress, onStartClaim, onContinueReport }) {
+  if (!inProgress.length) {
+    return (
+      <section className="claim-history-state" aria-labelledby="claim-history-empty-title">
+        <h2 id="claim-history-empty-title">No Claims yet</h2>
+        <p>When Northwind creates a Claim from your report, it appears here with its status and latest update.</p>
+        {onStartClaim && (
+          <button className="primary-button" type="button" onClick={onStartClaim}>Start a claim</button>
+        )}
+      </section>
+    )
+  }
+
+  const [latestReport] = sortClaimsByLatestUpdate(inProgress)
+  const reports = inProgress.length === 1 ? '1 report' : `${inProgress.length} reports`
+  return (
+    <section className="claim-history-state" aria-labelledby="claim-history-in-progress-title">
+      <h2 id="claim-history-in-progress-title">No created Claims yet</h2>
+      <p>
+        You have {reports} in progress. A report appears here after Northwind creates its Claim; until
+        then, continue it from your conversation.
+      </p>
+      {onContinueReport && (
+        <button className="primary-button" type="button" onClick={() => onContinueReport(latestReport.claim_id)}>
+          Continue your report
+        </button>
+      )}
+    </section>
+  )
+}
+
+export default function ClaimHistory({
+  claims,
+  error,
+  loading,
+  refreshing,
+  onRetry,
+  onSelect,
+  onStartClaim,
+  onContinueReport,
+}) {
   if (loading) {
     return <p className="claim-history-state" role="status">Loading your Claim history…</p>
   }
 
-  if (error && !claims?.length) {
+  const created = (claims || []).filter(isCreatedClaim)
+
+  if (error && !created.length) {
     return (
       <section className="claim-history-state is-error" role="alert">
         <h2>Claim history could not be loaded</h2>
-        <p>{error} Your Claims have not been changed.</p>
+        <p>{error} Your Claims have not been changed, and you can try loading them again.</p>
         <button className="secondary-button" type="button" onClick={onRetry}>Try again</button>
       </section>
     )
   }
 
-  if (!claims?.length) {
+  if (!created.length) {
     return (
-      <section className="claim-history-state" aria-labelledby="claim-history-empty-title">
-        <h2 id="claim-history-empty-title">No Claims recorded yet</h2>
-        <p>After Northwind confirms a new Claim, it will appear here with its latest update time.</p>
-      </section>
+      <ClaimHistoryEmpty
+        inProgress={(claims || []).filter((claim) => !isCreatedClaim(claim))}
+        onStartClaim={onStartClaim}
+        onContinueReport={onContinueReport}
+      />
     )
   }
 
   return (
     <>
       <div className="claim-history-toolbar">
-        <p>{claims.length} saved {claims.length === 1 ? 'Claim' : 'Claims'}</p>
+        <p>{created.length} saved {created.length === 1 ? 'Claim' : 'Claims'}</p>
         <button className="secondary-button" type="button" onClick={onRetry} disabled={refreshing}>
           {refreshing ? 'Refreshing…' : 'Refresh'}
         </button>
@@ -40,32 +134,13 @@ export default function ClaimHistory({ claims, error, loading, refreshing, onRet
       {error && (
         <div className="claim-history-stale" role="status">
           <strong>Showing earlier Claim records</strong>
-          <p>{error} The list below may be out of date.</p>
+          <p>{error} The list below may be out of date; try again to load the latest updates.</p>
           <button className="secondary-button" type="button" onClick={onRetry}>Try again</button>
         </div>
       )}
       <ol className="claim-history-list" aria-label="Your Claims, most recently updated first">
-        {sortClaimsByLatestUpdate(claims).map((claim) => (
-          <li key={claim.claim_id}>
-            <button
-              className="claim-history-card"
-              type="button"
-              onClick={() => onSelect(claim)}
-              aria-label={`Open ${claimTitle(claim)} ${claim.claim_id}`}
-            >
-              <span className="claim-history-card-heading">
-                <strong>{claimTitle(claim)}</strong>
-                <span aria-hidden="true">→</span>
-              </span>
-              <span className="claim-history-card-summary">
-                {claim.customer_next_step?.summary || 'Review this Claim and its available information.'}
-              </span>
-              <span className="claim-history-card-meta">
-                <span>{claim.claim_id}</span>
-                <time dateTime={claim.updated_at}>Updated {formatDateTime(claim.updated_at)}</time>
-              </span>
-            </button>
-          </li>
+        {sortClaimsByLatestUpdate(created).map((claim) => (
+          <ClaimHistoryRow key={claim.claim_id} claim={claim} onSelect={onSelect} />
         ))}
       </ol>
     </>
@@ -75,13 +150,8 @@ export default function ClaimHistory({ claims, error, loading, refreshing, onRet
 export function ClaimFeatureDirectory({ claim, onOpenEvidence }) {
   const nextStep = claim.customer_next_step || {}
   const claimNumber = claim.external_claim?.claim_number || claim.claim_id
-  const statusLabel = formatIdentifierLabel(nextStep.status || 'status unavailable')
-  const responsibleParty = {
-    claimant: 'You',
-    claims_professional: 'Claims professional',
-    external_party: 'External service provider',
-    system: 'System',
-  }[nextStep.responsible_party] || 'Not available'
+  const statusLabel = claimStatusLabel(nextStep.status)
+  const responsibleParty = responsiblePartyLabel(nextStep.responsible_party)
 
   return (
     <section className="claim-feature-directory" aria-labelledby="claim-features-title">

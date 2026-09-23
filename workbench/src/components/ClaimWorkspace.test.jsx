@@ -110,6 +110,43 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.getByRole('tab', { name: 'Claim information' })).toHaveAttribute('aria-selected', 'true')
   })
 
+  it('uses incident context when no claimant name is available and keeps exact IDs in record references', async () => {
+    const user = userEvent.setup()
+    const rawClaimId = 'clm_26ebb97a053bebb885e6'
+    const rawClaimantId = 'cus_demo'
+    const incidentSummary = 'The claimant has not yet completed the report.'
+    render(<ClaimWorkspace
+      {...props}
+      detail={{
+        ...detail,
+        claim_id: rawClaimId,
+        display_reference: rawClaimId,
+        claimant: { customer_id: rawClaimantId },
+        incident: { family: null, summary: incidentSummary },
+        created_at: '2026-09-22T01:00:00Z',
+      }}
+    />)
+
+    expect(screen.getByRole('heading', { name: incidentSummary, level: 1 })).toBeVisible()
+    expect(screen.queryByText(incidentSummary, { selector: '.claim-heading__summary' })).not.toBeInTheDocument()
+    expect(screen.getByText('Claim type not confirmed')).toBeVisible()
+    expect(screen.getByText(`Claim ${rawClaimId}`)).toBeVisible()
+    expect(screen.queryByText('Claim …b885e6')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: rawClaimantId })).not.toBeInTheDocument()
+
+    const referenceSummary = screen.getByText(/^Record references/, { selector: 'summary' })
+    const references = referenceSummary.closest('details')
+    expect(references).not.toHaveAttribute('open')
+    expect(within(references).getByText(rawClaimId)).not.toBeVisible()
+    expect(within(references).getByText(rawClaimantId)).not.toBeVisible()
+
+    await user.click(referenceSummary)
+
+    expect(references).toHaveAttribute('open')
+    expect(within(references).getByText(rawClaimId)).toBeVisible()
+    expect(within(references).getByText(rawClaimantId)).toBeVisible()
+  })
+
   it('supports arrow-key tab activation', async () => {
     const onSection = vi.fn()
     const user = userEvent.setup()
@@ -431,6 +468,43 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.getByRole('heading', { name: 'No staff action is currently authorised' })).toBeVisible()
   })
 
+  it('keeps the current conversation action available during a background Claim refresh', () => {
+    const sendAction = {
+      action_code: 'conversation.send_claimant_message',
+      target_type: 'session',
+      target_ref: 'ses_1',
+      availability: 'available',
+      based_on_revision: 4,
+    }
+    render(<ClaimWorkspace
+      {...props}
+      loading
+      section="conversation"
+      conversationSessionId="ses_1"
+      draft="A claimant-safe update"
+      detail={{
+        ...detail,
+        active_session_id: 'ses_1',
+        allowed_actions: [sendAction],
+      }}
+      resources={{
+        handoffs: { status: 'available', items: [] },
+        messages: {
+          status: 'available',
+          items: [],
+          requested_session_id: 'ses_1',
+          resolved_session_id: 'ses_1',
+        },
+      }}
+    />)
+
+    expect(screen.getByText('Refreshing this Claim')).toBeVisible()
+    expect(screen.getByText('The current projection remains visible while the latest revision is loaded.')).toBeVisible()
+    expect(screen.getByLabelText('Message to claimant')).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled()
+    expect(screen.queryByText('Staff messaging not available yet')).not.toBeInTheDocument()
+  })
+
   it('keeps a stale Claim readable but withdraws projected actions until refresh', () => {
     const acceptAction = {
       action_code: 'human.accept_handoff',
@@ -455,7 +529,7 @@ describe('ClaimWorkspace navigation', () => {
     />)
 
     expect(screen.getByText('Showing a saved Claim snapshot')).toBeInTheDocument()
-    expect(screen.getByText('Rear-end collision.')).toBeInTheDocument()
+    expect(screen.getAllByText('Rear-end collision.')).not.toHaveLength(0)
     expect(screen.queryByRole('button', { name: 'Review acceptance' })).not.toBeInTheDocument()
   })
 

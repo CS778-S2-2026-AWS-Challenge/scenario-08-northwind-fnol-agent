@@ -1,7 +1,6 @@
 """Motor fixture acceptance: facts, safety, continued chat, support and creation."""
 
 import json
-import logging
 from collections.abc import Callable
 
 import pytest
@@ -41,20 +40,21 @@ def agent_turn_provider() -> V8JourneyProvider:
             envelope(
                 fields=[fact('incident.injury_or_danger', True, 'my passenger has a sore neck')]
             ),
+            # The handoff opened by this turn silences the model entirely: the
+            # two claimant messages sent while it is open are only recorded,
+            # never reach the model. Once support resolves the handoff, the
+            # next real model call sees both of those messages in its own
+            # conversation history and catches up on every fact they carried
+            # in this one turn.
             envelope(
                 fields=[
                     fact('injury.persons_affected', ['passenger'], 'Just the passenger'),
                     fact('injury.severity_reported', 'minor', "she says it's minor"),
                     fact('injury.medical_attention', 'none', 'no ambulance'),
+                    fact('vehicle.drivable', False, "Can't drive it"),
                 ],
-                question='vehicle.drivable',
                 services=['vehicle_recovery_request'],
             ),
-            envelope(
-                fields=[fact('vehicle.drivable', False, "Can't drive it")],
-                services=['vehicle_recovery_request'],
-            ),
-            envelope(services=['vehicle_recovery_request']),
             envelope(
                 fields=[fact('parties.other_parties', True, 'another vehicle')],
                 reply=(
@@ -86,13 +86,11 @@ MOTOR_SUMMARY_FIELDS = [
 ]
 
 
-def test_motor_safety_handoff_continues_chat_then_resumes_support_and_creates(
+def test_motor_safety_handoff_silences_chat_then_resumes_support_and_creates(
     client: TestClient,
     repository: FixtureRepository,
-    caplog: pytest.LogCaptureFixture,
     record_property: Callable[[str, object], None],
 ) -> None:
-    caplog.set_level(logging.INFO, logger='backend.services.turn_proposal_validation')
     journey = Journey(client, 'motor', 'v8-motor')
     first = journey.send(
         'My car was rear-ended on Queen St yesterday around 3pm, bumper damaged, need an assessor'
@@ -116,25 +114,31 @@ def test_motor_safety_handoff_continues_chat_then_resumes_support_and_creates(
     assert (
         'injury.persons_affected' in third['dynamic_form']['requirements']['missing_required_now']
     )
-    fourth = journey.send("Just the passenger, she says it's minor, no ambulance")
-    assert fourth['agent_message']['message_actions'] == []
+    # An active handoff silences the model entirely: these two messages are
+    # only recorded, with no agent_message and no field extracted from them.
+    fourth = journey.send(
+        "Just the passenger, she says it's minor, no ambulance", expect_agent_message=False
+    )
+    assert (
+        'injury.persons_affected' in fourth['dynamic_form']['requirements']['missing_required_now']
+    )
+    journey.send("Can't drive it, can you get a tow?", expect_agent_message=False)
+    assert journey.view()['form'].get('vehicle.drivable') is None
+    journey.resolve_handoff(repository, third['handoff']['handoff_id'])
+    # Once support resolves the handoff, the model is invoked again and sees
+    # both silenced messages in its own conversation history, catching up on
+    # every fact they carried in this single turn.
+    sixth = journey.send('Yes please arrange the tow')
+    assert journey.view()['form']['vehicle.drivable']['value'] is False
     assert all(
-        code not in fourth['dynamic_form']['requirements']['missing_required_now']
+        code not in sixth['dynamic_form']['requirements']['missing_required_now']
         for code in (
             'injury.persons_affected',
             'injury.severity_reported',
             'injury.medical_attention',
+            'vehicle.drivable',
         )
     )
-    fifth = journey.send("Can't drive it, can you get a tow?")
-    assert journey.view()['form']['vehicle.drivable']['value'] is False
-    assert fifth['agent_message']['message_actions'] == []
-    assert any(
-        getattr(record, 'rejection', {}).get('reason') == 'suppressed_during_handoff'
-        for record in caplog.records
-    )
-    journey.resolve_handoff(repository, third['handoff']['handoff_id'])
-    sixth = journey.send('Yes please arrange the tow')
     assert any(
         action['service_identity'] == 'vehicle_recovery_request'
         for action in sixth['agent_message']['message_actions']

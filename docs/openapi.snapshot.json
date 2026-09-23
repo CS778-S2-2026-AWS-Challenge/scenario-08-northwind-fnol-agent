@@ -453,6 +453,7 @@
           "email": {
             "maxLength": 254,
             "minLength": 3,
+            "pattern": "^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$",
             "title": "Email",
             "type": "string"
           },
@@ -2566,6 +2567,42 @@
         "title": "ClaimMessageResponse",
         "type": "object"
       },
+      "ClaimPayoutContactSelectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "contact_preference": {
+            "$ref": "#/components/schemas/StructuredFormField-Output"
+          },
+          "customer_next_step": {
+            "$ref": "#/components/schemas/CustomerNextStep"
+          },
+          "payment_destination_id": {
+            "title": "Payment Destination Id",
+            "type": "string"
+          },
+          "primary_action": {
+            "$ref": "#/components/schemas/ClaimantPrimaryAction"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "claim_id",
+          "revision",
+          "payment_destination_id",
+          "contact_preference",
+          "customer_next_step",
+          "primary_action"
+        ],
+        "title": "ClaimPayoutContactSelectionResponse",
+        "type": "object"
+      },
       "ClaimPolicySelectionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2780,6 +2817,18 @@
                 "type": "null"
               }
             ]
+          },
+          "payment_destination_id": {
+            "anyOf": [
+              {
+                "pattern": "^pyd_[a-f0-9]{20}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Destination Id"
           },
           "primary_action": {
             "$ref": "#/components/schemas/ClaimantPrimaryAction"
@@ -5225,6 +5274,12 @@
             "title": "Evidence Refs",
             "type": "array"
           },
+          "evidence_snapshot_fingerprint": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Evidence Snapshot Fingerprint",
+            "type": "string"
+          },
           "pending_evidence": {
             "items": {
               "$ref": "#/components/schemas/PendingEvidenceReference"
@@ -5250,6 +5305,7 @@
           "working_claim_id",
           "claim_revision",
           "authorised_decision_id",
+          "evidence_snapshot_fingerprint",
           "route"
         ],
         "title": "CreateExternalClaimRequest",
@@ -10934,6 +10990,20 @@
             ],
             "title": "Display Name"
           },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "minLength": 3,
+                "pattern": "^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
           "legal_name": {
             "anyOf": [
               {
@@ -11462,6 +11532,7 @@
           "email": {
             "maxLength": 254,
             "minLength": 3,
+            "pattern": "^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$",
             "title": "Email",
             "type": "string"
           },
@@ -12310,6 +12381,28 @@
           "asset_id"
         ],
         "title": "SelectClaimAssetRequest",
+        "type": "object"
+      },
+      "SelectPayoutContactRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "contact_preference": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Contact Preference",
+            "type": "string"
+          },
+          "payment_destination_id": {
+            "pattern": "^pyd_[a-f0-9]{20}$",
+            "title": "Payment Destination Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "payment_destination_id",
+          "contact_preference"
+        ],
+        "title": "SelectPayoutContactRequest",
         "type": "object"
       },
       "SelectPolicyNumberRequest": {
@@ -18940,6 +19033,22 @@
         "parameters": [
           {
             "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
             "name": "authorization",
             "required": false,
             "schema": {
@@ -21828,6 +21937,107 @@
         "summary": "Create Claim Motor Other Driver",
         "tags": [
           "claimant"
+        ]
+      }
+    },
+    "/api/v1/claims/{claim_id}/payout-contact-selections": {
+      "post": {
+        "operationId": "post_payout_contact_selection_api_v1_claims__claim_id__payout_contact_selections_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectPayoutContactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimPayoutContactSelectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Payout Contact Selection",
+        "tags": [
+          "claimant",
+          "claimant account data"
         ]
       }
     },

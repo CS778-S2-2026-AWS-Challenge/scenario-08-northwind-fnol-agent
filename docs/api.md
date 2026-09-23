@@ -513,6 +513,15 @@ version with another published version.
 | `POST`, `GET` | `/account/identity-documents` | Idempotently create or cursor-page masked identity documents |
 | `PATCH`, `DELETE` | `/account/identity-documents/{identity_id}` | Revision-update or soft-retire one owned identity document |
 | `POST` | `/claims/{claim_id}/policy-selections` | Propose one active owned policy number into the registered Claim field |
+| `POST` | `/claims/{claim_id}/payout-contact-selections` | Atomically bind one active owned Payment Destination and confirm the registered Claim contact preference |
+
+Profile email writes accept a supported Internet-style address with one local part and a dotted
+domain. The backend trims surrounding whitespace and lowercases the complete address before it
+becomes authoritative. The claimant identity repository enforces normalized-email uniqueness in
+the same compare-and-set operation as the profile revision. An address already owned by another
+account returns `409 RESOURCE_CONFLICT`; a stale account revision remains `409 REVISION_CONFLICT`.
+Invalid email syntax returns the standard `422 VALIDATION_ERROR` without changing the account or
+its revision.
 
 `POST /api/v1/auth/sessions` is the only development/test authentication exception to the
 general bearer requirement. It accepts `email` and `password`, returns `201` with
@@ -531,7 +540,17 @@ the legal-name alias; it cannot disagree with `legal_name`. New clients send the
 revision in `If-Match`; a stale revision returns `409 REVISION_CONFLICT`.
 Profile text is whitespace-normalized before validation. Blank legal name, compatibility display
 name, preferred name, or residential address returns `422 VALIDATION_ERROR` and does not change
-the stored profile or revision.
+the stored profile or revision. Email updates are normalized to lowercase, and an email already
+owned by another account returns `409 RESOURCE_CONFLICT` without changing the stored profile or
+revision.
+
+Preferences PATCH accepts the Account projection's revision in `If-Match` and commits the
+communication preferences with a compare-and-set Account write. A stale supplied revision, or a
+repository conflict after the service read, returns retryable `409 REVISION_CONFLICT` with
+`current_revision`; the attempted preferences and Account revision are not committed. During the
+legacy-client transition the header remains optional and an omitted header uses the revision read
+at the start of the request, while still retaining repository compare-and-set protection. New
+clients send `If-Match` so edits made from a stale Account projection are rejected explicitly.
 
 Create requests for the three account resources require `Idempotency-Key`. List routes use the
 standard opaque cursor and default to active records. Their stable descending keyset is
@@ -708,9 +727,10 @@ assessor-consent, assessor-request, and support-request responses. `customer_nex
 browser's primary action or its precedence.
 
 The versioned claimant action registry contains only claimant-safe `claimant.*` codes:
-`claimant.create_claim`, `claimant.review_details`, `claimant.request_assessment`,
-`claimant.retry_assessment`, `claimant.track_assessment`, `claimant.await_staff_review`,
-`claimant.await_reconciliation`, and `claimant.continue_conversation`. These codes are separate
+`claimant.create_claim`, `claimant.review_details`, `claimant.review_payout_contact`,
+`claimant.review_agreement`, `claimant.request_assessment`, `claimant.retry_assessment`,
+`claimant.track_assessment`, `claimant.await_staff_review`, `claimant.await_reconciliation`, and
+`claimant.continue_conversation`. These codes are separate
 from staff and Agent Runtime action registries; a browser must not execute an internal
 `external.*`, `human.*`, or other Runtime command because a similarly named lifecycle state is
 visible.
@@ -724,13 +744,21 @@ the registry contract, claimant-safe visibility, and server-side operation bound
 `claim_revision` is the Claim revision used to derive the projection and `projection_version` is
 currently `v1`.
 
-Until the server-owned staged progression contracts for Issue #926 and Issue #928 are implemented,
-`customer_next_step.status=ready_to_create` is not permission to invoke legacy claim creation. In
-that state the projection retains `action_code=claimant.create_claim` as the action identity but
-MUST set `available=false`. Claimant/browser consumers MUST NOT present or execute that unavailable
-action and MUST NOT infer permission from `ready_to_create`, `workflow_state`, `required_inputs`,
-or other supporting fields. Only the backend-owned `primary_action.available` value authorises
-presentation as actionable.
+When intake reaches `customer_next_step.status=ready_to_create`, the claimant projection exposes
+`action_code=claimant.review_payout_contact` as the available primary action. The Step 3 save uses
+`POST /api/v1/claims/{claim_id}/payout-contact-selections` with `If-Match` and
+`Idempotency-Key`. The server validates the selected active owner-scoped Payment Destination,
+validates `claimant.contact_preference` against the Field Registry, and requires the corresponding
+profile destination for email, phone, or SMS. The Claim stores only `payment_destination_id`; the
+protected account number remains outside Claim State and ordinary reads remain masked.
+
+After a valid Step 3 selection, claimant reads derive
+`customer_next_step.status=agreement_required` and expose
+`action_code=claimant.review_agreement` as the available primary action. This authorises
+navigation to Step 4 only. It does not authorise formal submission, supply declaration wording, or
+make legacy `claimant.create_claim` available; Issue #928 owns that later contract. Browser
+consumers MUST use `primary_action` and MUST NOT infer progression from workflow state or local
+completion flags.
 
 The backend emits exactly one projection and gives external-service state precedence over Claim
 creation and conversation continuation. `terminal_failure` maps to staff review, while an unknown
@@ -821,14 +849,20 @@ retains the text and original idempotency identifiers so replay restores the del
 without creating a duplicate. The complete state
 and page flow is defined in `docs/claimant-staff-messaging-journey.md`.
 
+Claimant and Agent messages may be `claimant_visible` or `shared`; they cannot be `internal_only`.
+Staff and System records may use any registered visibility. Only a claimant message may carry a
+`client_message_id`, and that retry identity is unique within its Claim.
+
 The current staff reply helper is a deterministic template built from claimant-safe state; it does
 not call the Agent or model gateway and MUST NOT be labelled as Agent- or AI-generated. Template
 draft state is internal UI state, not a `MessageRecord`. Only an authenticated, assigned staff
 submission creates a shared message; building or accepting a template never sends it automatically.
 
 An `in_reply_to` reference MUST identify a message in the same claim and interaction session.
-Message lists use the stable total order `(created_at, message_id)` ascending (newest-last). Equal
-timestamps therefore cannot cause cursor pagination to duplicate or skip records.
+Message lists use persisted `in_reply_to` edges as the authoritative causal order: a reply always
+appears after its target. Independent messages use `(created_at, message_id)` as their stable
+tie-break order (newest-last). Equal timestamps therefore cannot invert a persisted reply or cause
+cursor pagination to duplicate or skip records.
 
 ### Customer Next Step
 
@@ -1003,18 +1037,20 @@ later claimant statement is resolved against existing assertions rather than sil
 
 | Field | Allowed values or rule |
 |---|---|
-| `kind` | Registered evidence type such as `incident_image`, `police_report`, `receipt`, `repair_quote`, or `other_document` |
+| `kind` | Registered evidence type: `agency_incident_record`, `assessment_report`, `claim_history`, `claimant_attachment`, `claimant_statement`, `document`, `external_assessment`, `incident_image`, `incident_photo`, `incident_report`, `internal_policy_history`, `item_photo`, `other_document`, `photo`, `policy`, `police_report`, `proof_of_ownership`, `receipt`, or `repair_quote` |
 | `status` | `missing`, `pending`, `received`, `unofficial`, `invalid`, `unavailable`, `superseded`, `expired` |
 | `file_status` | `not_available`, `awaiting_upload`, `uploading`, `uploaded`, `processing`, `ready`, `failed` |
 | `source` | `claimant`, `staff`, `external_system` |
 | `related_fields` | Registered form field codes supported or challenged by the item |
-| `needed_for` | One or more business actions; later evidence MUST NOT block an unrelated safe current action |
+| `needed_for` | Unique registered purposes: `current_action`, `later_action`, `liability_review`, `professional_review`, or `repair_authorisation`; later evidence MUST NOT block an unrelated safe current action |
 | `references` | Typed statements about a second record or claim fact. **Staff-visible only** |
 
 `status` carries the condition of the material and `file_status` the upload and
 processing lifecycle. They answer different questions and MUST NOT be read as
 alternatives to each other: `pending` with `not_available` is a document that does not
 exist yet, and `pending` with `awaiting_upload` is a file on its way in.
+Every fixture and MongoDB write boundary rejects unregistered kinds, fields, purposes,
+duplicates, and contradictory status/file-status combinations before persistence.
 
 Three conditions are statements about a *second* thing and therefore cannot be carried by
 `status` alone. Each is recorded as an `EvidenceReference`:
@@ -3847,6 +3883,7 @@ Request:
   "working_claim_id": "clm_01J4Y7Q2AW",
   "claim_revision": 9,
   "authorised_decision_id": "dec_01J4YD82JA",
+  "evidence_snapshot_fingerprint": "4eb1...64-character-sha256...a908",
   "confirmed_form": {},
   "evidence_refs": ["evd_01J4Y7V5QJ"],
   "pending_evidence": [
@@ -3875,12 +3912,36 @@ Response `201` or `200` for an idempotent replay:
 }
 ```
 
-The adapter MUST use the working claim ID as its idempotency reference. `creation_status` is `created`, `pending`, or `failed`. Pending evidence is preserved as outstanding work rather than silently dropped.
+Before adapter invocation, Runtime reloads and validates every persisted Evidence record for the
+Claim. `evidence_refs` must be unique and exactly equal that complete snapshot;
+`pending_evidence` must exactly describe every persisted pending record, including `kind` and
+`needed_for`; and `evidence_snapshot_fingerprint` must match the canonical persisted snapshot.
+Missing, extra, foreign, duplicate, stale, or unregistered Evidence fails with `422` before any
+provider call. `route` is derived from the persisted Claim family and must be
+`standard_motor_intake`, `standard_home_intake`, or `standard_contents_intake` accordingly.
+
+Runtime durably reserves one provider-neutral Claim-creation operation before calling the adapter.
+The operation binds the Claim/customer, authorised decision and revision, complete Evidence
+snapshot, request fingerprint, route, and adapter source. A provider result is first persisted on
+that operation as `settlement_pending`; the resulting Claim, terminal disposition, Branch
+Evaluation, and transition to `accepted` are then one repository atomic mutation. If that Claim
+compare-and-set conflicts, an unchanged retry settles the durable result without invoking the
+provider again. A definitely unsubmitted timeout/unavailable failure may retry the same operation.
+A submitted timeout/unavailable failure or any partial outcome remains `unknown_outcome` and may
+only use adapter reconciliation on the same identity. Failed or inconclusive reconciliation
+preserves the original create-call delivery observation. Reconciliation never issues a second
+create call.
+
+The adapter MUST use the working claim ID as its idempotency reference. `creation_status` is
+`created`, `pending`, or `failed`. Pending Evidence is preserved as outstanding work rather than
+silently dropped.
 
 `source` is `fixture` for the explicitly selected deterministic adapter or `configured_service` for a
 confirmed provider adapter. A result MUST NOT claim `configured_service` merely because
 an integration is planned. An unavailable configured service remains explicit and MUST
-NOT silently fall through to another data runtime profile.
+NOT silently fall through to another data runtime profile. The result source must equal the
+source declared by the installed adapter, and its route must equal the authoritative request
+route, or the result is rejected without projecting the Claim as created.
 
 The request and response above are the provider-neutral boundary. Provider table names,
 partition keys, regions, SDK payloads, ARNs, credentials and vendor error bodies MUST
