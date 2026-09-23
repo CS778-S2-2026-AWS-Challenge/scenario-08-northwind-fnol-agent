@@ -79,6 +79,8 @@ def test_valid_grouped_model_questions_remain_verbatim_and_are_not_duplicated() 
     assert validated.next_question is not None
     assert validated.reply == reply
     assert (
-        compose_reply(None, (), validated.reply, validated.next_question.wording, model_authored=True)
+        compose_reply(
+            None, (), validated.reply, validated.next_question.wording, model_authored=True
+        )
         == reply
     )

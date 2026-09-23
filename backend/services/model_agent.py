@@ -1508,8 +1508,7 @@ class GatewayAgent:
                         'agent_turn_field_contract_violation',
                         extra={
                             'violations': [
-                                item.model_dump(mode='json')
-                                for item in contract_error.violations
+                                item.model_dump(mode='json') for item in contract_error.violations
                             ],
                         },
                     )

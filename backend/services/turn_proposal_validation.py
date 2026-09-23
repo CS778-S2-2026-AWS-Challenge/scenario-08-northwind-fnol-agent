@@ -129,7 +129,8 @@ def claimant_report_supports_value(
     # habit ("rear-ended" instead of rear-ended). That wrapper is not part of
     # the claimant's words; strip one symmetric layer before matching, not a
     # relaxation of the verbatim-substring requirement itself.
-    quote = ' '.join((reported_text or '').split()).casefold().strip('"‘’“”\'')
+    quote_wrapping_chars = '"\'‘’“”'  # noqa: RUF001 -- typographic quotes some models emit
+    quote = ' '.join((reported_text or '').split()).casefold().strip(quote_wrapping_chars)
     message = ' '.join((message_text or '').split()).casefold()
     if not quote or quote not in message:
         return False
@@ -276,7 +277,9 @@ def parse_turn_proposal(raw: dict[str, object]) -> tuple[V8TurnProposal, list[di
                 # envelope must not fail because one field is malformed.
                 reason = (
                     'length_limit_exceeded'
-                    if all(item['type'] in {'string_too_long', 'too_long'} for item in error.errors())
+                    if all(
+                        item['type'] in {'string_too_long', 'too_long'} for item in error.errors()
+                    )
                     else 'invalid_structure'
                 )
                 rejected.append({'part': 'field_change', 'value': str(index), 'reason': reason})
@@ -523,14 +526,17 @@ def validate_turn_proposal(
             # "I don't know when" is a disposition, not a time. Record it as such
             # so the report carries the gap instead of a fabricated value.
             disposition = 'claimant_will_supply'
-        if disposition == 'claimant_will_supply' and change.value is not None:
+        if (
+            disposition == 'claimant_will_supply'
+            and change.value is not None
+            and not _is_non_answer(change.value, change.reported_text)
+        ):
             # The model labelled this a non-answer but also supplied a real
             # value with a quote. The label is the model's guess; whether the
             # quote actually supports a value is Runtime's call, not the
             # model's. If it looks like a genuine answer, keep it as one
             # instead of discarding what the claimant actually said.
-            if not _is_non_answer(change.value, change.reported_text):
-                disposition = 'value'
+            disposition = 'value'
         if disposition == 'claimant_will_supply':
             changes.append(
                 ProposedFormChange(
