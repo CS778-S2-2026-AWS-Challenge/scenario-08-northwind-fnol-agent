@@ -569,6 +569,18 @@ def _replay_persisted_response(
     that payload while the message, decision, and current Claim are re-read.
     """
 
+    if idempotency.response_payload is not None and (idempotency.response_status or 0) >= 400:
+        # _settle_accepted_error stored the terminal error envelope of a
+        # rejected attempt, not a successful MessageTurnResponse. Same-key
+        # replay must reproduce that original error, not a MessageTurnResponse
+        # rebuilt from a payload that was never one.
+        stored_error = dict(idempotency.response_payload)
+        stored_error['details'] = (
+            [ErrorDetail.model_validate(item) for item in stored_error['details']]
+            if stored_error.get('details')
+            else None
+        )
+        raise ApiError(status_code=cast(int, idempotency.response_status), **stored_error)
     payload = idempotency.response_payload or {}
     historical_revision = idempotency.message_turn_revision or int(payload.get('claim_revision', 0))
     replay_kind = idempotency.message_turn_kind
@@ -698,13 +710,30 @@ def _replay_persisted_response(
         value is not None
         for value in (
             idempotency.decision_id,
-            idempotency.agent_message_id,
             idempotency.runtime_trace_id,
             idempotency.runtime_result_id,
-            idempotency.handoff_id,
         )
     ):
         raise _persisted_turn_integrity_error()
+    if idempotency.agent_message_id is not None:
+        # A model-dependency recovery legitimately carries a synthetic agent
+        # message_only turn without a decision or Runtime trace: the safety
+        # notice authored when a pre-provider handoff committed. It must
+        # still resolve to a real Agent message replying to this claimant
+        # message, or the record is corrupt.
+        recovery_agent_message = repository.get_message(
+            claim_id, session_id, idempotency.agent_message_id, principal.subject
+        )
+        if (
+            recovery_agent_message is None
+            or recovery_agent_message.actor is not ActorType.AGENT
+            or recovery_agent_message.in_reply_to != claimant_message.message_id
+        ):
+            raise _persisted_turn_integrity_error()
+    if idempotency.handoff_id is not None:
+        handoff = repository.get_handoff(claim_id, idempotency.handoff_id, principal.subject)
+        if handoff is None or handoff.source_message_id != claimant_message.message_id:
+            raise _persisted_turn_integrity_error()
     if idempotency.response_payload is not None:
         return _refresh_current_claim(repository, principal.subject, idempotency.response_payload)
     claim = repository.get_claim(claim_id, principal.subject)
@@ -2011,11 +2040,15 @@ def submit_message(
     handoff_open = active_handoff is not None
     # An active handoff means a human is being brought in for a support
     # request, accessibility need, distress signal, or urgent safety risk.
-    # The claimant is told support has their request; the Agent is not
-    # invoked again until the handoff resolves, so the model never continues
-    # an escalated conversation a human is expected to own.
+    # A genuinely new claimant message is told support has their request; the
+    # Agent is not invoked again until the handoff resolves, so the model
+    # never continues an escalated conversation a human is expected to own.
+    # A retry of an already-accepted message that never reached a completed
+    # turn (a prior attempt's provider call failed) is not new content: it is
+    # the same interrupted turn asking to try the model again, so it must
+    # fall through to the normal turn path below rather than being silenced.
     message_text = payload.content.text if payload.content is not None else ''
-    if active_handoff is not None:
+    if active_handoff is not None and not retrying_saved_message:
         if progress_reporter is not None:
             progress_reporter.accepted()
         timestamp = now_utc()

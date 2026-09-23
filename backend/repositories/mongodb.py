@@ -5914,21 +5914,36 @@ class MongoDBRepository:
         key: str,
         request_fingerprint: str,
     ) -> IdempotencyRecord | None:
+        from backend.repositories.protocols import message_turn_result_priority
+
         def reserve(mongo_session: Any) -> IdempotencyRecord | None:
-            original_document = self._collection.find_one(
-                {
-                    'record_type': 'idempotency',
-                    'actor_id': actor_id,
-                    'route': route,
-                    'payload.claim_id': claim_id,
-                    'payload.message_id': message_id,
-                    'payload.retired': {'$ne': True},
-                },
-                sort=[('_id', -1)],
-                session=mongo_session,
+            original_documents = list(
+                self._collection.find(
+                    {
+                        'record_type': 'idempotency',
+                        'actor_id': actor_id,
+                        'route': route,
+                        'payload.claim_id': claim_id,
+                        'payload.message_id': message_id,
+                        'payload.retired': {'$ne': True},
+                    },
+                    session=mongo_session,
+                )
             )
-            if original_document is None:
+            if not original_documents:
                 return None
+            # The most recently written attempt at this message is not
+            # necessarily the completed one -- a failed attempt may have been
+            # recorded after an earlier success reconciled, or vice versa.
+            # The same completed-over-failed priority fixture uses via
+            # find_message_turn_idempotency must decide which attempt an
+            # alias is reserved against.
+            original_document = max(
+                original_documents,
+                key=lambda document: message_turn_result_priority(
+                    IdempotencyRecord(**document['payload'])
+                ),
+            )
             if original_document['payload'].get('request_fingerprint') != request_fingerprint:
                 raise IdempotencyConflict(key)
             alias = replace(

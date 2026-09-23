@@ -352,11 +352,19 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
     assert all(event.permission is not None for event in audits)
 
 
-def test_claimant_safety_turn_may_upgrade_existing_open_handoff_without_replacing_it(
+def test_claimant_message_during_open_handoff_is_silenced_without_upgrading_it(
     client: TestClient,
     auth_headers: dict[str, str],
     repository: FixtureRepository,
 ) -> None:
+    """A message arriving while a handoff is open is recorded, not processed.
+
+    An earlier design let a same-turn safety signal upgrade an open handoff's
+    urgency; per the full-silence contract, no message is inspected while a
+    handoff is open, so no upgrade can happen -- the original handoff is
+    preserved exactly as the claimant first requested it.
+    """
+
     claim_id, handoff_id = create_claim_and_handoff(
         client, auth_headers, key_prefix='handoff-runtime-upgrade'
     )
@@ -375,12 +383,14 @@ def test_claimant_safety_turn_may_upgrade_existing_open_handoff_without_replacin
         },
     )
     assert response.status_code == 200, response.text
-    upgraded = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
-    assert upgraded is not None
-    assert upgraded.handoff_id == handoff_id
-    assert upgraded.support_need is not None
-    assert upgraded.support_need.value == 'urgent'
-    assert upgraded.priority.value in {'urgent', 'immediate'}
+    body = response.json()
+    assert body['agent_message'] is None
+    assert body['decision'] is None
+    unchanged = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    assert unchanged is not None
+    assert unchanged.handoff_id == handoff_id
+    assert unchanged.support_need is not None
+    assert unchanged.support_need.value == 'human_requested'
     assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
 
 

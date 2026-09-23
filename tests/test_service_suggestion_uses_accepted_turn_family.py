@@ -197,22 +197,20 @@ def test_granted_generic_offer_does_not_become_retry_when_task_storage_is_unavai
     )
 
 
-def test_existing_open_handoff_suppresses_toolbox_and_same_turn_service_proposals(
+def test_existing_open_handoff_silences_new_messages_without_a_second_model_call(
     app: FastAPI,
     client: TestClient,
     repository: FixtureRepository,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    caplog.set_level(logging.INFO, logger='backend.services.turn_proposal_validation')
-    provider = V8JourneyProvider(
-        [
-            envelope(),
-            envelope(
-                fields=[fact('claim.product_family', 'motor', 'My car was rear-ended')],
-                services=[RECOVERY, 'police_105_reporting_guidance'],
-            ),
-        ]
-    )
+    """A new claimant message while a handoff is open is recorded, never processed.
+
+    An earlier design let the toolbox stay visible but suppressed same-turn
+    service proposals while a handoff was open; per the full-silence
+    contract, the model is never invoked for a new message during an open
+    handoff at all, so there is no second turn to inspect.
+    """
+
+    provider = V8JourneyProvider([envelope()])
     app.state.agent_turn_provider = InvariantGuardedAgent(provider)
     claim_id, session_id, revision = _new_claim(client)
     first = submit_message(
@@ -239,18 +237,12 @@ def test_existing_open_handoff_suppresses_toolbox_and_same_turn_service_proposal
         text=MOTOR_MESSAGE,
     )
     assert second.status_code == 200, second.text
-    assert second.json()['agent_message'] is not None
-    assert second.json()['agent_message']['message_actions'] == []
-    assert _prompt_services(provider, 1) == []
+    assert second.json()['agent_message'] is None
+    assert second.json()['decision'] is None
+    assert len(provider.gateway.requests) == 1
     claim = repository.get_claim(claim_id, 'cus_demo')
-    assert claim is not None and claim.incident_type == 'motor'
+    assert claim is not None and claim.incident_type is None
     assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
-    rejections = [
-        getattr(record, 'rejection', {})
-        for record in caplog.records
-        if getattr(record, 'rejection', {}).get('reason') == 'suppressed_during_handoff'
-    ]
-    assert len(rejections) == 2
 
 
 def test_conflicting_family_assertion_cannot_unlock_services_for_the_disputed_family(

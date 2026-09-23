@@ -18,8 +18,16 @@ from backend.services.turn_proposal_validation import _EXECUTION_CLAIM, Validate
 _GENERIC_SERVICE_WORDS = frozenset(
     {'vehicle', 'home', 'contents', 'information', 'guidance', 'reporting', 'specialist'}
 )
-# Sending the report to the claims team is the model's own act, not a third-party promise.
-_SUBMISSION_VERB = re.compile(r'\b(?:submit(?:ted)?|sent|send)\b', re.IGNORECASE)
+# Sending the report to the claims team is the model's own future act, not a
+# third-party promise -- but only as intent ("I'll send it"), never as a
+# completed action ("I submitted it") the model cannot actually perform:
+# Claim creation is a separate, claimant-confirmed API call this validator has
+# no visibility into, so a past-tense or present-perfect submission claim is
+# never truthful within this same turn.
+_SUBMISSION_INTENT_VERB = re.compile(
+    r"\b(?:will|(?:i|we)(?:'ll|’ll))\s+(?:\S+\s+){0,2}?(?:submit|send)\b",  # noqa: RUF001
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +97,7 @@ def review_reply(validated: ValidatedTurn) -> ConsistencyReview:
             if sentence.rstrip().endswith('?'):
                 continue
             match = _EXECUTION_CLAIM.search(sentence)
-            if match is None or _SUBMISSION_VERB.search(match.group(0)):
+            if match is None or _SUBMISSION_INTENT_VERB.search(sentence):
                 continue
             problems.append(
                 ReplyInconsistency(kind='claims_arrangement_without_service', detail=match.group(0))

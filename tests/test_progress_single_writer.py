@@ -13,8 +13,10 @@ ALLOWED_WRITERS = {
     ('turn_reducer.py', 'apply_progress'),
     ('handoffs.py', 'updated_claim_for_handoff'),
     ('claims.py', 'start_claim'),
-    # An accepted claims-system result initializes CREATED, never reopens intake.
-    ('integrations.py', 'create_external_claim'),
+    # An accepted, durably recorded claims-system result initializes CREATED,
+    # never reopens intake; the operation record it settles from is itself
+    # gated on the same authorised decision create_external_claim checked.
+    ('integrations.py', '_settle_recorded_claim_creation'),
 }
 
 
@@ -86,7 +88,7 @@ def test_external_creation_exception_only_initializes_created_state() -> None:
     function = next(
         node
         for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == 'create_external_claim'
+        if isinstance(node, ast.FunctionDef) and node.name == '_settle_recorded_claim_creation'
     )
     state_values = [
         value

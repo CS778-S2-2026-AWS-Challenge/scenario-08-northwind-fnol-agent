@@ -84,7 +84,7 @@ class ObservingGatewayFailure:
     'failure', [ModelGatewayErrorCode.TIMEOUT, ModelGatewayErrorCode.MALFORMED_RESPONSE]
 )
 @pytest.mark.parametrize('text', ['A passenger is injured.', 'I want to speak to a person.'])
-def test_safety_handoff_commits_before_failed_provider_and_followup_continues(
+def test_safety_handoff_commits_before_failed_provider_then_silences_new_messages(
     app: FastAPI,
     client: TestClient,
     repository: FixtureRepository,
@@ -127,6 +127,13 @@ def test_safety_handoff_commits_before_failed_provider_and_followup_continues(
     saved_input = next(item for item in history if item['actor'] == 'claimant')
     assert saved_input['recovery'] is not None
     gateway.fail = False
+    # A genuinely new claimant message arriving while the safety handoff is
+    # still open is silenced entirely: it is only recorded, never reaches the
+    # model, per the same full-silence contract as any other open handoff
+    # (support request, accessibility, distress). Recovering an *already
+    # accepted* message that failed before completion is a different case,
+    # covered by test_explicit_retry_after_safety_notice_returns_real_reply_
+    # and_keeps_original_replay below.
     followup = client.post(
         url,
         headers={**auth_headers, 'Idempotency-Key': 'safety-followup', 'If-Match': '3'},
@@ -136,10 +143,14 @@ def test_safety_handoff_commits_before_failed_provider_and_followup_continues(
         },
     )
     assert followup.status_code == 200, followup.text
+    followup_body = followup.json()
+    assert followup_body['agent_message'] is None
+    assert followup_body['decision'] is None
+    assert followup_body['form_changes'] == []
     current = repository.get_claim(claim_id, 'cus_demo')
-    assert current is not None and current.form['incident.location'].value == 'Symonds Street'
+    assert current is not None and 'incident.location' not in current.form
     assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
-    assert gateway.calls == 2
+    assert gateway.calls == 1
     assert all(
         item.actor in {ActorType.CLAIMANT, ActorType.AGENT}
         for item in repository.list_messages(claim_id, session_id, 'cus_demo')
@@ -252,6 +263,9 @@ def test_explicit_retry_after_safety_notice_returns_real_reply_and_keeps_origina
         inbound = [message for message in history if message['actor'] == 'claimant']
         assert len(inbound) == 1
         assert inbound[0]['recovery'] is None
+        # The handoff created by the safety interrupt was never resolved, so
+        # this genuinely new claimant message is silenced entirely: recorded,
+        # never reaching the model, per the full-silence contract.
         later = client.post(
             url,
             headers={
@@ -265,6 +279,10 @@ def test_explicit_retry_after_safety_notice_returns_real_reply_and_keeps_origina
             },
         )
         assert later.status_code == 200, later.text
+        later_body = later.json()
+        assert later_body['agent_message'] is None
+        assert later_body['decision'] is None
+        assert gateway.calls == 2
         later_snapshot = client.get(f'/api/v1/claims/{claim_id}', headers=owner).json()
         replayed_success = client.post(url, headers=retry_headers, json=payload).json()
         assert replayed_success == {

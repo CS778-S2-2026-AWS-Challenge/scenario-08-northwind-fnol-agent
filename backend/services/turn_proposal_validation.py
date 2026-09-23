@@ -431,6 +431,7 @@ def validate_turn_proposal(
     evidence: Sequence[AgentEvidenceReference] = (),
     service_eligibility_resolver: Callable[[list[ProposedFormChange]], Collection[str]]
     | None = None,
+    authorised_service_ids: Collection[str] = (),
 ) -> ValidatedTurn:
     """Validate one model envelope without applying claim mutations.
 
@@ -444,6 +445,10 @@ def validate_turn_proposal(
         message_text: Latest claimant message used solely as fact provenance.
         evidence: Evidence authorised for this model request.
         service_eligibility_resolver: Existing eligibility query using validated turn facts.
+        authorised_service_ids: Services with a durable, claimant-granted consent
+            record on this Claim. A field the model marks third_party_pending
+            must name one of these -- being merely eligible to offer is not the
+            same as a real party having been authorised to do the work.
     Returns:
         A typed, immutable boundary consumed by the sole claimant reducer.
     Raises:
@@ -538,6 +543,20 @@ def validate_turn_proposal(
             # instead of discarding what the claimant actually said.
             disposition = 'value'
         if disposition == 'claimant_will_supply':
+            # The claimant's own non-answer authorises UNAVAILABLE; the model
+            # cannot invent one. A quote that is not actually in this
+            # message, or that does not read as a genuine "I don't know /
+            # will send later", is not authority to mark the field settled --
+            # it stays missing so the report still asks for it.
+            quote = ' '.join((change.reported_text or '').split())
+            current_message = (message_text or '').casefold()
+            if (
+                not quote
+                or quote.casefold() not in current_message
+                or not _is_non_answer(change.value, change.reported_text)
+            ):
+                reject('field_change', change.field_code, 'unavailable_without_claimant_quote')
+                continue
             changes.append(
                 ProposedFormChange(
                     field_code=change.field_code,
@@ -592,12 +611,19 @@ def validate_turn_proposal(
     )
     if service_eligibility_resolver is not None and not services_suppressed:
         eligible_service_ids = service_eligibility_resolver(changes)
-    # A fact the model hands to a third party needs that service to be one
-    # Runtime can actually offer this turn; otherwise the fact stays open.
+    # A fact the model hands to a third party needs a real, durable
+    # responsibility record for that service on this Claim -- being merely
+    # eligible to offer the service is not evidence anyone has actually taken
+    # it on. Without that authorised record, the field stays open rather than
+    # settling on an unaccountable "someone else has this" claim.
     for change, needed_for in pending_changes:
         identity = str(change.service_identity)
-        if services_suppressed or identity not in eligible_service_ids:
-            reject('field_change', change.field_code, 'service_not_available_for_field')
+        if (
+            services_suppressed
+            or identity not in eligible_service_ids
+            or identity not in authorised_service_ids
+        ):
+            reject('field_change', change.field_code, 'service_not_authorised_for_field')
             continue
         changes.append(
             ProposedFormChange(

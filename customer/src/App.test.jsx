@@ -2966,6 +2966,78 @@ describe('claimant intake projection', () => {
     await waitFor(() => expect(screen.queryByText('new-damage.jpg')).not.toBeInTheDocument())
   })
 
+  it('does not resurface Evidence already sent with an earlier message in the composer tray', async () => {
+    const user = userEvent.setup()
+    const historicalClaimantMessage = {
+      ...claimantMessage,
+      evidence_refs: ['evd_already_sent'],
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({
+      items: [{ ...initialClaim, can_resume: true }],
+      page: { next_cursor: null },
+    })
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_ui_vp',
+      model_profile_id: 'qwen-local',
+      started_at: '2026-09-10T01:00:02Z',
+      resume: {
+        customer_next_step: initialClaim.customer_next_step,
+        summary: 'A pipe burst in the kitchen.',
+        pending_items: [],
+        prior_commitments: [],
+      },
+    })
+    api.getClaim.mockResolvedValue(initialClaim)
+    api.getClaimMessages.mockResolvedValue({ items: [historicalClaimantMessage, agentMessage] })
+    api.getClaimEvidence.mockResolvedValue({
+      revision: 1,
+      items: [{
+        evidence_id: 'evd_already_sent',
+        claim_id: initialClaim.claim_id,
+        kind: 'incident_photo',
+        status: 'received',
+        file_status: 'ready',
+        original_filename: 'already-sent.jpg',
+        media_type: 'image/jpeg',
+        size_bytes: 5,
+        source: 'claimant',
+        created_at: '2026-09-10T00:59:00Z',
+        updated_at: '2026-09-10T00:59:00Z',
+      }],
+    })
+    api.submitClaimMessage.mockResolvedValue({
+      claimant_message: { ...claimantMessage, message_id: 'msg_follow_up', content: { type: 'text', text: 'One more detail.' } },
+      agent_message: agentMessage,
+      form_changes: [],
+      contents_item_changes: [],
+      dynamic_form: null,
+      claim_revision: 2,
+      decision: { customer_next_step: initialClaim.customer_next_step },
+    })
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
+
+    await screen.findByPlaceholderText('Write the details you know...')
+    // Evidence sent on an earlier message is historical: it must never sit
+    // in the composer tray as if it were staged to ride the next message.
+    expect(screen.queryByText('already-sent.jpg')).not.toBeInTheDocument()
+
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'One more detail.')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(1))
+    expect(api.submitClaimMessage).toHaveBeenCalledWith(expect.objectContaining({
+      evidenceRefs: [],
+    }))
+  })
+
   it('restores a protected Claim Evidence deep link without creating or resuming a Claim', async () => {
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue({

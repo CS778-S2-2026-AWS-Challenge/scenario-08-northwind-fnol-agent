@@ -101,18 +101,27 @@ def test_registered_unknown_medical_attention_enum_is_not_a_placeholder(
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
+    # The safety text-scan (which would open a handoff and silence the
+    # second turn) checks for specific injury/danger phrasing, not just the
+    # word "unsafe" alone -- so "unsafe" confirms incident.injury_or_danger
+    # (via the weaker safety marker the claimant-quote check accepts) and
+    # activates the injury.details branch that registers
+    # injury.medical_attention, without tripping the stricter interrupt scan.
     app.state.agent_turn_provider = InvariantGuardedAgent(
         V8JourneyProvider(
             [
                 envelope(
-                    fields=[fact('incident.injury_or_danger', True, 'My passenger is injured')]
+                    fields=[
+                        fact('incident.location', 'Queen St', 'Queen St'),
+                        fact('incident.injury_or_danger', True, 'unsafe'),
+                    ]
                 ),
                 envelope(fields=[fact('injury.medical_attention', 'unknown', 'I do not know')]),
             ]
         )
     )
     journey = Journey(client, 'motor', 'placeholder-enum-control')
-    journey.send('My passenger is injured.')
+    journey.send('It happened on Queen St, and the road felt unsafe at the time.')
     journey.send('I do not know whether they have received medical attention.')
     claim = repository.get_claim(journey.claim_id, 'cus_demo')
     assert claim is not None

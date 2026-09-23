@@ -467,9 +467,11 @@ function App() {
   const followLatestMessages = useRef(true)
   const forceLatestMessages = useRef(false)
   const confirmedClaimProjections = useRef(new Map())
+  const messagesRef = useRef(messages)
   activeClaimRef.current = claim
   activeSessionIdRef.current = sessionId
   accountRef.current = account
+  messagesRef.current = messages
   const realtimePrincipal = account ? 'authenticated' : claim?.claim_id ? 'anonymous' : 'none'
   const realtimeSyncNotice = realtimeHealth === 'stale'
     ? 'Live updates need to be resynchronised. Some claim information may be out of date while we restore the latest status.'
@@ -973,6 +975,14 @@ function App() {
     }
   }
 
+  function linkedEvidenceIds() {
+    const linked = new Set()
+    for (const item of messagesRef.current) {
+      for (const evidenceId of item.evidence_refs || []) linked.add(evidenceId)
+    }
+    return linked
+  }
+
   function syncEvidenceProjection(response) {
     const responseRevision = Number(response.revision || 0)
     const currentClaimRevision = Math.max(Number(activeClaimRef.current?.revision || 0), latestRevision.current)
@@ -1004,9 +1014,18 @@ function App() {
           return evidence && hasRealContent(evidence) ? attachmentForEvidence(evidence, item) : item
         })
       }
+      // Evidence already carried by a message in this conversation is
+      // historical: it already rode a send, so it must never resurface in
+      // the composer tray and auto-attach itself to an unrelated future
+      // message just because it is still visible in the Claim Evidence
+      // projection. The message history is the durable record of which
+      // Evidence has actually been sent; dismissedComposerEvidenceIds alone
+      // is an in-memory hint that does not survive a claim switch or reload.
+      const alreadyLinked = linkedEvidenceIds()
       return items
         .filter((item) => hasRealContent(item))
         .filter((item) => !dismissedComposerEvidenceIds.current.has(item.evidence_id))
+        .filter((item) => !alreadyLinked.has(item.evidence_id))
         .map((item) => attachmentForEvidence(item, currentByEvidenceId.get(item.evidence_id)))
     })
     return true
@@ -1397,6 +1416,25 @@ function App() {
   // The projection updater only uses stable React setters and is intentionally local to this view.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claim?.claim_id])
+
+  useEffect(() => {
+    // Evidence and message history load independently, so evidence syncing
+    // before this conversation's messages have arrived would otherwise let
+    // historical Evidence sit unfiltered in the composer tray until some
+    // later resync happens to catch it. Pruning here on every messages
+    // change closes that race: as soon as a message's evidence_refs are
+    // known, any attachment still carrying that same evidenceId is already
+    // sent and must leave the tray now, not whenever evidence next syncs.
+    const linked = new Set()
+    for (const item of messages) {
+      for (const evidenceId of item.evidence_refs || []) linked.add(evidenceId)
+    }
+    if (linked.size === 0) return
+    setAttachments((current) => {
+      const filtered = current.filter((item) => !item.evidenceId || !linked.has(item.evidenceId))
+      return filtered.length === current.length ? current : filtered
+    })
+  }, [messages])
 
   async function uploadAttachment(
     file,

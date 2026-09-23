@@ -878,6 +878,11 @@ class GatewayAgent:
                 message_text=context.message_text,
                 evidence=context.evidence,
                 service_eligibility_resolver=context.service_eligibility_resolver,
+                authorised_service_ids={
+                    consent.service_identity
+                    for consent in context.claim.external_service_consents
+                    if consent.status.value == 'granted'
+                },
             )
             if optional_rejections:
                 validated_turn = replace(
