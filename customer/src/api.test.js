@@ -279,6 +279,8 @@ describe('claim creation contract', () => {
     await createPaymentDestination({
       accountType: 'cheque',
       accountNumber: '12-3456-1234567-00',
+      bankName: 'Synthetic Bank',
+      accountHolderName: 'Synthetic Claimant',
       idempotencyKey: 'payment-key',
     })
     await selectClaimPayoutContact({
@@ -303,6 +305,8 @@ describe('claim creation contract', () => {
         body: JSON.stringify({
           account_type: 'cheque',
           account_number: '12-3456-1234567-00',
+          bank_name: 'Synthetic Bank',
+          account_holder_name: 'Synthetic Claimant',
         }),
       }),
     )

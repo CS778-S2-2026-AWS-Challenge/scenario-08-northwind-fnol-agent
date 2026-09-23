@@ -526,13 +526,18 @@ Invalid email syntax returns the standard `422 VALIDATION_ERROR` without changin
 its revision.
 
 Payment Destination projections expose `bank_name`, `account_holder_name`, and an authoritative
-`is_common` marker in addition to the existing account type and masked account number. The first
-successful active destination create for an account becomes common atomically; later creates are
-non-common. A claimant may designate another owned active destination with a revisioned PATCH,
-which atomically clears the previous common marker. Retiring the common destination leaves no
-common destination and never silently promotes another record. Legacy records may return the new
-fields as absent/null and are never populated by guessing. Supplying no account number in a PATCH
-retains the sealed value; supplying one replaces it and refreshes only the masked projection.
+`is_common` marker in addition to the existing account type and masked account number. New creates
+require non-empty `bank_name` and `account_holder_name` values. The first successful create becomes
+common atomically only when the account has zero active destinations; creating into an account that
+still has any active destination never fills a missing common marker implicitly. A claimant may
+designate another owned active destination with a revisioned PATCH, which atomically clears the
+previous common marker. That demotion advances the previous resource revision and records separate
+append-only audit evidence. Retiring the common destination leaves no common destination and never
+silently promotes another record. Legacy records may return the new fields as absent/null and a
+missing common marker as `false`; list and resource reads never perform a projection-only adoption.
+A compatible legacy record becomes common only through the explicit revisioned designation path.
+Supplying no account number in a PATCH retains the sealed value; supplying one replaces it and
+refreshes only the masked projection.
 
 `POST /api/v1/auth/sessions` is the only development/test authentication exception to the
 general bearer requirement. It accepts `email` and `password`, returns `201` with

@@ -162,7 +162,7 @@ def _payment_destination_record(
     )
 
 
-def test_mongodb_payment_destination_legacy_read_and_common_guard(
+def test_mongodb_payment_destination_legacy_read_and_create_are_authoritative(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repository = MongoDBRepository(mongomock.MongoClient(), 'payment_destination_contract')
@@ -184,7 +184,10 @@ def test_mongodb_payment_destination_legacy_read_and_common_guard(
         legacy.customer_id, include_inactive=False, after=None, limit=25
     )
     assert not more
-    assert records[0].is_common is True
+    assert records[0].is_common is False
+    fetched = repository.get_payment_destination(legacy.payment_destination_id, legacy.customer_id)
+    assert fetched is not None
+    assert fetched.is_common is False
 
     candidate = _payment_destination_record('pyd_bbbbbbbbbbbbbbbbbbbb', is_common=True)
     principal = Principal(subject=legacy.customer_id, actor_type='claimant', auth_source='test')
@@ -197,17 +200,49 @@ def test_mongodb_payment_destination_legacy_read_and_common_guard(
         session_id='',
         response_payload=None,
     )
-    with pytest.raises(CommonPaymentDestinationConflict):
-        repository.create_account_record(
-            candidate,
-            idempotency,
-            _account_audit(candidate, principal, action='created', idempotency_key=idempotency.key),
-        )
+    stored_candidate = repository.create_account_record(
+        candidate,
+        idempotency,
+        _account_audit(candidate, principal, action='created', idempotency_key=idempotency.key),
+    )
+    assert isinstance(stored_candidate, PaymentDestinationRecord)
+    assert stored_candidate.is_common is False
     restored_document = repository._collection.find_one(
         {'_id': legacy_document['_id']}, projection={'is_common': 1}
     )
     assert restored_document is not None
-    assert restored_document['is_common'] is True
+    assert 'is_common' not in restored_document
+
+
+def test_mongodb_first_common_create_maps_unique_index_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'payment_destination_create_race')
+    monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
+    record = _payment_destination_record('pyd_bbbbbbbbbbbbbbbbbbbb')
+    principal = Principal(subject=record.customer_id, actor_type='claimant', auth_source='test')
+    idempotency = IdempotencyRecord(
+        actor_id=record.customer_id,
+        route='/api/v1/account/payment-destinations',
+        key='common-create-race',
+        request_fingerprint='fingerprint',
+        claim_id=record.payment_destination_id,
+        session_id='',
+        response_payload={},
+    )
+
+    def raise_unique_conflict(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise IdempotencyConflict(record.payment_destination_id)
+
+    monkeypatch.setattr(repository, '_put', raise_unique_conflict)
+
+    with pytest.raises(CommonPaymentDestinationConflict):
+        repository.create_account_record(
+            record,
+            idempotency,
+            _account_audit(record, principal, action='created', idempotency_key=idempotency.key),
+        )
 
 
 def test_mongodb_payment_destination_designation_clears_previous_common(
@@ -234,6 +269,7 @@ def test_mongodb_payment_destination_designation_clears_previous_common(
         designated,
         1,
         _account_audit(designated, principal, action='updated'),
+        'aud_mongo_common_demotion',
     )
     restored_previous = repository.get_payment_destination(
         previous.payment_destination_id, current.customer_id
@@ -244,7 +280,18 @@ def test_mongodb_payment_destination_designation_clears_previous_common(
     assert restored_previous is not None
     assert restored_current is not None
     assert restored_previous.is_common is False
+    assert restored_previous.revision == 2
     assert restored_current.is_common is True
+    previous_events = repository.list_audit_events_internal(
+        AuditSubject(
+            subject_type=AuditSubjectType.PAYMENT_DESTINATION,
+            subject_id=previous.payment_destination_id,
+        )
+    )
+    assert len(previous_events) == 1
+    assert previous_events[0].source_refs == [
+        f'payment_destination:{previous.payment_destination_id}:revision:2'
+    ]
 
 
 def _claim(revision: int = 1) -> WorkingClaim:

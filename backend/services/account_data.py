@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
@@ -178,7 +178,6 @@ def _create(
     build: Callable[[], RecordT],
     project: Callable[[RecordT], ProjectionT],
     projection_type: type[ProjectionT],
-    on_common_conflict: Callable[[], None] | None = None,
 ) -> ProjectionT:
     key = require_idempotency_key(key_header)
     fingerprint = request_fingerprint(payload)
@@ -201,14 +200,13 @@ def _create(
             response_payload=projection.model_dump(mode='json'),
         )
         try:
-            repository.create_account_record(
+            stored_record = repository.create_account_record(
                 record,
                 idempotency,
                 _account_audit(record, principal, action='created', idempotency_key=key),
             )
         except CommonPaymentDestinationConflict:
-            if attempt == 0 and on_common_conflict is not None:
-                on_common_conflict()
+            if attempt == 0:
                 continue
             raise
         except IdempotencyConflict as error:
@@ -220,7 +218,7 @@ def _create(
             ):
                 raise _idempotency_conflict() from error
             return projection_type.model_validate(replay.response_payload)
-        return projection
+        return project(cast(RecordT, stored_record))
     raise RuntimeError('Payment Destination create retry was exhausted.')
 
 
@@ -260,17 +258,6 @@ def create_payment_destination(
     idempotency_key: str | None,
 ) -> PaymentDestinationProjection:
     now = now_utc()
-    common_requested = not any(
-        record.is_common
-        for record in repository.list_payment_destinations(
-            principal.subject, include_inactive=False, after=None, limit=1000
-        )[0]
-    )
-
-    def _set_common_requested_false() -> None:
-        nonlocal common_requested
-        common_requested = False
-
     return _create(
         repository,
         persistence,
@@ -284,7 +271,7 @@ def create_payment_destination(
             account_type=payload.account_type,
             bank_name=payload.bank_name,
             account_holder_name=payload.account_holder_name,
-            is_common=common_requested,
+            is_common=False,
             protected_value=_seal(protected_values, payload.account_number),
             masked_value=masked_value(payload.account_number),
             created_at=now,
@@ -292,7 +279,6 @@ def create_payment_destination(
         ),
         project_payment_destination,
         PaymentDestinationProjection,
-        on_common_conflict=lambda: _set_common_requested_false(),
     )
 
 
@@ -480,6 +466,7 @@ def _update(
     expected_revision: int,
     changes: dict[str, object],
     project: Callable[[RecordT], ProjectionT],
+    related_audit_event_id: str | None = None,
 ) -> ProjectionT:
     updated = record.model_copy(
         update={**changes, 'revision': record.revision + 1, 'updated_at': now_utc()}
@@ -489,6 +476,7 @@ def _update(
             updated,
             expected_revision,
             _account_audit(updated, principal, action='updated'),
+            related_audit_event_id,
         )
     except RevisionConflict as error:
         raise _revision_conflict(error.current_revision) from error
@@ -538,7 +526,18 @@ def update_payment_destination(
             protected_value=_seal(protected_values, payload.account_number),
             masked_value=masked_value(payload.account_number),
         )
-    return _update(repository, principal, record, expected, changes, project_payment_destination)
+    related_audit_event_id = None
+    if payload.is_common is True and 'is_common' in payload.model_fields_set:
+        related_audit_event_id = new_id('aud')
+    return _update(
+        repository,
+        principal,
+        record,
+        expected,
+        changes,
+        project_payment_destination,
+        related_audit_event_id,
+    )
 
 
 def update_identity_document(

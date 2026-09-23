@@ -108,11 +108,12 @@ from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.account_data import (
     AccountCursorKey,
     AccountRecord,
-    CommonPaymentDestinationConflict,
     PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
     account_record_audit_matches,
     account_record_identity,
+    payment_destination_create_result,
+    payment_destination_demotion,
     payout_contact_selection_audit_matches,
     policy_selection_audit_matches,
 )
@@ -330,7 +331,7 @@ class FixtureRepository(PersistenceRepository):
         record: AccountRecord,
         idempotency: IdempotencyRecord,
         audit_event: AuditEventEnvelope,
-    ) -> None:
+    ) -> AccountRecord:
         with self._claim_mutation_lock:
             kind, identifier, _ = account_record_identity(record)
             lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
@@ -338,32 +339,30 @@ class FixtureRepository(PersistenceRepository):
             if (
                 record.customer_id != idempotency.actor_id
                 or identifier != idempotency.claim_id
-                or not account_record_audit_matches(
-                    record, audit_event, idempotency_key=idempotency.key
-                )
                 or identifier in store
                 or lookup in self._idempotency
                 or audit_event.event_id in self._audit_events
             ):
                 raise IdempotencyConflict(idempotency.key)
+            stored_record = record
+            stored_idempotency = idempotency
             if isinstance(record, PaymentDestinationRecord) and record.active:
                 active = [
                     item
                     for item in self._payment_destinations.values()
                     if item.customer_id == record.customer_id and item.active
                 ]
-                common = [item for item in active if item.is_common]
-                legacy = [item for item in active if 'is_common' not in item.model_fields_set]
-                if not common and len(legacy) == 1:
-                    adopted = legacy[0].model_copy(update={'is_common': True})
-                    self._payment_destinations[adopted.payment_destination_id] = adopted
-                    common = [adopted]
-                if record.is_common and common:
-                    raise CommonPaymentDestinationConflict(idempotency.key)
+                stored_record = record.model_copy(update={'is_common': not active})
+                stored_idempotency = payment_destination_create_result(stored_record, idempotency)
+            if not account_record_audit_matches(
+                stored_record, audit_event, idempotency_key=stored_idempotency.key
+            ):
+                raise IdempotencyConflict(idempotency.key)
             del kind
-            store[identifier] = deepcopy(record)
-            self._idempotency[lookup] = deepcopy(idempotency)
+            store[identifier] = deepcopy(stored_record)
+            self._idempotency[lookup] = deepcopy(stored_idempotency)
             self._audit_events[audit_event.event_id] = deepcopy(audit_event)
+            return deepcopy(stored_record)
 
     def get_policy(self, policy_id: str, customer_id: str) -> PolicyNumberRecord | None:
         record = self._policies.get(policy_id)
@@ -444,21 +443,6 @@ class FixtureRepository(PersistenceRepository):
         destinations = [
             record for record in records if isinstance(record, PaymentDestinationRecord)
         ]
-        active = [
-            item
-            for item in self._payment_destinations.values()
-            if item.customer_id == customer_id and item.active
-        ]
-        common = [item for item in active if item.is_common]
-        legacy = [item for item in active if 'is_common' not in item.model_fields_set]
-        if not common and len(legacy) == 1:
-            legacy_id = legacy[0].payment_destination_id
-            destinations = [
-                item.model_copy(update={'is_common': True})
-                if item.payment_destination_id == legacy_id
-                else item
-                for item in destinations
-            ]
         return destinations, more
 
     def list_identity_documents(
@@ -483,6 +467,7 @@ class FixtureRepository(PersistenceRepository):
         record: AccountRecord,
         expected_revision: int,
         audit_event: AuditEventEnvelope,
+        related_audit_event_id: str | None = None,
     ) -> None:
         with self._claim_mutation_lock:
             _, identifier, _ = account_record_identity(record)
@@ -500,20 +485,30 @@ class FixtureRepository(PersistenceRepository):
             ):
                 raise KeyError(identifier)
             if isinstance(record, PaymentDestinationRecord) and record.is_common:
-                for other_id, other in list(self._payment_destinations.items()):
+                previous = [
+                    other
+                    for other_id, other in self._payment_destinations.items()
+                    if other_id != record.payment_destination_id
+                    and other.customer_id == record.customer_id
+                    and other.active
+                    and other.is_common
+                ]
+                if len(previous) > 1 or (previous and related_audit_event_id is None):
+                    raise KeyError(identifier)
+                if previous:
+                    assert related_audit_event_id is not None
+                    demoted, demotion_event = payment_destination_demotion(
+                        previous[0], audit_event, related_audit_event_id
+                    )
                     if (
-                        other_id != record.payment_destination_id
-                        and other.customer_id == record.customer_id
-                        and other.active
-                        and other.is_common
-                    ):
-                        self._payment_destinations[other_id] = other.model_copy(
-                            update={
-                                'is_common': False,
-                                'revision': other.revision + 1,
-                                'updated_at': record.updated_at,
-                            }
+                        not account_record_audit_matches(
+                            demoted, demotion_event, idempotency_key=None
                         )
+                        or demotion_event.event_id in self._audit_events
+                    ):
+                        raise KeyError(identifier)
+                    self._payment_destinations[demoted.payment_destination_id] = demoted
+                    self._audit_events[demotion_event.event_id] = demotion_event
             store[identifier] = deepcopy(record)
             self._audit_events[audit_event.event_id] = deepcopy(audit_event)
 

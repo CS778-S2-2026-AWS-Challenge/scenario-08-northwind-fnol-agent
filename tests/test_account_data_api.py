@@ -44,6 +44,12 @@ def _post(
     key: str,
     payload: dict[str, str],
 ) -> dict[str, Any]:
+    if path == '/api/v1/account/payment-destinations':
+        payload = {
+            'bank_name': 'Synthetic Bank',
+            'account_holder_name': 'Synthetic Claimant',
+            **payload,
+        }
     response = client.post(path, headers={**headers, 'Idempotency-Key': key}, json=payload)
     assert response.status_code == 201, response.text
     return cast(dict[str, Any], response.json())
@@ -117,12 +123,22 @@ def test_protected_account_records_are_masked_owned_revisioned_and_idempotent(
     replay = client.post(
         '/api/v1/account/payment-destinations',
         headers={**owner, 'Idempotency-Key': 'payment-create'},
-        json={'account_type': 'cheque', 'account_number': bank_number},
+        json={
+            'account_type': 'cheque',
+            'account_number': bank_number,
+            'bank_name': 'Synthetic Bank',
+            'account_holder_name': 'Synthetic Claimant',
+        },
     )
     changed_replay = client.post(
         '/api/v1/account/payment-destinations',
         headers={**owner, 'Idempotency-Key': 'payment-create'},
-        json={'account_type': 'savings', 'account_number': bank_number},
+        json={
+            'account_type': 'savings',
+            'account_number': bank_number,
+            'bank_name': 'Synthetic Bank',
+            'account_holder_name': 'Synthetic Claimant',
+        },
     )
     owner_list = client.get('/api/v1/account/payment-destinations', headers=owner)
     other_list = client.get('/api/v1/account/payment-destinations', headers=other)
@@ -133,7 +149,12 @@ def test_protected_account_records_are_masked_owned_revisioned_and_idempotent(
     invalid_number = client.post(
         '/api/v1/account/payment-destinations',
         headers={**owner, 'Idempotency-Key': 'invalid-sensitive-number'},
-        json={'account_type': 'cheque', 'account_number': 'XYZ'},
+        json={
+            'account_type': 'cheque',
+            'account_number': 'XYZ',
+            'bank_name': 'Synthetic Bank',
+            'account_holder_name': 'Synthetic Claimant',
+        },
     )
     concealed = client.patch(
         f'/api/v1/account/payment-destinations/{payment["payment_destination_id"]}',
@@ -207,6 +228,7 @@ def test_protected_account_records_are_masked_owned_revisioned_and_idempotent(
 
 def test_payment_destinations_persist_profile_fields_and_one_common_destination(
     client: TestClient,
+    repository: FixtureRepository,
 ) -> None:
     owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
     first = _post(
@@ -244,6 +266,19 @@ def test_payment_destinations_persist_profile_fields_and_one_common_destination(
     by_id = {item['payment_destination_id']: item for item in listed.json()['items']}
     assert by_id[first['payment_destination_id']]['is_common'] is False
     assert by_id[second['payment_destination_id']]['is_common'] is True
+    demoted = repository.get_payment_destination(first['payment_destination_id'], 'cus_demo')
+    assert demoted is not None
+    assert demoted.revision == 2
+    demotion_events = repository.list_audit_events_internal(
+        AuditSubject(
+            subject_type=AuditSubjectType.PAYMENT_DESTINATION,
+            subject_id=first['payment_destination_id'],
+        )
+    )
+    assert len(demotion_events) == 2
+    assert demotion_events[-1].source_refs == [
+        f'payment_destination:{first["payment_destination_id"]}:revision:2'
+    ]
 
     renamed = client.patch(
         f'/api/v1/account/payment-destinations/{first["payment_destination_id"]}',
@@ -260,6 +295,38 @@ def test_payment_destinations_persist_profile_fields_and_one_common_destination(
     assert retired.status_code == 204
     active = client.get('/api/v1/account/payment-destinations', headers=owner)
     assert all(item['is_common'] is False for item in active.json()['items'])
+    replacement = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        'common-after-retirement',
+        {'account_type': 'savings', 'account_number': '12-3456-5555666-00'},
+    )
+    assert replacement['is_common'] is False
+
+
+@pytest.mark.parametrize('missing_field', ['bank_name', 'account_holder_name'])
+def test_payment_destination_create_requires_profile_fields(
+    client: TestClient,
+    missing_field: str,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    payload = {
+        'account_type': 'savings',
+        'account_number': '12-3456-1111222-00',
+        'bank_name': 'Synthetic Bank',
+        'account_holder_name': 'Synthetic Claimant',
+    }
+    del payload[missing_field]
+
+    response = client.post(
+        '/api/v1/account/payment-destinations',
+        headers={**owner, 'Idempotency-Key': f'missing-{missing_field}'},
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'VALIDATION_ERROR'
 
 
 def test_payment_destination_create_retries_as_non_common_after_atomic_race(
@@ -271,11 +338,34 @@ def test_payment_destination_create_retries_as_non_common_after_atomic_race(
     original = repository.create_account_record
     state = {'raised': False}
 
-    def race_once(record: Any, idempotency: Any, audit_event: Any) -> None:
+    def race_once(record: Any, idempotency: Any, audit_event: Any) -> Any:
         if not state['raised']:
             state['raised'] = True
+            winner = record.model_copy(
+                update={'payment_destination_id': 'pyd_aaaaaaaaaaaaaaaaaaaa'}
+            )
+            winner_key = 'concurrent-winner'
+            winner_idempotency = replace(
+                idempotency,
+                key=winner_key,
+                claim_id=winner.payment_destination_id,
+            )
+            original(
+                winner,
+                winner_idempotency,
+                _account_audit(
+                    winner,
+                    Principal(
+                        subject=winner.customer_id,
+                        actor_type='claimant',
+                        auth_source='test',
+                    ),
+                    action='created',
+                    idempotency_key=winner_key,
+                ),
+            )
             raise CommonPaymentDestinationConflict(idempotency.key)
-        original(record, idempotency, audit_event)
+        return original(record, idempotency, audit_event)
 
     monkeypatch.setattr(repository, 'create_account_record', race_once)
     created = _post(
@@ -288,7 +378,7 @@ def test_payment_destination_create_retries_as_non_common_after_atomic_race(
     assert created['is_common'] is False
 
 
-def test_fixture_adopts_one_legacy_payment_destination_on_read(
+def test_fixture_legacy_payment_destination_requires_explicit_designation(
     repository: FixtureRepository,
 ) -> None:
     timestamp = datetime(2026, 1, 1, tzinfo=UTC)
@@ -310,10 +400,35 @@ def test_fixture_adopts_one_legacy_payment_destination_on_read(
         'cus_legacy', include_inactive=False, after=None, limit=25
     )
     assert not more
-    assert records[0].is_common is True
+    assert records[0].is_common is False
+    fetched = repository.get_payment_destination(legacy.payment_destination_id, 'cus_legacy')
+    assert fetched is not None
+    assert fetched.is_common is False
+
+    designated = legacy.model_copy(
+        update={'is_common': True, 'revision': 2, 'updated_at': timestamp}
+    )
+    principal = Principal(subject='cus_legacy', actor_type='claimant', auth_source='test')
+    repository.update_account_record(
+        designated,
+        1,
+        _account_audit(designated, principal, action='updated'),
+        'aud_unused_related_event',
+    )
+    stored = repository.get_payment_destination(legacy.payment_destination_id, 'cus_legacy')
+    assert stored is not None
+    assert stored.is_common is True
+    assert stored.revision == 2
+    events = repository.list_audit_events_internal(
+        AuditSubject(
+            subject_type=AuditSubjectType.PAYMENT_DESTINATION,
+            subject_id=legacy.payment_destination_id,
+        )
+    )
+    assert len(events) == 1
 
 
-def test_fixture_rejects_second_common_destination_inside_create_boundary(
+def test_fixture_create_boundary_decides_common_from_active_record_count(
     repository: FixtureRepository,
 ) -> None:
     timestamp = datetime(2026, 1, 1, tzinfo=UTC)
@@ -328,7 +443,7 @@ def test_fixture_rejects_second_common_destination_inside_create_boundary(
     )
     principal = Principal(subject=first.customer_id, actor_type='claimant', auth_source='test')
     first_key = 'fixture-common-first'
-    repository.create_account_record(
+    stored_first = repository.create_account_record(
         first,
         IdempotencyRecord(
             actor_id=first.customer_id,
@@ -341,24 +456,27 @@ def test_fixture_rejects_second_common_destination_inside_create_boundary(
         ),
         _account_audit(first, principal, action='created', idempotency_key=first_key),
     )
+    assert isinstance(stored_first, PaymentDestinationRecord)
+    assert stored_first.is_common is True
     second = first.model_copy(
         update={'payment_destination_id': 'pyd_eeeeeeeeeeeeeeeeeeee', 'is_common': True}
     )
     second_key = 'fixture-common-second'
-    with pytest.raises(CommonPaymentDestinationConflict):
-        repository.create_account_record(
-            second,
-            IdempotencyRecord(
-                actor_id=second.customer_id,
-                route='/api/v1/account/payment-destinations',
-                key=second_key,
-                request_fingerprint='second',
-                claim_id=second.payment_destination_id,
-                session_id='',
-                response_payload={},
-            ),
-            _account_audit(second, principal, action='created', idempotency_key=second_key),
-        )
+    stored_second = repository.create_account_record(
+        second,
+        IdempotencyRecord(
+            actor_id=second.customer_id,
+            route='/api/v1/account/payment-destinations',
+            key=second_key,
+            request_fingerprint='second',
+            claim_id=second.payment_destination_id,
+            session_id='',
+            response_payload={},
+        ),
+        _account_audit(second, principal, action='created', idempotency_key=second_key),
+    )
+    assert isinstance(stored_second, PaymentDestinationRecord)
+    assert stored_second.is_common is False
 
 
 def test_saved_policy_prefills_registered_claim_field_without_coverage_inference(
@@ -1487,7 +1605,12 @@ def test_account_operation_logs_are_correlated_and_exclude_protected_values(
                 'Idempotency-Key': 'logged-payment',
                 'X-Request-ID': 'account-log-success',
             },
-            json={'account_type': 'cheque', 'account_number': bank_number},
+            json={
+                'account_type': 'cheque',
+                'account_number': bank_number,
+                'bank_name': 'Synthetic Bank',
+                'account_holder_name': 'Synthetic Claimant',
+            },
         )
         rejected = client.patch(
             f'/api/v1/account/payment-destinations/{created.json()["payment_destination_id"]}',

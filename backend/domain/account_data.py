@@ -116,9 +116,8 @@ class CreatePolicyNumberRequest(ContractModel):
 class CreatePaymentDestinationRequest(ContractModel):
     account_type: ShortText
     account_number: ProtectedNumber
-    # Optional keeps existing account_type/account_number-only callers compatible.
-    bank_name: ShortText | None = None
-    account_holder_name: ShortText | None = None
+    bank_name: ShortText
+    account_holder_name: ShortText
 
     @field_validator('account_number')
     @classmethod

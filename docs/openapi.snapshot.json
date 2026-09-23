@@ -5595,17 +5595,10 @@
         "additionalProperties": false,
         "properties": {
           "account_holder_name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Account Holder Name"
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Account Holder Name",
+            "type": "string"
           },
           "account_number": {
             "maxLength": 80,
@@ -5620,22 +5613,17 @@
             "type": "string"
           },
           "bank_name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Bank Name"
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Bank Name",
+            "type": "string"
           }
         },
         "required": [
           "account_type",
-          "account_number"
+          "account_number",
+          "bank_name",
+          "account_holder_name"
         ],
         "title": "CreatePaymentDestinationRequest",
         "type": "object"
