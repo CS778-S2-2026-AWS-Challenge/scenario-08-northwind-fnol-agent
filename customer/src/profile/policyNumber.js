@@ -6,16 +6,17 @@ export function maskPolicyNumber(value = '') {
 }
 
 function retainedPolicyStatus(resource) {
-  if (resource?.error || resource?.stale) return 'Could not refresh'
   if (resource?.loading) return resource?.items?.length ? 'Refreshing…' : 'Loading…'
+  if (resource?.error || resource?.stale) return 'Could not refresh'
   return ''
 }
 
 export function policyNumberSummary(resource) {
   const policies = resource?.items
+  if (resource?.loading && !policies?.length) return 'Loading…'
   if (resource?.error && !policies?.length) return 'Unavailable'
   if (policies === null) return 'Loading…'
-  if (!policies?.length) return 'Not provided'
+  if (!policies?.length) return resource?.stale ? 'Unavailable' : 'Not provided'
   const value = policies.length === 1
     ? maskPolicyNumber(policies[0].policy_number)
     : `${policies.length} policy numbers saved`

@@ -5,7 +5,9 @@ import { maskPolicyNumber } from './policyNumber.js'
 import { profileMutationMessage } from './profileMutation.js'
 
 export default function PolicyNumberDetails({
+  announceResourceState = true,
   editingDisabled = false,
+  fallbackFocusId,
   resource,
   pending,
   onBeginCreate,
@@ -31,8 +33,10 @@ export default function PolicyNumberDetails({
     if (editor || !returnFocusIdRef.current) return
     const triggerId = returnFocusIdRef.current
     returnFocusIdRef.current = null
-    globalThis.document?.getElementById(triggerId)?.focus()
-  }, [editor])
+    const target = globalThis.document?.getElementById(triggerId)
+      || globalThis.document?.getElementById(fallbackFocusId)
+    target?.focus()
+  }, [editor, fallbackFocusId])
 
   function closeEditor() {
     if (editor?.mode === 'create') onAbandonCreate('policy', editor.attemptId)
@@ -81,11 +85,16 @@ export default function PolicyNumberDetails({
       <FeatureNotice notice={notice} />
       <p className="profile-helper-copy">A saved policy number does not confirm coverage or attach it to a Claim.</p>
       <ResourceError
+        announce={announceResourceState}
         message={resource.error}
         onRetry={onReload}
         retainedLabel={resource.stale ? 'saved policy numbers' : ''}
       />
-      {policies === null && !resource.error && <p className="profile-assets-loading" role="status">Loading saved policy numbers…</p>}
+      {policies === null && !resource.error && (
+        <p className="profile-assets-loading" role={announceResourceState ? 'status' : undefined}>
+          Loading saved policy numbers…
+        </p>
+      )}
       {authoritative && policies.length === 0 && !editor && <p className="profile-assets-empty">No policy numbers saved.</p>}
       {policies !== null && policies.length > 0 && (
         <ul className="profile-record-list" aria-label="Saved policy numbers">
@@ -119,7 +128,7 @@ export default function PolicyNumberDetails({
           <span aria-hidden="true">+</span> Add policy number
         </button>
       )}
-      {authoritative && editor && (
+      {editor && (
         <form className="profile-edit-form profile-record-form" onSubmit={save}>
           <h3>{editor.mode === 'create' ? 'Add policy number' : 'Edit policy number'}</h3>
           <label htmlFor="profile-policy-number">Policy number</label>
@@ -135,9 +144,14 @@ export default function PolicyNumberDetails({
             disabled={saving}
             onChange={(event) => setDraft(event.target.value)}
           />
+          {!authoritative && (
+            <p className="profile-helper-copy">
+              Policy data is being refreshed or could not be confirmed. Retry the load or cancel this draft.
+            </p>
+          )}
           <p className="profile-helper-copy">Northwind stores policy numbers as reusable account records. Choosing one for a Claim is a separate step and does not decide coverage.</p>
           <div className="profile-asset-form-actions">
-            <button className="primary-button" type="submit" disabled={saving || !draft.trim()}>{saving ? 'Saving…' : 'Save policy number'}</button>
+            <button className="primary-button" type="submit" disabled={!authoritative || saving || !draft.trim()}>{saving ? 'Saving…' : 'Save policy number'}</button>
             <button className="profile-quiet-action" type="button" disabled={saving} onClick={closeEditor}>Cancel</button>
           </div>
         </form>

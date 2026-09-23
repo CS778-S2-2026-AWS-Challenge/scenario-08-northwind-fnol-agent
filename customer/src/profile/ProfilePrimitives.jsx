@@ -23,10 +23,10 @@ export function FeatureNotice({ notice }) {
   )
 }
 
-export function ResourceError({ message, onRetry, retainedLabel = '' }) {
+export function ResourceError({ announce = true, message, onRetry, retainedLabel = '' }) {
   if (!message) return null
   return (
-    <div className="profile-assets-error" role="alert">
+    <div className="profile-assets-error" role={announce ? 'alert' : undefined}>
       <p>
         {message}
         {retainedLabel && ` Previously loaded ${retainedLabel} are shown below and may be out of date. Reload before making changes.`}

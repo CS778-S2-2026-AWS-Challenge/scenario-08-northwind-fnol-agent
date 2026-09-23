@@ -44,7 +44,13 @@ function ProfileHeader({ account, controller, policyEditorActive, policyResource
       <div className="profile-header-copy">
         <span className="profile-account-name-label">Preferred name</span>
         <strong>{account.profile.preferred_name || 'Not provided'}</strong>
-        <p className="profile-header-meta">
+        <p
+          className="profile-header-meta"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          aria-label="Policy number status"
+        >
           <span>Policy number</span>
           <strong>{policyNumberSummary(policyResource)}</strong>
         </p>
@@ -106,9 +112,11 @@ export default function PersonalDetailsSection({
           </form>
         )}
         <details className="profile-policy-disclosure">
-          <summary>{policyDisclosureSummary(policyResource)}</summary>
+          <summary id="profile-policy-disclosure-summary">{policyDisclosureSummary(policyResource)}</summary>
           <PolicyNumberDetails
+            announceResourceState={false}
             editingDisabled={Boolean(controller.activeEditor)}
+            fallbackFocusId="profile-policy-disclosure-summary"
             resource={policyResource}
             pending={policyController.pending}
             onBeginCreate={policyController.beginCreate}

@@ -200,7 +200,7 @@ describe('UserProfile', () => {
     await user.click(screen.getByRole('button', { name: 'Save policy number' }))
 
     expect(savePolicy).toHaveBeenCalledWith(policy.policy_id, policy.revision, 'NTH-9876')
-    expect(await screen.findByRole('status')).toHaveTextContent('••••9876 was saved')
+    expect(await screen.findByText(/Policy number ••••9876 was saved/)).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('button', { name: 'Edit policy number ••••1234' })).toHaveFocus())
   })
 
@@ -225,7 +225,7 @@ describe('UserProfile', () => {
       policyNumber: 'NTH-1234',
       attemptId: 'policy-attempt-1',
     })
-    expect(await screen.findByRole('status')).toHaveTextContent('••••1234 was saved')
+    expect(await screen.findByText(/Policy number ••••1234 was saved/)).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('button', { name: 'Add policy number' })).toHaveFocus())
   })
 
@@ -251,6 +251,76 @@ describe('UserProfile', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Edit policy number ••••1234' })).toHaveFocus())
   })
 
+  it('keeps the active policy draft recoverable through retained loading and failure', async () => {
+    const user = userEvent.setup()
+    const sharedProps = {
+      account,
+      activeSection: 'personal-details',
+      onCreateAsset: vi.fn(),
+      onOpenClaims: vi.fn(),
+      onReloadAssets: vi.fn(),
+      onSaveProfile: vi.fn().mockResolvedValue(account),
+      onSavePreferences: vi.fn().mockResolvedValue(account),
+      onSelectSection: vi.fn(),
+      onSignOut: vi.fn(),
+      onUpdateAsset: vi.fn(),
+    }
+    const view = (resource) => <UserProfile {...sharedProps} controller={profileController(resource)} />
+    const { rerender } = render(view({ items: [policy], error: '', loading: false, stale: false }))
+
+    await user.click(screen.getByText('View or edit policy number', { selector: 'summary' }))
+    await user.click(screen.getByRole('button', { name: 'Edit policy number ••••1234' }))
+    const input = screen.getByLabelText('Policy number', { selector: 'input' })
+    expect(input).toHaveFocus()
+
+    rerender(view({ items: [policy], error: '', loading: true, stale: true }))
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save policy number' })).toBeDisabled()
+    expect(input).toHaveFocus()
+
+    rerender(view({ items: [policy], error: 'Reload failed.', loading: false, stale: true }))
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+    expect(screen.getByText(/Reload failed/)).toBeInTheDocument()
+    expect(input).toHaveFocus()
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.getByText('View or edit policy number — refresh failed', { selector: 'summary' })).toHaveFocus())
+    expect(screen.getByRole('button', { name: 'Edit profile' })).not.toBeDisabled()
+  })
+
+  it('announces collapsed policy loading, completion, and failure once', async () => {
+    const user = userEvent.setup()
+    const sharedProps = {
+      account,
+      activeSection: 'personal-details',
+      onCreateAsset: vi.fn(),
+      onOpenClaims: vi.fn(),
+      onReloadAssets: vi.fn(),
+      onSaveProfile: vi.fn().mockResolvedValue(account),
+      onSavePreferences: vi.fn().mockResolvedValue(account),
+      onSelectSection: vi.fn(),
+      onSignOut: vi.fn(),
+      onUpdateAsset: vi.fn(),
+    }
+    const view = (resource) => <UserProfile {...sharedProps} controller={profileController(resource)} />
+    const { rerender } = render(view({ items: null, error: '', loading: true, stale: false }))
+
+    const liveStatus = screen.getByRole('status', { name: 'Policy number status' })
+    expect(liveStatus).toHaveAttribute('aria-live', 'polite')
+    expect(liveStatus).toHaveAttribute('aria-atomic', 'true')
+    expect(liveStatus).toHaveTextContent('Loading…')
+
+    rerender(view({ items: [policy], error: '', loading: false, stale: false }))
+    expect(liveStatus).toHaveTextContent('••••1234')
+    await user.click(screen.getByText('View or edit policy number', { selector: 'summary' }))
+
+    rerender(view({ items: [policy], error: 'Reload failed.', loading: false, stale: true }))
+    expect(liveStatus).toHaveTextContent('••••1234 · Could not refresh')
+    expect(screen.getAllByRole('status')).toEqual([liveStatus])
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByText(/Reload failed/)).toBeInTheDocument()
+  })
+
   it('keeps every historical policy record visible without inventing a primary policy', async () => {
     const user = userEvent.setup()
     const secondPolicy = { ...policy, policy_id: 'pol_22222222222222222222', policy_number: 'NTH-5678' }
@@ -274,7 +344,7 @@ describe('UserProfile', () => {
 
     expect(screen.getByText('••••1234 · Could not refresh', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
     await user.click(screen.getByText('View or edit policy number — refresh failed', { selector: 'summary' }))
-    expect(screen.getByRole('alert')).toHaveTextContent('Reload failed')
+    expect(screen.getByText(/Reload failed/)).toBeInTheDocument()
     expect(screen.getByText('••••1234')).toBeInTheDocument()
   })
 
@@ -303,7 +373,7 @@ describe('UserProfile', () => {
 
     expect(screen.getByText('Unavailable', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
     await user.click(screen.getByText('Add policy number — refresh failed', { selector: 'summary' }))
-    expect(screen.getByRole('alert')).toHaveTextContent('could not load saved policy numbers')
+    expect(screen.getByText(/could not load saved policy numbers/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Try again' }))
     expect(reloadPolicies).toHaveBeenCalledTimes(1)
   })
@@ -317,7 +387,7 @@ describe('UserProfile', () => {
 
     expect(screen.getByText('Loading…', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
     await user.click(screen.getByText('Add policy number — loading', { selector: 'summary' }))
-    expect(screen.getByRole('status')).toHaveTextContent('Loading saved policy numbers…')
+    expect(screen.getByText('Loading saved policy numbers…')).toBeInTheDocument()
   })
 
   it('shows the prepared Claim choices only when account-backed handlers are supplied', async () => {
@@ -364,7 +434,7 @@ describe('UserProfile', () => {
     await user.click(screen.getByRole('button', { name: 'Save profile' }))
 
     expect(onSaveProfile).toHaveBeenCalledWith({ preferred_name: 'Iris Liu' })
-    expect(await screen.findByRole('status')).toHaveTextContent('updated in your saved Northwind account')
+    expect(await screen.findByText(/updated in your saved Northwind account/)).toBeInTheDocument()
     expect(screen.getByText('Iris Liu', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
     expect(screen.getByText('Iris Zhang', { selector: '.profile-summary-row > dd' })).toBeInTheDocument()
     expect(screen.queryByLabelText('Preferred name')).not.toBeInTheDocument()
@@ -445,7 +515,7 @@ describe('UserProfile', () => {
       phone: '+64 21 555 123',
       residential_address: '22 Harbour Road, Auckland',
     })
-    expect(await screen.findByRole('status')).toHaveTextContent('Profile information was updated')
+    expect(await screen.findByText(/Profile information was updated/)).toBeInTheDocument()
     expect(screen.getByText('Iris', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
     expect(screen.getByText('Iris Zhang-Smith', { selector: '.profile-summary-row > dd' })).toBeInTheDocument()
     expect(screen.getByText('22 Harbour Road, Auckland')).toBeInTheDocument()
@@ -491,7 +561,7 @@ describe('UserProfile', () => {
     await user.click(saveButton)
 
     expect(onSaveProfile).toHaveBeenCalledTimes(2)
-    expect(await screen.findByRole('status')).toHaveTextContent('Profile information was updated')
+    expect(await screen.findByText(/Profile information was updated/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Edit personal information' })).toBeInTheDocument()
   })
 
