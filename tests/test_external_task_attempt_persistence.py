@@ -460,7 +460,9 @@ def test_generic_dispatch_exception_persists_retryable_attempt() -> None:
     assert attempts[0].outcome is ExternalTaskOperationStatus.RETRYABLE_FAILURE
 
 
-def test_assessor_settlement_persists_operation_task_and_attempt_together() -> None:
+def test_assessor_settlement_persists_operation_task_and_attempt_together(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repository = FixtureRepository()
     _seed(repository)
     prepared = AssessorRoutingOperation(
@@ -488,6 +490,21 @@ def test_assessor_settlement_persists_operation_task_and_attempt_together() -> N
             'updated_at': BASE + timedelta(seconds=1),
         }
     )
+    original = repository.save_external_task_attempt
+
+    def fail_once(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        raise RuntimeError('simulated attempt persistence failure')
+
+    monkeypatch.setattr(repository, 'save_external_task_attempt', fail_once)
+    with pytest.raises(RuntimeError, match='simulated attempt persistence failure'):
+        repository.save_assessor_routing_settlement(accepted, _task(), _attempt(), CUSTOMER)
+
+    assert repository.get_assessor_routing_operation(OPERATION) == prepared
+    assert repository.list_external_tasks_internal(CLAIM) == [_task()]
+    assert repository.list_external_task_attempts_internal(CLAIM) == []
+
+    monkeypatch.setattr(repository, 'save_external_task_attempt', original)
     repository.save_assessor_routing_settlement(accepted, _task(), _attempt(), CUSTOMER)
 
     assert repository.get_assessor_routing_operation(OPERATION) == accepted
