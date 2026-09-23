@@ -227,6 +227,11 @@ class SQLiteIdentityRepository(IdentityRepository):
                     residential_address TEXT,
                     email_updates INTEGER NOT NULL DEFAULT 1,
                     sms_updates INTEGER NOT NULL DEFAULT 0,
+                    auto_fill_personal_details INTEGER NOT NULL DEFAULT 0,
+                    auto_fill_policy_number INTEGER NOT NULL DEFAULT 0,
+                    auto_fill_saved_assets INTEGER NOT NULL DEFAULT 0,
+                    auto_fill_payment_details INTEGER NOT NULL DEFAULT 0,
+                    auto_fill_identity_information INTEGER NOT NULL DEFAULT 0,
                     active INTEGER NOT NULL DEFAULT 1,
                     revision INTEGER NOT NULL DEFAULT 1,
                     updated_at TEXT NOT NULL
@@ -251,6 +256,17 @@ class SQLiteIdentityRepository(IdentityRepository):
                 connection.execute(
                     'ALTER TABLE accounts ADD COLUMN active INTEGER NOT NULL DEFAULT 1'
                 )
+            for name in (
+                'auto_fill_personal_details',
+                'auto_fill_policy_number',
+                'auto_fill_saved_assets',
+                'auto_fill_payment_details',
+                'auto_fill_identity_information',
+            ):
+                if name not in columns:
+                    connection.execute(
+                        f'ALTER TABLE accounts ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0'
+                    )
             for name, declaration in (
                 ('legal_name', 'TEXT'),
                 ('preferred_name', 'TEXT'),
@@ -320,6 +336,13 @@ class SQLiteIdentityRepository(IdentityRepository):
                 'email': bool(row['email_updates']),
                 'sms': bool(row['sms_updates']),
             },
+            claim_auto_fill_preferences={
+                'personal_details': bool(row['auto_fill_personal_details']),
+                'policy_number': bool(row['auto_fill_policy_number']),
+                'saved_assets': bool(row['auto_fill_saved_assets']),
+                'payment_details': bool(row['auto_fill_payment_details']),
+                'identity_information': bool(row['auto_fill_identity_information']),
+            },
             active=bool(row['active']),
             revision=int(row['revision']),
             updated_at=datetime.fromisoformat(row['updated_at']),
@@ -360,8 +383,11 @@ class SQLiteIdentityRepository(IdentityRepository):
                     INSERT INTO accounts
                     (customer_id, email, password_hash, display_name, legal_name,
                      preferred_name, date_of_birth, phone, residential_address,
-                     email_updates, sms_updates, active, revision, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     email_updates, sms_updates, auto_fill_personal_details,
+                     auto_fill_policy_number, auto_fill_saved_assets,
+                     auto_fill_payment_details, auto_fill_identity_information,
+                     active, revision, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         account.customer_id,
@@ -375,6 +401,11 @@ class SQLiteIdentityRepository(IdentityRepository):
                         account.residential_address,
                         int(account.communication_preferences['email']),
                         int(account.communication_preferences['sms']),
+                        int(account.claim_auto_fill_preferences['personal_details']),
+                        int(account.claim_auto_fill_preferences['policy_number']),
+                        int(account.claim_auto_fill_preferences['saved_assets']),
+                        int(account.claim_auto_fill_preferences['payment_details']),
+                        int(account.claim_auto_fill_preferences['identity_information']),
                         int(account.active),
                         account.revision,
                         account.updated_at.isoformat(),
@@ -427,8 +458,10 @@ class SQLiteIdentityRepository(IdentityRepository):
                     """
                     UPDATE accounts SET email = ?, password_hash = ?, display_name = ?,
                         legal_name = ?, preferred_name = ?, date_of_birth = ?, phone = ?,
-                        residential_address = ?, email_updates = ?, sms_updates = ?, active = ?,
-                        revision = ?, updated_at = ?
+                        residential_address = ?, email_updates = ?, sms_updates = ?,
+                        auto_fill_personal_details = ?, auto_fill_policy_number = ?,
+                        auto_fill_saved_assets = ?, auto_fill_payment_details = ?,
+                        auto_fill_identity_information = ?, active = ?, revision = ?, updated_at = ?
                     WHERE customer_id = ? AND revision = ?
                     """,
                     (
@@ -442,6 +475,11 @@ class SQLiteIdentityRepository(IdentityRepository):
                         account.residential_address,
                         int(account.communication_preferences['email']),
                         int(account.communication_preferences['sms']),
+                        int(account.claim_auto_fill_preferences['personal_details']),
+                        int(account.claim_auto_fill_preferences['policy_number']),
+                        int(account.claim_auto_fill_preferences['saved_assets']),
+                        int(account.claim_auto_fill_preferences['payment_details']),
+                        int(account.claim_auto_fill_preferences['identity_information']),
                         int(account.active),
                         account.revision,
                         account.updated_at.isoformat(),
