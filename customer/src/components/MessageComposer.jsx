@@ -1,4 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import AttachmentPreview from './AttachmentPreview.jsx'
+import { modelAttachmentCompatibility } from '../attachmentModelCompatibility.js'
 
 function OptionMenu({
   value,
@@ -219,19 +221,38 @@ export default function MessageComposer({
 
   const modelDisplayName = (model) => model?.label || model?.id
   const selectedModelOption = models.find((model) => model.id === selectedModel)
+  const selectedModelCompatibility = modelAttachmentCompatibility(attachments, selectedModelOption)
   const modelLabel = modelDisplayName(selectedModelOption) || selectedModel || modelDisplayName(models[0]) || 'Choose model'
   const modelSelectionDisabled = busy || disabled || models.length === 0
-  const modelOptions = models.map((model) => ({
-    value: model.id,
-    label: modelDisplayName(model),
-    meta: isWorkspace
-      ? [
-          model.label !== model.id ? model.id : null,
-          model.availability === 'unavailable' ? 'Unavailable' : null,
-        ].filter(Boolean).join(' · ') || undefined
-      : undefined,
-    disabled: model.availability === 'unavailable',
-  }))
+  const modelOptions = models.map((model) => {
+    const compatibility = modelAttachmentCompatibility(attachments, model)
+    return {
+      value: model.id,
+      label: modelDisplayName(model),
+      meta: [
+        isWorkspace && model.label !== model.id ? model.id : null,
+        model.availability === 'unavailable' ? 'Unavailable' : null,
+        compatibility.hasRequirements ? compatibility.statusLabel : null,
+      ].filter(Boolean).join(' · ') || undefined,
+      disabled: model.availability === 'unavailable' || !compatibility.compatible,
+    }
+  })
+  const hasSendableAttachment = attachments.some((attachment) => (
+    attachment.status === 'staged'
+      ? Boolean(attachment.stagedFile && attachment.uploadAttempt)
+      : (
+        (attachment.status === 'uploaded' || attachment.status === 'processing')
+        && Boolean(attachment.evidenceId || attachment.uploadAttempt?.evidenceId)
+      )
+  ))
+  const hasUploadingAttachment = attachments.some((attachment) => attachment.status === 'uploading')
+  const sendDisabled = (
+    (!draft.trim() && !hasSendableAttachment)
+    || hasUploadingAttachment
+    || !selectedModelCompatibility.compatible
+    || busy
+    || disabled
+  )
 
   return (
     <form className={`composer ${isWorkspace ? 'workspace-composer' : ''}`} onSubmit={onSubmit}>
@@ -245,19 +266,21 @@ export default function MessageComposer({
               // the claimant can always remove it, whatever its upload state.
               const canRemoveFromDraft = Boolean(onRemoveAttachment)
               const content = (
-                <>
-                  <span className="composer-file-icon" aria-hidden="true">↗</span>
-                  <span className="composer-file-copy">
-                    <strong>{attachment.name}</strong>
-                    <small>{attachment.statusLabel || attachment.status || 'Uploaded'}</small>
-                  </span>
-                </>
+                <span className="composer-file-copy">
+                  <strong>{attachment.name}</strong>
+                  <small>{attachment.statusLabel || attachment.status || 'Uploaded'}</small>
+                </span>
               )
               return (
                 <div
                   className={`composer-file composer-file-${attachment.status || 'uploaded'} ${selectedAttachmentId === attachmentId ? 'is-selected' : ''}`}
                   key={attachmentId}
                 >
+                  <AttachmentPreview
+                    attachment={attachment}
+                    fallbackClassName="composer-file-icon"
+                    className="composer-file-preview"
+                  />
                   {canRemoveFromDraft ? (
                     <button
                       type="button"
@@ -349,11 +372,17 @@ export default function MessageComposer({
             </div>
           )}
         </div>
-        <button className="send-btn" type="submit" disabled={!draft.trim() || busy || disabled}>
+        <button className="send-btn" type="submit" disabled={sendDisabled}>
           {buttonLabel}
           <span aria-hidden="true">→</span>
         </button>
         </div>
+        {!selectedModelCompatibility.compatible && (
+          <div className="composer-capability-warning" role="alert">
+            <span className="composer-capability-warning-icon" aria-hidden="true">!</span>
+            <span>{selectedModelCompatibility.message}</span>
+          </div>
+        )}
       </div>
       {disabled && <p className="composer-note">{disabledNote}</p>}
       {error && (

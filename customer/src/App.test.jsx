@@ -1,6 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+
+const originalCreateObjectUrl = Object.getOwnPropertyDescriptor(globalThis.URL, 'createObjectURL')
+const originalRevokeObjectUrl = Object.getOwnPropertyDescriptor(globalThis.URL, 'revokeObjectURL')
 
 const api = vi.hoisted(() => ({
   ApiRequestError: class ApiRequestError extends Error {},
@@ -228,25 +231,50 @@ function readyDynamicForm() {
 describe('claimant intake projection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    api.requestId.mockImplementation((prefix) => `${prefix}-test`)
     globalThis.localStorage.clear()
     globalThis.sessionStorage.clear()
     globalThis.sessionStorage.setItem('northwind.anonymousSession', 'anonymous-session-test')
     globalThis.history.replaceState({}, '', '/')
+    Object.defineProperty(globalThis.URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn((file) => `blob:app/${encodeURIComponent(file.name)}`),
+    })
+    Object.defineProperty(globalThis.URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    })
     api.hasClaimantAccessToken.mockReturnValue(false)
     api.getRuntimeCapabilities.mockResolvedValue({
       claim_types: ['motor', 'home', 'contents'],
       models: [
-        { id: 'qwen-local', label: 'qwen3.8-27b', availability: 'available' },
-        { id: 'nowcoding-gpt55', label: 'gpt-5.5', availability: 'available' },
+        {
+          id: 'qwen-local',
+          label: 'qwen3.8-27b',
+          availability: 'available',
+          image_input: false,
+          document_input: false,
+        },
+        {
+          id: 'nowcoding-gpt55',
+          label: 'gpt-5.5',
+          availability: 'available',
+          image_input: false,
+          document_input: false,
+        },
         {
           id: 'bedrock-nova2-lite',
           label: 'global.amazon.nova-2-lite-v1:0',
           availability: 'unavailable',
+          image_input: true,
+          document_input: false,
         },
         {
           id: 'google-gemini35-flash-lite',
           label: 'gemini-3.5-flash-lite',
           availability: 'available',
+          image_input: true,
+          document_input: true,
         },
       ],
       default_model_profile_id: 'qwen-local',
@@ -265,6 +293,19 @@ describe('claimant intake projection', () => {
     })
   })
 
+  afterEach(() => {
+    if (originalCreateObjectUrl) {
+      Object.defineProperty(globalThis.URL, 'createObjectURL', originalCreateObjectUrl)
+    } else {
+      delete globalThis.URL.createObjectURL
+    }
+    if (originalRevokeObjectUrl) {
+      Object.defineProperty(globalThis.URL, 'revokeObjectURL', originalRevokeObjectUrl)
+    } else {
+      delete globalThis.URL.revokeObjectURL
+    }
+  })
+
   it('shows the backend default model before creating a session', async () => {
     const user = userEvent.setup()
     render(<App />)
@@ -277,7 +318,7 @@ describe('claimant intake projection', () => {
     await user.click(model)
     expect(screen.getByRole('listbox', { name: 'Model' })).toBeInTheDocument()
     expect(screen.getByRole('option', {
-      name: 'global.amazon.nova-2-lite-v1:0',
+      name: /global\.amazon\.nova-2-lite-v1:0.*Unavailable/,
     })).toBeDisabled()
     await user.click(screen.getByRole('option', {
       name: 'gemini-3.5-flash-lite',
@@ -285,7 +326,7 @@ describe('claimant intake projection', () => {
     expect(model).toHaveTextContent('gemini-3.5-flash-lite')
 
     await user.click(model)
-    await user.click(screen.getByRole('option', { name: 'gpt-5.5' }))
+    await user.click(screen.getByRole('option', { name: /^gpt-5\.5/ }))
     expect(model).toHaveTextContent('gpt-5.5')
 
     await waitFor(() => expect(model).toHaveFocus())
@@ -648,13 +689,12 @@ describe('claimant intake projection', () => {
     expect(api.createClaim).toHaveBeenCalledWith(expect.not.objectContaining({ incidentType: expect.anything() }))
 
     const failure = await screen.findByText(
-      'The model service is temporarily unavailable. The claim is unchanged. Try again in a moment.',
+      'The model service is temporarily unavailable. The claim is unchanged. Try the message again in a moment.',
     )
     expect(failure).toBeInTheDocument()
-    expect(screen.getByText('Delivery not confirmed')).toBeInTheDocument()
-    expect(container.querySelector('.workspace-composer [role="alert"]')).toHaveTextContent(
-      'The model service is temporarily unavailable. The claim is unchanged. Try again in a moment.',
-    )
+    expect(screen.getByText('Not sent')).toBeInTheDocument()
+    expect(failure.closest('[role="alert"]')).toHaveClass('is-failed')
+    expect(container.querySelector('.workspace-composer [role="alert"]')).not.toBeInTheDocument()
     expect(screen.queryByText('We could not confirm delivery. Please try again.')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Retry message' })).toBeInTheDocument()
   })
@@ -883,6 +923,40 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
     expect(await screen.findByText('Thank you. I have recorded the incident time.')).toBeVisible()
+    await waitFor(() => expect(messageList.scrollTop).toBe(960))
+  })
+
+  it('keeps the latest message visible when an attachment warning grows the composer', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.requestEvidenceUpload.mockReturnValue(new Promise(() => {}))
+
+    const { container } = render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+
+    const messageList = container.querySelector('.message-list')
+    Object.defineProperties(messageList, {
+      clientHeight: { configurable: true, value: 240 },
+      scrollHeight: { configurable: true, value: 960 },
+    })
+    messageList.scrollTop = 720
+    fireEvent.scroll(messageList)
+    messageList.scrollTop = 0
+
+    await user.upload(
+      container.querySelector('.workspace-composer input[type="file"]'),
+      new File(['image'], 'blocked-image.png', { type: 'image/png' }),
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('This model cannot process images.')
     await waitFor(() => expect(messageList.scrollTop).toBe(960))
   })
 
@@ -1268,6 +1342,61 @@ describe('claimant intake projection', () => {
     expect(await screen.findByRole('button', { name: 'Staff assistance' })).toBeEnabled()
     expect(screen.queryByRole('status', { name: /Staff assistance completed/ })).not.toBeInTheDocument()
     expect(screen.queryByText('Staff assistance completed')).not.toBeInTheDocument()
+  })
+
+  it('restores persisted message attachments without adding them back to the composer', async () => {
+    const user = userEvent.setup()
+    const savedClaim = { ...initialClaim, revision: 4, can_resume: true }
+    const savedEvidence = {
+      evidence_id: 'evd_saved_photo',
+      claim_id: initialClaim.claim_id,
+      kind: 'incident_photo',
+      status: 'received',
+      file_status: 'ready',
+      original_filename: 'saved-damage.jpg',
+      media_type: 'image/jpeg',
+      size_bytes: 5,
+      source: 'claimant',
+      created_at: '2026-09-14T01:05:00Z',
+      updated_at: '2026-09-14T01:06:00Z',
+    }
+    const savedFileMessage = {
+      ...claimantMessage,
+      content: { type: 'evidence_reference' },
+      evidence_refs: [savedEvidence.evidence_id],
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [savedClaim], page: { next_cursor: null } })
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_ui_vp',
+      model_profile_id: 'qwen-local',
+      started_at: '2026-09-10T01:00:02Z',
+      resume: {
+        customer_next_step: savedClaim.customer_next_step,
+        summary: 'A file was provided.',
+        pending_items: [],
+        prior_commitments: [],
+      },
+    })
+    api.getClaim.mockResolvedValue(savedClaim)
+    api.getClaimMessages.mockResolvedValue({ items: [savedFileMessage, agentMessage] })
+    api.getClaimEvidence.mockResolvedValue({
+      claim_id: savedClaim.claim_id,
+      revision: savedClaim.revision,
+      items: [savedEvidence],
+    })
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
+
+    const attachmentBubble = (await screen.findByText('saved-damage.jpg')).closest('.user-bubble')
+    expect(attachmentBubble).toHaveTextContent('Ready')
+    expect(document.querySelector('.composer-attachments')).not.toBeInTheDocument()
   })
 
   it('starts a new local draft without creating a Claim before the first message', async () => {
@@ -3029,6 +3158,54 @@ describe('claimant intake projection', () => {
     expect(api.completeEvidenceUpload).not.toHaveBeenCalled()
   })
 
+  it('removes a completed upload from the current composer selection', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.requestEvidenceUpload.mockResolvedValue({
+      evidence_id: 'evd_detached_photo',
+      revision: 3,
+      upload: { method: 'PUT', url: '/upload-target', headers: {} },
+    })
+    api.uploadEvidenceContent.mockResolvedValue(undefined)
+    api.completeEvidenceUpload.mockResolvedValue({
+      revision: 4,
+      evidence: {
+        evidence_id: 'evd_detached_photo',
+        claim_id: initialClaim.claim_id,
+        kind: 'incident_photo',
+        status: 'received',
+        file_status: 'ready',
+        original_filename: 'detached-damage.jpg',
+        media_type: 'image/jpeg',
+        size_bytes: 5,
+        source: 'claimant',
+        created_at: '2026-09-14T01:05:00Z',
+        updated_at: '2026-09-14T01:06:00Z',
+      },
+    })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    await user.upload(
+      document.querySelector('input[type="file"]'),
+      new File(['image'], 'detached-damage.jpg', { type: 'image/jpeg' }),
+    )
+
+    expect(await screen.findByText('Ready')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Remove detached-damage.jpg' }))
+
+    expect(screen.queryByText('detached-damage.jpg')).not.toBeInTheDocument()
+    expect(api.submitClaimMessage).toHaveBeenCalledTimes(1)
+  })
+
   it('opens account Evidence history directly without creating an empty Claim', async () => {
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue({
@@ -3063,7 +3240,7 @@ describe('claimant intake projection', () => {
     expect(api.createClaim).not.toHaveBeenCalled()
   })
 
-  it('stages a pre-message attachment, uploads it before the first message, and rides its evidence_id on that turn', async () => {
+  it('uploads a staged file before the first message and shows it in the claimant bubble', async () => {
     const user = userEvent.setup()
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue({
@@ -3071,7 +3248,15 @@ describe('claimant intake projection', () => {
       preferences: { email: true, sms: false },
     })
     api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
-    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      claimant_message: {
+        ...claimantMessage,
+        evidence_refs: ['evd_staged_photo'],
+      },
+      claim_revision: 5,
+      primary_action: primaryAction({ revision: 5 }),
+    })
     api.requestEvidenceUpload.mockResolvedValue({
       evidence_id: 'evd_staged_photo',
       revision: 3,
@@ -3106,26 +3291,201 @@ describe('claimant intake projection', () => {
     expect(api.requestEvidenceUpload).not.toHaveBeenCalled()
     expect(screen.queryByText('Conversation history')).not.toBeInTheDocument()
 
+    expect(screen.getByRole('alert')).toHaveTextContent('This model cannot process images.')
+    await user.click(screen.getByRole('button', { name: 'Model' }))
+    await user.click(screen.getByRole('option', { name: /gemini-3\.5-flash-lite.*Supports images/ }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
     await waitFor(() => expect(api.requestEvidenceUpload).toHaveBeenCalledWith(expect.objectContaining({
       claimId: initialClaim.claim_id,
-      revision: initialClaim.revision,
+      revision: 1,
     })))
     expect(api.createClaim).toHaveBeenCalledTimes(1)
-    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(1))
-    // The model can only read evidence attached to the message it arrives with:
-    // the upload must complete, and its evidence_id must ride the same turn,
-    // not a follow-up message nobody sends.
+    expect(api.submitClaimMessage).toHaveBeenCalledTimes(1)
     expect(api.requestEvidenceUpload.mock.invocationCallOrder[0])
       .toBeLessThan(api.submitClaimMessage.mock.invocationCallOrder[0])
     expect(api.submitClaimMessage).toHaveBeenCalledWith(expect.objectContaining({
+      revision: 4,
+      text: 'A pipe burst in the kitchen.',
       evidenceRefs: ['evd_staged_photo'],
     }))
-    // Once it has ridden the message, the attachment leaves the composer
-    // tray: it is not a draft waiting to be sent any more.
-    await waitFor(() => expect(screen.queryByText('new-damage.jpg')).not.toBeInTheDocument())
+    await waitFor(() => expect(document.querySelector('.composer-attachments')).not.toBeInTheDocument())
+    const attachmentBubble = (await screen.findByText('new-damage.jpg')).closest('.user-bubble')
+    expect(attachmentBubble).toHaveTextContent('A pipe burst in the kitchen.')
+    expect(attachmentBubble).toHaveTextContent('Ready')
+  })
+
+  it('starts a Claim and sends an attachment without requiring message text', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      claimant_message: {
+        ...claimantMessage,
+        content: { type: 'evidence_reference' },
+        evidence_refs: ['evd_file_only'],
+      },
+      claim_revision: 5,
+      primary_action: primaryAction({ revision: 5 }),
+    })
+    api.requestEvidenceUpload.mockResolvedValue({
+      evidence_id: 'evd_file_only',
+      revision: 3,
+      upload: { method: 'PUT', url: '/upload-target', headers: {} },
+    })
+    api.uploadEvidenceContent.mockResolvedValue(undefined)
+    api.completeEvidenceUpload.mockResolvedValue({
+      revision: 4,
+      evidence: {
+        evidence_id: 'evd_file_only',
+        claim_id: initialClaim.claim_id,
+        kind: 'incident_photo',
+        status: 'received',
+        file_status: 'ready',
+        original_filename: 'file-only-damage.jpg',
+        media_type: 'image/jpeg',
+        size_bytes: 5,
+        source: 'claimant',
+        created_at: '2026-09-14T01:05:00Z',
+        updated_at: '2026-09-14T01:06:00Z',
+      },
+    })
+
+    render(<App />)
+    await user.upload(
+      document.querySelector('input[type="file"]'),
+      new File(['image'], 'file-only-damage.jpg', { type: 'image/jpeg' }),
+    )
+    const send = screen.getByRole('button', { name: 'Start claim' })
+    const capabilityWarning = screen.getByRole('alert')
+    expect(capabilityWarning).toHaveTextContent('This model cannot process images.')
+    expect(capabilityWarning).toHaveTextContent('Your file is still attached.')
+    expect(send).toBeDisabled()
+    expect(api.createClaim).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Model' }))
+    expect(screen.getByRole('option', { name: /qwen3\.8-27b.*Does not support images/ })).toBeDisabled()
+    await user.click(screen.getByRole('option', { name: /gemini-3\.5-flash-lite.*Supports images/ }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(send).toBeEnabled()
+    await user.click(send)
+
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledWith(expect.objectContaining({
+      revision: 4,
+      text: '',
+      evidenceRefs: ['evd_file_only'],
+      modelProfileId: 'google-gemini35-flash-lite',
+    })))
+    await waitFor(() => expect(document.querySelector('.composer-attachments')).not.toBeInTheDocument())
+    const attachmentBubble = (await screen.findByText('file-only-damage.jpg')).closest('.user-bubble')
+    expect(attachmentBubble).toHaveTextContent('Ready')
+    const preview = within(attachmentBubble).getByRole('link', {
+      name: 'Open file-only-damage.jpg in a new tab',
+    })
+    expect(preview).toHaveAttribute('href', 'blob:app/file-only-damage.jpg')
+    expect(preview.querySelector('img')).toHaveAttribute('src', 'blob:app/file-only-damage.jpg')
+  })
+
+  it('keeps an uploaded image preview available when the model turn fails', async () => {
+    const user = userEvent.setup()
+    api.getRuntimeCapabilities.mockResolvedValue({
+      claim_types: ['motor', 'home', 'contents'],
+      models: [
+        {
+          id: 'qwen-local',
+          label: 'qwen3.8-27b',
+          availability: 'available',
+          image_input: true,
+          document_input: false,
+        },
+        {
+          id: 'nowcoding-gpt55',
+          label: 'gpt-5.5',
+          availability: 'available',
+          image_input: true,
+          document_input: false,
+        },
+      ],
+      default_model_profile_id: 'qwen-local',
+    })
+    let requestSequence = 0
+    api.requestId.mockImplementation((prefix) => `${prefix}-${++requestSequence}`)
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.requestEvidenceUpload.mockResolvedValue({
+      evidence_id: 'evd_failed_turn_photo',
+      revision: 3,
+      upload: { method: 'PUT', url: '/upload-target', headers: {} },
+    })
+    api.uploadEvidenceContent.mockResolvedValue(undefined)
+    api.completeEvidenceUpload.mockResolvedValue({
+      revision: 4,
+      evidence: {
+        evidence_id: 'evd_failed_turn_photo',
+        claim_id: initialClaim.claim_id,
+        kind: 'incident_photo',
+        status: 'received',
+        file_status: 'processing',
+        original_filename: 'failed-turn-photo.png',
+        media_type: 'image/png',
+        size_bytes: 5,
+        source: 'claimant',
+        created_at: '2026-09-14T01:05:00Z',
+        updated_at: '2026-09-14T01:06:00Z',
+      },
+    })
+    api.submitClaimMessage.mockRejectedValue(Object.assign(
+      new api.ApiRequestError('The model service could not complete the request. The claim is unchanged.'),
+      { code: 'DEPENDENCY_FAILED', status: 502, retryable: false },
+    ))
+
+    render(<App />)
+    await user.upload(
+      document.querySelector('input[type="file"]'),
+      new File(['image'], 'failed-turn-photo.png', { type: 'image/png' }),
+    )
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    const failureDetail = await screen.findByText(
+      'The model service could not complete the request. The claim is unchanged. Your file upload is preserved and remains attached. Retry the message, or select another available model and retry.',
+    )
+    const failureCard = failureDetail.closest('[role="alert"]')
+    expect(failureCard).toHaveTextContent('Not sent')
+    expect(failureCard).toHaveTextContent('Processing')
+    const failedPreview = within(failureCard).getByRole('link', {
+      name: 'Open failed-turn-photo.png in a new tab',
+    })
+    expect(failedPreview).toHaveAttribute('href', 'blob:app/failed-turn-photo.png')
+    expect(failedPreview).toHaveAttribute('target', '_blank')
+    expect(failedPreview.querySelector('img')).toHaveAttribute('src', 'blob:app/failed-turn-photo.png')
+
+    const firstAttempt = api.submitClaimMessage.mock.calls[0][0]
+    await user.click(screen.getByRole('button', { name: 'Retry message' }))
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(2))
+    const safeRetry = api.submitClaimMessage.mock.calls[1][0]
+    expect(safeRetry.idempotencyKey).toBe(firstAttempt.idempotencyKey)
+    expect(safeRetry.clientMessageId).toBe(firstAttempt.clientMessageId)
+
+    await user.click(screen.getByRole('button', { name: 'Model' }))
+    await user.click(screen.getByRole('option', { name: /^gpt-5\.5/ }))
+    await user.click(screen.getByRole('button', { name: 'Retry message' }))
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(3))
+    const changedModelAttempt = api.submitClaimMessage.mock.calls[2][0]
+    expect(changedModelAttempt.modelProfileId).toBe('nowcoding-gpt55')
+    expect(changedModelAttempt.idempotencyKey).not.toBe(firstAttempt.idempotencyKey)
+    expect(changedModelAttempt.clientMessageId).not.toBe(firstAttempt.clientMessageId)
   })
 
   it('does not resurface Evidence already sent with an earlier message in the composer tray', async () => {
@@ -3173,7 +3533,11 @@ describe('claimant intake projection', () => {
       }],
     })
     api.submitClaimMessage.mockResolvedValue({
-      claimant_message: { ...claimantMessage, message_id: 'msg_follow_up', content: { type: 'text', text: 'One more detail.' } },
+      claimant_message: {
+        ...claimantMessage,
+        message_id: 'msg_follow_up',
+        content: { type: 'text', text: 'One more detail.' },
+      },
       agent_message: agentMessage,
       form_changes: [],
       contents_item_changes: [],
@@ -3182,14 +3546,15 @@ describe('claimant intake projection', () => {
       decision: { customer_next_step: initialClaim.customer_next_step },
     })
 
-    render(<App />)
+    const { container } = render(<App />)
     await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
 
     await screen.findByPlaceholderText('Write the details you know...')
     // Evidence sent on an earlier message is historical: it must never sit
     // in the composer tray as if it were staged to ride the next message.
-    expect(screen.queryByText('already-sent.jpg')).not.toBeInTheDocument()
+    expect((await screen.findByText('already-sent.jpg')).closest('.user-bubble')).not.toBeNull()
+    expect(container.querySelector('.composer-attachments')).not.toBeInTheDocument()
 
     await user.type(screen.getByPlaceholderText('Write the details you know...'), 'One more detail.')
     await user.click(screen.getByRole('button', { name: 'Send' }))

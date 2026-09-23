@@ -19,12 +19,62 @@ import {
   setClaimantAccessToken,
   streamClaimUpdates,
   streamRealtimeEvents,
+  submitClaimMessage,
   updateAccountAsset,
   updateAccountProfile,
   updateAccountPreferences,
   updateAccountIdentityDocument,
   updateAccountPolicy,
 } from './api.js'
+
+describe('claim message contract', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken('synthetic-claimant-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('sends Evidence references with or without message text', async () => {
+    fetch.mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 201 }))
+    await submitClaimMessage({
+      claimId: 'clm_message_contract',
+      sessionId: 'ses_message_contract',
+      revision: 4,
+      text: '   ',
+      evidenceRefs: ['evd_photo'],
+      idempotencyKey: 'turn-file-only',
+      clientMessageId: 'msg-file-only',
+    })
+
+    const fileOnlyBody = JSON.parse(fetch.mock.calls[0][1].body)
+    expect(fileOnlyBody).toEqual({
+      client_message_id: 'msg-file-only',
+      evidence_refs: ['evd_photo'],
+    })
+
+    fetch.mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 201 }))
+    await submitClaimMessage({
+      claimId: 'clm_message_contract',
+      sessionId: 'ses_message_contract',
+      revision: 5,
+      text: '  Kitchen damage  ',
+      evidenceRefs: ['evd_photo'],
+      idempotencyKey: 'turn-text-and-file',
+      clientMessageId: 'msg-text-and-file',
+    })
+
+    const textAndFileBody = JSON.parse(fetch.mock.calls[1][1].body)
+    expect(textAndFileBody).toEqual({
+      client_message_id: 'msg-text-and-file',
+      content: { type: 'text', text: 'Kitchen damage' },
+      evidence_refs: ['evd_photo'],
+    })
+  })
+})
 
 describe('policy and payment account clients', () => {
   beforeEach(() => {
