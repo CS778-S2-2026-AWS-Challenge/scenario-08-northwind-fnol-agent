@@ -769,6 +769,53 @@ describe('claimant intake projection', () => {
     expect(screen.getByText(initialClaim.claim_id)).toBeInTheDocument()
   })
 
+  it('opens Profile as a standalone page and returns to the loaded conversation', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: {
+        display_name: 'Alexandria Montgomery-Sinclair',
+        email: 'alexandria.montgomery-sinclair@example.invalid',
+        phone: '',
+      },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    const { container } = render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+
+    const profileButton = container.querySelector('.intake-profile')
+    expect(profileButton).toHaveAccessibleName(
+      'Open Profile for Alexandria Montgomery-Sinclair (alexandria.montgomery-sinclair@example.invalid)',
+    )
+    expect(container.querySelector('.intake-profile-name')).toHaveAttribute('title', 'Alexandria Montgomery-Sinclair')
+    expect(container.querySelector('.intake-profile-name')).toHaveTextContent('Alexand…inclair')
+    expect(container.querySelector('.intake-profile-email')).toHaveAttribute(
+      'title',
+      'alexandria.montgomery-sinclair@example.invalid',
+    )
+    expect(container.querySelector('.intake-profile-email')).toHaveTextContent('alexandr…invalid')
+    await user.click(profileButton)
+
+    expect(await screen.findByRole('region', { name: 'Personal details' })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile')
+    expect(container.querySelector('.profile-page .user-profile')).toBeInTheDocument()
+    expect(container.querySelector('.workspace-utility-page')).not.toBeInTheDocument()
+    expect(screen.queryByText(initialClaim.claim_id)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+
+    expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
+    expect(screen.getByText(initialClaim.claim_id)).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe(`/claims/${initialClaim.claim_id}`)
+    expect(api.createClaim).toHaveBeenCalledTimes(1)
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
+  })
+
   it('returns to the start page from the Claim header without dropping the conversation', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage.mockResolvedValue(initialTurn())
