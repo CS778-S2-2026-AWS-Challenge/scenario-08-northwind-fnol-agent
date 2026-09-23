@@ -1409,6 +1409,120 @@ describe('claimant intake projection', () => {
     expect(api.getClaim).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps a failed resumed-message retry on the saved message above Claim resumed', async () => {
+    const user = userEvent.setup()
+    const recovery = {
+      rule_id: 'claimant_turn.model_dependency_failure',
+      claimant_projection: 'Your message is saved, but I could not respond just now. You can try again.',
+      resume_triggers: ['claimant_reply', 'explicit_retry_request'],
+      resume_entrypoint: 'submit_message',
+      continuation: 'runtime.fail_safe',
+    }
+    const savedHi = {
+      message_id: 'msg_saved_hi',
+      actor: 'claimant',
+      client_message_id: 'message-saved-hi',
+      content: { type: 'text', text: 'hi' },
+      created_at: '2026-09-16T01:05:00Z',
+      recovery,
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [{ ...initialClaim, can_resume: true }], page: { next_cursor: null } })
+    api.getClaim.mockResolvedValue(initialClaim)
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_resumed',
+      model_profile_id: 'qwen-local',
+      started_at: '2026-09-16T01:06:00Z',
+      resume: { summary: 'You said hi.', unresolved_questions: [], pending_items: [], prior_commitments: [] },
+    })
+    api.getClaimMessages.mockResolvedValue({ items: [savedHi] })
+    api.submitClaimMessage.mockRejectedValueOnce(Object.assign(
+      new api.ApiRequestError('The claims assistant is temporarily unavailable.'),
+      { status: 503, code: 'DEPENDENCY_UNAVAILABLE', retryable: true },
+    ))
+
+    const { container } = render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
+    const resumed = await screen.findByText('Claim resumed')
+
+    await user.click(screen.getByRole('button', { name: 'Retry response' }))
+    expect(await screen.findByText(/The claims assistant is temporarily unavailable/)).toBeVisible()
+
+    const hiBubbles = [...container.querySelectorAll('.message-list .user-bubble')]
+      .filter((bubble) => bubble.textContent === 'hi')
+    expect(hiBubbles).toHaveLength(1)
+    expect(container.querySelector('.message-list .is-failed')).not.toBeInTheDocument()
+    expect(hiBubbles[0].compareDocumentPosition(resumed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Retry response' })).toBeEnabled()
+    expect(api.submitClaimMessage).toHaveBeenCalledWith(expect.objectContaining({ clientMessageId: 'message-saved-hi' }))
+  })
+
+  it('renders earlier messages above Claim resumed and a genuine post-resume message below it', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [{ ...initialClaim, can_resume: true }], page: { next_cursor: null } })
+    api.getClaim.mockResolvedValue(initialClaim)
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_resumed',
+      model_profile_id: 'qwen-local',
+      started_at: '2026-09-10T00:59:00Z',
+      resume: { summary: 'A pipe burst in the kitchen.', unresolved_questions: [], pending_items: [], prior_commitments: [] },
+    })
+    // The readback arrives with the reply first; the client must still show the causal order.
+    api.getClaimMessages.mockResolvedValue({ items: [{ ...agentMessage, in_reply_to: claimantMessage.message_id }, claimantMessage] })
+    api.submitClaimMessage.mockResolvedValueOnce({
+      ...initialTurn(),
+      claimant_message: {
+        ...claimantMessage,
+        message_id: 'msg_after_resume',
+        content: { type: 'text', text: 'The water is now turned off.' },
+        created_at: '2026-09-16T01:10:00Z',
+      },
+      agent_message: {
+        ...agentMessage,
+        message_id: 'msg_agent_after_resume',
+        in_reply_to: 'msg_after_resume',
+        content: { type: 'text', text: 'Thanks, I recorded that update.' },
+        created_at: '2026-09-16T01:10:01Z',
+      },
+    })
+
+    const { container } = render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
+    await screen.findByText('Claim resumed')
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'The water is now turned off.')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await screen.findByText('Thanks, I recorded that update.')
+
+    const order = [...container.querySelectorAll('.message-list > *')]
+      .map((item) => item.textContent)
+      .map((text) => [
+        claimantMessage.content.text,
+        agentMessage.content.text,
+        'Claim resumed',
+        'The water is now turned off.',
+        'Thanks, I recorded that update.',
+      ].find((needle) => text.includes(needle)))
+      .filter(Boolean)
+    expect(order).toEqual([
+      claimantMessage.content.text,
+      agentMessage.content.text,
+      'Claim resumed',
+      'The water is now turned off.',
+      'Thanks, I recorded that update.',
+    ])
+  })
+
   it('removes an anonymous history reference after a permanent resume failure', async () => {
     const user = userEvent.setup()
     const historyKey = 'northwind.anonymousConversationHistory.v1.anonymous-session-test'
