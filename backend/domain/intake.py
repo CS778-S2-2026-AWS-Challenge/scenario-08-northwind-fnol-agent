@@ -87,6 +87,31 @@ INTAKE_REQUIREMENTS = {
             'Please check whether the property is habitable.',
         ),
         ControlledIntakeField(
+            'injury.persons_affected',
+            'Who was injured or affected?',
+            'Please check who was affected.',
+        ),
+        ControlledIntakeField(
+            'injury.severity_reported',
+            'How serious are the reported injuries?',
+            'Please check the reported injury severity.',
+        ),
+        ControlledIntakeField(
+            'injury.medical_attention',
+            'What medical attention has been received or requested?',
+            'Please check the medical attention details.',
+        ),
+        ControlledIntakeField(
+            'theft.entry_context',
+            'Was entry forced, unlocked, or is this unknown?',
+            'Please check the entry circumstances.',
+        ),
+        ControlledIntakeField(
+            'incident.discovered_at',
+            'When did you discover the loss?',
+            'Please check when the loss was discovered.',
+        ),
+        ControlledIntakeField(
             'contents.items',
             'Tell me about one damaged, lost, or stolen item.',
             'Please check the item details before I continue.',
@@ -123,13 +148,15 @@ def next_requirement_field(
 
     if evaluation is None:
         return INTAKE_REQUIREMENTS['incident.description']
-    return intake_field_for_requirement(evaluation.requirements.next_required_item)
+    missing = evaluation.requirements.missing_required_now
+    return intake_field_for_requirement(missing[0] if missing else None)
 
 
 def next_requirement_step(requirements: RequirementResolution) -> CustomerNextStep:
     """Project deterministic requirements into the existing claimant next-step contract."""
 
-    intake_field = intake_field_for_requirement(requirements.next_required_item)
+    missing = requirements.missing_required_now
+    intake_field = intake_field_for_requirement(missing[0] if missing else None)
     if intake_field is not None:
         return CustomerNextStep(
             status='more_information_needed',
@@ -143,9 +170,16 @@ def next_requirement_step(requirements: RequirementResolution) -> CustomerNextSt
             summary='Your confirmed report is ready for claim creation.',
             responsible_party=ResponsibleParty.CLAIMANT,
         )
+    if getattr(requirements, 'ready_pending_confirmation', False):
+        return CustomerNextStep(
+            status='confirmation_requested',
+            summary='Please confirm the recorded details before claim creation.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+            required_items=list(getattr(requirements, 'recorded', [])),
+        )
     return CustomerNextStep(
         status='clarification_needed',
-        summary='Please clarify the claim type before the report continues.',
+        summary='Your report needs clarification before it can continue.',
         responsible_party=ResponsibleParty.CLAIMANT,
-        required_items=['claim.product_family'],
+        required_items=[],
     )

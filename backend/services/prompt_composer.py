@@ -4,7 +4,7 @@ import json
 from importlib.resources import files
 from math import ceil
 
-from backend.domain.agent_context_runtime import ContextLoadMode, TurnRoute
+from backend.domain.agent_context_runtime import ContextLoadMode, TurnRoute, TurnTask
 from backend.domain.prompt_pack import (
     PromptBundle,
     PromptFragmentDefinition,
@@ -21,6 +21,7 @@ _SCHEMA_FILES = {
     'claimant.handoff.v1': 'handoff.json',
     'claimant.claim-creation.v1': 'claim-creation.json',
     'claimant.sourced-summary.v1': 'sourced-summary.json',
+    'claimant.turn.v1': 'turn.json',
 }
 
 
@@ -30,9 +31,10 @@ def estimate_tokens(value: str) -> int:
     return max(1, ceil(len(value.encode('utf-8')) / 3))
 
 
-def load_prompt_manifest() -> PromptPackManifest:
+def load_prompt_manifest(prompt_version: str = 'northwind-fnol-claimant-v7') -> PromptPackManifest:
+    pack = 'v8' if prompt_version == 'northwind-fnol-claimant-v8' else 'v7'
     payload = json.loads(
-        files('backend.prompts').joinpath('v7/manifest.json').read_text(encoding='utf-8')
+        files('backend.prompts').joinpath(f'{pack}/manifest.json').read_text(encoding='utf-8')
     )
     return PromptPackManifest.model_validate(payload)
 
@@ -41,9 +43,10 @@ def load_response_schema(schema_id: str) -> dict[str, object]:
     try:
         filename = _SCHEMA_FILES[schema_id]
     except KeyError as error:
-        raise ValueError(f'Unknown v7 response schema: {schema_id}.') from error
+        raise ValueError(f'Unknown claimant response schema: {schema_id}.') from error
+    pack = 'v8' if schema_id == 'claimant.turn.v1' else 'v7'
     payload = json.loads(
-        files('backend.prompts').joinpath(f'v7/schema/{filename}').read_text(encoding='utf-8')
+        files('backend.prompts').joinpath(f'{pack}/schema/{filename}').read_text(encoding='utf-8')
     )
     if not isinstance(payload, dict):
         raise ValueError('A v7 response schema must be a JSON object.')
@@ -58,10 +61,11 @@ def load_fragment_contents(
     manifest: PromptPackManifest | None = None,
 ) -> dict[str, str]:
     selected_manifest = manifest or load_prompt_manifest()
+    pack = 'v8' if selected_manifest.prompt_pack_version == 'northwind-fnol-claimant-v8' else 'v7'
     return {
         definition.fragment_id: (
             files('backend.prompts')
-            .joinpath(f'v7/{definition.path}')
+            .joinpath(f'{pack}/{definition.path}')
             .read_text(encoding='utf-8')
             .strip()
         )
@@ -75,16 +79,33 @@ def _initial_fragment_ids(
 ) -> set[str]:
     family = route.product_family or 'unresolved-family'
     fragment_ids = {
-        'core.authority',
-        'core.safety',
-        'core.response-style',
-        'core.provenance',
-        f'family.{family}',
-        f'task.{route.task.value.replace("_", "-")}',
+        item
+        for item in (
+            'core.authority',
+            'core.safety',
+            'core.response-style',
+            'core.provenance',
+        )
+        if item in definitions
     }
+    # v8 ordinary tasks share one turn fragment; v7 retains task-specific prose.
+    family_fragment = f'family.{family}'
+    task_fragment = f'task.{route.task.value.replace("_", "-")}'
+    if route.product_family is not None or family_fragment in definitions:
+        fragment_ids.add(family_fragment)
+    if task_fragment in definitions:
+        fragment_ids.add(task_fragment)
+    elif 'task.turn' in definitions:
+        fragment_ids.add('task.turn')
     for capability_id in route.capability_ids:
         fragment_id = f'capability.{capability_id}'
         definition = definitions.get(fragment_id)
+        if (
+            route.task.value == 'evidence_history'
+            and definition is not None
+            and definition.load_mode == ContextLoadMode.AUTO_CANDIDATE
+        ):
+            continue
         if (
             definition is not None
             and definition.load_mode == ContextLoadMode.AUTO_CANDIDATE
@@ -124,6 +145,14 @@ def compose_prompt(
     fragment_contents: dict[str, str] | None = None,
 ) -> PromptBundle:
     selected_manifest = manifest or load_prompt_manifest()
+    # The rollback pack still names its external fragment by the old task.
+    # Translate the shared intent only for prompt selection, never to clip facts.
+    if (
+        selected_manifest.prompt_pack_version == 'northwind-fnol-claimant-v7'
+        and 'external' in route.intents
+        and route.task is TurnTask.INTAKE
+    ):
+        route = route.model_copy(update={'task': TurnTask.EXTERNAL_SUPPORT})
     by_id = {item.fragment_id: item for item in selected_manifest.fragments}
     selected_ids = _initial_fragment_ids(route, by_id)
     missing = selected_ids - set(by_id)
@@ -152,11 +181,14 @@ def compose_prompt(
     contents: list[str] = []
     refs: list[PromptFragmentRef] = []
     for definition in selected:
+        pack = (
+            'v8' if selected_manifest.prompt_pack_version == 'northwind-fnol-claimant-v8' else 'v7'
+        )
         content = (
             fragment_contents[definition.fragment_id]
             if fragment_contents is not None
             else files('backend.prompts')
-            .joinpath(f'v7/{definition.path}')
+            .joinpath(f'{pack}/{definition.path}')
             .read_text(encoding='utf-8')
             .strip()
         )
@@ -173,7 +205,12 @@ def compose_prompt(
         )
     family = route.product_family or 'unresolved-family'
     suffix = ':'.join(route.capability_ids)
-    bundle_id = f'claimant-v7:{family}:{route.task.value}' + (f':{suffix}' if suffix else '')
+    bundle_version = (
+        'v8' if selected_manifest.prompt_pack_version == 'northwind-fnol-claimant-v8' else 'v7'
+    )
+    bundle_id = f'claimant-{bundle_version}:{family}:{route.task.value}' + (
+        f':{suffix}' if suffix else ''
+    )
     instruction = '\n\n'.join(contents)
     return PromptBundle(
         prompt_bundle_id=bundle_id,

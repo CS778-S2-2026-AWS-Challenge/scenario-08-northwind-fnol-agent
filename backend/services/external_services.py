@@ -1,3 +1,4 @@
+import logging
 from hashlib import sha256
 from typing import Any, NoReturn, cast
 
@@ -16,6 +17,7 @@ from backend.domain.audit import (
 from backend.domain.external_service_registry import (
     ExternalLifecycleStatus,
     build_lifecycle_projection,
+    service_action_presentation,
 )
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
@@ -76,6 +78,8 @@ from backend.services.support import (
     request_fingerprint,
     require_idempotency_key,
 )
+
+logger = logging.getLogger(__name__)
 
 _ACTION_SERVICE_NAME = 'Vehicle damage assessment'
 _ACTION_PROVIDER = 'Controlled assessment fixture'
@@ -245,7 +249,16 @@ def claimant_assessor_action(
     interrupted_dispatch = False
     continuation: ExternalTaskContinuationOutcome | None = None
     if routing is None:
-        actionable_task = _latest_actionable_assessor_task(repository, claim)
+        try:
+            actionable_task = _latest_actionable_assessor_task(repository, claim)
+        except RuntimeError:
+            logger.warning(
+                'external_lifecycle_context_unavailable',
+                extra={'claim_id': claim.claim_id, 'component': 'claimant_assessor_projection'},
+            )
+            # An unavailable task read is not proof that nothing was sent.
+            # Suppress the optional action instead of offering another request.
+            return None
         if actionable_task is not None:
             failed_task, interrupted_dispatch = actionable_task
         consent = _active_assessor_consent(claim)
@@ -296,6 +309,7 @@ def claimant_assessor_action(
         catalogue_reference=canonical_projection.catalogue_reference,
         capability_provenance=canonical_projection.provenance.value,
         access_form=canonical_projection.access_form,
+        presentation=service_action_presentation(ASSESSOR_SERVICE_IDENTITY, status.value),
         status_label=canonical_projection.status_label,
         status_detail=canonical_projection.status_detail,
         pending_owner=canonical_projection.pending_owner,
@@ -455,10 +469,10 @@ def claimant_next_step(
 ) -> CustomerNextStep:
     """Say what the claimant does next, without contradicting the record beside it.
 
-    Three cases are corrected, and each is corrected because the stored next step says
-    something the claim's own records contradict. A retryable failure is left alone: the
-    stored next step already says Northwind can send the request, and `can_request`
-    agrees. Every correction is derived here rather than written, so AT-10's empty
+    Each correction applies when the stored next step contradicts the operation's
+    current ownership. A retryable failure with an offered retry belongs to the claimant,
+    even if Claim creation previously stored system ownership. Every correction is
+    derived here rather than written, so AT-10's empty
     `claim_state_effects.failure_may_change` still holds.
 
     Args:
@@ -487,10 +501,71 @@ def claimant_next_step(
                 }
             )
         return claim.customer_next_step
+    if action.status is ClaimantExternalServiceStatus.RETRYABLE_FAILURE and action.can_request:
+        # Claim creation may have ended with a system-owned next step. The
+        # separate assessor operation now offers a claimant-owned retry; its
+        # read-time projection must agree with the lifecycle without reopening
+        # or rewriting the terminal Claim.
+        return claim.customer_next_step.model_copy(
+            update={
+                'status': 'assessor_request_ready',
+                'summary': action.next_action,
+                'responsible_party': ResponsibleParty.CLAIMANT,
+                'expected_by': None,
+                'required_items': [],
+            }
+        )
     replacement = _WITHDRAWN_ACTION_NEXT_STEPS.get(action.status)
     if replacement is None:
-        if action.status in _ANSWERABLE_STATUSES and _assessment_has_come_back(repository, claim):
+        try:
+            result_received = action.status in _ANSWERABLE_STATUSES and _assessment_has_come_back(
+                repository, claim
+            )
+        except RuntimeError:
+            logger.warning(
+                'external_lifecycle_context_unavailable',
+                extra={
+                    'claim_id': claim.claim_id,
+                    'component': 'claimant_assessor_result_projection',
+                },
+            )
+            return claim.customer_next_step
+        if result_received:
             replacement = _RESULT_RECEIVED_NEXT_STEP
+        elif (
+            action.status
+            in {
+                ClaimantExternalServiceStatus.ASSIGNED,
+                ClaimantExternalServiceStatus.QUEUED,
+            }
+            and action.routing is not None
+        ):
+            return claim.customer_next_step.model_copy(
+                update={
+                    'status': (
+                        'assessor_assigned'
+                        if action.status is ClaimantExternalServiceStatus.ASSIGNED
+                        else 'awaiting_assessor_assignment'
+                    ),
+                    'summary': action.routing.next_step,
+                    'responsible_party': ResponsibleParty.EXTERNAL_PARTY,
+                    'expected_by': action.routing.expected_by,
+                    'required_items': [],
+                }
+            )
+        elif action.status is ClaimantExternalServiceStatus.READY_TO_REQUEST:
+            return claim.customer_next_step.model_copy(
+                update={
+                    'status': 'assessor_request_ready',
+                    'summary': (
+                        'Your permission is recorded. Northwind can now send the vehicle '
+                        'assessment request.'
+                    ),
+                    'responsible_party': ResponsibleParty.CLAIMANT,
+                    'expected_by': None,
+                    'required_items': [],
+                }
+            )
         else:
             return claim.customer_next_step
     status, summary = replacement
@@ -627,17 +702,18 @@ def grant_assessor_consent(
     updated = claim.model_copy(
         update={
             'external_service_consents': [*claim.external_service_consents, consent],
-            'customer_next_step': CustomerNextStep(
-                status='assessor_request_ready',
-                summary=(
-                    'Your permission is recorded. Northwind can now send the vehicle '
-                    'assessment request.'
-                ),
-                responsible_party=ResponsibleParty.CLAIMANT,
-            ),
             'revision': claim.revision + 1,
             'updated_at': now_utc(),
         }
+    )
+    from backend.services.turn_reducer import apply_progress
+
+    updated = apply_progress(
+        updated,
+        build_applied_branch_evaluation(
+            updated, repository=repository, recomputation_reason='external_consent_progress'
+        ),
+        open_handoffs=tuple(repository.list_handoffs(claim_id, principal.subject)),
     )
     response = _response(repository, updated)
     idempotency = IdempotencyRecord(

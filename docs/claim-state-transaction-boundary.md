@@ -77,6 +77,28 @@ Rules:
 
 ## Mutation Families
 
+### Claimant v8 progress and persist-first exceptions
+
+`reduce_turn` constructs the normal claimant result; `recompute_progress` is the shared
+decision point for workflow and claimant next-step changes. Form/confirmation, consent,
+handoff, staff and external-result consumers use it inside their existing mutation families.
+Claim initialization and the shared authorized handoff writer are explicit exceptions,
+not competing general progress authorities. The assessor overlay is read-only.
+
+A v8 chat HTTP request spans distinct durable boundaries: inbound acceptance advances
+N to N+1; a detected safety/support action commits independently before the provider;
+successful model processing commits the result with another CAS. Each individual material
+mutation still increments once. A model failure preserves accepted inbound and safety state;
+it does not apply the failed model's facts. Confirmation validates the displayed record
+against the original pre-inbound revision while final persistence checks the current revision.
+
+Same-key responses are frozen on the existing idempotency record after authorized dispatch
+and before returning success. A new explicit retry reuses the accepted message/checkpoint;
+it is not a new inbound or a second endpoint. See the [persistence contract](persistence-schema.md)
+for successful-response freezing, recovery notices and process-interruption behavior.
+
+### Atomic mutation bundles
+
 The provider-neutral repository exposes explicit atomic mutation families instead of a
 sequence of unrelated `save_*` calls.
 
@@ -85,7 +107,7 @@ sequence of unrelated `save_*` calls.
 | Resume/start claimant session | claim + new/updated session + optional prior-active Session closure + idempotency | claim `N -> N+1`; session linked to the same claim/customer; one active claimant session; may establish the new `active_session_id`; when replacing an active Session, closing that prior Session occurs inside the same revision-checked atomic bundle |
 | Pause/checkpoint claimant session | claim + paused session + bounded recovery context + initial Follow-up + idempotency | claim `N -> N+1`; source session must be the current active session; clears `active_session_id`; creates one Claim-scoped Follow-up for the interruption |
 | Message-only claimant continuation | claim + session + message + idempotency | claim `N -> N+1`; session context updated to the resulting claim revision; stored `active_session_id` is preserved |
-| Validated Agent turn | claim + session question accounting + claimant message + Agent message + decision + applied Branch Evaluation + optional handoff/evidence + idempotency | claim `N -> N+1`; all trigger/reply/decision/evaluation links agree; stored `active_session_id` is preserved; failed retrieval or validation writes none of the bundle |
+| Validated Agent turn | claim + session question accounting + accepted claimant message link + Agent message + decision + applied Branch Evaluation + optional handoff/evidence + idempotency | result commit `N -> N+1`; all links agree; stored `active_session_id` is preserved; failed validation writes none of this result bundle, while the earlier inbound/safety checkpoint remains durable |
 | Evidence state mutation | claim + evidence + idempotency | claim `N -> N+1`; evidence belongs to the claim and active interaction boundary; stored `active_session_id` is preserved |
 | Handoff mutation | claim + handoff + idempotency + Claim-scoped audit fact | claim `N -> N+1`; handoff identity, audit handoff source reference, resulting audit revision, actor, and idempotency identity agree; stored `active_session_id` is preserved |
 | Staff write-back | claim + one or more authorised staff/handoff/message/customer-update records + idempotency + audit fact when a handoff is mutated | claim `N -> N+1`; all supplied records belong to the claim; handoff lifecycle writes carry the same actor/idempotency/resulting-revision audit identity; non-interaction staff records may be session-agnostic, while staff messages bind the active session and staff actor; stored `active_session_id` is preserved |

@@ -157,6 +157,7 @@ def test_model_binding_manifest_selects_qwen_without_exposing_a_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv('AGENT_RUNTIME_PROFILE', 'model_gateway')
+    monkeypatch.setenv('MODEL_PROFILE_ID', 'qwen-local')
     monkeypatch.setenv('MODEL_RUNTIME_BINDINGS_PATH', 'config/model-runtime-bindings.json')
     monkeypatch.setenv('NORTHWIND_QWEN_BASE_URL', 'http://qwen.test/v1')
     monkeypatch.delenv('MODEL_BASE_URL', raising=False)
@@ -175,12 +176,12 @@ def test_model_binding_manifest_selects_qwen_without_exposing_a_secret(
     assert settings.model_reasoning_mode == 'disabled'
     assert [item.profile_id for item in settings.model_runtime_bindings] == [
         'qwen-local',
-        'nowcoding-gpt55',
+        'openrouter-gpt4o-mini',
         'bedrock-nova2-lite',
         'google-gemini35-flash-lite',
     ]
     gpt = settings.model_runtime_bindings[1]
-    assert gpt.model_identifier == 'gpt-5.5'
+    assert gpt.model_identifier == 'openai/gpt-4o-mini'
     assert gpt.credential_environment_variable == 'NORTHWIND_MODEL_API_KEY'
     bedrock = settings.model_runtime_bindings[2]
     assert bedrock.model_identifier == 'global.amazon.nova-2-lite-v1:0'
@@ -235,6 +236,7 @@ def test_model_binding_manifest_rejects_a_missing_private_endpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv('AGENT_RUNTIME_PROFILE', 'model_gateway')
+    monkeypatch.setenv('MODEL_PROFILE_ID', 'qwen-local')
     monkeypatch.setenv('MODEL_RUNTIME_BINDINGS_PATH', 'config/model-runtime-bindings.json')
     monkeypatch.delenv('NORTHWIND_QWEN_BASE_URL', raising=False)
 

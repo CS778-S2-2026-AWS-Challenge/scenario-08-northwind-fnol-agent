@@ -6,8 +6,7 @@
     "next_step",
     "reason_codes",
     "field_changes",
-    "contents_item_changes",
-    "service_offer_ids"
+    "contents_item_changes"
   ],
   "properties": {
     "reply": {"type": "string", "minLength": 1, "maxLength": 2000},
@@ -121,11 +120,6 @@
           "source_evidence_id": {"type": ["string", "null"], "maxLength": 100}
         }
       }
-    },
-    "service_offer_ids": {
-      "type": "array",
-      "maxItems": 3,
-      "items": {"type": "string", "minLength": 1, "maxLength": 100}
     }
   }
 }

@@ -2,23 +2,10 @@
 
 import re
 
-from backend.domain.agent_context_runtime import TurnRoute, TurnTask
+from backend.domain.agent_context_runtime import TurnIntent, TurnRoute, TurnTask
 from backend.services.agent import AgentTurnContext
+from backend.services.turn_family_resolution import resolve_turn_family
 
-_FAMILY_TERMS = {
-    'motor': re.compile(
-        r'\b(?:car|vehicle|driv(?:e|ing|able)|road|collision|crash|rear[- ]?end|windscreen)\b',
-        re.IGNORECASE,
-    ),
-    'home': re.compile(
-        r'\b(?:home|house|building|roof|wall|floor|room|pipe|plumb|flood)\b',
-        re.IGNORECASE,
-    ),
-    'contents': re.compile(
-        r'\b(?:contents?|belongings?|laptop|phone|jewellery|furniture|stolen item)\b',
-        re.IGNORECASE,
-    ),
-}
 _CORRECTION = re.compile(
     r'\b(?:correct|correction|actually|instead|not what|change that|update (?:this|that))\b',
     re.I,
@@ -30,38 +17,17 @@ _STATUS = re.compile(
     re.I,
 )
 _EVIDENCE_HISTORY = re.compile(
-    r'\b(?:previous|prior|earlier|history|already uploaded|old (?:photo|document|file))\b',
+    r'\b(?:(?:previous|prior|earlier|old)\s+(?:uploaded\s+)?(?:photos?|images?|documents?|files?|uploads?|evidence)'
+    r'|(?:upload|file|evidence|document|photo)\s+history|already uploaded)\b',
     re.I,
 )
-_EXTERNAL = re.compile(
-    r'\b(?:assess(?:or|ment)?|damage assessment|repair(?:er| shop| booking)?|police|'
-    r'tow(?:ing)?|emergency service)\b',
-    re.I,
-)
-
-
-def _authoritative_family(context: AgentTurnContext) -> str | None:
-    candidates = [
-        context.claim.incident_type,
-        context.branch_evaluation.selected_family if context.branch_evaluation else None,
-        (
-            str(context.claim.form['claim.product_family'].value)
-            if 'claim.product_family' in context.claim.form
-            else None
-        ),
-    ]
-    for value in candidates:
-        normalized = {'property': 'home'}.get(value or '', value)
-        if normalized in {'motor', 'home', 'contents'}:
-            return normalized
-    return None
 
 
 def _capabilities(message: str) -> list[str]:
     capabilities: list[str] = []
     for capability, pattern in (
         ('assessor', r'\b(?:assess(?:or|ment)?|damage assessment)\b'),
-        ('repair', r'\b(?:repair(?:er| shop| booking)?|fix (?:my|the))\b'),
+        ('repair', r'\b(?:repair(?:s|er| shop| booking)?|tow(?:ing)?|fix (?:my|the))\b'),
         ('emergency', r'\b(?:emergency|immediate danger|ambulance|fire service)\b'),
         ('police', r'\bpolice\b'),
         ('policy-search', r'\b(?:policy|cover(?:age|ed)?|excess)\b'),
@@ -74,34 +40,30 @@ def _capabilities(message: str) -> list[str]:
 
 def route_turn(context: AgentTurnContext) -> TurnRoute:
     message = (context.message_text or '').strip()
-    authoritative_family = _authoritative_family(context)
-    if authoritative_family is not None:
-        family = authoritative_family
-        family_resolution = 'authoritative'
-    else:
-        candidates = [
-            family for family, pattern in _FAMILY_TERMS.items() if pattern.search(message)
-        ]
-        if len(candidates) != 1:
-            configured_response = (
-                context.runtime_policy.controlled_rules.deterministic_responses.get(
-                    'unresolved_family'
-                )
-                if context.runtime_policy is not None
-                else None
-            )
-            return TurnRoute(
-                family_resolution='unresolved',
-                task=TurnTask.INTAKE,
-                deterministic_response=configured_response
-                or (
-                    'Please choose the single loss you want to report first: motor, home, or '
-                    'contents.'
-                ),
-                model_required=False,
-            )
-        family = candidates[0]
-        family_resolution = 'inferred'
+    snapshot = context.runtime_configuration_snapshot
+    # Routing also serves deterministic deployments whose policy release has no
+    # model binding. Only a v8 instruction can require model-owned family routing;
+    # model execution still validates its selected binding in the request planner.
+    inspect_model = (
+        context.runtime_policy is None
+        or context.runtime_policy.instruction.prompt_version == 'northwind-fnol-claimant-v8'
+    )
+    model = (
+        snapshot.model(context.model_profile_id) if snapshot is not None and inspect_model else None
+    )
+    model_family_judgment = (
+        model is not None and model.values.get('prompt_version') == 'northwind-fnol-claimant-v8'
+    )
+    resolution = (
+        resolve_turn_family(
+            context.claim, context.branch_evaluation, message, model_family_judgment=True
+        )
+        if model_family_judgment
+        else context.turn_family_resolution
+        or resolve_turn_family(context.claim, context.branch_evaluation, message)
+    )
+    family = resolution.product_family
+    family_resolution = resolution.status
 
     capabilities = _capabilities(message)
     if {'policy-search', 'claim-history'} & set(capabilities):
@@ -110,8 +72,6 @@ def route_turn(context: AgentTurnContext) -> TurnRoute:
         task = TurnTask.EVIDENCE_HISTORY
     elif context.evidence:
         task = TurnTask.EVIDENCE_CURRENT
-    elif _EXTERNAL.search(message):
-        task = TurnTask.EXTERNAL_SUPPORT
     elif _STATUS.search(message):
         task = TurnTask.STATUS_QUESTION
     elif _CORRECTION.search(message):
@@ -122,10 +82,30 @@ def route_turn(context: AgentTurnContext) -> TurnRoute:
         task = TurnTask.CLAIM_CREATION
     else:
         task = TurnTask.INTAKE
+    intents: set[TurnIntent] = {'intake'}
+    if set(capabilities) & {'assessor', 'repair', 'emergency', 'police'}:
+        intents.add('external')
+    if 'policy-search' in capabilities:
+        intents.add('policy_lookup')
+    if 'claim-history' in capabilities:
+        intents.add('history_lookup')
+    if _CORRECTION.search(message):
+        intents.add('correction')
+    if _CONFIRMATION.search(message):
+        intents.add('confirmation')
+    if _EVIDENCE_HISTORY.search(message):
+        intents.add('evidence_history')
+    if context.evidence:
+        intents.add('evidence_current')
+    if context.branch_evaluation is not None and context.branch_evaluation.requirements.ready:
+        intents.add('creation')
+    if _STATUS.search(message):
+        intents.add('status')
     return TurnRoute(
         product_family=family,
         family_resolution=family_resolution,
         task=task,
         capability_ids=capabilities,
+        intents=frozenset(intents),
         model_required=True,
     )

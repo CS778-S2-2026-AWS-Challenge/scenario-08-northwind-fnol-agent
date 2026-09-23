@@ -1,3 +1,6 @@
+import logging
+from typing import TYPE_CHECKING
+
 from backend.adapters.handoff_dispatch import (
     HandoffDispatchAdapter,
     HandoffDispatchReceipt,
@@ -21,6 +24,7 @@ from backend.domain.models import (
     HandoffStatus,
     HandoffTrigger,
     HandoffType,
+    MessageRecord,
     MessageVisibility,
     PreferredChannel,
     ResponsibleParty,
@@ -59,6 +63,9 @@ ACTIVE_HANDOFF_STATUSES = {
     HandoffStatus.ACCEPTED,
     HandoffStatus.IN_PROGRESS,
 }
+
+if TYPE_CHECKING:
+    from backend.services.agent import SafetyInterrupt
 
 
 def _claim_not_found() -> ApiError:
@@ -310,6 +317,49 @@ def build_handoff(
     return handoff, next_step
 
 
+def prepare_support_handoff(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    *,
+    support_need: SupportNeed,
+    reason: str,
+    preferred_channel: PreferredChannel | None,
+    source_message_id: str | None,
+    reason_code: str | None = None,
+) -> tuple[HandoffRecord, CustomerNextStep, bool]:
+    """Share the no-duplicate, upgrade-only rule across all support entrypoints."""
+    existing = next(
+        (
+            item
+            for item in reversed(repository.list_handoffs(claim.claim_id, claim.customer_id))
+            if item.status in ACTIVE_HANDOFF_STATUSES
+        ),
+        None,
+    )
+    if existing is not None:
+        upgraded = existing
+        if support_need is SupportNeed.URGENT:
+            upgraded = existing.model_copy(
+                update={
+                    'support_need': SupportNeed.URGENT,
+                    'priority': HandoffPriority.IMMEDIATE
+                    if existing.priority is HandoffPriority.IMMEDIATE
+                    else HandoffPriority.URGENT,
+                }
+            )
+        return upgraded, claim.customer_next_step, upgraded != existing
+    handoff, next_step = build_handoff(
+        repository,
+        claim,
+        support_need=support_need,
+        reason=reason,
+        preferred_channel=preferred_channel,
+        source_message_id=source_message_id,
+        reason_code=reason_code,
+    )
+    return handoff, next_step, True
+
+
 def updated_claim_for_handoff(
     claim: WorkingClaim,
     handoff: HandoffRecord,
@@ -321,12 +371,19 @@ def updated_claim_for_handoff(
         else CustomerSupport.HUMAN_REQUESTED
     )
     urgency = (
-        Urgency.URGENT if handoff.support_need is SupportNeed.URGENT else claim.claim_state.urgency
+        Urgency.URGENT
+        if handoff.support_need is SupportNeed.URGENT
+        and claim.claim_state.urgency is not Urgency.IMMEDIATE_SAFETY_RISK
+        else claim.claim_state.urgency
     )
     action = (
         AgentAction.URGENT_HANDOFF
-        if handoff.type is HandoffType.URGENT_SUPPORT
+        if handoff.type is HandoffType.URGENT_SUPPORT or handoff.support_need is SupportNeed.URGENT
         else AgentAction.HANDOFF
+    )
+    terminal = (
+        claim.terminal_disposition is not None
+        or claim.claim_state.workflow_state is WorkflowState.CREATED
     )
     return claim.model_copy(
         update={
@@ -335,14 +392,113 @@ def updated_claim_for_handoff(
                 update={
                     'customer_support': customer_support,
                     'urgency': urgency,
-                    'workflow_state': WorkflowState.PROFESSIONAL_REVIEW,
-                    'next_action': action,
+                    'workflow_state': (
+                        claim.claim_state.workflow_state
+                        if terminal
+                        else WorkflowState.PROFESSIONAL_REVIEW
+                    ),
+                    'next_action': claim.claim_state.next_action if terminal else action,
                 }
             ),
-            'customer_next_step': next_step,
+            'customer_next_step': claim.customer_next_step if terminal else next_step,
             'updated_at': handoff.created_at,
         }
     )
+
+
+def commit_detected_handoff(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim: WorkingClaim,
+    message: MessageRecord,
+    interrupt: 'SafetyInterrupt',
+) -> tuple[WorkingClaim, HandoffRecord]:
+    """Make deterministic support durable before asking a model to continue intake."""
+    route = f'/api/v1/claims/{claim.claim_id}/sessions/{message.session_id}/messages#safety'
+    key = f'safety:{message.message_id}'
+    prior = repository.find_idempotency(principal.subject, route, key)
+    if prior is not None and prior.handoff_id is not None:
+        saved = repository.get_handoff(claim.claim_id, prior.handoff_id, principal.subject)
+        if saved is not None:
+            return claim, saved
+    support_need = {
+        'urgent_safety': SupportNeed.URGENT,
+        'human_requested': SupportNeed.HUMAN_REQUESTED,
+        'accessibility': SupportNeed.ACCESSIBILITY_REQUIRED,
+        'distress': SupportNeed.DISTRESS,
+    }[interrupt.kind]
+    handoff, next_step, changed = prepare_support_handoff(
+        repository,
+        claim,
+        support_need=support_need,
+        reason=interrupt.safety_notice,
+        preferred_channel=None,
+        source_message_id=message.message_id,
+        reason_code=interrupt.reason_code,
+    )
+    if not changed:
+        return claim, handoff
+    updated = updated_claim_for_handoff(claim, handoff, next_step).model_copy(
+        update={'updated_at': now_utc()}
+    )
+    from backend.services.turn_reducer import apply_progress
+
+    evaluation = build_applied_branch_evaluation(
+        updated,
+        repository=repository,
+        recomputation_reason='preprovider_safety_handoff',
+        trigger_source_refs=[message.message_id, handoff.handoff_id],
+    )
+    updated = apply_progress(updated, evaluation, open_handoffs=(handoff,))
+    operation = IdempotencyRecord(
+        actor_id=principal.subject,
+        route=route,
+        key=key,
+        request_fingerprint=request_fingerprint(
+            {'message_id': message.message_id, 'kind': interrupt.kind}
+        ),
+        claim_id=claim.claim_id,
+        session_id=message.session_id,
+        handoff_id=handoff.handoff_id,
+        action_code='human.urgent_handoff'
+        if support_need is SupportNeed.URGENT
+        else 'human.handoff',
+    )
+    audit = build_handoff_audit_event(
+        principal=principal,
+        claim=updated,
+        handoff=handoff,
+        route=route,
+        idempotency_key=key,
+        required_permission='claimant_support_request',
+        reason='Deterministic claimant support committed before model processing.',
+        created_at=updated.updated_at,
+        source_refs=[message.message_id, interrupt.reason_code],
+    )
+    try:
+        repository.save_handoff_mutation(
+            updated,
+            claim.revision,
+            handoff,
+            operation,
+            audit,
+            branch_evaluation=evaluation,
+            safety_message=message,
+        )
+    except Exception as error:
+        logging.getLogger(__name__).exception(
+            'preprovider_safety_handoff_failed',
+            extra={'claim_id': claim.claim_id, 'source_message_id': message.message_id},
+        )
+        raise ApiError(
+            status_code=500,
+            code='SAFETY_HANDOFF_PERSISTENCE_FAILED',
+            message=(
+                'Your message is saved, but the support request could not be committed. Try again.'
+            ),
+            retryable=True,
+        ) from error
+    return updated, handoff
 
 
 def create_support_request(
@@ -402,16 +558,15 @@ def create_support_request(
             retryable=True,
             current_revision=claim.revision,
         )
-    active_handoff = next(
-        (
-            handoff
-            for handoff in reversed(repository.list_handoffs(claim_id, principal.subject))
-            if handoff.status in ACTIVE_HANDOFF_STATUSES
-            and handoff.support_need is payload.support_need
-        ),
-        None,
+    handoff, next_step, changed = prepare_support_handoff(
+        repository,
+        claim,
+        support_need=payload.support_need,
+        reason=payload.reason,
+        preferred_channel=payload.preferred_channel,
+        source_message_id=None,
     )
-    if active_handoff is not None:
+    if not changed:
         repository.save_idempotency(
             IdempotencyRecord(
                 actor_id=principal.subject,
@@ -420,25 +575,29 @@ def create_support_request(
                 request_fingerprint=fingerprint,
                 claim_id=claim_id,
                 session_id=claim.active_session_id or '',
-                handoff_id=active_handoff.handoff_id,
+                handoff_id=handoff.handoff_id,
             )
         )
         return _response(
             repository,
-            active_handoff,
+            handoff,
             claim,
-            _notify_staff_queue(runtime_integration_policy, dispatch, active_handoff),
+            _notify_staff_queue(runtime_integration_policy, dispatch, handoff),
         )
-
-    handoff, next_step = build_handoff(
-        repository,
-        claim,
-        support_need=payload.support_need,
-        reason=payload.reason,
-        preferred_channel=payload.preferred_channel,
-        source_message_id=None,
-    )
     updated_claim = updated_claim_for_handoff(claim, handoff, next_step)
+    from backend.services.turn_reducer import apply_progress
+
+    evaluation = build_applied_branch_evaluation(
+        updated_claim,
+        repository=repository,
+        recomputation_reason='handoff_created',
+        trigger_source_refs=[handoff.handoff_id],
+    )
+    updated_claim = apply_progress(
+        updated_claim,
+        evaluation,
+        open_handoffs=(*repository.list_handoffs(claim_id, principal.subject), handoff),
+    )
     idempotency = IdempotencyRecord(
         actor_id=principal.subject,
         route=route,
@@ -466,12 +625,7 @@ def create_support_request(
             handoff,
             idempotency,
             audit_event,
-            branch_evaluation=build_applied_branch_evaluation(
-                updated_claim,
-                repository=repository,
-                recomputation_reason='handoff_created',
-                trigger_source_refs=[handoff.handoff_id],
-            ),
+            branch_evaluation=evaluation,
         )
     except RevisionConflict as conflict:
         raise ApiError(

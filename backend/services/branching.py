@@ -92,6 +92,7 @@ def build_applied_branch_evaluation(
     current_action: AgentAction | str | None = None,
     trigger_source_refs: Sequence[str] = (),
     created_at: datetime | None = None,
+    latest_message: str | None = None,
 ) -> BranchEvaluationRecord:
     """Build immutable evidence for an evaluation of the resulting Claim revision."""
 
@@ -99,6 +100,7 @@ def build_applied_branch_evaluation(
         previous_evaluation = latest_applied_branch_evaluation(repository, claim)
     evaluated = BranchRuleEvaluator().evaluate(
         claim,
+        latest_message=latest_message,
         trigger_source_refs=trigger_source_refs,
         current_action=current_action or claim.claim_state.next_action,
         recomputation_reason=recomputation_reason,

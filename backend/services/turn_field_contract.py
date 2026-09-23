@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
@@ -79,12 +80,12 @@ def _value_schema(field: TurnFieldDefinition) -> dict[str, object]:
             'type': 'array',
             'minItems': 1,
             'maxItems': 50,
-            'items': {'type': 'string', 'minLength': 1},
+            'items': {'type': 'string', 'minLength': 1, 'maxLength': 100},
         }
     # String is the narrow common representation accepted by the registry for
     # text, location, and temporal facts. Structured forms remain Runtime-valid
     # but are not requested from providers until their exact schema is registered.
-    return {'type': 'string', 'minLength': 1}
+    return {'type': 'string', 'minLength': 1, 'maxLength': 300}
 
 
 def bind_provider_schema(
@@ -114,6 +115,17 @@ def bind_provider_schema(
         grouped_fields[schema_key][1].append(field.field_code)
 
     variants: list[dict[str, object]] = []
+    shared_properties = {
+        key: value for key, value in base_properties.items() if key not in {'field_code', 'value'}
+    }
+    if len(grouped_fields) > 1 and shared_properties:
+        definitions = bound.setdefault('$defs', {})
+        if not isinstance(definitions, dict):
+            raise ValueError('The response schema definitions must be an object.')
+        for key, value in shared_properties.items():
+            definition_id = f'TurnField_{key}'
+            definitions[definition_id] = value
+            shared_properties[key] = {'$ref': f'#/$defs/{definition_id}'}
     for value_schema, field_codes in grouped_fields.values():
         field_code_schema: dict[str, object] = {'type': 'string'}
         if len(field_codes) == 1:
@@ -124,18 +136,25 @@ def bind_provider_schema(
             {
                 'type': 'object',
                 'properties': {
+                    **shared_properties,
                     'field_code': field_code_schema,
-                    'value': value_schema,
+                    # null carries a disposition (claimant will supply / third
+                    # party pending) instead of a value; the parser enforces
+                    # that pairing.
+                    'value': {'anyOf': [value_schema, {'type': 'null'}]},
                 },
-                'required': ['field_code', 'value'],
+                'required': list(base_item.get('required', list(base_properties))),
+                'additionalProperties': False,
             }
         )
     if variants:
-        field_changes['items'] = {**base_item, 'oneOf': variants}
-        field_changes['maxItems'] = min(
-            int(field_changes.get('maxItems', 50)),
-            len(contract.fields),
-        )
+        # The provider strict translator closes the parent object.  Keeping the
+        # old parent properties beside these variants made every item
+        # unsatisfiable: the parent required all v7 bookkeeping keys while each
+        # variant closed the object to only field_code/value.  The v8 contract
+        # asks the model for the four semantic keys; Runtime derives the rest.
+        field_changes['items'] = {'anyOf': variants}
+        field_changes['maxItems'] = min(int(field_changes.get('maxItems', 8)), len(contract.fields))
     else:
         field_changes['items'] = base_item
         field_changes['maxItems'] = 0
@@ -160,7 +179,35 @@ def normalise_field_value(field: TurnFieldDefinition, value: Any) -> Any:
     return value
 
 
+_PLACEHOLDER_PATTERN = re.compile(
+    r'^[<>\[\]{}]*\s*(unknown|n/?a|none|tbd|todo|placeholder|not[\s_-]?provided|'
+    r'not[\s_-]?specified|xxx+)\s*[<>\[\]{}]*$',
+    re.IGNORECASE,
+)
+
+
+def _is_placeholder_text(value: str) -> bool:
+    """Recognize free-text stand-ins; registered enum values are not placeholders."""
+    return bool(_PLACEHOLDER_PATTERN.match(value.strip()))
+
+
+def _free_text_placeholder(field: TurnFieldDefinition, value: Any) -> bool:
+    def placeholder(text: str) -> bool:
+        # A schema reference is a stand-in, not a supplied field value.
+        return _is_placeholder_text(text) or (
+            text.strip(' <>[]{}()/\\').casefold() == field.field_code.casefold()
+        )
+
+    if field.value_type in {'text', 'location'} and isinstance(value, str):
+        return placeholder(value)
+    if field.value_type == 'text_list' and isinstance(value, list):
+        return any(isinstance(item, str) and placeholder(item) for item in value)
+    return False
+
+
 def _field_value_is_valid(field: TurnFieldDefinition, value: Any) -> bool:
+    if _free_text_placeholder(field, value):
+        return False
     if field.value_type == 'text':
         return isinstance(value, str) and bool(value.strip())
     if field.value_type == 'boolean':
@@ -192,6 +239,8 @@ def _field_value_is_valid(field: TurnFieldDefinition, value: Any) -> bool:
 def validate_field_changes(
     contract: TurnFieldContract,
     changes: list[Any],
+    *,
+    rejected_bounds: list[TurnFieldViolation] | None = None,
 ) -> list[Any]:
     allowed = contract.by_code
     validated: list[Any] = []
@@ -209,14 +258,49 @@ def validate_field_changes(
             )
             continue
         value = normalise_field_value(field, change.value)
-        if not _field_value_is_valid(field, value):
-            violations.append(
-                TurnFieldViolation(
-                    field_code=field_code,
-                    expected_value_type=field.value_type,
-                    reason_code='invalid_value',
+        within_bound = not (
+            (
+                field.value_type in {'text', 'location', 'temporal'}
+                and isinstance(value, str)
+                and len(value) > 300
+            )
+            or (
+                field.value_type == 'text_list'
+                and isinstance(value, list)
+                and (
+                    len(value) > 50
+                    or any(isinstance(item, str) and len(item) > 100 for item in value)
                 )
             )
+        )
+        if not within_bound:
+            violation = TurnFieldViolation(
+                field_code=field_code,
+                expected_value_type=field.value_type,
+                reason_code='length_limit_exceeded',
+            )
+            if rejected_bounds is not None:
+                rejected_bounds.append(violation)
+            else:
+                violations.append(violation)
+            continue
+        # A disposition other than 'value' carries no value by design (the
+        # claimant will supply it later, or a third party will); the strict
+        # type check only applies to a fact the model is actually supplying.
+        disposition = getattr(change, 'disposition', 'value')
+        if disposition != 'value':
+            validated.append(change.model_copy(update={'value': None}))
+            continue
+        if not _field_value_is_valid(field, value):
+            violation = TurnFieldViolation(
+                field_code=field_code,
+                expected_value_type=field.value_type,
+                reason_code='invalid_value',
+            )
+            if rejected_bounds is not None and _free_text_placeholder(field, value):
+                rejected_bounds.append(violation)
+            else:
+                violations.append(violation)
             continue
         validated.append(change.model_copy(update={'value': value}))
     if violations:

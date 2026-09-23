@@ -272,8 +272,7 @@ describe('claimant intake projection', () => {
     const model = await screen.findByRole('button', { name: 'Model' })
     expect(model).toBeEnabled()
     expect(model).toHaveTextContent('qwen3.8-27b')
-    const claimType = screen.getByRole('button', { name: 'Claim type (optional)' })
-    expect(claimType).toHaveTextContent('Let Agent identify')
+    expect(screen.queryByRole('button', { name: 'Claim type (optional)' })).not.toBeInTheDocument()
 
     await user.click(model)
     expect(screen.getByRole('listbox', { name: 'Model' })).toBeInTheDocument()
@@ -350,6 +349,7 @@ describe('claimant intake projection', () => {
 
   it('does not duplicate messages when realtime readback finishes before the POST response', async () => {
     const user = userEvent.setup()
+    api.requestId.mockImplementation((prefix) => `${prefix}-test`)
     let pushLiveUpdate
     let resolveTurn
     api.streamRealtimeEvents.mockImplementation(({ onEvent }) => {
@@ -364,7 +364,9 @@ describe('claimant intake projection', () => {
       revision: 2,
       primary_action: primaryAction({ revision: 2 }),
     })
-    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+    api.getClaimMessages.mockResolvedValue({ items: [
+      { ...claimantMessage, client_message_id: 'message-test' }, agentMessage,
+    ] })
 
     render(<App />)
     await user.type(
@@ -375,6 +377,7 @@ describe('claimant intake projection', () => {
     await waitFor(() => expect(pushLiveUpdate).toBeTypeOf('function'))
 
     await act(async () => pushLiveUpdate(realtimeChange(2, ['claim', 'messages'])))
+    await waitFor(() => expect(screen.queryByLabelText('Message sending')).not.toBeInTheDocument())
     await act(async () => resolveTurn(initialTurn()))
 
     expect(screen.getAllByText(claimantMessage.content.text)).toHaveLength(1)
@@ -425,6 +428,29 @@ describe('claimant intake projection', () => {
     expect(api.createClaim).not.toHaveBeenCalled()
     expect(api.promoteAnonymousClaim).not.toHaveBeenCalled()
     expect(screen.queryByText(initialClaim.claim_id)).not.toBeInTheDocument()
+  })
+
+  it('reloads the published model catalogue after login when the initial request was unauthorized', async () => {
+    const user = userEvent.setup()
+    api.getRuntimeCapabilities.mockRejectedValueOnce(new api.ApiRequestError('Sign in again.'))
+      .mockResolvedValueOnce({
+        default_model_profile_id: 'openrouter-gpt4o-mini',
+        models: [{ id: 'openrouter-gpt4o-mini', label: 'openai/gpt-4o-mini', availability: 'available' }],
+      })
+    api.loginClaimant.mockResolvedValue({ access_token: 'claimant-token' })
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'QA claimant', email: 'qa@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    render(<App />)
+    await waitFor(() => expect(api.getRuntimeCapabilities).toHaveBeenCalledTimes(1))
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.type(screen.getByLabelText('Email address'), 'qa@example.test')
+    await user.type(screen.getByLabelText('Password'), 'Synthetic-QA-Password!')
+    await user.click(screen.getAllByRole('button', { name: 'Log in' }).at(-1))
+    expect(await screen.findByText('openai/gpt-4o-mini')).toBeVisible()
+    expect(api.getRuntimeCapabilities).toHaveBeenCalledTimes(2)
   })
 
   it('keeps account actions and the composer without exposing the legacy form route', async () => {
@@ -619,13 +645,13 @@ describe('claimant intake projection', () => {
     await user.type(input, 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    expect(api.createClaim).toHaveBeenCalledWith(expect.objectContaining({ incidentType: null }))
+    expect(api.createClaim).toHaveBeenCalledWith(expect.not.objectContaining({ incidentType: expect.anything() }))
 
     const failure = await screen.findByText(
       'The model service is temporarily unavailable. The claim is unchanged. Try again in a moment.',
     )
     expect(failure).toBeInTheDocument()
-    expect(screen.getByText('Not sent')).toBeInTheDocument()
+    expect(screen.getByText('Delivery not confirmed')).toBeInTheDocument()
     expect(container.querySelector('.workspace-composer [role="alert"]')).toHaveTextContent(
       'The model service is temporarily unavailable. The claim is unchanged. Try again in a moment.',
     )
@@ -662,22 +688,67 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'My car was damaged.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    const dialog = await screen.findByRole('dialog', { name: 'Third-party services' })
-    expect(dialog).toBeVisible()
+    await screen.findByText(agentMessage.content.text)
+    expect(screen.queryByRole('dialog', { name: 'Third-party services' })).not.toBeInTheDocument()
     expect(container.querySelector('.message-list .service-capability-list')).not.toBeInTheDocument()
     expect(container.querySelector('.message-list .external-capabilities-trigger')).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Close third-party services' }))
-    expect(screen.queryByRole('dialog', { name: 'Third-party services' })).not.toBeInTheDocument()
-
     const documentsTab = screen.getByRole('tab', { name: 'What to provide' })
-    await waitFor(() => expect(documentsTab).toHaveFocus())
     await user.click(documentsTab)
     const trigger = screen.getByRole('button', { name: /Third-party support/ })
     expect(trigger.closest('[role="tabpanel"]')).toHaveAccessibleName('What to provide')
     expect(trigger).toHaveTextContent('2 services available')
     await user.click(trigger)
     expect(await screen.findByRole('dialog', { name: 'Third-party services' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Close third-party services' }))
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it.each([false, true])('retries a saved unanswered message with its original identity and a new request key (safety notice: %s)', async (hasSafetyNotice) => {
+    const user = userEvent.setup()
+    let requestSequence = 0
+    api.requestId.mockImplementation((prefix) => `${prefix}-${++requestSequence}`)
+    const recovery = {
+      rule_id: 'claimant_turn.model_dependency_failure',
+      claimant_projection: 'Your message is saved, but I could not respond just now. You can try again.',
+      resume_triggers: ['claimant_reply', 'explicit_retry_request'],
+      resume_entrypoint: 'submit_message',
+      continuation: 'runtime.fail_safe',
+    }
+    api.submitClaimMessage.mockImplementationOnce(async (request) => ({
+      ...initialTurn(),
+      claimant_message: { ...claimantMessage, client_message_id: request.clientMessageId, recovery },
+      agent_message: hasSafetyNotice ? {
+        ...agentMessage,
+        message_id: 'msg-safety-recovery',
+        content: { text: 'If anyone is in immediate danger, call 111. Northwind support has been notified and your report has been saved.' },
+        in_reply_to: claimantMessage.message_id,
+        recovery,
+      } : null,
+      decision: null,
+      recovery,
+    })).mockImplementationOnce(async (request) => ({
+      ...initialTurn(),
+      claim_revision: 3,
+      claimant_message: { ...claimantMessage, client_message_id: request.clientMessageId },
+      agent_message: { ...agentMessage, in_reply_to: claimantMessage.message_id },
+    }))
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    expect(await screen.findByText(recovery.claimant_projection)).toBeVisible()
+    expect(screen.queryByText('Not sent')).not.toBeInTheDocument()
+    if (hasSafetyNotice) {
+      expect(screen.getByText(/Northwind support has been notified/)).toBeVisible()
+    }
+    await user.click(screen.getByRole('button', { name: 'Retry response' }))
+    expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
+    const [first, retried] = api.submitClaimMessage.mock.calls.map(([request]) => request)
+    expect(retried.clientMessageId).toBe(first.clientMessageId)
+    expect(retried.idempotencyKey).not.toBe(first.idempotencyKey)
+    expect(screen.getAllByText(claimantMessage.content.text)).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Retry response' })).not.toBeInTheDocument()
   })
 
   it('returns to Claim history from Claim tools without dropping the active conversation', async () => {
@@ -1703,7 +1774,7 @@ describe('claimant intake projection', () => {
   })
 
 
-  it('completes payout and contact Step 3 from backend action and enters Step 4', async () => {
+  it('completes payout and contact Step 3 from backend action and opens claim creation directly', async () => {
     const user = userEvent.setup()
     const paymentDestination = {
       payment_destination_id: 'pyd_1234567890abcdef1234',
@@ -1718,8 +1789,9 @@ describe('claimant intake projection', () => {
       requiredInputs: ['payment_destination_id', 'claimant.contact_preference'],
       revision: 2,
     })
-    const agreementAction = primaryAction({
-      actionCode: 'claimant.review_agreement',
+    const createClaimAction = primaryAction({
+      actionCode: 'claimant.create_claim',
+      actionType: 'claim_creation',
       available: true,
       revision: 3,
     })
@@ -1765,7 +1837,7 @@ describe('claimant intake projection', () => {
         summary: 'Continue to agreement and confirmation.',
         required_items: [],
       },
-      primary_action: agreementAction,
+      primary_action: createClaimAction,
     })
     api.getClaim.mockResolvedValue({
       ...initialClaim,
@@ -1785,7 +1857,28 @@ describe('claimant intake projection', () => {
         summary: 'Continue to agreement and confirmation.',
         required_items: [],
       },
-      primary_action: agreementAction,
+      primary_action: createClaimAction,
+    })
+    api.createExternalClaim.mockResolvedValue({
+      revision: 4,
+      external_claim: {
+        claim_number: 'NWF-2026-16ECDD',
+        creation_status: 'created',
+        route: 'Claims intake review',
+        next_step: 'A claims specialist will review the submitted details.',
+        expected_by: '2026-09-16T01:00:00Z',
+      },
+      external_service_action: null,
+      customer_next_step: {
+        status: 'claim_created',
+        summary: 'Claims intake review',
+        required_items: [],
+      },
+      primary_action: primaryAction({
+        actionCode: 'claimant.continue_conversation',
+        available: false,
+        revision: 4,
+      }),
     })
 
     render(<App />)
@@ -1812,14 +1905,19 @@ describe('claimant intake projection', () => {
     ))
     expect(api.getClaim).toHaveBeenCalledWith(initialClaim.claim_id)
 
-    const agreement = await screen.findByRole('button', { name: /Agreement & confirmation/i })
-    expect(agreement).toHaveTextContent('Step 4 ready')
-    expect(screen.getByRole('button', {
-      name: /Claim progress: 9 of 9 required details complete\. Continue to agreement and confirmation\./i,
+    const createAction = await screen.findByRole('button', { name: /Create your claim/i })
+    expect(createAction).toHaveTextContent('Ready')
+    await user.click(createAction)
+
+    await waitFor(() => expect(api.createExternalClaim).toHaveBeenCalledWith(
+      expect.objectContaining({
+        claimId: initialClaim.claim_id,
+        revision: 3,
+      }),
+    ))
+    expect(await screen.findByRole('status', {
+      name: 'Claim NWF-2026-16ECDD created',
     })).toBeInTheDocument()
-    await user.click(agreement)
-    expect(screen.getByRole('heading', { name: 'Agreement & confirmation' })).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('Step 3 complete')
   })
 
   it('keeps creation and assessment actions in the Agent message flow', async () => {
@@ -1900,6 +1998,11 @@ describe('claimant intake projection', () => {
     expect(await screen.findByRole('status', {
       name: 'Claim NWF-2026-16ECDD created',
     })).toBeInTheDocument()
+    expect(screen.getByText('Claim created')).toBeInTheDocument()
+    expect(screen.getByRole('button', {
+      name: /Claim progress: 9 of 9 required details complete\. Claims intake review/i,
+    })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Claim progress:.*Ready to create/i })).not.toBeInTheDocument()
     const claimDetails = screen.getByRole('button', { name: /Claim details/i })
     expect(claimDetails).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByText('A claims specialist will review the submitted details.')).not.toBeVisible()
@@ -2129,11 +2232,32 @@ describe('claimant intake projection', () => {
     })).toHaveAttribute('aria-expanded', 'false')
   })
 
-  it('installs the current claim snapshot without merging historical replay deltas', async () => {
+  it.each([true, false])('installs the current snapshot and suppresses stale replay actions (readback succeeds: %s)', async (readbackSucceeds) => {
     const user = userEvent.setup()
     const currentDynamicForm = dynamicForm({ value: '9pm', valueState: 'confirmed' })
+    const historicalAction = {
+      offer_id: 'offer-assessor-replay',
+      agent_message_id: agentMessage.message_id,
+      service_identity: 'vehicle_damage_assessment_routing',
+      service_name: 'Vehicle damage assessment',
+      provider: 'Northwind assessment service',
+      purpose: 'Arrange a vehicle damage assessment.',
+      shared_data_summary: ['Your confirmed incident region'],
+      consent_status: 'not_recorded',
+      status: 'consent_required',
+      routing: null,
+      failure_code: null,
+      can_request: true,
+    }
+    let resolveHistory
+    let rejectHistory
+    api.getClaimMessages.mockReturnValue(new Promise((resolve, reject) => {
+      resolveHistory = resolve
+      rejectHistory = reject
+    }))
     api.submitClaimMessage.mockResolvedValue({
       ...initialTurn(),
+      agent_message: { ...agentMessage, message_actions: [historicalAction] },
       claim_revision: 2,
       current_claim_revision: 3,
       form_changes: [{
@@ -2184,6 +2308,30 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
+    await waitFor(() => expect(api.getClaimMessages).toHaveBeenCalledWith(initialClaim.claim_id, 'ses_ui_vp'))
+    expect(screen.queryByText('Permission needed')).not.toBeInTheDocument()
+    await act(async () => {
+      if (readbackSucceeds) {
+        resolveHistory({ items: [claimantMessage, {
+          ...agentMessage,
+          message_actions: [{
+            ...historicalAction,
+            consent_status: 'withdrawn',
+            status: 'consent_withdrawn',
+            can_request: false,
+          }],
+        }] })
+      } else {
+        rejectHistory(new Error('History unavailable'))
+      }
+    })
+    if (readbackSucceeds) {
+      expect(await screen.findByText('Permission withdrawn')).toBeInTheDocument()
+    } else {
+      expect(await screen.findByText(/Your message is saved, but current service actions could not be refreshed/)).toBeInTheDocument()
+      expect(screen.queryByText(/We could not confirm delivery/)).not.toBeInTheDocument()
+    }
+    expect(screen.queryByText('Permission needed')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Details' }))
 
     expect(screen.getAllByText('9pm').length).toBeGreaterThan(0)
@@ -2754,7 +2902,7 @@ describe('claimant intake projection', () => {
     expect(api.createClaim).not.toHaveBeenCalled()
   })
 
-  it('stages a pre-message attachment and uploads it only after the first message', async () => {
+  it('stages a pre-message attachment, uploads it before the first message, and rides its evidence_id on that turn', async () => {
     const user = userEvent.setup()
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue({
@@ -2802,13 +2950,93 @@ describe('claimant intake projection', () => {
 
     await waitFor(() => expect(api.requestEvidenceUpload).toHaveBeenCalledWith(expect.objectContaining({
       claimId: initialClaim.claim_id,
-      revision: 2,
+      revision: initialClaim.revision,
     })))
     expect(api.createClaim).toHaveBeenCalledTimes(1)
-    expect(api.submitClaimMessage).toHaveBeenCalledTimes(1)
-    expect(api.submitClaimMessage.mock.invocationCallOrder[0])
-      .toBeLessThan(api.requestEvidenceUpload.mock.invocationCallOrder[0])
-    expect(await screen.findByText('Ready')).toBeInTheDocument()
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(1))
+    // The model can only read evidence attached to the message it arrives with:
+    // the upload must complete, and its evidence_id must ride the same turn,
+    // not a follow-up message nobody sends.
+    expect(api.requestEvidenceUpload.mock.invocationCallOrder[0])
+      .toBeLessThan(api.submitClaimMessage.mock.invocationCallOrder[0])
+    expect(api.submitClaimMessage).toHaveBeenCalledWith(expect.objectContaining({
+      evidenceRefs: ['evd_staged_photo'],
+    }))
+    // Once it has ridden the message, the attachment leaves the composer
+    // tray: it is not a draft waiting to be sent any more.
+    await waitFor(() => expect(screen.queryByText('new-damage.jpg')).not.toBeInTheDocument())
+  })
+
+  it('does not resurface Evidence already sent with an earlier message in the composer tray', async () => {
+    const user = userEvent.setup()
+    const historicalClaimantMessage = {
+      ...claimantMessage,
+      evidence_refs: ['evd_already_sent'],
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({
+      items: [{ ...initialClaim, can_resume: true }],
+      page: { next_cursor: null },
+    })
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_ui_vp',
+      model_profile_id: 'qwen-local',
+      started_at: '2026-09-10T01:00:02Z',
+      resume: {
+        customer_next_step: initialClaim.customer_next_step,
+        summary: 'A pipe burst in the kitchen.',
+        pending_items: [],
+        prior_commitments: [],
+      },
+    })
+    api.getClaim.mockResolvedValue(initialClaim)
+    api.getClaimMessages.mockResolvedValue({ items: [historicalClaimantMessage, agentMessage] })
+    api.getClaimEvidence.mockResolvedValue({
+      revision: 1,
+      items: [{
+        evidence_id: 'evd_already_sent',
+        claim_id: initialClaim.claim_id,
+        kind: 'incident_photo',
+        status: 'received',
+        file_status: 'ready',
+        original_filename: 'already-sent.jpg',
+        media_type: 'image/jpeg',
+        size_bytes: 5,
+        source: 'claimant',
+        created_at: '2026-09-10T00:59:00Z',
+        updated_at: '2026-09-10T00:59:00Z',
+      }],
+    })
+    api.submitClaimMessage.mockResolvedValue({
+      claimant_message: { ...claimantMessage, message_id: 'msg_follow_up', content: { type: 'text', text: 'One more detail.' } },
+      agent_message: agentMessage,
+      form_changes: [],
+      contents_item_changes: [],
+      dynamic_form: null,
+      claim_revision: 2,
+      decision: { customer_next_step: initialClaim.customer_next_step },
+    })
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
+
+    await screen.findByPlaceholderText('Write the details you know...')
+    // Evidence sent on an earlier message is historical: it must never sit
+    // in the composer tray as if it were staged to ride the next message.
+    expect(screen.queryByText('already-sent.jpg')).not.toBeInTheDocument()
+
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'One more detail.')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(1))
+    expect(api.submitClaimMessage).toHaveBeenCalledWith(expect.objectContaining({
+      evidenceRefs: [],
+    }))
   })
 
   it('restores a protected Claim Evidence deep link without creating or resuming a Claim', async () => {

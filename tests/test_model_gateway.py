@@ -83,6 +83,7 @@ from backend.domain.models import (
     FormStatus,
     FraudSignal,
     IntegrationSource,
+    MessageVisibility,
     NeededFor,
     ResponsibleParty,
     StructuredFormField,
@@ -736,12 +737,21 @@ def test_openai_compatible_translates_optional_fields_to_strict_schema() -> None
     assert forbidden_items['additionalProperties'] is False
 
 
-def test_every_v7_schema_materializes_for_openai_and_bedrock(
+def test_every_registered_claimant_schema_materializes_for_openai_and_bedrock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv('TEST_V7_BEDROCK_TOKEN', 'synthetic-token')
     schemas = load_response_schemas()
-    assert len(schemas) == 7
+    assert set(schemas) == {
+        'claimant.answer.v1',
+        'claimant.intake-patch.v1',
+        'claimant.external-offer.v1',
+        'claimant.evidence-action.v1',
+        'claimant.handoff.v1',
+        'claimant.claim-creation.v1',
+        'claimant.sourced-summary.v1',
+        'claimant.turn.v1',
+    }
 
     for schema_id, schema in schemas.items():
         openai_payload: dict[str, object] = {}
@@ -1678,7 +1688,7 @@ def test_google_exchange_keeps_long_continuation_state_out_of_runtime_persistenc
         )
         for profile_id in (
             'qwen-local',
-            'nowcoding-gpt55',
+            'openrouter-gpt4o-mini',
             'google-gemini35-flash-lite',
         )
     )
@@ -3004,7 +3014,7 @@ def test_policy_lookup_replan_rejects_deprecated_legacy_action() -> None:
     assert len(gateway.requests) == 2
     stored = repository.get_claim(created['claim']['claim_id'], 'cus_demo')
     assert stored is not None
-    assert stored.revision == created['claim']['revision']
+    assert stored.revision == created['claim']['revision'] + 1
     assert 'policy.policy_number' not in stored.form
 
 
@@ -3022,8 +3032,8 @@ def test_policy_lookup_replan_rejects_deprecated_legacy_action() -> None:
                     'limit': 10,
                 }
             ],
-            502,
-            'DEPENDENCY_FAILED',
+            200,
+            'claimant_turn.model_dependency_failure',
         ),
     ],
 )
@@ -3091,15 +3101,20 @@ def test_failed_or_second_context_round_cannot_mutate_claim(
         )
 
     assert response.status_code == expected_status
-    assert response.json()['error']['code'] == expected_code
-    assert repository.get_claim(created['claim']['claim_id'], 'cus_demo') == before
-    assert (
-        repository.list_messages(
-            created['claim']['claim_id'], created['session']['session_id'], 'cus_demo'
-        )
-        == []
+    if second_tools:
+        assert_saved_model_recovery(response)
+        assert response.json()['claimant_message']['recovery']['rule_id'] == expected_code
+    else:
+        assert response.json()['error']['code'] == expected_code
+    assert before is not None
+    assert_model_message_failure_is_atomic(
+        repository,
+        before,
+        created['claim']['claim_id'],
+        created['session']['session_id'],
+        protocol,
+        idempotency_suffix='turn',
     )
-    assert repository.list_agent_decisions(created['claim']['claim_id'], 'cus_demo') == []
 
 
 def submit_model_message(
@@ -3156,12 +3171,38 @@ def assert_model_message_failure_is_atomic(
     claim_id: str,
     session_id: str,
     protocol: str,
+    *,
+    idempotency_suffix: str = 'message',
 ) -> None:
-    assert repository.get_claim(claim_id, 'cus_demo') == before_claim
-    assert repository.list_messages(claim_id, session_id, 'cus_demo') == []
+    """Failure saves inbound once but applies no proposed Claim or lifecycle facts."""
+    stored = repository.get_claim(claim_id, 'cus_demo')
+    assert stored is not None
+    assert stored.revision == before_claim.revision + 1
+    assert stored.model_dump(exclude={'revision', 'updated_at'}) == before_claim.model_dump(
+        exclude={'revision', 'updated_at'}
+    )
+    messages = repository.list_messages(claim_id, session_id, 'cus_demo')
+    assert len(messages) == 1
+    assert messages[0].actor is ActorType.CLAIMANT
+    assert messages[0].visibility is MessageVisibility.CLAIMANT_VISIBLE
     assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
     route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
-    assert repository.find_idempotency('cus_demo', route, f'{protocol}-message') is None
+    checkpoint = repository.find_idempotency('cus_demo', route, f'{protocol}-{idempotency_suffix}')
+    assert checkpoint is not None
+    assert checkpoint.message_id == messages[0].message_id
+    assert checkpoint.revision_before_message == before_claim.revision
+
+
+def assert_saved_model_recovery(response: httpx.Response) -> None:
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body['agent_message'] is None
+    assert body['decision'] is None
+    assert body['form_changes'] == []
+    assert (
+        body['claimant_message']['recovery']['rule_id'] == 'claimant_turn.model_dependency_failure'
+    )
+    assert body['claimant_message']['recovery']['resume_entrypoint'] == 'submit_message'
 
 
 def test_incomplete_model_contents_proposal_is_rejected_before_runtime_mutation() -> None:
@@ -3173,8 +3214,7 @@ def test_incomplete_model_contents_proposal_is_rejected_before_runtime_mutation(
         protocol=protocol,
     )
 
-    assert response.status_code == 502
-    assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
+    assert_saved_model_recovery(response)
     assert_model_message_failure_is_atomic(
         repository,
         before_claim,
@@ -3275,8 +3315,7 @@ def test_non_complete_provider_results_are_bounded_and_atomic_at_message_api(
     )
 
     assert observed_status == [expected_status]
-    assert response.status_code == 502
-    assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
+    assert_saved_model_recovery(response)
     assert_model_message_failure_is_atomic(
         repository,
         before_claim,
@@ -3355,7 +3394,7 @@ def _model_proposal_output(
 
 
 @pytest.mark.parametrize('active_action', [AgentAction.HANDOFF, AgentAction.URGENT_HANDOFF])
-def test_active_handoff_cannot_be_replaced_by_model_provider(
+def test_active_handoff_continues_through_model_provider(
     active_action: AgentAction,
 ) -> None:
     gateway = StaticGateway(
@@ -3384,10 +3423,10 @@ def test_active_handoff_cannot_be_replaced_by_model_provider(
     )
 
     assert proposal.action is AgentAction.UPDATE
-    assert proposal.reason_codes == ['HANDOFF_ALREADY_QUEUED']
-    assert proposal.state_changes == []
-    assert proposal.customer_next_step == claim.customer_next_step
-    assert gateway.call_count == 0
+    assert proposal.reason_codes == ['MODEL_UPDATE']
+    assert proposal.state_changes[0].path == 'claim_state.next_action'
+    assert proposal.customer_next_step is not None
+    assert gateway.call_count == 1
 
 
 def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> None:
@@ -3557,7 +3596,7 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
     assert operation.result is not None
     assert operation.result == {
         'purpose': 'agent_turn',
-        'model_profile_id': 'qwen-local',
+        'model_profile_id': 'openrouter-gpt4o-mini',
         'prompt_version': 'northwind-fnol-claimant-v6',
         'request_stage': 'initial',
         'invocation_ordinal': 1,
@@ -3889,7 +3928,7 @@ def test_model_signal_injection_is_rejected_before_workbench_persistence() -> No
         protocol=protocol,
     )
 
-    assert response.status_code == 502
+    assert_saved_model_recovery(response)
     assert_model_message_failure_is_atomic(
         repository,
         before_claim,
@@ -4070,13 +4109,7 @@ def test_model_fact_metadata_rejection_is_bounded_and_atomic_at_message_api() ->
         protocol=protocol,
     )
 
-    assert response.status_code == 502
-    assert response.json()['error'] == {
-        'code': 'DEPENDENCY_FAILED',
-        'message': 'The model service could not complete the request. The claim is unchanged.',
-        'request_id': response.headers['X-Request-ID'],
-        'retryable': False,
-    }
+    assert_saved_model_recovery(response)
     assert_model_message_failure_is_atomic(
         repository,
         before_claim,
@@ -4087,20 +4120,17 @@ def test_model_fact_metadata_rejection_is_bounded_and_atomic_at_message_api() ->
 
 
 @pytest.mark.parametrize(
-    ('gateway_code', 'gateway_retryable', 'status_code', 'api_code', 'api_retryable'),
+    ('gateway_code', 'gateway_retryable'),
     [
-        (ModelGatewayErrorCode.TIMEOUT, True, 503, 'DEPENDENCY_UNAVAILABLE', True),
-        (ModelGatewayErrorCode.RATE_LIMIT, True, 503, 'DEPENDENCY_UNAVAILABLE', True),
-        (ModelGatewayErrorCode.AUTHENTICATION, False, 502, 'DEPENDENCY_FAILED', False),
-        (ModelGatewayErrorCode.CONFIGURATION, False, 502, 'DEPENDENCY_FAILED', False),
+        (ModelGatewayErrorCode.TIMEOUT, True),
+        (ModelGatewayErrorCode.RATE_LIMIT, True),
+        (ModelGatewayErrorCode.AUTHENTICATION, False),
+        (ModelGatewayErrorCode.CONFIGURATION, False),
     ],
 )
 def test_model_gateway_failures_are_bounded_and_atomic_at_message_api(
     gateway_code: ModelGatewayErrorCode,
     gateway_retryable: bool,
-    status_code: int,
-    api_code: str,
-    api_retryable: bool,
 ) -> None:
     protocol = f'failing_{gateway_code.value}'
     response, repository, before_claim, claim_id, session_id = submit_model_message(
@@ -4108,12 +4138,11 @@ def test_model_gateway_failures_are_bounded_and_atomic_at_message_api(
         protocol=protocol,
     )
 
-    assert response.status_code == status_code
-    error = response.json()['error']
-    assert error['code'] == api_code
-    assert error['retryable'] is api_retryable
+    assert_saved_model_recovery(response)
     assert 'model.example.test' not in response.text
-    assert gateway_code.value not in response.text
+    # The caller-chosen client_message_id includes the synthetic failure name;
+    # the server-owned claimant explanation must not expose provider diagnostics.
+    assert gateway_code.value not in json.dumps(response.json()['claimant_message']['recovery'])
     assert_model_message_failure_is_atomic(
         repository,
         before_claim,
@@ -4143,7 +4172,7 @@ def test_model_gateway_failures_are_bounded_and_atomic_at_message_api(
         ),
     ],
 )
-def test_deterministic_interrupts_precede_model_gateway(
+def test_runtime_handoff_precedes_provider_and_survives_provider_failure(
     failure_kind: str,
     message_text: str,
     expected_action: str,
@@ -4167,13 +4196,20 @@ def test_deterministic_interrupts_precede_model_gateway(
     assert response.status_code == 200
     stored_claim = repository.get_claim(claim_id, 'cus_demo')
     assert stored_claim is not None
-    assert stored_claim.revision == before_claim.revision + 1
+    assert stored_claim.revision == before_claim.revision + 2
+    assert stored_claim.form == before_claim.form
+    assert stored_claim.contents_items == before_claim.contents_items
+    body = response.json()
+    assert body['agent_message'] is not None
+    assert 'Northwind' in body['agent_message']['content']['text']
+    if expected_action == 'URGENT_HANDOFF':
+        assert 'safety' in body['agent_message']['content']['text'].lower()
     handoffs = repository.list_handoffs(claim_id, 'cus_demo')
     assert len(handoffs) == 1
     assert handoffs[0].type.value == expected_type
     assert handoffs[0].trigger.value == expected_trigger
     assert handoffs[0].reason_codes == [expected_reason]
-    assert gateway.call_count == 0
+    assert gateway.call_count == 1
 
 
 @pytest.mark.parametrize(
@@ -4294,7 +4330,7 @@ def test_namespaced_model_handoff_on_routine_message_does_not_create_handoff() -
     assert body['agent_message']['content']['text'] == safe_response
     stored_claim = repository.get_claim(claim_id, 'cus_demo')
     assert stored_claim is not None
-    assert stored_claim.revision == before_claim.revision + 1
+    assert stored_claim.revision == before_claim.revision + 2
     assert stored_claim.customer_next_step.status == 'action_not_applied'
     assert stored_claim.customer_next_step.responsible_party is ResponsibleParty.SYSTEM
     messages = repository.list_messages(claim_id, _session_id, 'cus_demo')
@@ -4314,8 +4350,19 @@ def test_namespaced_model_handoff_on_routine_message_does_not_create_handoff() -
     assert 'staff member' not in runtime_turn.result.customer_response.casefold()
 
 
-def test_explicit_human_request_uses_runtime_interrupt_before_model_gateway() -> None:
-    gateway = RuntimeSequenceGateway([])
+def test_explicit_human_request_keeps_runtime_interrupt_with_model_reply() -> None:
+    gateway = RuntimeSequenceGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[ModelToolCall(call_id='support-read', name='claim.read', arguments={})],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output=_runtime_model_output(),
+            ),
+        ]
+    )
 
     response, repository, before_claim, claim_id, _session_id = submit_model_message(
         gateway,
@@ -4325,13 +4372,13 @@ def test_explicit_human_request_uses_runtime_interrupt_before_model_gateway() ->
     )
 
     assert response.status_code == 200
-    assert gateway.requests == []
+    assert len(gateway.requests) == 2
     handoffs = repository.list_handoffs(claim_id, 'cus_demo')
     assert len(handoffs) == 1
     assert handoffs[0].support_need is SupportNeed.HUMAN_REQUESTED
     stored_claim = repository.get_claim(claim_id, 'cus_demo')
     assert stored_claim is not None
-    assert stored_claim.revision == before_claim.revision + 1
+    assert stored_claim.revision == before_claim.revision + 3
 
 
 def test_legacy_model_motor_journey_is_rejected_before_side_effects() -> None:
@@ -4419,8 +4466,10 @@ def test_legacy_model_motor_journey_is_rejected_before_side_effects() -> None:
         assert intake.json()['error']['code'] == 'LEGACY_AGENT_ACTION_DEPRECATED'
         stored_claim = repository.get_claim(claim_id, 'cus_demo')
         assert stored_claim is not None
-        assert stored_claim.revision == 1
-        assert repository.list_messages(claim_id, session_id, 'cus_demo') == []
+        assert stored_claim.revision == 2
+        messages = repository.list_messages(claim_id, session_id, 'cus_demo')
+        assert len(messages) == 1
+        assert messages[0].actor is ActorType.CLAIMANT
         assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
         return
         intake_body = intake.json()
@@ -4922,7 +4971,7 @@ def test_explicit_unpublished_profile_fails_closed_instead_of_falling_back() -> 
     )
 
     with pytest.raises(ModelGatewayError) as captured:
-        gateway.complete(ModelRequest(model_profile_id='nowcoding-gpt54mini', messages=[]))
+        gateway.complete(ModelRequest(model_profile_id='openrouter-gpt4o-mini', messages=[]))
 
     assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
     assert constructed == []

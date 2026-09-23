@@ -26,6 +26,7 @@ class AuditEventType(str, Enum):
     ACTION_FAILED = 'action.failed'
     ACTION_UNKNOWN_OUTCOME = 'action.unknown_outcome'
     ACCESS_DENIED = 'access.denied'
+    AGENT_TURN_RECOVERY = 'AGENT_TURN_RECOVERY'
 
 
 class AuditOutcome(str, Enum):

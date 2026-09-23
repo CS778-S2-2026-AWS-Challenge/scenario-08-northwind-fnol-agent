@@ -1273,11 +1273,11 @@ def test_model_validation_accepts_each_deployment_bound_profile() -> None:
             tools=True,
         ),
         ModelRuntimeBinding(
-            profile_id='nowcoding-gpt55',
+            profile_id='openrouter-gpt4o-mini',
             protocol='openai_compatible',
-            provider='nowcoding',
-            model_identifier='gpt-5.5',
-            base_url='https://nowcoding.example.test/v1',
+            provider='openrouter',
+            model_identifier='openai/gpt-4o-mini',
+            base_url='https://openrouter.example.test/api/v1',
             credential_environment_variable='NORTHWIND_MODEL_API_KEY',
             purpose='agent_turn',
             privacy_class='synthetic_fnol',
@@ -1329,11 +1329,11 @@ def test_model_validation_accepts_each_deployment_bound_profile() -> None:
 
 def test_admin_api_validates_a_secondary_deployment_bound_model_without_a_secret() -> None:
     binding = ModelRuntimeBinding(
-        profile_id='nowcoding-gpt55',
+        profile_id='openrouter-gpt4o-mini',
         protocol='openai_compatible',
-        provider='nowcoding',
-        model_identifier='gpt-5.5',
-        base_url='https://nowcoding.example.test/v1',
+        provider='openrouter',
+        model_identifier='openai/gpt-4o-mini',
+        base_url='https://openrouter.example.test/api/v1',
         credential_environment_variable='NORTHWIND_MODEL_API_KEY',
         purpose='agent_turn',
         privacy_class='synthetic_fnol',
@@ -1380,7 +1380,7 @@ def test_admin_api_validates_a_secondary_deployment_bound_model_without_a_secret
 
         assert validated.status_code == 200, validated.text
         assert validated.json()['state'] == 'awaiting_approval'
-        assert validated.json()['values']['model_identifier'] == 'gpt-5.5'
+        assert validated.json()['values']['model_identifier'] == 'openai/gpt-4o-mini'
         assert validated.json()['values']['credential_environment_variable'] == (
             'NORTHWIND_MODEL_API_KEY'
         )

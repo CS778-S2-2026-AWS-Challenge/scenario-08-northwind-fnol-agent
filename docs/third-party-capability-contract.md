@@ -31,6 +31,47 @@ when no adapter is configured. Adapter output is returned as provider evidence;
 the model cannot turn an unavailable, acknowledged or unverified response into a
 Claim fact or a completed booking.
 
+The v8 model sees the bounded registered service toolbox regardless of family, excluding open
+handoffs and services with existing operations. The context key `eligible_services` names this
+read-only list; presence grants no eligibility or permission. No candidate-catalogue record or
+lifecycle is introduced. After validating field changes, Runtime resolves the accepted same-turn
+family using the existing fact-resolution rules, or the persisted confirmed family, and queries
+`eligible_service_ids` again. Registry, family, lifecycle and cooldown filters remain authoritative.
+Unsupported or disputed family assertions cannot unlock services. Only
+the reducer creates offers. A suggestion grants neither consent nor dispatch authority. Pattern
+selection remains only for explicit renewed intent during cooldown and the no-model path.
+If no capability is eligible, chat continues without a fabricated offer or execution claim.
+
+| Contract | Producer | Authority boundary |
+| --- | --- | --- |
+| Eligible capability | Runtime `eligible_service_ids` | Family, lifecycle, availability and suppression filters. |
+| Service suggestion | Model `V8ServiceSuggestion` | Advisory subset of the eligible identities. |
+| Offer | Reducer / external Runtime WorkItem | Bound to the actual Agent message and disclosure fingerprint. |
+| Consent | Claimant | Existing scoped `ExternalServiceConsent`; never inferred from prose. |
+| ExternalTask | Dispatcher | Created only after existing consent and execution checks. |
+
+Declined or withdrawn services cannot produce new offers for the next three claimant turns. A renewed explicit
+request can restore eligibility during that cooldown, but cannot bypass an open handoff:
+every new service suggestion is suppressed while support remains open. A renewed offer receives
+a new offer ID/disclosure binding and requires a fresh consent; the old consent remains history
+and its offer cannot be reused to request dispatch. Consent mutations recompute claimant progress.
+
+The registry projects `presentation` from access form and operation status: `info_link`,
+`action_button`, `consent_request`, `tracked_task`, `agent_assisted`, or `status_update`.
+The frontend consumes that value rather than guessing from provider fields. New polymorphic
+rendering is outside this change. The frontend unknown-family catalogue still contains only
+cross-family manual, link or phone guidance and does not open automatically. The model toolbox
+is separate: a source-backed family proposal can unlock a matching offer in that same turn.
+Without an accepted family the message offer set remains empty. The independent Staff Assistance
+entry is not a third-party catalogue item and stays available.
+
+Conversation commit and external dispatch are separate outcomes. An adapter rejection,
+unavailability, or exception is recorded as the corresponding external-task failure and emits a
+privacy-safe diagnostic containing correlation IDs and controlled codes, not claimant text or
+provider payloads. It must not convert a committed message turn into a failed chat request. An
+unknown outcome still uses the canonical reconciliation rule and the same operation identity; it
+is never automatically retried.
+
 The claimant projection is intentionally limited to service purpose, public
 contact, disclosure requirements and the current server-declared action. The
 Workbench receives the same catalogue plus its existing staff-only operation,

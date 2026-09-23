@@ -1000,8 +1000,13 @@ persist their child record and idempotency response, and publish Claim/queue ref
 The backend MUST maintain a versioned field registry with validation and display metadata. New product fields require a registry change; clients MUST NOT invent arbitrary field codes.
 
 Every claimant Dynamic Form projection includes deterministic `requirements`: `satisfied`,
-`missing_required_now`, `pending_later`, `next_required_item`, `ready`,
-`current_action_total`, and `current_action_satisfied`. The backend recalculates this projection
+`recorded`, `missing_required_now`, `missing_by_branch`, `pending_later`, `next_required_item`, `ready`,
+`ready_pending_confirmation`, `by_state`, `unresolved`,
+`current_action_total`, and `current_action_satisfied`. `by_state` groups every projected field
+code by its seven-state disposition (`missing`, `proposed`, `confirmed_exact`, `confirmed_approx`,
+`disputed`, `unavailable`, `pending_generation`); `unresolved` is the `missing` group, so a client
+can distinguish still-missing fields from fields already settled into a resting state such as
+`unavailable` or `pending_generation`. The backend recalculates this projection
 from authoritative Claim State, the selected registered branch, and the current action. Clients
 must not calculate readiness or choose required fields locally.
 
@@ -1335,9 +1340,9 @@ active Release Set; runtime readiness means this process has the required endpoi
 credential. Health remains `null` until a controlled provider check records a result and opening
 the page never invokes a paid provider. The frontend uses the default when creating a Session,
 while a message may select another published and runtime-ready profile in the same conversation.
-The repository initial catalogue publishes `qwen-local`, `nowcoding-gpt55`,
+The repository initial catalogue publishes `qwen-local`, `openrouter-gpt4o-mini`,
 `google-gemini35-flash-lite`, and the explicitly unavailable `bedrock-nova2-lite`; deployment
-selection keeps `qwen-local` as the default unless `MODEL_PROFILE_ID` changes.
+selection keeps `openrouter-gpt4o-mini` as the default unless `MODEL_PROFILE_ID` changes.
 
 ### `POST /api/v1/claims`
 
@@ -1348,12 +1353,14 @@ Request:
 ```json
 {
   "channel": "web_agent",
-  "locale": "en-NZ",
-  "incident_type": "motor"
+  "locale": "en-NZ"
 }
 ```
 
-`incident_type` MAY be omitted when it is not yet known.
+`incident_type` MAY be supplied by compatible clients, but the claimant application does not ask
+the user to choose it. A working Claim may remain unresolved until the first message. The message
+Runtime then derives one shared bounded family result from confirmed facts and the current text;
+ambiguous or conflicting input asks for clarification and creates no external-service offer.
 
 Response `201`:
 
@@ -1620,6 +1627,13 @@ read failure. Cross-Claim records, contradictory capability provenance, invalid 
 relationships, unsupported registry mappings, invalid result-verification combinations, and
 context overflow return the same bounded code with `retryable: false`.
 
+For a third-party support turn, Runtime selects service identities from the published registry;
+model output cannot add them. Failure to assemble an optional offer leaves a safe conversation
+valid and creates no service action. After a message turn is committed, a later adapter failure is
+projected through the external-task lifecycle and does not change this endpoint into a failed
+chat response. The response must not claim that external work was arranged or submitted unless
+the corresponding Runtime lifecycle evidence exists.
+
 Response `200`:
 
 ```json
@@ -1711,8 +1725,9 @@ Response `200`:
 claim_revision is the Claim revision committed by this message turn. An idempotent replay
 continues to report that historical turn revision even when later Claim mutations have advanced
 the Claim. current_claim_revision is the latest authoritative Claim revision and is the value
-used by a continuation action or a new revision-checked request. For a fresh turn these values are
-equal. Both fields are integer revision values and are present on every MessageTurnResponse. The
+used by a continuation action or a new revision-checked request. A fresh response can already have
+a newer current revision after post-commit service continuation. Both fields are integer revision
+values and are present on every MessageTurnResponse. The
 historical value is the revision to use when interpreting the replayed turn; the current value is
 the revision to send with a subsequent revision-checked mutation. Neither field changes the
 Claim revision or creates a new turn by itself. Retries of records written before
@@ -1726,10 +1741,14 @@ current-state patch during replay. When the two revisions differ, clients instal
 and must not merge the historical deltas into live form or contents state. Current dynamic form,
 next step, primary action, handoff, contents, and `updated_at` therefore come from the same
 authoritative snapshot for Agent and message-only responses. Namespaced Runtime records are durable
-children of an Agent turn; there is no separate read-only Runtime response kind. The server records
-an explicit turn kind and committed turn revision with each accepted message. A retry using the same
-`client_message_id` under a new idempotency key atomically reserves that key as an alias of the
-original turn before returning it. Reusing the alias for different input returns
+children of an Agent turn; there is no separate read-only Runtime response kind. Only
+`current_claim` and `current_claim_revision` refresh on replay; all historical turn evidence
+remains frozen. Replay performs no model call, reduction, service dispatch or audit mutation.
+Historical message actions do not grant current permission. When revisions differ, clients
+refresh actions through the existing messages read endpoint and suppress stale controls meanwhile.
+The server records an explicit turn kind and committed turn revision with each accepted message.
+A retry using the same `client_message_id` under a new idempotency key atomically reserves that key
+as an alias of the original turn before returning it. Reusing the alias for different input returns
 `409 IDEMPOTENCY_CONFLICT`. A missing or mislinked declared decision, Agent message, Runtime result,
 Runtime trace, or Handoff is a bounded `500 INTERNAL_ERROR`; replay never downgrades a damaged turn
 to a partial successful response. Runtime plan and ActionEnvelope revisions are checked against the
@@ -1737,11 +1756,72 @@ independently persisted message-turn revision rather than against another Runtim
 
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
 
+The v8 message boundary accepts and persists the inbound message before model processing.
+Acceptance advances the Claim revision once; a successful result commits the authorised facts,
+Agent message and turn records with a second revision check. Clients must use the returned
+`current_claim_revision` for subsequent mutations rather than assume a single increment. A model failure returns `200` for the
+saved message, with `agent_message: null` and a `recovery` projection containing `rule_id`,
+`continuation: runtime.fail_safe`, `claimant_projection`, `resume_triggers`, and
+`resume_entrypoint: submit_message`. It does not represent a successful model response.
+
+When Runtime detects an explicit safety or human-support request, it commits the shared
+handoff creation or priority upgrade before calling the model. This advances the revision
+independently and survives a later provider failure. If that safety mutation cannot commit,
+the request fails rather than claiming that support has been notified. On provider failure
+after a committed safety action, `agent_message` is non-null: it contains the deterministic
+safety guidance and support confirmation, with the same `recovery` metadata. This notice
+does not represent a completed model response or remove the original message's Retry action.
+Only a subsequent non-recovery Agent reply completes that response. Failed model facts are
+never applied, and the turn does not fall back to ControlledAgent.
+
+Failure to persist that safety action returns `500 SAFETY_HANDOFF_PERSISTENCE_FAILED`
+with `retryable: true`. The accepted inbound remains stored, but the client must not present
+the failed support action as completed.
+
+`ClaimantMessage` exposes its original `client_message_id` and the same optional `recovery`
+projection so saved-but-unanswered messages remain actionable after history reload. An explicit
+Retry resends that original identity, content and Evidence references with a new
+`Idempotency-Key` and the current Claim revision through this same endpoint. It reuses the saved
+inbound and its original confirmation checkpoint, never saving duplicate claimant text. An
+identical HTTP key replays its saved historical response, refreshing only the two `current_*`
+fields without another model call. Existing session and
+Claim ownership checks continue to apply; retry does not move messages between sessions.
+
+When the collected report only needs confirmation, `customer_next_step.status` is
+`confirmation_requested`. A conversational acknowledgement confirms only the values actually
+shown, bound to their assertion identities, fingerprint and revision before accepting the
+acknowledgement message. A same-turn correction or intervening mutation invalidates that binding.
+
+In a v8 model turn without authoritative product family, registered top-level family fields
+are available as `candidate_now` even without a keyword match. This does not make every family's
+fields required. The model may propose family and supported details in the same turn; the usual
+quotation/source checks and confirmation boundary still apply. Stored proposed family values
+select collection requirements without becoming confirmed merely through selection.
+
+The v8 model's service toolbox is independent of the frontend catalogue's initial family filter.
+After validating facts, Runtime checks service suggestions against the accepted same-turn family
+and existing task, cooldown and handoff rules. A first-turn family proposal and matching consent
+card can therefore appear in one response. Seeing a service in model context grants neither
+consent nor execution authority; the frontend's initial catalogue behavior is unchanged.
+
+Runtime also requires the entire claimant message to be an unqualified acceptance of the
+displayed batch. A scoped answer such as `Yes we can still live here` may confirm habitability
+but cannot confirm other recorded values. The model's `confirms_batch` flag is advisory only:
+it cannot authorize a scoped answer or veto a valid explicit acceptance. UI field-confirmation
+buttons keep their explicit field selection and the same revision/value checks.
+`POST /form/confirmations` remains available for explicit selected-field confirmation.
+
 `agent_message.message_actions[]` is supplementary to `primary_action`. Runtime may attach a
 registered third-party offer while the normal safety, information, confirmation, or creation
 action remains primary. Each offer is bound to its originating Agent message and is restored by
 message history; formal external Claim creation is not a precondition for recognition, display,
 or consent. The client cannot construct an offer or widen its disclosure scope.
+
+Each service action also carries `presentation`: `info_link`, `action_button`,
+`consent_request`, `tracked_task`, `agent_assisted`, or `status_update`, derived by the backend
+registry from access form and operation/consent state. The initial unknown-family catalogue
+contains only manual services common to all three families, such as Police 105. It does not
+automatically open or suppress the independent Staff Assistance entry.
 
 `dynamic_form` is a claimant-safe projection of the applied branch evaluation after the turn. It
 exposes only active, claimant-visible fields; inactive and system-owned fields remain outside this
@@ -1931,6 +2011,12 @@ This endpoint is the live handler for the registered `claim.create` action. It a
 `ready_for_next` Claim and dispatches a typed, revision-checked, idempotent command through the
 configured `claims_service.create_claim` binding before using the existing provider-neutral
 adapter. The model cannot call or authorise this endpoint by emitting an action name.
+
+If branch evaluation reports recorded (proposed) facts, the endpoint returns
+`409 CONFIRMATION_REQUIRED` with those field codes in `details`; it never attempts
+creation while the Claim is still `collecting`. The claimant may confirm those
+fields through the form-confirmation endpoint or the conversational confirmation
+path, after which the normal revision and idempotency checks apply.
 
 The claimant client MAY offer a guided Motor presentation over the same resources used by the
 conversational intake. The guided presentation creates the Working Claim before its first page is
@@ -2162,8 +2248,9 @@ withdrawn. It is a stored field written when permission is recorded, and a faile
 no claim field, so on its own it keeps saying that Northwind can now send the request. Where
 `external_service_action.status` is `terminal_failure` or `awaiting_reconciliation`, the projected
 next step instead reports that Northwind is reviewing or checking the request, with
-`responsible_party` `claims_professional` and no required items. A `retryable_failure` keeps the
-stored next step, which agrees with `can_request`. The correction is derived for the read; the
+`responsible_party` `claims_professional` and no required items. A `retryable_failure` with
+`can_request=true` projects the existing `assessor_request_ready` step with claimant ownership,
+even if Claim creation previously stored a system-owned step. The correction is derived for the read; the
 stored field is not rewritten, so a failed attempt still changes nothing on the claim.
 
 The authorised decision and prepared operation identity are persisted together before the

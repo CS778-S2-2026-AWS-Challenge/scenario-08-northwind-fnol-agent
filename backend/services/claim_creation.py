@@ -166,13 +166,16 @@ def create_claim_from_confirmed_report(
         )
         .requirements
     )
-    missing_or_unconfirmed = requirements.missing_required_now
-    if missing_or_unconfirmed:
+    # A first notice is complete when every required fact has a disposition:
+    # supplied, approximate, awaiting the claimant, awaiting a third party, or
+    # recorded but unconfirmed. Only a fact with no disposition at all blocks.
+    # Recorded and disputed facts travel to the Workbench carrying their state.
+    if requirements.unresolved:
         raise _invalid_state(
-            'Required claim facts must be confirmed before claim creation.',
+            'Every required claim fact needs a disposition before claim creation.',
             [
-                ErrorDetail(field=field_code, reason='Confirm this field before claim creation.')
-                for field_code in missing_or_unconfirmed
+                ErrorDetail(field=field_code, reason='Supply or account for this field first.')
+                for field_code in requirements.unresolved
             ],
         )
     open_handoffs = [
