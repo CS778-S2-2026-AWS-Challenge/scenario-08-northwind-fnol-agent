@@ -698,6 +698,38 @@ describe('claimant intake projection', () => {
     expect(screen.getByText(initialClaim.claim_id)).toBeInTheDocument()
   })
 
+  it('opens Profile as a standalone page and returns to the loaded conversation', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    const { container } = render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+
+    await user.click(container.querySelector('.intake-profile'))
+
+    expect(await screen.findByRole('region', { name: 'Personal details' })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile')
+    expect(container.querySelector('.profile-page .user-profile')).toBeInTheDocument()
+    expect(container.querySelector('.workspace-utility-page')).not.toBeInTheDocument()
+    expect(screen.queryByText(initialClaim.claim_id)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+
+    expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
+    expect(screen.getByText(initialClaim.claim_id)).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe(`/claims/${initialClaim.claim_id}`)
+    expect(api.createClaim).toHaveBeenCalledTimes(1)
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
+  })
+
   it('returns to the start page from the Claim header without dropping the conversation', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage.mockResolvedValue(initialTurn())

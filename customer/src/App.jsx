@@ -405,10 +405,11 @@ function App() {
   const [mobileView, setMobileView] = useState('chat')
   const [workspaceView, setWorkspaceView] = useState('chat')
   const [workspaceActive, setWorkspaceActive] = useState(false)
+  const [profileReturnClaimId, setProfileReturnClaimId] = useState(null)
   const profileController = useProfileController({
     account,
     setAccount,
-    enabled: page === 'account' || workspaceView === 'account',
+    enabled: page === 'account',
   })
   const [runtimeCapabilities, setRuntimeCapabilities] = useState({
     claim_types: ['motor', 'home', 'contents'],
@@ -578,6 +579,7 @@ function App() {
   }
 
   function setPage(nextPage, { replace = false } = {}) {
+    setProfileReturnClaimId(null)
     setPageState(nextPage)
     if (nextPage === 'account') setProfileSection(null)
     const nextPath = nextPage === 'account' ? '/profile' : routeForPage(nextPage)
@@ -605,6 +607,9 @@ function App() {
       const nextProfileSection = profileSectionFromPath(path)
       const nextPage = pageForPath(path)
       setWorkspaceActive(path.startsWith('/claims/') && Boolean(claim))
+      setProfileReturnClaimId(
+        nextPage === 'account' ? globalThis.history?.state?.profileReturnClaimId || null : null,
+      )
       setProfileSection(nextProfileSection)
       const historyClaimMatch = path.match(/^\/account\/claims\/([^/]+)/)
       setSelectedHistoryClaimId(historyClaimMatch ? decodeURIComponent(historyClaimMatch[1]) : null)
@@ -2351,6 +2356,44 @@ function App() {
     setPage('home')
   }
 
+  function openProfileFromWorkspace(section = null) {
+    if (!account) {
+      setPage('login')
+      return
+    }
+    const returnClaimId = claim?.claim_id || null
+    setProfileReturnClaimId(returnClaimId)
+    setProfileSection(section)
+    setWorkspaceView('chat')
+    setMobileView('chat')
+    setWorkspaceActive(false)
+    setPageState('account')
+    const nextPath = profilePathForSection(section)
+    if (globalThis.location?.pathname !== nextPath) {
+      globalThis.history?.pushState(
+        { northwindRoute: 'account', profileReturnClaimId: returnClaimId },
+        '',
+        nextPath,
+      )
+    }
+  }
+
+  function leaveProfilePage() {
+    if (profileReturnClaimId && claim?.claim_id === profileReturnClaimId) {
+      setProfileReturnClaimId(null)
+      setWorkspaceView('chat')
+      setMobileView('chat')
+      setWorkspaceActive(true)
+      setPageState('home')
+      const claimPath = `/claims/${claim.claim_id}`
+      if (globalThis.location?.pathname !== claimPath) {
+        globalThis.history?.pushState({ northwindRoute: 'home' }, '', claimPath)
+      }
+      return
+    }
+    setPage('home')
+  }
+
   function returnToLanding() {
     clearComposerAttachments()
     pendingSubmission.current = null
@@ -2373,7 +2416,11 @@ function App() {
     setPageState('account')
     const nextPath = profilePathForSection(section)
     if (globalThis.location?.pathname !== nextPath) {
-      globalThis.history?.pushState({ northwindRoute: 'account', profileSection: section }, '', nextPath)
+      globalThis.history?.pushState({
+        northwindRoute: 'account',
+        profileSection: section,
+        profileReturnClaimId,
+      }, '', nextPath)
     }
   }
 
@@ -2566,7 +2613,7 @@ function App() {
           busy={isBusy}
           onAddDestination={addPayoutDestination}
           onContinue={continuePayoutContact}
-          onManageContact={() => setWorkspaceView('account')}
+          onManageContact={() => openProfileFromWorkspace('personal-details')}
           onLogin={() => setPage('login')}
         />
       )
@@ -2639,7 +2686,7 @@ function App() {
           <button
             className="login-button"
             type="button"
-            onClick={() => setPage(isProfilePage ? 'home' : account ? 'account' : 'login')}
+            onClick={() => isProfilePage ? leaveProfilePage() : setPage(account ? 'account' : 'login')}
           >
             {isProfilePage ? 'Back' : account ? 'Profile' : 'Log in'}
           </button>
@@ -2952,10 +2999,7 @@ function App() {
               })}
             </div>
             <div className="intake-history-bottom">
-              <button className="intake-profile" type="button" onClick={() => {
-                if (account) { setWorkspaceView('account'); setPage('account') }
-                else setPage('login')
-              }}>
+              <button className="intake-profile" type="button" onClick={() => openProfileFromWorkspace()}>
                 <span className="intake-profile-avatar">{account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}</span>
                 <span className="intake-profile-copy">
                   <span>{account?.profile?.display_name || 'Log in to save your chat'}</span>
@@ -2994,9 +3038,7 @@ function App() {
                       ? 'Claim features'
                       : workspaceView === 'external-services'
                         ? 'External services'
-                        : workspaceView === 'account'
-                          ? 'Profile'
-                          : workspaceView === 'agreement'
+                        : workspaceView === 'agreement'
                             ? 'Agreement & confirmation'
                             : 'Evidence history'}
               </h1>
@@ -3009,9 +3051,7 @@ function App() {
                       ? 'Review this Claim\'s current status and available information.'
                       : workspaceView === 'external-services'
                         ? 'See the external service currently recorded for this Claim, including what may be shared and what happens next.'
-                        : workspaceView === 'account'
-                          ? 'Manage the account details Northwind currently supports and review unavailable profile capabilities.'
-                          : workspaceView === 'agreement'
+                        : workspaceView === 'agreement'
                             ? 'Your payout destination and preferred contact method are saved. Agreement review and final Claim confirmation happen in Step 4.'
                             : workspaceView === 'claim-evidence'
                             ? 'Review the files and supporting material recorded for the selected Claim.'
@@ -3048,20 +3088,6 @@ function App() {
                   </div>
                 )
               )}
-              {workspaceView === 'account' && account && (
-                <div className="workspace-account-content">
-                  <UserProfile
-                    account={account}
-                    activeSection={profileSection}
-                    controller={profileController}
-                    embedded
-                    onOpenClaims={openClaimHistory}
-                    onSelectSection={openProfileSection}
-                    onSignOut={signOut}
-                  />
-                </div>
-              )}
-
               {workspaceView === 'agreement' && (
                 <div className="claim-history-state" role="status">
                   <h2>Step 3 complete</h2>
