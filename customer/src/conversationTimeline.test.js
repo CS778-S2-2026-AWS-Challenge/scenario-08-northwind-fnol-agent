@@ -28,6 +28,28 @@ describe('orderMessages', () => {
     }
   })
 
+  it('compares created_at at the full precision the API emits, not at milliseconds', () => {
+    // Both instants fall in the same millisecond; the server orders them by microseconds first.
+    const earlier = message('msg_z', '2026-09-22T01:00:00.000100Z')
+    const later = message('msg_a', '2026-09-22T01:00:00.000900Z')
+
+    for (const input of permutations([later, earlier])) {
+      expect(ids(orderMessages(input))).toEqual(['msg_z', 'msg_a'])
+    }
+  })
+
+  it('treats an omitted fraction as zero and compares instants across timezone offsets', () => {
+    // Pydantic omits a zero fraction; an offset names the same instant as its UTC form.
+    const wholeSecond = message('msg_d', '2026-09-22T01:00:00Z')
+    const halfSecond = message('msg_c', '2026-09-22T01:00:00.5Z')
+    const justAfterHalf = message('msg_b', '2026-09-22T14:00:00.500001+13:00')
+    const sameInstantLowerId = message('msg_a', '2026-09-22T01:00:00.500001Z')
+
+    for (const input of permutations([justAfterHalf, wholeSecond, sameInstantLowerId, halfSecond])) {
+      expect(ids(orderMessages(input))).toEqual(['msg_d', 'msg_c', 'msg_a', 'msg_b'])
+    }
+  })
+
   it('places a reply after its persisted target even when its timestamp or identifier sorts earlier', () => {
     const target = message('msg_z_target', '2026-09-22T01:00:05Z')
     const reply = message('msg_a_reply', '2026-09-22T01:00:04Z', { actor: 'agent', in_reply_to: 'msg_z_target' })

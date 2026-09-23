@@ -3,14 +3,24 @@
 // target, and independent messages are newest-last by (created_at, message_id). Applying it
 // on every commit keeps the conversation independent of which request finished first.
 
+const RFC3339 = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/i
+
+// The server compares Python datetimes at microsecond precision, while Date.parse keeps only
+// milliseconds. Split the value into whole-second epoch milliseconds (offset applied) and the
+// fraction padded to nanoseconds, so two instants inside one millisecond keep the server order.
+// An omitted fraction, which the API emits for a zero microsecond, compares as zero.
 function timestamp(message) {
-  const value = Date.parse(message.created_at || '')
-  return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY
+  const match = RFC3339.exec(message.created_at || '')
+  const seconds = match ? Date.parse(`${match[1]}${match[3]}`) : Number.NaN
+  if (!Number.isFinite(seconds)) return { seconds: Number.POSITIVE_INFINITY, fraction: '' }
+  return { seconds, fraction: (match[2] || '').padEnd(9, '0').slice(0, 9) }
 }
 
 function compareMessages(left, right) {
-  const byTime = timestamp(left) - timestamp(right)
-  if (byTime !== 0 && !Number.isNaN(byTime)) return byTime
+  const leftTime = timestamp(left)
+  const rightTime = timestamp(right)
+  if (leftTime.seconds !== rightTime.seconds) return leftTime.seconds < rightTime.seconds ? -1 : 1
+  if (leftTime.fraction !== rightTime.fraction) return leftTime.fraction < rightTime.fraction ? -1 : 1
   if (left.message_id === right.message_id) return 0
   return left.message_id < right.message_id ? -1 : 1
 }
