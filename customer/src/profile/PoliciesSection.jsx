@@ -1,32 +1,61 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { FeatureNotice, ResourceError, SectionHeading } from './ProfilePrimitives.jsx'
+import { FeatureNotice, ResourceError } from './ProfilePrimitives.jsx'
+import { maskPolicyNumber } from './policyNumber.js'
 import { profileMutationMessage } from './profileMutation.js'
 
-function maskPolicyNumber(value = '') {
-  const compact = value.replace(/\s/g, '')
-  if (!compact) return 'Not provided'
-  return `••••${compact.slice(-4)}`
-}
+const RETRY_BUTTON_ID = 'profile-policy-retry-button'
 
-export default function PoliciesSection({
+export default function PolicyNumberDetails({
+  announceResourceState = true,
+  editingDisabled = false,
+  fallbackFocusId,
   resource,
   pending,
-  headingAs: Heading = 'h1',
   onBeginCreate,
   onAbandonCreate,
   onCreate,
   onReload,
   onUpdate,
+  onEditingChange,
 }) {
   const [editor, setEditor] = useState(null)
   const [draft, setDraft] = useState('')
   const [notice, setNotice] = useState(null)
   const inputRef = useRef(null)
+  const returnFocusIdRef = useRef(null)
+  // Where focus must land once a failed save or a retry has settled: the preserved draft input
+  // while a draft is open, otherwise the re-rendered retry control or the disclosure summary.
+  const recoveryFocusRef = useRef(null)
   const policies = resource.items
   const authoritative = policies !== null && !resource.error && !resource.loading && !resource.stale
+  const saving = editor?.mode === 'create'
+    ? Boolean(pending['policy-create'])
+    : Boolean(pending[`policy:${editor?.policyId}`])
 
   useEffect(() => { if (editor && authoritative) inputRef.current?.focus() }, [authoritative, editor])
+
+  useEffect(() => {
+    const target = recoveryFocusRef.current
+    if (!target || resource.loading || saving) return
+    recoveryFocusRef.current = null
+    const element = target === 'input'
+      ? inputRef.current
+      : globalThis.document?.getElementById(RETRY_BUTTON_ID)
+        || globalThis.document?.getElementById(fallbackFocusId)
+    element?.focus()
+  }, [editor, fallbackFocusId, resource.error, resource.loading, resource.stale, saving])
+
+  useEffect(() => { onEditingChange?.(Boolean(editor)) }, [editor, onEditingChange])
+
+  useEffect(() => {
+    if (editor || !returnFocusIdRef.current) return
+    const triggerId = returnFocusIdRef.current
+    returnFocusIdRef.current = null
+    const target = globalThis.document?.getElementById(triggerId)
+      || globalThis.document?.getElementById(fallbackFocusId)
+    target?.focus()
+  }, [editor, fallbackFocusId])
 
   function closeEditor() {
     if (editor?.mode === 'create') onAbandonCreate('policy', editor.attemptId)
@@ -34,15 +63,15 @@ export default function PoliciesSection({
     setDraft('')
   }
 
-  function beginCreate() {
-    closeEditor()
+  function beginCreate(event) {
     setNotice(null)
+    returnFocusIdRef.current = event.currentTarget.id
     setEditor({ mode: 'create', attemptId: onBeginCreate('policy') })
   }
 
-  function beginEdit(policy) {
-    closeEditor()
+  function beginEdit(policy, event) {
     setNotice(null)
+    returnFocusIdRef.current = event.currentTarget.id
     setEditor({ mode: 'edit', policyId: policy.policy_id })
     setDraft(policy.policy_number)
   }
@@ -62,29 +91,36 @@ export default function PoliciesSection({
       setEditor(null)
       setDraft('')
     } catch (error) {
+      // The clicked submit is disabled until the resource is authoritative again, so focus moves
+      // to the preserved draft once the pending state clears.
+      recoveryFocusRef.current = 'input'
       setNotice({ kind: 'error', text: profileMutationMessage(error, 'Northwind could not save this policy number.') })
     }
   }
 
-  const saving = editor?.mode === 'create'
-    ? Boolean(pending['policy-create'])
-    : Boolean(pending[`policy:${editor?.policyId}`])
+  function retryLoad() {
+    recoveryFocusRef.current = editor ? 'input' : 'retry'
+    // The retry control unmounts while the reload runs; the failure is already surfaced through
+    // resource.error, so the rejection only needs to be observed here.
+    return onReload().catch(() => {})
+  }
 
   return (
-    <section className="profile-section" aria-labelledby="profile-policies">
+    <div className="profile-policy-details" role="group" aria-label="Saved policy number controls">
       <FeatureNotice notice={notice} />
-      <SectionHeading
-        as={Heading}
-        id="profile-policies"
-        title="Policies"
-        description="Review the policy numbers saved to your account. A saved number does not confirm coverage."
-      />
+      <p className="profile-helper-copy">A saved policy number does not confirm coverage or attach it to a Claim.</p>
       <ResourceError
+        announce={announceResourceState}
         message={resource.error}
-        onRetry={onReload}
+        onRetry={retryLoad}
         retainedLabel={resource.stale ? 'saved policy numbers' : ''}
+        retryButtonId={RETRY_BUTTON_ID}
       />
-      {policies === null && !resource.error && <p className="profile-assets-loading" role="status">Loading saved policy numbers…</p>}
+      {policies === null && !resource.error && (
+        <p className="profile-assets-loading" role={announceResourceState ? 'status' : undefined}>
+          Loading saved policy numbers…
+        </p>
+      )}
       {authoritative && policies.length === 0 && !editor && <p className="profile-assets-empty">No policy numbers saved.</p>}
       {policies !== null && policies.length > 0 && (
         <ul className="profile-record-list" aria-label="Saved policy numbers">
@@ -93,11 +129,12 @@ export default function PoliciesSection({
               <span><strong>Policy number</strong><span>{maskPolicyNumber(policy.policy_number)}</span></span>
               {authoritative && (
                 <button
+                  id={`profile-policy-edit-${policy.policy_id}`}
                   className="profile-quiet-action"
                   type="button"
-                  disabled={Boolean(pending[`policy:${policy.policy_id}`])}
+                  disabled={editingDisabled || Boolean(pending[`policy:${policy.policy_id}`])}
                   aria-label={`Edit policy number ${maskPolicyNumber(policy.policy_number)}`}
-                  onClick={() => beginEdit(policy)}
+                  onClick={(event) => beginEdit(policy, event)}
                 >
                   Edit
                 </button>
@@ -107,11 +144,17 @@ export default function PoliciesSection({
         </ul>
       )}
       {authoritative && !editor && (
-        <button className="profile-asset-add-action" type="button" disabled={Boolean(pending['policy-create'])} onClick={beginCreate}>
+        <button
+          id="profile-policy-add-button"
+          className="profile-asset-add-action"
+          type="button"
+          disabled={editingDisabled || Boolean(pending['policy-create'])}
+          onClick={beginCreate}
+        >
           <span aria-hidden="true">+</span> Add policy number
         </button>
       )}
-      {authoritative && editor && (
+      {editor && (
         <form className="profile-edit-form profile-record-form" onSubmit={save}>
           <h3>{editor.mode === 'create' ? 'Add policy number' : 'Edit policy number'}</h3>
           <label htmlFor="profile-policy-number">Policy number</label>
@@ -127,13 +170,18 @@ export default function PoliciesSection({
             disabled={saving}
             onChange={(event) => setDraft(event.target.value)}
           />
+          {!authoritative && (
+            <p className="profile-helper-copy">
+              Policy data is being refreshed or could not be confirmed. Retry the load or cancel this draft.
+            </p>
+          )}
           <p className="profile-helper-copy">Northwind stores policy numbers as reusable account records. Choosing one for a Claim is a separate step and does not decide coverage.</p>
           <div className="profile-asset-form-actions">
-            <button className="primary-button" type="submit" disabled={saving || !draft.trim()}>{saving ? 'Saving…' : 'Save policy number'}</button>
+            <button className="primary-button" type="submit" disabled={!authoritative || saving || !draft.trim()}>{saving ? 'Saving…' : 'Save policy number'}</button>
             <button className="profile-quiet-action" type="button" disabled={saving} onClick={closeEditor}>Cancel</button>
           </div>
         </form>
       )}
-    </section>
+    </div>
   )
 }

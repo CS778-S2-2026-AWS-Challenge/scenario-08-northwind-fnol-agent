@@ -2,7 +2,6 @@ import { PROFILE_CATEGORIES } from '../profileRoutes.js'
 import AssetsSection from '../profile/AssetsSection.jsx'
 import PaymentDetailsSection from '../profile/PaymentDetailsSection.jsx'
 import PersonalDetailsSection from '../profile/PersonalDetailsSection.jsx'
-import PoliciesSection from '../profile/PoliciesSection.jsx'
 import { SectionHeading, SummaryRow } from '../profile/ProfilePrimitives.jsx'
 import usePersonalDetailsEditor from '../profile/usePersonalDetailsEditor.js'
 import ClaimAutoFillChoices from './ClaimAutoFillChoices.jsx'
@@ -122,19 +121,13 @@ export default function UserProfile({
 
   function renderSection() {
     if (currentSection === 'personal-details') {
-      return <PersonalDetailsSection account={account} controller={personalController} headingAs={SectionTitle} />
-    }
-    if (currentSection === 'policies') {
       return (
-        <PoliciesSection
-          resource={resolvedController.resources.policies}
-          pending={resolvedController.pending}
+        <PersonalDetailsSection
+          account={account}
+          controller={personalController}
           headingAs={SectionTitle}
-          onBeginCreate={resolvedController.beginCreate}
-          onAbandonCreate={resolvedController.abandonCreate}
-          onCreate={resolvedController.createPolicy}
-          onReload={resolvedController.reloadPolicies}
-          onUpdate={resolvedController.savePolicy}
+          policyController={resolvedController}
+          policyResource={resolvedController.resources.policies}
         />
       )
     }
