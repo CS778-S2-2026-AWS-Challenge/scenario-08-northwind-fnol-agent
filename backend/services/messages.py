@@ -679,6 +679,13 @@ def _replay_persisted_response(
             )
             if handoff is None or handoff.source_message_id != claimant_message.message_id:
                 raise _persisted_turn_integrity_error()
+        if idempotency.response_payload is not None:
+            # A stored response is a durable compatibility record: its historical
+            # fields (primary_action, agent_message, ...) stay frozen exactly as
+            # first returned, and only the current-Claim projection refreshes.
+            return _refresh_current_claim(
+                repository, principal.subject, idempotency.response_payload
+            )
         return _message_turn_response(
             repository,
             principal,
@@ -698,6 +705,8 @@ def _replay_persisted_response(
         )
     ):
         raise _persisted_turn_integrity_error()
+    if idempotency.response_payload is not None:
+        return _refresh_current_claim(repository, principal.subject, idempotency.response_payload)
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None or historical_revision < 1:
         raise _session_not_found()

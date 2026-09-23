@@ -8,7 +8,9 @@ reach the conversation.
 import ast
 import inspect
 import re
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -45,10 +47,9 @@ def test_compose_reply_returns_only_safety_notice_and_model_words() -> None:
     # The model-authored early return happens before any template append.
     assert (
         any(
-            isinstance(node.value, ast.Call)
-            and 'model_authored' in ast.get_source_segment(source, node)
+            isinstance(node.value, ast.Call) and 'model_authored' in segment
             for node in returns
-            if ast.get_source_segment(source, node) is not None
+            if (segment := ast.get_source_segment(source, node)) is not None
         )
         or 'if model_authored:' in source
     )
@@ -62,9 +63,9 @@ def test_compose_reply_returns_only_safety_notice_and_model_words() -> None:
 def test_fixture_journeys_expose_no_runtime_text_or_field_codes(
     client: TestClient,
     repository: FixtureRepository,
-    provider_factory: object,
+    provider_factory: Callable[[], V8JourneyProvider],
 ) -> None:
-    provider: V8JourneyProvider = inspect.unwrap(provider_factory)()  # type: ignore[operator]
+    provider = cast(Callable[[], V8JourneyProvider], inspect.unwrap(provider_factory))()
     scripted = [
         response.structured_output['reply']
         for response in provider.gateway.responses
@@ -100,7 +101,12 @@ def test_fixture_journeys_expose_no_runtime_text_or_field_codes(
     registered = set(build_default_registry().field_codes) | set(INTAKE_REQUIREMENTS)
     templates = {item.prompt for item in INTAKE_REQUIREMENTS.values()}
     for index, text in enumerate(scripts):
-        turn = journey.send(text)
+        # An active handoff (opened by the motor script's third turn) silences
+        # the model entirely: these two messages are only recorded, with no
+        # agent_message, so there is no reply text to check here.
+        turn = journey.send(text, expect_agent_message=not (family == 'motor' and index in {3, 4}))
+        if turn['agent_message'] is None:
+            continue
         reply = turn['agent_message']['content']['text']
         for phrase in RETIRED_RUNTIME_PHRASES:
             assert phrase not in reply, (index, phrase, reply)

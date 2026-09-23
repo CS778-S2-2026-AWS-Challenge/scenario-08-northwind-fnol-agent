@@ -163,9 +163,10 @@ def plan_model_turn(
     route = route_turn(context)
     if not route.model_required:
         return None
-    if context.runtime_configuration_snapshot is None:
+    runtime_configuration_snapshot = context.runtime_configuration_snapshot
+    if runtime_configuration_snapshot is None:
         raise ValueError('A v7 model turn requires one active Runtime configuration snapshot.')
-    model_record = context.runtime_configuration_snapshot.model(context.model_profile_id)
+    model_record = runtime_configuration_snapshot.model(context.model_profile_id)
     if model_record is None:
         raise ValueError('The selected model profile is absent from the Runtime snapshot.')
     model_configuration = ModelRuntimeConfiguration.model_validate(model_record.values)
@@ -326,9 +327,8 @@ def plan_model_turn(
         recent_history_tokens=recent_history_tokens,
         retrieved_context_tokens=retrieved_tokens,
     )
-    snapshot = context.runtime_configuration_snapshot
     cache_plan = build_cache_plan(
-        release_set_id=snapshot.release_set_id or 'unpublished',
+        release_set_id=runtime_configuration_snapshot.release_set_id or 'unpublished',
         model_profile_id=context.model_profile_id,
         claim_revision=context.claim.revision,
         principal_scope=f'customer:{context.claim.customer_id}',

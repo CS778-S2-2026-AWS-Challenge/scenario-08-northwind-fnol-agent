@@ -1,6 +1,7 @@
 """D12: a reply that contradicts the ledger goes back to the model, never gets edited."""
 
 import json
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -25,7 +26,7 @@ HONEST_REWRITE = envelope(
 )
 
 
-def _provider(*proposals: dict) -> V8JourneyProvider:
+def _provider(*proposals: dict[str, Any]) -> V8JourneyProvider:
     provider = V8JourneyProvider([])
     provider.gateway.responses.extend(
         ModelResponse(completion_status=ModelCompletionStatus.COMPLETE, structured_output=item)

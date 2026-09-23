@@ -8,6 +8,7 @@ and the claimant is never shown an error for a document Runtime accepted.
 
 from hashlib import sha256
 
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -57,7 +58,9 @@ def _upload(
     return evidence_id, completed.json()['revision']
 
 
-def _send_file_only(client: TestClient, claim_id: str, session_id: str, revision: int, ref: str):
+def _send_file_only(
+    client: TestClient, claim_id: str, session_id: str, revision: int, ref: str
+) -> httpx.Response:
     return client.post(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
         headers={**CLAIMANT, 'Idempotency-Key': f'{ref}-turn', 'If-Match': str(revision)},
