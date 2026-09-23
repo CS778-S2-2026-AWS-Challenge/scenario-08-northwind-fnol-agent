@@ -25,6 +25,10 @@ from backend.domain.models import (
     AgentAction,
     AgentAuthority,
     AgentDecisionRecord,
+    AssessorRoutingOperation,
+    AssessorRoutingOperationStatus,
+    AssessorRoutingResult,
+    AssessorRoutingStatus,
     AuthorityOutcome,
     Channel,
     ClaimState,
@@ -454,6 +458,40 @@ def test_generic_dispatch_exception_persists_retryable_attempt() -> None:
     assert tasks[0].status is ExternalTaskOperationStatus.RETRYABLE_FAILURE
     assert len(attempts) == 1
     assert attempts[0].outcome is ExternalTaskOperationStatus.RETRYABLE_FAILURE
+
+
+def test_assessor_settlement_persists_operation_task_and_attempt_together() -> None:
+    repository = FixtureRepository()
+    _seed(repository)
+    prepared = AssessorRoutingOperation(
+        operation_id=OPERATION,
+        claim_id=CLAIM,
+        external_claim_id=CLAIM,
+        authorisation_ref='dec_attempt_001',
+        claimant_consent_ref='consent_attempt_001',
+        requested_action=ASSESSOR_REQUESTED_ACTION,
+        authorised_revision=1,
+        request_fingerprint='fingerprint-attempt',
+        status=AssessorRoutingOperationStatus.PREPARED,
+        created_at=BASE,
+        updated_at=BASE,
+    )
+    repository.save_assessor_routing_operation(prepared)
+    accepted = prepared.model_copy(
+        update={
+            'status': AssessorRoutingOperationStatus.ACCEPTED,
+            'result': AssessorRoutingResult(
+                routing_status=AssessorRoutingStatus.ASSIGNED,
+                assessor_reference='asr_attempt_001',
+                next_step='Assessment requested.',
+            ),
+            'updated_at': BASE + timedelta(seconds=1),
+        }
+    )
+    repository.save_assessor_routing_settlement(accepted, _task(), _attempt(), CUSTOMER)
+
+    assert repository.get_assessor_routing_operation(OPERATION) == accepted
+    assert repository.list_external_task_attempts_internal(CLAIM) == [_attempt()]
 
 
 def test_generic_settlement_rolls_back_task_when_attempt_write_fails(
