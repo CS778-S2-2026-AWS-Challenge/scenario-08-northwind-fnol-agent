@@ -108,6 +108,7 @@ from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.account_data import (
     AccountCursorKey,
     AccountRecord,
+    CommonPaymentDestinationConflict,
     PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
     account_record_audit_matches,
@@ -345,6 +346,20 @@ class FixtureRepository(PersistenceRepository):
                 or audit_event.event_id in self._audit_events
             ):
                 raise IdempotencyConflict(idempotency.key)
+            if isinstance(record, PaymentDestinationRecord) and record.active:
+                active = [
+                    item
+                    for item in self._payment_destinations.values()
+                    if item.customer_id == record.customer_id and item.active
+                ]
+                common = [item for item in active if item.is_common]
+                legacy = [item for item in active if 'is_common' not in item.model_fields_set]
+                if not common and len(legacy) == 1:
+                    adopted = legacy[0].model_copy(update={'is_common': True})
+                    self._payment_destinations[adopted.payment_destination_id] = adopted
+                    common = [adopted]
+                if record.is_common and common:
+                    raise CommonPaymentDestinationConflict(idempotency.key)
             del kind
             store[identifier] = deepcopy(record)
             self._idempotency[lookup] = deepcopy(idempotency)
@@ -426,7 +441,25 @@ class FixtureRepository(PersistenceRepository):
             after,
             limit,
         )
-        return [record for record in records if isinstance(record, PaymentDestinationRecord)], more
+        destinations = [
+            record for record in records if isinstance(record, PaymentDestinationRecord)
+        ]
+        active = [
+            item
+            for item in self._payment_destinations.values()
+            if item.customer_id == customer_id and item.active
+        ]
+        common = [item for item in active if item.is_common]
+        legacy = [item for item in active if 'is_common' not in item.model_fields_set]
+        if not common and len(legacy) == 1:
+            legacy_id = legacy[0].payment_destination_id
+            destinations = [
+                item.model_copy(update={'is_common': True})
+                if item.payment_destination_id == legacy_id
+                else item
+                for item in destinations
+            ]
+        return destinations, more
 
     def list_identity_documents(
         self,
@@ -466,6 +499,21 @@ class FixtureRepository(PersistenceRepository):
                 or audit_event.event_id in self._audit_events
             ):
                 raise KeyError(identifier)
+            if isinstance(record, PaymentDestinationRecord) and record.is_common:
+                for other_id, other in list(self._payment_destinations.items()):
+                    if (
+                        other_id != record.payment_destination_id
+                        and other.customer_id == record.customer_id
+                        and other.active
+                        and other.is_common
+                    ):
+                        self._payment_destinations[other_id] = other.model_copy(
+                            update={
+                                'is_common': False,
+                                'revision': other.revision + 1,
+                                'updated_at': record.updated_at,
+                            }
+                        )
             store[identifier] = deepcopy(record)
             self._audit_events[audit_event.event_id] = deepcopy(audit_event)
 

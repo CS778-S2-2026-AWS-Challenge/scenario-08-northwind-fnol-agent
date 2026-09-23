@@ -39,6 +39,10 @@ class PaymentDestinationSelectionConflict(RepositoryConflict):
         self.current_revision = current_revision
 
 
+class CommonPaymentDestinationConflict(RepositoryConflict):
+    """Another concurrent create established the account's common destination."""
+
+
 class ClaimantContactSelectionConflict(RepositoryConflict):
     """The claimant profile authority changed before payout/contact commit."""
 

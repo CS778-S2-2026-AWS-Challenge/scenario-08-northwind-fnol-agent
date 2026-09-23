@@ -133,6 +133,7 @@ from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.account_data import (
     AccountCursorKey,
     AccountRecord,
+    CommonPaymentDestinationConflict,
     PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
     account_record_audit_matches,
@@ -328,6 +329,16 @@ class MongoDBRepository:
             [('record_type', 1), ('customer_id', 1), ('created_at', -1), ('_id', -1)],
             name='account_record_customer_all_created',
             partialFilterExpression={'record_type': {'$in': account_record_types}},
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('customer_id', 1), ('is_common', 1)],
+            unique=True,
+            name='payment_destination_active_common_unique',
+            partialFilterExpression={
+                'record_type': 'payment_destination',
+                'active': True,
+                'is_common': True,
+            },
         )
         self._collection.create_index(
             [
@@ -656,13 +667,41 @@ class MongoDBRepository:
         def persist(mongo_session: Any) -> None:
             self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
             self._ensure_new_audit_event(audit_event, mongo_session=mongo_session)
-            self._put(
-                kind,
-                identifier,
-                record,
-                customer_id=record.customer_id,
-                session=mongo_session,
-            )
+            if isinstance(record, PaymentDestinationRecord) and record.active:
+                active_documents = list(
+                    self._collection.find(
+                        {
+                            'record_type': 'payment_destination',
+                            'customer_id': record.customer_id,
+                            'active': True,
+                        },
+                        session=mongo_session,
+                    )
+                )
+                common = [item for item in active_documents if item.get('is_common') is True]
+                legacy = [item for item in active_documents if 'is_common' not in item]
+                if not common and len(legacy) == 1:
+                    self._collection.update_one(
+                        {'_id': legacy[0]['_id']},
+                        {'$set': {'is_common': True}},
+                        session=mongo_session,
+                    )
+                    common = [legacy[0]]
+                if record.is_common and common:
+                    raise CommonPaymentDestinationConflict(idempotency.key)
+            try:
+                self._put(
+                    kind,
+                    identifier,
+                    record,
+                    customer_id=record.customer_id,
+                    session=mongo_session,
+                )
+            except IdempotencyConflict as error:
+                # A concurrent first-create can win the partial common-marker index.
+                if isinstance(record, PaymentDestinationRecord) and record.is_common:
+                    raise CommonPaymentDestinationConflict(idempotency.key) from error
+                raise
             self._save_idempotency(idempotency, mongo_session)
             self._insert_audit_event(audit_event, mongo_session=mongo_session)
 
@@ -746,7 +785,7 @@ class MongoDBRepository:
         after: AccountCursorKey | None,
         limit: int,
     ) -> tuple[list[PaymentDestinationRecord], bool]:
-        return self._list_account_records(
+        records, more = self._list_account_records(
             'payment_destination',
             PaymentDestinationRecord,
             customer_id,
@@ -754,6 +793,26 @@ class MongoDBRepository:
             after=after,
             limit=limit,
         )
+        active_documents = list(
+            self._collection.find(
+                {'record_type': 'payment_destination', 'customer_id': customer_id, 'active': True},
+                projection={'_id': 1, 'is_common': 1},
+            )
+        )
+        common_count = sum(item.get('is_common') is True for item in active_documents)
+        legacy_ids = {
+            item['_id'].removeprefix('payment_destination:')
+            for item in active_documents
+            if 'is_common' not in item
+        }
+        if common_count == 0 and len(legacy_ids) == 1:
+            records = [
+                record.model_copy(update={'is_common': True})
+                if record.payment_destination_id in legacy_ids
+                else record
+                for record in records
+            ]
+        return records, more
 
     def list_identity_documents(
         self,
@@ -786,6 +845,18 @@ class MongoDBRepository:
 
         def persist(mongo_session: Any) -> None:
             self._ensure_new_audit_event(audit_event, mongo_session=mongo_session)
+            if isinstance(record, PaymentDestinationRecord) and record.is_common:
+                self._collection.update_many(
+                    {
+                        'record_type': 'payment_destination',
+                        'customer_id': record.customer_id,
+                        'active': True,
+                        'is_common': True,
+                        '_id': {'$ne': self._record_id(kind, identifier)},
+                    },
+                    {'$set': {'is_common': False}, '$inc': {'revision': 1}},
+                    session=mongo_session,
+                )
             document = record.model_dump(mode='json')
             document.update(
                 {

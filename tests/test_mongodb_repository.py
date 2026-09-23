@@ -22,6 +22,7 @@ from backend.adapters.claims_service import (
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.core.runtime_profiles import RuntimeCapabilityStatus
+from backend.domain.account_data import PaymentDestinationRecord
 from backend.domain.audit import AuditSubject, AuditSubjectType
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
@@ -109,6 +110,7 @@ from backend.domain.staff_agent import (
     StaffAgentSession,
 )
 from backend.domain.staff_identity import StaffPresenceRecord
+from backend.repositories.account_data import CommonPaymentDestinationConflict
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import (
     MongoDBConfigurationError,
@@ -126,6 +128,7 @@ from backend.repositories.protocols import (
     staff_agent_execution_for,
     with_staff_agent_source,
 )
+from backend.services.account_data import _account_audit
 from backend.services.external_service_entry import resolve_external_service_entry
 from backend.services.handoff_audit import build_handoff_audit_event
 from backend.services.integrations import (
@@ -138,6 +141,112 @@ from backend.services.realtime import delivery_for
 
 def _assert_persistence_contract(repository: MongoDBRepository) -> PersistenceRepository:
     return repository
+
+
+def _payment_destination_record(
+    identifier: str, *, is_common: bool = False
+) -> PaymentDestinationRecord:
+    timestamp = datetime(2026, 8, 21, tzinfo=UTC)
+    return PaymentDestinationRecord(
+        payment_destination_id=identifier,
+        customer_id='cus_payment_mongo',
+        protected_value='sealed-value',
+        masked_value='****1234',
+        account_type='savings',
+        bank_name='Synthetic Bank',
+        account_holder_name='Synthetic Claimant',
+        is_common=is_common,
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+
+
+def test_mongodb_payment_destination_legacy_read_and_common_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'payment_destination_contract')
+    monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
+    legacy = _payment_destination_record('pyd_aaaaaaaaaaaaaaaaaaaa')
+    legacy_document = legacy.model_dump(mode='json')
+    legacy_document.update(
+        {
+            '_id': f'payment_destination:{legacy.payment_destination_id}',
+            'record_type': 'payment_destination',
+            'customer_id': legacy.customer_id,
+            'claim_id': None,
+        }
+    )
+    legacy_document.pop('is_common')
+    repository._collection.insert_one(legacy_document)
+
+    records, more = repository.list_payment_destinations(
+        legacy.customer_id, include_inactive=False, after=None, limit=25
+    )
+    assert not more
+    assert records[0].is_common is True
+
+    candidate = _payment_destination_record('pyd_bbbbbbbbbbbbbbbbbbbb', is_common=True)
+    principal = Principal(subject=legacy.customer_id, actor_type='claimant', auth_source='test')
+    idempotency = IdempotencyRecord(
+        actor_id=legacy.customer_id,
+        route='/api/v1/account/payment-destinations',
+        key='legacy-common-guard',
+        request_fingerprint='fingerprint',
+        claim_id=candidate.payment_destination_id,
+        session_id='',
+        response_payload=None,
+    )
+    with pytest.raises(CommonPaymentDestinationConflict):
+        repository.create_account_record(
+            candidate,
+            idempotency,
+            _account_audit(candidate, principal, action='created', idempotency_key=idempotency.key),
+        )
+    assert (
+        repository._collection.find_one(
+            {'_id': legacy_document['_id']}, projection={'is_common': 1}
+        )['is_common']
+        is True
+    )
+
+
+def test_mongodb_payment_destination_designation_clears_previous_common(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'payment_destination_designation')
+    monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
+    previous = _payment_destination_record('pyd_cccccccccccccccccccc', is_common=True)
+    current = _payment_destination_record('pyd_dddddddddddddddddddd')
+    for record in (previous, current):
+        document = record.model_dump(mode='json')
+        document.update(
+            {
+                '_id': f'payment_destination:{record.payment_destination_id}',
+                'record_type': 'payment_destination',
+                'customer_id': record.customer_id,
+                'claim_id': None,
+            }
+        )
+        repository._collection.insert_one(document)
+    designated = current.model_copy(update={'is_common': True, 'revision': 2})
+    principal = Principal(subject=current.customer_id, actor_type='claimant', auth_source='test')
+    repository.update_account_record(
+        designated,
+        1,
+        _account_audit(designated, principal, action='updated'),
+    )
+    assert (
+        repository.get_payment_destination(
+            previous.payment_destination_id, current.customer_id
+        ).is_common
+        is False
+    )
+    assert (
+        repository.get_payment_destination(
+            current.payment_destination_id, current.customer_id
+        ).is_common
+        is True
+    )
 
 
 def _claim(revision: int = 1) -> WorkingClaim:

@@ -5367,6 +5367,19 @@
       "CreatePaymentDestinationRequest": {
         "additionalProperties": false,
         "properties": {
+          "account_holder_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Holder Name"
+          },
           "account_number": {
             "maxLength": 80,
             "minLength": 4,
@@ -5378,6 +5391,19 @@
             "minLength": 1,
             "title": "Account Type",
             "type": "string"
+          },
+          "bank_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Name"
           }
         },
         "required": [
@@ -10438,6 +10464,17 @@
       "PaymentDestinationProjection": {
         "additionalProperties": false,
         "properties": {
+          "account_holder_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Holder Name"
+          },
           "account_type": {
             "title": "Account Type",
             "type": "string"
@@ -10446,10 +10483,26 @@
             "title": "Active",
             "type": "boolean"
           },
+          "bank_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Name"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "is_common": {
+            "default": false,
+            "title": "Is Common",
+            "type": "boolean"
           },
           "masked_account_number": {
             "title": "Masked Account Number",
@@ -13962,6 +14015,19 @@
       "UpdatePaymentDestinationRequest": {
         "additionalProperties": false,
         "properties": {
+          "account_holder_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Holder Name"
+          },
           "account_number": {
             "maxLength": 80,
             "minLength": 4,
@@ -13973,6 +14039,23 @@
             "minLength": 1,
             "title": "Account Type",
             "type": "string"
+          },
+          "bank_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Name"
+          },
+          "is_common": {
+            "title": "Is Common",
+            "type": "boolean"
           }
         },
         "title": "UpdatePaymentDestinationRequest",

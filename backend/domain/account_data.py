@@ -67,6 +67,9 @@ class ProtectedAccountRecord(ContractModel):
 class PaymentDestinationRecord(ProtectedAccountRecord):
     payment_destination_id: str = Field(pattern=r'^pyd_[a-f0-9]{20}$')
     account_type: ShortText
+    bank_name: ShortText | None = None
+    account_holder_name: ShortText | None = None
+    is_common: bool = False
 
 
 class IdentityDocumentRecord(ProtectedAccountRecord):
@@ -86,6 +89,9 @@ class PolicyNumberProjection(ContractModel):
 class PaymentDestinationProjection(ContractModel):
     payment_destination_id: str
     account_type: str
+    bank_name: str | None = None
+    account_holder_name: str | None = None
+    is_common: bool = False
     masked_account_number: str
     revision: int
     active: bool
@@ -110,6 +116,9 @@ class CreatePolicyNumberRequest(ContractModel):
 class CreatePaymentDestinationRequest(ContractModel):
     account_type: ShortText
     account_number: ProtectedNumber
+    # Optional keeps existing account_type/account_number-only callers compatible.
+    bank_name: ShortText | None = None
+    account_holder_name: ShortText | None = None
 
     @field_validator('account_number')
     @classmethod
@@ -148,6 +157,11 @@ class UpdatePolicyNumberRequest(ContractModel):
 class UpdatePaymentDestinationRequest(ContractModel):
     account_type: ShortText = Field(default_factory=_omitted_short_text)
     account_number: ProtectedNumber = Field(default_factory=_omitted_protected_number)
+    bank_name: ShortText | None = Field(default_factory=lambda: cast(str, PydanticUndefined))
+    account_holder_name: ShortText | None = Field(
+        default_factory=lambda: cast(str, PydanticUndefined)
+    )
+    is_common: bool = Field(default_factory=lambda: cast(bool, PydanticUndefined))
 
     @field_validator('account_number')
     @classmethod
@@ -228,6 +242,9 @@ def project_payment_destination(
     return PaymentDestinationProjection(
         payment_destination_id=record.payment_destination_id,
         account_type=record.account_type,
+        bank_name=record.bank_name,
+        account_holder_name=record.account_holder_name,
+        is_common=record.is_common,
         masked_account_number=record.masked_value,
         revision=record.revision,
         active=record.active,

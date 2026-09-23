@@ -508,7 +508,7 @@ version with another published version.
 | `PATCH` | `/account/preferences` | Update the authenticated claimant's communication preferences |
 | `POST`, `GET` | `/account/policies` | Idempotently create or cursor-page reusable account policy numbers |
 | `PATCH`, `DELETE` | `/account/policies/{policy_id}` | Revision-update or soft-retire one owned policy number |
-| `POST`, `GET` | `/account/payment-destinations` | Idempotently create or cursor-page masked bank-account destinations |
+| `POST`, `GET` | `/account/payment-destinations` | Idempotently create or cursor-page masked bank-account destinations, including claimant bank and holder names and the authoritative common-destination marker |
 | `PATCH`, `DELETE` | `/account/payment-destinations/{payment_destination_id}` | Revision-update or soft-retire one owned destination |
 | `POST`, `GET` | `/account/identity-documents` | Idempotently create or cursor-page masked identity documents |
 | `PATCH`, `DELETE` | `/account/identity-documents/{identity_id}` | Revision-update or soft-retire one owned identity document |
@@ -522,6 +522,15 @@ the same compare-and-set operation as the profile revision. An address already o
 account returns `409 RESOURCE_CONFLICT`; a stale account revision remains `409 REVISION_CONFLICT`.
 Invalid email syntax returns the standard `422 VALIDATION_ERROR` without changing the account or
 its revision.
+
+Payment Destination projections expose `bank_name`, `account_holder_name`, and an authoritative
+`is_common` marker in addition to the existing account type and masked account number. The first
+successful active destination create for an account becomes common atomically; later creates are
+non-common. A claimant may designate another owned active destination with a revisioned PATCH,
+which atomically clears the previous common marker. Retiring the common destination leaves no
+common destination and never silently promotes another record. Legacy records may return the new
+fields as absent/null and are never populated by guessing. Supplying no account number in a PATCH
+retains the sealed value; supplying one replaces it and refreshes only the masked projection.
 
 `POST /api/v1/auth/sessions` is the only development/test authentication exception to the
 general bearer requirement. It accepts `email` and `password`, returns `201` with
