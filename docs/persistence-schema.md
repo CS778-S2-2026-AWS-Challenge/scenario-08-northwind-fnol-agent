@@ -69,7 +69,7 @@ records remain target contracts.
 
 | Group | Records | Primary ownership |
 | --- | --- | --- |
-| Customer | authorised identity reference, permitted contact and communication preferences, active state, revision, and update time | `customer_id` |
+| Customer | authorised identity reference, permitted contact, communication preferences, five default-off Claim auto-fill preferences, active state, revision, and update time | `customer_id` |
 | Identity record | protected identity-document reference, masked value, type, issuer, verification state, dates, provenance, and revision | `identity_id` (`idn_`), linked to `customer_id` |
 | Payment destination | protected account reference, masked account number, type/name, verification state, dates, and revision | `payment_destination_id` (`pyd_`), linked to `customer_id` |
 | Policy summary | bounded policy identity, product family, display status, effective dates, and provenance | `policy_id` (`pol_`), linked to `customer_id` |
@@ -375,6 +375,17 @@ the append-only audit collection through a bounded, filterable projection.
 
 ## Account Profile and Protected Record Mapping
 
+- Customer account persistence stores the five Claim auto-fill booleans beside profile and
+  communication preferences under the same Account revision. The Fixture adapter keeps them on
+  `CustomerAccountRecord`; SQLite uses five non-null integer columns with zero defaults. Opening a
+  legacy SQLite database adds missing columns as default-off without guessing claimant intent.
+  Updating the complete preference object uses one expected-revision compare-and-set and advances
+  the Account revision exactly once. A failed or stale write changes neither preferences nor
+  revision.
+- The Claim auto-fill suggestion manifest is a derived owner-scoped read across Account, active
+  Policy Number, Asset, Payment Destination, and Identity Document records. It persists no
+  manifest, copies no values or resource identifiers into Claim State, and creates no Claim,
+  Branch Evaluation, audit, idempotency, realtime, Agent, or external-service mutation.
 - Existing identity rows migrate `legal_name` from the previous `display_name`. No date of birth,
   address, preferred name, policy, bank, or identity-document value is guessed. After migration,
   `display_name` is a compatibility projection derived from preferred name or legal name and is
@@ -452,7 +463,8 @@ the append-only audit collection through a bounded, filterable projection.
 - Synthetic credential verification and session persistence are fixture capabilities only;
   selecting a production environment fails closed until an approved identity provider and
   durable identity adapter exist.
-- Profile and communication preferences are Customer records, not browser-local authority.
+- Profile, communication preferences, and Claim auto-fill preferences are Customer records, not
+  browser-local authority.
 - Authentication data cannot grant staff roles, change claim ownership, or enter Claim State.
 - Staff password hashes and session hashes remain in the staff identity store; they are not Claim,
   claimant session, or Workbench projection fields.
@@ -471,9 +483,9 @@ the append-only audit collection through a bounded, filterable projection.
   for one email, exactly one write succeeds and the other leaves its account and revision
   unchanged.
 - Existing local SQLite identity databases are upgraded in place with account revisions,
-  timestamps, opaque session IDs, and session revisions. The migration preserves account/session
-  relationships and assigns each legacy session one stable `ias_` ID before creating its unique
-  lookup index.
+  timestamps, five default-off Claim auto-fill columns, opaque session IDs, and session revisions.
+  The migration preserves account/session relationships and assigns each legacy session one
+  stable `ias_` ID before creating its unique lookup index.
 - Staff logout revokes the server-side session immediately. The local adapter does not by itself
   establish production IdP, MFA, recovery, or per-Claim entitlement readiness.
 

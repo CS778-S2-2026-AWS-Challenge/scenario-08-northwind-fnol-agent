@@ -9,6 +9,7 @@ from backend.core.errors import ApiError
 from backend.domain.identity import (
     AccountProjection,
     AuthenticatedSession,
+    ClaimAutoFillPreferencesPatchRequest,
     CurrentAuthSession,
     LoginRequest,
     PreferencesPatchRequest,
@@ -22,6 +23,7 @@ from backend.services.identity import (
     login,
     register,
     session_projection,
+    update_claim_auto_fill_preferences,
     update_preferences,
     update_profile,
 )
@@ -108,3 +110,15 @@ def patch_account_preferences(
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> AccountProjection:
     return update_preferences(identity_repository_for(request), principal, payload, if_match)
+
+
+@router.patch('/account/claim-auto-fill-preferences', response_model=AccountProjection)
+def patch_account_claim_auto_fill_preferences(
+    request: Request,
+    payload: ClaimAutoFillPreferencesPatchRequest,
+    principal: Principal = Depends(require_claimant_session),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> AccountProjection:
+    return update_claim_auto_fill_preferences(
+        identity_repository_for(request), principal, payload, if_match
+    )

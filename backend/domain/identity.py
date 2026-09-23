@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+from enum import Enum
 from typing import Annotated
 
 from pydantic import (
@@ -75,6 +76,15 @@ class CustomerAccountRecord:
     residential_address: str | None = None
     communication_preferences: dict[str, bool] = field(
         default_factory=lambda: {'email': True, 'sms': False}
+    )
+    claim_auto_fill_preferences: dict[str, bool] = field(
+        default_factory=lambda: {
+            'personal_details': False,
+            'policy_number': False,
+            'saved_assets': False,
+            'payment_details': False,
+            'identity_information': False,
+        }
     )
     active: bool = True
     revision: int = 1
@@ -169,10 +179,49 @@ class CommunicationPreferences(BaseModel):
     sms: bool
 
 
+class ClaimAutoFillPreferences(BaseModel):
+    personal_details: bool = False
+    policy_number: bool = False
+    saved_assets: bool = False
+    payment_details: bool = False
+    identity_information: bool = False
+
+
+class ClaimAutoFillCategory(str, Enum):
+    PERSONAL_DETAILS = 'personal_details'
+    POLICY_NUMBER = 'policy_number'
+    SAVED_ASSETS = 'saved_assets'
+    PAYMENT_DETAILS = 'payment_details'
+    IDENTITY_INFORMATION = 'identity_information'
+
+
+class ClaimAutoFillAction(str, Enum):
+    REVIEW_AND_CONFIRM = 'review_and_confirm'
+    SELECT_POLICY = 'select_policy'
+    SELECT_ASSET = 'select_asset'
+    CONFIRM_SEPARATELY = 'confirm_separately'
+
+
+class ClaimAutoFillSuggestion(BaseModel):
+    category: ClaimAutoFillCategory
+    enabled: bool
+    available: bool
+    eligible: bool
+    action: ClaimAutoFillAction
+
+
+class ClaimAutoFillSuggestionManifest(BaseModel):
+    claim_id: str
+    claim_revision: int = Field(ge=1)
+    account_revision: int = Field(ge=1)
+    suggestions: list[ClaimAutoFillSuggestion]
+
+
 class AccountProjection(BaseModel):
     customer_id: str
     profile: AccountProfile
     preferences: CommunicationPreferences
+    claim_auto_fill_preferences: ClaimAutoFillPreferences
     revision: int = Field(ge=1)
     updated_at: datetime
     development_identity: bool = False
@@ -223,6 +272,16 @@ class PreferencesPatchRequest(BaseModel):
 
     email: bool
     sms: bool
+
+
+class ClaimAutoFillPreferencesPatchRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    personal_details: bool
+    policy_number: bool
+    saved_assets: bool
+    payment_details: bool
+    identity_information: bool
 
 
 class AdminCustomerAccountProjection(BaseModel):
