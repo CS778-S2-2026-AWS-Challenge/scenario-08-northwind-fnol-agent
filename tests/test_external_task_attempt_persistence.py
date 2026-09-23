@@ -430,6 +430,32 @@ def test_generic_dispatch_persists_each_provider_outcome(
     assert attempts[0].outcome is expected
 
 
+def test_generic_settlement_rolls_back_task_when_attempt_write_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = FixtureRepository()
+    _seed(repository)
+    task = _task()
+    attempt = _attempt()
+    original = repository.save_external_task_attempt
+
+    def fail_once(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        raise RuntimeError('simulated attempt persistence failure')
+
+    monkeypatch.setattr(repository, 'save_external_task_attempt', fail_once)
+    with pytest.raises(RuntimeError, match='simulated attempt persistence failure'):
+        repository.save_external_task_settlement(task, attempt, CUSTOMER)
+
+    assert repository.list_external_task_attempts_internal(CLAIM) == []
+    assert repository.list_external_tasks_internal(CLAIM)[0] == _task()
+
+    monkeypatch.setattr(repository, 'save_external_task_attempt', original)
+    repository.save_external_task_settlement(task, attempt, CUSTOMER)
+    repository.save_external_task_settlement(task, attempt, CUSTOMER)
+    assert repository.list_external_task_attempts_internal(CLAIM) == [attempt]
+
+
 def test_workbench_projection_returns_attempts_in_sequence_order() -> None:
     claim = _claim()
     task = _task()

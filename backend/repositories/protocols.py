@@ -836,6 +836,16 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """Persist an immutable operation identity and valid outcome transition."""
         raise NotImplementedError
 
+    def save_assessor_routing_settlement(
+        self,
+        operation: AssessorRoutingOperation,
+        task: ExternalTaskRecord,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Atomically persist an assessor outcome and its task attempt."""
+        raise NotImplementedError
+
     def save_assessor_reconciliation(
         self,
         claim: WorkingClaim,
@@ -1148,6 +1158,15 @@ class PersistenceRepository(ClaimRepository, Protocol):
             KeyError: The claim, task, or request authority is unavailable.
             IdempotencyConflict: The identity, sequence, or immutable payload conflicts.
         """
+        raise NotImplementedError
+
+    def save_external_task_settlement(
+        self,
+        task: ExternalTaskRecord,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Atomically persist a generic task outcome and its task attempt."""
         raise NotImplementedError
 
     def reserve_external_dispatch(

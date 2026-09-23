@@ -2397,6 +2397,32 @@ class FixtureRepository(PersistenceRepository):
             return
         self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
 
+    def save_assessor_routing_settlement(
+        self,
+        operation: AssessorRoutingOperation,
+        task: ExternalTaskRecord,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Atomically persist an assessor outcome and its attempt in fixture storage."""
+        with self._claim_mutation_lock:
+            operations = deepcopy(self._assessor_routing_operations)
+            tasks = deepcopy(self._external_tasks)
+            attempts = deepcopy(self._external_task_attempts)
+            events = deepcopy(self._realtime_events)
+            sequence = self._realtime_sequence
+            try:
+                self.save_assessor_routing_operation(operation)
+                self.save_external_task(task, customer_id)
+                self.save_external_task_attempt(attempt, customer_id)
+            except Exception:
+                self._assessor_routing_operations = operations
+                self._external_tasks = tasks
+                self._external_task_attempts = attempts
+                self._realtime_events = events
+                self._realtime_sequence = sequence
+                raise
+
     def save_assessor_reconciliation(
         self,
         claim: WorkingClaim,
@@ -3581,6 +3607,28 @@ class FixtureRepository(PersistenceRepository):
             if attempt.attempt_number != expected_number:
                 raise IdempotencyConflict(attempt.attempt_id)
             self._external_task_attempts[attempt.attempt_id] = deepcopy(attempt)
+
+    def save_external_task_settlement(
+        self,
+        task: ExternalTaskRecord,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Atomically persist a generic task outcome and its attempt in fixture storage."""
+        with self._claim_mutation_lock:
+            tasks = deepcopy(self._external_tasks)
+            attempts = deepcopy(self._external_task_attempts)
+            events = deepcopy(self._realtime_events)
+            sequence = self._realtime_sequence
+            try:
+                self.save_external_task(task, customer_id)
+                self.save_external_task_attempt(attempt, customer_id)
+            except Exception:
+                self._external_tasks = tasks
+                self._external_task_attempts = attempts
+                self._realtime_events = events
+                self._realtime_sequence = sequence
+                raise
 
     def release_external_dispatch(
         self,

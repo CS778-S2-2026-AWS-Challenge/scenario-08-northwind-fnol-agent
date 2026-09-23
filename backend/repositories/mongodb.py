@@ -2858,7 +2858,21 @@ class MongoDBRepository:
         self,
         operation: AssessorRoutingOperation,
     ) -> None:
-        claim = self.get_claim_internal(operation.claim_id)
+        self._atomic(
+            lambda mongo_session: self._save_assessor_routing_operation(operation, mongo_session)
+        )
+
+    def _save_assessor_routing_operation(
+        self,
+        operation: AssessorRoutingOperation,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            operation.claim_id,
+            WorkingClaim,
+            session=mongo_session,
+        )
         external_claim_id = (
             claim.external_claim.external_claim_id
             if claim is not None
@@ -2873,7 +2887,12 @@ class MongoDBRepository:
         ):
             raise KeyError(operation.claim_id)
 
-        existing = self.get_assessor_routing_operation(operation.operation_id)
+        existing = self._get(
+            'assessor_routing_operation',
+            operation.operation_id,
+            AssessorRoutingOperation,
+            session=mongo_session,
+        )
         if existing is None:
             if operation.status is not AssessorRoutingOperationStatus.PREPARED:
                 raise IdempotencyConflict(operation.operation_id)
@@ -2882,6 +2901,7 @@ class MongoDBRepository:
                 operation.operation_id,
                 operation,
                 claim_id=operation.claim_id,
+                session=mongo_session,
             )
             return
 
@@ -2924,7 +2944,24 @@ class MongoDBRepository:
             operation.operation_id,
             operation,
             claim_id=operation.claim_id,
+            session=mongo_session,
         )
+
+    def save_assessor_routing_settlement(
+        self,
+        operation: AssessorRoutingOperation,
+        task: ExternalTaskRecord,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Atomically persist an assessor outcome and its task attempt in MongoDB."""
+
+        def persist(mongo_session: Any) -> None:
+            self._save_assessor_routing_operation(operation, mongo_session)
+            self._save_external_task(task, customer_id, mongo_session)
+            self._save_external_task_attempt(attempt, customer_id, mongo_session)
+
+        self._atomic(persist)
 
     def save_assessor_reconciliation(
         self,
@@ -3675,6 +3712,20 @@ class MongoDBRepository:
                 mongo_session,
             )
         )
+
+    def save_external_task_settlement(
+        self,
+        task: ExternalTaskRecord,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Atomically persist a generic task outcome and its attempt in MongoDB."""
+
+        def persist(mongo_session: Any) -> None:
+            self._save_external_task(task, customer_id, mongo_session)
+            self._save_external_task_attempt(attempt, customer_id, mongo_session)
+
+        self._atomic(persist)
 
     def _save_external_task_attempt(
         self,
