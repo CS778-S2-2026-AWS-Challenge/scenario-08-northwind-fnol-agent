@@ -863,7 +863,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 
 .intake-page { min-height: calc(100svh - 64px); display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr) minmax(260px, 340px); background: var(--color-page); }
 .mobile-intake-tabs { display: none; }
-.intake-history { padding: var(--space-5) var(--space-4); border-right: var(--border-region); background: var(--color-sidebar); }
+.intake-history { padding: var(--space-5) var(--space-4) 0; border-right: var(--border-region); background: var(--color-sidebar); }
 .intake-history-top { padding-bottom: var(--space-5); border-bottom: 1px solid var(--color-divider); }
 .intake-brand { font-size: var(--font-size-section); font-weight: var(--font-weight-semibold); }
 .intake-brand-sub { margin-top: var(--space-1); font-size: var(--font-size-caption); }
