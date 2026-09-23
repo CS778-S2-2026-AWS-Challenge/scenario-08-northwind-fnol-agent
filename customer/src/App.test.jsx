@@ -1850,6 +1850,7 @@ describe('claimant intake projection', () => {
           source: 'claimant',
         },
       },
+      dynamic_form: readyDynamicForm(),
       customer_next_step: {
         status: 'agreement_required',
         summary: 'Continue to agreement and confirmation.',

@@ -123,6 +123,52 @@ def test_explicit_injury_interrupts_intake_and_persists_urgent_handoff(
     assert stored_claim.claim_state.workflow_state.value == 'professional_review'
 
 
+def test_message_replay_fails_closed_for_mislinked_handoff_result(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, 'mislinked-handoff-claim')
+    claim = created['claim']
+    session = created['session']
+    assert isinstance(claim, dict)
+    assert isinstance(session, dict)
+    claim_id = str(claim['claim_id'])
+    session_id = str(session['session_id'])
+    turn = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        'A passenger is injured and the road is still unsafe.',
+        key='mislinked-handoff-message',
+    )
+    handoff_id = str(turn['handoff']['handoff_id'])  # type: ignore[index]
+    repository._handoffs[handoff_id] = repository._handoffs[handoff_id].model_copy(
+        update={'source_message_id': 'msg_unrelated'}
+    )
+
+    replay = client.post(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'mislinked-handoff-message',
+            'If-Match': '1',
+        },
+        json={
+            'client_message_id': 'mislinked-handoff-message',
+            'content': {
+                'type': 'text',
+                'text': 'A passenger is injured and the road is still unsafe.',
+            },
+            'evidence_refs': [],
+        },
+    )
+
+    assert replay.status_code == 500
+    assert replay.json()['error']['code'] == 'INTERNAL_ERROR'
+
+
 @pytest.mark.parametrize(
     'description',
     [

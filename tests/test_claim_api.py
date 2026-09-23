@@ -41,7 +41,7 @@ from backend.domain.models import (
 from backend.domain.retrieval import ClaimHistoryRetrievalRecord, ClaimHistorySearchRequest
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
-from backend.repositories.protocols import IdempotencyConflict, RevisionConflict
+from backend.repositories.protocols import IdempotencyConflict, IdempotencyRecord, RevisionConflict
 from backend.services.agent import AgentProposal, AgentTurnContext
 from backend.services.messages import _TurnEvidenceResolver
 
@@ -1573,6 +1573,108 @@ def test_claimant_can_start_an_anonymous_browser_session(client: TestClient) -> 
     assert response.json()['session']['claim_id'] == response.json()['claim']['claim_id']
 
 
+def test_anonymous_claim_promotion_rekeys_message_replay_authority(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    anonymous_session = str(uuid4())
+    anonymous_actor = f'anonymous:{anonymous_session}'
+    anonymous_headers = {'X-Northwind-Anonymous-Session': anonymous_session}
+    created = create_claim(client, anonymous_headers, key='anonymous-promotion-claim').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+    first = submit_message(
+        client,
+        anonymous_headers,
+        claim_id,
+        session_id,
+        key='anonymous-promotion-turn',
+        client_message_id='anonymous-promotion-message',
+    )
+    assert first.status_code == 200, first.text
+    route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
+
+    promoted = client.post(
+        f'/api/v1/claims/{claim_id}/promote',
+        headers={**auth_headers, 'X-Northwind-Anonymous-Session': anonymous_session},
+    )
+    assert promoted.status_code == 200, promoted.text
+    retired_turn = repository.find_idempotency(anonymous_actor, route, 'anonymous-promotion-turn')
+    assert retired_turn is not None
+    assert retired_turn.retired is True
+    assert repository.find_idempotency('cus_demo', route, 'anonymous-promotion-turn') is not None
+
+    delayed_create_retry = create_claim(
+        client,
+        anonymous_headers,
+        key='anonymous-promotion-claim',
+    )
+
+    replay = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=first.json()['claim_revision'],
+        key='promoted-replay-alias',
+        client_message_id='anonymous-promotion-message',
+    )
+    stale_anonymous_replay = submit_message(
+        client,
+        anonymous_headers,
+        claim_id,
+        session_id,
+        revision=first.json()['claim_revision'],
+        key='anonymous-promotion-turn',
+        client_message_id='anonymous-promotion-message',
+    )
+
+    assert replay.status_code == 200, replay.text
+    assert replay.json() == first.json()
+    assert delayed_create_retry.status_code == 409
+    assert delayed_create_retry.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert len(repository.list_claims_internal()) == 1
+    assert stale_anonymous_replay.status_code == 404
+    assert repository.find_idempotency('cus_demo', route, 'promoted-replay-alias') is not None
+
+
+def test_anonymous_claim_promotion_conflict_is_atomic(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    anonymous_session = str(uuid4())
+    anonymous_actor = f'anonymous:{anonymous_session}'
+    anonymous_headers = {'X-Northwind-Anonymous-Session': anonymous_session}
+    created = create_claim(client, anonymous_headers, key='promotion-conflict').json()
+    claim_id = created['claim']['claim_id']
+    repository.save_idempotency(
+        IdempotencyRecord(
+            actor_id='cus_demo',
+            route='/api/v1/claims',
+            key='promotion-conflict',
+            request_fingerprint='different-request',
+            claim_id='clm_other',
+            session_id='ses_other',
+        )
+    )
+
+    response = client.post(
+        f'/api/v1/claims/{claim_id}/promote',
+        headers={**auth_headers, 'X-Northwind-Anonymous-Session': anonymous_session},
+    )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert repository.get_claim(claim_id, anonymous_actor) is not None
+    assert repository.get_claim(claim_id, 'cus_demo') is None
+    assert (
+        repository.find_idempotency(anonymous_actor, '/api/v1/claims', 'promotion-conflict')
+        is not None
+    )
+
+
 def test_claim_creation_rejects_missing_and_overlong_idempotency_keys(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -1833,6 +1935,16 @@ def test_message_turn_deduplicates_retries_and_rejects_conflicting_client_id(
     first = submit_message(client, auth_headers, claim_id, session_id, key='turn-a')
     idempotency_replay = submit_message(client, auth_headers, claim_id, session_id, key='turn-a')
     client_id_replay = submit_message(client, auth_headers, claim_id, session_id, key='turn-b')
+    alias_conflict = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=2,
+        key='turn-b',
+        client_message_id='different-client-message',
+        text='Different content under the reserved alias key.',
+    )
     conflict = submit_message(
         client,
         auth_headers,
@@ -1846,6 +1958,12 @@ def test_message_turn_deduplicates_retries_and_rejects_conflicting_client_id(
     assert first.status_code == 200
     assert idempotency_replay.json() == first.json()
     assert client_id_replay.json() == first.json()
+    assert alias_conflict.status_code == 409
+    assert alias_conflict.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
+    alias = repository.find_idempotency('cus_demo', route, 'turn-b')
+    assert alias is not None
+    assert alias.message_id == first.json()['claimant_message']['message_id']
     assert conflict.status_code == 409
     assert conflict.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
     assert len(repository.list_messages(claim_id, session_id, 'cus_demo')) == 2
@@ -2123,6 +2241,234 @@ def test_mongodb_replay_with_new_key_survives_repository_restart(
         replay_body['current_claim']['form']['incident.description']['value']
         == 'The corrected description persisted after restart.'
     )
+
+
+def test_mongodb_promotion_rekeys_replay_authority_across_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mongo_client: Any = mongomock.MongoClient()
+    database_name = 'message_promotion_restart'
+    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    anonymous_session = str(uuid4())
+    anonymous_actor = f'anonymous:{anonymous_session}'
+    anonymous_headers = {'X-Northwind-Anonymous-Session': anonymous_session}
+    authenticated_headers = {'Authorization': 'Bearer synthetic-claimant'}
+    first_repository = MongoDBRepository(mongo_client, database_name)
+    monkeypatch.setattr(first_repository, '_atomic', lambda operation: operation(None))
+
+    with TestClient(create_app(settings, repository=first_repository)) as first_client:
+        created = create_claim(
+            first_client,
+            anonymous_headers,
+            key='mongo-promotion-claim',
+        ).json()
+        claim_id = created['claim']['claim_id']
+        session_id = created['session']['session_id']
+        first = submit_message(
+            first_client,
+            anonymous_headers,
+            claim_id,
+            session_id,
+            key='mongo-promotion-turn',
+            client_message_id='mongo-promotion-message',
+        )
+        assert first.status_code == 200, first.text
+        promoted = first_client.post(
+            f'/api/v1/claims/{claim_id}/promote',
+            headers={
+                **authenticated_headers,
+                'X-Northwind-Anonymous-Session': anonymous_session,
+            },
+        )
+        assert promoted.status_code == 200, promoted.text
+
+    monkeypatch.setattr(first_repository._collection, 'create_index', lambda *args, **kwargs: None)
+    restarted_repository = MongoDBRepository(mongo_client, database_name)
+    monkeypatch.setattr(restarted_repository, '_atomic', lambda operation: operation(None))
+    route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
+    retired_turn = restarted_repository.find_idempotency(
+        anonymous_actor,
+        route,
+        'mongo-promotion-turn',
+    )
+    assert retired_turn is not None
+    assert retired_turn.retired is True
+    assert (
+        restarted_repository.find_idempotency('cus_demo', route, 'mongo-promotion-turn') is not None
+    )
+
+    with TestClient(create_app(settings, repository=restarted_repository)) as restarted_client:
+        delayed_create_retry = create_claim(
+            restarted_client,
+            anonymous_headers,
+            key='mongo-promotion-claim',
+        )
+        replay = submit_message(
+            restarted_client,
+            authenticated_headers,
+            claim_id,
+            session_id,
+            revision=first.json()['claim_revision'],
+            key='mongo-promotion-alias',
+            client_message_id='mongo-promotion-message',
+        )
+
+    assert replay.status_code == 200, replay.text
+    assert replay.json() == first.json()
+    assert delayed_create_retry.status_code == 409
+    assert delayed_create_retry.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert len(restarted_repository.list_claims_internal()) == 1
+    assert (
+        restarted_repository.find_idempotency('cus_demo', route, 'mongo-promotion-alias')
+        is not None
+    )
+
+
+def test_mongodb_promotion_conflict_leaves_anonymous_authority_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mongo_client: Any = mongomock.MongoClient()
+    repository = MongoDBRepository(mongo_client, 'message_promotion_conflict')
+    monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
+    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    anonymous_session = str(uuid4())
+    anonymous_actor = f'anonymous:{anonymous_session}'
+    anonymous_headers = {'X-Northwind-Anonymous-Session': anonymous_session}
+    authenticated_headers = {'Authorization': 'Bearer synthetic-claimant'}
+
+    with TestClient(create_app(settings, repository=repository)) as client:
+        created = create_claim(
+            client,
+            anonymous_headers,
+            key='mongo-promotion-conflict',
+        ).json()
+        claim_id = created['claim']['claim_id']
+        repository.save_idempotency(
+            IdempotencyRecord(
+                actor_id='cus_demo',
+                route='/api/v1/claims',
+                key='mongo-promotion-conflict',
+                request_fingerprint='different-request',
+                claim_id='clm_other',
+                session_id='ses_other',
+            )
+        )
+        response = client.post(
+            f'/api/v1/claims/{claim_id}/promote',
+            headers={
+                **authenticated_headers,
+                'X-Northwind-Anonymous-Session': anonymous_session,
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert repository.get_claim(claim_id, anonymous_actor) is not None
+    assert repository.get_claim(claim_id, 'cus_demo') is None
+    assert (
+        repository.find_idempotency(
+            anonymous_actor,
+            '/api/v1/claims',
+            'mongo-promotion-conflict',
+        )
+        is not None
+    )
+
+
+def test_mongodb_replay_fails_closed_for_corrupted_runtime_and_handoff_links(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mongo_client: Any = mongomock.MongoClient()
+    repository = MongoDBRepository(mongo_client, 'message_corrupt_links')
+    monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
+    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    headers = {'Authorization': 'Bearer synthetic-claimant'}
+
+    with TestClient(create_app(settings, repository=repository)) as client:
+        runtime_claim = create_claim(client, headers, key='corrupt-runtime-claim').json()
+        runtime_claim_id = runtime_claim['claim']['claim_id']
+        runtime_session_id = runtime_claim['session']['session_id']
+        runtime_turn = submit_message(
+            client,
+            headers,
+            runtime_claim_id,
+            runtime_session_id,
+            key='corrupt-runtime-turn',
+            client_message_id='corrupt-runtime-message',
+        )
+        assert runtime_turn.status_code == 200, runtime_turn.text
+        runtime_route = f'/api/v1/claims/{runtime_claim_id}/sessions/{runtime_session_id}/messages'
+        runtime_idempotency = repository.find_idempotency(
+            'cus_demo', runtime_route, 'corrupt-runtime-turn'
+        )
+        assert runtime_idempotency is not None
+        assert runtime_idempotency.runtime_result_id is not None
+        runtime_records = repository.get_runtime_turn_for_trigger(
+            runtime_claim_id,
+            runtime_idempotency.message_id or '',
+            'cus_demo',
+        )
+        assert runtime_records is not None
+        repository._collection.update_one(
+            {
+                'record_type': 'execution_plan',
+                'turn_id': runtime_records.turn_plan.turn_id,
+            },
+            {'$set': {'expected_revision': 99}},
+        )
+        repository._collection.update_many(
+            {
+                'record_type': 'action_envelope',
+                'turn_id': runtime_records.turn_plan.turn_id,
+            },
+            {'$set': {'expected_revision': 99}},
+        )
+        runtime_replay = submit_message(
+            client,
+            headers,
+            runtime_claim_id,
+            runtime_session_id,
+            key='corrupt-runtime-turn',
+            client_message_id='corrupt-runtime-message',
+        )
+
+        handoff_claim = create_claim(client, headers, key='corrupt-handoff-claim').json()
+        handoff_claim_id = handoff_claim['claim']['claim_id']
+        handoff_session_id = handoff_claim['session']['session_id']
+        handoff_turn = submit_message(
+            client,
+            headers,
+            handoff_claim_id,
+            handoff_session_id,
+            key='corrupt-handoff-turn',
+            client_message_id='corrupt-handoff-message',
+            text='A passenger is injured and the road is still unsafe.',
+        )
+        assert handoff_turn.status_code == 200, handoff_turn.text
+        handoff_route = f'/api/v1/claims/{handoff_claim_id}/sessions/{handoff_session_id}/messages'
+        handoff_idempotency = repository.find_idempotency(
+            'cus_demo', handoff_route, 'corrupt-handoff-turn'
+        )
+        assert handoff_idempotency is not None
+        assert handoff_idempotency.handoff_id is not None
+        repository._collection.update_one(
+            {'_id': f'handoff:{handoff_idempotency.handoff_id}'},
+            {'$set': {'source_message_id': 'msg_unrelated'}},
+        )
+        handoff_replay = submit_message(
+            client,
+            headers,
+            handoff_claim_id,
+            handoff_session_id,
+            key='corrupt-handoff-turn',
+            client_message_id='corrupt-handoff-message',
+            text='A passenger is injured and the road is still unsafe.',
+        )
+
+    assert runtime_replay.status_code == 500
+    assert runtime_replay.json()['error']['code'] == 'INTERNAL_ERROR'
+    assert handoff_replay.status_code == 500
+    assert handoff_replay.json()['error']['code'] == 'INTERNAL_ERROR'
 
 
 def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(

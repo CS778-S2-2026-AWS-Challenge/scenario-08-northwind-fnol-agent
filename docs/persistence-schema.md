@@ -491,14 +491,16 @@ the append-only audit collection through a bounded, filterable projection.
   identical replay returns the current authorised projection; changed input under the
   same key is a conflict.
 - A claimant message-turn idempotency record also retains `message_turn_kind`
-  (`legacy_agent`, `runtime`, or `message_only`) and the immutable
-  `message_turn_revision`. Fixture and MongoDB can resolve the original record by actor, route,
-  Claim, and claimant `message_id`, so the same `client_message_id` under a different retry key
-  still reports the committed historical revision. The kind defines the complete required child
-  association set: legacy Agent requires its decision and Agent message, Runtime requires its
-  Runtime trace and Agent message, and message-only declares no such child. A missing declared
-  child is an integrity failure and cannot be returned as a partial message-only success. Legacy
-  records without the new coordinates use their stored response and existing durable associations
+  (`legacy_agent` or `message_only`) and the immutable `message_turn_revision`. Namespaced Runtime
+  records are children of the Agent turn, not a separate response kind. Current Agent records also
+  retain `runtime_result_id`; replay verifies the Runtime bundle, result, decision, Agent reply,
+  optional trace, and optional Handoff against the same Claim, Session, trigger message, response
+  message, and committed revision. The stored message-turn revision is the independent authority
+  for the Runtime plan and ActionEnvelope expected revision. Fixture and MongoDB atomically reserve a new retry key as an
+  alias when the same `client_message_id` replays the original request. That alias is thereafter
+  unavailable to different content. A missing or mislinked declared child is an integrity failure
+  and cannot be returned as a partial message-only success. Legacy records without the newer
+  coordinates use their stored response and existing durable associations
   for compatibility; replay does not rewrite them or repeat side effects.
 - A Workbench mutation idempotency record also retains the Action Registry version, exact
   `action_code`, and exact `target_ref` resolved before execution. These fields preserve the
@@ -780,7 +782,11 @@ the append-only audit collection through a bounded, filterable projection.
 Anonymous browser sessions may own a temporary conversation Claim, but Evidence
 upload mutations require an authenticated claimant. Selecting a file before
 login is not a persistence operation; promotion transfers the existing Claim
-and its records only after authentication, and abandoned selections leave no
+and its records only after authentication. Promotion atomically re-keys every Claim-scoped
+idempotency record from the anonymous subject to the authenticated claimant in Fixture and MongoDB.
+The original anonymous key becomes a retired tombstone: it cannot reveal or replay the promoted
+Claim, but it still prevents a delayed request from repeating the original side effect. A target-key conflict rejects the whole
+promotion without a partial owner change. Abandoned selections leave no
 Evidence record or protected object.
 
 ## Retrieval and Review Invariants

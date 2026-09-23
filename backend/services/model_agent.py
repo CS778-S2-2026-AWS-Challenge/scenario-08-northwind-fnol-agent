@@ -1415,12 +1415,9 @@ class GatewayAgent:
                     started_at=started_at,
                     request_budgets=request_budgets,
                 )
-                review = (
-                    review_reply(result.validated_turn)
-                    if result.validated_turn is not None
-                    else None
-                )
-                if review is not None and not review.consistent:
+                validated_turn = result.validated_turn
+                review = review_reply(validated_turn) if validated_turn is not None else None
+                if review is not None and validated_turn is not None and not review.consistent:
                     # The words contradict the ledger. Hand the ruling back to
                     # the model once; Runtime never rewrites the reply itself.
                     logger.info(
@@ -1445,7 +1442,7 @@ class GatewayAgent:
                         ModelMessage(
                             role=ModelRole.USER,
                             content=json.dumps(
-                                review.runtime_review(result.validated_turn.rejected),
+                                review.runtime_review(validated_turn.rejected),
                                 separators=(',', ':'),
                                 sort_keys=True,
                             ),

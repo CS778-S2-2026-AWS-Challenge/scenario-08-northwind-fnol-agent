@@ -809,12 +809,12 @@ class BedrockConverseModelGateway:
             ) from None
 
         self._raise_for_status(response.status_code, _provider_error_type(response))
-        payload: object = None
+        response_payload: object = None
         try:
-            payload = response.json()
-            return self._normalise_response(payload, request, response.headers)
+            response_payload = response.json()
+            return self._normalise_response(response_payload, request, response.headers)
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-            _log_malformed_provider_response(payload, error)
+            _log_malformed_provider_response(response_payload, error)
             raise ModelGatewayError(
                 ModelGatewayErrorCode.MALFORMED_RESPONSE,
                 provider_model=self._config.model,
