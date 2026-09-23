@@ -202,12 +202,11 @@ def test_mongodb_payment_destination_legacy_read_and_common_guard(
             idempotency,
             _account_audit(candidate, principal, action='created', idempotency_key=idempotency.key),
         )
-    assert (
-        repository._collection.find_one(
-            {'_id': legacy_document['_id']}, projection={'is_common': 1}
-        )['is_common']
-        is True
+    restored_document = repository._collection.find_one(
+        {'_id': legacy_document['_id']}, projection={'is_common': 1}
     )
+    assert restored_document is not None
+    assert restored_document['is_common'] is True
 
 
 def test_mongodb_payment_destination_designation_clears_previous_common(
@@ -235,18 +234,16 @@ def test_mongodb_payment_destination_designation_clears_previous_common(
         1,
         _account_audit(designated, principal, action='updated'),
     )
-    assert (
-        repository.get_payment_destination(
-            previous.payment_destination_id, current.customer_id
-        ).is_common
-        is False
+    restored_previous = repository.get_payment_destination(
+        previous.payment_destination_id, current.customer_id
     )
-    assert (
-        repository.get_payment_destination(
-            current.payment_destination_id, current.customer_id
-        ).is_common
-        is True
+    restored_current = repository.get_payment_destination(
+        current.payment_destination_id, current.customer_id
     )
+    assert restored_previous is not None
+    assert restored_current is not None
+    assert restored_previous.is_common is False
+    assert restored_current.is_common is True
 
 
 def _claim(revision: int = 1) -> WorkingClaim:
