@@ -4,6 +4,8 @@ import { FeatureNotice, ResourceError } from './ProfilePrimitives.jsx'
 import { maskPolicyNumber } from './policyNumber.js'
 import { profileMutationMessage } from './profileMutation.js'
 
+const RETRY_BUTTON_ID = 'profile-policy-retry-button'
+
 export default function PolicyNumberDetails({
   announceResourceState = true,
   editingDisabled = false,
@@ -22,10 +24,27 @@ export default function PolicyNumberDetails({
   const [notice, setNotice] = useState(null)
   const inputRef = useRef(null)
   const returnFocusIdRef = useRef(null)
+  // Where focus must land once a failed save or a retry has settled: the preserved draft input
+  // while a draft is open, otherwise the re-rendered retry control or the disclosure summary.
+  const recoveryFocusRef = useRef(null)
   const policies = resource.items
   const authoritative = policies !== null && !resource.error && !resource.loading && !resource.stale
+  const saving = editor?.mode === 'create'
+    ? Boolean(pending['policy-create'])
+    : Boolean(pending[`policy:${editor?.policyId}`])
 
   useEffect(() => { if (editor && authoritative) inputRef.current?.focus() }, [authoritative, editor])
+
+  useEffect(() => {
+    const target = recoveryFocusRef.current
+    if (!target || resource.loading || saving) return
+    recoveryFocusRef.current = null
+    const element = target === 'input'
+      ? inputRef.current
+      : globalThis.document?.getElementById(RETRY_BUTTON_ID)
+        || globalThis.document?.getElementById(fallbackFocusId)
+    element?.focus()
+  }, [editor, fallbackFocusId, resource.error, resource.loading, resource.stale, saving])
 
   useEffect(() => { onEditingChange?.(Boolean(editor)) }, [editor, onEditingChange])
 
@@ -72,13 +91,19 @@ export default function PolicyNumberDetails({
       setEditor(null)
       setDraft('')
     } catch (error) {
+      // The clicked submit is disabled until the resource is authoritative again, so focus moves
+      // to the preserved draft once the pending state clears.
+      recoveryFocusRef.current = 'input'
       setNotice({ kind: 'error', text: profileMutationMessage(error, 'Northwind could not save this policy number.') })
     }
   }
 
-  const saving = editor?.mode === 'create'
-    ? Boolean(pending['policy-create'])
-    : Boolean(pending[`policy:${editor?.policyId}`])
+  function retryLoad() {
+    recoveryFocusRef.current = editor ? 'input' : 'retry'
+    // The retry control unmounts while the reload runs; the failure is already surfaced through
+    // resource.error, so the rejection only needs to be observed here.
+    return onReload().catch(() => {})
+  }
 
   return (
     <div className="profile-policy-details" role="group" aria-label="Saved policy number controls">
@@ -87,8 +112,9 @@ export default function PolicyNumberDetails({
       <ResourceError
         announce={announceResourceState}
         message={resource.error}
-        onRetry={onReload}
+        onRetry={retryLoad}
         retainedLabel={resource.stale ? 'saved policy numbers' : ''}
+        retryButtonId={RETRY_BUTTON_ID}
       />
       {policies === null && !resource.error && (
         <p className="profile-assets-loading" role={announceResourceState ? 'status' : undefined}>

@@ -23,7 +23,7 @@ export function FeatureNotice({ notice }) {
   )
 }
 
-export function ResourceError({ announce = true, message, onRetry, retainedLabel = '' }) {
+export function ResourceError({ announce = true, message, onRetry, retainedLabel = '', retryButtonId }) {
   if (!message) return null
   return (
     <div className="profile-assets-error" role={announce ? 'alert' : undefined}>
@@ -31,7 +31,7 @@ export function ResourceError({ announce = true, message, onRetry, retainedLabel
         {message}
         {retainedLabel && ` Previously loaded ${retainedLabel} are shown below and may be out of date. Reload before making changes.`}
       </p>
-      <button className="profile-quiet-action" type="button" onClick={() => { void onRetry() }}>
+      <button id={retryButtonId} className="profile-quiet-action" type="button" onClick={() => { void onRetry() }}>
         Try again
       </button>
     </div>
