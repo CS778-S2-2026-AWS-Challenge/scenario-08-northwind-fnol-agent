@@ -63,6 +63,8 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
     assert before_confirmation.status_code == 409
     assert before_confirmation.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
 
+    journey_input = cast(str, journey['input'])
+    assessment_request = 'Could you help me get a damage assessment for the repairs?'
     turn = client.post(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
         headers={
@@ -225,10 +227,7 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
             'client_message_id': 'issue928-ordering-message',
             'content': {
                 'type': 'text',
-                'text': (
-                    f'{journey["input"]} '
-                    'Could you help me get a damage assessment for the repairs?'
-                ),
+                'text': f'{journey_input} {assessment_request}',
             },
             'evidence_refs': [],
         },
