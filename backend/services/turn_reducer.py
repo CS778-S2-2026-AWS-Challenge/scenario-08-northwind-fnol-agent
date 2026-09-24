@@ -474,7 +474,9 @@ def reduce_turn(
         # arrived has not seen either yet.
         current_product_family_field = projected_confirmation_form.get('claim.product_family')
         current_product_family = (
-            current_product_family_field.value if current_product_family_field is not None else None
+            current_product_family_field.value
+            if current_product_family_field is not None
+            else claim.incident_type
         )
         if current_product_family == 'motor':
             vehicle_damage = projected_confirmation_form.get('vehicle.damage_description')
