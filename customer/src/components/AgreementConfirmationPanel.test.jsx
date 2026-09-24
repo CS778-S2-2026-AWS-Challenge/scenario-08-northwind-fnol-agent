@@ -45,6 +45,7 @@ describe('AgreementConfirmationPanel', () => {
         status="idle"
         onSubmit={onSubmit}
         onReviewInformation={vi.fn()}
+        onReturnToConversation={vi.fn()}
       />,
     )
 
@@ -65,6 +66,41 @@ describe('AgreementConfirmationPanel', () => {
     })
   })
 
+  it('shows the backend creation result instead of a dead submit action', () => {
+    const onReturnToConversation = vi.fn()
+
+    render(
+      <AgreementConfirmationPanel
+        claim={{
+          ...claim,
+          external_claim: {
+            claim_number: 'NWF-2026-16ECDD',
+            creation_status: 'created',
+            next_step: 'A claims specialist will review the submitted details.',
+            expected_by: '2026-09-16T01:00:00Z',
+          },
+        }}
+        busy={false}
+        status="idle"
+        onSubmit={vi.fn()}
+        onReviewInformation={vi.fn()}
+        onReturnToConversation={onReturnToConversation}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Claim submitted' })).toBeTruthy()
+    expect(screen.getByText('NWF-2026-16ECDD')).toBeTruthy()
+    expect(screen.getByText('created')).toBeTruthy()
+    expect(
+      screen.getByText('A claims specialist will review the submitted details.'),
+    ).toBeTruthy()
+    expect(screen.getByText('2026-09-16T01:00:00Z')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Submit claim' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    expect(onReturnToConversation).toHaveBeenCalledTimes(1)
+  })
+
   it('supports creation retry without recording another acceptance', () => {
     const onSubmit = vi.fn()
 
@@ -83,6 +119,7 @@ describe('AgreementConfirmationPanel', () => {
         status="idle"
         onSubmit={onSubmit}
         onReviewInformation={vi.fn()}
+        onReturnToConversation={vi.fn()}
       />,
     )
 
