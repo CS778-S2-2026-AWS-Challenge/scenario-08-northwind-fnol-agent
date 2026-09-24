@@ -3301,6 +3301,7 @@ function App() {
                     setDetailsTab('summary')
                     setWorkspaceView('chat')
                   }}
+                  onReturnToConversation={() => setWorkspaceView('chat')}
                 />
               )}
               {workspaceView === 'claim-evidence' && selectedHistoryClaim && (
