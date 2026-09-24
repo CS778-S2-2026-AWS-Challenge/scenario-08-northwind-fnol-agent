@@ -7661,6 +7661,93 @@
         "title": "ExternalServiceOfferDecisionRequest",
         "type": "object"
       },
+      "ExternalTaskAttempt": {
+        "additionalProperties": false,
+        "description": "One recorded attempt at an external task, kept whether it succeeded or not.\n\nA failure that leaves nothing behind is the same as one that never happened,\nand the claim then cannot explain why it is waiting. Each attempt records its\nplace in the sequence, when it ran, the claim revision it ran against, and\nwhat came back, so a claimant or staff reader can see the history rather than\nonly the current state.\n\nThe operation identity is the same across every attempt for one request. That\nis what makes a retry the same request rather than a second one, so it is\nrecorded here as well and checked before another attempt is permitted.\n\nDelivery follows the same contract as the task record it belongs to: an\naccepted attempt must have reached the provider, and reaching the provider\nmust be evidenced rather than asserted. Without that an attempt could record\na provider acceptance for a request that was never sent.",
+        "properties": {
+          "attempt_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "attempt_number": {
+            "minimum": 1.0,
+            "title": "Attempt Number",
+            "type": "integer"
+          },
+          "claim_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "claim_revision": {
+            "minimum": 1.0,
+            "title": "Claim Revision",
+            "type": "integer"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/ExternalTaskDelivery",
+            "default": "not_submitted"
+          },
+          "delivery_evidence": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery Evidence"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalTaskFailureCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/ExternalTaskOperationStatus"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "task_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt_id",
+          "task_id",
+          "claim_id",
+          "operation_id",
+          "attempt_number",
+          "claim_revision",
+          "started_at",
+          "outcome"
+        ],
+        "title": "ExternalTaskAttempt",
+        "type": "object"
+      },
       "ExternalTaskAuthorisation": {
         "additionalProperties": false,
         "description": "The two independent authorities one external request needs.\n\n`docs/claim-creation-boundary.md` requires both a current Northwind rule or\nstaff decision and a matching active claimant-consent record, and states\nthat neither substitutes for the other. They are separate fields here for\nthat reason: a request holding only one of them is not authorised, and no\ncode path can satisfy the pair by supplying the same reference twice.",
@@ -15803,6 +15890,13 @@
       "WorkbenchExternalRequest": {
         "additionalProperties": false,
         "properties": {
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalTaskAttempt"
+            },
+            "title": "Attempts",
+            "type": "array"
+          },
           "lifecycle": {
             "$ref": "#/components/schemas/WorkbenchExternalLifecycle"
           },

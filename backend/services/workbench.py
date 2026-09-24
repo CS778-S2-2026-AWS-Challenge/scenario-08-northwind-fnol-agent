@@ -18,6 +18,7 @@ from backend.domain.external_service_registry import (
 )
 from backend.domain.external_services import (
     ASSESSOR_SERVICE_IDENTITY,
+    ExternalTaskAttempt,
     ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
@@ -1894,9 +1895,17 @@ def _build_projection(
             external_attention = sum(
                 item.lifecycle.needs_attention
                 for item in _external_requests(
-                    claim, external_tasks, external_requests, external_results, evidence, actions
+                    claim,
+                    external_tasks,
+                    repository.list_external_task_attempts_internal(claim.claim_id),
+                    external_requests,
+                    external_results,
+                    evidence,
+                    actions,
                 )
             )
+        except RuntimeError:
+            external_section_limitation = 'External-service records are temporarily unavailable.'
         except (InvalidExternalLifecycleTransition, ValueError):
             external_section_limitation = _INCONSISTENT_EXTERNAL_LIFECYCLE
     motor_other_driver = repository.get_motor_other_driver(claim.claim_id, claim.customer_id)
@@ -2553,6 +2562,7 @@ def list_workbench_external_requests(
     claim = _authorised_claim(repository, principal, claim_id)
     try:
         tasks = repository.list_external_tasks_internal(claim_id)
+        attempts = repository.list_external_task_attempts_internal(claim_id)
         requests = repository.list_external_task_requests_internal(claim_id)
         results = repository.list_external_task_results_internal(claim_id)
         evidence = repository.list_evidence(claim_id, claim.customer_id)
@@ -2565,7 +2575,15 @@ def list_workbench_external_requests(
             limitation='External-service records are temporarily unavailable.',
         )
     try:
-        items = _external_requests(claim, tasks, requests, results, evidence, staff_actions)
+        items = _external_requests(
+            claim,
+            tasks,
+            attempts,
+            requests,
+            results,
+            evidence,
+            staff_actions,
+        )
     except (InvalidExternalLifecycleTransition, ValueError):
         return WorkbenchResourcePage(
             items=[],
@@ -2580,6 +2598,7 @@ def list_workbench_external_requests(
 def _external_requests(
     claim: WorkingClaim,
     tasks: Sequence[ExternalTaskRecord],
+    attempts: Sequence[ExternalTaskAttempt],
     requests: Sequence[ExternalTaskRequest],
     results: Sequence[ExternalTaskResult],
     evidence: Sequence[EvidenceRecord],
@@ -2607,6 +2626,11 @@ def _external_requests(
     """
 
     by_task = {item.task_id: item for item in requests}
+    attempts_by_task: dict[str, list[ExternalTaskAttempt]] = {}
+    for attempt in attempts:
+        attempts_by_task.setdefault(attempt.task_id, []).append(attempt)
+    for task_attempts in attempts_by_task.values():
+        task_attempts.sort(key=lambda item: (item.attempt_number, item.attempt_id))
     results_by_task = {item.task_id: item for item in results}
     evidence_by_id = {item.evidence_id: item for item in evidence}
     task_ids = {task.task_id for task in tasks}
@@ -2637,6 +2661,7 @@ def _external_requests(
             WorkbenchExternalRequest(
                 request=external_request,
                 task=task,
+                attempts=attempts_by_task.get(task.task_id, []),
                 lifecycle=_external_lifecycle(
                     task,
                     external_request,

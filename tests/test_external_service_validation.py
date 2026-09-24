@@ -485,6 +485,12 @@ def test_a_retry_continues_the_failed_task_instead_of_opening_a_second_one() -> 
     assert tasks[0].task_id == after_failure[0].task_id
     assert tasks[0].status is ExternalTaskOperationStatus.ACCEPTED
     assert tasks[0].updated_at > after_failure[0].updated_at
+    attempts = repository.list_external_task_attempts_internal(claim_id)
+    assert [attempt.attempt_number for attempt in attempts] == [1, 2]
+    assert [attempt.outcome for attempt in attempts] == [
+        ExternalTaskOperationStatus.RETRYABLE_FAILURE,
+        ExternalTaskOperationStatus.ACCEPTED,
+    ]
 
 
 @pytest.mark.parametrize(

@@ -16,6 +16,7 @@ from backend.domain.audit import (
 )
 from backend.domain.claim_creation import ClaimCreationOperationRecord
 from backend.domain.external_services import (
+    ExternalTaskAttempt,
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
     ExternalTaskRequest,
@@ -835,6 +836,16 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """Persist an immutable operation identity and valid outcome transition."""
         raise NotImplementedError
 
+    def save_assessor_routing_settlement(
+        self,
+        operation: AssessorRoutingOperation,
+        task: ExternalTaskRecord,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Atomically persist an assessor outcome and its task attempt."""
+        raise NotImplementedError
+
     def save_assessor_reconciliation(
         self,
         claim: WorkingClaim,
@@ -1128,6 +1139,36 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """
         raise NotImplementedError
 
+    def save_external_task_attempt(
+        self,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Append one immutable execution attempt for a claim-owned external task.
+
+        Attempts are append-only execution history. The current ``ExternalTaskRecord``
+        remains the lifecycle summary; this record explains each dispatch or retry and
+        must survive provider restart.
+
+        Args:
+            attempt: Validated attempt outcome to append.
+            customer_id: Customer who owns the parent claim.
+
+        Raises:
+            KeyError: The claim, task, or request authority is unavailable.
+            IdempotencyConflict: The identity, sequence, or immutable payload conflicts.
+        """
+        raise NotImplementedError
+
+    def save_external_task_settlement(
+        self,
+        task: ExternalTaskRecord,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Atomically persist a generic task outcome and its task attempt."""
+        raise NotImplementedError
+
     def reserve_external_dispatch(
         self,
         claim_id: str,
@@ -1293,6 +1334,13 @@ class PersistenceRepository(ClaimRepository, Protocol):
         Raises:
             RuntimeError: A configured persistence provider cannot complete the read.
         """
+        raise NotImplementedError
+
+    def list_external_task_attempts_internal(
+        self,
+        claim_id: str,
+    ) -> list[ExternalTaskAttempt]:
+        """List append-only external-task attempts for an authorised Claim read."""
         raise NotImplementedError
 
     def list_external_task_results_internal(self, claim_id: str) -> list[ExternalTaskResult]:
