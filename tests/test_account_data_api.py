@@ -3,6 +3,7 @@ from base64 import urlsafe_b64decode
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import replace
+from datetime import UTC, datetime
 from threading import Event
 from typing import Any, cast
 
@@ -12,16 +13,21 @@ from fastapi.testclient import TestClient
 
 from backend.adapters.identity import FixtureIdentityRepository
 from backend.app import create_app
+from backend.core.auth import Principal
 from backend.core.config import IdentityMode, Settings
+from backend.domain.account_data import PaymentDestinationRecord
 from backend.domain.audit import AuditSubject, AuditSubjectType
 from backend.domain.models import CustomerNextStep, ResponsibleParty, WorkingClaim
 from backend.repositories.account_data import (
+    CommonPaymentDestinationConflict,
+    PaymentDestinationDesignationConflict,
     PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
-from backend.repositories.protocols import IdempotencyConflict, RevisionConflict
+from backend.repositories.protocols import IdempotencyConflict, IdempotencyRecord, RevisionConflict
+from backend.services.account_data import _account_audit
 from backend.services.protected_values import UnavailableProtectedValueAdapter
 
 
@@ -39,6 +45,12 @@ def _post(
     key: str,
     payload: dict[str, str],
 ) -> dict[str, Any]:
+    if path == '/api/v1/account/payment-destinations':
+        payload = {
+            'bank_name': 'Synthetic Bank',
+            'account_holder_name': 'Synthetic Claimant',
+            **payload,
+        }
     response = client.post(path, headers={**headers, 'Idempotency-Key': key}, json=payload)
     assert response.status_code == 201, response.text
     return cast(dict[str, Any], response.json())
@@ -112,12 +124,22 @@ def test_protected_account_records_are_masked_owned_revisioned_and_idempotent(
     replay = client.post(
         '/api/v1/account/payment-destinations',
         headers={**owner, 'Idempotency-Key': 'payment-create'},
-        json={'account_type': 'cheque', 'account_number': bank_number},
+        json={
+            'account_type': 'cheque',
+            'account_number': bank_number,
+            'bank_name': 'Synthetic Bank',
+            'account_holder_name': 'Synthetic Claimant',
+        },
     )
     changed_replay = client.post(
         '/api/v1/account/payment-destinations',
         headers={**owner, 'Idempotency-Key': 'payment-create'},
-        json={'account_type': 'savings', 'account_number': bank_number},
+        json={
+            'account_type': 'savings',
+            'account_number': bank_number,
+            'bank_name': 'Synthetic Bank',
+            'account_holder_name': 'Synthetic Claimant',
+        },
     )
     owner_list = client.get('/api/v1/account/payment-destinations', headers=owner)
     other_list = client.get('/api/v1/account/payment-destinations', headers=other)
@@ -128,7 +150,12 @@ def test_protected_account_records_are_masked_owned_revisioned_and_idempotent(
     invalid_number = client.post(
         '/api/v1/account/payment-destinations',
         headers={**owner, 'Idempotency-Key': 'invalid-sensitive-number'},
-        json={'account_type': 'cheque', 'account_number': 'XYZ'},
+        json={
+            'account_type': 'cheque',
+            'account_number': 'XYZ',
+            'bank_name': 'Synthetic Bank',
+            'account_holder_name': 'Synthetic Claimant',
+        },
     )
     concealed = client.patch(
         f'/api/v1/account/payment-destinations/{payment["payment_destination_id"]}',
@@ -198,6 +225,409 @@ def test_protected_account_records_are_masked_owned_revisioned_and_idempotent(
     )
     assert events
     assert all(bank_number not in event.model_dump_json() for event in events)
+
+
+def test_payment_destinations_persist_profile_fields_and_one_common_destination(
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    first = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        'common-first',
+        {
+            'account_type': 'savings',
+            'account_number': '12-3456-1111222-00',
+            'bank_name': 'Synthetic Bank',
+            'account_holder_name': 'Synthetic Claimant',
+        },
+    )
+    second = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        'common-second',
+        {'account_type': 'cheque', 'account_number': '12-3456-3333444-00'},
+    )
+    assert first['bank_name'] == 'Synthetic Bank'
+    assert first['account_holder_name'] == 'Synthetic Claimant'
+    assert first['is_common'] is True
+    assert second['is_common'] is False
+
+    designated = client.patch(
+        f'/api/v1/account/payment-destinations/{second["payment_destination_id"]}',
+        headers={**owner, 'If-Match': '1'},
+        json={'is_common': True},
+    )
+    assert designated.status_code == 200, designated.text
+    assert designated.json()['is_common'] is True
+    listed = client.get('/api/v1/account/payment-destinations', headers=owner)
+    by_id = {item['payment_destination_id']: item for item in listed.json()['items']}
+    assert by_id[first['payment_destination_id']]['is_common'] is False
+    assert by_id[second['payment_destination_id']]['is_common'] is True
+    demoted = repository.get_payment_destination(first['payment_destination_id'], 'cus_demo')
+    assert demoted is not None
+    assert demoted.revision == 2
+    demotion_events = repository.list_audit_events_internal(
+        AuditSubject(
+            subject_type=AuditSubjectType.PAYMENT_DESTINATION,
+            subject_id=first['payment_destination_id'],
+        )
+    )
+    assert len(demotion_events) == 2
+    assert demotion_events[-1].source_refs == [
+        f'payment_destination:{first["payment_destination_id"]}:revision:2'
+    ]
+
+    renamed = client.patch(
+        f'/api/v1/account/payment-destinations/{first["payment_destination_id"]}',
+        headers={**owner, 'If-Match': '2'},
+        json={'bank_name': 'Synthetic Bank Updated'},
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()['bank_name'] == 'Synthetic Bank Updated'
+
+    retired = client.delete(
+        f'/api/v1/account/payment-destinations/{second["payment_destination_id"]}',
+        headers={**owner, 'If-Match': '2'},
+    )
+    assert retired.status_code == 204
+    active = client.get('/api/v1/account/payment-destinations', headers=owner)
+    assert all(item['is_common'] is False for item in active.json()['items'])
+    replacement = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        'common-after-retirement',
+        {'account_type': 'savings', 'account_number': '12-3456-5555666-00'},
+    )
+    assert replacement['is_common'] is False
+
+
+def test_payment_destination_rejects_retired_common_designation_atomically(
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    common = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        'active-common',
+        {'account_type': 'savings', 'account_number': '12-3456-1111222-00'},
+    )
+    retired_target = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        'retired-target',
+        {'account_type': 'cheque', 'account_number': '12-3456-3333444-00'},
+    )
+    retired = client.delete(
+        f'/api/v1/account/payment-destinations/{retired_target["payment_destination_id"]}',
+        headers={**owner, 'If-Match': '1'},
+    )
+    assert retired.status_code == 204
+
+    response = client.patch(
+        f'/api/v1/account/payment-destinations/{retired_target["payment_destination_id"]}',
+        headers={**owner, 'If-Match': '2'},
+        json={'is_common': True},
+    )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'PAYMENT_DESTINATION_STATE_CONFLICT'
+    stored_common = repository.get_payment_destination(common['payment_destination_id'], 'cus_demo')
+    stored_target = repository.get_payment_destination(
+        retired_target['payment_destination_id'], 'cus_demo'
+    )
+    assert stored_common is not None
+    assert stored_target is not None
+    assert (stored_common.active, stored_common.is_common, stored_common.revision) == (
+        True,
+        True,
+        1,
+    )
+    assert (stored_target.active, stored_target.is_common, stored_target.revision) == (
+        False,
+        False,
+        2,
+    )
+    assert (
+        len(
+            repository.list_audit_events_internal(
+                AuditSubject(
+                    subject_type=AuditSubjectType.PAYMENT_DESTINATION,
+                    subject_id=common['payment_destination_id'],
+                )
+            )
+        )
+        == 1
+    )
+    assert (
+        len(
+            repository.list_audit_events_internal(
+                AuditSubject(
+                    subject_type=AuditSubjectType.PAYMENT_DESTINATION,
+                    subject_id=retired_target['payment_destination_id'],
+                )
+            )
+        )
+        == 2
+    )
+
+
+def test_payment_destination_rejects_false_common_mutation(
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    common = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        'false-common',
+        {'account_type': 'savings', 'account_number': '12-3456-1111222-00'},
+    )
+
+    response = client.patch(
+        f'/api/v1/account/payment-destinations/{common["payment_destination_id"]}',
+        headers={**owner, 'If-Match': '1'},
+        json={'is_common': False},
+    )
+
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'VALIDATION_ERROR'
+    stored = repository.get_payment_destination(common['payment_destination_id'], 'cus_demo')
+    assert stored is not None
+    assert (stored.active, stored.is_common, stored.revision) == (True, True, 1)
+
+
+@pytest.mark.parametrize('missing_field', ['bank_name', 'account_holder_name'])
+def test_payment_destination_create_requires_profile_fields(
+    client: TestClient,
+    missing_field: str,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    payload = {
+        'account_type': 'savings',
+        'account_number': '12-3456-1111222-00',
+        'bank_name': 'Synthetic Bank',
+        'account_holder_name': 'Synthetic Claimant',
+    }
+    del payload[missing_field]
+
+    response = client.post(
+        '/api/v1/account/payment-destinations',
+        headers={**owner, 'Idempotency-Key': f'missing-{missing_field}'},
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'VALIDATION_ERROR'
+
+
+def test_payment_destination_create_retries_as_non_common_after_atomic_race(
+    client: TestClient,
+    repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    original = repository.create_account_record
+    state = {'raised': False}
+
+    def race_once(record: Any, idempotency: Any, audit_event: Any) -> Any:
+        if not state['raised']:
+            state['raised'] = True
+            winner = record.model_copy(
+                update={'payment_destination_id': 'pyd_aaaaaaaaaaaaaaaaaaaa'}
+            )
+            winner_key = 'concurrent-winner'
+            winner_idempotency = replace(
+                idempotency,
+                key=winner_key,
+                claim_id=winner.payment_destination_id,
+            )
+            original(
+                winner,
+                winner_idempotency,
+                _account_audit(
+                    winner,
+                    Principal(
+                        subject=winner.customer_id,
+                        actor_type='claimant',
+                        auth_source='test',
+                    ),
+                    action='created',
+                    idempotency_key=winner_key,
+                ),
+            )
+            raise CommonPaymentDestinationConflict(idempotency.key)
+        return original(record, idempotency, audit_event)
+
+    monkeypatch.setattr(repository, 'create_account_record', race_once)
+    created = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        'common-race',
+        {'account_type': 'savings', 'account_number': '12-3456-8888999-00'},
+    )
+    assert created['is_common'] is False
+
+
+def test_fixture_legacy_payment_destination_requires_explicit_designation(
+    repository: FixtureRepository,
+) -> None:
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    legacy = PaymentDestinationRecord.model_validate(
+        {
+            'payment_destination_id': 'pyd_aaaaaaaaaaaaaaaaaaaa',
+            'customer_id': 'cus_legacy',
+            'protected_value': 'sealed-value',
+            'masked_value': '****1234',
+            'account_type': 'savings',
+            'revision': 1,
+            'active': True,
+            'created_at': timestamp,
+            'updated_at': timestamp,
+        }
+    )
+    repository._payment_destinations[legacy.payment_destination_id] = legacy
+    records, more = repository.list_payment_destinations(
+        'cus_legacy', include_inactive=False, after=None, limit=25
+    )
+    assert not more
+    assert records[0].is_common is False
+    fetched = repository.get_payment_destination(legacy.payment_destination_id, 'cus_legacy')
+    assert fetched is not None
+    assert fetched.is_common is False
+
+    designated = legacy.model_copy(
+        update={'is_common': True, 'revision': 2, 'updated_at': timestamp}
+    )
+    principal = Principal(subject='cus_legacy', actor_type='claimant', auth_source='test')
+    repository.update_account_record(
+        designated,
+        1,
+        _account_audit(designated, principal, action='updated'),
+        'aud_unused_related_event',
+    )
+    stored = repository.get_payment_destination(legacy.payment_destination_id, 'cus_legacy')
+    assert stored is not None
+    assert stored.is_common is True
+    assert stored.revision == 2
+    events = repository.list_audit_events_internal(
+        AuditSubject(
+            subject_type=AuditSubjectType.PAYMENT_DESTINATION,
+            subject_id=legacy.payment_destination_id,
+        )
+    )
+    assert len(events) == 1
+
+
+def test_fixture_rejects_retired_common_designation_before_any_mutation(
+    repository: FixtureRepository,
+) -> None:
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    common = PaymentDestinationRecord(
+        payment_destination_id='pyd_aaaaaaaaaaaaaaaaaaaa',
+        customer_id='cus_designation_guard',
+        protected_value='sealed-value',
+        masked_value='****1234',
+        account_type='savings',
+        is_common=True,
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    retired = PaymentDestinationRecord(
+        payment_destination_id='pyd_bbbbbbbbbbbbbbbbbbbb',
+        customer_id=common.customer_id,
+        protected_value='sealed-value',
+        masked_value='****5678',
+        account_type='cheque',
+        active=False,
+        revision=2,
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    repository._payment_destinations = {
+        common.payment_destination_id: common,
+        retired.payment_destination_id: retired,
+    }
+    designated = retired.model_copy(update={'is_common': True, 'revision': 3})
+    principal = Principal(subject=retired.customer_id, actor_type='claimant', auth_source='test')
+
+    with pytest.raises(PaymentDestinationDesignationConflict):
+        repository.update_account_record(
+            designated,
+            2,
+            _account_audit(designated, principal, action='updated'),
+            'aud_rejected_demotion',
+        )
+
+    assert (
+        repository.get_payment_destination(common.payment_destination_id, common.customer_id)
+        == common
+    )
+    assert (
+        repository.get_payment_destination(retired.payment_destination_id, retired.customer_id)
+        == retired
+    )
+    assert not repository._audit_events
+
+
+def test_fixture_create_boundary_decides_common_from_active_record_count(
+    repository: FixtureRepository,
+) -> None:
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    first = PaymentDestinationRecord(
+        payment_destination_id='pyd_ffffffffffffffffffff',
+        customer_id='cus_common_guard',
+        protected_value='sealed-value',
+        masked_value='****1234',
+        account_type='savings',
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    principal = Principal(subject=first.customer_id, actor_type='claimant', auth_source='test')
+    first_key = 'fixture-common-first'
+    stored_first = repository.create_account_record(
+        first,
+        IdempotencyRecord(
+            actor_id=first.customer_id,
+            route='/api/v1/account/payment-destinations',
+            key=first_key,
+            request_fingerprint='first',
+            claim_id=first.payment_destination_id,
+            session_id='',
+            response_payload={},
+        ),
+        _account_audit(first, principal, action='created', idempotency_key=first_key),
+    )
+    assert isinstance(stored_first, PaymentDestinationRecord)
+    assert stored_first.is_common is True
+    second = first.model_copy(
+        update={'payment_destination_id': 'pyd_eeeeeeeeeeeeeeeeeeee', 'is_common': True}
+    )
+    second_key = 'fixture-common-second'
+    stored_second = repository.create_account_record(
+        second,
+        IdempotencyRecord(
+            actor_id=second.customer_id,
+            route='/api/v1/account/payment-destinations',
+            key=second_key,
+            request_fingerprint='second',
+            claim_id=second.payment_destination_id,
+            session_id='',
+            response_payload={},
+        ),
+        _account_audit(second, principal, action='created', idempotency_key=second_key),
+    )
+    assert isinstance(stored_second, PaymentDestinationRecord)
+    assert stored_second.is_common is False
 
 
 def test_saved_policy_prefills_registered_claim_field_without_coverage_inference(
@@ -423,13 +853,13 @@ def test_payout_contact_selection_is_atomic_masked_and_resumable(adapter: str) -
     assert body['contact_preference']['value'] == 'email'
     assert body['contact_preference']['status'] == 'confirmed'
     assert body['customer_next_step']['status'] == 'agreement_required'
-    assert body['primary_action']['action_code'] == 'claimant.review_agreement'
+    assert body['primary_action']['action_code'] == 'claimant.create_claim'
     assert body['primary_action']['available'] is True
     assert detail.status_code == 200
     assert detail.json()['payment_destination_id'] == payment['payment_destination_id']
     assert detail.json()['form']['claimant.contact_preference']['value'] == 'email'
     assert detail.json()['customer_next_step']['status'] == 'agreement_required'
-    assert detail.json()['primary_action']['action_code'] == 'claimant.review_agreement'
+    assert detail.json()['primary_action']['action_code'] == 'claimant.create_claim'
     assert bank_number not in selected.text
     assert bank_number not in detail.text
 
@@ -505,12 +935,12 @@ def test_payout_contact_in_app_progresses_to_agreement(
     assert selected.status_code == 201, selected.text
     assert selected.json()['contact_preference']['value'] == 'in_app'
     assert selected.json()['customer_next_step']['status'] == 'agreement_required'
-    assert selected.json()['primary_action']['action_code'] == 'claimant.review_agreement'
+    assert selected.json()['primary_action']['action_code'] == 'claimant.create_claim'
     assert selected.json()['primary_action']['available'] is True
 
     assert detail.status_code == 200, detail.text
     assert detail.json()['customer_next_step']['status'] == 'agreement_required'
-    assert detail.json()['primary_action']['action_code'] == 'claimant.review_agreement'
+    assert detail.json()['primary_action']['action_code'] == 'claimant.create_claim'
     assert detail.json()['primary_action']['available'] is True
 
 
@@ -1326,7 +1756,12 @@ def test_account_operation_logs_are_correlated_and_exclude_protected_values(
                 'Idempotency-Key': 'logged-payment',
                 'X-Request-ID': 'account-log-success',
             },
-            json={'account_type': 'cheque', 'account_number': bank_number},
+            json={
+                'account_type': 'cheque',
+                'account_number': bank_number,
+                'bank_name': 'Synthetic Bank',
+                'account_holder_name': 'Synthetic Claimant',
+            },
         )
         rejected = client.patch(
             f'/api/v1/account/payment-destinations/{created.json()["payment_destination_id"]}',

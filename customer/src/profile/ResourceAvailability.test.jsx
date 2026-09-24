@@ -3,13 +3,6 @@ import { render, screen } from '@testing-library/react'
 
 import IdentityDocuments from '../components/IdentityDocuments.jsx'
 import PaymentDetailsSection from './PaymentDetailsSection.jsx'
-import PoliciesSection from './PoliciesSection.jsx'
-
-const policy = {
-  policy_id: 'pol_11111111111111111111',
-  policy_number: 'NTH-1234',
-  revision: 1,
-}
 
 const identity = {
   identity_id: 'idn_11111111111111111111',
@@ -35,17 +28,6 @@ const commonProps = {
 }
 
 const resourceCases = [
-  {
-    label: 'Policies',
-    records: [policy],
-    emptyText: 'No policy numbers saved.',
-    retainedText: '••••1234',
-    renderSection: (resource) => render(<PoliciesSection {...commonProps} resource={resource} />),
-    assertNoMutationControls: () => {
-      expect(screen.queryByRole('button', { name: 'Add policy number' })).not.toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /Edit policy number/ })).not.toBeInTheDocument()
-    },
-  },
   {
     label: 'Identity',
     records: [identity],

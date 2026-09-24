@@ -24,6 +24,7 @@ from backend.domain.evidence import (
     validate_evidence_record,
 )
 from backend.domain.external_services import (
+    ExternalTaskAttempt,
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
     ExternalTaskRequest,
@@ -108,10 +109,13 @@ from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.account_data import (
     AccountCursorKey,
     AccountRecord,
+    PaymentDestinationDesignationConflict,
     PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
     account_record_audit_matches,
     account_record_identity,
+    payment_destination_create_result,
+    payment_destination_demotion,
     payout_contact_selection_audit_matches,
     policy_selection_audit_matches,
 )
@@ -172,6 +176,7 @@ class FixtureRepository(PersistenceRepository):
         self._motor_other_drivers: dict[str, MotorOtherDriverRecord] = {}
         self._contents_item_evidence_associations: dict[str, ContentsItemEvidenceAssociation] = {}
         self._external_tasks: dict[str, ExternalTaskRecord] = {}
+        self._external_task_attempts: dict[str, ExternalTaskAttempt] = {}
         self._external_task_requests: dict[str, ExternalTaskRequest] = {}
         self._external_task_evidence_links: dict[tuple[str, str], ExternalTaskEvidenceLink] = {}
         self._external_task_results: dict[str, ExternalTaskResult] = {}
@@ -329,7 +334,7 @@ class FixtureRepository(PersistenceRepository):
         record: AccountRecord,
         idempotency: IdempotencyRecord,
         audit_event: AuditEventEnvelope,
-    ) -> None:
+    ) -> AccountRecord:
         with self._claim_mutation_lock:
             kind, identifier, _ = account_record_identity(record)
             lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
@@ -337,18 +342,30 @@ class FixtureRepository(PersistenceRepository):
             if (
                 record.customer_id != idempotency.actor_id
                 or identifier != idempotency.claim_id
-                or not account_record_audit_matches(
-                    record, audit_event, idempotency_key=idempotency.key
-                )
                 or identifier in store
                 or lookup in self._idempotency
                 or audit_event.event_id in self._audit_events
             ):
                 raise IdempotencyConflict(idempotency.key)
+            stored_record = record
+            stored_idempotency = idempotency
+            if isinstance(record, PaymentDestinationRecord) and record.active:
+                active = [
+                    item
+                    for item in self._payment_destinations.values()
+                    if item.customer_id == record.customer_id and item.active
+                ]
+                stored_record = record.model_copy(update={'is_common': not active})
+                stored_idempotency = payment_destination_create_result(stored_record, idempotency)
+            if not account_record_audit_matches(
+                stored_record, audit_event, idempotency_key=stored_idempotency.key
+            ):
+                raise IdempotencyConflict(idempotency.key)
             del kind
-            store[identifier] = deepcopy(record)
-            self._idempotency[lookup] = deepcopy(idempotency)
+            store[identifier] = deepcopy(stored_record)
+            self._idempotency[lookup] = deepcopy(stored_idempotency)
             self._audit_events[audit_event.event_id] = deepcopy(audit_event)
+            return deepcopy(stored_record)
 
     def get_policy(self, policy_id: str, customer_id: str) -> PolicyNumberRecord | None:
         record = self._policies.get(policy_id)
@@ -426,7 +443,10 @@ class FixtureRepository(PersistenceRepository):
             after,
             limit,
         )
-        return [record for record in records if isinstance(record, PaymentDestinationRecord)], more
+        destinations = [
+            record for record in records if isinstance(record, PaymentDestinationRecord)
+        ]
+        return destinations, more
 
     def list_identity_documents(
         self,
@@ -450,6 +470,7 @@ class FixtureRepository(PersistenceRepository):
         record: AccountRecord,
         expected_revision: int,
         audit_event: AuditEventEnvelope,
+        related_audit_event_id: str | None = None,
     ) -> None:
         with self._claim_mutation_lock:
             _, identifier, _ = account_record_identity(record)
@@ -466,6 +487,37 @@ class FixtureRepository(PersistenceRepository):
                 or audit_event.event_id in self._audit_events
             ):
                 raise KeyError(identifier)
+            if isinstance(record, PaymentDestinationRecord) and record.is_common:
+                if (
+                    not isinstance(current, PaymentDestinationRecord)
+                    or not current.active
+                    or not record.active
+                ):
+                    raise PaymentDestinationDesignationConflict(identifier, reason='inactive')
+                previous = [
+                    other
+                    for other_id, other in self._payment_destinations.items()
+                    if other_id != record.payment_destination_id
+                    and other.customer_id == record.customer_id
+                    and other.active
+                    and other.is_common
+                ]
+                if len(previous) > 1 or (previous and related_audit_event_id is None):
+                    raise KeyError(identifier)
+                if previous:
+                    assert related_audit_event_id is not None
+                    demoted, demotion_event = payment_destination_demotion(
+                        previous[0], audit_event, related_audit_event_id
+                    )
+                    if (
+                        not account_record_audit_matches(
+                            demoted, demotion_event, idempotency_key=None
+                        )
+                        or demotion_event.event_id in self._audit_events
+                    ):
+                        raise KeyError(identifier)
+                    self._payment_destinations[demoted.payment_destination_id] = demoted
+                    self._audit_events[demotion_event.event_id] = demotion_event
             store[identifier] = deepcopy(record)
             self._audit_events[audit_event.event_id] = deepcopy(audit_event)
 
@@ -795,6 +847,7 @@ class FixtureRepository(PersistenceRepository):
         self._motor_other_drivers.clear()
         self._contents_item_evidence_associations.clear()
         self._external_tasks.clear()
+        self._external_task_attempts.clear()
         self._external_task_requests.clear()
         self._external_task_evidence_links.clear()
         self._external_task_results.clear()
@@ -2394,6 +2447,32 @@ class FixtureRepository(PersistenceRepository):
             return
         self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
 
+    def save_assessor_routing_settlement(
+        self,
+        operation: AssessorRoutingOperation,
+        task: ExternalTaskRecord,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Atomically persist an assessor outcome and its attempt in fixture storage."""
+        with self._claim_mutation_lock:
+            operations = deepcopy(self._assessor_routing_operations)
+            tasks = deepcopy(self._external_tasks)
+            attempts = deepcopy(self._external_task_attempts)
+            events = deepcopy(self._realtime_events)
+            sequence = self._realtime_sequence
+            try:
+                self.save_assessor_routing_operation(operation)
+                self.save_external_task(task, customer_id)
+                self.save_external_task_attempt(attempt, customer_id)
+            except Exception:
+                self._assessor_routing_operations = operations
+                self._external_tasks = tasks
+                self._external_task_attempts = attempts
+                self._realtime_events = events
+                self._realtime_sequence = sequence
+                raise
+
     def save_assessor_reconciliation(
         self,
         claim: WorkingClaim,
@@ -3536,6 +3615,71 @@ class FixtureRepository(PersistenceRepository):
             self._external_task_requests[request_id] = deepcopy(reserved)
             return reserved
 
+    def save_external_task_attempt(
+        self,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Append one claim-owned attempt without replacing prior history."""
+        with self._claim_mutation_lock:
+            if self.get_claim(attempt.claim_id, customer_id) is None:
+                raise KeyError(attempt.claim_id)
+            task = self._external_tasks.get(attempt.task_id)
+            if task is None or task.claim_id != attempt.claim_id:
+                raise KeyError(attempt.task_id)
+            request = next(
+                (
+                    item
+                    for item in self._external_task_requests.values()
+                    if item.task_id == attempt.task_id
+                ),
+                None,
+            )
+            if request is None or request.operation_id != attempt.operation_id:
+                raise KeyError(attempt.operation_id)
+            existing = self._external_task_attempts.get(attempt.attempt_id)
+            if existing is not None:
+                if existing != attempt:
+                    raise IdempotencyConflict(attempt.attempt_id)
+                return
+            for stored in self._external_task_attempts.values():
+                if (
+                    stored.task_id == attempt.task_id
+                    and stored.attempt_number == attempt.attempt_number
+                ):
+                    raise IdempotencyConflict(attempt.attempt_id)
+            prior = [
+                stored.attempt_number
+                for stored in self._external_task_attempts.values()
+                if stored.task_id == attempt.task_id
+            ]
+            expected_number = max(prior, default=0) + 1
+            if attempt.attempt_number != expected_number:
+                raise IdempotencyConflict(attempt.attempt_id)
+            self._external_task_attempts[attempt.attempt_id] = deepcopy(attempt)
+
+    def save_external_task_settlement(
+        self,
+        task: ExternalTaskRecord,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Atomically persist a generic task outcome and its attempt in fixture storage."""
+        with self._claim_mutation_lock:
+            tasks = deepcopy(self._external_tasks)
+            attempts = deepcopy(self._external_task_attempts)
+            events = deepcopy(self._realtime_events)
+            sequence = self._realtime_sequence
+            try:
+                self.save_external_task(task, customer_id)
+                self.save_external_task_attempt(attempt, customer_id)
+            except Exception:
+                self._external_tasks = tasks
+                self._external_task_attempts = attempts
+                self._realtime_events = events
+                self._realtime_sequence = sequence
+                raise
+
     def release_external_dispatch(
         self,
         claim_id: str,
@@ -3836,6 +3980,20 @@ class FixtureRepository(PersistenceRepository):
             deepcopy(task) for task in self._external_tasks.values() if task.claim_id == claim_id
         ]
         return sorted(tasks, key=lambda task: (task.created_at, task.task_id))
+
+    def list_external_task_attempts_internal(
+        self,
+        claim_id: str,
+    ) -> list[ExternalTaskAttempt]:
+        """Return immutable attempts in task/sequence order."""
+        attempts = [
+            deepcopy(attempt)
+            for attempt in self._external_task_attempts.values()
+            if attempt.claim_id == claim_id
+        ]
+        return sorted(
+            attempts, key=lambda item: (item.task_id, item.attempt_number, item.attempt_id)
+        )
 
     def list_external_task_results_internal(self, claim_id: str) -> list[ExternalTaskResult]:
         """List returned results for an already-authorised internal claim read.
@@ -4404,6 +4562,7 @@ for _material_claim_mutation in (
     'save_evidence_action_mutation',
     'save_evidence_mutation',
     'save_external_task',
+    'save_external_task_attempt',
     'save_external_task_request',
     'save_external_task_evidence_link',
     'save_external_task_result',

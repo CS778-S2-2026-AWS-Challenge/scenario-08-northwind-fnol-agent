@@ -89,7 +89,6 @@ export default function UserProfile({
   const resolvedController = controller || {
     resources: {
       assets: { items: assets, error: assetsError, loading: assets === null, stale: false },
-      policies: { items: [], error: '', loading: false, stale: false },
       payments: { items: [], error: '', loading: false, stale: false },
       identities: { items: [], error: '', loading: false, stale: false },
     },
@@ -100,12 +99,9 @@ export default function UserProfile({
     savePreferences: onSavePreferences,
     createAsset: ({ asset }) => onCreateAsset(asset),
     saveAsset: onUpdateAsset,
-    createPolicy: async () => {},
-    savePolicy: async () => {},
     createIdentity: async () => {},
     saveIdentity: async () => {},
     reloadAssets: onReloadAssets,
-    reloadPolicies: async () => [],
     reloadPayments: async () => [],
     reloadIdentities: async () => [],
   }
@@ -126,8 +122,6 @@ export default function UserProfile({
           account={account}
           controller={personalController}
           headingAs={SectionTitle}
-          policyController={resolvedController}
-          policyResource={resolvedController.resources.policies}
         />
       )
     }

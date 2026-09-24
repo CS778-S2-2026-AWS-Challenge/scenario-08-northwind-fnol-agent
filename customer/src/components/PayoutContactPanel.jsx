@@ -35,6 +35,8 @@ export default function PayoutContactPanel({
   )
   const [contactPreference, setContactPreference] = useState(existingContact)
   const [addingDestination, setAddingDestination] = useState(false)
+  const [bankName, setBankName] = useState('')
+  const [accountHolderName, setAccountHolderName] = useState('')
   const [accountType, setAccountType] = useState('')
   const [accountNumber, setAccountNumber] = useState('')
   const [formError, setFormError] = useState('')
@@ -73,8 +75,18 @@ export default function PayoutContactPanel({
   async function saveDestination(event) {
     event.preventDefault()
     setFormError('')
+    const normalizedBankName = bankName.trim()
+    const normalizedAccountHolderName = accountHolderName.trim()
     const normalizedType = accountType.trim()
     const normalizedNumber = accountNumber.trim()
+    if (!normalizedBankName) {
+      setFormError('Enter the bank name.')
+      return
+    }
+    if (!normalizedAccountHolderName) {
+      setFormError('Enter the account holder name.')
+      return
+    }
     if (!normalizedType) {
       setFormError('Enter the account type.')
       return
@@ -87,8 +99,12 @@ export default function PayoutContactPanel({
       const created = await onAddDestination({
         accountType: normalizedType,
         accountNumber: normalizedNumber,
+        bankName: normalizedBankName,
+        accountHolderName: normalizedAccountHolderName,
       })
       setSelectedDestinationId(created.payment_destination_id)
+      setBankName('')
+      setAccountHolderName('')
       setAccountType('')
       setAccountNumber('')
       setAddingDestination(false)
@@ -192,6 +208,24 @@ export default function PayoutContactPanel({
 
         {showDestinationForm && (
           <form className="payout-new-account" onSubmit={saveDestination}>
+            <label htmlFor="payout-bank-name">Bank</label>
+            <input
+              id="payout-bank-name"
+              value={bankName}
+              onChange={(event) => setBankName(event.target.value)}
+              autoComplete="organization"
+              disabled={busy}
+              required
+            />
+            <label htmlFor="payout-account-holder-name">Account holder</label>
+            <input
+              id="payout-account-holder-name"
+              value={accountHolderName}
+              onChange={(event) => setAccountHolderName(event.target.value)}
+              autoComplete="name"
+              disabled={busy}
+              required
+            />
             <label htmlFor="payout-account-type">Account type</label>
             <input
               id="payout-account-type"

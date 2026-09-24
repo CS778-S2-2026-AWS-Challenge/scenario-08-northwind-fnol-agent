@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 from pydantic import Field, StringConstraints, field_validator, model_validator
 from pydantic_core import PydanticUndefined
@@ -67,6 +67,9 @@ class ProtectedAccountRecord(ContractModel):
 class PaymentDestinationRecord(ProtectedAccountRecord):
     payment_destination_id: str = Field(pattern=r'^pyd_[a-f0-9]{20}$')
     account_type: ShortText
+    bank_name: ShortText | None = None
+    account_holder_name: ShortText | None = None
+    is_common: bool = False
 
 
 class IdentityDocumentRecord(ProtectedAccountRecord):
@@ -86,6 +89,9 @@ class PolicyNumberProjection(ContractModel):
 class PaymentDestinationProjection(ContractModel):
     payment_destination_id: str
     account_type: str
+    bank_name: str | None = None
+    account_holder_name: str | None = None
+    is_common: bool = False
     masked_account_number: str
     revision: int
     active: bool
@@ -110,6 +116,8 @@ class CreatePolicyNumberRequest(ContractModel):
 class CreatePaymentDestinationRequest(ContractModel):
     account_type: ShortText
     account_number: ProtectedNumber
+    bank_name: ShortText
+    account_holder_name: ShortText
 
     @field_validator('account_number')
     @classmethod
@@ -148,6 +156,11 @@ class UpdatePolicyNumberRequest(ContractModel):
 class UpdatePaymentDestinationRequest(ContractModel):
     account_type: ShortText = Field(default_factory=_omitted_short_text)
     account_number: ProtectedNumber = Field(default_factory=_omitted_protected_number)
+    bank_name: ShortText | None = Field(default_factory=lambda: cast(str, PydanticUndefined))
+    account_holder_name: ShortText | None = Field(
+        default_factory=lambda: cast(str, PydanticUndefined)
+    )
+    is_common: Literal[True] = Field(default_factory=lambda: cast(Literal[True], PydanticUndefined))
 
     @field_validator('account_number')
     @classmethod
@@ -228,6 +241,9 @@ def project_payment_destination(
     return PaymentDestinationProjection(
         payment_destination_id=record.payment_destination_id,
         account_type=record.account_type,
+        bank_name=record.bank_name,
+        account_holder_name=record.account_holder_name,
+        is_common=record.is_common,
         masked_account_number=record.masked_value,
         revision=record.revision,
         active=record.active,

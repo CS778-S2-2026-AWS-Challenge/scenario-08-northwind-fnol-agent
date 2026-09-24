@@ -45,6 +45,7 @@ from backend.domain.evidence import (
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
     ASSESSOR_SERVICE_IDENTITY,
+    ExternalTaskAttempt,
     ExternalTaskAuthorisation,
     ExternalTaskDelivery,
     ExternalTaskEvidenceLink,
@@ -302,18 +303,87 @@ def _record_external_send(
     return sent
 
 
+def _build_external_attempt(
+    repository: PersistenceRepository,
+    *,
+    task: ExternalTaskRecord,
+    request: ExternalTaskRequest,
+    customer_id: str,
+    claim_revision: int,
+    outcome: ExternalTaskOperationStatus,
+    failure_code: ExternalTaskFailureCode | None,
+    delivery: ExternalTaskDelivery,
+    delivery_evidence: str | None,
+) -> ExternalTaskAttempt:
+    """Append the provider outcome for the next immutable task attempt."""
+    if request.operation_id is None:
+        raise _idempotency_error()
+    attempts = repository.list_external_task_attempts_internal(task.claim_id)
+    task_attempts = [item for item in attempts if item.task_id == task.task_id]
+    attempt_number = max((item.attempt_number for item in task_attempts), default=0) + 1
+    attempt_id = (
+        f'att_{request_fingerprint({"task_id": task.task_id, "number": attempt_number})[:24]}'
+    )
+    attempt = ExternalTaskAttempt(
+        attempt_id=attempt_id,
+        task_id=task.task_id,
+        claim_id=task.claim_id,
+        operation_id=request.operation_id,
+        attempt_number=attempt_number,
+        claim_revision=claim_revision,
+        started_at=request.sent_at or now_utc(),
+        outcome=outcome,
+        failure_code=failure_code,
+        delivery=delivery,
+        delivery_evidence=delivery_evidence,
+    )
+    return attempt
+
+
+def _record_external_attempt(
+    repository: PersistenceRepository,
+    *,
+    task: ExternalTaskRecord,
+    request: ExternalTaskRequest,
+    customer_id: str,
+    claim_revision: int,
+    outcome: ExternalTaskOperationStatus,
+    failure_code: ExternalTaskFailureCode | None,
+    delivery: ExternalTaskDelivery,
+    delivery_evidence: str | None,
+) -> None:
+    """Append the provider outcome for the next immutable task attempt."""
+    attempt = _build_external_attempt(
+        repository,
+        task=task,
+        request=request,
+        customer_id=customer_id,
+        claim_revision=claim_revision,
+        outcome=outcome,
+        failure_code=failure_code,
+        delivery=delivery,
+        delivery_evidence=delivery_evidence,
+    )
+    try:
+        repository.save_external_task_attempt(attempt, customer_id)
+    except (IdempotencyConflict, KeyError) as conflict:
+        raise _idempotency_error() from conflict
+
+
 def _record_external_acceptance(
     repository: PersistenceRepository,
     *,
     task: ExternalTaskRecord,
     customer_id: str,
     provider_reference: str,
+    persist: bool = True,
 ) -> ExternalTaskRecord:
     accepted = _accepted_external_task(task=task, provider_reference=provider_reference)
-    try:
-        repository.save_external_task(accepted, customer_id)
-    except (IdempotencyConflict, KeyError) as conflict:
-        raise _idempotency_error() from conflict
+    if persist:
+        try:
+            repository.save_external_task(accepted, customer_id)
+        except (IdempotencyConflict, KeyError) as conflict:
+            raise _idempotency_error() from conflict
     return accepted
 
 
@@ -893,6 +963,7 @@ def _record_external_failure(
     failure_code: ExternalTaskFailureCode,
     delivery: ExternalTaskDelivery,
     delivery_evidence: str | None,
+    persist: bool = True,
 ) -> ExternalTaskRecord:
     """Record on the task what the attempt actually came to.
 
@@ -951,10 +1022,11 @@ def _record_external_failure(
         }
     )
     assert_task_transition_is_permitted(task, failed)
-    try:
-        repository.save_external_task(failed, customer_id)
-    except (IdempotencyConflict, KeyError) as conflict:
-        raise _idempotency_error() from conflict
+    if persist:
+        try:
+            repository.save_external_task(failed, customer_id)
+        except (IdempotencyConflict, KeyError) as conflict:
+            raise _idempotency_error() from conflict
     return failed
 
 
@@ -2274,6 +2346,7 @@ def route_assessor(
             failure_code=ExternalTaskFailureCode(failure.code.value),
             delivery=failure.delivery,
             delivery_evidence=failure.delivery_evidence,
+            persist=False,
         )
         # The operation takes the status the task was given rather than deciding a
         # second time from the failure code. The two used to be settled by separate
@@ -2286,7 +2359,23 @@ def route_assessor(
                 'updated_at': now_utc(),
             }
         )
-        repository.save_assessor_routing_operation(failed_operation)
+        failed_attempt = _build_external_attempt(
+            repository,
+            task=task,
+            request=external_request,
+            customer_id=claim.customer_id,
+            claim_revision=operation.authorised_revision,
+            outcome=failed_task.status,
+            failure_code=ExternalTaskFailureCode(failure.code.value),
+            delivery=failed_task.delivery,
+            delivery_evidence=failed_task.delivery_evidence,
+        )
+        repository.save_assessor_routing_settlement(
+            failed_operation,
+            failed_task,
+            failed_attempt,
+            claim.customer_id,
+        )
         # An attempt that settled releases its hold: the task status now says what may
         # happen next, and a retryable failure that the matrix permits to be retried
         # must be able to take the reservation again. An unknown outcome keeps it,
@@ -2323,15 +2412,31 @@ def route_assessor(
                 f'{task.integration_source.value} routing answer: '
                 f'{outcome.result.routing_status.value}'
             ),
+            persist=False,
         )
-        repository.save_assessor_routing_operation(
-            operation.model_copy(
-                update={
-                    'status': _OPERATION_STATUS_BY_TASK_STATUS[refused_task.status],
-                    'failure_code': AssessorRoutingFailureCode.MALFORMED,
-                    'updated_at': now_utc(),
-                }
-            )
+        refused_operation = operation.model_copy(
+            update={
+                'status': _OPERATION_STATUS_BY_TASK_STATUS[refused_task.status],
+                'failure_code': AssessorRoutingFailureCode.MALFORMED,
+                'updated_at': now_utc(),
+            }
+        )
+        refused_attempt = _build_external_attempt(
+            repository,
+            task=task,
+            request=external_request,
+            customer_id=claim.customer_id,
+            claim_revision=operation.authorised_revision,
+            outcome=refused_task.status,
+            failure_code=ExternalTaskFailureCode.MALFORMED,
+            delivery=refused_task.delivery,
+            delivery_evidence=refused_task.delivery_evidence,
+        )
+        repository.save_assessor_routing_settlement(
+            refused_operation,
+            refused_task,
+            refused_attempt,
+            claim.customer_id,
         )
         _release_dispatch(repository, claim=claim, request=external_request)
         raise ApiError(
@@ -2356,13 +2461,37 @@ def route_assessor(
     )
     provider_reference = outcome.result.assessor_reference or outcome.result.queue_reference
     assert provider_reference is not None
-    repository.save_assessor_routing_operation(accepted_operation)
     accepted_task = _record_external_acceptance(
         repository,
         task=task,
         customer_id=claim.customer_id,
         provider_reference=provider_reference,
+        persist=False,
     )
+    accepted_attempt = _build_external_attempt(
+        repository,
+        task=task,
+        request=external_request,
+        customer_id=claim.customer_id,
+        claim_revision=operation.authorised_revision,
+        outcome=ExternalTaskOperationStatus.ACCEPTED,
+        failure_code=None,
+        delivery=accepted_task.delivery,
+        delivery_evidence=accepted_task.delivery_evidence,
+    )
+    try:
+        repository.save_assessor_routing_settlement(
+            accepted_operation,
+            accepted_task,
+            accepted_attempt,
+            claim.customer_id,
+        )
+    except Exception:
+        # The provider returned a known, idempotently replayable answer, but none of
+        # that answer reached durable lifecycle state. Release this attempt's hold so
+        # the same operation can replay and settle the complete record set.
+        _release_dispatch(repository, claim=claim, request=external_request)
+        raise
     _record_awaited_material(repository, task=accepted_task, claim=claim)
     # Acceptance is a settled outcome too. Leaving the hold would leave the stored
     # request claiming a dispatch is in progress after the answer arrived.

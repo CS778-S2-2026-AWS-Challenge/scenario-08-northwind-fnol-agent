@@ -56,7 +56,12 @@ def test_claim_auto_fill_manifest_is_owner_scoped_preference_gated_and_read_only
         '/api/v1/account/payment-destinations',
         owner,
         'auto-fill-payment',
-        {'account_type': 'cheque', 'account_number': '12-3456-1234567-00'},
+        {
+            'account_type': 'cheque',
+            'account_number': '12-3456-1234567-00',
+            'bank_name': 'Synthetic Bank',
+            'account_holder_name': 'Synthetic Claimant',
+        },
     )
     _post(
         client,

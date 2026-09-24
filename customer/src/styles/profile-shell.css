@@ -140,31 +140,6 @@
   font-weight: var(--font-weight-semibold);
 }
 
-.profile-policy-disclosure {
-  max-width: var(--measure-reading);
-  margin-top: var(--space-4);
-}
-
-.profile-policy-disclosure > summary {
-  display: inline-flex;
-  min-height: var(--size-control-touch);
-  align-items: center;
-  color: var(--color-accent-strong);
-  font-size: var(--font-size-control);
-  font-weight: var(--font-weight-medium);
-  cursor: pointer;
-}
-
-.profile-policy-disclosure > summary:focus-visible {
-  border-radius: var(--radius-md);
-  outline: var(--border-focus);
-  outline-offset: var(--space-1);
-}
-
-.profile-policy-details {
-  padding-top: var(--space-2);
-}
-
 .profile-header-editor {
   max-width: var(--measure-reading);
   margin-top: var(--space-5);

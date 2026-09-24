@@ -9,7 +9,6 @@ const api = vi.hoisted(() => ({
   ApiRequestError: class ApiRequestError extends Error {},
   confirmClaimFields: vi.fn(),
   createAccountAsset: vi.fn(),
-  createAccountPolicy: vi.fn(),
   createExternalClaim: vi.fn(),
   createPaymentDestination: vi.fn(),
   createClaim: vi.fn(),
@@ -49,7 +48,6 @@ const api = vi.hoisted(() => ({
   updateAccountAsset: vi.fn(),
   createAccountIdentityDocument: vi.fn(),
   updateAccountIdentityDocument: vi.fn(),
-  updateAccountPolicy: vi.fn(),
   updateClaimField: vi.fn(),
 }))
 
@@ -639,7 +637,7 @@ describe('claimant intake projection', () => {
     await waitFor(() => expect(globalThis.location.pathname).toBe('/profile/personal-details'))
     expect(screen.queryByRole('button', { name: 'Policies' })).not.toBeInTheDocument()
     expect(screen.getByText('Not provided', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
-    expect(api.listAccountPolicies).toHaveBeenCalled()
+    expect(api.listAccountPolicies).not.toHaveBeenCalled()
 
     await user.click(screen.getAllByRole('button', { name: 'Insured assets' })[0])
     expect(await screen.findByRole('heading', { name: 'Insured assets' })).toBeInTheDocument()

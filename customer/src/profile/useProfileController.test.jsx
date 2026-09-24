@@ -6,16 +6,13 @@ const api = vi.hoisted(() => ({
   ApiRequestError: class ApiRequestError extends Error {},
   createAccountAsset: vi.fn(),
   createAccountIdentityDocument: vi.fn(),
-  createAccountPolicy: vi.fn(),
   getAuthenticatedAccount: vi.fn(),
   listAccountAssets: vi.fn(),
   listAccountIdentityDocuments: vi.fn(),
   listAccountPaymentDestinations: vi.fn(),
-  listAccountPolicies: vi.fn(),
   requestId: vi.fn(),
   updateAccountAsset: vi.fn(),
   updateAccountIdentityDocument: vi.fn(),
-  updateAccountPolicy: vi.fn(),
   updateAccountPreferences: vi.fn(),
   updateAccountProfile: vi.fn(),
 }))
@@ -23,7 +20,6 @@ const api = vi.hoisted(() => ({
 vi.mock('../api.js', () => api)
 
 import useProfileController, { ProfileMutationError } from './useProfileController.js'
-import { policyDisclosureSummary, policyNumberSummary } from './policyNumber.js'
 
 const account = {
   customer_id: 'cus_profile_controller',
@@ -45,12 +41,6 @@ const asset = {
   revision: 1,
 }
 
-const policy = {
-  policy_id: 'pol_11111111111111111111',
-  policy_number: 'NTH-1234',
-  revision: 1,
-}
-
 const payment = {
   payment_destination_id: 'pay_11111111111111111111',
   account_type: 'everyday',
@@ -67,11 +57,11 @@ const identity = {
 
 const resourceCases = [
   {
-    label: 'Policies',
-    resource: 'policies',
-    listMethod: 'listAccountPolicies',
-    reloadMethod: 'reloadPolicies',
-    records: [policy],
+    label: 'Assets',
+    resource: 'assets',
+    listMethod: 'listAccountAssets',
+    reloadMethod: 'reloadAssets',
+    records: [asset],
   },
   {
     label: 'Identity',
@@ -109,7 +99,6 @@ describe('useProfileController mutation recovery', () => {
     let requestNumber = 0
     api.requestId.mockImplementation((prefix) => `${prefix}-key-${requestNumber += 1}`)
     api.listAccountAssets.mockResolvedValue(emptyPage())
-    api.listAccountPolicies.mockResolvedValue(emptyPage())
     api.listAccountPaymentDestinations.mockResolvedValue(emptyPage())
     api.listAccountIdentityDocuments.mockResolvedValue(emptyPage())
   })
@@ -216,48 +205,36 @@ describe('useProfileController mutation recovery', () => {
   )
 
   it.each([
-    {
-      label: 'one retained policy',
-      records: [policy],
-      header: '••••1234 · Refreshing…',
-      disclosure: 'View or edit policy number — refreshing',
-    },
-    {
-      label: 'a retained empty policy list',
-      records: [],
-      header: 'Loading…',
-      disclosure: 'Add policy number — loading',
-    },
-  ])('reports active loading while retrying $label after failure', async ({ records, header, disclosure }) => {
+    { label: 'one retained asset', records: [asset] },
+    { label: 'a retained empty asset list', records: [] },
+  ])('reports active loading while retrying $label after failure', async ({ records }) => {
     let resolveRetry
     const retryResponse = new Promise((resolve) => { resolveRetry = resolve })
-    api.listAccountPolicies
+    api.listAccountAssets
       .mockResolvedValueOnce(emptyPage(records))
       .mockRejectedValueOnce({ code: 'NETWORK_ERROR' })
       .mockImplementationOnce(() => retryResponse)
     const { result } = renderController()
 
-    await waitFor(() => expect(result.current.controller.resources.policies.items).toEqual(records))
+    await waitFor(() => expect(result.current.controller.resources.assets.items).toEqual(records))
     await act(async () => {
-      await expect(result.current.controller.reloadPolicies()).rejects.toMatchObject({ code: 'NETWORK_ERROR' })
+      await expect(result.current.controller.reloadAssets()).rejects.toMatchObject({ code: 'NETWORK_ERROR' })
     })
 
     let retryPromise
-    act(() => { retryPromise = result.current.controller.reloadPolicies() })
-    await waitFor(() => expect(result.current.controller.resources.policies).toMatchObject({
+    act(() => { retryPromise = result.current.controller.reloadAssets() })
+    await waitFor(() => expect(result.current.controller.resources.assets).toMatchObject({
       items: records,
       error: '',
       loading: true,
       stale: true,
     }))
-    expect(policyNumberSummary(result.current.controller.resources.policies)).toBe(header)
-    expect(policyDisclosureSummary(result.current.controller.resources.policies)).toBe(disclosure)
 
     await act(async () => {
       resolveRetry(emptyPage(records))
       await retryPromise
     })
-    expect(result.current.controller.resources.policies).toMatchObject({
+    expect(result.current.controller.resources.assets).toMatchObject({
       items: records,
       error: '',
       loading: false,
@@ -265,22 +242,22 @@ describe('useProfileController mutation recovery', () => {
     })
   })
 
-  it('retains policy records while mutation readback loads and fails', async () => {
+  it('retains records while mutation readback loads and fails', async () => {
     let rejectReadback
     const readback = new Promise((resolve, reject) => { rejectReadback = reject })
-    api.listAccountPolicies
-      .mockResolvedValueOnce(emptyPage([policy]))
+    api.listAccountAssets
+      .mockResolvedValueOnce(emptyPage([asset]))
       .mockImplementationOnce(() => readback)
-    api.updateAccountPolicy.mockRejectedValueOnce({ code: 'NETWORK_ERROR' })
+    api.updateAccountAsset.mockRejectedValueOnce({ code: 'NETWORK_ERROR' })
     const { result } = renderController()
 
-    await waitFor(() => expect(result.current.controller.resources.policies.items).toEqual([policy]))
+    await waitFor(() => expect(result.current.controller.resources.assets.items).toEqual([asset]))
     let mutationPromise
     act(() => {
-      mutationPromise = result.current.controller.savePolicy(policy.policy_id, policy.revision, 'NTH-9876')
+      mutationPromise = result.current.controller.saveAsset(asset.asset_id, asset.revision, { display_name: 'Renamed SUV' })
     })
-    await waitFor(() => expect(result.current.controller.resources.policies).toMatchObject({
-      items: [policy],
+    await waitFor(() => expect(result.current.controller.resources.assets).toMatchObject({
+      items: [asset],
       error: '',
       loading: true,
       stale: false,
@@ -290,12 +267,12 @@ describe('useProfileController mutation recovery', () => {
       rejectReadback({ code: 'NETWORK_ERROR' })
       await expect(mutationPromise).rejects.toMatchObject({ kind: 'unknown' })
     })
-    expect(result.current.controller.resources.policies).toMatchObject({
-      items: [policy],
+    expect(result.current.controller.resources.assets).toMatchObject({
+      items: [asset],
       loading: false,
       stale: true,
     })
-    expect(result.current.controller.resources.policies.error).not.toBe('')
+    expect(result.current.controller.resources.assets.error).not.toBe('')
   })
 
   it('reuses the same idempotency key when an asset response is lost and readback cannot find it', async () => {

@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.domain.audit import AuditSubject, AuditSubjectType
+from backend.domain.claim_creation import evidence_snapshot_fingerprint
 from backend.domain.external_services import (
     ASSESSOR_SERVICE_IDENTITY,
     ExternalTaskDelivery,
@@ -1608,13 +1609,14 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
             'working_claim_id': claim_id,
             'claim_revision': stored.revision,
             'authorised_decision_id': create_decision.decision_id,
+            'evidence_snapshot_fingerprint': evidence_snapshot_fingerprint([]),
             'confirmed_form': {},
             'evidence_refs': [],
             'pending_evidence': [],
             'route': 'standard_motor_intake',
         },
     )
-    assert creation_response.status_code == 201
+    assert creation_response.status_code == 201, creation_response.text
     creation = creation_response.json()
 
     created_claim = repository.get_claim_internal(claim_id)
@@ -1680,7 +1682,6 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
         },
     )
     assert routing_response.status_code == 201
-    routing = routing_response.json()
 
     response = client.get(
         f'/api/v1/workbench/claims/{claim_id}',
@@ -1702,8 +1703,8 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
     assert detail['integration_summary']['claim_number'] == creation['claim_number']
     assert detail['integration_summary']['expected_by'] == creation['expected_by']
     assert detail['integration_summary']['assessor_routing_status'] == 'assigned'
-    assert detail['customer_next_step']['status'] == 'assessor_assigned'
-    assert detail['customer_next_step']['expected_by'] == routing['expected_by']
+    assert detail['customer_next_step']['status'] == 'claim_created'
+    assert detail['customer_next_step']['expected_by'] == creation['expected_by']
     assert detail['terminal_disposition']['value'] == 'completed'
     assert detail['terminal_disposition']['reason_code'] == 'CLAIM_CREATED'
     assert detail['terminal_disposition']['source_refs'] == [

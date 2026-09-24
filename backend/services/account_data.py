@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
@@ -62,6 +62,8 @@ from backend.repositories.account_data import (
     AccountDataRepository,
     AccountRecord,
     ClaimantContactSelectionConflict,
+    CommonPaymentDestinationConflict,
+    PaymentDestinationDesignationConflict,
     PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
     account_record_identity,
@@ -129,6 +131,15 @@ def _idempotency_conflict() -> ApiError:
     )
 
 
+def _payment_destination_state_conflict(reason: str) -> ApiError:
+    return ApiError(
+        status_code=409,
+        code='PAYMENT_DESTINATION_STATE_CONFLICT',
+        message='Only an active Payment Destination can be designated as common.',
+        details=[ErrorDetail(field='is_common', reason=reason)],
+    )
+
+
 def _seal(protected_values: ProtectedValueAdapter, value: str) -> str:
     try:
         return protected_values.seal(value)
@@ -185,34 +196,40 @@ def _create(
         if existing.request_fingerprint != fingerprint or existing.response_payload is None:
             raise _idempotency_conflict()
         return projection_type.model_validate(existing.response_payload)
-    record = build()
-    projection = project(record)
-    _, identifier, _ = account_record_identity(record)
-    idempotency = IdempotencyRecord(
-        actor_id=principal.subject,
-        route=route,
-        key=key,
-        request_fingerprint=fingerprint,
-        claim_id=identifier,
-        session_id='',
-        response_payload=projection.model_dump(mode='json'),
-    )
-    try:
-        repository.create_account_record(
-            record,
-            idempotency,
-            _account_audit(record, principal, action='created', idempotency_key=key),
+    for attempt in range(2):
+        record = build()
+        projection = project(record)
+        _, identifier, _ = account_record_identity(record)
+        idempotency = IdempotencyRecord(
+            actor_id=principal.subject,
+            route=route,
+            key=key,
+            request_fingerprint=fingerprint,
+            claim_id=identifier,
+            session_id='',
+            response_payload=projection.model_dump(mode='json'),
         )
-    except IdempotencyConflict as error:
-        replay = idempotency_repository.find_idempotency(principal.subject, route, key)
-        if (
-            replay is None
-            or replay.request_fingerprint != fingerprint
-            or replay.response_payload is None
-        ):
-            raise _idempotency_conflict() from error
-        return projection_type.model_validate(replay.response_payload)
-    return projection
+        try:
+            stored_record = repository.create_account_record(
+                record,
+                idempotency,
+                _account_audit(record, principal, action='created', idempotency_key=key),
+            )
+        except CommonPaymentDestinationConflict:
+            if attempt == 0:
+                continue
+            raise
+        except IdempotencyConflict as error:
+            replay = idempotency_repository.find_idempotency(principal.subject, route, key)
+            if (
+                replay is None
+                or replay.request_fingerprint != fingerprint
+                or replay.response_payload is None
+            ):
+                raise _idempotency_conflict() from error
+            return projection_type.model_validate(replay.response_payload)
+        return project(cast(RecordT, stored_record))
+    raise RuntimeError('Payment Destination create retry was exhausted.')
 
 
 def create_policy(
@@ -262,6 +279,9 @@ def create_payment_destination(
             payment_destination_id=new_id('pyd'),
             customer_id=principal.subject,
             account_type=payload.account_type,
+            bank_name=payload.bank_name,
+            account_holder_name=payload.account_holder_name,
+            is_common=False,
             protected_value=_seal(protected_values, payload.account_number),
             masked_value=masked_value(payload.account_number),
             created_at=now,
@@ -456,6 +476,7 @@ def _update(
     expected_revision: int,
     changes: dict[str, object],
     project: Callable[[RecordT], ProjectionT],
+    related_audit_event_id: str | None = None,
 ) -> ProjectionT:
     updated = record.model_copy(
         update={**changes, 'revision': record.revision + 1, 'updated_at': now_utc()}
@@ -465,6 +486,7 @@ def _update(
             updated,
             expected_revision,
             _account_audit(updated, principal, action='updated'),
+            related_audit_event_id,
         )
     except RevisionConflict as error:
         raise _revision_conflict(error.current_revision) from error
@@ -508,13 +530,29 @@ def update_payment_destination(
         raise _not_found('payment destination')
     if record.revision != expected:
         raise _revision_conflict(record.revision)
+    if 'is_common' in payload.model_fields_set and not record.active:
+        raise _payment_destination_state_conflict('The Payment Destination is inactive.')
     changes = payload.model_dump(exclude_unset=True, exclude={'account_number'})
     if 'account_number' in payload.model_fields_set:
         changes.update(
             protected_value=_seal(protected_values, payload.account_number),
             masked_value=masked_value(payload.account_number),
         )
-    return _update(repository, principal, record, expected, changes, project_payment_destination)
+    related_audit_event_id = None
+    if payload.is_common is True and 'is_common' in payload.model_fields_set:
+        related_audit_event_id = new_id('aud')
+    try:
+        return _update(
+            repository,
+            principal,
+            record,
+            expected,
+            changes,
+            project_payment_destination,
+            related_audit_event_id,
+        )
+    except PaymentDestinationDesignationConflict as error:
+        raise _payment_destination_state_conflict(error.reason) from error
 
 
 def update_identity_document(
@@ -561,9 +599,10 @@ def deactivate_record(
     if not record.active:
         _, identifier, _ = account_record_identity(record)
         return RetirementResult(resource_id=identifier, revision=record.revision)
-    updated = record.model_copy(
-        update={'active': False, 'revision': record.revision + 1, 'updated_at': now_utc()}
-    )
+    retirement_changes = {'active': False, 'revision': record.revision + 1, 'updated_at': now_utc()}
+    if isinstance(record, PaymentDestinationRecord):
+        retirement_changes['is_common'] = False
+    updated = record.model_copy(update=retirement_changes)
     try:
         repository.update_account_record(
             updated, expected, _account_audit(updated, principal, action='retired')

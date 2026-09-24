@@ -319,6 +319,8 @@ export function listPaymentDestinations({ cursor, limit = 100, signal } = {}) {
 export function createPaymentDestination({
   accountType,
   accountNumber,
+  bankName,
+  accountHolderName,
   idempotencyKey = requestId('payment-destination'),
 }) {
   return apiRequest('/api/v1/account/payment-destinations', {
@@ -327,6 +329,8 @@ export function createPaymentDestination({
     body: JSON.stringify({
       account_type: accountType,
       account_number: accountNumber,
+      bank_name: bankName,
+      account_holder_name: accountHolderName,
     }),
   })
 }
@@ -364,28 +368,6 @@ export function updateAccountPreferences(preferences, revision) {
     method: 'PATCH',
     headers: revision == null ? undefined : { 'If-Match': String(revision) },
     body: JSON.stringify(preferences),
-  })
-}
-
-export function listAccountPolicies({ cursor, limit = 25, signal } = {}) {
-  const params = new URLSearchParams({ limit: String(limit) })
-  if (cursor) params.set('cursor', cursor)
-  return apiRequest(`/api/v1/account/policies?${params}`, { signal })
-}
-
-export function createAccountPolicy({ policyNumber, idempotencyKey = requestId('policy') }) {
-  return apiRequest('/api/v1/account/policies', {
-    method: 'POST',
-    headers: { 'Idempotency-Key': idempotencyKey },
-    body: JSON.stringify({ policy_number: policyNumber }),
-  })
-}
-
-export function updateAccountPolicy({ policyId, revision, policyNumber }) {
-  return apiRequest(`/api/v1/account/policies/${encodeURIComponent(policyId)}`, {
-    method: 'PATCH',
-    headers: { 'If-Match': String(revision) },
-    body: JSON.stringify({ policy_number: policyNumber }),
   })
 }
 
