@@ -91,17 +91,38 @@ unsatisfiable provider schema. They are not production runtime dependencies.
 
 ### Run the app
 
-Start the backend and the claimant frontend against the shared model with one command:
+Start the complete system — MongoDB, MinIO with the approved knowledge corpus ingested, the
+backend on the `local_mvp` persistence profile talking to the shared model, and all three
+frontends — with one command:
 
 ```powershell
 .\scripts\start-dev.ps1
 ```
 
-It pulls the model credentials from the team secrets endpoint, starts the backend on port 8000
-with the `model_gateway` runtime profile and the shared `config/model-runtime-bindings.json`
-(currently OpenRouter `openai/gpt-4o`), then starts the claimant frontend on port 5173. Open
-`http://127.0.0.1:5173/`. Add `-BackendOnly` to skip the frontend, or `-BackendPort` /
-`-CustomerPort` to move either process.
+Requires Docker Desktop running. The script:
+
+1. pulls model credentials from the team secrets endpoint;
+2. brings up MongoDB and MinIO through `docker-compose.yml` and waits for each to report
+   healthy, then runs the one-shot `mongo-init`/`minio-init` containers and checks their real
+   exit codes;
+3. ingests the approved knowledge corpus into that MinIO so retrieval is real, not the fixture
+   stub;
+4. starts the backend on `DATA_RUNTIME_PROFILE=local_mvp` with the `model_gateway` runtime
+   profile against the shared `config/model-runtime-bindings.json` (currently OpenRouter
+   `openai/gpt-4o`), and polls `/health/ready` until it actually reports ready;
+5. starts the claimant, Workbench, and Admin frontends and polls each one's page until it
+   actually responds.
+
+Every step fails loudly on its real exit code or health check instead of printing a PID and
+moving on: a backend that crashes on startup is reported as failed, not as running. Open
+`http://127.0.0.1:5173/` for the claimant view, `http://127.0.0.1:5174/workbench/` for staff, and
+`http://127.0.0.1:5175/admin/` for the Control Plane console.
+
+Options: `-BackendOnly` starts only MongoDB/MinIO/backend and skips all three frontends.
+`-SkipDocker` falls back to the fixture data profile (no MongoDB, no MinIO, no persisted
+Evidence, no real knowledge retrieval) when Docker is genuinely unavailable. `-BackendPort` /
+`-CustomerPort` / `-WorkbenchPort` / `-AdminPort` move a process. `-ReadyTimeoutSeconds` extends
+the readiness wait on a slow machine.
 
 The script starts from a fresh Control Plane database each time (`var/dev/control-plane.sqlite3`,
 ignored by git). The backend only publishes the checked-in model catalogue into an empty Control
@@ -125,29 +146,52 @@ foreach ($line in ($bundle -split "`n")) {
     if ($line -match '^([A-Z][A-Z0-9_]*)=(.*)$') { Set-Item -Path "env:$($Matches[1])" -Value $Matches[2] }
 }
 
-# 2. Fresh Control Plane (see above), then select the model_gateway runtime and the shared profile.
+# 2. MongoDB and MinIO, then the real one-shot init containers.
+docker compose up -d --wait mongodb minio
+docker compose up --exit-code-from mongo-init mongo-init
+docker compose up --exit-code-from minio-init minio-init
+
+# 3. Ingest the approved knowledge corpus into that MinIO.
+$env:NORTHWIND_OBJECT_STORAGE_ENDPOINT = 'http://localhost:9000'
+$env:NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID = 'minioadmin'
+$env:NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY = 'minioadmin'
+$env:NORTHWIND_KNOWLEDGE_BUCKET = 'northwind-knowledge'
+py -3.12 scripts/upload_knowledge_sources.py config/knowledge-source-corpus
+Get-ChildItem config/knowledge-ingestion-requests/*.json | ForEach-Object {
+    py -3.12 scripts/ingest_knowledge_source.py $_.FullName
+}
+
+# 4. Fresh Control Plane (see above), then select local_mvp/model_gateway and the shared profile.
 New-Item -ItemType Directory -Force -Path var/dev | Out-Null
 Remove-Item -Force -ErrorAction SilentlyContinue var/dev/control-plane.sqlite3*
 $env:NORTHWIND_ENVIRONMENT = 'development'
 $env:NORTHWIND_IDENTITY_MODE = 'normal'
 $env:NORTHWIND_CONTROL_PLANE_DB_PATH = 'var/dev/control-plane.sqlite3'
+$env:DATA_RUNTIME_PROFILE = 'local_mvp'
+$env:NORTHWIND_OBJECT_STORAGE_ADAPTER = 's3_compatible'
+$env:NORTHWIND_MONGODB_URI = 'mongodb://localhost:27017/?directConnection=true&replicaSet=rs0'
+$env:NORTHWIND_MONGODB_DATABASE = 'northwind_fnol'
+$env:NORTHWIND_MONGODB_COLLECTION = 'northwind_records'
+$env:NORTHWIND_OBJECT_STORAGE_BUCKET = 'northwind-evidence'
 $env:AGENT_RUNTIME_PROFILE = 'model_gateway'
 $env:MODEL_RUNTIME_BINDINGS_PATH = 'config/model-runtime-bindings.json'
 $env:MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
 $env:MODEL_TIMEOUT_SECONDS = '180'
 
-# 3. Backend (in this shell).
+# 5. Backend (in this shell). Poll http://127.0.0.1:8000/health/ready before trusting it.
 py -3.12 -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --log-config scripts/dev-logging.json
 
-# 4. Claimant frontend (in a second shell; it proxies /api to port 8000).
+# 6. Claimant frontend (in a second shell; it proxies /api to port 8000).
 npm run dev --prefix customer -- --host 127.0.0.1 --port 5173
 ```
 
 The Workbench and Admin frontends start the same way from `workbench/` and `admin/` on ports
-5174 and 5175 if you need them.
+5174 and 5175, each with `--prefix` and `--port` changed to match; set `WORKBENCH_API_TARGET`
+and `ADMIN_API_TARGET` to `http://127.0.0.1:8000` first if the backend is not on the default port.
 
-`AGENT_RUNTIME_PROFILE=controlled` is a deterministic agent that never calls a model. It exists
-for CI and the test suite only and is not a way to run the app.
+`AGENT_RUNTIME_PROFILE=controlled` is a deterministic agent that never calls a model.
+`DATA_RUNTIME_PROFILE=fixture` keeps no Evidence and answers knowledge queries from a fixed
+stub. Both exist for CI and the test suite only and are not a way to run the app.
 
 Deployment environments inject the same variable names through their secret and configuration
 mechanisms; they must not package a local `.env` file.
@@ -188,11 +232,11 @@ FastAPI evidence flow against local MinIO, start the packaged service and config
 `s3_compatible` adapter as described in
 [MinIO Object-Storage Boundary](docs/minio-object-storage.md).
 
-To run the bounded local MVP persistence path, start the local MongoDB replica set and MinIO
-initialisers, then use `deploy/runtime/local-mvp.env.example`. The repeatable
-`py -3.12 scripts/run_local_mvp_smoke.py` check verifies MongoDB-backed claimant/staff recovery,
-revision and idempotency behaviour, protected MinIO evidence bytes, and governed knowledge
-retrieval. Policy/history remain synthetic. After those checks pass,
+`start-dev.ps1` above already runs the backend on this persistence path for interactive use. The
+following two smoke-test scripts verify it instead of running it: with the same MongoDB and MinIO
+from `docker-compose.yml` up, `py -3.12 scripts/run_local_mvp_smoke.py` checks MongoDB-backed
+claimant/staff recovery, revision and idempotency behaviour, protected MinIO evidence bytes, and
+governed knowledge retrieval. Policy/history remain synthetic. After those checks pass,
 `py -3.12 scripts/run_local_model_mvp_smoke.py` verifies the merged provider-neutral model path
 against the same MongoDB composition with a deterministic OpenAI-compatible transport. It covers
 accepted-turn provenance, restart recovery, replay without a second model call, stale revisions,
