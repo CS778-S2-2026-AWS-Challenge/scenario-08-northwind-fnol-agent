@@ -49,6 +49,97 @@ def _create_asset(client: TestClient, headers: dict[str, str]) -> dict[str, Any]
     return cast(dict[str, Any], response.json())
 
 
+@pytest.mark.parametrize(
+    ('asset_type', 'details'),
+    [
+        ('vehicle', {'registration': 'NOTE123'}),
+        ('property', {'address': '1 Note Street'}),
+        ('contents', {'description': 'Synthetic note item'}),
+    ],
+)
+def test_asset_note_round_trips_and_clears_for_each_asset_type(
+    client: TestClient,
+    repository: FixtureRepository,
+    asset_type: str,
+    details: dict[str, object],
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    created = client.post(
+        '/api/v1/account/assets',
+        headers={**owner, 'Idempotency-Key': f'note-create-{asset_type}'},
+        json={
+            'asset_type': asset_type,
+            'display_name': f'Synthetic {asset_type}',
+            'details': details,
+            'note': '  Keep near the front entrance.\nCall before visiting.  ',
+        },
+    )
+
+    assert created.status_code == 201, created.text
+    asset = created.json()
+    assert asset['note'] == 'Keep near the front entrance.\nCall before visiting.'
+
+    updated = client.patch(
+        f'/api/v1/account/assets/{asset["asset_id"]}',
+        headers={**owner, 'If-Match': '1'},
+        json={'display_name': f'Updated {asset_type}'},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()['note'] == asset['note']
+
+    stale = client.patch(
+        f'/api/v1/account/assets/{asset["asset_id"]}',
+        headers={**owner, 'If-Match': '1'},
+        json={'note': 'A stale replacement must not win.'},
+    )
+    assert stale.status_code == 409
+    assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert stale.json()['error']['current_revision'] == 2
+
+    fresh_session = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    readback = client.get(
+        f'/api/v1/account/assets/{asset["asset_id"]}',
+        headers=fresh_session,
+    )
+    assert readback.status_code == 200
+    assert readback.json()['note'] == asset['note']
+
+    cleared = client.patch(
+        f'/api/v1/account/assets/{asset["asset_id"]}',
+        headers={**fresh_session, 'If-Match': '2'},
+        json={'note': None},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()['note'] is None
+    assert cleared.json()['revision'] == 3
+
+    events = repository.list_audit_events_internal(
+        AuditSubject(subject_type=AuditSubjectType.ASSET, subject_id=asset['asset_id'])
+    )
+    assert len(events) == 3
+    assert 'Keep near the front entrance' not in ''.join(
+        event.model_dump_json() for event in events
+    )
+
+
+@pytest.mark.parametrize('note', ['', '   \n\t  ', 'x' * 1001])
+def test_asset_note_validation_does_not_mutate_the_asset(
+    client: TestClient,
+    note: str,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    asset = _create_asset(client, owner)
+    route = f'/api/v1/account/assets/{asset["asset_id"]}'
+
+    response = client.patch(route, headers={**owner, 'If-Match': '1'}, json={'note': note})
+    stored = client.get(route, headers=owner)
+
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert stored.status_code == 200
+    assert stored.json() == asset
+
+
 def test_account_assets_are_owned_paginated_revisioned_and_soft_deleted(
     client: TestClient,
     repository: FixtureRepository,
@@ -449,6 +540,7 @@ def test_property_and_contents_assets_prefill_only_their_approved_claim_facts(
             'asset_type': asset_type,
             'display_name': f'Synthetic {asset_type}',
             'details': details,
+            'note': 'Account-only note that must not enter the Claim.',
         },
     )
     created_claim = client.post(
@@ -468,6 +560,7 @@ def test_property_and_contents_assets_prefill_only_their_approved_claim_facts(
     )
 
     assert selected.status_code == 201, selected.text
+    assert 'note' not in selected.json()['snapshot']
     assert set(selected.json()['proposed_fields']) == expected_fields
     assert selected.json()['proposed_fields']['claim.product_family']['value'] == family
     if asset_type == 'contents':

@@ -101,6 +101,7 @@ def test_mongodb_reads_legacy_contents_asset_and_snapshot_without_exposing_seria
         source_refs=[f'asset:{asset.asset_id}:revision:{asset.revision}'],
     )
     asset_document = asset.model_dump(mode='json')
+    asset_document.pop('note')
     asset_document.update({'_id': f'asset:{asset.asset_id}', 'record_type': 'asset'})
     asset_document['details']['serial_number'] = 'LEGACY-SENSITIVE-SERIAL'
     snapshot_document = snapshot.model_dump(mode='json')
@@ -234,6 +235,47 @@ def test_fixture_asset_repository_enforces_owner_and_compare_and_set() -> None:
             audit_event=_asset_audit(stale, 'aud_fixture_stale'),
         )
     assert conflict.value.current_revision == 2
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
+def test_asset_note_persistence_and_clear_have_fixture_mongodb_parity(adapter: str) -> None:
+    repository: FixtureRepository | MongoDBRepository
+    if adapter == 'fixture':
+        repository = FixtureRepository()
+    else:
+        mongo = MongoDBRepository(mongomock.MongoClient(), f'asset_note_{adapter}')
+        mongo._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+        repository = mongo
+
+    note = 'Synthetic private asset note.'
+    asset = _asset().model_copy(update={'note': note})
+    repository.create_asset(
+        asset,
+        IdempotencyRecord(
+            actor_id=asset.customer_id,
+            route='/api/v1/account/assets',
+            key=f'note-create-{adapter}',
+            request_fingerprint=f'note-create-fingerprint-{adapter}',
+            claim_id=asset.asset_id,
+            session_id='',
+        ),
+        _asset_audit(asset, f'aud_note_create_{adapter}', idempotency_key=f'note-create-{adapter}'),
+    )
+    assert repository.get_asset(asset.asset_id, asset.customer_id) == asset
+
+    cleared = asset.model_copy(update={'note': None, 'revision': 2})
+    repository.update_asset(
+        cleared,
+        expected_revision=1,
+        audit_event=_asset_audit(cleared, f'aud_note_clear_{adapter}'),
+    )
+
+    assert repository.get_asset(asset.asset_id, asset.customer_id) == cleared
+    events = repository.list_audit_events_internal(
+        AuditSubject(subject_type=AuditSubjectType.ASSET, subject_id=asset.asset_id)
+    )
+    assert len(events) == 2
+    assert note not in ''.join(event.model_dump_json() for event in events)
 
 
 @pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])

@@ -1663,6 +1663,17 @@
             "title": "Display Name",
             "type": "string"
           },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -1678,6 +1689,7 @@
           "asset_type",
           "display_name",
           "details",
+          "note",
           "revision",
           "active",
           "created_at",
@@ -5280,6 +5292,19 @@
             "minLength": 1,
             "title": "Display Name",
             "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
           }
         },
         "required": [
@@ -14360,6 +14385,19 @@
             "minLength": 1,
             "title": "Display Name",
             "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
           }
         },
         "title": "UpdateAssetRequest",
