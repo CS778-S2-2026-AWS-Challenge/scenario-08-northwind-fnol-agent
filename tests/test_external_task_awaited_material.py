@@ -20,6 +20,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.issue_928_support import prepare_claim_submission
+
 os.environ.setdefault('DATA_RUNTIME_PROFILE', 'fixture')
 
 from backend.app import create_app
@@ -129,7 +131,31 @@ def _drive(client: TestClient, *, route: bool) -> str:
         )
         if response.status_code < 400:
             break
-        details = (response.json().get('error') or {}).get('details') or []
+        error = response.json().get('error') or {}
+        details = error.get('details') or []
+        if (
+            not details
+            and error.get('code') == 'INVALID_STATE_TRANSITION'
+            and 'submission agreement' in error.get('message', '')
+        ):
+            submission_revision = prepare_claim_submission(
+                client,
+                CLAIMANT,
+                claim_id,
+                _revision(client, claim_id),
+                key='aw-submit',
+            )
+            response = client.post(
+                f'/api/v1/claims/{claim_id}/creation',
+                headers={
+                    **CLAIMANT,
+                    'Idempotency-Key': f'aw-create-{attempt}-after-submit',
+                    'If-Match': str(submission_revision),
+                },
+                json={},
+            )
+            assert response.status_code == 201, response.text
+            break
         assert details, response.json()
         client.patch(
             f'/api/v1/claims/{claim_id}/form',

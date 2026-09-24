@@ -44,6 +44,7 @@ from backend.repositories.mongodb import MongoDBRepository
 from backend.repositories.protocols import IdempotencyConflict, IdempotencyRecord, RevisionConflict
 from backend.services.agent import AgentProposal, AgentTurnContext
 from backend.services.messages import _TurnEvidenceResolver
+from tests.issue_928_support import prepare_claim_submission
 
 
 class HighImpactAgent:
@@ -932,12 +933,19 @@ def test_default_home_journey_creates_without_an_unapproved_external_service(
     assert completed.status_code == 200, completed.text
     completed_body = completed.json()
     assert completed_body['dynamic_form']['requirements']['ready'] is True
+    submission_revision = prepare_claim_submission(
+        client,
+        auth_headers,
+        claim_id,
+        completed_body['revision'],
+        key='home-default-runtime-submit',
+    )
     creation = client.post(
         f'/api/v1/claims/{claim_id}/creation',
         headers={
             **auth_headers,
             'Idempotency-Key': 'home-default-runtime-create',
-            'If-Match': str(completed_body['revision']),
+            'If-Match': str(submission_revision),
         },
     )
 

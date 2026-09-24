@@ -12,6 +12,7 @@ from backend.adapters.model_gateway import (
 from backend.app import create_app
 from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
+from tests.issue_928_support import prepare_claim_submission
 
 
 def _bedrock_response(proposal: dict[str, object], request_number: int) -> httpx.Response:
@@ -293,12 +294,19 @@ def test_bedrock_motor_turns_reach_claim_creation_without_reasking_location(
         assert confirm.status_code == 200
         assert confirm.json()['customer_next_step']['status'] == 'ready_to_create', confirm.json()
 
+        submission_revision = prepare_claim_submission(
+            client,
+            claimant_headers,
+            claim_id,
+            int(confirm.json()['revision']),
+            key='bedrock-motor-submit',
+        )
         external_claim = client.post(
             f'/api/v1/claims/{claim_id}/creation',
             headers={
                 **claimant_headers,
                 'Idempotency-Key': 'bedrock-motor-create',
-                'If-Match': str(confirm.json()['revision']),
+                'If-Match': str(submission_revision),
             },
         )
         assert external_claim.status_code == 201

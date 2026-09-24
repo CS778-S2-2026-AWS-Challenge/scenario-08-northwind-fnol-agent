@@ -5,6 +5,7 @@ from typing import Any, cast
 from fastapi.testclient import TestClient
 
 from backend.repositories.fixture import FixtureRepository
+from tests.issue_928_support import prepare_claim_submission
 
 FIXTURE_PATH = Path(__file__).parent / 'fixtures' / 'journeys' / 'AT-01-clear-motor-creation.json'
 
@@ -103,10 +104,17 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
     assert ready_claim is not None
     assert ready_claim.claim_state.workflow_state.value == 'ready_for_next'
 
+    submission_revision = prepare_claim_submission(
+        client,
+        auth_headers,
+        claim_id,
+        confirmed_body['revision'],
+        key='at01-submit',
+    )
     creation_headers = {
         **auth_headers,
         'Idempotency-Key': 'at01-controlled-creation',
-        'If-Match': str(confirmed_body['revision']),
+        'If-Match': str(submission_revision),
     }
     created_external = client.post(
         f'/api/v1/claims/{claim_id}/creation',
@@ -139,7 +147,7 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
         headers={
             **auth_headers,
             'Idempotency-Key': 'at01-controlled-creation',
-            'If-Match': str(confirmed_body['revision'] + 1),
+            'If-Match': str(submission_revision + 1),
         },
     )
     assert conflicting_reuse.status_code == 409
@@ -249,12 +257,19 @@ def test_clear_motor_intake_classifies_missing_incident_type_before_creation(
     assert claimant_view.status_code == 200
     assert claimant_view.json()['incident_type'] == 'motor'
 
+    submission_revision = prepare_claim_submission(
+        client,
+        auth_headers,
+        claim['claim_id'],
+        confirmed_body['revision'],
+        key='unclassified-submit',
+    )
     created_external = client.post(
         f'/api/v1/claims/{claim["claim_id"]}/creation',
         headers={
             **auth_headers,
             'Idempotency-Key': 'unclassified-controlled-creation',
-            'If-Match': str(confirmed_body['revision']),
+            'If-Match': str(submission_revision),
         },
     )
     assert created_external.status_code == 201
@@ -342,12 +357,19 @@ def test_pending_later_evidence_does_not_block_controlled_claim_creation(
         },
     ).json()
 
+    submission_revision = prepare_claim_submission(
+        client,
+        auth_headers,
+        claim_id,
+        evidence_turn['claim_revision'],
+        key='pending-submit',
+    )
     response = client.post(
         f'/api/v1/claims/{claim_id}/creation',
         headers={
             **auth_headers,
             'Idempotency-Key': 'pending-controlled-creation',
-            'If-Match': str(evidence_turn['claim_revision']),
+            'If-Match': str(submission_revision),
         },
     )
 

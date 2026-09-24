@@ -563,6 +563,29 @@ export function getClaimMessages(claimId, sessionId) {
   return apiRequest(`/api/v1/claims/${claimId}/sessions/${sessionId}/messages?limit=100`)
 }
 
+
+export function acceptClaimAgreement({
+  claimId,
+  revision,
+  agreementId,
+  version,
+  confirmations,
+  idempotencyKey = requestId('agreement-acceptance'),
+}) {
+  return apiRequest(`/api/v1/claims/${claimId}/agreement-acceptances`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+    body: JSON.stringify({
+      agreement_id: agreementId,
+      version,
+      confirmations,
+    }),
+  })
+}
+
 export function createExternalClaim({
   claimId,
   revision,

@@ -537,6 +537,7 @@ def _drive(
                 return turns, evidence, None, []
         requirements = _requirements(journey)
         if requirements.get('ready'):
+            journey.prepare_submission(key=f'{scenario.scenario_id}-submit')
             journey.step(CREATE, 'POST', f'{claim}/creation', 201, 'claimant')
             return turns, evidence, None, []
         item = str(requirements.get('next_required_item'))

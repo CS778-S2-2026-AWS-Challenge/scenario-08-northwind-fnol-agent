@@ -23,8 +23,10 @@ from fastapi.testclient import TestClient
 
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
+from backend.domain.models import CustomerNextStep, ResponsibleParty
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.scenario_loader import load_scenario, seed_scenario
+from tests.issue_928_support import prepare_claim_submission
 
 SCENARIO_PATH = (
     Path(__file__).resolve().parents[1]
@@ -290,6 +292,7 @@ def test_creation_is_refused_while_the_professional_review_is_open(
 
 def test_review_then_creation_succeeds_and_keeps_the_conflict(
     client: TestClient,
+    repository: FixtureRepository,
 ) -> None:
     """The whole path: refused, reviewed through the staff authority, then created.
 
@@ -321,12 +324,42 @@ def test_review_then_creation_succeeds_and_keeps_the_conflict(
     # The registry's own projected state change, not this test's preference.
     assert after_review['coverage'] == 'clear'
 
+    # #928 adds claimant-owned payout/contact and agreement prerequisites before
+    # creation. AT-02 tests the professional-review boundary rather than the
+    # separate claimant progression transition, so prepare that new prerequisite
+    # as test state instead of changing production progression behavior here.
+    claim = repository.get_claim(claim_id, 'cus_demo')
+    assert claim is not None
+    ready_for_payout_contact = claim.model_copy(
+        update={
+            'revision': claim.revision + 1,
+            'customer_next_step': CustomerNextStep(
+                status='ready_to_create',
+                summary=(
+                    'Your reviewed claim information is ready for payout and contact details.'
+                ),
+                responsible_party=ResponsibleParty.CLAIMANT,
+            ),
+        }
+    )
+    repository.save_claim(
+        ready_for_payout_contact,
+        expected_revision=claim.revision,
+    )
+
+    submission_revision = prepare_claim_submission(
+        client,
+        CLAIMANT,
+        claim_id,
+        int(_revision(client, claim_id)),
+        key='at02-submit',
+    )
     created = client.post(
         f'/api/v1/claims/{claim_id}/creation',
         headers={
             **CLAIMANT,
             'Idempotency-Key': 'at02-create',
-            'If-Match': _revision(client, claim_id),
+            'If-Match': str(submission_revision),
         },
         json={},
     )

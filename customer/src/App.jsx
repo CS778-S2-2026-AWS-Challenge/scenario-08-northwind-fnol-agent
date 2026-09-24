@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ApiRequestError,
+  acceptClaimAgreement,
   confirmClaimFields,
   createClaim,
   createExternalClaim,
@@ -40,6 +41,7 @@ import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
 import ClaimDocuments from './components/ClaimDocuments.jsx'
 import ClaimReviewPanel from './components/ClaimReviewPanel.jsx'
+import AgreementConfirmationPanel from './components/AgreementConfirmationPanel.jsx'
 import PayoutContactPanel from './components/PayoutContactPanel.jsx'
 import ConversationHistorySidebar from './components/ConversationHistorySidebar.jsx'
 import {
@@ -420,6 +422,7 @@ function App() {
   const pendingSubmission = useRef(null)
   const pendingConfirmation = useRef(null)
   const pendingSupportRequest = useRef(null)
+  const pendingAgreementAcceptance = useRef(null)
   const pendingClaimCreation = useRef(null)
   const pendingExternalService = useRef(null)
   const latestRevision = useRef(0)
@@ -449,6 +452,11 @@ function App() {
   const forceLatestMessages = useRef(false)
   const confirmedClaimProjections = useRef(new Map())
   const messagesRef = useRef(messages)
+  useEffect(() => {
+    pendingAgreementAcceptance.current = null
+    pendingClaimCreation.current = null
+  }, [claim?.claim_id])
+
   activeClaimRef.current = claim
   activeSessionIdRef.current = sessionId
   accountRef.current = account
@@ -2009,6 +2017,87 @@ function App() {
     }
   }
 
+
+  async function submitAgreementAndCreate(confirmations) {
+    if (!claim || isBusy || !claim.submission_agreement) return
+
+    const actionCode = claim.primary_action?.action_code
+    const canAccept = actionCode === 'claimant.review_agreement'
+    const alreadyAccepted = actionCode === 'claimant.create_claim'
+
+    if (!canAccept && !alreadyAccepted) return
+
+    setError('')
+    setStatus('creating-claim')
+
+    try {
+      let revision = claim.revision
+
+      if (canAccept) {
+        const agreement = claim.submission_agreement
+
+        if (
+          !pendingAgreementAcceptance.current
+          || pendingAgreementAcceptance.current.claimId !== claim.claim_id
+          || pendingAgreementAcceptance.current.revision !== claim.revision
+        ) {
+          pendingAgreementAcceptance.current = {
+            claimId: claim.claim_id,
+            revision: claim.revision,
+            idempotencyKey: requestId('agreement-acceptance'),
+          }
+        }
+
+        const operation = pendingAgreementAcceptance.current
+        const accepted = await acceptClaimAgreement({
+          claimId: claim.claim_id,
+          revision: operation.revision,
+          agreementId: agreement.agreement_id,
+          version: agreement.version,
+          confirmations,
+          idempotencyKey: operation.idempotencyKey,
+        })
+
+        revision = accepted.revision
+
+        setClaim((current) => ({
+          ...current,
+          revision: accepted.revision,
+          submission_agreement: accepted.agreement,
+          primary_action: accepted.primary_action,
+        }))
+        setNextStep(accepted.customer_next_step)
+        pendingAgreementAcceptance.current = null
+      }
+
+      if (!pendingClaimCreation.current) {
+        pendingClaimCreation.current = {
+          idempotencyKey: requestId('claim-creation'),
+        }
+      }
+
+      const response = await createExternalClaim({
+        claimId: claim.claim_id,
+        revision,
+        idempotencyKey: pendingClaimCreation.current.idempotencyKey,
+      })
+
+      setClaim((current) => ({
+        ...current,
+        revision: response.revision,
+        external_claim: response.external_claim,
+        external_service_action: response.external_service_action,
+        primary_action: response.primary_action,
+      }))
+      setNextStep(response.customer_next_step)
+      pendingClaimCreation.current = null
+      pendingAgreementAcceptance.current = null
+      setStatus('idle')
+    } catch (requestError) {
+      showError(requestError)
+    }
+  }
+
   async function createConfirmedClaim() {
     if (
       !claim
@@ -2615,6 +2704,7 @@ function App() {
           )
         }
         setRealtimeHealth('healthy')
+        setWorkspaceView('agreement')
       } catch (readbackError) {
         setRealtimeHealth('stale')
         throw readbackError
@@ -3201,13 +3291,17 @@ function App() {
                 )
               )}
               {workspaceView === 'agreement' && (
-                <div className="claim-history-state" role="status">
-                  <h2>Step 3 complete</h2>
-                  <p>
-                    Northwind has saved the payout destination and preferred contact method for this Claim.
-                    Agreement content and final submission remain governed by the Step 4 flow.
-                  </p>
-                </div>
+                <AgreementConfirmationPanel
+                  claim={claim}
+                  busy={isBusy}
+                  status={status}
+                  onSubmit={submitAgreementAndCreate}
+                  onReviewInformation={() => {
+                    setDetailsOpen(true)
+                    setDetailsTab('summary')
+                    setWorkspaceView('chat')
+                  }}
+                />
               )}
               {workspaceView === 'claim-evidence' && selectedHistoryClaim && (
                 <EvidenceHistory claimId={selectedHistoryClaim.claim_id} />

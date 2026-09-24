@@ -65,6 +65,10 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.agreement import (
+    agreement_acceptance_is_current,
+    current_submission_agreement,
+)
 from backend.services.branching import (
     build_applied_branch_evaluation,
     claimant_dynamic_form_projection,
@@ -352,6 +356,9 @@ def claimant_claim(
         ),
         evidence_summary=evidence_summary_for(claimant_evidence),
         payment_destination_id=claim.payment_destination_id,
+        submission_agreement=(
+            current_submission_agreement() if next_step.status == 'agreement_required' else None
+        ),
         external_claim=claim.external_claim,
         external_service_action=legacy_external_service_action,
         external_capabilities=list(capability_catalogue(claim.incident_type)),
@@ -362,6 +369,7 @@ def claimant_claim(
             claim_revision=claim.revision,
             next_step=next_step,
             external_service_action=legacy_external_service_action,
+            agreement_accepted=agreement_acceptance_is_current(claim),
         ),
         incomplete_context=_claimant_incomplete_context(repository, claim),
         handoff=handoff,

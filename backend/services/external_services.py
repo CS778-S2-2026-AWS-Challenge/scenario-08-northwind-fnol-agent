@@ -416,7 +416,7 @@ def _assessment_has_come_back(
     )
 
 
-def _payout_contact_is_complete(
+def payout_contact_is_complete(
     repository: PersistenceRepository,
     claim: WorkingClaim,
     identity_repository: IdentityRepository | None,
@@ -485,7 +485,7 @@ def claimant_next_step(
     """
 
     if action is None:
-        if claim.customer_next_step.status == 'ready_to_create' and _payout_contact_is_complete(
+        if claim.customer_next_step.status == 'ready_to_create' and payout_contact_is_complete(
             repository, claim, identity_repository
         ):
             return claim.customer_next_step.model_copy(

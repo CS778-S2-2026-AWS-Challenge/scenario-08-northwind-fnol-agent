@@ -18,6 +18,8 @@ from backend.domain.external_service_registry import capability_catalogue
 from backend.domain.identity import ClaimAutoFillSuggestionManifest
 from backend.domain.model_gateway import ModelGatewayError
 from backend.domain.models import (
+    AcceptClaimAgreementRequest,
+    AgreementAcceptanceResponse,
     ClaimantClaim,
     ClaimantExternalServiceResponse,
     ClaimantSession,
@@ -52,6 +54,7 @@ from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider
 from backend.services.agent_action_execution import ClaimantRuntimeActionDispatcher
 from backend.services.agent_turn_progress import AgentTurnProgressReporter
+from backend.services.agreement import accept_claim_agreement
 from backend.services.claim_auto_fill import claim_auto_fill_suggestions
 from backend.services.claim_creation import create_claim_from_confirmed_report
 from backend.services.claim_data import (
@@ -385,6 +388,33 @@ def promote_claim(
 
 
 @router.post(
+    '/{claim_id}/agreement-acceptances',
+    response_model=AgreementAcceptanceResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_agreement_acceptance(
+    claim_id: str,
+    payload: AcceptClaimAgreementRequest,
+    request: Request,
+    response: Response,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> AgreementAcceptanceResponse:
+    result, replayed = accept_claim_agreement(
+        repository_for(request),
+        identity_repository_for(request),
+        principal,
+        claim_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )
+    response.status_code = status.HTTP_200_OK if replayed else status.HTTP_201_CREATED
+    return result
+
+
+@router.post(
     '/{claim_id}/creation',
     response_model=ClaimCreationResponse,
     status_code=status.HTTP_201_CREATED,
@@ -404,6 +434,7 @@ def create_external_claim(
         claim_id,
         idempotency_key,
         if_match,
+        identity_repository_for(request),
     )
 
 

@@ -26,14 +26,20 @@ from backend.domain.models import (
     StateChange,
     WorkflowState,
 )
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import IdempotencyRecord, PersistenceRepository
 from backend.services.agent_action_execution import (
     ClaimantRuntimeActionDispatcher,
     ClaimContextHandlerOutcome,
 )
 from backend.services.agent_action_mapping import map_claim_context_execution_to_api
+from backend.services.agreement import agreement_acceptance_is_current
 from backend.services.claimant_action_projection import project_claimant_primary_action
-from backend.services.external_services import claimant_assessor_action
+from backend.services.external_services import (
+    claimant_assessor_action,
+    claimant_next_step,
+    payout_contact_is_complete,
+)
 from backend.services.integrations import create_external_claim
 from backend.services.support import (
     now_utc,
@@ -60,6 +66,7 @@ def create_claim_from_confirmed_report(
     claim_id: str,
     idempotency_key: str | None,
     if_match: str | None,
+    identity_repository: IdentityRepository | None = None,
 ) -> ClaimCreationResponse:
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
@@ -196,6 +203,25 @@ def create_claim_from_confirmed_report(
     ]
     if not claimant_messages:
         raise _invalid_state('A claimant message is required before claim creation.')
+
+    external_service_action = claimant_assessor_action(repository, claim)
+    projected_next_step = claimant_next_step(
+        repository,
+        claim,
+        external_service_action,
+        identity_repository=identity_repository,
+    )
+    if (
+        identity_repository is None
+        or external_service_action is not None
+        or projected_next_step.status != 'agreement_required'
+        or not payout_contact_is_complete(repository, claim, identity_repository)
+        or not agreement_acceptance_is_current(claim)
+    ):
+        raise _invalid_state(
+            'Complete payout and contact selection and explicitly confirm the current '
+            'submission agreement before creating the Claim.'
+        )
 
     command = build_claim_context_command(
         'claim.create',
