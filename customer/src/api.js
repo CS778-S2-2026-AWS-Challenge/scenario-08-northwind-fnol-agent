@@ -319,6 +319,8 @@ export function listPaymentDestinations({ cursor, limit = 100, signal } = {}) {
 export function createPaymentDestination({
   accountType,
   accountNumber,
+  bankName,
+  accountHolderName,
   idempotencyKey = requestId('payment-destination'),
 }) {
   return apiRequest('/api/v1/account/payment-destinations', {
@@ -327,6 +329,8 @@ export function createPaymentDestination({
     body: JSON.stringify({
       account_type: accountType,
       account_number: accountNumber,
+      bank_name: bankName,
+      account_holder_name: accountHolderName,
     }),
   })
 }

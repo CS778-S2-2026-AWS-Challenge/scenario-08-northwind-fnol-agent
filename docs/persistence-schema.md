@@ -395,8 +395,18 @@ the append-only audit collection through a bounded, filterable projection.
 - `identity_document:{identity_id}` stores document type, authenticated ciphertext, last-four
   mask, ownership, revision, active state, and timestamps. Document type is exactly
   `driver_licence` or `passport`.
-- `payment_destination:{payment_destination_id}` stores account type, authenticated ciphertext,
-  last-four mask, ownership, revision, active state, and timestamps. It is not a payment command.
+- `payment_destination:{payment_destination_id}` stores account type, claimant-supplied bank and
+  account-holder names, authenticated ciphertext, last-four mask, ownership, revision, active
+  state, and an authoritative `is_common` marker. New records require both claimant-supplied names;
+  legacy records may retain null values until a revisioned update completes them. At most one
+  active common destination exists per account. Repository create assigns common only when the
+  account has zero active destinations, so a create after common retirement does not silently fill
+  the vacancy while another active record remains. Legacy records without a marker project
+  `is_common=false` consistently from list and resource reads and require explicit revisioned
+  designation. Designation accepts only an active target and atomically advances and audits both
+  the promoted target and any demoted previous common record; rejection changes neither record nor
+  audit history. Retiring the common destination does not silently promote another
+  record. It is not a payment command.
 - Fixture and MongoDB adapters enforce the same owner-first access, create idempotency, optimistic
   revision, stable descending `(created_at, resource_id)` keyset pagination, soft retirement, and
   value-free audit contract. Cursors bind the owner digest, record type, and active-record filter.

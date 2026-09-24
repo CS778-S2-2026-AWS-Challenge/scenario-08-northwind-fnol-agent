@@ -2521,7 +2521,7 @@ function App() {
   }
 
 
-  async function addPayoutDestination({ accountType, accountNumber }) {
+  async function addPayoutDestination({ accountType, accountNumber, bankName, accountHolderName }) {
     if (!account) {
       setPage('login')
       throw new ApiRequestError('Log in before saving payout details.', {
@@ -2534,6 +2534,8 @@ function App() {
       const created = await createPaymentDestination({
         accountType,
         accountNumber,
+        bankName,
+        accountHolderName,
         idempotencyKey: requestId('payment-destination'),
       })
       setPaymentDestinationState((current) => ({

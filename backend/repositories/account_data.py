@@ -1,5 +1,6 @@
 """Persistence port for bounded account-owned policy and protected records."""
 
+from dataclasses import replace
 from datetime import datetime
 from typing import Protocol
 
@@ -12,6 +13,7 @@ from backend.domain.audit import (
     AuditEventEnvelope,
     AuditEventType,
     AuditOutcome,
+    AuditSubject,
     AuditSubjectType,
     AuditVisibility,
 )
@@ -37,6 +39,19 @@ class PaymentDestinationSelectionConflict(RepositoryConflict):
         self.payment_destination_id = payment_destination_id
         self.reason = reason
         self.current_revision = current_revision
+
+
+class CommonPaymentDestinationConflict(RepositoryConflict):
+    """Another concurrent create established the account's common destination."""
+
+
+class PaymentDestinationDesignationConflict(RepositoryConflict):
+    """The target cannot become the account's common Payment Destination."""
+
+    def __init__(self, payment_destination_id: str, *, reason: str) -> None:
+        super().__init__(f'Payment Destination {payment_destination_id} is {reason}.')
+        self.payment_destination_id = payment_destination_id
+        self.reason = reason
 
 
 class ClaimantContactSelectionConflict(RepositoryConflict):
@@ -131,6 +146,46 @@ def account_record_audit_matches(
     )
 
 
+def payment_destination_create_result(
+    record: PaymentDestinationRecord,
+    idempotency: IdempotencyRecord,
+) -> IdempotencyRecord:
+    """Bind the create replay payload to the repository-authoritative common marker."""
+    if idempotency.response_payload is None:
+        return idempotency
+    response_payload = dict(idempotency.response_payload)
+    response_payload['is_common'] = record.is_common
+    return replace(idempotency, response_payload=response_payload)
+
+
+def payment_destination_demotion(
+    record: PaymentDestinationRecord,
+    operation_event: AuditEventEnvelope,
+    event_id: str,
+) -> tuple[PaymentDestinationRecord, AuditEventEnvelope]:
+    """Build the related record and audit mutation for an atomic common designation."""
+    demoted = record.model_copy(
+        update={
+            'is_common': False,
+            'revision': record.revision + 1,
+            'updated_at': operation_event.created_at,
+        }
+    )
+    event = operation_event.model_copy(
+        update={
+            'event_id': event_id,
+            'subject': AuditSubject(
+                subject_type=AuditSubjectType.PAYMENT_DESTINATION,
+                subject_id=demoted.payment_destination_id,
+            ),
+            'source_refs': [
+                f'payment_destination:{demoted.payment_destination_id}:revision:{demoted.revision}'
+            ],
+        }
+    )
+    return demoted, event
+
+
 def payout_contact_selection_audit_matches(
     claim: WorkingClaim,
     payment_destination_id: str,
@@ -193,7 +248,7 @@ class AccountDataRepository(Protocol):
         record: PolicyNumberRecord | PaymentDestinationRecord | IdentityDocumentRecord,
         idempotency: IdempotencyRecord,
         audit_event: AuditEventEnvelope,
-    ) -> None: ...
+    ) -> AccountRecord: ...
 
     def get_policy(self, policy_id: str, customer_id: str) -> PolicyNumberRecord | None: ...
 
@@ -237,6 +292,7 @@ class AccountDataRepository(Protocol):
         record: PolicyNumberRecord | PaymentDestinationRecord | IdentityDocumentRecord,
         expected_revision: int,
         audit_event: AuditEventEnvelope,
+        related_audit_event_id: str | None = None,
     ) -> None: ...
 
     def save_policy_selection(
