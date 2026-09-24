@@ -127,7 +127,7 @@ The initial role-to-scope contract is intentionally narrow.
 | Actor type | Minimum scopes | Primary boundary |
 | --- | --- | --- |
 | claimant | `claim:read:self`, `claim:write:self` | Own claimant-visible Claim State, sessions, messages, evidence, support requests, status |
-| staff | `workbench:read`, `workbench:write` | Authorised internal claim/workbench projections and staff mutations |
+| staff | Capabilities derived from the stored staff roles | Staff identity session and role-authorised application boundaries |
 | administrator | `admin:read`, `admin:write` | Separately contracted Control Plane configuration and audit surfaces |
 | agent_service | `agent:execute` plus explicitly granted tool capabilities | Claim-scoped orchestration only when an external service boundary exists |
 | integration_service | `tools:invoke` plus an allow-listed operation/purpose | Narrow internal adapter routes |
@@ -136,6 +136,19 @@ Scopes are capabilities, not role aliases and not wildcard resource grants. A fu
 staff principal may receive `operations:read` without receiving administrator
 configuration authority. An administrator does not automatically receive claimant or
 unrestricted production Claim State editing authority.
+
+The current staff role mapping is deliberately closed:
+
+| Stored staff role | Derived capabilities | Boundary |
+| --- | --- | --- |
+| `claims_professional` | `workbench:read`, `workbench:write` | Authorised Workbench projections and mutations |
+| `operations` | None | Own staff session and profile only; no Workbench Claim access |
+
+Unknown roles grant no capability. A published access policy can remove a derived capability but
+cannot add one. The staff identity routes for the current session, profile, and logout require an
+authenticated staff identity rather than Workbench capability, so an operations-only account can
+still manage its own session. Operations-only authentication does not create a claimable Workbench
+presence lease.
 
 The Admin API is available under the separate `/internal/v1/admin` boundary. Its account
 management routes use the same administrator scopes and identity repository boundary; they do

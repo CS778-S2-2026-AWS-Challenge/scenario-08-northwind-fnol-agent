@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 
 from backend.adapters.claims_service import AssessorServiceAdapter
 from backend.adapters.evidence_storage import EvidenceStorage, EvidenceStorageUnavailable
-from backend.core.auth import Principal, require_staff
+from backend.core.auth import Principal, require_workbench_read, require_workbench_write
 from backend.core.errors import ApiError
 from backend.domain.assets import ClaimAssetSnapshotListResponse, project_snapshot
 from backend.domain.models import (
@@ -107,7 +107,7 @@ def create_staff_message(
     claim_id: str,
     payload: CreateStaffMessageRequest,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> StaffMessageResponse:
@@ -140,7 +140,7 @@ def assessor_adapter_for(request: Request) -> AssessorServiceAdapter:
 @conversation_router.get('', response_model=WorkbenchConversationsResponse)
 def read_workbench_conversations(
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     limit: int = Query(default=50, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchConversationsResponse:
@@ -172,7 +172,7 @@ def _safe_download_filename(value: str | None) -> str:
 @router.get('', response_model=WorkbenchClaimListResponse)
 def read_workbench_claims(
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     view: WorkbenchQueueView | None = Query(default=None),
     workflow_state: WorkflowState | None = Query(default=None),
     priority: WorkPriorityLevel | None = Query(default=None),
@@ -204,7 +204,7 @@ def read_workbench_claims(
 
 @router.get('/filter-metadata', response_model=WorkbenchClaimFilterMetadata)
 def read_workbench_claim_filter_metadata(
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
 ) -> WorkbenchClaimFilterMetadata:
     return get_workbench_claim_filter_metadata(principal)
 
@@ -213,7 +213,7 @@ def read_workbench_claim_filter_metadata(
 def read_workbench_claim(
     claim_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
 ) -> WorkbenchClaimDetail:
     return get_review_connected_workbench_detail(repository_for(request), principal, claim_id)
 
@@ -222,7 +222,7 @@ def read_workbench_claim(
 def read_workbench_claim_asset_snapshots(
     claim_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> ClaimAssetSnapshotListResponse:
@@ -253,7 +253,7 @@ def reopen_workbench_claim(
     claim_id: str,
     payload: ReopenClaimRequest,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> WorkbenchClaimDetail:
@@ -271,7 +271,7 @@ def reopen_workbench_claim(
 def read_workbench_fields(
     claim_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchFieldsResponse:
@@ -282,7 +282,7 @@ def read_workbench_fields(
 def read_workbench_sessions(
     claim_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchSessionsResponse:
@@ -296,7 +296,7 @@ def read_workbench_sessions(
 def read_workbench_collaboration_requests(
     claim_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchCollaborationRequestsResponse:
@@ -313,7 +313,7 @@ def read_workbench_messages(
     claim_id: str,
     session_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     limit: int = Query(default=50, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchMessagesResponse:
@@ -326,7 +326,7 @@ def read_workbench_messages(
 def read_workbench_evidence(
     claim_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchEvidenceResponse:
@@ -337,7 +337,7 @@ def read_workbench_evidence(
 def read_workbench_retrievals(
     claim_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchRetrievalsResponse:
@@ -348,7 +348,7 @@ def read_workbench_retrievals(
 def read_workbench_signals(
     claim_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchSignalsResponse:
@@ -359,7 +359,7 @@ def read_workbench_signals(
 def read_workbench_handoffs(
     claim_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchHandoffsResponse:
@@ -370,7 +370,7 @@ def read_workbench_handoffs(
 def read_workbench_work_items(
     claim_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchWorkItemsResponse:
@@ -381,7 +381,7 @@ def read_workbench_work_items(
 def read_workbench_runtime_work_items(
     claim_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchRuntimeWorkItemsResponse:
@@ -394,7 +394,7 @@ def read_workbench_runtime_work_items(
 def read_workbench_customer_updates(
     claim_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchCustomerUpdatesResponse:
@@ -407,7 +407,7 @@ def read_workbench_customer_updates(
 def read_workbench_external_requests(
     claim_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchExternalRequestsResponse:
@@ -420,7 +420,7 @@ def read_workbench_external_requests(
 def read_workbench_events(
     claim_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchEventsResponse:
@@ -432,7 +432,7 @@ def read_workbench_evidence_content(
     claim_id: str,
     evidence_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
 ) -> Response:
     repository = repository_for(request)
     # Reuse the Workbench permission boundary before reading any file content.
@@ -479,7 +479,7 @@ def read_workbench_evidence_content_data(
     claim_id: str,
     evidence_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
 ) -> dict[str, str]:
     repository = repository_for(request)
     detail = get_review_connected_workbench_detail(repository, principal, claim_id)
@@ -528,7 +528,7 @@ def create_action(
     claim_id: str,
     payload: CreateStaffActionRequest,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> StaffActionMutationResponse:
@@ -547,7 +547,7 @@ def accept_external_task_review(
     task_id: str,
     payload: AcceptHandoffRequest,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> StaffActionMutationResponse:
@@ -611,7 +611,7 @@ def reconcile_external_task_response(
     claim_id: str,
     task_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> ExternalTaskReconciliationResponse:
@@ -672,7 +672,7 @@ def update_action(
     action_id: str,
     payload: UpdateStaffActionRequest,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> StaffActionMutationResponse:
@@ -691,7 +691,7 @@ def create_signal_decision(
     signal_id: str,
     payload: SignalDecisionRequest,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> SignalDecisionResponse:
@@ -706,7 +706,7 @@ def accept_claim_handoff(
     handoff_id: str,
     payload: AcceptHandoffRequest,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> HandoffMutationResponse:
@@ -727,7 +727,7 @@ def resolve_claim_handoff(
     handoff_id: str,
     payload: ResolveHandoffRequest,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> HandoffMutationResponse:
@@ -751,7 +751,7 @@ def request_cowork(
     claim_id: str,
     payload: CreateCoworkRequest,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> CollaborationMutationResponse:
@@ -769,7 +769,7 @@ def request_transfer(
     claim_id: str,
     payload: CreateTransferRequest,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> CollaborationMutationResponse:
@@ -787,7 +787,7 @@ def decide_collaboration(
     request_id: str,
     payload: DecideCollaborationRequest,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> CollaborationMutationResponse:
@@ -807,7 +807,7 @@ def return_claim_to_queue(
     claim_id: str,
     payload: RequeueClaimRequest,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> CollaborationMutationResponse:
