@@ -881,6 +881,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   cursor: pointer;
 }
 .tool-btn:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent-strong); background: var(--color-surface); }
+.tool-btn[aria-pressed='true'] { border-color: var(--color-accent); color: var(--color-accent-strong); background: var(--color-accent-soft); }
 .tool-btn:focus-visible { outline: var(--border-focus); outline-offset: var(--space-1); }
 .tool-btn:disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
 .tool-icon {
