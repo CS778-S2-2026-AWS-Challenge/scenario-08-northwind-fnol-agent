@@ -205,13 +205,11 @@ def create_claim_from_confirmed_report(
         raise _invalid_state('A claimant message is required before claim creation.')
 
     acceptance_current = agreement_acceptance_is_current(claim)
-    _external_action, _projected_next_step, current_action = (
-        claimant_current_action_projection(
-            repository,
-            claim,
-            identity_repository=identity_repository,
-            agreement_accepted=acceptance_current,
-        )
+    _external_action, _projected_next_step, current_action = claimant_current_action_projection(
+        repository,
+        claim,
+        identity_repository=identity_repository,
+        agreement_accepted=acceptance_current,
     )
     if (
         identity_repository is None
