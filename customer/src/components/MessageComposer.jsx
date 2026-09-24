@@ -175,6 +175,8 @@ export default function MessageComposer({
   const fileInput = useRef(null)
   const textareaRef = useRef(null)
   const [voiceStatus, setVoiceStatus] = useState('')
+  const [isListening, setIsListening] = useState(false)
+  const recognitionRef = useRef(null)
   const [selectedAttachmentId, setSelectedAttachmentId] = useState(null)
 
   useEffect(() => {
@@ -184,7 +186,18 @@ export default function MessageComposer({
     textarea.style.height = `${textarea.scrollHeight}px`
   }, [draft, attachments.length])
 
-  function startVoiceInput() {
+  useEffect(() => () => recognitionRef.current?.stop(), [])
+
+  function toggleVoiceInput() {
+    if (recognitionRef.current) {
+      // Stop recording on this same click; onend clears state. Set here too so
+      // a slow browser onend callback cannot leave the button showing "Listening..."
+      recognitionRef.current.stop()
+      recognitionRef.current = null
+      setIsListening(false)
+      setVoiceStatus('')
+      return
+    }
     const SpeechRecognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition
     if (!SpeechRecognition) {
       setVoiceStatus('Voice input is not available in this browser.')
@@ -192,15 +205,37 @@ export default function MessageComposer({
     }
     const recognition = new SpeechRecognition()
     recognition.lang = 'en-NZ'
+    // Non-continuous mode ends the whole recognition after the first pause in
+    // speech, which is why a few words used to cut the recording short.
+    // Continuous keeps the microphone open until the claimant stops it themselves.
+    recognition.continuous = true
     recognition.interimResults = false
+    recognitionRef.current = recognition
+    setIsListening(true)
     setVoiceStatus('Listening...')
     recognition.onresult = (event) => {
-      const transcript = event.results?.[0]?.[0]?.transcript || ''
-      if (transcript) setDraft((current) => `${current}${current ? ' ' : ''}${transcript}`)
+      // In continuous mode, event.results accumulates every utterance heard so
+      // far in this session; resultIndex marks where this event's new results
+      // start. Appending from the full list on every event (the old behaviour)
+      // re-added every already-transcribed utterance each time, duplicating
+      // text after just a couple of words.
+      let addition = ''
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index]
+        if (result.isFinal) addition += `${addition ? ' ' : ''}${result[0]?.transcript || ''}`
+      }
+      if (addition) setDraft((current) => `${current}${current ? ' ' : ''}${addition}`)
+    }
+    recognition.onerror = () => {
+      setVoiceStatus('Voice input could not be started.')
+      recognitionRef.current = null
+      setIsListening(false)
+    }
+    recognition.onend = () => {
+      recognitionRef.current = null
+      setIsListening(false)
       setVoiceStatus('')
     }
-    recognition.onerror = () => setVoiceStatus('Voice input could not be started.')
-    recognition.onend = () => setVoiceStatus('')
     recognition.start()
   }
 
@@ -324,11 +359,12 @@ export default function MessageComposer({
             </svg>
           </button>
           <button
-            className="tool-btn tool-voice"
+            className={`tool-btn tool-voice ${isListening ? 'is-listening' : ''}`}
             type="button"
-            aria-label="Use voice input"
-            title="Use voice input"
-            onClick={startVoiceInput}
+            aria-label={isListening ? 'Stop voice input' : 'Use voice input'}
+            title={isListening ? 'Stop voice input' : 'Use voice input'}
+            aria-pressed={isListening}
+            onClick={toggleVoiceInput}
           >
             <svg className="tool-icon" viewBox="0 0 24 24" aria-hidden="true">
               <rect x="9" y="3" width="6" height="11" rx="3" />

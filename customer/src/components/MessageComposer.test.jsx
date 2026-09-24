@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import MessageComposer from './MessageComposer.jsx'
@@ -114,4 +114,55 @@ it('uses recognizable icons and accessible names for attachment and voice contro
   expect(voice.querySelector('.tool-icon')).toBeInTheDocument()
   expect(attach).toHaveAttribute('title', 'Attach a file')
   expect(voice).toHaveAttribute('title', 'Use voice input')
+})
+
+class FakeSpeechRecognition {
+  constructor() {
+    FakeSpeechRecognition.instances.push(this)
+    this.continuous = false
+    this.interimResults = false
+    this.start = vi.fn()
+    this.stop = vi.fn(() => this.onend?.())
+  }
+}
+FakeSpeechRecognition.instances = []
+
+it('keeps recording across several utterances until the claimant stops it, without duplicating text', async () => {
+  FakeSpeechRecognition.instances = []
+  globalThis.SpeechRecognition = FakeSpeechRecognition
+  const user = userEvent.setup()
+  render(<ControlHarness />)
+
+  const voice = screen.getByRole('button', { name: 'Use voice input' })
+  await user.click(voice)
+
+  expect(FakeSpeechRecognition.instances).toHaveLength(1)
+  const recognition = FakeSpeechRecognition.instances[0]
+  // The claimant should not have to re-trigger recognition after every pause.
+  expect(recognition.continuous).toBe(true)
+
+  // Two separate continuous-mode events, each only carrying its own new
+  // result at event.resultIndex -- exactly what a real browser sends.
+  await act(async () => {
+    recognition.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'rear-ended on Symonds Street' } }] })
+  })
+  await act(async () => {
+    recognition.onresult({
+      resultIndex: 1,
+      results: [
+        { isFinal: true, 0: { transcript: 'rear-ended on Symonds Street' } },
+        { isFinal: true, 0: { transcript: 'bumper is damaged' } },
+      ],
+    })
+  })
+
+  const textarea = screen.getByRole('textbox', { name: 'Claim message' })
+  expect(textarea).toHaveValue('rear-ended on Symonds Street bumper is damaged')
+
+  // A second click stops the same instance rather than starting a new one.
+  const stopButton = screen.getByRole('button', { name: 'Stop voice input' })
+  await user.click(stopButton)
+  expect(recognition.stop).toHaveBeenCalledTimes(1)
+  expect(FakeSpeechRecognition.instances).toHaveLength(1)
+  expect(screen.getByRole('button', { name: 'Use voice input' })).toBeInTheDocument()
 })
