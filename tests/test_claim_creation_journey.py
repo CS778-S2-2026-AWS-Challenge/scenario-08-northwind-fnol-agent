@@ -216,37 +216,29 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
     claim_id = cast(str, claim['claim_id'])
     session_id = cast(str, working['session']['session_id'])
 
-    turn = client.post(
+    intake = client.post(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
         headers={
             **auth_headers,
-            'Idempotency-Key': 'issue928-ordering-message',
+            'Idempotency-Key': 'issue928-ordering-intake',
             'If-Match': str(claim['revision']),
         },
         json={
-            'client_message_id': 'issue928-ordering-message',
-            'content': {
-                'type': 'text',
-                'text': f'{journey_input} {assessment_request}',
-            },
+            'client_message_id': 'issue928-ordering-intake',
+            'content': {'type': 'text', 'text': journey_input},
             'evidence_refs': [],
         },
     )
-    assert turn.status_code == 200, turn.text
-    turn_body = cast(dict[str, Any], turn.json())
-    offer = next(
-        action
-        for action in turn_body['agent_message']['message_actions']
-        if action['service_identity'] == 'vehicle_damage_assessment_routing'
-    )
-    proposed = sorted(item['field_code'] for item in turn_body['form_changes'])
+    assert intake.status_code == 200, intake.text
+    intake_body = cast(dict[str, Any], intake.json())
+    proposed = sorted(item['field_code'] for item in intake_body['form_changes'])
 
     confirmed = client.post(
         f'/api/v1/claims/{claim_id}/form/confirmations',
         headers={
             **auth_headers,
             'Idempotency-Key': 'issue928-ordering-confirm',
-            'If-Match': str(turn_body['claim_revision']),
+            'If-Match': str(intake_body['claim_revision']),
         },
         json={'field_codes': proposed},
     )
@@ -260,13 +252,34 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
     )
     assert ready['customer_next_step']['status'] == 'ready_to_create'
 
+    assessor_turn = client.post(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'issue928-ordering-assessor',
+            'If-Match': str(ready['revision']),
+        },
+        json={
+            'client_message_id': 'issue928-ordering-assessor',
+            'content': {'type': 'text', 'text': assessment_request},
+            'evidence_refs': [],
+        },
+    )
+    assert assessor_turn.status_code == 200, assessor_turn.text
+    assessor_body = cast(dict[str, Any], assessor_turn.json())
+    offer = next(
+        action
+        for action in assessor_body['agent_message']['message_actions']
+        if action['service_identity'] == 'vehicle_damage_assessment_routing'
+    )
+
     offer_id = cast(str, offer['offer_id'])
     granted = client.post(
         f'/api/v1/claims/{claim_id}/external-service-offers/{offer_id}/decision',
         headers={
             **auth_headers,
             'Idempotency-Key': 'issue928-ordering-offer',
-            'If-Match': str(ready['revision']),
+            'If-Match': str(assessor_body['claim_revision']),
         },
         json={'decision': 'grant'},
     )
