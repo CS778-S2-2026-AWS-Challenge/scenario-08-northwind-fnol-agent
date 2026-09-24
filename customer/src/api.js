@@ -64,7 +64,36 @@ async function apiRequest(path, options = {}) {
       { code: 'NETWORK_ERROR', retryable: true },
     )
   }
+  return handleApiResponse(response)
+}
 
+// A presigned storage URL (MinIO/S3) carries its own query-string signature and
+// rejects a request that also carries our app's Authorization or anonymous-session
+// header: "request has multiple authentication types, please use one". This never
+// sends either, and never assumes the error body is JSON (S3-compatible storage
+// returns XML).
+async function storageRequest(path, options = {}) {
+  let response
+  try {
+    response = await fetch(path, options)
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error
+    throw new ApiRequestError(
+      'We could not reach the claim service. Check your connection and try again.',
+      { code: 'NETWORK_ERROR', retryable: true },
+    )
+  }
+  if (!response.ok) {
+    throw new ApiRequestError('The file could not be uploaded. Please try again.', {
+      code: 'STORAGE_ERROR',
+      status: response.status,
+      retryable: true,
+    })
+  }
+  return null
+}
+
+async function handleApiResponse(response) {
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
     const error = payload?.error
@@ -499,7 +528,7 @@ export function completeEvidenceUpload({ claimId, evidenceId, revision, checksum
 }
 
 export function uploadEvidenceContent({ upload, file, signal }) {
-  return apiRequest(upload.url, {
+  return storageRequest(upload.url, {
     method: upload.method,
     headers: upload.headers,
     body: file,
