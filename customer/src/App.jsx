@@ -53,6 +53,7 @@ import './styles/profile-records.css'
 import './styles/profile-assets.css'
 import './styles/profile-responsive.css'
 import { profilePathForSection, profileSectionFromPath } from './profileRoutes.js'
+import { buildConversationTimeline, mergeMessagesById, orderMessages } from './conversationTimeline.js'
 import useProfileController from './profile/useProfileController.js'
 import { documentAttentionCount } from './claimDocumentProjection.js'
 import {
@@ -211,47 +212,6 @@ function assistancePresentation({ handoff, nextStep, requesting, reviewingReply,
     }
   }
   return null
-}
-
-function buildConversationTimeline(messages, resumeContext) {
-  const timeline = messages.map((message) => ({
-    key: message.message_id,
-    kind: 'message',
-    message,
-  }))
-  if (resumeContext) {
-    const boundaryMessageIndex = resumeContext.resumed_after_message_id
-      ? timeline.findIndex((item) => item.message?.message_id === resumeContext.resumed_after_message_id)
-      : -1
-    const resumedAt = Date.parse(resumeContext.resumed_at || '')
-    const firstMessageAfterResume = boundaryMessageIndex < 0 && Number.isFinite(resumedAt)
-      ? timeline.findIndex((item) => (
-          item.message && Date.parse(item.message.created_at || '') >= resumedAt
-        ))
-      : -1
-    const insertAt = boundaryMessageIndex >= 0
-      ? boundaryMessageIndex + 1
-      : firstMessageAfterResume >= 0
-        ? firstMessageAfterResume
-        : resumeContext.has_resume_boundary
-          ? 0
-          : timeline.length
-    timeline.splice(insertAt, 0, {
-      key: `claim-resumed-${resumeContext.resumed_at || 'current'}`,
-      kind: 'conversation-event',
-      title: 'Claim resumed',
-      detail: 'Continuing from your previous conversation',
-    })
-  }
-  return timeline
-}
-
-function mergeMessagesById(current, incoming) {
-  const merged = new Map(current.map((message) => [message.message_id, message]))
-  for (const message of incoming) {
-    if (message?.message_id) merged.set(message.message_id, message)
-  }
-  return [...merged.values()]
 }
 
 const CLAIMANT_ACTION_KINDS = Object.freeze({
@@ -450,6 +410,9 @@ function App() {
   const [offerConsentChecks, setOfferConsentChecks] = useState({})
   const [offerErrors, setOfferErrors] = useState({})
   const [failedMessage, setFailedMessage] = useState(null)
+  // A failed retry of an already saved message belongs on that message, not as a new
+  // unconfirmed bubble at the end of the conversation (#1025).
+  const [recoveryFailure, setRecoveryFailure] = useState(null)
   const [pendingMessage, setPendingMessage] = useState(null)
   const [activeTurnProgress, setActiveTurnProgress] = useState(null)
   const [messageActivities, setMessageActivities] = useState({})
@@ -910,7 +873,9 @@ function App() {
 
   function commitMessages(nextMessages) {
     messagesRequestGeneration.current += 1
-    setMessages(nextMessages)
+    setMessages(typeof nextMessages === 'function'
+      ? (current) => orderMessages(nextMessages(current))
+      : orderMessages(nextMessages))
   }
 
   function applyMessagesReadback(items, { generation, claimId, sessionId }) {
@@ -919,7 +884,7 @@ function App() {
       || activeClaimRef.current?.claim_id !== claimId
       || activeSessionIdRef.current !== sessionId
     ) return false
-    setMessages(items)
+    setMessages(orderMessages(items))
     return true
   }
 
@@ -1674,6 +1639,7 @@ function App() {
     forceLatestMessages.current = true
     setError('')
     setFailedMessage(null)
+    setRecoveryFailure(null)
     if (isAssistanceReply) {
       setAssistanceReplyReview({
         claimId: claim.claim_id,
@@ -1859,13 +1825,15 @@ function App() {
         const retryGuidance = requestError instanceof ApiRequestError && requestError.retryable
           ? 'Try again in a moment.'
           : 'Review the message and try again.'
-        setFailedMessage({
-          text,
-          sender: 'You',
-          message: serverConfirmedFailure
-            ? `${requestError.message} ${retryGuidance}`
-            : 'We could not confirm delivery because the connection ended before the service responded. Retry safely; the same request will not create a duplicate.',
-        })
+        const failureMessage = serverConfirmedFailure
+          ? `${requestError.message} ${retryGuidance}`
+          : 'We could not confirm delivery because the connection ended before the service responded. Retry safely; the same request will not create a duplicate.'
+        if (recoveryMessage) {
+          pendingSubmission.current = null
+          setRecoveryFailure({ messageId: recoveryMessage.message_id, message: failureMessage })
+        } else {
+          setFailedMessage({ text, sender: 'You', message: failureMessage })
+        }
         setError('')
         if (requestError instanceof ApiRequestError && requestError.code === 'REVISION_CONFLICT') {
           refreshAfterConflict().catch(() => {})
@@ -1901,6 +1869,7 @@ function App() {
     setEvidenceLoadStatus('idle')
     setEvidenceSyncNotice('')
     setResumeContext(null)
+    setRecoveryFailure(null)
     setExpandedConversationPanels({})
     setExternalServiceInteraction({
       claimId: null,
@@ -2245,6 +2214,7 @@ function App() {
       replaceActiveClaimContext(current, session.session_id)
       if (session.model_profile_id) setSelectedModel(session.model_profile_id)
       commitMessages(conversation.items)
+      setRecoveryFailure(null)
       setForm(current.form)
       setContentsItems(current.contents_items || [])
       setDynamicForm(current.dynamic_form || null)
@@ -2253,7 +2223,7 @@ function App() {
       setResumeContext({
         ...session.resume,
         resumed_at: session.started_at,
-        resumed_after_message_id: conversation.items.at(-1)?.message_id || null,
+        resumed_after_message_id: orderMessages(conversation.items).at(-1)?.message_id || null,
         has_resume_boundary: true,
       })
       setWorkspaceActive(true)
@@ -3312,6 +3282,9 @@ function App() {
                         {message.actor === 'claimant' && message.recovery && !messages.some((reply) => reply.actor === 'agent' && !reply.recovery && reply.in_reply_to === message.message_id) && (
                           <div role="status">
                             <p>{message.recovery.claimant_projection}</p>
+                            {recoveryFailure?.messageId === message.message_id && (
+                              <p className="message-state" role="alert">{recoveryFailure.message}</p>
+                            )}
                             {message.client_message_id && message.recovery.resume_triggers?.includes('explicit_retry_request') && (
                               <button type="button" disabled={isBusy} onClick={(event) => sendMessage(event, message)}>Retry response</button>
                             )}
