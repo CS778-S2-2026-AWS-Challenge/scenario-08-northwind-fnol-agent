@@ -226,7 +226,7 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
             'content': {
                 'type': 'text',
                 'text': (
-                    f"{journey['input']} "
+                    f'{journey["input"]} '
                     'Could you help me get a damage assessment for the repairs?'
                 ),
             },
