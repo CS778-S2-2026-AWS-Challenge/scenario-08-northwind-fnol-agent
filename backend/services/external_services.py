@@ -43,6 +43,7 @@ from backend.domain.models import (
     AuthorityOutcome,
     ClaimantExternalServiceAction,
     ClaimantExternalServiceResponse,
+    ClaimantPrimaryAction,
     ClaimantExternalServiceStatus,
     ClaimCreationStatus,
     CustomerNextStep,
@@ -579,6 +580,42 @@ def claimant_next_step(
         }
     )
 
+
+
+def claimant_current_action_projection(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    identity_repository: IdentityRepository | None = None,
+    *,
+    agreement_accepted: bool = False,
+) -> tuple[ClaimantExternalServiceAction | None, CustomerNextStep, ClaimantPrimaryAction]:
+    """Derive the one authoritative claimant action used by reads and writes.
+
+    Message-bound service offers remain actions on their originating Agent message.
+    They must not replace the normal intake Step 3/Step 4 primary action, regardless
+    of whether the offer has already been accepted or dispatched.
+    """
+
+    external_action = claimant_assessor_action(repository, claim)
+    primary_external_action = (
+        external_action
+        if external_action is None or external_action.offer_id is None
+        else None
+    )
+    next_step = claimant_next_step(
+        repository,
+        claim,
+        primary_external_action,
+        identity_repository=identity_repository,
+    )
+    primary_action = project_claimant_primary_action(
+        claim_id=claim.claim_id,
+        claim_revision=claim.revision,
+        next_step=next_step,
+        external_service_action=primary_external_action,
+        agreement_accepted=agreement_accepted,
+    )
+    return primary_external_action, next_step, primary_action
 
 def _response(
     repository: PersistenceRepository,
