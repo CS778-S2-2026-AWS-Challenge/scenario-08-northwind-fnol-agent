@@ -108,6 +108,7 @@ from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.account_data import (
     AccountCursorKey,
     AccountRecord,
+    PaymentDestinationDesignationConflict,
     PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
     account_record_audit_matches,
@@ -485,6 +486,12 @@ class FixtureRepository(PersistenceRepository):
             ):
                 raise KeyError(identifier)
             if isinstance(record, PaymentDestinationRecord) and record.is_common:
+                if (
+                    not isinstance(current, PaymentDestinationRecord)
+                    or not current.active
+                    or not record.active
+                ):
+                    raise PaymentDestinationDesignationConflict(identifier, reason='inactive')
                 previous = [
                     other
                     for other_id, other in self._payment_destinations.items()

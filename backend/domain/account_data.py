@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 from pydantic import Field, StringConstraints, field_validator, model_validator
 from pydantic_core import PydanticUndefined
@@ -160,7 +160,7 @@ class UpdatePaymentDestinationRequest(ContractModel):
     account_holder_name: ShortText | None = Field(
         default_factory=lambda: cast(str, PydanticUndefined)
     )
-    is_common: bool = Field(default_factory=lambda: cast(bool, PydanticUndefined))
+    is_common: Literal[True] = Field(default_factory=lambda: cast(Literal[True], PydanticUndefined))
 
     @field_validator('account_number')
     @classmethod

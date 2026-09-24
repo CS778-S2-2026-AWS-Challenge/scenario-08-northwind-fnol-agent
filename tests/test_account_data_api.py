@@ -20,6 +20,7 @@ from backend.domain.audit import AuditSubject, AuditSubjectType
 from backend.domain.models import CustomerNextStep, ResponsibleParty, WorkingClaim
 from backend.repositories.account_data import (
     CommonPaymentDestinationConflict,
+    PaymentDestinationDesignationConflict,
     PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
 )
@@ -305,6 +306,105 @@ def test_payment_destinations_persist_profile_fields_and_one_common_destination(
     assert replacement['is_common'] is False
 
 
+def test_payment_destination_rejects_retired_common_designation_atomically(
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    common = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        'active-common',
+        {'account_type': 'savings', 'account_number': '12-3456-1111222-00'},
+    )
+    retired_target = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        'retired-target',
+        {'account_type': 'cheque', 'account_number': '12-3456-3333444-00'},
+    )
+    retired = client.delete(
+        f'/api/v1/account/payment-destinations/{retired_target["payment_destination_id"]}',
+        headers={**owner, 'If-Match': '1'},
+    )
+    assert retired.status_code == 204
+
+    response = client.patch(
+        f'/api/v1/account/payment-destinations/{retired_target["payment_destination_id"]}',
+        headers={**owner, 'If-Match': '2'},
+        json={'is_common': True},
+    )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'PAYMENT_DESTINATION_STATE_CONFLICT'
+    stored_common = repository.get_payment_destination(common['payment_destination_id'], 'cus_demo')
+    stored_target = repository.get_payment_destination(
+        retired_target['payment_destination_id'], 'cus_demo'
+    )
+    assert stored_common is not None
+    assert stored_target is not None
+    assert (stored_common.active, stored_common.is_common, stored_common.revision) == (
+        True,
+        True,
+        1,
+    )
+    assert (stored_target.active, stored_target.is_common, stored_target.revision) == (
+        False,
+        False,
+        2,
+    )
+    assert (
+        len(
+            repository.list_audit_events_internal(
+                AuditSubject(
+                    subject_type=AuditSubjectType.PAYMENT_DESTINATION,
+                    subject_id=common['payment_destination_id'],
+                )
+            )
+        )
+        == 1
+    )
+    assert (
+        len(
+            repository.list_audit_events_internal(
+                AuditSubject(
+                    subject_type=AuditSubjectType.PAYMENT_DESTINATION,
+                    subject_id=retired_target['payment_destination_id'],
+                )
+            )
+        )
+        == 2
+    )
+
+
+def test_payment_destination_rejects_false_common_mutation(
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    common = _post(
+        client,
+        owner,
+        '/api/v1/account/payment-destinations',
+        'false-common',
+        {'account_type': 'savings', 'account_number': '12-3456-1111222-00'},
+    )
+
+    response = client.patch(
+        f'/api/v1/account/payment-destinations/{common["payment_destination_id"]}',
+        headers={**owner, 'If-Match': '1'},
+        json={'is_common': False},
+    )
+
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'VALIDATION_ERROR'
+    stored = repository.get_payment_destination(common['payment_destination_id'], 'cus_demo')
+    assert stored is not None
+    assert (stored.active, stored.is_common, stored.revision) == (True, True, 1)
+
+
 @pytest.mark.parametrize('missing_field', ['bank_name', 'account_holder_name'])
 def test_payment_destination_create_requires_profile_fields(
     client: TestClient,
@@ -426,6 +526,57 @@ def test_fixture_legacy_payment_destination_requires_explicit_designation(
         )
     )
     assert len(events) == 1
+
+
+def test_fixture_rejects_retired_common_designation_before_any_mutation(
+    repository: FixtureRepository,
+) -> None:
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    common = PaymentDestinationRecord(
+        payment_destination_id='pyd_aaaaaaaaaaaaaaaaaaaa',
+        customer_id='cus_designation_guard',
+        protected_value='sealed-value',
+        masked_value='****1234',
+        account_type='savings',
+        is_common=True,
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    retired = PaymentDestinationRecord(
+        payment_destination_id='pyd_bbbbbbbbbbbbbbbbbbbb',
+        customer_id=common.customer_id,
+        protected_value='sealed-value',
+        masked_value='****5678',
+        account_type='cheque',
+        active=False,
+        revision=2,
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    repository._payment_destinations = {
+        common.payment_destination_id: common,
+        retired.payment_destination_id: retired,
+    }
+    designated = retired.model_copy(update={'is_common': True, 'revision': 3})
+    principal = Principal(subject=retired.customer_id, actor_type='claimant', auth_source='test')
+
+    with pytest.raises(PaymentDestinationDesignationConflict):
+        repository.update_account_record(
+            designated,
+            2,
+            _account_audit(designated, principal, action='updated'),
+            'aud_rejected_demotion',
+        )
+
+    assert (
+        repository.get_payment_destination(common.payment_destination_id, common.customer_id)
+        == common
+    )
+    assert (
+        repository.get_payment_destination(retired.payment_destination_id, retired.customer_id)
+        == retired
+    )
+    assert not repository._audit_events
 
 
 def test_fixture_create_boundary_decides_common_from_active_record_count(

@@ -111,7 +111,10 @@ from backend.domain.staff_agent import (
     StaffAgentSession,
 )
 from backend.domain.staff_identity import StaffPresenceRecord
-from backend.repositories.account_data import CommonPaymentDestinationConflict
+from backend.repositories.account_data import (
+    CommonPaymentDestinationConflict,
+    PaymentDestinationDesignationConflict,
+)
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import (
     MongoDBConfigurationError,
@@ -292,6 +295,48 @@ def test_mongodb_payment_destination_designation_clears_previous_common(
     assert previous_events[0].source_refs == [
         f'payment_destination:{previous.payment_destination_id}:revision:2'
     ]
+
+
+def test_mongodb_rejects_retired_common_designation_before_any_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'retired_designation_guard')
+    monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
+    common = _payment_destination_record('pyd_aaaaaaaaaaaaaaaaaaaa', is_common=True)
+    retired = _payment_destination_record('pyd_bbbbbbbbbbbbbbbbbbbb').model_copy(
+        update={'active': False, 'revision': 2}
+    )
+    for record in (common, retired):
+        document = record.model_dump(mode='json')
+        document.update(
+            {
+                '_id': f'payment_destination:{record.payment_destination_id}',
+                'record_type': 'payment_destination',
+                'customer_id': record.customer_id,
+                'claim_id': None,
+            }
+        )
+        repository._collection.insert_one(document)
+    designated = retired.model_copy(update={'is_common': True, 'revision': 3})
+    principal = Principal(subject=retired.customer_id, actor_type='claimant', auth_source='test')
+
+    with pytest.raises(PaymentDestinationDesignationConflict):
+        repository.update_account_record(
+            designated,
+            2,
+            _account_audit(designated, principal, action='updated'),
+            'aud_rejected_demotion',
+        )
+
+    assert (
+        repository.get_payment_destination(common.payment_destination_id, common.customer_id)
+        == common
+    )
+    assert (
+        repository.get_payment_destination(retired.payment_destination_id, retired.customer_id)
+        == retired
+    )
+    assert repository._collection.count_documents({'record_type': 'audit_event'}) == 0
 
 
 def _claim(revision: int = 1) -> WorkingClaim:

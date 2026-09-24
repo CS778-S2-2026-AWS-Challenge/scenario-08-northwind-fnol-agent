@@ -403,8 +403,9 @@ the append-only audit collection through a bounded, filterable projection.
   account has zero active destinations, so a create after common retirement does not silently fill
   the vacancy while another active record remains. Legacy records without a marker project
   `is_common=false` consistently from list and resource reads and require explicit revisioned
-  designation. Designation atomically advances and audits both the promoted target and any demoted
-  previous common record. Retiring the common destination does not silently promote another
+  designation. Designation accepts only an active target and atomically advances and audits both
+  the promoted target and any demoted previous common record; rejection changes neither record nor
+  audit history. Retiring the common destination does not silently promote another
   record. It is not a payment command.
 - Fixture and MongoDB adapters enforce the same owner-first access, create idempotency, optimistic
   revision, stable descending `(created_at, resource_id)` keyset pagination, soft retirement, and

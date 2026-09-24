@@ -134,6 +134,7 @@ from backend.repositories.account_data import (
     AccountCursorKey,
     AccountRecord,
     CommonPaymentDestinationConflict,
+    PaymentDestinationDesignationConflict,
     PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
     account_record_audit_matches,
@@ -824,6 +825,19 @@ class MongoDBRepository:
         def persist(mongo_session: Any) -> None:
             self._ensure_new_audit_event(audit_event, mongo_session=mongo_session)
             if isinstance(record, PaymentDestinationRecord) and record.is_common:
+                current_destination = self._get(
+                    'payment_destination',
+                    identifier,
+                    PaymentDestinationRecord,
+                    customer_id=record.customer_id,
+                    session=mongo_session,
+                )
+                if current_destination is None:
+                    raise KeyError(identifier)
+                if current_destination.revision != expected_revision:
+                    raise RevisionConflict(current_destination.revision)
+                if not current_destination.active or not record.active:
+                    raise PaymentDestinationDesignationConflict(identifier, reason='inactive')
                 previous_documents = list(
                     self._collection.find(
                         {

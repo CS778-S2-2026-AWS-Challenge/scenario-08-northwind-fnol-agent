@@ -14343,6 +14343,7 @@
             "title": "Bank Name"
           },
           "is_common": {
+            "const": true,
             "title": "Is Common",
             "type": "boolean"
           }

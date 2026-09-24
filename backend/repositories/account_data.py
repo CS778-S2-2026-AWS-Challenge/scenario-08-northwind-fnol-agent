@@ -45,6 +45,15 @@ class CommonPaymentDestinationConflict(RepositoryConflict):
     """Another concurrent create established the account's common destination."""
 
 
+class PaymentDestinationDesignationConflict(RepositoryConflict):
+    """The target cannot become the account's common Payment Destination."""
+
+    def __init__(self, payment_destination_id: str, *, reason: str) -> None:
+        super().__init__(f'Payment Destination {payment_destination_id} is {reason}.')
+        self.payment_destination_id = payment_destination_id
+        self.reason = reason
+
+
 class ClaimantContactSelectionConflict(RepositoryConflict):
     """The claimant profile authority changed before payout/contact commit."""
 

@@ -530,9 +530,12 @@ Payment Destination projections expose `bank_name`, `account_holder_name`, and a
 require non-empty `bank_name` and `account_holder_name` values. The first successful create becomes
 common atomically only when the account has zero active destinations; creating into an account that
 still has any active destination never fills a missing common marker implicitly. A claimant may
-designate another owned active destination with a revisioned PATCH, which atomically clears the
-previous common marker. That demotion advances the previous resource revision and records separate
-append-only audit evidence. Retiring the common destination leaves no common destination and never
+designate another owned active destination with a revisioned PATCH containing `is_common: true`,
+which atomically clears the previous common marker. `is_common: false` is not an un-designation
+operation and returns `422 VALIDATION_ERROR`. An inactive target returns `409
+PAYMENT_DESTINATION_STATE_CONFLICT` before either destination or its audit history changes. That
+demotion advances the previous resource revision and records separate append-only audit evidence.
+Retiring the common destination leaves no common destination and never
 silently promotes another record. Legacy records may return the new fields as absent/null and a
 missing common marker as `false`; list and resource reads never perform a projection-only adoption.
 A compatible legacy record becomes common only through the explicit revisioned designation path.
@@ -606,8 +609,10 @@ transaction is being committed, the API returns `409 POLICY_SELECTION_CONFLICT` 
 `policy_id` and instructs the client to reload Policy state; it does not expose the Policy
 revision as the Claim revision.
 
-Payment destinations accept only `account_type` and account number. Identity documents accept
-only `driver_licence` or `passport` plus document number. Their full numbers are encrypted through
+New Payment Destinations require `bank_name`, `account_holder_name`, `account_type`, and account
+number. Existing destinations may update those fields and may use `is_common: true` for the
+active-only designation operation described above. Identity documents accept only
+`driver_licence` or `passport` plus document number. Their full numbers are encrypted through
 the protected-value adapter before repository persistence. Ordinary create/list/update responses
 return only `masked_account_number` or `masked_document_number`; they never return ciphertext or
 plaintext. These routes do not execute payments, verify bank accounts, or verify identity. A
@@ -4201,6 +4206,7 @@ All errors use one envelope:
 | `STAFF_NOT_AVAILABLE` | `409` | Staff presence is offline, unavailable, or its lease has expired |
 | `STAFF_PRESENCE_UNAVAILABLE` | `503` | Staff presence could not be persisted; retry after the dependency recovers |
 | `RESOURCE_CONFLICT` | `409` | A unique account or resource already exists |
+| `PAYMENT_DESTINATION_STATE_CONFLICT` | `409` | Common designation targeted an inactive Payment Destination |
 | `SESSION_NOT_ACTIVE` | `409` | Session is expired or already revoked |
 | `IDEMPOTENCY_CONFLICT` | `409` | Key was reused with a different request |
 | `DEMO_SEED_REQUIRES_EMPTY_QUEUE` | `409` | Controlled demo seed requires an empty Claim queue |

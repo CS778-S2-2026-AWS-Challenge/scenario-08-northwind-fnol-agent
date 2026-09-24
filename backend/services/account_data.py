@@ -63,6 +63,7 @@ from backend.repositories.account_data import (
     AccountRecord,
     ClaimantContactSelectionConflict,
     CommonPaymentDestinationConflict,
+    PaymentDestinationDesignationConflict,
     PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
     account_record_identity,
@@ -127,6 +128,15 @@ def _idempotency_conflict() -> ApiError:
         status_code=409,
         code='IDEMPOTENCY_CONFLICT',
         message='The Idempotency-Key was already used with a different request.',
+    )
+
+
+def _payment_destination_state_conflict(reason: str) -> ApiError:
+    return ApiError(
+        status_code=409,
+        code='PAYMENT_DESTINATION_STATE_CONFLICT',
+        message='Only an active Payment Destination can be designated as common.',
+        details=[ErrorDetail(field='is_common', reason=reason)],
     )
 
 
@@ -520,6 +530,8 @@ def update_payment_destination(
         raise _not_found('payment destination')
     if record.revision != expected:
         raise _revision_conflict(record.revision)
+    if 'is_common' in payload.model_fields_set and not record.active:
+        raise _payment_destination_state_conflict('The Payment Destination is inactive.')
     changes = payload.model_dump(exclude_unset=True, exclude={'account_number'})
     if 'account_number' in payload.model_fields_set:
         changes.update(
@@ -529,15 +541,18 @@ def update_payment_destination(
     related_audit_event_id = None
     if payload.is_common is True and 'is_common' in payload.model_fields_set:
         related_audit_event_id = new_id('aud')
-    return _update(
-        repository,
-        principal,
-        record,
-        expected,
-        changes,
-        project_payment_destination,
-        related_audit_event_id,
-    )
+    try:
+        return _update(
+            repository,
+            principal,
+            record,
+            expected,
+            changes,
+            project_payment_destination,
+            related_audit_event_id,
+        )
+    except PaymentDestinationDesignationConflict as error:
+        raise _payment_destination_state_conflict(error.reason) from error
 
 
 def update_identity_document(
