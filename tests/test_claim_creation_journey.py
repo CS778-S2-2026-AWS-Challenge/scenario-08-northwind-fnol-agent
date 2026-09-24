@@ -198,7 +198,6 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
     assert projection['external_claim'] == result['external_claim']
 
 
-
 def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
     client: TestClient,
     auth_headers: dict[str, str],
