@@ -48,11 +48,11 @@ async function main() {
     await page.getByRole('heading', { name: 'Personal information', exact: true }).waitFor({ state: 'visible', timeout: 30000 })
     assert(new URL(page.url()).pathname === '/profile/personal-details', 'Legacy Policies deep link did not recover to Personal details.')
     assert(await page.getByRole('button', { name: 'Policies', exact: true }).count() === 0, 'Removed Policies navigation is still visible.')
-    await page.locator('.profile-header-meta').getByText('Policy number', { exact: true }).waitFor({ state: 'visible' })
-    await page.locator('.profile-policy-disclosure').waitFor({ state: 'visible' })
+    await page.locator('.profile-header-meta').getByText('Customer ID:', { exact: true }).waitFor({ state: 'visible' })
+    assert(await page.getByText(/policy number/i).count() === 0, 'Personal details still shows a policy number.')
     assert(await hasNoHorizontalOverflow(page), 'Desktop Personal details page has horizontal overflow.')
     result.checks.legacy_policies_deep_link_recovers = true
-    result.checks.desktop_policy_number_visible = true
+    result.checks.desktop_customer_id_visible = true
     result.checks.desktop_no_horizontal_overflow = true
     await screenshot(page, 'pr1024-01-desktop-personal-details')
 
@@ -111,8 +111,7 @@ async function main() {
 
     await mobileIndex.getByRole('button', { name: 'Personal details', exact: true }).click()
     await page.getByRole('heading', { name: 'Personal information', exact: true }).waitFor({ state: 'visible' })
-    await page.locator('.profile-header-meta').getByText('Policy number', { exact: true }).waitFor({ state: 'visible' })
-    await page.locator('.profile-policy-disclosure').waitFor({ state: 'visible' })
+    await page.locator('.profile-header-meta').getByText('Customer ID:', { exact: true }).waitFor({ state: 'visible' })
     assert(new URL(page.url()).pathname === '/profile/personal-details', 'Mobile Personal details route did not open.')
     assert(await hasNoHorizontalOverflow(page), 'Mobile Personal details page has horizontal overflow.')
     await screenshot(page, 'pr1024-04-mobile-personal-details')
@@ -121,7 +120,7 @@ async function main() {
     await mobileIndex.getByRole('button', { name: 'Personal details', exact: true }).waitFor({ state: 'visible' })
     assert(new URL(page.url()).pathname === '/profile', 'Mobile Back did not restore the category index.')
     result.checks.mobile_category_index_visible = true
-    result.checks.mobile_policy_number_visible = true
+    result.checks.mobile_customer_id_visible = true
     result.checks.mobile_category_back_restores_index = true
     result.checks.mobile_no_horizontal_overflow = true
 

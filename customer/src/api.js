@@ -367,28 +367,6 @@ export function updateAccountPreferences(preferences, revision) {
   })
 }
 
-export function listAccountPolicies({ cursor, limit = 25, signal } = {}) {
-  const params = new URLSearchParams({ limit: String(limit) })
-  if (cursor) params.set('cursor', cursor)
-  return apiRequest(`/api/v1/account/policies?${params}`, { signal })
-}
-
-export function createAccountPolicy({ policyNumber, idempotencyKey = requestId('policy') }) {
-  return apiRequest('/api/v1/account/policies', {
-    method: 'POST',
-    headers: { 'Idempotency-Key': idempotencyKey },
-    body: JSON.stringify({ policy_number: policyNumber }),
-  })
-}
-
-export function updateAccountPolicy({ policyId, revision, policyNumber }) {
-  return apiRequest(`/api/v1/account/policies/${encodeURIComponent(policyId)}`, {
-    method: 'PATCH',
-    headers: { 'If-Match': String(revision) },
-    body: JSON.stringify({ policy_number: policyNumber }),
-  })
-}
-
 export function listAccountPaymentDestinations({ cursor, limit = 25, signal } = {}) {
   const params = new URLSearchParams({ limit: String(limit) })
   if (cursor) params.set('cursor', cursor)
