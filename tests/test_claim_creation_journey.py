@@ -203,8 +203,10 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
     auth_headers: dict[str, str],
 ) -> None:
     journey = _fixture()
-    journey_input = cast(str, journey['input'])
-    assessment_request = 'Could you help me get a damage assessment for the repairs?'
+    journey_input = (
+        cast(str, journey['input'])
+        + ' Could you help me get a damage assessment for the repairs?'
+    )
     created = client.post(
         '/api/v1/claims',
         headers={**auth_headers, 'Idempotency-Key': 'issue928-ordering-claim'},
@@ -232,6 +234,12 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
     assert intake.status_code == 200, intake.text
     intake_body = cast(dict[str, Any], intake.json())
     proposed = sorted(item['field_code'] for item in intake_body['form_changes'])
+    offer = next(
+        action
+        for action in intake_body['agent_message']['message_actions']
+        if action['service_identity'] == 'vehicle_damage_assessment_routing'
+    )
+    offer_id = cast(str, offer['offer_id'])
 
     confirmed = client.post(
         f'/api/v1/claims/{claim_id}/form/confirmations',
@@ -252,34 +260,12 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
     )
     assert ready['customer_next_step']['status'] == 'ready_to_create'
 
-    assessor_turn = client.post(
-        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
-        headers={
-            **auth_headers,
-            'Idempotency-Key': 'issue928-ordering-assessor',
-            'If-Match': str(ready['revision']),
-        },
-        json={
-            'client_message_id': 'issue928-ordering-assessor',
-            'content': {'type': 'text', 'text': assessment_request},
-            'evidence_refs': [],
-        },
-    )
-    assert assessor_turn.status_code == 200, assessor_turn.text
-    assessor_body = cast(dict[str, Any], assessor_turn.json())
-    offer = next(
-        action
-        for action in assessor_body['agent_message']['message_actions']
-        if action['service_identity'] == 'vehicle_damage_assessment_routing'
-    )
-
-    offer_id = cast(str, offer['offer_id'])
     granted = client.post(
         f'/api/v1/claims/{claim_id}/external-service-offers/{offer_id}/decision',
         headers={
             **auth_headers,
             'Idempotency-Key': 'issue928-ordering-offer',
-            'If-Match': str(assessor_body['claim_revision']),
+            'If-Match': str(ready['revision']),
         },
         json={'decision': 'grant'},
     )
