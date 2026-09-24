@@ -40,6 +40,7 @@ from backend.domain.models import (
     MessageRecord,
     MessageVisibility,
     NeededFor,
+    ProposedFormChange,
     ResponsibleParty,
     SessionRecord,
     StructuredFormField,
@@ -67,7 +68,11 @@ from backend.services.external_service_offers import (
     detected_service_intents,
     offer_work_item,
 )
-from backend.services.fact_resolution import confirm_contents_item, confirm_form_field
+from backend.services.fact_resolution import (
+    confirm_contents_item,
+    confirm_form_field,
+    resolve_form_change,
+)
 from backend.services.handoffs import prepare_support_handoff, updated_claim_for_handoff
 from backend.services.professional_reviews import build_policy_review_handoff
 
@@ -454,6 +459,52 @@ def reduce_turn(
     projected_confirmation_contents = _apply_contents_item_changes(
         claim.contents_items, contents_item_changes
     )
+    # loss.description restates the same loss motor/contents already record at item level
+    # (the vehicle's confirmed damage, a contents item's own description). Runtime derives
+    # it here from that already-confirmed source instead of asking the claimant to state
+    # the same loss twice; it lands as an inference, so needs_confirmation still requires
+    # the claimant to see and accept it in the next batch confirmation before it counts as
+    # a claimant-stated fact -- Runtime proposes, the claimant still decides.
+    if 'loss.description' not in projected_confirmation_form:
+        derived_loss_description: str | None = None
+        derived_source_field: str | None = None
+        # This turn's own family proposal, not the pre-turn branch_evaluation: on the
+        # very turn that confirms both product_family and the item-level fact together
+        # (the common case), the evaluation Runtime was handed before this message
+        # arrived has not seen either yet.
+        current_product_family_field = projected_confirmation_form.get('claim.product_family')
+        current_product_family = (
+            current_product_family_field.value if current_product_family_field is not None else None
+        )
+        if current_product_family == 'motor':
+            vehicle_damage = projected_confirmation_form.get('vehicle.damage_description')
+            if vehicle_damage is not None and vehicle_damage.status is FormStatus.CONFIRMED:
+                derived_loss_description = str(vehicle_damage.value)
+                derived_source_field = 'vehicle.damage_description'
+        elif current_product_family == 'contents':
+            first_item = next(iter(projected_confirmation_contents), None)
+            if first_item is not None and first_item.status is FormStatus.CONFIRMED:
+                derived_loss_description = first_item.description
+                derived_source_field = 'contents.items'
+        if derived_loss_description is not None:
+            form_changes['loss.description'] = resolve_form_change(
+                field_code='loss.description',
+                existing=None,
+                proposal=ProposedFormChange(
+                    field_code='loss.description',
+                    value=derived_loss_description,
+                    source=FormSource.INFERENCE,
+                    status=FormStatus.PROPOSED,
+                    needed_for=NeededFor.CURRENT_ACTION,
+                    reported_text=f'Derived from {derived_source_field}.',
+                ),
+                source_ref=claimant_message.message_id,
+                message_text=message_text,
+                timestamp=timestamp,
+                accepted_status=FormStatus.PROPOSED,
+                updated_by=ActorReference(actor_type=ActorType.AGENT, actor_id='runtime'),
+            )
+            projected_confirmation_form['loss.description'] = form_changes['loss.description']
     batch_confirmed = confirmation_before_message is not None and can_confirm(
         claim,
         projected_confirmation_form,
