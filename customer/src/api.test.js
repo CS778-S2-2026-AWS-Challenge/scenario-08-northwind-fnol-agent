@@ -4,12 +4,10 @@ import {
   applyEvidenceHistoryAction,
   createAccountAsset,
   createAccountIdentityDocument,
-  createAccountPolicy,
   createClaim,
   listAccountAssets,
   listAccountIdentityDocuments,
   listAccountPaymentDestinations,
-  listAccountPolicies,
   createPaymentDestination,
   listEvidenceHistory,
   listClaims,
@@ -23,10 +21,9 @@ import {
   updateAccountProfile,
   updateAccountPreferences,
   updateAccountIdentityDocument,
-  updateAccountPolicy,
 } from './api.js'
 
-describe('policy and payment account clients', () => {
+describe('payment account clients', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
     setClaimantAccessToken('synthetic-claimant-token')
@@ -35,31 +32,6 @@ describe('policy and payment account clients', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     setClaimantAccessToken(null)
-  })
-
-  it('uses the plural policy contract with cursor, create key, and revision', async () => {
-    fetch.mockResolvedValue(new Response(JSON.stringify({ items: [], page: { next_cursor: null } }), { status: 200 }))
-    await listAccountPolicies({ cursor: 'policy-cursor' })
-    expect(fetch).toHaveBeenCalledWith(
-      '/api/v1/account/policies?limit=25&cursor=policy-cursor',
-      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token' }) }),
-    )
-
-    fetch.mockResolvedValue(new Response(JSON.stringify({ policy_id: 'pol_synthetic', policy_number: 'NW-1234', revision: 1 }), { status: 201 }))
-    await createAccountPolicy({ policyNumber: 'NW-1234', idempotencyKey: 'policy-test-key' })
-    expect(fetch).toHaveBeenCalledWith('/api/v1/account/policies', expect.objectContaining({
-      method: 'POST',
-      headers: expect.objectContaining({ 'Idempotency-Key': 'policy-test-key' }),
-      body: JSON.stringify({ policy_number: 'NW-1234' }),
-    }))
-
-    fetch.mockResolvedValue(new Response(JSON.stringify({ policy_id: 'pol_synthetic', policy_number: 'NW-5678', revision: 2 }), { status: 200 }))
-    await updateAccountPolicy({ policyId: 'pol_synthetic', revision: 1, policyNumber: 'NW-5678' })
-    expect(fetch).toHaveBeenCalledWith('/api/v1/account/policies/pol_synthetic', expect.objectContaining({
-      method: 'PATCH',
-      headers: expect.objectContaining({ 'If-Match': '1' }),
-      body: JSON.stringify({ policy_number: 'NW-5678' }),
-    }))
   })
 
   it('loads only the masked payment destination projection', async () => {

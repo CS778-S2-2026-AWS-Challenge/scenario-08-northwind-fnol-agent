@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import UserProfile from './UserProfile.jsx'
 
 const account = {
+  customer_id: 'cus_iris_profile',
   profile: {
     display_name: 'Iris',
     legal_name: 'Iris Zhang',
@@ -33,39 +34,6 @@ const vehicleAsset = {
   active: true,
   created_at: '2026-09-12T01:00:00Z',
   updated_at: '2026-09-17T01:00:00Z',
-}
-
-const policy = {
-  policy_id: 'pol_11111111111111111111',
-  policy_number: 'NTH-1234',
-  revision: 2,
-}
-
-function profileController(policyResource, overrides = {}) {
-  return {
-    resources: {
-      assets: { items: [], error: '', loading: false, stale: false },
-      policies: policyResource,
-      payments: { items: [], error: '', loading: false, stale: false },
-      identities: { items: [], error: '', loading: false, stale: false },
-    },
-    pending: {},
-    beginCreate: vi.fn().mockReturnValue('policy-attempt-1'),
-    abandonCreate: vi.fn(),
-    saveProfile: vi.fn().mockResolvedValue(account),
-    savePreferences: vi.fn().mockResolvedValue(account),
-    createAsset: vi.fn(),
-    saveAsset: vi.fn(),
-    createPolicy: vi.fn().mockResolvedValue(policy),
-    savePolicy: vi.fn().mockResolvedValue(policy),
-    createIdentity: vi.fn(),
-    saveIdentity: vi.fn(),
-    reloadAssets: vi.fn().mockResolvedValue([]),
-    reloadPolicies: vi.fn().mockResolvedValue(policyResource.items || []),
-    reloadPayments: vi.fn().mockResolvedValue([]),
-    reloadIdentities: vi.fn().mockResolvedValue([]),
-    ...overrides,
-  }
 }
 
 function ProfileHarness({ initialSection = null, profileProps }) {
@@ -128,9 +96,10 @@ describe('UserProfile', () => {
     expect(screen.queryByRole('button', { name: 'Policies' })).not.toBeInTheDocument()
     expect(screen.getByText('i•••@gmail.com')).toBeInTheDocument()
     expect(screen.getByText('••• ••• 123')).toBeInTheDocument()
-    expect(screen.getByText('Policy number')).toBeInTheDocument()
-    expect(screen.getByText('Not provided', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
-    expect(screen.getByText('Add policy number', { selector: 'summary' })).toBeInTheDocument()
+    expect(screen.getByText('Customer ID:', { selector: '.profile-header-meta > span' })).toBeInTheDocument()
+    expect(screen.getByText('cus_iris_profile', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Profile header' })).not.toHaveTextContent(/policy/i)
+    expect(screen.queryByRole('button', { name: /policy number/i })).not.toBeInTheDocument()
     expect(screen.queryByText(/^Saved$/)).not.toBeInTheDocument()
     expect(screen.getByText('Iris', { selector: '.profile-header-copy > strong' }).closest('.profile-header')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Edit profile' }).closest('.profile-header')).toBeInTheDocument()
@@ -180,216 +149,6 @@ describe('UserProfile', () => {
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
   })
 
-  it('shows and edits the account policy number through Personal details disclosure', async () => {
-    const user = userEvent.setup()
-    const savePolicy = vi.fn().mockResolvedValue({ ...policy, policy_number: 'NTH-9876', revision: 3 })
-    const controller = profileController(
-      { items: [policy], error: '', loading: false, stale: false },
-      { savePolicy },
-    )
-    renderProfile({ controller }, 'personal-details')
-
-    expect(screen.getByText('••••1234', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
-    await user.click(screen.getByText('View or edit policy number', { selector: 'summary' }))
-    await user.click(screen.getByRole('button', { name: 'Edit policy number ••••1234' }))
-
-    const input = screen.getByLabelText('Policy number', { selector: 'input' })
-    expect(input).toHaveFocus()
-    await user.clear(input)
-    await user.type(input, 'NTH-9876')
-    await user.click(screen.getByRole('button', { name: 'Save policy number' }))
-
-    expect(savePolicy).toHaveBeenCalledWith(policy.policy_id, policy.revision, 'NTH-9876')
-    expect(await screen.findByText(/Policy number ••••9876 was saved/)).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit policy number ••••1234' })).toHaveFocus())
-  })
-
-  it('adds an account policy number through the Personal details disclosure', async () => {
-    const user = userEvent.setup()
-    const createPolicy = vi.fn().mockResolvedValue(policy)
-    const controller = profileController(
-      { items: [], error: '', loading: false, stale: false },
-      { createPolicy },
-    )
-    renderProfile({ controller }, 'personal-details')
-
-    await user.click(screen.getByText('Add policy number', { selector: 'summary' }))
-    await user.click(screen.getByRole('button', { name: 'Add policy number' }))
-
-    const input = screen.getByLabelText('Policy number', { selector: 'input' })
-    expect(input).toHaveFocus()
-    await user.type(input, 'NTH-1234')
-    await user.click(screen.getByRole('button', { name: 'Save policy number' }))
-
-    expect(createPolicy).toHaveBeenCalledWith({
-      policyNumber: 'NTH-1234',
-      attemptId: 'policy-attempt-1',
-    })
-    expect(await screen.findByText(/Policy number ••••1234 was saved/)).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Add policy number' })).toHaveFocus())
-  })
-
-  it('keeps Personal details forms mutually exclusive and returns focus after policy cancellation', async () => {
-    const user = userEvent.setup()
-    const controller = profileController({
-      items: [policy], error: '', loading: false, stale: false,
-    })
-    renderProfile({ controller }, 'personal-details')
-
-    await user.click(screen.getByText('View or edit policy number', { selector: 'summary' }))
-    await user.click(screen.getByRole('button', { name: 'Edit profile' }))
-    expect(screen.getByRole('button', { name: 'Edit policy number ••••1234' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Save profile' })).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Done' }))
-    await user.click(screen.getByRole('button', { name: 'Edit policy number ••••1234' }))
-    expect(screen.getByRole('button', { name: 'Edit profile' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Edit personal information' })).toBeDisabled()
-    expect(screen.queryByRole('button', { name: 'Save profile' })).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Cancel' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit policy number ••••1234' })).toHaveFocus())
-  })
-
-  it('keeps the active policy draft recoverable through retained loading and failure', async () => {
-    const user = userEvent.setup()
-    const sharedProps = {
-      account,
-      activeSection: 'personal-details',
-      onCreateAsset: vi.fn(),
-      onOpenClaims: vi.fn(),
-      onReloadAssets: vi.fn(),
-      onSaveProfile: vi.fn().mockResolvedValue(account),
-      onSavePreferences: vi.fn().mockResolvedValue(account),
-      onSelectSection: vi.fn(),
-      onSignOut: vi.fn(),
-      onUpdateAsset: vi.fn(),
-    }
-    const view = (resource) => <UserProfile {...sharedProps} controller={profileController(resource)} />
-    const { rerender } = render(view({ items: [policy], error: '', loading: false, stale: false }))
-
-    await user.click(screen.getByText('View or edit policy number', { selector: 'summary' }))
-    await user.click(screen.getByRole('button', { name: 'Edit policy number ••••1234' }))
-    const input = screen.getByLabelText('Policy number', { selector: 'input' })
-    expect(input).toHaveFocus()
-
-    rerender(view({ items: [policy], error: '', loading: true, stale: true }))
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Save policy number' })).toBeDisabled()
-    expect(input).toHaveFocus()
-
-    rerender(view({ items: [policy], error: 'Reload failed.', loading: false, stale: true }))
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
-    expect(screen.getByText(/Reload failed/)).toBeInTheDocument()
-    expect(input).toHaveFocus()
-
-    await user.click(screen.getByRole('button', { name: 'Cancel' }))
-    await waitFor(() => expect(screen.getByText('View or edit policy number — refresh failed', { selector: 'summary' })).toHaveFocus())
-    expect(screen.getByRole('button', { name: 'Edit profile' })).not.toBeDisabled()
-  })
-
-  it('announces collapsed policy loading, completion, and failure once', async () => {
-    const user = userEvent.setup()
-    const sharedProps = {
-      account,
-      activeSection: 'personal-details',
-      onCreateAsset: vi.fn(),
-      onOpenClaims: vi.fn(),
-      onReloadAssets: vi.fn(),
-      onSaveProfile: vi.fn().mockResolvedValue(account),
-      onSavePreferences: vi.fn().mockResolvedValue(account),
-      onSelectSection: vi.fn(),
-      onSignOut: vi.fn(),
-      onUpdateAsset: vi.fn(),
-    }
-    const view = (resource) => <UserProfile {...sharedProps} controller={profileController(resource)} />
-    const { rerender } = render(view({ items: null, error: '', loading: true, stale: false }))
-
-    const liveStatus = screen.getByRole('status', { name: 'Policy number status' })
-    expect(liveStatus).toHaveAttribute('aria-live', 'polite')
-    expect(liveStatus).toHaveAttribute('aria-atomic', 'true')
-    expect(liveStatus).toHaveTextContent('Loading…')
-
-    rerender(view({ items: [policy], error: '', loading: false, stale: false }))
-    expect(liveStatus).toHaveTextContent('••••1234')
-    await user.click(screen.getByText('View or edit policy number', { selector: 'summary' }))
-
-    rerender(view({ items: [policy], error: 'Reload failed.', loading: false, stale: true }))
-    expect(liveStatus).toHaveTextContent('••••1234 · Could not refresh')
-    expect(screen.getAllByRole('status')).toEqual([liveStatus])
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    expect(screen.getByText(/Reload failed/)).toBeInTheDocument()
-  })
-
-  it('keeps every historical policy record visible without inventing a primary policy', async () => {
-    const user = userEvent.setup()
-    const secondPolicy = { ...policy, policy_id: 'pol_22222222222222222222', policy_number: 'NTH-5678' }
-    const controller = profileController({
-      items: [policy, secondPolicy], error: '', loading: false, stale: false,
-    })
-    renderProfile({ controller }, 'personal-details')
-
-    expect(screen.getByText('2 policy numbers saved', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
-    await user.click(screen.getByText('View or edit policy number', { selector: 'summary' }))
-    expect(screen.getByText('••••1234')).toBeInTheDocument()
-    expect(screen.getByText('••••5678')).toBeInTheDocument()
-  })
-
-  it('labels a retained policy number when its refresh fails', async () => {
-    const user = userEvent.setup()
-    const controller = profileController({
-      items: [policy], error: 'Reload failed.', loading: false, stale: true,
-    })
-    renderProfile({ controller }, 'personal-details')
-
-    expect(screen.getByText('••••1234 · Could not refresh', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
-    await user.click(screen.getByText('View or edit policy number — refresh failed', { selector: 'summary' }))
-    expect(screen.getByText(/Reload failed/)).toBeInTheDocument()
-    expect(screen.getByText('••••1234')).toBeInTheDocument()
-  })
-
-  it('labels retained policy records while a refresh is running', async () => {
-    const user = userEvent.setup()
-    const secondPolicy = { ...policy, policy_id: 'pol_22222222222222222222', policy_number: 'NTH-5678' }
-    const controller = profileController({
-      items: [policy, secondPolicy], error: '', loading: true, stale: false,
-    })
-    renderProfile({ controller }, 'personal-details')
-
-    expect(screen.getByText('2 policy numbers saved · Refreshing…', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
-    await user.click(screen.getByText('View or edit policy number — refreshing', { selector: 'summary' }))
-    expect(screen.getByText('••••1234')).toBeInTheDocument()
-    expect(screen.getByText('••••5678')).toBeInTheDocument()
-  })
-
-  it('keeps policy loading and retryable errors inside Personal details', async () => {
-    const user = userEvent.setup()
-    const reloadPolicies = vi.fn().mockResolvedValue([])
-    const controller = profileController(
-      { items: null, error: 'Northwind could not load saved policy numbers. Reload this section and try again.', loading: false, stale: false },
-      { reloadPolicies },
-    )
-    renderProfile({ controller }, 'personal-details')
-
-    expect(screen.getByText('Unavailable', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
-    await user.click(screen.getByText('Add policy number — refresh failed', { selector: 'summary' }))
-    expect(screen.getByText(/could not load saved policy numbers/)).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Try again' }))
-    expect(reloadPolicies).toHaveBeenCalledTimes(1)
-  })
-
-  it('shows policy loading feedback inside Personal details', async () => {
-    const user = userEvent.setup()
-    const controller = profileController({
-      items: null, error: '', loading: true, stale: false,
-    })
-    renderProfile({ controller }, 'personal-details')
-
-    expect(screen.getByText('Loading…', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
-    await user.click(screen.getByText('Add policy number — loading', { selector: 'summary' }))
-    expect(screen.getByText('Loading saved policy numbers…')).toBeInTheDocument()
-  })
-
   it('shows the prepared Claim choices only when account-backed handlers are supplied', async () => {
     const user = userEvent.setup()
     const onChangeAutoFillChoice = vi.fn()
@@ -413,6 +172,15 @@ describe('UserProfile', () => {
     expect(onChangeAutoFillChoice).toHaveBeenCalledWith('c', true)
     await user.click(screen.getByRole('button', { name: 'Save Claim auto-fill choices' }))
     expect(onSaveAutoFillChoices).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows Not provided for a missing preferred name or customer ID', () => {
+    renderProfile({
+      account: { ...account, customer_id: undefined, profile: { ...account.profile, preferred_name: null } },
+    }, 'personal-details')
+
+    expect(screen.getByText('Not provided', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(screen.getByText('Not provided', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
   })
 
   it('updates the preferred name without changing the legal name', async () => {

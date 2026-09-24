@@ -1,8 +1,4 @@
-import { useState } from 'react'
-
 import { FeatureNotice, SummaryRow } from './ProfilePrimitives.jsx'
-import PolicyNumberDetails from './PoliciesSection.jsx'
-import { policyDisclosureSummary, policyNumberSummary } from './policyNumber.js'
 
 function maskEmail(value = '') {
   const [local, domain] = value.split('@')
@@ -37,29 +33,22 @@ function formatDateOfBirth(value) {
   }).format(date)
 }
 
-function ProfileHeader({ account, controller, policyEditorActive, policyResource }) {
+function ProfileHeader({ account, controller }) {
   return (
     <header className="profile-header">
       <div className="profile-avatar" aria-hidden="true">{initials(account.profile.display_name)}</div>
       <div className="profile-header-copy">
         <span className="profile-account-name-label">Preferred name</span>
         <strong>{account.profile.preferred_name || 'Not provided'}</strong>
-        <p
-          className="profile-header-meta"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          aria-label="Policy number status"
-        >
-          <span>Policy number</span>
-          <strong>{policyNumberSummary(policyResource)}</strong>
+        <p className="profile-header-meta">
+          <span>Customer ID:</span>
+          <strong>{account.customer_id || 'Not provided'}</strong>
         </p>
       </div>
       <button
         id="profile-edit-button"
         className="profile-quiet-action"
         type="button"
-        disabled={policyEditorActive}
         aria-expanded={controller.activeEditor === 'profile'}
         aria-controls="profile-header-editor"
         onClick={controller.activeEditor === 'profile'
@@ -76,21 +65,13 @@ export default function PersonalDetailsSection({
   account,
   controller,
   headingAs: Heading = 'h1',
-  policyController,
-  policyResource,
 }) {
   const profile = account.profile || {}
-  const [policyEditorActive, setPolicyEditorActive] = useState(false)
   return (
     <section className="profile-section" aria-label="Personal details">
       <FeatureNotice notice={controller.notice} />
       <section className="profile-header-region" aria-label="Profile header">
-        <ProfileHeader
-          account={account}
-          controller={controller}
-          policyEditorActive={policyEditorActive}
-          policyResource={policyResource}
-        />
+        <ProfileHeader account={account} controller={controller} />
         {controller.activeEditor === 'profile' && (
           <form id="profile-header-editor" className="profile-edit-form profile-header-editor" onSubmit={controller.saveDetails}>
             <h3>Profile details</h3>
@@ -111,22 +92,6 @@ export default function PersonalDetailsSection({
             </button>
           </form>
         )}
-        <details className="profile-policy-disclosure">
-          <summary id="profile-policy-disclosure-summary">{policyDisclosureSummary(policyResource)}</summary>
-          <PolicyNumberDetails
-            announceResourceState={false}
-            editingDisabled={Boolean(controller.activeEditor)}
-            fallbackFocusId="profile-policy-disclosure-summary"
-            resource={policyResource}
-            pending={policyController.pending}
-            onBeginCreate={policyController.beginCreate}
-            onAbandonCreate={policyController.abandonCreate}
-            onCreate={policyController.createPolicy}
-            onReload={policyController.reloadPolicies}
-            onUpdate={policyController.savePolicy}
-            onEditingChange={setPolicyEditorActive}
-          />
-        </details>
       </section>
 
       <section className="profile-personal-information" aria-labelledby="profile-personal-information-title">
@@ -136,7 +101,6 @@ export default function PersonalDetailsSection({
             id="profile-personal-edit-button"
             className="profile-quiet-action"
             type="button"
-            disabled={policyEditorActive}
             aria-label={controller.activeEditor === 'personal'
               ? 'Done editing personal information'
               : 'Edit personal information'}

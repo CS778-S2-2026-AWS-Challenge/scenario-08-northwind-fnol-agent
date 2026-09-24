@@ -4,16 +4,13 @@ import {
   ApiRequestError,
   createAccountAsset,
   createAccountIdentityDocument,
-  createAccountPolicy,
   getAuthenticatedAccount,
   listAccountAssets,
   listAccountIdentityDocuments,
   listAccountPaymentDestinations,
-  listAccountPolicies,
   requestId,
   updateAccountAsset,
   updateAccountIdentityDocument,
-  updateAccountPolicy,
   updateAccountPreferences,
   updateAccountProfile,
 } from '../api.js'
@@ -26,11 +23,6 @@ const RESOURCE_CONFIG = {
     id: 'asset_id',
     label: 'saved assets',
     list: listAccountAssets,
-  },
-  policies: {
-    id: 'policy_id',
-    label: 'saved policy numbers',
-    list: listAccountPolicies,
   },
   payments: {
     id: 'payment_destination_id',
@@ -357,38 +349,6 @@ export default function useProfileController({ account, setAccount, enabled = tr
     reconcile: (latest) => latest.find((item) => item.asset_id === assetId && objectContains(item, updates)),
   }), [runResourceMutation])
 
-  const createPolicy = useCallback(async ({ policyNumber, attemptId }) => {
-    const normalized = policyNumber.trim()
-    const saved = await runResourceMutation({
-      scope: 'policy-create',
-      resource: 'policies',
-      action: 'the new policy number',
-      execute: () => createAccountPolicy({
-        policyNumber: normalized,
-        idempotencyKey: createKey('policy', attemptId),
-      }),
-      reconcile: (latest, before) => {
-        const previousIds = new Set(before.map((item) => item.policy_id))
-        return latest.find((item) => !previousIds.has(item.policy_id) && item.policy_number === normalized)
-      },
-    })
-    abandonCreate('policy', attemptId)
-    return saved
-  }, [abandonCreate, createKey, runResourceMutation])
-
-  const savePolicy = useCallback((policyId, revision, policyNumber) => {
-    const normalized = policyNumber.trim()
-    return runResourceMutation({
-      scope: `policy:${policyId}`,
-      resource: 'policies',
-      action: 'the policy-number update',
-      execute: () => updateAccountPolicy({ policyId, revision, policyNumber: normalized }),
-      reconcile: (latest) => latest.find((item) => (
-        item.policy_id === policyId && item.policy_number === normalized
-      )),
-    })
-  }, [runResourceMutation])
-
   const createIdentity = useCallback(async ({ documentType, documentNumber, attemptId }) => {
     const idempotencyKey = createKey('identity', attemptId)
     const create = () => createAccountIdentityDocument({
@@ -423,12 +383,9 @@ export default function useProfileController({ account, setAccount, enabled = tr
     savePreferences,
     createAsset,
     saveAsset,
-    createPolicy,
-    savePolicy,
     createIdentity,
     saveIdentity,
     reloadAssets: () => loadResource('assets', { preserveItems: true }),
-    reloadPolicies: () => loadResource('policies', { preserveItems: true }),
     reloadPayments: () => loadResource('payments', { preserveItems: true }),
     reloadIdentities: () => loadResource('identities', { preserveItems: true }),
   }
