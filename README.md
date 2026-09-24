@@ -89,20 +89,68 @@ The development requirements include `jsonschema` (MIT) and its typing package
 schemas in contract tests; Pydantic validation of a response alone cannot detect an
 unsatisfiable provider schema. They are not production runtime dependencies.
 
-Start the backend:
+### Run the app
+
+Start the backend and the claimant frontend against the shared model with one command:
 
 ```powershell
-py -3.12 -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+.\scripts\start-dev.ps1
 ```
 
-To run a configured model profile from the ignored project `.env`, load it explicitly:
+It pulls the model credentials from the team secrets endpoint, starts the backend on port 8000
+with the `model_gateway` runtime profile and the shared `config/model-runtime-bindings.json`
+(currently OpenRouter `openai/gpt-4o`), then starts the claimant frontend on port 5173. Open
+`http://127.0.0.1:5173/`. Add `-BackendOnly` to skip the frontend, or `-BackendPort` /
+`-CustomerPort` to move either process.
+
+The script starts from a fresh Control Plane database each time (`var/dev/control-plane.sqlite3`,
+ignored by git). The backend only publishes the checked-in model catalogue into an empty Control
+Plane; a database left over from an earlier checkout keeps its old catalogue, so you would see an
+old default model or profiles that no longer exist and nothing would tell you why. Claims,
+sessions and accounts are in separate databases and are kept. Pass `-KeepControlPlane` if you
+have published a release locally through the Admin console and want to keep it.
+
+Nobody keeps a private `.env` or a local credential store any more. Which model the team talks to
+is decided by `config/model-runtime-bindings.json`; when that file is loaded the backend ignores
+`MODEL_PROVIDER`, `MODEL_BASE_URL`, `MODEL_IDENTIFIER`, `MODEL_API_KEY_ENV` and the
+`MODEL_SUPPORTS_*` variables, so change the model there, not in the environment.
+
+The same steps, one at a time, if you prefer to run them by hand:
 
 ```powershell
-py -3.12 -m uvicorn backend.main:app --env-file .env --reload --host 127.0.0.1 --port 8000
+# 1. Pull the credentials. The bundle is KEY=VALUE lines.
+$bundle = Invoke-RestMethod -Uri 'https://ysoseri.us/secret/northwind-dev' `
+    -Headers @{ Authorization = 'Bearer ysk_nEtbZytRcPqjtTHzaEFD-0Lg2sxlGZ9oUdCfXrfuAJA' }
+foreach ($line in ($bundle -split "`n")) {
+    if ($line -match '^([A-Z][A-Z0-9_]*)=(.*)$') { Set-Item -Path "env:$($Matches[1])" -Value $Matches[2] }
+}
+
+# 2. Fresh Control Plane (see above), then select the model_gateway runtime and the shared profile.
+New-Item -ItemType Directory -Force -Path var/dev | Out-Null
+Remove-Item -Force -ErrorAction SilentlyContinue var/dev/control-plane.sqlite3*
+$env:NORTHWIND_ENVIRONMENT = 'development'
+$env:NORTHWIND_IDENTITY_MODE = 'normal'
+$env:NORTHWIND_CONTROL_PLANE_DB_PATH = 'var/dev/control-plane.sqlite3'
+$env:AGENT_RUNTIME_PROFILE = 'model_gateway'
+$env:MODEL_RUNTIME_BINDINGS_PATH = 'config/model-runtime-bindings.json'
+$env:MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
+$env:MODEL_TIMEOUT_SECONDS = '180'
+
+# 3. Backend (in this shell).
+py -3.12 -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --log-config scripts/dev-logging.json
+
+# 4. Claimant frontend (in a second shell; it proxies /api to port 8000).
+npm run dev --prefix customer -- --host 127.0.0.1 --port 5173
 ```
+
+The Workbench and Admin frontends start the same way from `workbench/` and `admin/` on ports
+5174 and 5175 if you need them.
+
+`AGENT_RUNTIME_PROFILE=controlled` is a deterministic agent that never calls a model. It exists
+for CI and the test suite only and is not a way to run the app.
 
 Deployment environments inject the same variable names through their secret and configuration
-mechanisms; they must not package the local `.env` file.
+mechanisms; they must not package a local `.env` file.
 
 ### Configure protected account data
 
@@ -125,36 +173,15 @@ protected writes fail closed with `503 PROTECTED_DATA_UNAVAILABLE`; the backend 
 plaintext as a fallback. Key custody, rotation, recovery, and retention remain deployment-security
 responsibilities.
 
-On Windows, private model credentials can instead be stored outside the repository with the
-current-user Data Protection API vault:
+Multimodal model input is declared per profile by the `image_input` and `document_input` flags in
+`config/model-runtime-bindings.json`. Those flags only enable image or PDF Evidence blocks for a
+provider profile that has repeatable adapter evidence; they do not grant access to object storage
+or bypass the Evidence authorization boundary.
 
-```powershell
-.\scripts\manage-local-secrets.ps1 set GEMINI_API_KEY
-.\scripts\manage-local-secrets.ps1 set NORTHWIND_MODEL_API_KEY
-.\scripts\manage-local-secrets.ps1 list
-.\scripts\manage-local-secrets.ps1 remove GEMINI_API_KEY
-```
-
-Start the native backend and all three frontends with:
-
-```powershell
-.\scripts\start-local.ps1
-```
-
-The launcher injects decrypted model credentials only into the backend process. The claimant,
-Workbench, and Admin processes do not inherit them. Docker remains optional for the native
-application processes and is used separately when MinIO is required.
-
-Multimodal model input is opt-in through `MODEL_SUPPORTS_IMAGE_INPUT` and
-`MODEL_SUPPORTS_DOCUMENT_INPUT`. These declarations only enable image or PDF Evidence blocks
-for a provider profile that has repeatable adapter evidence; they do not grant access to object
-storage or bypass the Evidence authorization boundary.
-
-The governed multi-model deployment allow-list is selected with
-`MODEL_RUNTIME_BINDINGS_PATH`. Private model endpoints remain environment-owned; the current
-Qwen binding resolves `NORTHWIND_QWEN_BASE_URL` at process startup rather than storing that
-address in source control. For the complete model publication contract, see
-[Provider-Neutral Model Gateway](docs/model-gateway.md).
+The governed multi-model deployment allow-list is the same bindings file. Private model endpoints
+remain environment-owned; the Qwen binding resolves `NORTHWIND_QWEN_BASE_URL` at process startup
+rather than storing that address in source control. For the complete model publication contract,
+see [Provider-Neutral Model Gateway](docs/model-gateway.md).
 
 The default object store remains the deterministic fixture adapter. To run the same
 FastAPI evidence flow against local MinIO, start the packaged service and configure the
