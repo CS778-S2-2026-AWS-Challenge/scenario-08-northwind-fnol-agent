@@ -369,7 +369,9 @@ describe('claimant intake projection', () => {
         ordinal: 3,
       },
     }))
-    expect(screen.getByRole('status')).toHaveTextContent('Checking relevant policy information')
+    expect(screen.getByText('Checking relevant policy information', {
+      selector: '[role="status"]',
+    })).toBeInTheDocument()
 
     await act(async () => resolveTurn(initialTurn()))
     expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
