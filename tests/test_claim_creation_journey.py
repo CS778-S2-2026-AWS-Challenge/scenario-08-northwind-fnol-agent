@@ -284,7 +284,9 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
         json={'decision': 'grant'},
     )
     assert granted.status_code == 201, granted.text
-    assert granted.json()['action']['status'] in {'assigned', 'queued'}
+    granted_body = cast(dict[str, Any], granted.json())
+    assert granted_body['action']['offer_id'] == offer_id
+    assert granted_body['action']['consent_status'] == 'granted'
 
     projected = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
     assert projected.status_code == 200, projected.text
