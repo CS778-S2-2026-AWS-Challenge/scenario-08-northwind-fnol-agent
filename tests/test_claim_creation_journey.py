@@ -261,8 +261,9 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
     )
     assert ready['customer_next_step']['status'] == 'ready_to_create'
 
+    offer_id = cast(str, offer['offer_id'])
     granted = client.post(
-        f'/api/v1/claims/{claim_id}/external-service-offers/{offer["offer_id"]}/decision',
+        f'/api/v1/claims/{claim_id}/external-service-offers/{offer_id}/decision',
         headers={
             **auth_headers,
             'Idempotency-Key': 'issue928-ordering-offer',

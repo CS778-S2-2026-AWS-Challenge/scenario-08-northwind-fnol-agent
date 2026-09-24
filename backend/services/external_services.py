@@ -596,11 +596,9 @@ def claimant_current_action_projection(
     """
 
     external_action = claimant_assessor_action(repository, claim)
-    primary_external_action = (
-        external_action
-        if external_action is None or external_action.offer_id is None
-        else None
-    )
+    primary_external_action = external_action
+    if external_action is not None and external_action.offer_id is not None:
+        primary_external_action = None
     next_step = claimant_next_step(
         repository,
         claim,
