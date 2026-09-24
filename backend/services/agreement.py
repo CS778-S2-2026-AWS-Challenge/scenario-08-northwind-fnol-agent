@@ -30,10 +30,8 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
-from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.external_services import (
-    claimant_assessor_action,
-    claimant_next_step,
+    claimant_current_action_projection,
     payout_contact_is_complete,
 )
 from backend.services.support import (
@@ -192,16 +190,14 @@ def accept_claim_agreement(
             'A completed or terminal Claim cannot accept a new submission agreement.'
         )
 
-    external_action = claimant_assessor_action(repository, claim)
-    next_step = claimant_next_step(
+    _external_action, _next_step, current_action = claimant_current_action_projection(
         repository,
         claim,
-        external_action,
         identity_repository=identity_repository,
     )
     if (
-        external_action is not None
-        or next_step.status != 'agreement_required'
+        current_action.action_code != 'claimant.review_agreement'
+        or not current_action.available
         or not payout_contact_is_complete(repository, claim, identity_repository)
     ):
         raise _invalid_state(
@@ -240,18 +236,13 @@ def accept_claim_agreement(
         },
     )
 
-    projected_next_step = claimant_next_step(
-        repository,
-        updated,
-        None,
-        identity_repository=identity_repository,
-    )
-    primary_action = project_claimant_primary_action(
-        claim_id=updated.claim_id,
-        claim_revision=updated.revision,
-        next_step=projected_next_step,
-        external_service_action=None,
-        agreement_accepted=True,
+    _external_action, projected_next_step, primary_action = (
+        claimant_current_action_projection(
+            repository,
+            updated,
+            identity_repository=identity_repository,
+            agreement_accepted=True,
+        )
     )
 
     response = AgreementAcceptanceResponse(
