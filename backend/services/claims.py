@@ -332,13 +332,11 @@ def claimant_claim(
                     if customer_update is not None
                     else None,
                 )
-    legacy_external_service_action, next_step, primary_action = (
-        claimant_current_action_projection(
-            repository,
-            claim,
-            identity_repository=identity_repository,
-            agreement_accepted=agreement_acceptance_is_current(claim),
-        )
+    legacy_external_service_action, next_step, primary_action = claimant_current_action_projection(
+        repository,
+        claim,
+        identity_repository=identity_repository,
+        agreement_accepted=agreement_acceptance_is_current(claim),
     )
     motor_other_driver = repository.get_motor_other_driver(claim.claim_id, claim.customer_id)
     return ClaimantClaim(
