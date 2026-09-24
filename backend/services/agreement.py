@@ -236,13 +236,11 @@ def accept_claim_agreement(
         },
     )
 
-    _external_action, projected_next_step, primary_action = (
-        claimant_current_action_projection(
-            repository,
-            updated,
-            identity_repository=identity_repository,
-            agreement_accepted=True,
-        )
+    _external_action, projected_next_step, primary_action = claimant_current_action_projection(
+        repository,
+        updated,
+        identity_repository=identity_repository,
+        agreement_accepted=True,
     )
 
     response = AgreementAcceptanceResponse(
