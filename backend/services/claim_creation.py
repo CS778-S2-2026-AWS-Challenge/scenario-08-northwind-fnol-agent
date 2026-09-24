@@ -37,7 +37,7 @@ from backend.services.agreement import agreement_acceptance_is_current
 from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.external_services import (
     claimant_assessor_action,
-    claimant_next_step,
+    claimant_current_action_projection,
     payout_contact_is_complete,
 )
 from backend.services.integrations import create_external_claim
@@ -204,19 +204,21 @@ def create_claim_from_confirmed_report(
     if not claimant_messages:
         raise _invalid_state('A claimant message is required before claim creation.')
 
-    external_service_action = claimant_assessor_action(repository, claim)
-    projected_next_step = claimant_next_step(
-        repository,
-        claim,
-        external_service_action,
-        identity_repository=identity_repository,
+    acceptance_current = agreement_acceptance_is_current(claim)
+    _external_action, _projected_next_step, current_action = (
+        claimant_current_action_projection(
+            repository,
+            claim,
+            identity_repository=identity_repository,
+            agreement_accepted=acceptance_current,
+        )
     )
     if (
         identity_repository is None
-        or external_service_action is not None
-        or projected_next_step.status != 'agreement_required'
+        or current_action.action_code != 'claimant.create_claim'
+        or not current_action.available
         or not payout_contact_is_complete(repository, claim, identity_repository)
-        or not agreement_acceptance_is_current(claim)
+        or not acceptance_current
     ):
         raise _invalid_state(
             'Complete payout and contact selection and explicitly confirm the current '
