@@ -21,7 +21,9 @@ export default function AgreementConfirmationPanel({
   status,
   onSubmit,
   onReviewInformation,
+  onReturnToConversation,
 }) {
+  const externalClaim = claim?.external_claim
   const agreement = claim?.submission_agreement
   const alreadyAccepted = claim?.primary_action?.action_code === 'claimant.create_claim'
   const confirmationScope = `${claim?.claim_id ?? ''}:${agreement?.agreement_id ?? ''}:${agreement?.version ?? ''}`
@@ -40,6 +42,39 @@ export default function AgreementConfirmationPanel({
         .filter((confirmation) => confirmation.required)
         .every((confirmation) => confirmations[confirmation.key] === true)
     : false
+
+  if (externalClaim) {
+    return (
+      <section className="claim-history-state" aria-labelledby="claim-submitted-heading">
+        <h2 id="claim-submitted-heading">Claim submitted</h2>
+        <dl>
+          <div>
+            <dt>Claim reference</dt>
+            <dd>{readable(externalClaim.claim_number)}</dd>
+          </div>
+          <div>
+            <dt>Creation status</dt>
+            <dd>{readable(externalClaim.creation_status)}</dd>
+          </div>
+          <div>
+            <dt>Next step</dt>
+            <dd>{readable(externalClaim.next_step)}</dd>
+          </div>
+          <div>
+            <dt>Expected by</dt>
+            <dd>{readable(externalClaim.expected_by)}</dd>
+          </div>
+        </dl>
+        <button
+          className="primary-button"
+          type="button"
+          onClick={onReturnToConversation}
+        >
+          Back to conversation
+        </button>
+      </section>
+    )
+  }
 
   if (!agreement) {
     return (
