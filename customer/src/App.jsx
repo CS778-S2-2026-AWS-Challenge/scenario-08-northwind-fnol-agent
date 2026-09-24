@@ -72,6 +72,7 @@ import {
 
 const FIELD_LABELS = {
   'claim.product_family': 'Claim type',
+  'incident.type': 'Incident type',
   'incident.description': 'What happened',
   'incident.injury_or_danger': 'Injury or immediate danger',
   'incident.occurred_at': 'When it happened',
@@ -120,7 +121,7 @@ const FIELD_SOURCE_LABELS = {
 }
 
 const SUPPORT_HANDOFF_TYPES = new Set(['human_support', 'urgent_support'])
-const PROFILE_NAME_PREVIEW_LENGTH = 15
+const PROFILE_NAME_PREVIEW_LENGTH = 14
 const PROFILE_EMAIL_PREVIEW_LENGTH = 17
 const MIDDLE_ELLIPSIS_SEPARATORS = new Set(['.', '-', '_'])
 
@@ -136,6 +137,20 @@ function middleEllipsis(value, maxLength) {
   while (MIDDLE_ELLIPSIS_SEPARATORS.has(start.at(-1))) start.pop()
   while (MIDDLE_ELLIPSIS_SEPARATORS.has(end[0])) end.shift()
   return `${start.join('')}…${end.join('')}`
+}
+
+function middleEllipsisLayoutParts(value, maxLength) {
+  const characters = Array.from(value)
+  if (characters.length <= maxLength) {
+    return { start: value, end: '', truncated: false }
+  }
+
+  const endLength = Math.floor((maxLength - 1) / 2)
+  return {
+    start: characters.slice(0, -endLength).join(''),
+    end: characters.slice(-endLength).join(''),
+    truncated: true,
+  }
 }
 
 function fieldLabel(fieldCode) {
@@ -166,6 +181,16 @@ function messageText(message) {
   if (typeof message?.content?.text === 'string') return message.content.text
   if (typeof message?.content?.summary === 'string') return message.content.summary
   return ''
+}
+
+function MessageTimestamp({ createdAt }) {
+  const timestamp = new Date(createdAt)
+  if (Number.isNaN(timestamp.getTime())) return null
+  return (
+    <time className="message-timestamp" dateTime={createdAt}>
+      {timestamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+    </time>
+  )
 }
 
 function assistancePresentation({ handoff, nextStep, requesting, reviewingReply, completed }) {
@@ -363,7 +388,7 @@ function mergeContentsItems(current, changes) {
   ]
 }
 
-function claimProgress(nextStep, dynamicForm) {
+function claimProgress(dynamicForm) {
   const requirements = dynamicForm?.requirements
   const total = requirements?.current_action_total || 0
   const current = requirements?.current_action_satisfied || 0
@@ -389,7 +414,6 @@ function claimProgress(nextStep, dynamicForm) {
   return {
     current,
     total,
-    label: nextStep?.summary || '',
     available: Boolean(requirements),
     items,
   }
@@ -397,6 +421,7 @@ function claimProgress(nextStep, dynamicForm) {
 
 function App() {
   const initialProfileSection = profileSectionFromPath(globalThis.location?.pathname)
+  const initialDraftWorkspaceActive = globalThis.location?.pathname === '/claims/new'
   const initialPage = (() => {
     const path = globalThis.location?.pathname || '/'
     if (path === '/auth/login') return 'login'
@@ -450,7 +475,8 @@ function App() {
   const [detailsTab, setDetailsTab] = useState('summary')
   const [mobileView, setMobileView] = useState('chat')
   const [workspaceView, setWorkspaceView] = useState('chat')
-  const [workspaceActive, setWorkspaceActive] = useState(false)
+  const [workspaceActive, setWorkspaceActive] = useState(initialDraftWorkspaceActive)
+  const [draftWorkspaceActive, setDraftWorkspaceActive] = useState(initialDraftWorkspaceActive)
   const [profileReturnClaimId, setProfileReturnClaimId] = useState(null)
   const profileController = useProfileController({
     account,
@@ -513,7 +539,6 @@ function App() {
   const externalCapabilitiesDialogRef = useRef(null)
   const externalCapabilitiesHeadingRef = useRef(null)
   const externalCapabilitiesTriggerRef = useRef(null)
-  const presentedCapabilityCatalogues = useRef(new Set())
   const restoreCapabilityTriggerFocus = useRef(false)
   const followLatestMessages = useRef(true)
   const forceLatestMessages = useRef(false)
@@ -530,7 +555,7 @@ function App() {
       ? 'Live updates are reconnecting. Some claim information may be out of date while we restore the latest status.'
       : ''
   const hasStarted = claim !== null
-  const isWorkspaceActive = hasStarted && workspaceActive
+  const isWorkspaceActive = workspaceActive && (hasStarted || draftWorkspaceActive)
   const savedReports = claimHistory === null
     ? null
     : claimHistory.filter((item) => item.can_resume)
@@ -540,7 +565,7 @@ function App() {
           .map((item) => item.claim_id === claim.claim_id ? claim : item)
           .filter((item) => item.claim_id === claim.claim_id || item.can_resume)
       : [claim, ...(savedReports || [])]
-    : []
+    : (savedReports || [])
   const homepageConversationReports = claim ? conversationReports : (savedReports || [])
   const selectedHistoryClaim = claimHistory?.find((item) => item.claim_id === selectedHistoryClaimId)
     || (claim?.claim_id === selectedHistoryClaimId ? claim : null)
@@ -626,6 +651,7 @@ function App() {
     if (nextPage === 'claim-evidence' && selectedHistoryClaimId) return `/account/claims/${encodeURIComponent(selectedHistoryClaimId)}/evidence`
     if (nextPage === 'files') return '/files'
     if (nextPage === 'how-it-works') return '/how-it-works'
+    if (isWorkspaceActive && draftWorkspaceActive) return '/claims/new'
     if (isWorkspaceActive && claim?.claim_id) return `/claims/${claim.claim_id}`
     return '/'
   }
@@ -658,7 +684,9 @@ function App() {
       const path = globalThis.location?.pathname || '/'
       const nextProfileSection = profileSectionFromPath(path)
       const nextPage = pageForPath(path)
-      setWorkspaceActive(path.startsWith('/claims/') && Boolean(claim))
+      const opensDraftWorkspace = path === '/claims/new'
+      setDraftWorkspaceActive(opensDraftWorkspace)
+      setWorkspaceActive(opensDraftWorkspace || (path.startsWith('/claims/') && Boolean(claim)))
       setProfileReturnClaimId(
         nextPage === 'account' ? globalThis.history?.state?.profileReturnClaimId || null : null,
       )
@@ -670,7 +698,9 @@ function App() {
         ? path
         : nextPage === 'account'
           ? profilePathForSection(nextProfileSection)
-          : nextPage === 'home' && path.startsWith('/claims/') && claim?.claim_id
+          : nextPage === 'home' && path === '/claims/new'
+            ? '/claims/new'
+            : nextPage === 'home' && path.startsWith('/claims/') && claim?.claim_id
             ? `/claims/${claim.claim_id}`
             : routeForPage(nextPage)
       if (path !== canonicalPath) {
@@ -700,11 +730,13 @@ function App() {
                   ? '/files'
                   : page === 'how-it-works'
                     ? '/how-it-works'
-                    : isWorkspaceActive && claim?.claim_id ? `/claims/${claim.claim_id}` : '/'
+                    : isWorkspaceActive && draftWorkspaceActive
+                      ? '/claims/new'
+                      : isWorkspaceActive && claim?.claim_id ? `/claims/${claim.claim_id}` : '/'
     if (globalThis.location?.pathname !== expectedPath) {
       globalThis.history?.replaceState({ northwindRoute: page }, '', expectedPath)
     }
-  }, [isWorkspaceActive, page, claim?.claim_id, profileSection, selectedHistoryClaimId])
+  }, [draftWorkspaceActive, isWorkspaceActive, page, claim?.claim_id, profileSection, selectedHistoryClaimId])
 
   const isBusy = [
     'starting',
@@ -729,7 +761,7 @@ function App() {
     [contentsItems],
   )
   const inputLabel = INPUT_LABELS[nextStep?.status] || 'Add more information'
-  const progress = useMemo(() => claimProgress(nextStep, dynamicForm), [dynamicForm, nextStep])
+  const progress = useMemo(() => claimProgress(dynamicForm), [dynamicForm])
   const serviceConsentChecked = externalServiceInteraction.claimId === claim?.claim_id
     && externalServiceInteraction.consentChecked
   const serviceError = externalServiceInteraction.claimId === claim?.claim_id
@@ -832,19 +864,6 @@ function App() {
       controller.abort()
     }
   }, [accountCustomerId, accountRevision, claim?.claim_id, conversationActionKind])
-  const externalCapabilityKey = claim?.external_capabilities?.length > 0
-    ? `${claim.claim_id}:${claim.external_capabilities
-        .map((capability) => `${capability.service_identity}:${capability.registry_version || ''}`)
-        .join('|')}`
-    : null
-
-  useEffect(() => {
-    if (!externalCapabilityKey || !isWorkspaceActive) return
-    if (presentedCapabilityCatalogues.current.has(externalCapabilityKey)) return
-    presentedCapabilityCatalogues.current.add(externalCapabilityKey)
-    setExternalCapabilitiesOpen(true)
-  }, [externalCapabilityKey, isWorkspaceActive])
-
   useEffect(() => {
     const dialog = externalCapabilitiesDialogRef.current
     if (!dialog) return
@@ -983,6 +1002,7 @@ function App() {
     activeSessionIdRef.current = currentSessionId
     latestRevisionClaimId.current = currentClaim?.claim_id || null
     latestRevision.current = Number(currentClaim?.revision || 0)
+    setDraftWorkspaceActive(false)
     setClaim(currentClaim)
     setSessionId(currentSessionId)
   }
@@ -1776,8 +1796,8 @@ function App() {
         messageId: null,
       })
     }
-    setStatus(isWorkspaceActive ? 'sending' : 'starting')
-    let messageWasSubmitted = false
+    setStatus(hasStarted ? 'sending' : 'starting')
+    let messageWasSubmitted = hasStarted
     try {
       if (recoveryMessage) {
         pendingSubmission.current = {
@@ -1809,8 +1829,8 @@ function App() {
         turnId: operation.clientMessageId,
         retrying: Boolean(recoveryMessage),
       })
-      let activeClaim = isWorkspaceActive ? claim : null
-      let activeSessionId = isWorkspaceActive ? sessionId : null
+      let activeClaim = hasStarted ? claim : null
+      let activeSessionId = hasStarted ? sessionId : null
       if (!activeClaim) {
         const created = await createClaim({
           idempotencyKey: operation.claimKey,
@@ -2021,7 +2041,7 @@ function App() {
     }
   }
 
-  function startNewChat() {
+  function startNewChat({ stayInWorkspace = false } = {}) {
     if (isBusy) return
     clearComposerAttachments()
     pendingSubmission.current = null
@@ -2048,6 +2068,7 @@ function App() {
     setResumeContext(null)
     setRecoveryFailure(null)
     setExpandedConversationPanels({})
+    setExternalCapabilitiesOpen(false)
     setExternalServiceInteraction({
       claimId: null,
       consentChecked: false,
@@ -2058,7 +2079,8 @@ function App() {
     setDetailsTab('summary')
     setWorkspaceView('chat')
     setMobileView('chat')
-    setWorkspaceActive(false)
+    setDraftWorkspaceActive(stayInWorkspace)
+    setWorkspaceActive(stayInWorkspace)
     setDraft('')
     setError('')
     setFailedMessage(null)
@@ -2068,8 +2090,9 @@ function App() {
     setMessageActivities({})
     setStatus('idle')
     setPageState('home')
-    if (globalThis.location?.pathname !== '/') {
-      globalThis.history?.pushState({ northwindRoute: 'home' }, '', '/')
+    const nextPath = stayInWorkspace ? '/claims/new' : '/'
+    if (globalThis.location?.pathname !== nextPath) {
+      globalThis.history?.pushState({ northwindRoute: 'home' }, '', nextPath)
     }
   }
 
@@ -2925,12 +2948,13 @@ function App() {
   const isProfilePage = page === 'account'
   const profileDisplayName = account?.profile?.display_name || 'Log in to save your chat'
   const profileEmail = account?.profile?.email || 'Profile and preferences'
+  const profileNamePreview = middleEllipsisLayoutParts(profileDisplayName, PROFILE_NAME_PREVIEW_LENGTH)
   const profileButtonLabel = account
     ? `Open Profile for ${profileDisplayName} (${profileEmail})`
     : 'Open Profile and preferences'
 
   return (
-    <div className={`customer-app ${!isWorkspaceActive && page === 'home' ? 'entry-shell' : ''} ${isProfilePage ? 'is-profile-page' : ''}`}>
+    <div className={`customer-app ${!isWorkspaceActive && page === 'home' ? 'entry-shell' : ''} ${isWorkspaceActive && !['login', 'register'].includes(page) ? 'workspace-shell' : ''} ${isProfilePage ? 'is-profile-page' : ''}`}>
       <header className={`product-header ${isWorkspaceActive && !['login', 'register'].includes(page) ? 'is-intake-header' : ''}`}>
         <div className="header-leading">
           <a className="brand" href="/" onClick={(event) => { event.preventDefault(); setPage('home') }} aria-label="Northwind home">
@@ -2971,7 +2995,7 @@ function App() {
             {isProfilePage ? 'Back' : account ? 'Profile' : 'Log in'}
           </button>
         )}
-        {isWorkspaceActive && !['login', 'register'].includes(page) && (
+        {isWorkspaceActive && claim && !['login', 'register'].includes(page) && (
           <div className="header-actions">
             {status === 'requesting-support' || handoff ? (
               <span className="header-assistance-chip">
@@ -3239,7 +3263,13 @@ function App() {
           </nav>
           <aside className={`intake-history mobile-view-${mobileView}`} aria-label="Conversation history">
             <div className="history-actions" aria-label="Claim tools">
-              <button type="button" onClick={startNewChat} disabled={isBusy}>New chat</button>
+              <button
+                type="button"
+                onClick={() => startNewChat({ stayInWorkspace: true })}
+                disabled={isBusy}
+              >
+                New chat
+              </button>
               <button type="button" onClick={() => setWorkspaceView('privacy')}>Privacy policy</button>
               <button type="button" onClick={openClaimHistory}>Claim history</button>
               <button type="button" onClick={() => setWorkspaceView('external-services')}>External services</button>
@@ -3262,7 +3292,7 @@ function App() {
             <div className="intake-history-label">Conversation history</div>
             <div className="intake-history-list">
               {conversationReports.map((report) => {
-                const isCurrent = report.claim_id === claim.claim_id
+                const isCurrent = report.claim_id === claim?.claim_id
                 return (
                   <button
                     className={`intake-history-item ${isCurrent ? 'is-active' : ''}`}
@@ -3294,7 +3324,12 @@ function App() {
                 <span className="intake-profile-avatar" aria-hidden="true">{account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}</span>
                 <span className="intake-profile-copy">
                   <span className="intake-profile-name" title={profileDisplayName} aria-hidden="true">
-                    {middleEllipsis(profileDisplayName, PROFILE_NAME_PREVIEW_LENGTH)}
+                    {profileNamePreview.truncated ? (
+                      <>
+                        <span className="intake-profile-name-start">{profileNamePreview.start}</span>
+                        <span className="intake-profile-name-end">{profileNamePreview.end}</span>
+                      </>
+                    ) : profileNamePreview.start}
                   </span>
                   <small className="intake-profile-email" title={profileEmail} aria-hidden="true">
                     {middleEllipsis(profileEmail, PROFILE_EMAIL_PREVIEW_LENGTH)}
@@ -3396,15 +3431,15 @@ function App() {
                 <EvidenceHistory claimId={selectedHistoryClaim.claim_id} />
               )}
               {workspaceView === 'external-services' && (
-                claim.external_service_action
+                claim?.external_service_action
                   ? <ExternalServiceOverview action={claim.external_service_action} />
                   : <p className="empty-details">No external service is currently recorded for this claim.</p>
               )}
               {workspaceView === 'files' && (
                 account ? (
                   <EvidenceHistory
-                    currentClaimId={claim.claim_id}
-                    currentClaimRevision={claim.revision}
+                    currentClaimId={claim?.claim_id || null}
+                    currentClaimRevision={claim?.revision || null}
                   />
                 ) : (
                   <div className="evidence-history-state">
@@ -3418,20 +3453,24 @@ function App() {
             <div className="conversation-heading">
               <div className="conversation-heading-main">
                 <div className="claim-heading-identity">
-                  <span>Claim:</span>
-                  <h1 id="conversation-title">{claim.claim_id}</h1>
+                  {claim ? <span>Claim:</span> : null}
+                  <h1 id="conversation-title">{claim?.claim_id || 'New conversation'}</h1>
                 </div>
               </div>
-              <div className="claim-status">{claim.external_claim?.creation_status === 'created'
-                ? 'Claim created'
-                : handoff ? 'Staff assistance active' : 'In progress'}</div>
+              <div className="claim-status">{claim
+                ? claim.external_claim?.creation_status === 'created'
+                  ? 'Claim created'
+                  : handoff ? 'Staff assistance active' : 'In progress'
+                : 'Ready to start'}</div>
             </div>
 
-            <ClaimProgressDisclosure
-              progress={progress}
-              expanded={conversationPanelExpanded('progress')}
-              onToggle={() => toggleConversationPanel('progress')}
-            />
+            {claim && (
+              <ClaimProgressDisclosure
+                progress={progress}
+                expanded={conversationPanelExpanded('progress')}
+                onToggle={() => toggleConversationPanel('progress')}
+              />
+            )}
 
             <div
               ref={messageListRef}
@@ -3462,27 +3501,31 @@ function App() {
                   const claimantText = messageText(message)
                   return (
                     <article className="msg-user" key={item.key}>
-                      <div>
-                        <div className="user-bubble">
-                          {claimantText && <p className="user-bubble-text">{claimantText}</p>}
-                          <ClaimantMessageAttachments
-                            message={message}
-                            evidenceItems={evidenceItems}
-                            previewFiles={evidencePreviewFiles.current}
-                          />
-                        </div>
-                        <div className="msg-meta">{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
-                        {message.actor === 'claimant' && message.recovery && !messages.some((reply) => reply.actor === 'agent' && !reply.recovery && reply.in_reply_to === message.message_id) && (
-                          <div role="status">
-                            <p>{message.recovery.claimant_projection}</p>
-                            {recoveryFailure?.messageId === message.message_id && (
-                              <p className="message-state" role="alert">{recoveryFailure.message}</p>
-                            )}
-                            {message.client_message_id && message.recovery.resume_triggers?.includes('explicit_retry_request') && (
-                              <button type="button" disabled={isBusy} onClick={(event) => sendMessage(event, message)}>Retry response</button>
-                            )}
+                      <div className="chat-message-row">
+                        <div className="user-message-body">
+                          <div className="chat-bubble user-bubble">
+                            {claimantText && <p className="user-bubble-text">{claimantText}</p>}
+                            <ClaimantMessageAttachments
+                              message={message}
+                              evidenceItems={evidenceItems}
+                              previewFiles={evidencePreviewFiles.current}
+                            />
                           </div>
-                        )}
+                          {message.actor === 'claimant' && message.recovery && !messages.some((reply) => reply.actor === 'agent' && !reply.recovery && reply.in_reply_to === message.message_id) && (
+                            <div className="message-recovery" role="status">
+                              <p>{message.recovery.claimant_projection}</p>
+                              {recoveryFailure?.messageId === message.message_id && (
+                                <p className="message-state" role="alert">{recoveryFailure.message}</p>
+                              )}
+                              {message.client_message_id && message.recovery.resume_triggers?.includes('explicit_retry_request') && (
+                                <button type="button" disabled={isBusy} onClick={(event) => sendMessage(event, message)}>Retry response</button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <span className="message-avatar claimant-message-avatar" aria-hidden="true">
+                          {account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}
+                        </span>
                       </div>
                     </article>
                   )
@@ -3490,11 +3533,13 @@ function App() {
                 if (message.actor === 'staff') {
                   return (
                     <article className="msg-staff" key={item.key}>
-                      <div className="staff-mark" aria-hidden="true">N</div>
-                      <div className="staff-message-body">
-                        <div className="staff-label">Northwind staff</div>
-                        <div className="staff-bubble">{messageText(message)}</div>
-                        <div className="msg-meta">{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
+                      <MessageTimestamp createdAt={message.created_at} />
+                      <div className="chat-message-row">
+                        <div className="message-avatar staff-mark" aria-hidden="true">N</div>
+                        <div className="staff-message-body">
+                          <div className="staff-label">Northwind staff</div>
+                          <div className="chat-bubble staff-bubble">{messageText(message)}</div>
+                        </div>
                       </div>
                     </article>
                   )
@@ -3509,35 +3554,40 @@ function App() {
                 }
                 return (
                   <article className="msg-agent" key={item.key}>
-                    <div className="agent-bar" />
-                    <div className="agent-body">
-                      <div className="agent-label">Claims assistant</div>
-                      <AgentTurnDisclosure progress={messageActivities[message.message_id]} />
-                      <div className="agent-text"><p>{messageText(message)}</p><button className="listen-message" type="button" onClick={() => { if (globalThis.speechSynthesis) { globalThis.speechSynthesis.cancel(); globalThis.speechSynthesis.speak(new SpeechSynthesisUtterance(messageText(message))) } }}>Listen</button></div>
-                      {(message.message_actions || []).map((action) => (
-                        <div className="conversation-agent-action" key={action.offer_id || action.service_identity}>
-                          <ExternalServiceAction
-                            action={action}
-                            consentChecked={Boolean(offerConsentChecks[action.offer_id])}
-                            setConsentChecked={(checked) => setOfferConsentChecks((current) => ({
-                              ...current,
-                              [action.offer_id]: checked,
-                            }))}
-                            onRequest={() => decideMessageExternalService(action, 'grant')}
-                            onDecline={() => decideMessageExternalService(action, 'decline')}
-                            onWithdraw={() => decideMessageExternalService(action, 'withdraw')}
-                            status={status}
-                            error={offerErrors[action.offer_id] || null}
-                            expanded={conversationPanelExpanded(action.offer_id)}
-                            onToggle={() => toggleConversationPanel(action.offer_id)}
-                          />
+                    <MessageTimestamp createdAt={message.created_at} />
+                    <div className="chat-message-row">
+                      <div className="message-avatar agent-avatar" aria-hidden="true">N</div>
+                      <div className="agent-body">
+                        <div className="agent-label">Claims assistant</div>
+                        <AgentTurnDisclosure progress={messageActivities[message.message_id]} />
+                        <div className="chat-bubble agent-bubble">
+                          <div className="agent-text"><p>{messageText(message)}</p><button className="listen-message" type="button" onClick={() => { if (globalThis.speechSynthesis) { globalThis.speechSynthesis.cancel(); globalThis.speechSynthesis.speak(new SpeechSynthesisUtterance(messageText(message))) } }}>Listen</button></div>
                         </div>
-                      ))}
-                      {item.key === lastAgentMessageId && conversationActionKind && (
-                        <div className="conversation-agent-action">
-                          {renderConversationAction()}
-                        </div>
-                      )}
+                        {(message.message_actions || []).map((action) => (
+                          <div className="conversation-agent-action" key={action.offer_id || action.service_identity}>
+                            <ExternalServiceAction
+                              action={action}
+                              consentChecked={Boolean(offerConsentChecks[action.offer_id])}
+                              setConsentChecked={(checked) => setOfferConsentChecks((current) => ({
+                                ...current,
+                                [action.offer_id]: checked,
+                              }))}
+                              onRequest={() => decideMessageExternalService(action, 'grant')}
+                              onDecline={() => decideMessageExternalService(action, 'decline')}
+                              onWithdraw={() => decideMessageExternalService(action, 'withdraw')}
+                              status={status}
+                              error={offerErrors[action.offer_id] || null}
+                              expanded={conversationPanelExpanded(action.offer_id)}
+                              onToggle={() => toggleConversationPanel(action.offer_id)}
+                            />
+                          </div>
+                        ))}
+                        {item.key === lastAgentMessageId && conversationActionKind && (
+                          <div className="conversation-agent-action">
+                            {renderConversationAction()}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </article>
                 )
@@ -3550,16 +3600,21 @@ function App() {
               {pendingMessage && (
                 <>
                   {!pendingMessage.retrying && !messages.some((message) => message.actor === 'claimant' && message.client_message_id === pendingMessage.turnId) && <article className="msg-user is-pending" aria-label="Message sending">
-                    <div>
-                      <div className="user-bubble">
-                        {pendingMessage.text && <p className="user-bubble-text">{pendingMessage.text}</p>}
-                        <ClaimantMessageAttachments
-                          evidenceItems={evidenceItems}
-                          attachments={pendingMessage.attachments}
-                          previewFiles={evidencePreviewFiles.current}
-                        />
+                    <div className="message-timestamp">Sending…</div>
+                    <div className="chat-message-row">
+                      <div className="user-message-body">
+                        <div className="chat-bubble user-bubble">
+                          {pendingMessage.text && <p className="user-bubble-text">{pendingMessage.text}</p>}
+                          <ClaimantMessageAttachments
+                            evidenceItems={evidenceItems}
+                            attachments={pendingMessage.attachments}
+                            previewFiles={evidencePreviewFiles.current}
+                          />
+                        </div>
                       </div>
-                      <div className="msg-meta">Sending…</div>
+                      <span className="message-avatar claimant-message-avatar" aria-hidden="true">
+                        {account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}
+                      </span>
                     </div>
                   </article>}
                   <AgentTurnPlaceholder
@@ -3569,16 +3624,25 @@ function App() {
                 </>
               )}
               {failedMessage && (
-                <article className="message message-claimant is-failed" role="alert">
-                  <p className="message-author">{failedMessage.sender}</p>
-                  {failedMessage.text && <p>{failedMessage.text}</p>}
-                  <ClaimantMessageAttachments
-                    evidenceItems={evidenceItems}
-                    attachments={failedMessage.attachments}
-                    previewFiles={evidencePreviewFiles.current}
-                  />
-                  <p className="message-state">{failedMessage.deliveryState || 'Not sent'}</p>
-                  <p className="message-failure-detail">{failedMessage.message}</p>
+                <article className="msg-user is-failed" role="alert">
+                  <div className="chat-message-row">
+                    <div className="user-message-body">
+                      <div className="chat-bubble user-bubble">
+                        <p className="message-author">{failedMessage.sender}</p>
+                        {failedMessage.text && <p className="user-bubble-text">{failedMessage.text}</p>}
+                        <ClaimantMessageAttachments
+                          evidenceItems={evidenceItems}
+                          attachments={failedMessage.attachments}
+                          previewFiles={evidencePreviewFiles.current}
+                        />
+                        <p className="message-state">{failedMessage.deliveryState || 'Not sent'}</p>
+                        <p className="message-failure-detail">{failedMessage.message}</p>
+                      </div>
+                    </div>
+                    <span className="message-avatar claimant-message-avatar" aria-hidden="true">
+                      {account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}
+                    </span>
+                  </div>
                 </article>
               )}
               {isUrgentSupport && handoff && ['queued', 'accepted'].includes(handoff.status) && (
@@ -3599,7 +3663,7 @@ function App() {
                 />
               )}
 
-              {claim.external_claim && (
+              {claim?.external_claim && (
                 <>
                   <ConversationEvent
                     icon={claim.external_claim.creation_status === 'failed' ? '!' : '✓'}
@@ -3690,7 +3754,7 @@ function App() {
                 <h2 id="claim-details-title">Claim details</h2>
               </div>
               <div className="details-panel-actions">
-                <span className="revision-label">Revision {claim.revision}</span>
+                <span className="revision-label">{claim ? `Revision ${claim.revision}` : 'Not started'}</span>
                 <button
                   className="details-toggle"
                   type="button"
@@ -3760,7 +3824,7 @@ function App() {
               tabIndex="0"
               hidden={detailsTab !== 'documents'}
             >
-              {claim.external_capabilities?.length > 0 && (
+              {claim?.external_capabilities?.length > 0 && (
                 <button
                   ref={externalCapabilitiesTriggerRef}
                   className="external-capabilities-trigger"
@@ -3792,7 +3856,7 @@ function App() {
             </div>
             </div>
           </aside>
-          {claim.external_capabilities?.length > 0 && (
+          {claim?.external_capabilities?.length > 0 && (
             <ExternalCapabilityCatalogue
               capabilities={claim.external_capabilities}
               dialogRef={externalCapabilitiesDialogRef}

@@ -22,13 +22,10 @@ export function ClaimProgressDisclosure({ progress, expanded, onToggle }) {
         type="button"
         aria-expanded={expanded}
         aria-controls={detailsId}
-        aria-label={`Claim progress: ${progressLabel}${progress.label ? `. ${progress.label}` : ''}`}
+        aria-label={`Claim progress: ${progressLabel}`}
         onClick={onToggle}
       >
-        <span className="claim-progress-copy">
-          <span>{countLabel}</span>
-          {progress.label && <strong>{progress.label}</strong>}
-        </span>
+        <span className="claim-progress-copy">{countLabel}</span>
         <Chevron expanded={expanded} />
       </button>
       <span
