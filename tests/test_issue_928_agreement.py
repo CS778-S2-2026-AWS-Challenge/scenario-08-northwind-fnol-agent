@@ -10,12 +10,14 @@ from backend.services.support import now_utc
 
 def _login(
     client: TestClient,
-    email: str = 'claimant.one@example.invalid',
-    password: str = 'northwind-demo-one',
+    claimant: str = 'one',
 ) -> dict[str, str]:
     response = client.post(
         '/api/v1/auth/sessions',
-        json={'email': email, 'password': password},
+        json={
+            'email': f'claimant.{claimant}@example.invalid',
+            'password': 'northwind-demo-' + claimant,
+        },
     )
     assert response.status_code == 201, response.text
     token = cast(dict[str, Any], response.json())['access_token']
@@ -34,6 +36,8 @@ def _prepare_step4(
         json={
             'account_type': 'cheque',
             'account_number': '12-3456-1111222-00',
+            'bank_name': 'Northwind Test Bank',
+            'account_holder_name': 'Claimant One',
         },
     )
     assert destination.status_code == 201, destination.text
@@ -257,11 +261,7 @@ def test_false_confirmation_wrong_version_foreign_claimant_and_stale_revision_fa
     assert stale.status_code == 409
     assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
 
-    foreign = _login(
-        client,
-        'claimant.two@example.invalid',
-        'northwind-demo-two',
-    )
+    foreign = _login(client, 'two')
     concealed = client.post(
         f'/api/v1/claims/{claim_id}/agreement-acceptances',
         headers={
