@@ -174,7 +174,10 @@ export default function MessageComposer({
   const isWorkspace = variant === 'workspace'
   const fileInput = useRef(null)
   const textareaRef = useRef(null)
+  const recognitionRef = useRef(null)
+  const expectedAbortRef = useRef(false)
   const [voiceStatus, setVoiceStatus] = useState('')
+  const [voiceState, setVoiceState] = useState('idle')
   const [selectedAttachmentId, setSelectedAttachmentId] = useState(null)
 
   useEffect(() => {
@@ -184,24 +187,111 @@ export default function MessageComposer({
     textarea.style.height = `${textarea.scrollHeight}px`
   }, [draft, attachments.length])
 
+  useEffect(() => {
+    if (!busy && !disabled) return
+    const recognition = recognitionRef.current
+    if (!recognition) return
+    expectedAbortRef.current = true
+    recognition.abort()
+    recognitionRef.current = null
+    setVoiceState('idle')
+    setVoiceStatus('')
+  }, [busy, disabled])
+
+  useEffect(() => () => {
+    expectedAbortRef.current = true
+    recognitionRef.current?.abort()
+    recognitionRef.current = null
+  }, [])
+
+  function voiceErrorMessage(error) {
+    switch (error) {
+      case 'not-allowed':
+      case 'service-not-allowed':
+        return 'Microphone permission was denied. Allow microphone access and try again.'
+      case 'no-speech':
+        return 'No speech was detected. Try again when you are ready.'
+      case 'audio-capture':
+        return 'No working microphone was found. Check your device and try again.'
+      case 'network':
+        return 'Voice recognition could not reach the browser speech service. Check your connection and try again.'
+      default:
+        return 'Voice input could not be completed. Try again.'
+    }
+  }
+
+  function stopVoiceInput() {
+    const recognition = recognitionRef.current
+    if (!recognition) return
+    expectedAbortRef.current = true
+    recognition.stop()
+    setVoiceState('idle')
+    setVoiceStatus('Voice input stopped.')
+  }
+
   function startVoiceInput() {
+    if (busy || disabled) return
+    if (recognitionRef.current) {
+      stopVoiceInput()
+      return
+    }
     const SpeechRecognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition
     if (!SpeechRecognition) {
+      setVoiceState('unsupported')
       setVoiceStatus('Voice input is not available in this browser.')
       return
     }
     const recognition = new SpeechRecognition()
+    recognitionRef.current = recognition
+    expectedAbortRef.current = false
     recognition.lang = 'en-NZ'
     recognition.interimResults = false
+    recognition.continuous = false
+    recognition.maxAlternatives = 1
+    let lastTranscript = ''
+    setVoiceState('listening')
     setVoiceStatus('Listening...')
     recognition.onresult = (event) => {
-      const transcript = event.results?.[0]?.[0]?.transcript || ''
-      if (transcript) setDraft((current) => `${current}${current ? ' ' : ''}${transcript}`)
-      setVoiceStatus('')
+      const startIndex = Number.isInteger(event.resultIndex) ? event.resultIndex : 0
+      const transcript = Array.from(event.results || [])
+        .slice(startIndex)
+        .filter((result) => result?.isFinal !== false)
+        .map((result) => result?.[0]?.transcript || '')
+        .join(' ')
+        .trim()
+      if (!transcript || transcript === lastTranscript) return
+      lastTranscript = transcript
+      setDraft((current) => {
+        const normalizedCurrent = current.replace(/\s+$/, '')
+        return `${normalizedCurrent}${normalizedCurrent ? ' ' : ''}${transcript}`
+      })
+      setVoiceStatus('Voice input added to your message.')
     }
-    recognition.onerror = () => setVoiceStatus('Voice input could not be started.')
-    recognition.onend = () => setVoiceStatus('')
-    recognition.start()
+    recognition.onerror = (event) => {
+      if (recognitionRef.current !== recognition) return
+      if (event.error === 'aborted' && expectedAbortRef.current) return
+      recognitionRef.current = null
+      setVoiceState('error')
+      setVoiceStatus(
+        event.error === 'aborted'
+          ? 'Voice input stopped unexpectedly. Try again.'
+          : voiceErrorMessage(event.error),
+      )
+    }
+    recognition.onend = () => {
+      if (recognitionRef.current !== recognition) return
+      recognitionRef.current = null
+      expectedAbortRef.current = false
+      setVoiceState('idle')
+      setVoiceStatus((current) => (current === 'Listening...' ? '' : current))
+    }
+    try {
+      recognition.start()
+    } catch {
+      recognitionRef.current = null
+      setVoiceState('error')
+      setVoiceStatus('Voice input could not be started. Try again.')
+    }
   }
 
   function removeAttachment(attachment) {
@@ -324,10 +414,12 @@ export default function MessageComposer({
             </svg>
           </button>
           <button
-            className="tool-btn tool-voice"
+            className={`tool-btn tool-voice ${voiceState === 'listening' ? 'is-listening' : ''}`}
             type="button"
             aria-label="Use voice input"
-            title="Use voice input"
+            aria-pressed={voiceState === 'listening'}
+            title={voiceState === 'listening' ? 'Stop voice input' : 'Use voice input'}
+            disabled={busy || disabled}
             onClick={startVoiceInput}
           >
             <svg className="tool-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -362,7 +454,14 @@ export default function MessageComposer({
           <span>{error}</span>
         </div>
       )}
-      {voiceStatus && <p className="composer-note" role="status">{voiceStatus}</p>}
+      <p
+        className={`composer-note ${voiceStatus ? '' : 'sr-only'}`}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {voiceStatus}
+      </p>
     </form>
   )
 }
