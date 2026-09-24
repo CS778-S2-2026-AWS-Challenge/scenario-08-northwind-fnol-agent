@@ -2224,7 +2224,9 @@ describe('claimant intake projection', () => {
     expect(within(successPanel).getByText('2026-09-16T01:00:00Z')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Submit claim' })).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.click(
+      within(successPanel).getByRole('button', { name: 'Back to conversation' }),
+    )
     expect(screen.queryByRole('heading', { name: 'Claim submitted' })).not.toBeInTheDocument()
   })
 
