@@ -7,7 +7,6 @@ import { ClaimProgressDisclosure } from './ConversationContext.jsx'
 
 const BASE_PROGRESS = {
   available: true,
-  label: 'In progress',
   items: [],
 }
 
@@ -44,6 +43,26 @@ describe('Claim progress disclosure', () => {
     expect(progressbar).toHaveAttribute('aria-valuemax', String(total))
     expect(container.querySelector('.claim-progress-fill').style.getPropertyValue('--progress-width'))
       .toBe(width)
+  })
+
+  it('omits the projected next-step summary from the compact progress row', () => {
+    render(
+      <ClaimProgressDisclosure
+        progress={{
+          ...BASE_PROGRESS,
+          current: 0,
+          total: 6,
+          label: 'Please tell me whether this is a motor, home, or contents claim.',
+        }}
+        expanded={false}
+        onToggle={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByText(/Please tell me whether this is a motor/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('button')).toHaveAccessibleName(
+      'Claim progress: 0 of 6 required details complete',
+    )
   })
 
   it('reveals the projected requirement states only after the claimant expands it', async () => {

@@ -615,6 +615,7 @@ frontend/shared/design-tokens.js
 
 | Token | 值 | 用途 |
 |---|---:|---|
+| `--font-size-micro` | `12px` | 紧凑型辅助标签，不用于 claimant 正文或主要状态 |
 | `--font-size-caption` | `14px` | 时间戳、低优先级 metadata |
 | `--font-size-body` | `16px` | claimant 正文、字段值、用户消息 |
 | `--font-size-message` | `18px` | Agent 主消息、重要状态 |
@@ -675,13 +676,14 @@ Claimant Profile geometry uses independent semantic roles from the shared token 
 | `--claimant-profile-label-width` | `160px` | Profile summary and choice row label width |
 | `--claimant-profile-address-min-height` | `96px` | Address textarea minimum height |
 
-### 6.5 Claimant entry 与 history token contract
+### 6.5 Claimant entry、history 与 workspace token contract
 
-下表只记录 claimant entry/history 使用或新增的共享基础角色，以及该产品表面的完整语义角色。通用色板、间距、圆角和边框的其余成员继续以 6.2–6.4 为准。页面组件只能消费表中的语义角色或已列明的共享基础角色，不得在 selector 内重新计算透明度、blur 或交互状态颜色。
+下表只记录 claimant entry、history 和 conversation workspace 使用或新增的共享基础角色，以及这些产品表面的完整语义角色。通用色板、间距、圆角和边框的其余成员继续以 6.2–6.4 为准。页面组件只能消费表中的语义角色或已列明的共享基础角色，不得在 selector 内重新计算透明度、blur 或交互状态颜色。
 
 | Token | Concrete value | Semantic purpose | Allowed consumers | Responsive behaviour |
 |---|---|---|---|---|
 | `--font-family-brand` | `"Source Serif 4", Georgia, serif` | Formal secondary brand typography foundation | Short brand statements and approved editorial headings | Fixed across viewports |
+| `--font-size-micro` | `12px` | Compact auxiliary-label foundation | Conversation-history section labels | Fixed across viewports; not used for claimant body copy or primary status |
 | `--font-size-display` | `40px` | Desktop display heading foundation | Short landing/display headings with an authorised semantic role | Fixed desktop value; compact layouts select a smaller role |
 | `--font-size-hero` | `28px` | Compact hero heading foundation | Informational entry headings and compact display fallback | Fixed value; used by claimant entry at `≤640px` |
 | `--blur-subtle` | `blur(8px)` | Low header-glass blur foundation | Shared translucent headers | Fixed across viewports |
@@ -724,6 +726,18 @@ Claimant Profile geometry uses independent semantic roles from the shared token 
 | `--claimant-history-mobile-scrim` | `color-mix(in srgb, var(--color-text-primary) 6%, transparent)` | Low-contrast modal-drawer scrim | Mobile history overlay only | Applied at `≤640px` |
 | `--claimant-history-rail-blur` | `var(--blur-floating)` (`blur(16px)`) | Rail/mobile-trigger glass blur | History rail and mobile history trigger | Consumer switches with the `640px` breakpoint |
 | `--claimant-history-panel-blur` | `var(--blur-overlay)` (`blur(20px)`) | Expanded overlay-panel blur | Conversation history panel | Fixed across viewports |
+| `--claimant-workspace-background-wash` | `color-mix(in srgb, var(--color-page) 8%, transparent)` | Light readability wash that preserves the homepage artwork | Conversation workspace background overlay | Fixed across workspace viewports |
+| `--claimant-workspace-sidebar-surface` | `color-mix(in srgb, var(--color-surface) 66%, transparent)` | Translucent supporting-rail surface | Conversation history and Claim details sidebars | Fixed across workspace viewports |
+| `--claimant-workspace-content-surface` | `color-mix(in srgb, var(--color-surface) 90%, transparent)` | High-contrast foreground conversation canvas | Central conversation panel | Fixed across workspace viewports |
+| `--claimant-workspace-divider-color` | `color-mix(in srgb, var(--color-divider) 72%, transparent)` | Boundary between workspace regions | Conversation workspace rails and content separators | Fixed across workspace viewports |
+| `--claimant-workspace-supporting-text` | `var(--color-text-secondary)` | Readable supporting-copy colour on translucent surfaces | Sidebar navigation, tabs, and explanatory copy | Fixed across workspace viewports |
+| `--claimant-workspace-sidebar-blur` | `var(--blur-overlay)` (`blur(20px)`) | Supporting-rail glass blur | Conversation history and Claim details sidebars | Fixed across workspace viewports |
+| `--claimant-workspace-content-blur` | `var(--blur-surface)` (`blur(12px)`) | Lower blur that keeps the primary conversation surface visually distinct | Central conversation panel | Fixed across workspace viewports |
+| `--claimant-workspace-sidebar-shadow` | `var(--shadow-none)` | Flat supporting-region elevation | Conversation history and Claim details sidebars | Fixed across workspace viewports |
+| `--claimant-workspace-content-shadow` | `var(--shadow-subtle)` | Subtle foreground elevation for the primary task region | Central conversation panel | Fixed across workspace viewports |
+| `--claimant-workspace-content-layer` | `1` | Content stacking role above the background wash | Conversation workspace regions | Fixed across workspace viewports |
+| `--claimant-message-surface` | `hsl(154 14% 38%)` | Deep claimant-authored message surface with sufficient contrast | Claimant conversation bubbles | Fixed across workspace viewports |
+| `--claimant-message-text` | `var(--color-on-accent)` | Inverse text on claimant-authored message surfaces | Claimant conversation bubble text | Fixed across workspace viewports |
 
 ### 6.6 状态语义
 
