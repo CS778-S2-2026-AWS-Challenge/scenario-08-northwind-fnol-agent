@@ -1411,14 +1411,6 @@ textarea:focus-visible {
 .intake-history-item.is-active { background: #f7f4ef; }
 .intake-history-title { font-size: 15px; font-weight: 500; }
 .intake-history-meta { overflow: hidden; color: #6b6760; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.intake-history-bottom { flex: 0 0 auto; padding: 10px 8px 14px; border-top: 2px solid #c8c4bb; }
-.intake-profile { display: flex; width: 100%; align-items: center; gap: 10px; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; font: inherit; text-align: left; cursor: pointer; }
-.intake-profile:hover { background: #c8c4bb; }
-.intake-profile-avatar { display: grid; width: 32px; height: 32px; flex: 0 0 auto; place-items: center; border-radius: 50%; color: #264d42; background: #b8d4cb; font-size: 13px; font-weight: 600; }
-.intake-profile-copy { display: grid; min-width: 0; gap: 2px; }
-.intake-profile-copy > span { overflow: hidden; color: #1a1814; font-size: 15px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.intake-profile-copy small { overflow: hidden; color: #6b6760; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-
 .conversation-panel {
   min-width: 0;
   height: 100svh;

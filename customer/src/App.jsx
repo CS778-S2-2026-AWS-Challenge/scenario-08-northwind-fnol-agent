@@ -53,6 +53,7 @@ import './styles/profile-records.css'
 import './styles/profile-assets.css'
 import './styles/profile-responsive.css'
 import { profilePathForSection, profileSectionFromPath } from './profileRoutes.js'
+import { buildConversationTimeline, mergeMessagesById, orderMessages } from './conversationTimeline.js'
 import useProfileController from './profile/useProfileController.js'
 import { documentAttentionCount } from './claimDocumentProjection.js'
 import {
@@ -117,6 +118,23 @@ const FIELD_SOURCE_LABELS = {
 }
 
 const SUPPORT_HANDOFF_TYPES = new Set(['human_support', 'urgent_support'])
+const PROFILE_NAME_PREVIEW_LENGTH = 15
+const PROFILE_EMAIL_PREVIEW_LENGTH = 17
+const MIDDLE_ELLIPSIS_SEPARATORS = new Set(['.', '-', '_'])
+
+function middleEllipsis(value, maxLength) {
+  const characters = Array.from(value)
+  if (characters.length <= maxLength) return value
+
+  const visibleCharacters = maxLength - 1
+  const startLength = Math.ceil(visibleCharacters / 2)
+  const endLength = Math.floor(visibleCharacters / 2)
+  const start = characters.slice(0, startLength)
+  const end = characters.slice(-endLength)
+  while (MIDDLE_ELLIPSIS_SEPARATORS.has(start.at(-1))) start.pop()
+  while (MIDDLE_ELLIPSIS_SEPARATORS.has(end[0])) end.shift()
+  return `${start.join('')}…${end.join('')}`
+}
 
 function fieldLabel(fieldCode) {
   return FIELD_LABELS[fieldCode] || fieldCode.split('.').at(-1).replaceAll('_', ' ')
@@ -194,47 +212,6 @@ function assistancePresentation({ handoff, nextStep, requesting, reviewingReply,
     }
   }
   return null
-}
-
-function buildConversationTimeline(messages, resumeContext) {
-  const timeline = messages.map((message) => ({
-    key: message.message_id,
-    kind: 'message',
-    message,
-  }))
-  if (resumeContext) {
-    const boundaryMessageIndex = resumeContext.resumed_after_message_id
-      ? timeline.findIndex((item) => item.message?.message_id === resumeContext.resumed_after_message_id)
-      : -1
-    const resumedAt = Date.parse(resumeContext.resumed_at || '')
-    const firstMessageAfterResume = boundaryMessageIndex < 0 && Number.isFinite(resumedAt)
-      ? timeline.findIndex((item) => (
-          item.message && Date.parse(item.message.created_at || '') >= resumedAt
-        ))
-      : -1
-    const insertAt = boundaryMessageIndex >= 0
-      ? boundaryMessageIndex + 1
-      : firstMessageAfterResume >= 0
-        ? firstMessageAfterResume
-        : resumeContext.has_resume_boundary
-          ? 0
-          : timeline.length
-    timeline.splice(insertAt, 0, {
-      key: `claim-resumed-${resumeContext.resumed_at || 'current'}`,
-      kind: 'conversation-event',
-      title: 'Claim resumed',
-      detail: 'Continuing from your previous conversation',
-    })
-  }
-  return timeline
-}
-
-function mergeMessagesById(current, incoming) {
-  const merged = new Map(current.map((message) => [message.message_id, message]))
-  for (const message of incoming) {
-    if (message?.message_id) merged.set(message.message_id, message)
-  }
-  return [...merged.values()]
 }
 
 const CLAIMANT_ACTION_KINDS = Object.freeze({
@@ -405,10 +382,11 @@ function App() {
   const [mobileView, setMobileView] = useState('chat')
   const [workspaceView, setWorkspaceView] = useState('chat')
   const [workspaceActive, setWorkspaceActive] = useState(false)
+  const [profileReturnClaimId, setProfileReturnClaimId] = useState(null)
   const profileController = useProfileController({
     account,
     setAccount,
-    enabled: page === 'account' || workspaceView === 'account',
+    enabled: page === 'account',
   })
   const [runtimeCapabilities, setRuntimeCapabilities] = useState({
     claim_types: ['motor', 'home', 'contents'],
@@ -432,6 +410,9 @@ function App() {
   const [offerConsentChecks, setOfferConsentChecks] = useState({})
   const [offerErrors, setOfferErrors] = useState({})
   const [failedMessage, setFailedMessage] = useState(null)
+  // A failed retry of an already saved message belongs on that message, not as a new
+  // unconfirmed bubble at the end of the conversation (#1025).
+  const [recoveryFailure, setRecoveryFailure] = useState(null)
   const [pendingMessage, setPendingMessage] = useState(null)
   const [activeTurnProgress, setActiveTurnProgress] = useState(null)
   const [messageActivities, setMessageActivities] = useState({})
@@ -580,6 +561,7 @@ function App() {
   }
 
   function setPage(nextPage, { replace = false } = {}) {
+    setProfileReturnClaimId(null)
     setPageState(nextPage)
     if (nextPage === 'account') setProfileSection(null)
     const nextPath = nextPage === 'account' ? '/profile' : routeForPage(nextPage)
@@ -607,6 +589,9 @@ function App() {
       const nextProfileSection = profileSectionFromPath(path)
       const nextPage = pageForPath(path)
       setWorkspaceActive(path.startsWith('/claims/') && Boolean(claim))
+      setProfileReturnClaimId(
+        nextPage === 'account' ? globalThis.history?.state?.profileReturnClaimId || null : null,
+      )
       setProfileSection(nextProfileSection)
       const historyClaimMatch = path.match(/^\/account\/claims\/([^/]+)/)
       setSelectedHistoryClaimId(historyClaimMatch ? decodeURIComponent(historyClaimMatch[1]) : null)
@@ -888,7 +873,9 @@ function App() {
 
   function commitMessages(nextMessages) {
     messagesRequestGeneration.current += 1
-    setMessages(nextMessages)
+    setMessages(typeof nextMessages === 'function'
+      ? (current) => orderMessages(nextMessages(current))
+      : orderMessages(nextMessages))
   }
 
   function applyMessagesReadback(items, { generation, claimId, sessionId }) {
@@ -897,7 +884,7 @@ function App() {
       || activeClaimRef.current?.claim_id !== claimId
       || activeSessionIdRef.current !== sessionId
     ) return false
-    setMessages(items)
+    setMessages(orderMessages(items))
     return true
   }
 
@@ -1652,6 +1639,7 @@ function App() {
     forceLatestMessages.current = true
     setError('')
     setFailedMessage(null)
+    setRecoveryFailure(null)
     if (isAssistanceReply) {
       setAssistanceReplyReview({
         claimId: claim.claim_id,
@@ -1837,13 +1825,15 @@ function App() {
         const retryGuidance = requestError instanceof ApiRequestError && requestError.retryable
           ? 'Try again in a moment.'
           : 'Review the message and try again.'
-        setFailedMessage({
-          text,
-          sender: 'You',
-          message: serverConfirmedFailure
-            ? `${requestError.message} ${retryGuidance}`
-            : 'We could not confirm delivery because the connection ended before the service responded. Retry safely; the same request will not create a duplicate.',
-        })
+        const failureMessage = serverConfirmedFailure
+          ? `${requestError.message} ${retryGuidance}`
+          : 'We could not confirm delivery because the connection ended before the service responded. Retry safely; the same request will not create a duplicate.'
+        if (recoveryMessage) {
+          pendingSubmission.current = null
+          setRecoveryFailure({ messageId: recoveryMessage.message_id, message: failureMessage })
+        } else {
+          setFailedMessage({ text, sender: 'You', message: failureMessage })
+        }
         setError('')
         if (requestError instanceof ApiRequestError && requestError.code === 'REVISION_CONFLICT') {
           refreshAfterConflict().catch(() => {})
@@ -1879,6 +1869,7 @@ function App() {
     setEvidenceLoadStatus('idle')
     setEvidenceSyncNotice('')
     setResumeContext(null)
+    setRecoveryFailure(null)
     setExpandedConversationPanels({})
     setExternalServiceInteraction({
       claimId: null,
@@ -2223,6 +2214,7 @@ function App() {
       replaceActiveClaimContext(current, session.session_id)
       if (session.model_profile_id) setSelectedModel(session.model_profile_id)
       commitMessages(conversation.items)
+      setRecoveryFailure(null)
       setForm(current.form)
       setContentsItems(current.contents_items || [])
       setDynamicForm(current.dynamic_form || null)
@@ -2231,7 +2223,7 @@ function App() {
       setResumeContext({
         ...session.resume,
         resumed_at: session.started_at,
-        resumed_after_message_id: conversation.items.at(-1)?.message_id || null,
+        resumed_after_message_id: orderMessages(conversation.items).at(-1)?.message_id || null,
         has_resume_boundary: true,
       })
       setWorkspaceActive(true)
@@ -2461,6 +2453,44 @@ function App() {
     setPage('home')
   }
 
+  function openProfileFromWorkspace(section = null) {
+    if (!account) {
+      setPage('login')
+      return
+    }
+    const returnClaimId = claim?.claim_id || null
+    setProfileReturnClaimId(returnClaimId)
+    setProfileSection(section)
+    setWorkspaceView('chat')
+    setMobileView('chat')
+    setWorkspaceActive(false)
+    setPageState('account')
+    const nextPath = profilePathForSection(section)
+    if (globalThis.location?.pathname !== nextPath) {
+      globalThis.history?.pushState(
+        { northwindRoute: 'account', profileReturnClaimId: returnClaimId },
+        '',
+        nextPath,
+      )
+    }
+  }
+
+  function leaveProfilePage() {
+    if (profileReturnClaimId && claim?.claim_id === profileReturnClaimId) {
+      setProfileReturnClaimId(null)
+      setWorkspaceView('chat')
+      setMobileView('chat')
+      setWorkspaceActive(true)
+      setPageState('home')
+      const claimPath = `/claims/${claim.claim_id}`
+      if (globalThis.location?.pathname !== claimPath) {
+        globalThis.history?.pushState({ northwindRoute: 'home' }, '', claimPath)
+      }
+      return
+    }
+    setPage('home')
+  }
+
   function returnToLanding() {
     clearComposerAttachments()
     pendingSubmission.current = null
@@ -2482,7 +2512,11 @@ function App() {
     setPageState('account')
     const nextPath = profilePathForSection(section)
     if (globalThis.location?.pathname !== nextPath) {
-      globalThis.history?.pushState({ northwindRoute: 'account', profileSection: section }, '', nextPath)
+      globalThis.history?.pushState({
+        northwindRoute: 'account',
+        profileSection: section,
+        profileReturnClaimId,
+      }, '', nextPath)
     }
   }
 
@@ -2677,7 +2711,7 @@ function App() {
           busy={isBusy}
           onAddDestination={addPayoutDestination}
           onContinue={continuePayoutContact}
-          onManageContact={() => setWorkspaceView('account')}
+          onManageContact={() => openProfileFromWorkspace('personal-details')}
           onLogin={() => setPage('login')}
         />
       )
@@ -2712,6 +2746,11 @@ function App() {
 
   const isUrgentSupport = handoff?.support_need === 'urgent'
   const isProfilePage = page === 'account'
+  const profileDisplayName = account?.profile?.display_name || 'Log in to save your chat'
+  const profileEmail = account?.profile?.email || 'Profile and preferences'
+  const profileButtonLabel = account
+    ? `Open Profile for ${profileDisplayName} (${profileEmail})`
+    : 'Open Profile and preferences'
 
   return (
     <div className={`customer-app ${!isWorkspaceActive && page === 'home' ? 'entry-shell' : ''} ${isProfilePage ? 'is-profile-page' : ''}`}>
@@ -2750,7 +2789,7 @@ function App() {
           <button
             className="login-button"
             type="button"
-            onClick={() => setPage(isProfilePage ? 'home' : account ? 'account' : 'login')}
+            onClick={() => isProfilePage ? leaveProfilePage() : setPage(account ? 'account' : 'login')}
           >
             {isProfilePage ? 'Back' : account ? 'Profile' : 'Log in'}
           </button>
@@ -3063,14 +3102,20 @@ function App() {
               })}
             </div>
             <div className="intake-history-bottom">
-              <button className="intake-profile" type="button" onClick={() => {
-                if (account) { setWorkspaceView('account'); setPage('account') }
-                else setPage('login')
-              }}>
-                <span className="intake-profile-avatar">{account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}</span>
+              <button
+                className="intake-profile"
+                type="button"
+                aria-label={profileButtonLabel}
+                onClick={() => openProfileFromWorkspace()}
+              >
+                <span className="intake-profile-avatar" aria-hidden="true">{account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}</span>
                 <span className="intake-profile-copy">
-                  <span>{account?.profile?.display_name || 'Log in to save your chat'}</span>
-                  <small>{account?.profile?.email || 'Profile and preferences'}</small>
+                  <span className="intake-profile-name" title={profileDisplayName} aria-hidden="true">
+                    {middleEllipsis(profileDisplayName, PROFILE_NAME_PREVIEW_LENGTH)}
+                  </span>
+                  <small className="intake-profile-email" title={profileEmail} aria-hidden="true">
+                    {middleEllipsis(profileEmail, PROFILE_EMAIL_PREVIEW_LENGTH)}
+                  </small>
                 </span>
               </button>
             </div>
@@ -3105,9 +3150,7 @@ function App() {
                       ? 'Claim features'
                       : workspaceView === 'external-services'
                         ? 'External services'
-                        : workspaceView === 'account'
-                          ? 'Profile'
-                          : workspaceView === 'agreement'
+                        : workspaceView === 'agreement'
                             ? 'Agreement & confirmation'
                             : 'Evidence history'}
               </h1>
@@ -3120,9 +3163,7 @@ function App() {
                       ? 'Review this Claim\'s current status and available information.'
                       : workspaceView === 'external-services'
                         ? 'See the external service currently recorded for this Claim, including what may be shared and what happens next.'
-                        : workspaceView === 'account'
-                          ? 'Manage the account details Northwind currently supports and review unavailable profile capabilities.'
-                          : workspaceView === 'agreement'
+                        : workspaceView === 'agreement'
                             ? 'Your payout destination and preferred contact method are saved. Agreement review and final Claim confirmation happen in Step 4.'
                             : workspaceView === 'claim-evidence'
                             ? 'Review the files and supporting material recorded for the selected Claim.'
@@ -3159,20 +3200,6 @@ function App() {
                   </div>
                 )
               )}
-              {workspaceView === 'account' && account && (
-                <div className="workspace-account-content">
-                  <UserProfile
-                    account={account}
-                    activeSection={profileSection}
-                    controller={profileController}
-                    embedded
-                    onOpenClaims={openClaimHistory}
-                    onSelectSection={openProfileSection}
-                    onSignOut={signOut}
-                  />
-                </div>
-              )}
-
               {workspaceView === 'agreement' && (
                 <div className="claim-history-state" role="status">
                   <h2>Step 3 complete</h2>
@@ -3257,6 +3284,9 @@ function App() {
                         {message.actor === 'claimant' && message.recovery && !messages.some((reply) => reply.actor === 'agent' && !reply.recovery && reply.in_reply_to === message.message_id) && (
                           <div role="status">
                             <p>{message.recovery.claimant_projection}</p>
+                            {recoveryFailure?.messageId === message.message_id && (
+                              <p className="message-state" role="alert">{recoveryFailure.message}</p>
+                            )}
                             {message.client_message_id && message.recovery.resume_triggers?.includes('explicit_retry_request') && (
                               <button type="button" disabled={isBusy} onClick={(event) => sendMessage(event, message)}>Retry response</button>
                             )}
