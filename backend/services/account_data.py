@@ -77,8 +77,7 @@ from backend.repositories.protocols import (
     RevisionConflict,
 )
 from backend.services.branching import build_applied_branch_evaluation
-from backend.services.claimant_action_projection import project_claimant_primary_action
-from backend.services.external_services import claimant_assessor_action, claimant_next_step
+from backend.services.external_services import claimant_current_action_projection
 from backend.services.fact_resolution import resolve_form_change
 from backend.services.protected_values import (
     ProtectedValueAdapter,
@@ -761,17 +760,12 @@ def _payout_contact_response(
             message='The saved payout and contact selection could not be restored.',
             retryable=True,
         )
-    projected_next_step = claimant_next_step(
-        persistence,
-        claim,
-        None,
-        identity_repository=identity_repository,
-    )
-    primary_action = project_claimant_primary_action(
-        claim_id=claim.claim_id,
-        claim_revision=claim.revision,
-        next_step=projected_next_step,
-        external_service_action=None,
+    _external_action, projected_next_step, primary_action = (
+        claimant_current_action_projection(
+            persistence,
+            claim,
+            identity_repository=identity_repository,
+        )
     )
     return ClaimPayoutContactSelectionResponse(
         claim_id=claim.claim_id,
@@ -830,18 +824,12 @@ def select_payout_contact(
             message='A terminal claim cannot change payout and contact selection.',
         )
 
-    external_action = claimant_assessor_action(persistence, claim)
-    projected_next_step = claimant_next_step(
-        persistence,
-        claim,
-        external_action,
-        identity_repository=identity_repository,
-    )
-    current_action = project_claimant_primary_action(
-        claim_id=claim.claim_id,
-        claim_revision=claim.revision,
-        next_step=projected_next_step,
-        external_service_action=external_action,
+    _external_action, _projected_next_step, current_action = (
+        claimant_current_action_projection(
+            persistence,
+            claim,
+            identity_repository=identity_repository,
+        )
     )
     if (
         current_action.action_code != 'claimant.review_payout_contact'
