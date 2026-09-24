@@ -760,12 +760,10 @@ def _payout_contact_response(
             message='The saved payout and contact selection could not be restored.',
             retryable=True,
         )
-    _external_action, projected_next_step, primary_action = (
-        claimant_current_action_projection(
-            persistence,
-            claim,
-            identity_repository=identity_repository,
-        )
+    _external_action, projected_next_step, primary_action = claimant_current_action_projection(
+        persistence,
+        claim,
+        identity_repository=identity_repository,
     )
     return ClaimPayoutContactSelectionResponse(
         claim_id=claim.claim_id,
@@ -824,12 +822,10 @@ def select_payout_contact(
             message='A terminal claim cannot change payout and contact selection.',
         )
 
-    _external_action, _projected_next_step, current_action = (
-        claimant_current_action_projection(
-            persistence,
-            claim,
-            identity_repository=identity_repository,
-        )
+    _external_action, _projected_next_step, current_action = claimant_current_action_projection(
+        persistence,
+        claim,
+        identity_repository=identity_repository,
     )
     if (
         current_action.action_code != 'claimant.review_payout_contact'
