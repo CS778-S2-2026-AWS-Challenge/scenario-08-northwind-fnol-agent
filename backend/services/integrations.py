@@ -2461,7 +2461,6 @@ def route_assessor(
     )
     provider_reference = outcome.result.assessor_reference or outcome.result.queue_reference
     assert provider_reference is not None
-    repository.save_assessor_routing_operation(accepted_operation)
     accepted_task = _record_external_acceptance(
         repository,
         task=task,
@@ -2480,12 +2479,19 @@ def route_assessor(
         delivery=accepted_task.delivery,
         delivery_evidence=accepted_task.delivery_evidence,
     )
-    repository.save_assessor_routing_settlement(
-        accepted_operation,
-        accepted_task,
-        accepted_attempt,
-        claim.customer_id,
-    )
+    try:
+        repository.save_assessor_routing_settlement(
+            accepted_operation,
+            accepted_task,
+            accepted_attempt,
+            claim.customer_id,
+        )
+    except Exception:
+        # The provider returned a known, idempotently replayable answer, but none of
+        # that answer reached durable lifecycle state. Release this attempt's hold so
+        # the same operation can replay and settle the complete record set.
+        _release_dispatch(repository, claim=claim, request=external_request)
+        raise
     _record_awaited_material(repository, task=accepted_task, claim=claim)
     # Acceptance is a settled outcome too. Leaving the hold would leave the stored
     # request claiming a dispatch is in progress after the answer arrived.
