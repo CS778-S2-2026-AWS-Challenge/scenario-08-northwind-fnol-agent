@@ -59,6 +59,8 @@ def prepare_claim_submission(
         json={
             'account_type': 'cheque',
             'account_number': account_number,
+            'bank_name': 'Northwind Test Bank',
+            'account_holder_name': 'Claimant One',
         },
     )
     assert destination.status_code == 201, destination.text
