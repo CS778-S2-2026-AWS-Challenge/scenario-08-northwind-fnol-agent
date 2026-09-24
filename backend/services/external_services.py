@@ -616,6 +616,7 @@ def claimant_current_action_projection(
     )
     return primary_external_action, next_step, primary_action
 
+
 def _response(
     repository: PersistenceRepository,
     claim: WorkingClaim,
