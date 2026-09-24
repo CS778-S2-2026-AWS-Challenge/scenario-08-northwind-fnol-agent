@@ -165,6 +165,7 @@ it('adds one final voice transcript to the draft and announces completion', asyn
 
   const recognition = recognitionInstances[0]
   expect(voice).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getByRole('status')).toHaveAttribute('aria-atomic', 'true')
   expect(screen.getByRole('status')).toHaveTextContent('Listening...')
 
   recognition.onresult({
@@ -211,7 +212,36 @@ it('does not change the draft when recognition ends without a transcript', async
     expect(message).toHaveValue('Existing details')
     expect(voice).toHaveAttribute('aria-pressed', 'false')
   })
-  expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  expect(screen.getByRole('status')).toBeInTheDocument()
+  expect(screen.getByRole('status')).toHaveTextContent('')
+})
+
+it('reports an unexpected aborted recognition as retryable', async () => {
+  const user = userEvent.setup()
+  render(<ComposerHarness />)
+
+  await user.click(screen.getByRole('button', { name: 'Use voice input' }))
+  recognitionInstances[0].onerror({ error: 'aborted' })
+
+  await waitFor(() => {
+    expect(screen.getByRole('status')).toHaveTextContent('Voice input stopped unexpectedly. Try again.')
+    expect(screen.getByRole('button', { name: 'Use voice input' })).toHaveAttribute('aria-pressed', 'false')
+  })
+})
+
+it('normalizes only the whitespace boundary before a transcript', async () => {
+  const user = userEvent.setup()
+  render(<ComposerHarness />)
+
+  const message = screen.getByRole('textbox', { name: 'Claim message' })
+  await user.type(message, 'Existing details  ')
+  await user.click(screen.getByRole('button', { name: 'Use voice input' }))
+  recognitionInstances[0].onresult({
+    resultIndex: 0,
+    results: [{ isFinal: true, 0: { transcript: 'More detail' } }],
+  })
+
+  await waitFor(() => expect(message).toHaveValue('Existing details More detail'))
 })
 
 it.each([

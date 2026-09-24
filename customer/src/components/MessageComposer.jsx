@@ -175,6 +175,7 @@ export default function MessageComposer({
   const fileInput = useRef(null)
   const textareaRef = useRef(null)
   const recognitionRef = useRef(null)
+  const expectedAbortRef = useRef(false)
   const [voiceStatus, setVoiceStatus] = useState('')
   const [voiceState, setVoiceState] = useState('idle')
   const [selectedAttachmentId, setSelectedAttachmentId] = useState(null)
@@ -190,6 +191,7 @@ export default function MessageComposer({
     if (!busy && !disabled) return
     const recognition = recognitionRef.current
     if (!recognition) return
+    expectedAbortRef.current = true
     recognition.abort()
     recognitionRef.current = null
     setVoiceState('idle')
@@ -197,6 +199,7 @@ export default function MessageComposer({
   }, [busy, disabled])
 
   useEffect(() => () => {
+    expectedAbortRef.current = true
     recognitionRef.current?.abort()
     recognitionRef.current = null
   }, [])
@@ -220,6 +223,7 @@ export default function MessageComposer({
   function stopVoiceInput() {
     const recognition = recognitionRef.current
     if (!recognition) return
+    expectedAbortRef.current = true
     recognition.stop()
     setVoiceState('idle')
     setVoiceStatus('Voice input stopped.')
@@ -239,6 +243,7 @@ export default function MessageComposer({
     }
     const recognition = new SpeechRecognition()
     recognitionRef.current = recognition
+    expectedAbortRef.current = false
     recognition.lang = 'en-NZ'
     recognition.interimResults = false
     recognition.continuous = false
@@ -256,18 +261,27 @@ export default function MessageComposer({
         .trim()
       if (!transcript || transcript === lastTranscript) return
       lastTranscript = transcript
-      setDraft((current) => `${current}${current ? ' ' : ''}${transcript}`)
+      setDraft((current) => {
+        const normalizedCurrent = current.replace(/\s+$/, '')
+        return `${normalizedCurrent}${normalizedCurrent ? ' ' : ''}${transcript}`
+      })
       setVoiceStatus('Voice input added to your message.')
     }
     recognition.onerror = (event) => {
-      if (event.error === 'aborted') return
+      if (recognitionRef.current !== recognition) return
+      if (event.error === 'aborted' && expectedAbortRef.current) return
       recognitionRef.current = null
       setVoiceState('error')
-      setVoiceStatus(voiceErrorMessage(event.error))
+      setVoiceStatus(
+        event.error === 'aborted'
+          ? 'Voice input stopped unexpectedly. Try again.'
+          : voiceErrorMessage(event.error),
+      )
     }
     recognition.onend = () => {
       if (recognitionRef.current !== recognition) return
       recognitionRef.current = null
+      expectedAbortRef.current = false
       setVoiceState('idle')
       setVoiceStatus((current) => (current === 'Listening...' ? '' : current))
     }
@@ -440,7 +454,14 @@ export default function MessageComposer({
           <span>{error}</span>
         </div>
       )}
-      {voiceStatus && <p className="composer-note" role="status" aria-live="polite">{voiceStatus}</p>}
+      <p
+        className={`composer-note ${voiceStatus ? '' : 'sr-only'}`}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {voiceStatus}
+      </p>
     </form>
   )
 }
