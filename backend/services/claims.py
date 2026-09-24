@@ -80,7 +80,10 @@ from backend.services.claim_data import (
 from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.claimant_form_projection import project_claimant_form_fields
 from backend.services.evidence_visibility import claimant_visible_evidence
-from backend.services.external_services import claimant_assessor_action, claimant_next_step
+from backend.services.external_services import (
+    claimant_assessor_action,
+    claimant_current_action_projection,
+)
 from backend.services.fact_resolution import (
     confirm_contents_item,
     confirm_form_field,
@@ -274,14 +277,8 @@ def claimant_claim(
     claimant_evidence = claimant_visible_evidence(
         repository.list_evidence(claim.claim_id, claim.customer_id)
     )
-    # Derived once and passed to both fields: the next step is corrected against the
-    # action, so reading the action twice could let the two disagree again.
-    external_service_action = claimant_assessor_action(repository, claim)
-    legacy_external_service_action = (
-        external_service_action
-        if external_service_action is None or external_service_action.offer_id is None
-        else None
-    )
+    # Read and write boundaries share one current-action derivation so a
+    # message-bound service offer cannot reorder the claimant intake journey.
     handoff: ClaimantHandoff | None = None
     resolved_support_handoff: ClaimantResolvedSupportHandoff | None = None
     if claim.active_session_id is not None:
@@ -335,11 +332,13 @@ def claimant_claim(
                     if customer_update is not None
                     else None,
                 )
-    next_step = claimant_next_step(
-        repository,
-        claim,
-        legacy_external_service_action,
-        identity_repository=identity_repository,
+    legacy_external_service_action, next_step, primary_action = (
+        claimant_current_action_projection(
+            repository,
+            claim,
+            identity_repository=identity_repository,
+            agreement_accepted=agreement_acceptance_is_current(claim),
+        )
     )
     motor_other_driver = repository.get_motor_other_driver(claim.claim_id, claim.customer_id)
     return ClaimantClaim(
@@ -364,13 +363,7 @@ def claimant_claim(
         external_capabilities=list(capability_catalogue(claim.incident_type)),
         dynamic_form=claimant_dynamic_form_projection(repository, claim),
         customer_next_step=next_step,
-        primary_action=project_claimant_primary_action(
-            claim_id=claim.claim_id,
-            claim_revision=claim.revision,
-            next_step=next_step,
-            external_service_action=legacy_external_service_action,
-            agreement_accepted=agreement_acceptance_is_current(claim),
-        ),
+        primary_action=primary_action,
         incomplete_context=_claimant_incomplete_context(repository, claim),
         handoff=handoff,
         resolved_support_handoff=resolved_support_handoff,
