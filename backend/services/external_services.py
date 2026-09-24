@@ -581,7 +581,6 @@ def claimant_next_step(
     )
 
 
-
 def claimant_current_action_projection(
     repository: PersistenceRepository,
     claim: WorkingClaim,
