@@ -203,10 +203,8 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
     auth_headers: dict[str, str],
 ) -> None:
     journey = _fixture()
-    journey_input = (
-        cast(str, journey['input'])
-        + ' Could you help me get a damage assessment for the repairs?'
-    )
+    journey_input = cast(str, journey['input'])
+    assessment_request = 'Could you help me get a damage assessment for the repairs?'
     created = client.post(
         '/api/v1/claims',
         headers={**auth_headers, 'Idempotency-Key': 'issue928-ordering-claim'},
@@ -227,7 +225,7 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
         },
         json={
             'client_message_id': 'issue928-ordering-intake',
-            'content': {'type': 'text', 'text': journey_input},
+            'content': {'type': 'text', 'text': f'{journey_input} {assessment_request}'},
             'evidence_refs': [],
         },
     )
