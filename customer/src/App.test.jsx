@@ -2116,6 +2116,19 @@ describe('claimant intake projection', () => {
         revision: 4,
       }),
     ))
+
+    expect(
+      await screen.findByRole('heading', { name: 'Claim submitted' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('NWF-2026-16ECDD')).toBeInTheDocument()
+    expect(
+      screen.getByText('A claims specialist will review the submitted details.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('2026-09-16T01:00:00Z')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Submit claim' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    expect(screen.queryByRole('heading', { name: 'Claim submitted' })).not.toBeInTheDocument()
   })
 
   it('keeps agreement review in the Agent message flow before final submission', async () => {
