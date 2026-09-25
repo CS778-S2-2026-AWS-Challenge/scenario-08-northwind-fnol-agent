@@ -125,13 +125,14 @@ function Invoke-TrackedStep {
 # run in this same shell, for instance).
 #
 # A fixed name list, independent of which runtime path actually executes below (-SkipDocker
-# skips the MongoDB/MinIO names entirely), plus the model secret names discovered from the
-# bundle text -- not known ahead of time. Building the removal set from $backendEnv.Keys
-# instead would only null-remove whatever this particular run happened to set, so a name this
-# run's -SkipDocker branch never touches -- but that the developer's shell still carries from
-# an earlier non-SkipDocker run -- would reach the frontends. Pure and process-free (no network
-# call, no Start-Process) so it can be exercised directly by
-# scripts/test-start-dev-credential-boundary.ps1.
+# skips the MongoDB/MinIO names entirely) and independent of which names the current bundle
+# fetch happens to return, plus whatever the bundle returns beyond that fixed list, discovered
+# dynamically. Building the removal set only from $backendEnv.Keys, or only from the current
+# bundle's own key names, both make the same mistake: they only null-remove what this
+# particular run happened to set or fetch, so a name a -SkipDocker run never touches, or a
+# credential the developer's shell still carries from an earlier session but that dropped out
+# of this run's bundle, would reach the frontends. Pure and process-free (no network call, no
+# Start-Process) so it can be exercised directly by scripts/test-start-dev-credential-boundary.ps1.
 function Get-CredentialEnvironments {
     param([string]$SecretsToken, [string]$BundleText)
     if (-not $SecretsToken) {
@@ -149,9 +150,18 @@ function Get-CredentialEnvironments {
         'NORTHWIND_OBJECT_STORAGE_REGION', 'NORTHWIND_OBJECT_STORAGE_BUCKET', 'NORTHWIND_KNOWLEDGE_BUCKET',
         'NORTHWIND_MONGODB_URI', 'NORTHWIND_MONGODB_DATABASE', 'NORTHWIND_MONGODB_COLLECTION'
     )
+    # Every credential_environment_variable name config/model-runtime-bindings.json currently
+    # configures, kept in sync manually with that file. Removed from every frontend regardless
+    # of whether this run's bundle fetch returned it: a name configured but not returned this
+    # time (a stale credential the developer's shell already carries from an earlier session,
+    # or one the endpoint temporarily omitted) must be treated the same as one that was.
+    $configuredModelCredentialNames = @(
+        'NORTHWIND_MODEL_API_KEY', 'AWS_BEARER_TOKEN_BEDROCK', 'GEMINI_API_KEY'
+    )
     $backendEnv = @{}
     $frontendEnv = @{}
     foreach ($name in $backendOnlyNames) { $frontendEnv[$name] = $null }
+    foreach ($name in $configuredModelCredentialNames) { $frontendEnv[$name] = $null }
     # The backend has no use for the bootstrap token itself, only for the model keys it
     # already unlocked below; null it in case this developer's own environment already has
     # it set (-Environment overlays the inherited environment, it does not replace it).
@@ -184,10 +194,17 @@ $bundle = if ($secretsToken) {
     Invoke-RestMethod -Uri 'https://ysoseri.us/secret/northwind-dev' `
         -Headers @{ Authorization = "Bearer $secretsToken" }
 } else { $null }
+# Remove it from this script's own process environment the moment the request is done: every
+# later external command in this script -- docker compose, Invoke-Step children, anything not
+# started through Start-Tracked's -Environment overlay -- inherits $env: directly, with no
+# overlay to null it back out. Leaving it here would leak it to every one of those, not only
+# to the Start-Tracked children the overlays cover.
+Remove-Item -ErrorAction SilentlyContinue env:NORTHWIND_SECRETS_TOKEN
 $credentials = Get-CredentialEnvironments -SecretsToken $secretsToken -BundleText $bundle
 $backendEnv = $credentials.BackendEnv
 $frontendEnv = $credentials.FrontendEnv
 $modelSecretNames = $credentials.ModelSecretNames
+$secretsToken = $null
 
 if ($SkipDocker) {
     # Fixture data profile: no MongoDB, no MinIO, no persisted Evidence, no real knowledge
