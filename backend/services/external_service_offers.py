@@ -61,8 +61,8 @@ from backend.repositories.protocols import (
 )
 from backend.services.branching import build_applied_branch_evaluation
 from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
-from backend.services.external_services import claimant_current_action_projection
 from backend.services.external_service_entry import ExternalServiceEntryDecision
+from backend.services.external_services import claimant_current_action_projection
 from backend.services.integrations import _build_external_attempt
 from backend.services.support import (
     now_utc,
