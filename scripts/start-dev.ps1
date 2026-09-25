@@ -38,6 +38,12 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# Start-Process -Environment (used to hand model credentials to the backend alone) exists from
+# PowerShell 7.3. Windows PowerShell 5.1 would not error on the unknown parameter cleanly
+# enough to trust, so refuse up front.
+if ($PSVersionTable.PSVersion -lt [version]'7.3') {
+    throw "This script needs PowerShell 7.3 or later (found $($PSVersionTable.PSVersion)). Run it with pwsh."
+}
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $repoRoot
 
@@ -70,9 +76,11 @@ function Wait-Ready {
 $startedProcesses = [System.Collections.Generic.List[Diagnostics.Process]]::new()
 
 function Start-Tracked {
-    param([string]$FilePath, [string[]]$ArgumentList)
+    # $Environment adds variables to this one child only; it never touches this shell's
+    # environment, so a later child does not inherit what an earlier one was given.
+    param([string]$FilePath, [string[]]$ArgumentList, [hashtable]$Environment = @{})
     $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList `
-        -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
+        -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru -Environment $Environment
     $startedProcesses.Add($process)
     return $process
 }
@@ -97,14 +105,26 @@ function Invoke-Step {
 }
 
 # 1. Pull model credentials from the team secrets endpoint. The bundle is KEY=VALUE lines.
-$env:NORTHWIND_SECRETS_TOKEN = 'ysk_nEtbZytRcPqjtTHzaEFD-0Lg2sxlGZ9oUdCfXrfuAJA'
+#    The bearer token that unlocks the bundle is itself a credential and is never stored in
+#    the repository: it comes from the NORTHWIND_SECRETS_TOKEN environment variable, which
+#    each developer sets once (see README). The fetched values are kept in a local table and
+#    handed only to the backend process; the Vite frontends never see them.
+if (-not $env:NORTHWIND_SECRETS_TOKEN) {
+    throw ('NORTHWIND_SECRETS_TOKEN is not set. Ask a teammate for the dev secrets token and ' +
+        'set it once for your user: [Environment]::SetEnvironmentVariable(' +
+        '"NORTHWIND_SECRETS_TOKEN", "<token>", "User"), then open a new terminal.')
+}
 $bundle = Invoke-RestMethod `
     -Uri 'https://ysoseri.us/secret/northwind-dev' `
     -Headers @{ Authorization = "Bearer $($env:NORTHWIND_SECRETS_TOKEN)" }
+$modelSecrets = @{}
 foreach ($line in ($bundle -split "`n")) {
     if ($line -match '^([A-Z][A-Z0-9_]*)=(.*)$') {
-        Set-Item -Path "env:$($Matches[1])" -Value $Matches[2]
+        $modelSecrets[$Matches[1]] = $Matches[2]
     }
+}
+if ($modelSecrets.Count -eq 0) {
+    throw 'The secrets endpoint returned no KEY=VALUE lines; the token may be wrong or revoked.'
 }
 
 if ($SkipDocker) {
@@ -197,7 +217,9 @@ function Start-Frontend {
 # last frontend -- stop every process this invocation started before surfacing the error, so
 # a partial run never leaves a hidden backend or Vite server holding its port.
 try {
-    $backend = Start-Tracked -FilePath 'py' -ArgumentList $backendArguments
+    # Model credentials go to the backend only. The secrets token itself is not passed on:
+    # the backend has no use for it, and nothing else this script starts should hold it.
+    $backend = Start-Tracked -FilePath 'py' -ArgumentList $backendArguments -Environment $modelSecrets
     $readyUrl = "http://127.0.0.1:$BackendPort/health/ready"
     Wait-Ready -Process $backend -Name 'Backend' -TimeoutSeconds $ReadyTimeoutSeconds -Probe {
         try {

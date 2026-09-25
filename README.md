@@ -99,9 +99,20 @@ frontends — with one command:
 .\scripts\start-dev.ps1
 ```
 
-Requires Docker Desktop running. The script:
+Requires Docker Desktop running and PowerShell 7.3+ (`pwsh`). One-time setup: the model
+credentials live on a team secrets endpoint, and the bearer token that unlocks it is itself a
+credential, so it is never stored in this repository. Get it from a teammate out of band and set
+it once for your Windows user, then open a new terminal:
 
-1. pulls model credentials from the team secrets endpoint;
+```powershell
+[Environment]::SetEnvironmentVariable('NORTHWIND_SECRETS_TOKEN', '<token from a teammate>', 'User')
+```
+
+The script refuses to start without it and tells you so. The script:
+
+1. pulls model credentials from the team secrets endpoint using that token, and hands them to
+   the backend process only — the three Vite frontends never receive them, and neither does the
+   token itself;
 2. brings up MongoDB and MinIO through `docker-compose.yml` and waits for each to report
    healthy, then runs the one-shot `mongo-init`/`minio-init` containers and checks their real
    exit codes;
@@ -139,9 +150,11 @@ is decided by `config/model-runtime-bindings.json`; when that file is loaded the
 The same steps, one at a time, if you prefer to run them by hand:
 
 ```powershell
-# 1. Pull the credentials. The bundle is KEY=VALUE lines.
+# 1. Pull the credentials with your NORTHWIND_SECRETS_TOKEN (set up above). The bundle is
+#    KEY=VALUE lines. Doing it by hand puts them in this shell's environment, so run the
+#    backend from this same shell and start the frontends from a different one.
 $bundle = Invoke-RestMethod -Uri 'https://ysoseri.us/secret/northwind-dev' `
-    -Headers @{ Authorization = 'Bearer ysk_nEtbZytRcPqjtTHzaEFD-0Lg2sxlGZ9oUdCfXrfuAJA' }
+    -Headers @{ Authorization = "Bearer $env:NORTHWIND_SECRETS_TOKEN" }
 foreach ($line in ($bundle -split "`n")) {
     if ($line -match '^([A-Z][A-Z0-9_]*)=(.*)$') { Set-Item -Path "env:$($Matches[1])" -Value $Matches[2] }
 }
