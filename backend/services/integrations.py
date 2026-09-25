@@ -2486,12 +2486,21 @@ def route_assessor(
             accepted_attempt,
             claim.customer_id,
         )
-    except Exception:
+    except Exception as error:
         # The provider returned a known, idempotently replayable answer, but none of
         # that answer reached durable lifecycle state. Release this attempt's hold so
-        # the same operation can replay and settle the complete record set.
+        # the same operation can replay and settle the complete record set. Do not
+        # expose the repository exception through the claimant/API boundary.
         _release_dispatch(repository, claim=claim, request=external_request)
-        raise
+        raise ApiError(
+            status_code=503,
+            code='DEPENDENCY_UNAVAILABLE',
+            message=(
+                'The assessment routing result could not be recorded. '
+                'Retry the request to restore the saved assessment state.'
+            ),
+            retryable=True,
+        ) from error
     _record_awaited_material(repository, task=accepted_task, claim=claim)
     # Acceptance is a settled outcome too. Leaving the hold would leave the stored
     # request claiming a dispatch is in progress after the answer arrived.
