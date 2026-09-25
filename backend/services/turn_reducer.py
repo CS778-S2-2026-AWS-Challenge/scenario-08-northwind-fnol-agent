@@ -483,11 +483,14 @@ def reduce_turn(
             if current_product_family_field is not None
             else claim.incident_type
         )
+        # Provenance comes from the origin's *current* assertion only. The field-level
+        # source_refs list is cumulative across the assertion history, so after a
+        # correction it still names the superseded message; citing that as support for
+        # the corrected value would be false. No current assertion with its own refs
+        # means no trustworthy origin, and then nothing is derived.
         if current_product_family == 'motor':
             vehicle_damage = projected_confirmation_form.get('vehicle.damage_description')
             if vehicle_damage is not None and vehicle_damage.status is FormStatus.CONFIRMED:
-                derived_loss_description = str(vehicle_damage.value)
-                origin_source_refs = list(vehicle_damage.source_refs)
                 origin_assertion = next(
                     (
                         item
@@ -496,9 +499,10 @@ def reduce_turn(
                     ),
                     None,
                 )
-                origin_reported_text = (
-                    origin_assertion.reported_text if origin_assertion is not None else None
-                )
+                if origin_assertion is not None and origin_assertion.source_refs:
+                    derived_loss_description = str(vehicle_damage.value)
+                    origin_source_refs = list(origin_assertion.source_refs)
+                    origin_reported_text = origin_assertion.reported_text
         elif current_product_family == 'contents':
             # Same predicate branch_registry._required_set uses to stop requiring the
             # field: any confirmed item, in any position, not only the first one.
@@ -511,8 +515,6 @@ def reduce_turn(
                 None,
             )
             if confirmed_item is not None:
-                derived_loss_description = confirmed_item.description
-                origin_source_refs = list(confirmed_item.source_refs)
                 origin_item_assertion = next(
                     (
                         item
@@ -521,14 +523,11 @@ def reduce_turn(
                     ),
                     None,
                 )
-                origin_reported_text = (
-                    origin_item_assertion.reported_text
-                    if origin_item_assertion is not None
-                    else None
-                )
+                if origin_item_assertion is not None and origin_item_assertion.source_refs:
+                    derived_loss_description = confirmed_item.description
+                    origin_source_refs = list(origin_item_assertion.source_refs)
+                    origin_reported_text = origin_item_assertion.reported_text
         if derived_loss_description is not None:
-            if not origin_source_refs:
-                origin_source_refs = [claimant_message.message_id]
             derived = resolve_form_change(
                 field_code='loss.description',
                 existing=None,
