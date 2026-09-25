@@ -467,7 +467,12 @@ def reduce_turn(
     # a claimant-stated fact -- Runtime proposes, the claimant still decides.
     if 'loss.description' not in projected_confirmation_form:
         derived_loss_description: str | None = None
-        derived_source_field: str | None = None
+        # The originating item-level assertion. The derived fact keeps that assertion's
+        # own source refs and the claimant's own words, not the current message: the
+        # vehicle damage or contents item may have been stated turns ago, and the audit
+        # trail must point at the message that actually supported it.
+        origin_source_refs: list[str] = []
+        origin_reported_text: str | None = None
         # This turn's own family proposal, not the pre-turn branch_evaluation: on the
         # very turn that confirms both product_family and the item-level fact together
         # (the common case), the evaluation Runtime was handed before this message
@@ -482,14 +487,49 @@ def reduce_turn(
             vehicle_damage = projected_confirmation_form.get('vehicle.damage_description')
             if vehicle_damage is not None and vehicle_damage.status is FormStatus.CONFIRMED:
                 derived_loss_description = str(vehicle_damage.value)
-                derived_source_field = 'vehicle.damage_description'
+                origin_source_refs = list(vehicle_damage.source_refs)
+                origin_assertion = next(
+                    (
+                        item
+                        for item in vehicle_damage.assertions
+                        if item.assertion_id == vehicle_damage.current_assertion_id
+                    ),
+                    None,
+                )
+                origin_reported_text = (
+                    origin_assertion.reported_text if origin_assertion is not None else None
+                )
         elif current_product_family == 'contents':
-            first_item = next(iter(projected_confirmation_contents), None)
-            if first_item is not None and first_item.status is FormStatus.CONFIRMED:
-                derived_loss_description = first_item.description
-                derived_source_field = 'contents.items'
+            # Same predicate branch_registry._required_set uses to stop requiring the
+            # field: any confirmed item, in any position, not only the first one.
+            confirmed_item = next(
+                (
+                    item
+                    for item in projected_confirmation_contents
+                    if item.status is FormStatus.CONFIRMED
+                ),
+                None,
+            )
+            if confirmed_item is not None:
+                derived_loss_description = confirmed_item.description
+                origin_source_refs = list(confirmed_item.source_refs)
+                origin_item_assertion = next(
+                    (
+                        item
+                        for item in confirmed_item.assertions
+                        if item.assertion_id == confirmed_item.current_assertion_id
+                    ),
+                    None,
+                )
+                origin_reported_text = (
+                    origin_item_assertion.reported_text
+                    if origin_item_assertion is not None
+                    else None
+                )
         if derived_loss_description is not None:
-            form_changes['loss.description'] = resolve_form_change(
+            if not origin_source_refs:
+                origin_source_refs = [claimant_message.message_id]
+            derived = resolve_form_change(
                 field_code='loss.description',
                 existing=None,
                 proposal=ProposedFormChange(
@@ -498,15 +538,27 @@ def reduce_turn(
                     source=FormSource.INFERENCE,
                     status=FormStatus.PROPOSED,
                     needed_for=NeededFor.CURRENT_ACTION,
-                    reported_text=f'Derived from {derived_source_field}.',
+                    reported_text=origin_reported_text,
                 ),
-                source_ref=claimant_message.message_id,
-                message_text=message_text,
+                source_ref=origin_source_refs[0],
+                message_text=None,
                 timestamp=timestamp,
                 accepted_status=FormStatus.PROPOSED,
                 updated_by=ActorReference(actor_type=ActorType.AGENT, actor_id='runtime'),
             )
-            projected_confirmation_form['loss.description'] = form_changes['loss.description']
+            # resolve_form_change records one source ref per assertion; carry every ref the
+            # originating assertion had so a multi-source origin is not narrowed to one.
+            derived = derived.model_copy(
+                update={
+                    'source_refs': origin_source_refs,
+                    'assertions': [
+                        item.model_copy(update={'source_refs': origin_source_refs})
+                        for item in derived.assertions
+                    ],
+                }
+            )
+            form_changes['loss.description'] = derived
+            projected_confirmation_form['loss.description'] = derived
     batch_confirmed = confirmation_before_message is not None and can_confirm(
         claim,
         projected_confirmation_form,

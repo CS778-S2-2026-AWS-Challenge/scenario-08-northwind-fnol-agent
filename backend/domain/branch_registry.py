@@ -1114,7 +1114,9 @@ class BranchRuleEvaluator:
                 if vehicle_damage is None or vehicle_damage.status is not FormStatus.CONFIRMED:
                     required.add('loss.description')
             elif selected_family == 'contents':
-                if not claim.contents_items:
+                # Same predicate turn_reducer derives from: a proposed, unavailable or
+                # superseded item does not yet state the loss.
+                if not any(item.status is FormStatus.CONFIRMED for item in claim.contents_items):
                     required.add('loss.description')
         for branch_id in active_branches:
             branch = self.registry.branch_by_id.get(branch_id)

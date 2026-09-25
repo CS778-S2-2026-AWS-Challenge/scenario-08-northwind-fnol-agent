@@ -60,8 +60,30 @@ function Wait-Ready {
         if (& $Probe) { return }
         Start-Sleep -Milliseconds 500
     }
-    if (-not $Process.HasExited) { Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue }
+    # Stopping is left to Stop-StartedProcesses so a late failure tears down everything this
+    # invocation started, not only the process that happened to time out.
     throw "$Name did not become ready within $TimeoutSeconds s."
+}
+
+# Every process this invocation starts, so a failure at any step can stop all of them rather
+# than leaving an already-running backend or frontend hidden on its port.
+$startedProcesses = [System.Collections.Generic.List[Diagnostics.Process]]::new()
+
+function Start-Tracked {
+    param([string]$FilePath, [string[]]$ArgumentList)
+    $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList `
+        -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
+    $startedProcesses.Add($process)
+    return $process
+}
+
+function Stop-StartedProcesses {
+    foreach ($process in $startedProcesses) {
+        if ($process.HasExited) { continue }
+        # npm run dev spawns the real Vite server as a child; /T stops the whole tree so the
+        # port is actually released, which Stop-Process on the parent alone would not do.
+        & taskkill /PID $process.Id /T /F 2>&1 | Out-Null
+    }
 }
 
 function Invoke-Step {
@@ -155,37 +177,11 @@ $backendArguments = @(
     '--host', '127.0.0.1', '--port', [string]$BackendPort,
     '--log-config', 'scripts/dev-logging.json'
 )
-$backend = Start-Process -FilePath 'py' -ArgumentList $backendArguments `
-    -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
-$readyUrl = "http://127.0.0.1:$BackendPort/health/ready"
-Wait-Ready -Process $backend -Name 'Backend' -TimeoutSeconds $ReadyTimeoutSeconds -Probe {
-    try {
-        $result = Invoke-RestMethod -Uri $readyUrl -TimeoutSec 3
-        return $result.status -ne 'unavailable'
-    }
-    catch { return $false }
-}
-
-$report = [ordered]@{ Backend = "$readyUrl (ready, PID $($backend.Id))" }
-
-if ($BackendOnly) {
-    [PSCustomObject]$report
-    return
-}
-
-# 7. Start the three frontends and wait for each to actually serve its page. Vite proxies read
-#    the target from these environment variables at startup, so they must be set before the
-#    process starts.
-$env:VITE_BACKEND_PORT = [string]$BackendPort
-$backendOrigin = "http://127.0.0.1:$BackendPort"
-$env:WORKBENCH_API_TARGET = $backendOrigin
-$env:ADMIN_API_TARGET = $backendOrigin
 
 function Start-Frontend {
     param([string]$Prefix, [int]$Port, [string]$BasePath, [int]$TimeoutSeconds)
-    $process = Start-Process -FilePath 'npm.cmd' `
-        -ArgumentList @('run', 'dev', '--prefix', $Prefix, '--', '--host', '127.0.0.1', '--port', [string]$Port) `
-        -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
+    $process = Start-Tracked -FilePath 'npm.cmd' `
+        -ArgumentList @('run', 'dev', '--prefix', $Prefix, '--', '--host', '127.0.0.1', '--port', [string]$Port)
     $url = "http://127.0.0.1:$Port$BasePath"
     Wait-Ready -Process $process -Name $Prefix -TimeoutSeconds $TimeoutSeconds -Probe {
         try {
@@ -197,13 +193,47 @@ function Start-Frontend {
     return [PSCustomObject]@{ Process = $process; Url = $url }
 }
 
-$customer = Start-Frontend -Prefix 'customer' -Port $CustomerPort -BasePath '/' -TimeoutSeconds $ReadyTimeoutSeconds
-$report.Customer = "$($customer.Url) (ready, PID $($customer.Process.Id))"
+# Everything from here on starts long-running processes. If any step fails -- including the
+# last frontend -- stop every process this invocation started before surfacing the error, so
+# a partial run never leaves a hidden backend or Vite server holding its port.
+try {
+    $backend = Start-Tracked -FilePath 'py' -ArgumentList $backendArguments
+    $readyUrl = "http://127.0.0.1:$BackendPort/health/ready"
+    Wait-Ready -Process $backend -Name 'Backend' -TimeoutSeconds $ReadyTimeoutSeconds -Probe {
+        try {
+            $result = Invoke-RestMethod -Uri $readyUrl -TimeoutSec 3
+            return $result.status -ne 'unavailable'
+        }
+        catch { return $false }
+    }
 
-$workbench = Start-Frontend -Prefix 'workbench' -Port $WorkbenchPort -BasePath '/workbench/' -TimeoutSeconds $ReadyTimeoutSeconds
-$report.Workbench = "$($workbench.Url) (ready, PID $($workbench.Process.Id))"
+    $report = [ordered]@{ Backend = "$readyUrl (ready, PID $($backend.Id))" }
 
-$admin = Start-Frontend -Prefix 'admin' -Port $AdminPort -BasePath '/admin/' -TimeoutSeconds $ReadyTimeoutSeconds
-$report.Admin = "$($admin.Url) (ready, PID $($admin.Process.Id))"
+    if ($BackendOnly) {
+        [PSCustomObject]$report
+        return
+    }
 
-[PSCustomObject]$report
+    # 7. Start the three frontends and wait for each to actually serve its page. Vite proxies
+    #    read the target from these environment variables at startup, so they must be set
+    #    before the process starts.
+    $env:VITE_BACKEND_PORT = [string]$BackendPort
+    $backendOrigin = "http://127.0.0.1:$BackendPort"
+    $env:WORKBENCH_API_TARGET = $backendOrigin
+    $env:ADMIN_API_TARGET = $backendOrigin
+
+    $customer = Start-Frontend -Prefix 'customer' -Port $CustomerPort -BasePath '/' -TimeoutSeconds $ReadyTimeoutSeconds
+    $report.Customer = "$($customer.Url) (ready, PID $($customer.Process.Id))"
+
+    $workbench = Start-Frontend -Prefix 'workbench' -Port $WorkbenchPort -BasePath '/workbench/' -TimeoutSeconds $ReadyTimeoutSeconds
+    $report.Workbench = "$($workbench.Url) (ready, PID $($workbench.Process.Id))"
+
+    $admin = Start-Frontend -Prefix 'admin' -Port $AdminPort -BasePath '/admin/' -TimeoutSeconds $ReadyTimeoutSeconds
+    $report.Admin = "$($admin.Url) (ready, PID $($admin.Process.Id))"
+
+    [PSCustomObject]$report
+}
+catch {
+    Stop-StartedProcesses
+    throw
+}
