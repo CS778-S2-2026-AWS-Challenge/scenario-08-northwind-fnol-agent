@@ -181,7 +181,7 @@ def test_model_binding_manifest_selects_qwen_without_exposing_a_secret(
         'google-gemini35-flash-lite',
     ]
     gpt = settings.model_runtime_bindings[1]
-    assert gpt.model_identifier == 'openai/gpt-4o-mini'
+    assert gpt.model_identifier == 'openai/gpt-4o'
     assert gpt.credential_environment_variable == 'NORTHWIND_MODEL_API_KEY'
     bedrock = settings.model_runtime_bindings[2]
     assert bedrock.model_identifier == 'global.amazon.nova-2-lite-v1:0'

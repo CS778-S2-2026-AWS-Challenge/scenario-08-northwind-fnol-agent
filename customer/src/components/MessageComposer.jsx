@@ -246,7 +246,10 @@ export default function MessageComposer({
     expectedAbortRef.current = false
     recognition.lang = 'en-NZ'
     recognition.interimResults = false
-    recognition.continuous = false
+    // Keep the microphone open across pauses in speech; the claimant ends the
+    // recording with the same button rather than the browser ending it after
+    // the first silence.
+    recognition.continuous = true
     recognition.maxAlternatives = 1
     let lastTranscript = ''
     setVoiceState('listening')

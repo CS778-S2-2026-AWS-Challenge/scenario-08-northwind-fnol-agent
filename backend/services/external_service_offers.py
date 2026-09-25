@@ -769,7 +769,7 @@ def _generic_offer_ready(claim: WorkingClaim, offer: ExternalServiceOfferMetadat
     evaluator = BranchRuleEvaluator()
     evaluation = evaluator.evaluate(claim, recomputation_reason='external_dispatch_requirements')
     required = set(entry.required_fields) | evaluator._required_set(
-        evaluation.selected_family, evaluation.active_branches, 'before_dispatch'
+        claim, evaluation.selected_family, evaluation.active_branches, 'before_dispatch'
     )
     return all(_source_value(claim, source) not in (None, '', [], {}) for source in required)
 

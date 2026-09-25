@@ -30,7 +30,7 @@ def test_injury_leaves_have_distinct_collection_deadlines() -> None:
         result.requirements.missing_required_now
     )
     assert 'injury.medical_attention' not in result.requirements.missing_required_now
-    assert evaluator._required_set('motor', result.active_branches, 'before_creation') == {
+    assert evaluator._required_set(claim, 'motor', result.active_branches, 'before_creation') == {
         'injury.medical_attention'
     }
     inactive = evaluator.evaluate(make_claim(incident_type='motor'))

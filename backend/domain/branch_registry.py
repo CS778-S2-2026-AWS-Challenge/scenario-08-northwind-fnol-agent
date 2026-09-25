@@ -9,7 +9,11 @@ from types import MappingProxyType
 from typing import Literal
 
 from backend.domain.agent_context_runtime import TurnFamilyResolution
-from backend.domain.field_registry import FIELD_REGISTRY_VERSION, REGISTERED_FIELD_CODES
+from backend.domain.field_registry import (
+    FIELD_REGISTRY_VERSION,
+    REGISTERED_FIELD_CODES,
+    trusted_origin_assertion,
+)
 from backend.domain.models import (
     AgentAction,
     BranchEvaluationRecord,
@@ -125,7 +129,6 @@ COMMON_REQUIRED = frozenset(
         'incident.injury_or_danger',
         'incident.occurred_at',
         'incident.location',
-        'loss.description',
     }
 )
 # Documents each kind of report normally carries, named by existing
@@ -137,12 +140,15 @@ FAMILY_DOCUMENTS = {
 }
 FAMILY_REQUIRED = {
     'motor': frozenset({'vehicle.damage_description', 'vehicle.drivable'}),
+    # Home has no per-item damage field loss.description could be read from, so it stays
+    # a required fact here rather than in COMMON_REQUIRED (see _required_set).
     'home': frozenset(
         {
             'property.address',
             'property.affected_areas',
             'property.ongoing_risk',
             'property.habitable',
+            'loss.description',
         }
     ),
     'contents': frozenset({'contents.items'}),
@@ -528,7 +534,7 @@ class BranchRuleEvaluator:
             candidate_family = next(iter(family_candidates))
             permitted_fields.update(FAMILY_FIELDS[candidate_family] & self.registry.field_codes)
 
-        required_now = self._required_set(selected_family, active)
+        required_now = self._required_set(claim, selected_family, active)
         previously_active = (
             {
                 result.branch_id
@@ -568,7 +574,7 @@ class BranchRuleEvaluator:
             )
 
         selections, requirements = project_requirements(required_now)
-        before_creation = self._required_set(selected_family, active, 'before_creation')
+        before_creation = self._required_set(claim, selected_family, active, 'before_creation')
         if before_creation and (
             current_action == AgentAction.CREATE_CLAIM or not requirements.missing_required_now
         ):
@@ -1092,6 +1098,7 @@ class BranchRuleEvaluator:
 
     def _required_set(
         self,
+        claim: WorkingClaim,
         selected_family: str | None,
         active_branches: Sequence[str],
         deadline: CollectionDeadline = 'required_now',
@@ -1100,6 +1107,37 @@ class BranchRuleEvaluator:
         required = set(COMMON_REQUIRED) if deadline == 'required_now' else set()
         if selected_family is not None and deadline == 'required_now':
             required.update(FAMILY_REQUIRED[selected_family])
+            # loss.description restates the same loss a family already records at item
+            # level (the vehicle's damage, a contents item's description). Requiring it
+            # only when that item-level fact is still missing avoids asking the claimant
+            # to state the same loss twice; Runtime derives it once there is a trustworthy
+            # origin to derive from (see turn_reducer.py), so the claimant is never asked
+            # at all in the common case. Both paths share trusted_origin_assertion so they
+            # agree on exactly which confirmed records qualify: a confirmed field or item
+            # with no current assertion, or one recorded with no source refs of its own
+            # (a legacy record), is not one -- Runtime cannot derive from it, so this must
+            # keep requiring the field rather than silently dropping it.
+            if selected_family == 'motor':
+                vehicle_damage = claim.form.get('vehicle.damage_description')
+                if (
+                    vehicle_damage is None
+                    or vehicle_damage.status is not FormStatus.CONFIRMED
+                    or (
+                        trusted_origin_assertion(
+                            vehicle_damage.current_assertion_id, vehicle_damage.assertions
+                        )
+                        is None
+                    )
+                ):
+                    required.add('loss.description')
+            elif selected_family == 'contents':
+                if not any(
+                    item.status is FormStatus.CONFIRMED
+                    and trusted_origin_assertion(item.current_assertion_id, item.assertions)
+                    is not None
+                    for item in claim.contents_items
+                ):
+                    required.add('loss.description')
         for branch_id in active_branches:
             branch = self.registry.branch_by_id.get(branch_id)
             if branch is None or branch.kind != 'fact':
