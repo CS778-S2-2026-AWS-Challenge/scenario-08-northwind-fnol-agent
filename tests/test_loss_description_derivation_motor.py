@@ -9,6 +9,7 @@ claimant never gave.
 """
 
 import pytest
+from fastapi.testclient import TestClient
 
 from tests.journey_v8_support import Journey, V8JourneyProvider, envelope, fact
 
@@ -28,7 +29,7 @@ def agent_turn_provider() -> V8JourneyProvider:
     )
 
 
-def test_motor_derives_loss_description_from_confirmed_vehicle_damage(client) -> None:
+def test_motor_derives_loss_description_from_confirmed_vehicle_damage(client: TestClient) -> None:
     journey = Journey(client, 'motor', 'v8-loss-desc-motor')
     journey.send('My car was rear-ended, bumper damaged.')
     form = journey.view()['form']

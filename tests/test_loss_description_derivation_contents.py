@@ -9,6 +9,7 @@ fact the claimant never gave.
 """
 
 import pytest
+from fastapi.testclient import TestClient
 
 from tests.journey_v8_support import Journey, V8JourneyProvider, envelope, fact
 
@@ -39,7 +40,7 @@ def agent_turn_provider() -> V8JourneyProvider:
     )
 
 
-def test_contents_derives_loss_description_from_confirmed_first_item(client) -> None:
+def test_contents_derives_loss_description_from_confirmed_first_item(client: TestClient) -> None:
     journey = Journey(client, 'contents', 'v8-loss-desc-contents')
     journey.send('My laptop was stolen from the house.')
     form = journey.view()['form']
