@@ -9,7 +9,11 @@ from types import MappingProxyType
 from typing import Literal
 
 from backend.domain.agent_context_runtime import TurnFamilyResolution
-from backend.domain.field_registry import FIELD_REGISTRY_VERSION, REGISTERED_FIELD_CODES
+from backend.domain.field_registry import (
+    FIELD_REGISTRY_VERSION,
+    REGISTERED_FIELD_CODES,
+    trusted_origin_assertion,
+)
 from backend.domain.models import (
     AgentAction,
     BranchEvaluationRecord,
@@ -1106,17 +1110,33 @@ class BranchRuleEvaluator:
             # loss.description restates the same loss a family already records at item
             # level (the vehicle's damage, a contents item's description). Requiring it
             # only when that item-level fact is still missing avoids asking the claimant
-            # to state the same loss twice; Runtime derives it once the item-level fact
-            # is confirmed (see turn_reducer.py), so the claimant is never asked at all
-            # in the common case.
+            # to state the same loss twice; Runtime derives it once there is a trustworthy
+            # origin to derive from (see turn_reducer.py), so the claimant is never asked
+            # at all in the common case. Both paths share trusted_origin_assertion so they
+            # agree on exactly which confirmed records qualify: a confirmed field or item
+            # with no current assertion, or one recorded with no source refs of its own
+            # (a legacy record), is not one -- Runtime cannot derive from it, so this must
+            # keep requiring the field rather than silently dropping it.
             if selected_family == 'motor':
                 vehicle_damage = claim.form.get('vehicle.damage_description')
-                if vehicle_damage is None or vehicle_damage.status is not FormStatus.CONFIRMED:
+                if (
+                    vehicle_damage is None
+                    or vehicle_damage.status is not FormStatus.CONFIRMED
+                    or (
+                        trusted_origin_assertion(
+                            vehicle_damage.current_assertion_id, vehicle_damage.assertions
+                        )
+                        is None
+                    )
+                ):
                     required.add('loss.description')
             elif selected_family == 'contents':
-                # Same predicate turn_reducer derives from: a proposed, unavailable or
-                # superseded item does not yet state the loss.
-                if not any(item.status is FormStatus.CONFIRMED for item in claim.contents_items):
+                if not any(
+                    item.status is FormStatus.CONFIRMED
+                    and trusted_origin_assertion(item.current_assertion_id, item.assertions)
+                    is not None
+                    for item in claim.contents_items
+                ):
                     required.add('loss.description')
         for branch_id in active_branches:
             branch = self.registry.branch_by_id.get(branch_id)

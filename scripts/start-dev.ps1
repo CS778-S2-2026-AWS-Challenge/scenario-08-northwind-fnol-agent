@@ -104,34 +104,96 @@ function Invoke-Step {
     }
 }
 
+function Invoke-TrackedStep {
+    # Runs one short-lived Python step with an explicit -Environment overlay, so it sees only
+    # what it is handed rather than this shell's own $env: (which may carry credentials from an
+    # earlier manual run, per the manual steps in README).
+    param([string]$Description, [string[]]$ArgumentList, [hashtable]$Environment = @{})
+    $process = Start-Process -FilePath 'py' -ArgumentList $ArgumentList `
+        -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru -Wait -Environment $Environment
+    if ($process.ExitCode -ne 0) {
+        throw "$Description failed (exit code $($process.ExitCode))."
+    }
+}
+
+# Credential boundary. Start-Process -Environment is an overlay on the inherited environment,
+# not a clean slate: a child sees everything in this shell's $env: plus the overlay, and a
+# $null overlay value removes a variable. So nothing secret is ever written to this shell's
+# $env:. Backend-only configuration and credentials live in $backendEnv and are passed to the
+# backend alone; every other child gets $frontendEnv, an overlay that removes every backend-only
+# name, in case the developer's own environment already carries one (an earlier manual-steps
+# run in this same shell, for instance).
+#
+# A fixed name list, independent of which runtime path actually executes below (-SkipDocker
+# skips the MongoDB/MinIO names entirely), plus the model secret names discovered from the
+# bundle text -- not known ahead of time. Building the removal set from $backendEnv.Keys
+# instead would only null-remove whatever this particular run happened to set, so a name this
+# run's -SkipDocker branch never touches -- but that the developer's shell still carries from
+# an earlier non-SkipDocker run -- would reach the frontends. Pure and process-free (no network
+# call, no Start-Process) so it can be exercised directly by
+# scripts/test-start-dev-credential-boundary.ps1.
+function Get-CredentialEnvironments {
+    param([string]$SecretsToken, [string]$BundleText)
+    if (-not $SecretsToken) {
+        throw ('NORTHWIND_SECRETS_TOKEN is not set. Ask a teammate for the dev secrets token and ' +
+            'set it once for your user: [Environment]::SetEnvironmentVariable(' +
+            '"NORTHWIND_SECRETS_TOKEN", "<token>", "User"), then open a new terminal.')
+    }
+    $backendOnlyNames = @(
+        'NORTHWIND_SECRETS_TOKEN',
+        'NORTHWIND_ENVIRONMENT', 'NORTHWIND_IDENTITY_MODE', 'NORTHWIND_CONTROL_PLANE_DB_PATH',
+        'AGENT_RUNTIME_PROFILE', 'DATA_RUNTIME_PROFILE',
+        'MODEL_RUNTIME_BINDINGS_PATH', 'MODEL_PROFILE_ID', 'MODEL_TIMEOUT_SECONDS',
+        'NORTHWIND_OBJECT_STORAGE_ADAPTER', 'NORTHWIND_OBJECT_STORAGE_ENDPOINT',
+        'NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY',
+        'NORTHWIND_OBJECT_STORAGE_REGION', 'NORTHWIND_OBJECT_STORAGE_BUCKET', 'NORTHWIND_KNOWLEDGE_BUCKET',
+        'NORTHWIND_MONGODB_URI', 'NORTHWIND_MONGODB_DATABASE', 'NORTHWIND_MONGODB_COLLECTION'
+    )
+    $backendEnv = @{}
+    $frontendEnv = @{}
+    foreach ($name in $backendOnlyNames) { $frontendEnv[$name] = $null }
+    # The backend has no use for the bootstrap token itself, only for the model keys it
+    # already unlocked below; null it in case this developer's own environment already has
+    # it set (-Environment overlays the inherited environment, it does not replace it).
+    $backendEnv.NORTHWIND_SECRETS_TOKEN = $null
+    $modelSecretNames = @()
+    foreach ($line in ($BundleText -split "`n")) {
+        if ($line -match '^([A-Z][A-Z0-9_]*)=(.*)$') {
+            $backendEnv[$Matches[1]] = $Matches[2]
+            $modelSecretNames += $Matches[1]
+            $frontendEnv[$Matches[1]] = $null
+        }
+    }
+    if ($modelSecretNames.Count -eq 0) {
+        throw 'The secrets endpoint returned no KEY=VALUE lines; the token may be wrong or revoked.'
+    }
+    return [PSCustomObject]@{
+        BackendEnv       = $backendEnv
+        FrontendEnv      = $frontendEnv
+        ModelSecretNames = $modelSecretNames
+    }
+}
+
 # 1. Pull model credentials from the team secrets endpoint. The bundle is KEY=VALUE lines.
 #    The bearer token that unlocks the bundle is itself a credential and is never stored in
 #    the repository: it comes from the NORTHWIND_SECRETS_TOKEN environment variable, which
-#    each developer sets once (see README). The fetched values are kept in a local table and
-#    handed only to the backend process; the Vite frontends never see them.
-if (-not $env:NORTHWIND_SECRETS_TOKEN) {
-    throw ('NORTHWIND_SECRETS_TOKEN is not set. Ask a teammate for the dev secrets token and ' +
-        'set it once for your user: [Environment]::SetEnvironmentVariable(' +
-        '"NORTHWIND_SECRETS_TOKEN", "<token>", "User"), then open a new terminal.')
-}
-$bundle = Invoke-RestMethod `
-    -Uri 'https://ysoseri.us/secret/northwind-dev' `
-    -Headers @{ Authorization = "Bearer $($env:NORTHWIND_SECRETS_TOKEN)" }
-$modelSecrets = @{}
-foreach ($line in ($bundle -split "`n")) {
-    if ($line -match '^([A-Z][A-Z0-9_]*)=(.*)$') {
-        $modelSecrets[$Matches[1]] = $Matches[2]
-    }
-}
-if ($modelSecrets.Count -eq 0) {
-    throw 'The secrets endpoint returned no KEY=VALUE lines; the token may be wrong or revoked.'
-}
+#    each developer sets once (see README). It is read into a local, used for one request,
+#    and removed from every child this script starts -- no child needs it.
+$secretsToken = $env:NORTHWIND_SECRETS_TOKEN
+$bundle = if ($secretsToken) {
+    Invoke-RestMethod -Uri 'https://ysoseri.us/secret/northwind-dev' `
+        -Headers @{ Authorization = "Bearer $secretsToken" }
+} else { $null }
+$credentials = Get-CredentialEnvironments -SecretsToken $secretsToken -BundleText $bundle
+$backendEnv = $credentials.BackendEnv
+$frontendEnv = $credentials.FrontendEnv
+$modelSecretNames = $credentials.ModelSecretNames
 
 if ($SkipDocker) {
     # Fixture data profile: no MongoDB, no MinIO, no persisted Evidence, no real knowledge
     # retrieval. Only use this when Docker genuinely is not available.
-    $env:DATA_RUNTIME_PROFILE = 'fixture'
-    $env:NORTHWIND_OBJECT_STORAGE_ADAPTER = 'fixture'
+    $backendEnv.DATA_RUNTIME_PROFILE = 'fixture'
+    $backendEnv.NORTHWIND_OBJECT_STORAGE_ADAPTER = 'fixture'
 }
 else {
     # 2. MongoDB and MinIO through docker-compose.yml, waited to healthy -- not started and
@@ -144,29 +206,41 @@ else {
     Invoke-Step 'mongo-init' { docker compose up --exit-code-from mongo-init mongo-init }
     Invoke-Step 'minio-init' { docker compose up --exit-code-from minio-init minio-init }
 
-    # 3. Ingest the approved knowledge corpus into that MinIO so retrieval is real, not the
-    #    fixture stub. This needs only the object-storage credentials, not a model.
-    $env:NORTHWIND_OBJECT_STORAGE_ENDPOINT = 'http://localhost:9000'
-    $env:NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID = 'minioadmin'
-    $env:NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY = 'minioadmin'
-    $env:NORTHWIND_OBJECT_STORAGE_REGION = 'us-east-1'
-    $env:NORTHWIND_KNOWLEDGE_BUCKET = 'northwind-knowledge'
-    Invoke-Step 'knowledge source upload' {
-        py -3.12 scripts/upload_knowledge_sources.py config/knowledge-source-corpus
+    # 3. Object-storage settings, shared by knowledge ingestion and the backend. These are the
+    #    docker-compose.yml development defaults for the local MinIO, not team secrets, but they
+    #    are still backend-only and never reach a frontend.
+    $storageEnv = @{
+        NORTHWIND_OBJECT_STORAGE_ENDPOINT          = 'http://localhost:9000'
+        NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID     = 'minioadmin'
+        NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY = 'minioadmin'
+        NORTHWIND_OBJECT_STORAGE_REGION            = 'us-east-1'
+        NORTHWIND_KNOWLEDGE_BUCKET                 = 'northwind-knowledge'
     }
+    foreach ($name in $storageEnv.Keys) { $backendEnv[$name] = $storageEnv[$name] }
+
+    # Ingest the approved knowledge corpus into that MinIO so retrieval is real, not the
+    # fixture stub. Run as tracked children with only the storage settings -- explicitly not
+    # the model credentials or the bootstrap token, which ingestion has no use for, and which
+    # -Environment would otherwise still let this process inherit from this shell's own $env:.
+    $ingestionEnv = $storageEnv.Clone()
+    $ingestionEnv.NORTHWIND_SECRETS_TOKEN = $null
+    foreach ($name in $modelSecretNames) { $ingestionEnv[$name] = $null }
+    Invoke-TrackedStep 'knowledge source upload' `
+        -ArgumentList @('-3.12', 'scripts/upload_knowledge_sources.py', 'config/knowledge-source-corpus') `
+        -Environment $ingestionEnv
     foreach ($request in (Get-ChildItem 'config/knowledge-ingestion-requests/*.json')) {
-        Invoke-Step "knowledge ingestion ($($request.Name))" {
-            py -3.12 scripts/ingest_knowledge_source.py $request.FullName
-        }
+        Invoke-TrackedStep "knowledge ingestion ($($request.Name))" `
+            -ArgumentList @('-3.12', 'scripts/ingest_knowledge_source.py', $request.FullName) `
+            -Environment $ingestionEnv
     }
 
     # 4. Point the backend at that MongoDB and MinIO through the local_mvp persistence profile.
-    $env:DATA_RUNTIME_PROFILE = 'local_mvp'
-    $env:NORTHWIND_OBJECT_STORAGE_ADAPTER = 's3_compatible'
-    $env:NORTHWIND_MONGODB_URI = 'mongodb://localhost:27017/?directConnection=true&replicaSet=rs0'
-    $env:NORTHWIND_MONGODB_DATABASE = 'northwind_fnol'
-    $env:NORTHWIND_MONGODB_COLLECTION = 'northwind_records'
-    $env:NORTHWIND_OBJECT_STORAGE_BUCKET = 'northwind-evidence'
+    $backendEnv.DATA_RUNTIME_PROFILE = 'local_mvp'
+    $backendEnv.NORTHWIND_OBJECT_STORAGE_ADAPTER = 's3_compatible'
+    $backendEnv.NORTHWIND_MONGODB_URI = 'mongodb://localhost:27017/?directConnection=true&replicaSet=rs0'
+    $backendEnv.NORTHWIND_MONGODB_DATABASE = 'northwind_fnol'
+    $backendEnv.NORTHWIND_MONGODB_COLLECTION = 'northwind_records'
+    $backendEnv.NORTHWIND_OBJECT_STORAGE_BUCKET = 'northwind-evidence'
 }
 
 # 5. Start from a fresh Control Plane so the checked-in model catalogue is what gets published.
@@ -180,13 +254,13 @@ New-Item -ItemType Directory -Force -Path (Split-Path $controlPlaneDb) | Out-Nul
 if (-not $KeepControlPlane) {
     Remove-Item -Force -ErrorAction SilentlyContinue "$controlPlaneDb", "$controlPlaneDb-shm", "$controlPlaneDb-wal"
 }
-$env:NORTHWIND_ENVIRONMENT = 'development'
-$env:NORTHWIND_IDENTITY_MODE = 'normal'
-$env:NORTHWIND_CONTROL_PLANE_DB_PATH = $controlPlaneDb
-$env:AGENT_RUNTIME_PROFILE = 'model_gateway'
-$env:MODEL_RUNTIME_BINDINGS_PATH = 'config/model-runtime-bindings.json'
-$env:MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
-$env:MODEL_TIMEOUT_SECONDS = '180'
+$backendEnv.NORTHWIND_ENVIRONMENT = 'development'
+$backendEnv.NORTHWIND_IDENTITY_MODE = 'normal'
+$backendEnv.NORTHWIND_CONTROL_PLANE_DB_PATH = $controlPlaneDb
+$backendEnv.AGENT_RUNTIME_PROFILE = 'model_gateway'
+$backendEnv.MODEL_RUNTIME_BINDINGS_PATH = 'config/model-runtime-bindings.json'
+$backendEnv.MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
+$backendEnv.MODEL_TIMEOUT_SECONDS = '180'
 
 # 6. Start the backend. The log config prints the structured diagnostic fields the runtime
 #    attaches to model-turn events, which is what you want to see while testing a journey.
@@ -199,9 +273,10 @@ $backendArguments = @(
 )
 
 function Start-Frontend {
-    param([string]$Prefix, [int]$Port, [string]$BasePath, [int]$TimeoutSeconds)
+    param([string]$Prefix, [int]$Port, [string]$BasePath, [int]$TimeoutSeconds, [hashtable]$Environment)
     $process = Start-Tracked -FilePath 'npm.cmd' `
-        -ArgumentList @('run', 'dev', '--prefix', $Prefix, '--', '--host', '127.0.0.1', '--port', [string]$Port)
+        -ArgumentList @('run', 'dev', '--prefix', $Prefix, '--', '--host', '127.0.0.1', '--port', [string]$Port) `
+        -Environment $Environment
     $url = "http://127.0.0.1:$Port$BasePath"
     Wait-Ready -Process $process -Name $Prefix -TimeoutSeconds $TimeoutSeconds -Probe {
         try {
@@ -217,9 +292,7 @@ function Start-Frontend {
 # last frontend -- stop every process this invocation started before surfacing the error, so
 # a partial run never leaves a hidden backend or Vite server holding its port.
 try {
-    # Model credentials go to the backend only. The secrets token itself is not passed on:
-    # the backend has no use for it, and nothing else this script starts should hold it.
-    $backend = Start-Tracked -FilePath 'py' -ArgumentList $backendArguments -Environment $modelSecrets
+    $backend = Start-Tracked -FilePath 'py' -ArgumentList $backendArguments -Environment $backendEnv
     $readyUrl = "http://127.0.0.1:$BackendPort/health/ready"
     Wait-Ready -Process $backend -Name 'Backend' -TimeoutSeconds $ReadyTimeoutSeconds -Probe {
         try {
@@ -237,20 +310,20 @@ try {
     }
 
     # 7. Start the three frontends and wait for each to actually serve its page. Vite proxies
-    #    read the target from these environment variables at startup, so they must be set
-    #    before the process starts.
-    $env:VITE_BACKEND_PORT = [string]$BackendPort
+    #    read the target from these environment variables at startup. These three are the only
+    #    names a frontend legitimately needs; everything else in $frontendEnv is a removal.
     $backendOrigin = "http://127.0.0.1:$BackendPort"
-    $env:WORKBENCH_API_TARGET = $backendOrigin
-    $env:ADMIN_API_TARGET = $backendOrigin
+    $frontendEnv.VITE_BACKEND_PORT = [string]$BackendPort
+    $frontendEnv.WORKBENCH_API_TARGET = $backendOrigin
+    $frontendEnv.ADMIN_API_TARGET = $backendOrigin
 
-    $customer = Start-Frontend -Prefix 'customer' -Port $CustomerPort -BasePath '/' -TimeoutSeconds $ReadyTimeoutSeconds
+    $customer = Start-Frontend -Prefix 'customer' -Port $CustomerPort -BasePath '/' -TimeoutSeconds $ReadyTimeoutSeconds -Environment $frontendEnv
     $report.Customer = "$($customer.Url) (ready, PID $($customer.Process.Id))"
 
-    $workbench = Start-Frontend -Prefix 'workbench' -Port $WorkbenchPort -BasePath '/workbench/' -TimeoutSeconds $ReadyTimeoutSeconds
+    $workbench = Start-Frontend -Prefix 'workbench' -Port $WorkbenchPort -BasePath '/workbench/' -TimeoutSeconds $ReadyTimeoutSeconds -Environment $frontendEnv
     $report.Workbench = "$($workbench.Url) (ready, PID $($workbench.Process.Id))"
 
-    $admin = Start-Frontend -Prefix 'admin' -Port $AdminPort -BasePath '/admin/' -TimeoutSeconds $ReadyTimeoutSeconds
+    $admin = Start-Frontend -Prefix 'admin' -Port $AdminPort -BasePath '/admin/' -TimeoutSeconds $ReadyTimeoutSeconds -Environment $frontendEnv
     $report.Admin = "$($admin.Url) (ready, PID $($admin.Process.Id))"
 
     [PSCustomObject]$report

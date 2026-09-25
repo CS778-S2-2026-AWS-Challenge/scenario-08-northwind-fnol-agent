@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from backend.core.errors import ApiError
 from backend.domain.branch_registry import BranchRuleEvaluator
 from backend.domain.external_service_registry import ExternalLifecycleStatus
+from backend.domain.field_registry import trusted_origin_assertion
 from backend.domain.ids import new_id
 from backend.domain.intake import next_requirement_step
 from backend.domain.models import (
@@ -483,50 +484,44 @@ def reduce_turn(
             if current_product_family_field is not None
             else claim.incident_type
         )
-        # Provenance comes from the origin's *current* assertion only. The field-level
-        # source_refs list is cumulative across the assertion history, so after a
-        # correction it still names the superseded message; citing that as support for
-        # the corrected value would be false. No current assertion with its own refs
-        # means no trustworthy origin, and then nothing is derived.
+        # trusted_origin_assertion is the same predicate branch_registry._required_set uses
+        # to decide whether to stop requiring the field, so the two paths always agree: a
+        # confirmed field/item with no current assertion, or one recorded with no source
+        # refs of its own (a legacy record), is not derived from here, and is not silently
+        # dropped from requirements there either. Provenance comes from that current
+        # assertion only -- the field-level source_refs list is cumulative across the
+        # assertion history, so after a correction it still names the superseded message,
+        # and citing that as support for the corrected value would be false.
         if current_product_family == 'motor':
             vehicle_damage = projected_confirmation_form.get('vehicle.damage_description')
             if vehicle_damage is not None and vehicle_damage.status is FormStatus.CONFIRMED:
-                origin_assertion = next(
-                    (
-                        item
-                        for item in vehicle_damage.assertions
-                        if item.assertion_id == vehicle_damage.current_assertion_id
-                    ),
-                    None,
+                origin_assertion = trusted_origin_assertion(
+                    vehicle_damage.current_assertion_id, vehicle_damage.assertions
                 )
-                if origin_assertion is not None and origin_assertion.source_refs:
+                if origin_assertion is not None:
                     derived_loss_description = str(vehicle_damage.value)
                     origin_source_refs = list(origin_assertion.source_refs)
                     origin_reported_text = origin_assertion.reported_text
         elif current_product_family == 'contents':
-            # Same predicate branch_registry._required_set uses to stop requiring the
-            # field: any confirmed item, in any position, not only the first one.
+            # Any confirmed item with a trusted origin, in any position, not only the first.
             confirmed_item = next(
                 (
                     item
                     for item in projected_confirmation_contents
                     if item.status is FormStatus.CONFIRMED
+                    and trusted_origin_assertion(item.current_assertion_id, item.assertions)
+                    is not None
                 ),
                 None,
             )
             if confirmed_item is not None:
-                origin_item_assertion = next(
-                    (
-                        item
-                        for item in confirmed_item.assertions
-                        if item.assertion_id == confirmed_item.current_assertion_id
-                    ),
-                    None,
+                origin_item_assertion = trusted_origin_assertion(
+                    confirmed_item.current_assertion_id, confirmed_item.assertions
                 )
-                if origin_item_assertion is not None and origin_item_assertion.source_refs:
-                    derived_loss_description = confirmed_item.description
-                    origin_source_refs = list(origin_item_assertion.source_refs)
-                    origin_reported_text = origin_item_assertion.reported_text
+                assert origin_item_assertion is not None  # guaranteed by the generator filter above
+                derived_loss_description = confirmed_item.description
+                origin_source_refs = list(origin_item_assertion.source_refs)
+                origin_reported_text = origin_item_assertion.reported_text
         if derived_loss_description is not None:
             derived = resolve_form_change(
                 field_code='loss.description',
