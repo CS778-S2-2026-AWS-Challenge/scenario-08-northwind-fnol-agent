@@ -216,6 +216,15 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
     claim_id = cast(str, claim['claim_id'])
     session_id = cast(str, working['session']['session_id'])
 
+    def assert_matches_fresh_get(mutation: dict[str, Any]) -> dict[str, Any]:
+        projected = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
+        assert projected.status_code == 200, projected.text
+        current = cast(dict[str, Any], projected.json())
+        assert mutation['revision'] == current['revision']
+        assert mutation['customer_next_step'] == current['customer_next_step']
+        assert mutation['primary_action'] == current['primary_action']
+        return current
+
     intake = client.post(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
         headers={
@@ -249,14 +258,18 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
         json={'field_codes': proposed},
     )
     assert confirmed.status_code == 200, confirmed.text
+    confirmed_body = cast(dict[str, Any], confirmed.json())
+    assert_matches_fresh_get(confirmed_body)
+
     ready = _complete_motor_requirements(
         client,
         auth_headers,
         claim_id,
-        confirmed.json()['revision'],
+        confirmed_body['revision'],
         key='issue928-ordering-ready',
     )
     assert ready['customer_next_step']['status'] == 'ready_to_create'
+    assert_matches_fresh_get(ready)
 
     granted = client.post(
         f'/api/v1/claims/{claim_id}/external-service-offers/{offer_id}/decision',
@@ -271,10 +284,42 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
     granted_body = cast(dict[str, Any], granted.json())
     assert granted_body['action']['offer_id'] == offer_id
     assert granted_body['action']['consent_status'] == 'granted'
+    granted_current = assert_matches_fresh_get(granted_body)
+    assert granted_current['primary_action']['action_code'] == 'claimant.review_payout_contact'
 
-    projected = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
-    assert projected.status_code == 200, projected.text
-    projected_body = cast(dict[str, Any], projected.json())
+    patched = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'issue928-ordering-post-offer-patch',
+            'If-Match': str(granted_body['revision']),
+        },
+        json={
+            'updates': [
+                {
+                    'field_code': 'vehicle.drivable',
+                    'value': True,
+                    'status': 'proposed',
+                }
+            ]
+        },
+    )
+    assert patched.status_code == 200, patched.text
+    patched_body = cast(dict[str, Any], patched.json())
+    assert_matches_fresh_get(patched_body)
+
+    reconfirmed = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'issue928-ordering-post-offer-confirm',
+            'If-Match': str(patched_body['revision']),
+        },
+        json={'field_codes': ['vehicle.drivable']},
+    )
+    assert reconfirmed.status_code == 200, reconfirmed.text
+    reconfirmed_body = cast(dict[str, Any], reconfirmed.json())
+    projected_body = assert_matches_fresh_get(reconfirmed_body)
     assert projected_body['primary_action']['action_code'] == 'claimant.review_payout_contact'
 
     session_headers = _session_headers(client, auth_headers)
@@ -306,10 +351,8 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
     payout_body = cast(dict[str, Any], payout.json())
     assert payout_body['customer_next_step']['status'] == 'agreement_required'
     assert payout_body['primary_action']['action_code'] == 'claimant.review_agreement'
+    detail_body = assert_matches_fresh_get(payout_body)
 
-    detail = client.get(f'/api/v1/claims/{claim_id}', headers=session_headers)
-    assert detail.status_code == 200, detail.text
-    detail_body = cast(dict[str, Any], detail.json())
     agreement = cast(dict[str, Any], detail_body['submission_agreement'])
     confirmations = {
         cast(str, item['key']): True
@@ -333,6 +376,7 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
     assert accepted.status_code == 201, accepted.text
     accepted_body = cast(dict[str, Any], accepted.json())
     assert accepted_body['primary_action']['action_code'] == 'claimant.create_claim'
+    assert_matches_fresh_get(accepted_body)
 
     external = client.post(
         f'/api/v1/claims/{claim_id}/creation',
@@ -347,7 +391,7 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
     assert external_body['external_claim']['creation_status'] == 'created'
     assert external_body['external_claim']['claim_number']
     assert external_body['customer_next_step']['status'] == 'claim_created'
-
+    assert_matches_fresh_get(external_body)
 
 def test_clear_motor_intake_classifies_missing_incident_type_before_creation(
     client: TestClient,
