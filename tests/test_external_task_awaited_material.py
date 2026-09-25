@@ -384,16 +384,16 @@ def test_an_interrupted_first_request_leaves_an_orphan_that_a_retry_repairs(
 
     monkeypatch.setattr(repository, 'save_external_task_evidence_link', fail_once)
 
-    interrupted = client.post(
-        f'/api/v1/claims/{claim_id}/assessor-routing',
-        headers={
-            **CLAIMANT,
-            'Idempotency-Key': 'aw-r',
-            'If-Match': _revision(client, claim_id),
-        },
-        json={},
-    )
-    assert interrupted.status_code == 409
+    with pytest.raises(KeyError, match='task store unavailable'):
+        client.post(
+            f'/api/v1/claims/{claim_id}/assessor-routing',
+            headers={
+                **CLAIMANT,
+                'Idempotency-Key': 'aw-r',
+                'If-Match': _revision(client, claim_id),
+            },
+            json={},
+        )
 
     claim = repository.get_claim_internal(claim_id)
     assert claim is not None
@@ -476,17 +476,16 @@ def test_a_write_that_returns_quietly_is_not_taken_as_proof(
     assert response.status_code == 409, response.text
 
 
-def test_a_task_left_behind_by_an_interrupted_acceptance_is_carried_forward(
+def test_interrupted_acceptance_rolls_back_before_clean_retry(
     client: TestClient, repository: FixtureRepository, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The other partial-write shape: the operation advanced, the task did not.
+    """An interrupted atomic settlement rolls the task back before a clean retry.
 
-    Acceptance is three writes — the routing operation, the task transition, then the
-    owed material. An interruption at the second leaves the operation `accepted` while
-    its task is still `prepared`, which is the state the recovery branch exists for.
-    Nothing exercised it, so this states what recovery owes: finish the transition it
-    finds unfinished, and record what the task then owes, rather than reporting a
-    request whose task never left `prepared`.
+    Assessor acceptance persists the operation, task transition, and attempt through one
+    atomic settlement. If task persistence fails inside that boundary, fixture storage
+    rolls the settlement back and the injected storage error reaches the default
+    TestClient. Retrying the same request then completes the transition and records the
+    material owed by the accepted task.
     """
 
     claim_id = _consented_claim(client)
