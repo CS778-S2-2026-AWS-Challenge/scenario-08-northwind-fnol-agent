@@ -384,16 +384,16 @@ def test_an_interrupted_first_request_leaves_an_orphan_that_a_retry_repairs(
 
     monkeypatch.setattr(repository, 'save_external_task_evidence_link', fail_once)
 
-    with pytest.raises(KeyError, match='task store unavailable'):
-        client.post(
-            f'/api/v1/claims/{claim_id}/assessor-routing',
-            headers={
-                **CLAIMANT,
-                'Idempotency-Key': 'aw-r',
-                'If-Match': _revision(client, claim_id),
-            },
-            json={},
-        )
+    interrupted = client.post(
+        f'/api/v1/claims/{claim_id}/assessor-routing',
+        headers={
+            **CLAIMANT,
+            'Idempotency-Key': 'aw-r',
+            'If-Match': _revision(client, claim_id),
+        },
+        json={},
+    )
+    assert interrupted.status_code == 409
 
     claim = repository.get_claim_internal(claim_id)
     assert claim is not None
@@ -500,16 +500,16 @@ def test_interrupted_acceptance_rolls_back_before_clean_retry(
 
     monkeypatch.setattr(repository, 'save_external_task', fail_the_transition)
 
-    interrupted = client.post(
-        f'/api/v1/claims/{claim_id}/assessor-routing',
-        headers={
-            **CLAIMANT,
-            'Idempotency-Key': 'aw-r',
-            'If-Match': _revision(client, claim_id),
-        },
-        json={},
-    )
-    assert interrupted.status_code == 409
+    with pytest.raises(KeyError, match='task store unavailable'):
+        client.post(
+            f'/api/v1/claims/{claim_id}/assessor-routing',
+            headers={
+                **CLAIMANT,
+                'Idempotency-Key': 'aw-r',
+                'If-Match': _revision(client, claim_id),
+            },
+            json={},
+        )
 
     stranded = repository.list_external_tasks_internal(claim_id)[0]
     assert stranded.status is ExternalTaskOperationStatus.PREPARED
