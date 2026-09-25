@@ -393,6 +393,7 @@ def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
     assert external_body['customer_next_step']['status'] == 'claim_created'
     assert_matches_fresh_get(external_body)
 
+
 def test_clear_motor_intake_classifies_missing_incident_type_before_creation(
     client: TestClient,
     auth_headers: dict[str, str],
