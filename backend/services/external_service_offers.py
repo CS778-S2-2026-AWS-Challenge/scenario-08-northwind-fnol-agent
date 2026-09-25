@@ -52,6 +52,7 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.domain.runtime import ExternalServiceOfferMetadata, RuntimeWorkItemRecord
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -59,8 +60,8 @@ from backend.repositories.protocols import (
     RevisionConflict,
 )
 from backend.services.branching import build_applied_branch_evaluation
-from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
+from backend.services.external_services import claimant_current_action_projection
 from backend.services.external_service_entry import ExternalServiceEntryDecision
 from backend.services.integrations import _build_external_attempt
 from backend.services.support import (
@@ -406,6 +407,7 @@ def decide_external_service_offer(
     payload: ExternalServiceOfferDecisionRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    identity_repository: IdentityRepository | None = None,
 ) -> tuple[ClaimantExternalServiceResponse, bool]:
     """Record one exact offer decision without trusting client-authored scope."""
 
@@ -560,17 +562,19 @@ def decide_external_service_offer(
     )
     actions = message_external_actions(repository, updated, offer.agent_message_id)
     action = next(action for action in actions if action.offer_id == offer.offer_id)
+    _external_action, projected_next_step, projected_primary_action = (
+        claimant_current_action_projection(
+            repository,
+            updated,
+            identity_repository=identity_repository,
+        )
+    )
     response = ClaimantExternalServiceResponse(
         claim_id=claim_id,
         revision=updated.revision,
         action=action,
-        customer_next_step=updated.customer_next_step,
-        primary_action=project_claimant_primary_action(
-            claim_id=claim_id,
-            claim_revision=updated.revision,
-            next_step=updated.customer_next_step,
-            external_service_action=None,
-        ),
+        customer_next_step=projected_next_step,
+        primary_action=projected_primary_action,
     )
     idempotency = IdempotencyRecord(
         actor_id=principal.subject,
@@ -621,17 +625,18 @@ def decide_external_service_offer(
         branch_evaluation,
         open_handoffs=tuple(repository.list_handoffs(claim_id, principal.subject)),
     )
-    recomputed_next_step = updated.customer_next_step
+    _external_action, recomputed_next_step, recomputed_primary_action = (
+        claimant_current_action_projection(
+            repository,
+            updated,
+            identity_repository=identity_repository,
+        )
+    )
     response = response.model_copy(
         update={
             'revision': updated.revision,
             'customer_next_step': recomputed_next_step,
-            'primary_action': project_claimant_primary_action(
-                claim_id=claim_id,
-                claim_revision=updated.revision,
-                next_step=recomputed_next_step,
-                external_service_action=None,
-            ),
+            'primary_action': recomputed_primary_action,
         }
     )
     idempotency = IdempotencyRecord(
