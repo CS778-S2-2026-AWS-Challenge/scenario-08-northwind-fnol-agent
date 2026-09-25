@@ -479,13 +479,13 @@ def test_a_write_that_returns_quietly_is_not_taken_as_proof(
 def test_interrupted_acceptance_rolls_back_before_clean_retry(
     client: TestClient, repository: FixtureRepository, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An interrupted atomic settlement rolls the task back before a clean retry.
+    """An interrupted atomic settlement returns a retryable API error, then retries cleanly.
 
     Assessor acceptance persists the operation, task transition, and attempt through one
     atomic settlement. If task persistence fails inside that boundary, fixture storage
-    rolls the settlement back and the injected storage error reaches the default
-    TestClient. Retrying the same request then completes the transition and records the
-    material owed by the accepted task.
+    rolls the settlement back and the claimant boundary receives a stable retryable
+    dependency error. Retrying the same request then completes the transition and records
+    the material owed by the accepted task.
     """
 
     claim_id = _consented_claim(client)
@@ -500,16 +500,20 @@ def test_interrupted_acceptance_rolls_back_before_clean_retry(
 
     monkeypatch.setattr(repository, 'save_external_task', fail_the_transition)
 
-    with pytest.raises(KeyError, match='task store unavailable'):
-        client.post(
-            f'/api/v1/claims/{claim_id}/assessor-routing',
-            headers={
-                **CLAIMANT,
-                'Idempotency-Key': 'aw-r',
-                'If-Match': _revision(client, claim_id),
-            },
-            json={},
-        )
+    interrupted = client.post(
+        f'/api/v1/claims/{claim_id}/assessor-routing',
+        headers={
+            **CLAIMANT,
+            'Idempotency-Key': 'aw-r',
+            'If-Match': _revision(client, claim_id),
+        },
+        json={},
+    )
+    assert interrupted.status_code == 503, interrupted.text
+    error = interrupted.json()['error']
+    assert error['code'] == 'DEPENDENCY_UNAVAILABLE'
+    assert error['retryable'] is True
+    assert 'task store unavailable' not in interrupted.text
 
     stranded = repository.list_external_tasks_internal(claim_id)[0]
     assert stranded.status is ExternalTaskOperationStatus.PREPARED
