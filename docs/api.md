@@ -2222,8 +2222,12 @@ only a queue accepted the request.
 Timeout and unavailable responses use `503 DEPENDENCY_UNAVAILABLE` with `retryable: true`.
 Access-denied and malformed responses use `502 DEPENDENCY_FAILED` with `retryable: false`. All
 four leave the consented Working Claim revision unchanged and do not report assignment.
-Automatic retry counts remain unapproved; the claimant client offers only an explicit retry for
-retryable failures.
+If the provider returns a known, replayable routing result but the atomic operation/task/attempt
+settlement cannot be persisted, the endpoint also returns `503 DEPENDENCY_UNAVAILABLE` with
+`retryable: true`; repository exception types are not exposed. The settlement rolls back to the
+prepared operation/task state, releases the dispatch hold, and an unchanged retry settles the same
+operation identity. Automatic retry counts remain unapproved; the claimant client offers only an
+explicit retry for retryable failures.
 
 A permitted retry continues the same operation, task, and request record. The operation identity
 is derived from the claim, the active claimant permission, and the requested action, so it does
