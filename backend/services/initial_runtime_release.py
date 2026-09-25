@@ -124,6 +124,10 @@ def repository_v7_values(
         binding.profile_id: _model_values(binding, prompt_version=prompt_version)
         for binding in bindings
     }
+    # This function composes the shared release for both the v7 and v8 claimant prompt: the
+    # governance labels below must track whichever prompt_version was actually requested, not
+    # a version baked in when this only served v7.
+    governance_version = prompt_version.rsplit('-', 1)[-1]
     values: dict[str, dict[str, object]] = {
         'agent_instruction': {
             'prompt_version': prompt_version,
@@ -139,7 +143,7 @@ def repository_v7_values(
             ],
         },
         'agent_tool_policy': {
-            'policy_version': 'northwind-fnol-agent-tools-v7',
+            'policy_version': f'northwind-fnol-agent-tools-{governance_version}',
             'allowed_action_codes': list(registered_actions()),
             'allowed_tool_names': list(registered_agent_tool_names()),
             'request_profiles': [
@@ -154,11 +158,11 @@ def repository_v7_values(
             'schema_registry': load_response_schemas(),
         },
         'agent_rule': {
-            'rules_version': 'northwind-fnol-controlled-rules-v7',
+            'rules_version': f'northwind-fnol-controlled-rules-{governance_version}',
             'disabled_rule_ids': [],
             'observation_rule_ids': [],
-            'route_policy_version': 'northwind-turn-router-v7',
-            'context_catalogue_version': 'northwind-context-catalogue-v7',
+            'route_policy_version': f'northwind-turn-router-{governance_version}',
+            'context_catalogue_version': f'northwind-context-catalogue-{governance_version}',
             'context_budget_policy': ContextBudgetPolicy().model_dump(mode='json'),
             'deterministic_responses': {
                 'unresolved_family': (
@@ -171,7 +175,7 @@ def repository_v7_values(
             },
         },
         'feature': {
-            'feature_version': 'northwind-fnol-agent-features-v7',
+            'feature_version': f'northwind-fnol-agent-features-{governance_version}',
             'model_assisted_turns': True,
             'knowledge_retrieval': True,
             'external_service_offers': True,

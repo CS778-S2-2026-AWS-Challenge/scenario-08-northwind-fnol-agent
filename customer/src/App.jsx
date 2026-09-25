@@ -74,11 +74,14 @@ const FIELD_LABELS = {
   'claim.product_family': 'Claim type',
   'incident.type': 'Incident type',
   'incident.description': 'What happened',
+  'incident.cause': 'Cause',
   'incident.injury_or_danger': 'Injury or immediate danger',
   'incident.occurred_at': 'When it happened',
+  'incident.discovered_at': 'When it was discovered',
   'incident.location': 'Incident location',
   'loss.description': 'Damage or loss',
   'parties.other_parties': 'Other people or vehicles involved',
+  'vehicle.registration': 'Vehicle registration',
   'vehicle.damage_description': 'Vehicle damage',
   'vehicle.drivable': 'Vehicle safe to drive',
   'property.address': 'Affected property',
@@ -86,6 +89,16 @@ const FIELD_LABELS = {
   'property.ongoing_risk': 'Ongoing property risk',
   'property.habitable': 'Property safe to live in',
   'contents.items': 'Damaged, lost, or stolen items',
+  'contents.police_reference': 'Police reference for stolen items',
+  'theft.entry_context': 'How entry occurred',
+  'injury.persons_affected': 'Who was injured',
+  'injury.severity_reported': 'Injury severity',
+  'injury.medical_attention': 'Medical attention received',
+  'authorities.police_report_reference': 'Police report reference',
+  'authorities.emergency_services_notified': 'Emergency services notified',
+  'policy.policy_number': 'Policy number',
+  'claimant.role': 'Your role in this claim',
+  'claimant.client_number': 'Client number',
   'claimant.contact_preference': 'Preferred contact method',
 }
 
@@ -174,6 +187,7 @@ function fieldValueText(field) {
   ) {
     return 'Expected later'
   }
+  if (typeof field.value === 'boolean') return field.value ? 'Yes' : 'No'
   return String(field.value ?? '')
 }
 

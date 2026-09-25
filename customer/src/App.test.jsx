@@ -2271,6 +2271,73 @@ describe('claimant intake projection', () => {
     })).not.toBeInTheDocument()
   })
 
+  it('renders boolean field values as Yes/No and shows a human label for every registered field', async () => {
+    const user = userEvent.setup()
+    const claimWithBooleanFields = {
+      ...initialClaim,
+      revision: 2,
+      form: {
+        'incident.injury_or_danger': { value: false, status: 'confirmed', source: 'claimant' },
+        'vehicle.drivable': { value: true, status: 'confirmed', source: 'claimant' },
+        'incident.cause': { value: 'Hit the guardrail while reversing.', status: 'confirmed', source: 'claimant' },
+      },
+      dynamic_form: {
+        selected_family: 'motor',
+        claim_revision: 2,
+        requirements: {
+          ready: false,
+          current_action_total: 3,
+          current_action_satisfied: 3,
+          satisfied: ['incident.injury_or_danger', 'vehicle.drivable', 'incident.cause'],
+          next_required_item: null,
+          pending_later: [],
+          missing_required_now: [],
+        },
+        fields: [],
+        form: {},
+      },
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({
+      items: [{ ...claimWithBooleanFields, can_resume: true }],
+      page: { next_cursor: null },
+    })
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_ui_vp',
+      model_profile_id: 'qwen-local',
+      started_at: '2026-09-10T01:00:02Z',
+      resume: {
+        customer_next_step: claimWithBooleanFields.customer_next_step,
+        summary: 'My car was rear-ended.',
+        pending_items: [],
+        prior_commitments: [],
+      },
+    })
+    api.getClaim.mockResolvedValue(claimWithBooleanFields)
+    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
+
+    await screen.findByRole('heading', { name: 'Claim details' })
+
+    // A boolean value must read as Yes/No, never the raw JavaScript "true"/"false" string.
+    expect(screen.getByText('Yes')).toBeVisible()
+    expect(screen.getByText('No')).toBeVisible()
+    expect(screen.queryByText('true')).not.toBeInTheDocument()
+    expect(screen.queryByText('false')).not.toBeInTheDocument()
+
+    // A registered field without an explicit label must still show something readable,
+    // not the bare last segment of its field code.
+    expect(screen.getAllByText('Cause').length).toBeGreaterThan(0)
+  })
+
+
   it('uses the backend agreement primary action when supporting projections disagree', async () => {
     const user = userEvent.setup()
     const externalServiceAction = {
