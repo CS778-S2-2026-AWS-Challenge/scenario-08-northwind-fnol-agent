@@ -503,17 +503,19 @@ version with another published version.
 | `POST` | `/auth/sessions` | Authenticate a development/test synthetic claimant and create an opaque session |
 | `GET` | `/auth/session` | Read the current authenticated claimant session |
 | `DELETE` | `/auth/session` | Revoke the current claimant session |
-| `GET` | `/account` | Read the authenticated claimant's profile and communication preferences |
+| `GET` | `/account` | Read the authenticated claimant's profile, communication preferences, and Claim auto-fill preferences |
 | `PATCH` | `/account/profile` | Update the authenticated claimant's approved profile fields |
 | `PATCH` | `/account/preferences` | Update the authenticated claimant's communication preferences |
+| `PATCH` | `/account/claim-auto-fill-preferences` | Replace the five Claim auto-fill category preferences using Account revision concurrency |
 | `POST`, `GET` | `/account/policies` | Idempotently create or cursor-page reusable account policy numbers |
 | `PATCH`, `DELETE` | `/account/policies/{policy_id}` | Revision-update or soft-retire one owned policy number |
-| `POST`, `GET` | `/account/payment-destinations` | Idempotently create or cursor-page masked bank-account destinations |
+| `POST`, `GET` | `/account/payment-destinations` | Idempotently create or cursor-page masked bank-account destinations, including claimant bank and holder names and the authoritative common-destination marker |
 | `PATCH`, `DELETE` | `/account/payment-destinations/{payment_destination_id}` | Revision-update or soft-retire one owned destination |
 | `POST`, `GET` | `/account/identity-documents` | Idempotently create or cursor-page masked identity documents |
 | `PATCH`, `DELETE` | `/account/identity-documents/{identity_id}` | Revision-update or soft-retire one owned identity document |
 | `POST` | `/claims/{claim_id}/policy-selections` | Propose one active owned policy number into the registered Claim field |
 | `POST` | `/claims/{claim_id}/payout-contact-selections` | Atomically bind one active owned Payment Destination and confirm the registered Claim contact preference |
+| `GET` | `/claims/{claim_id}/auto-fill-suggestions` | Read preference-gated saved-data availability and the safe action for each category |
 
 Profile email writes accept a supported Internet-style address with one local part and a dotted
 domain. The backend trims surrounding whitespace and lowercases the complete address before it
@@ -522,6 +524,23 @@ the same compare-and-set operation as the profile revision. An address already o
 account returns `409 RESOURCE_CONFLICT`; a stale account revision remains `409 REVISION_CONFLICT`.
 Invalid email syntax returns the standard `422 VALIDATION_ERROR` without changing the account or
 its revision.
+
+Payment Destination projections expose `bank_name`, `account_holder_name`, and an authoritative
+`is_common` marker in addition to the existing account type and masked account number. New creates
+require non-empty `bank_name` and `account_holder_name` values. The first successful create becomes
+common atomically only when the account has zero active destinations; creating into an account that
+still has any active destination never fills a missing common marker implicitly. A claimant may
+designate another owned active destination with a revisioned PATCH containing `is_common: true`,
+which atomically clears the previous common marker. `is_common: false` is not an un-designation
+operation and returns `422 VALIDATION_ERROR`. An inactive target returns `409
+PAYMENT_DESTINATION_STATE_CONFLICT` before either destination or its audit history changes. That
+demotion advances the previous resource revision and records separate append-only audit evidence.
+Retiring the common destination leaves no common destination and never
+silently promotes another record. Legacy records may return the new fields as absent/null and a
+missing common marker as `false`; list and resource reads never perform a projection-only adoption.
+A compatible legacy record becomes common only through the explicit revisioned designation path.
+Supplying no account number in a PATCH retains the sealed value; supplying one replaces it and
+refreshes only the masked projection.
 
 `POST /api/v1/auth/sessions` is the only development/test authentication exception to the
 general bearer requirement. It accepts `email` and `password`, returns `201` with
@@ -552,6 +571,26 @@ legacy-client transition the header remains optional and an omitted header uses 
 at the start of the request, while still retaining repository compare-and-set protection. New
 clients send `If-Match` so edits made from a stale Account projection are rejected explicitly.
 
+The `claim_auto_fill_preferences` Account member contains exactly five booleans:
+`personal_details`, `policy_number`, `saved_assets`, `payment_details`, and
+`identity_information`. Every category defaults to `false` for new and migrated accounts.
+`PATCH /api/v1/account/claim-auto-fill-preferences` replaces the complete five-member object and
+requires `If-Match` with the Account revision. Missing or malformed revision authority returns
+`409 REVISION_REQUIRED`; stale or concurrently changed authority returns retryable `409
+REVISION_CONFLICT` without changing any preference or Account revision.
+
+`GET /api/v1/claims/{claim_id}/auto-fill-suggestions` requires an authenticated session and an
+owned Claim; inaccessible and unknown Claims both return concealed `404 RESOURCE_NOT_FOUND`. The
+response contains `claim_id`, the unchanged Claim revision, the Account revision, and one item for
+each category with `enabled`, `available`, `eligible`, and `action`. Eligibility is true only when
+the preference is enabled and a supported active owner-scoped source exists. Personal details use
+`review_and_confirm`; Policies and Assets use their existing `select_policy` and `select_asset`
+contracts; Payment and Identity use `confirm_separately`. Reading the manifest does not change the
+Claim, Dynamic Form, Branch Evaluation, idempotency, audit, realtime, Agent, or external services.
+The response contains no saved record IDs, raw values, masked values, or ciphertext. A preference
+is suggestion permission only: it is not claimant confirmation, coverage authority, payment
+authority, identity verification, or third-party disclosure consent.
+
 Create requests for the three account resources require `Idempotency-Key`. List routes use the
 standard opaque cursor and default to active records. Their stable descending keyset is
 `(created_at, resource_id)`; a cursor is bound to its authenticated owner, resource collection,
@@ -570,8 +609,10 @@ transaction is being committed, the API returns `409 POLICY_SELECTION_CONFLICT` 
 `policy_id` and instructs the client to reload Policy state; it does not expose the Policy
 revision as the Claim revision.
 
-Payment destinations accept only `account_type` and account number. Identity documents accept
-only `driver_licence` or `passport` plus document number. Their full numbers are encrypted through
+New Payment Destinations require `bank_name`, `account_holder_name`, `account_type`, and account
+number. Existing destinations may update those fields and may use `is_common: true` for the
+active-only designation operation described above. Identity documents accept only
+`driver_licence` or `passport` plus document number. Their full numbers are encrypted through
 the protected-value adapter before repository persistence. Ordinary create/list/update responses
 return only `masked_account_number` or `masked_document_number`; they never return ciphertext or
 plaintext. These routes do not execute payments, verify bank accounts, or verify identity. A
@@ -3029,7 +3070,8 @@ returns `404 RESOURCE_NOT_FOUND` through the existing staff-safe boundary.
 
 ### `GET /api/v1/workbench/claims/{claim_id}/external-requests`
 
-Returns each raw external task/request together with a backend-projected `lifecycle`. The lifecycle
+Returns each raw external task/request together with a backend-projected `lifecycle` and the
+append-only `attempts` recorded for that task. The lifecycle
 contains stakeholder and service labels, the lifecycle registry version and canonical lifecycle
 status, the catalogue reference, capability provenance, access form, and actual request provenance,
 request type, authority, consent, delivery and verification
@@ -3044,6 +3086,14 @@ completion. `result_received_at` records ingestion time, while `result_verified_
 check. `result_evidence_ids` is empty when the returned result has no linked evidence;
 `result_evidence` projects each linked Evidence ID with its current `status` and `file_status` for
 staff without exposing storage keys or provider payloads.
+
+`attempts` is ordered by `attempt_number` and contains the durable execution history for the task.
+Each entry records the stable `attempt_id`, `operation_id`, Claim revision, start time, delivery
+evidence, and one of the registered `accepted`, `retryable_failure`, `terminal_failure`, or
+`unknown_outcome` results. Attempts are append-only: an exact replay is idempotent, while a changed
+record, reused sequence number, skipped sequence, mismatched task/Claim/request identity, or
+different operation identity is rejected. `unknown_outcome` remains distinct from both retryable and
+terminal failure and requires reconciliation before another dispatch; it is never provider success.
 
 `catalogue_reference` names the merged third-party service catalogue row that authorises this
 service identity, so a persisted task can be traced to the entry permitting it. It is null for a
@@ -4165,6 +4215,7 @@ All errors use one envelope:
 | `STAFF_NOT_AVAILABLE` | `409` | Staff presence is offline, unavailable, or its lease has expired |
 | `STAFF_PRESENCE_UNAVAILABLE` | `503` | Staff presence could not be persisted; retry after the dependency recovers |
 | `RESOURCE_CONFLICT` | `409` | A unique account or resource already exists |
+| `PAYMENT_DESTINATION_STATE_CONFLICT` | `409` | Common designation targeted an inactive Payment Destination |
 | `SESSION_NOT_ACTIVE` | `409` | Session is expired or already revoked |
 | `IDEMPOTENCY_CONFLICT` | `409` | Key was reused with a different request |
 | `DEMO_SEED_REQUIRES_EMPTY_QUEUE` | `409` | Controlled demo seed requires an empty Claim queue |

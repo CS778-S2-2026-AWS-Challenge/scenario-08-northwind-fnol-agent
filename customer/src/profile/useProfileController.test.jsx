@@ -6,16 +6,13 @@ const api = vi.hoisted(() => ({
   ApiRequestError: class ApiRequestError extends Error {},
   createAccountAsset: vi.fn(),
   createAccountIdentityDocument: vi.fn(),
-  createAccountPolicy: vi.fn(),
   getAuthenticatedAccount: vi.fn(),
   listAccountAssets: vi.fn(),
   listAccountIdentityDocuments: vi.fn(),
   listAccountPaymentDestinations: vi.fn(),
-  listAccountPolicies: vi.fn(),
   requestId: vi.fn(),
   updateAccountAsset: vi.fn(),
   updateAccountIdentityDocument: vi.fn(),
-  updateAccountPolicy: vi.fn(),
   updateAccountPreferences: vi.fn(),
   updateAccountProfile: vi.fn(),
 }))
@@ -44,12 +41,6 @@ const asset = {
   revision: 1,
 }
 
-const policy = {
-  policy_id: 'pol_11111111111111111111',
-  policy_number: 'NTH-1234',
-  revision: 1,
-}
-
 const payment = {
   payment_destination_id: 'pay_11111111111111111111',
   account_type: 'everyday',
@@ -66,11 +57,11 @@ const identity = {
 
 const resourceCases = [
   {
-    label: 'Policies',
-    resource: 'policies',
-    listMethod: 'listAccountPolicies',
-    reloadMethod: 'reloadPolicies',
-    records: [policy],
+    label: 'Assets',
+    resource: 'assets',
+    listMethod: 'listAccountAssets',
+    reloadMethod: 'reloadAssets',
+    records: [asset],
   },
   {
     label: 'Identity',
@@ -108,7 +99,6 @@ describe('useProfileController mutation recovery', () => {
     let requestNumber = 0
     api.requestId.mockImplementation((prefix) => `${prefix}-key-${requestNumber += 1}`)
     api.listAccountAssets.mockResolvedValue(emptyPage())
-    api.listAccountPolicies.mockResolvedValue(emptyPage())
     api.listAccountPaymentDestinations.mockResolvedValue(emptyPage())
     api.listAccountIdentityDocuments.mockResolvedValue(emptyPage())
   })
@@ -213,6 +203,77 @@ describe('useProfileController mutation recovery', () => {
       expect(result.current.controller.resources[resource].error).not.toBe('')
     },
   )
+
+  it.each([
+    { label: 'one retained asset', records: [asset] },
+    { label: 'a retained empty asset list', records: [] },
+  ])('reports active loading while retrying $label after failure', async ({ records }) => {
+    let resolveRetry
+    const retryResponse = new Promise((resolve) => { resolveRetry = resolve })
+    api.listAccountAssets
+      .mockResolvedValueOnce(emptyPage(records))
+      .mockRejectedValueOnce({ code: 'NETWORK_ERROR' })
+      .mockImplementationOnce(() => retryResponse)
+    const { result } = renderController()
+
+    await waitFor(() => expect(result.current.controller.resources.assets.items).toEqual(records))
+    await act(async () => {
+      await expect(result.current.controller.reloadAssets()).rejects.toMatchObject({ code: 'NETWORK_ERROR' })
+    })
+
+    let retryPromise
+    act(() => { retryPromise = result.current.controller.reloadAssets() })
+    await waitFor(() => expect(result.current.controller.resources.assets).toMatchObject({
+      items: records,
+      error: '',
+      loading: true,
+      stale: true,
+    }))
+
+    await act(async () => {
+      resolveRetry(emptyPage(records))
+      await retryPromise
+    })
+    expect(result.current.controller.resources.assets).toMatchObject({
+      items: records,
+      error: '',
+      loading: false,
+      stale: false,
+    })
+  })
+
+  it('retains records while mutation readback loads and fails', async () => {
+    let rejectReadback
+    const readback = new Promise((resolve, reject) => { rejectReadback = reject })
+    api.listAccountAssets
+      .mockResolvedValueOnce(emptyPage([asset]))
+      .mockImplementationOnce(() => readback)
+    api.updateAccountAsset.mockRejectedValueOnce({ code: 'NETWORK_ERROR' })
+    const { result } = renderController()
+
+    await waitFor(() => expect(result.current.controller.resources.assets.items).toEqual([asset]))
+    let mutationPromise
+    act(() => {
+      mutationPromise = result.current.controller.saveAsset(asset.asset_id, asset.revision, { display_name: 'Renamed SUV' })
+    })
+    await waitFor(() => expect(result.current.controller.resources.assets).toMatchObject({
+      items: [asset],
+      error: '',
+      loading: true,
+      stale: false,
+    }))
+
+    await act(async () => {
+      rejectReadback({ code: 'NETWORK_ERROR' })
+      await expect(mutationPromise).rejects.toMatchObject({ kind: 'unknown' })
+    })
+    expect(result.current.controller.resources.assets).toMatchObject({
+      items: [asset],
+      loading: false,
+      stale: true,
+    })
+    expect(result.current.controller.resources.assets.error).not.toBe('')
+  })
 
   it('reuses the same idempotency key when an asset response is lost and readback cannot find it', async () => {
     api.createAccountAsset

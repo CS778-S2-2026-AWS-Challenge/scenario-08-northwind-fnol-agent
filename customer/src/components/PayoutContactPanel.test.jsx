@@ -43,6 +43,8 @@ describe('PayoutContactPanel', () => {
       />,
     )
 
+    await user.type(screen.getByLabelText('Bank'), 'Synthetic Bank')
+    await user.type(screen.getByLabelText('Account holder'), 'Synthetic Claimant')
     await user.type(screen.getByLabelText('Account type'), 'Everyday')
     await user.type(screen.getByLabelText('Bank account number'), '12-3456-1234567-00')
     await user.click(screen.getByRole('button', { name: 'Save payout account' }))
@@ -50,7 +52,11 @@ describe('PayoutContactPanel', () => {
     expect(onAddDestination).toHaveBeenCalledWith({
       accountType: 'Everyday',
       accountNumber: '12-3456-1234567-00',
+      bankName: 'Synthetic Bank',
+      accountHolderName: 'Synthetic Claimant',
     })
+    expect(screen.getByLabelText('Bank')).toHaveValue('')
+    expect(screen.getByLabelText('Account holder')).toHaveValue('')
     expect(screen.getByLabelText('Bank account number')).toHaveValue('')
 
     rerender(
@@ -138,6 +144,8 @@ describe('PayoutContactPanel', () => {
     await user.click(screen.getByRole('radio', { name: /Everyday .*6700/i }))
     await user.click(screen.getByRole('radio', { name: /Email claimant@example.test/i }))
     await user.click(screen.getByRole('button', { name: 'Add another account' }))
+    await user.type(screen.getByLabelText('Bank'), 'Sensitive bank draft')
+    await user.type(screen.getByLabelText('Account holder'), 'Sensitive holder draft')
     await user.type(screen.getByLabelText('Account type'), 'Sensitive draft')
     await user.type(screen.getByLabelText('Bank account number'), '12-3456-1234567-00')
 

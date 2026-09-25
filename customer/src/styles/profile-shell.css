@@ -135,6 +135,11 @@
   line-height: var(--line-height-body);
 }
 
+.profile-header-meta strong {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
 .profile-header-editor {
   max-width: var(--measure-reading);
   margin-top: var(--space-5);

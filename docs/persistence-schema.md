@@ -60,16 +60,18 @@ slice stores the task's claim, service/action, source class, operation and deliv
 failure/provider reference, timestamps, one immutable originating task per evidence item, and
 one `erq_` request per task. The request records its purpose, disclosed field names, independent
 Northwind-authority and claimant-consent references, authorised Claim revision, preparation
-time, first send time, and stable operation identity. The controlled assessor path also stores one
-returned result per task, its source and receipt time, linked Evidence identifiers, verification
-state, verification time, and checked Claim revision. Later provider attempts and reconciliation
-records remain target contracts.
+time, first send time, and stable operation identity. Each dispatch and retry also appends one
+`ExternalTaskAttempt` with its sequence, operation identity, Claim revision, delivery evidence,
+and provider-neutral outcome classification. Attempts are immutable and read back by Claim and
+task; the task record remains the current lifecycle summary. The controlled assessor path also
+stores one returned result per task, its source and receipt time, linked Evidence identifiers,
+verification state, verification time, and checked Claim revision.
 
 ## Logical Record Groups
 
 | Group | Records | Primary ownership |
 | --- | --- | --- |
-| Customer | authorised identity reference, permitted contact and communication preferences, active state, revision, and update time | `customer_id` |
+| Customer | authorised identity reference, permitted contact, communication preferences, five default-off Claim auto-fill preferences, active state, revision, and update time | `customer_id` |
 | Identity record | protected identity-document reference, masked value, type, issuer, verification state, dates, provenance, and revision | `identity_id` (`idn_`), linked to `customer_id` |
 | Payment destination | protected account reference, masked account number, type/name, verification state, dates, and revision | `payment_destination_id` (`pyd_`), linked to `customer_id` |
 | Policy summary | bounded policy identity, product family, display status, effective dates, and provenance | `policy_id` (`pol_`), linked to `customer_id` |
@@ -94,7 +96,8 @@ records remain target contracts.
 | Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps, and support continuation target (`resume_workflow_state`, `resume_next_action`) | `claim_id` and `handoff_id` |
 | Follow-up | due time, responsible party, attempt count, channel, outcome, status | `claim_id` and `follow_up_id` |
 | Integration | published provider configuration references, adapter capability/health projection, external-service consent, durable Claim-creation operation and result, durable routing operation intent/outcome, routing result, external participant task, returned task result and verification, idempotency result | integration identity, `claim_id`, task, result, or consent/operation identity |
-| External request | implemented purpose, disclosed field names, consent and authority, preparation and first send identity, controlled assessor result and verification; target capability/requirement versions, attempts, and reconciliation | `claim_id`, `request_id`, linked to `task_id` |
+| External request | implemented purpose, disclosed field names, consent and authority, preparation and first send identity, controlled assessor result and verification; target capability/requirement versions and reconciliation | `claim_id`, `request_id`, linked to `task_id` |
+| External task attempt | append-only dispatch/retry outcome, stable operation identity, sequence, Claim revision, delivery evidence, and failure classification | `claim_id`, `task_id`, `attempt_number`, `attempt_id` |
 | Configuration | versioned Agent Policy, Registry snapshots, model profiles, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
 | Branch evaluation | immutable branch/form calculation evidence, selected family, active branches, field selection states, and Claim revision precondition | `claim_id`, `evaluation_id` |
 | Audit | append-only claim, integration, configuration, account, and access events | event identity and subject |
@@ -375,6 +378,17 @@ the append-only audit collection through a bounded, filterable projection.
 
 ## Account Profile and Protected Record Mapping
 
+- Customer account persistence stores the five Claim auto-fill booleans beside profile and
+  communication preferences under the same Account revision. The Fixture adapter keeps them on
+  `CustomerAccountRecord`; SQLite uses five non-null integer columns with zero defaults. Opening a
+  legacy SQLite database adds missing columns as default-off without guessing claimant intent.
+  Updating the complete preference object uses one expected-revision compare-and-set and advances
+  the Account revision exactly once. A failed or stale write changes neither preferences nor
+  revision.
+- The Claim auto-fill suggestion manifest is a derived owner-scoped read across Account, active
+  Policy Number, Asset, Payment Destination, and Identity Document records. It persists no
+  manifest, copies no values or resource identifiers into Claim State, and creates no Claim,
+  Branch Evaluation, audit, idempotency, realtime, Agent, or external-service mutation.
 - Existing identity rows migrate `legal_name` from the previous `display_name`. No date of birth,
   address, preferred name, policy, bank, or identity-document value is guessed. After migration,
   `display_name` is a compatibility projection derived from preferred name or legal name and is
@@ -384,8 +398,18 @@ the append-only audit collection through a bounded, filterable projection.
 - `identity_document:{identity_id}` stores document type, authenticated ciphertext, last-four
   mask, ownership, revision, active state, and timestamps. Document type is exactly
   `driver_licence` or `passport`.
-- `payment_destination:{payment_destination_id}` stores account type, authenticated ciphertext,
-  last-four mask, ownership, revision, active state, and timestamps. It is not a payment command.
+- `payment_destination:{payment_destination_id}` stores account type, claimant-supplied bank and
+  account-holder names, authenticated ciphertext, last-four mask, ownership, revision, active
+  state, and an authoritative `is_common` marker. New records require both claimant-supplied names;
+  legacy records may retain null values until a revisioned update completes them. At most one
+  active common destination exists per account. Repository create assigns common only when the
+  account has zero active destinations, so a create after common retirement does not silently fill
+  the vacancy while another active record remains. Legacy records without a marker project
+  `is_common=false` consistently from list and resource reads and require explicit revisioned
+  designation. Designation accepts only an active target and atomically advances and audits both
+  the promoted target and any demoted previous common record; rejection changes neither record nor
+  audit history. Retiring the common destination does not silently promote another
+  record. It is not a payment command.
 - Fixture and MongoDB adapters enforce the same owner-first access, create idempotency, optimistic
   revision, stable descending `(created_at, resource_id)` keyset pagination, soft retirement, and
   value-free audit contract. Cursors bind the owner digest, record type, and active-record filter.
@@ -452,7 +476,8 @@ the append-only audit collection through a bounded, filterable projection.
 - Synthetic credential verification and session persistence are fixture capabilities only;
   selecting a production environment fails closed until an approved identity provider and
   durable identity adapter exist.
-- Profile and communication preferences are Customer records, not browser-local authority.
+- Profile, communication preferences, and Claim auto-fill preferences are Customer records, not
+  browser-local authority.
 - Authentication data cannot grant staff roles, change claim ownership, or enter Claim State.
 - Staff password hashes and session hashes remain in the staff identity store; they are not Claim,
   claimant session, or Workbench projection fields.
@@ -471,9 +496,9 @@ the append-only audit collection through a bounded, filterable projection.
   for one email, exactly one write succeeds and the other leaves its account and revision
   unchanged.
 - Existing local SQLite identity databases are upgraded in place with account revisions,
-  timestamps, opaque session IDs, and session revisions. The migration preserves account/session
-  relationships and assigns each legacy session one stable `ias_` ID before creating its unique
-  lookup index.
+  timestamps, five default-off Claim auto-fill columns, opaque session IDs, and session revisions.
+  The migration preserves account/session relationships and assigns each legacy session one
+  stable `ias_` ID before creating its unique lookup index.
 - Staff logout revokes the server-side session immediately. The local adapter does not by itself
   establish production IdP, MFA, recovery, or per-Claim entitlement readiness.
 

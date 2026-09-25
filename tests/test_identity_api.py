@@ -117,9 +117,9 @@ def test_claim_capabilities_exposes_configured_model_profile() -> None:
             headers={'Authorization': f'Bearer {session["access_token"]}'},
         )
 
-    assert response.json()['models'][0]['id'] == 'qwen-local'
+    assert response.json()['models'][0]['id'] == 'openrouter-gpt4o-mini'
     assert response.json()['models'][0]['label'] == 'gpt54-mini'
-    assert response.json()['default_model_profile_id'] == 'qwen-local'
+    assert response.json()['default_model_profile_id'] == 'openrouter-gpt4o-mini'
     assert response.json()['models'][0]['image_input'] is False
     assert response.json()['models'][0]['document_input'] is False
 
@@ -348,6 +348,82 @@ def test_preferences_update_uses_the_projected_account_revision(client: TestClie
     assert response.status_code == 200
     assert response.json()['preferences'] == {'email': False, 'sms': True}
     assert response.json()['revision'] == before['revision'] + 1
+
+
+def test_claim_auto_fill_preferences_default_off_and_require_current_revision(
+    client: TestClient,
+) -> None:
+    session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    authorization = {'Authorization': f'Bearer {session["access_token"]}'}
+    before = client.get('/api/v1/account', headers=authorization).json()
+    expected_default = {
+        'personal_details': False,
+        'policy_number': False,
+        'saved_assets': False,
+        'payment_details': False,
+        'identity_information': False,
+    }
+
+    missing_revision = client.patch(
+        '/api/v1/account/claim-auto-fill-preferences',
+        headers=authorization,
+        json={**expected_default, 'personal_details': True},
+    )
+    incomplete = client.patch(
+        '/api/v1/account/claim-auto-fill-preferences',
+        headers={**authorization, 'If-Match': str(before['revision'])},
+        json={'personal_details': True},
+    )
+    updated = client.patch(
+        '/api/v1/account/claim-auto-fill-preferences',
+        headers={**authorization, 'If-Match': str(before['revision'])},
+        json={key: True for key in expected_default},
+    )
+    stale = client.patch(
+        '/api/v1/account/claim-auto-fill-preferences',
+        headers={**authorization, 'If-Match': str(before['revision'])},
+        json=expected_default,
+    )
+    readback = client.get('/api/v1/account', headers=authorization)
+
+    assert before['claim_auto_fill_preferences'] == expected_default
+    assert missing_revision.status_code == 409
+    assert missing_revision.json()['error']['code'] == 'REVISION_REQUIRED'
+    assert incomplete.status_code == 422
+    assert incomplete.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert updated.status_code == 200
+    assert updated.json()['claim_auto_fill_preferences'] == {key: True for key in expected_default}
+    assert updated.json()['revision'] == before['revision'] + 1
+    assert stale.status_code == 409
+    assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert readback.json() == updated.json()
+
+
+def test_claim_auto_fill_preferences_map_repository_revision_race() -> None:
+    class ConflictingIdentityRepository(FixtureIdentityRepository):
+        def save_account(self, account: CustomerAccountRecord, expected_revision: int) -> None:
+            raise RevisionConflict(expected_revision + 1)
+
+    repository = ConflictingIdentityRepository()
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        identity_repository=repository,
+    )
+    with TestClient(app) as test_client:
+        session = login(test_client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        authorization = {'Authorization': f'Bearer {session["access_token"]}'}
+        before = test_client.get('/api/v1/account', headers=authorization).json()
+        response = test_client.patch(
+            '/api/v1/account/claim-auto-fill-preferences',
+            headers={**authorization, 'If-Match': str(before['revision'])},
+            json={key: True for key in before['claim_auto_fill_preferences']},
+        )
+        after = test_client.get('/api/v1/account', headers=authorization).json()
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert response.json()['error']['current_revision'] == before['revision'] + 1
+    assert after == before
 
 
 def test_preferences_rejects_a_stale_revision_without_changing_the_account(

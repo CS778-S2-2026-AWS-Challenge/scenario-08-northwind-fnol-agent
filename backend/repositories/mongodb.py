@@ -37,6 +37,7 @@ from backend.domain.evidence import (
     validate_evidence_record,
 )
 from backend.domain.external_services import (
+    ExternalTaskAttempt,
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
     ExternalTaskRequest,
@@ -133,10 +134,14 @@ from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.account_data import (
     AccountCursorKey,
     AccountRecord,
+    CommonPaymentDestinationConflict,
+    PaymentDestinationDesignationConflict,
     PaymentDestinationSelectionConflict,
     PolicySelectionConflict,
     account_record_audit_matches,
     account_record_identity,
+    payment_destination_create_result,
+    payment_destination_demotion,
     payout_contact_selection_audit_matches,
     policy_selection_audit_matches,
 )
@@ -330,6 +335,16 @@ class MongoDBRepository:
             partialFilterExpression={'record_type': {'$in': account_record_types}},
         )
         self._collection.create_index(
+            [('record_type', 1), ('customer_id', 1), ('is_common', 1)],
+            unique=True,
+            name='payment_destination_active_common_unique',
+            partialFilterExpression={
+                'record_type': 'payment_destination',
+                'active': True,
+                'is_common': True,
+            },
+        )
+        self._collection.create_index(
             [
                 ('record_type', 1),
                 ('customer_id', 1),
@@ -455,6 +470,12 @@ class MongoDBRepository:
             unique=True,
             name='external_task_result_task_unique',
             partialFilterExpression={'record_type': 'external_task_result'},
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('claim_id', 1), ('task_id', 1), ('attempt_number', 1)],
+            unique=True,
+            name='external_task_attempt_sequence_unique',
+            partialFilterExpression={'record_type': 'external_task_attempt'},
         )
         for search_field in (
             'external_reference',
@@ -642,7 +663,7 @@ class MongoDBRepository:
         record: AccountRecord,
         idempotency: IdempotencyRecord,
         audit_event: AuditEventEnvelope,
-    ) -> None:
+    ) -> AccountRecord:
         kind, identifier, _ = account_record_identity(record)
         if (
             record.customer_id != idempotency.actor_id
@@ -653,20 +674,42 @@ class MongoDBRepository:
         ):
             raise KeyError(identifier)
 
-        def persist(mongo_session: Any) -> None:
+        def persist(mongo_session: Any) -> AccountRecord:
             self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
             self._ensure_new_audit_event(audit_event, mongo_session=mongo_session)
-            self._put(
-                kind,
-                identifier,
-                record,
-                customer_id=record.customer_id,
-                session=mongo_session,
-            )
-            self._save_idempotency(idempotency, mongo_session)
+            stored_record = record
+            stored_idempotency = idempotency
+            if isinstance(record, PaymentDestinationRecord) and record.active:
+                active_documents = list(
+                    self._collection.find(
+                        {
+                            'record_type': 'payment_destination',
+                            'customer_id': record.customer_id,
+                            'active': True,
+                        },
+                        session=mongo_session,
+                    )
+                )
+                stored_record = record.model_copy(update={'is_common': not active_documents})
+                stored_idempotency = payment_destination_create_result(stored_record, idempotency)
+            try:
+                self._put(
+                    kind,
+                    identifier,
+                    stored_record,
+                    customer_id=stored_record.customer_id,
+                    session=mongo_session,
+                )
+            except IdempotencyConflict as error:
+                # A concurrent first-create can win the partial common-marker index.
+                if isinstance(stored_record, PaymentDestinationRecord) and stored_record.is_common:
+                    raise CommonPaymentDestinationConflict(idempotency.key) from error
+                raise
+            self._save_idempotency(stored_idempotency, mongo_session)
             self._insert_audit_event(audit_event, mongo_session=mongo_session)
+            return stored_record
 
-        self._atomic(persist)
+        return self._atomic(persist)
 
     def get_policy(self, policy_id: str, customer_id: str) -> PolicyNumberRecord | None:
         return self._get('policy', policy_id, PolicyNumberRecord, customer_id=customer_id)
@@ -746,7 +789,7 @@ class MongoDBRepository:
         after: AccountCursorKey | None,
         limit: int,
     ) -> tuple[list[PaymentDestinationRecord], bool]:
-        return self._list_account_records(
+        records, more = self._list_account_records(
             'payment_destination',
             PaymentDestinationRecord,
             customer_id,
@@ -754,6 +797,7 @@ class MongoDBRepository:
             after=after,
             limit=limit,
         )
+        return records, more
 
     def list_identity_documents(
         self,
@@ -777,6 +821,7 @@ class MongoDBRepository:
         record: AccountRecord,
         expected_revision: int,
         audit_event: AuditEventEnvelope,
+        related_audit_event_id: str | None = None,
     ) -> None:
         kind, identifier, _ = account_record_identity(record)
         if record.revision != expected_revision + 1 or not account_record_audit_matches(
@@ -786,6 +831,68 @@ class MongoDBRepository:
 
         def persist(mongo_session: Any) -> None:
             self._ensure_new_audit_event(audit_event, mongo_session=mongo_session)
+            if isinstance(record, PaymentDestinationRecord) and record.is_common:
+                current_destination = self._get(
+                    'payment_destination',
+                    identifier,
+                    PaymentDestinationRecord,
+                    customer_id=record.customer_id,
+                    session=mongo_session,
+                )
+                if current_destination is None:
+                    raise KeyError(identifier)
+                if current_destination.revision != expected_revision:
+                    raise RevisionConflict(current_destination.revision)
+                if not current_destination.active or not record.active:
+                    raise PaymentDestinationDesignationConflict(identifier, reason='inactive')
+                previous_documents = list(
+                    self._collection.find(
+                        {
+                            'record_type': 'payment_destination',
+                            'customer_id': record.customer_id,
+                            'active': True,
+                            'is_common': True,
+                            '_id': {'$ne': self._record_id(kind, identifier)},
+                        },
+                        session=mongo_session,
+                    )
+                )
+                if len(previous_documents) > 1 or (
+                    previous_documents and related_audit_event_id is None
+                ):
+                    raise KeyError(identifier)
+                if previous_documents:
+                    assert related_audit_event_id is not None
+                    previous = self._model_from_document(
+                        previous_documents[0], PaymentDestinationRecord
+                    )
+                    if previous is None:
+                        raise KeyError(identifier)
+                    demoted, demotion_event = payment_destination_demotion(
+                        previous, audit_event, related_audit_event_id
+                    )
+                    demoted_document = demoted.model_dump(mode='json')
+                    demoted_document.update(
+                        {
+                            '_id': previous_documents[0]['_id'],
+                            'record_type': 'payment_destination',
+                            'customer_id': demoted.customer_id,
+                            'claim_id': None,
+                        }
+                    )
+                    demotion_result = self._collection.replace_one(
+                        {
+                            '_id': previous_documents[0]['_id'],
+                            'record_type': 'payment_destination',
+                            'customer_id': demoted.customer_id,
+                            'revision': previous.revision,
+                        },
+                        demoted_document,
+                        session=mongo_session,
+                    )
+                    if demotion_result.matched_count != 1:
+                        raise RevisionConflict(previous.revision)
+                    self._insert_audit_event(demotion_event, mongo_session=mongo_session)
             document = record.model_dump(mode='json')
             document.update(
                 {
@@ -2851,7 +2958,21 @@ class MongoDBRepository:
         self,
         operation: AssessorRoutingOperation,
     ) -> None:
-        claim = self.get_claim_internal(operation.claim_id)
+        self._atomic(
+            lambda mongo_session: self._save_assessor_routing_operation(operation, mongo_session)
+        )
+
+    def _save_assessor_routing_operation(
+        self,
+        operation: AssessorRoutingOperation,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            operation.claim_id,
+            WorkingClaim,
+            session=mongo_session,
+        )
         external_claim_id = (
             claim.external_claim.external_claim_id
             if claim is not None
@@ -2866,7 +2987,12 @@ class MongoDBRepository:
         ):
             raise KeyError(operation.claim_id)
 
-        existing = self.get_assessor_routing_operation(operation.operation_id)
+        existing = self._get(
+            'assessor_routing_operation',
+            operation.operation_id,
+            AssessorRoutingOperation,
+            session=mongo_session,
+        )
         if existing is None:
             if operation.status is not AssessorRoutingOperationStatus.PREPARED:
                 raise IdempotencyConflict(operation.operation_id)
@@ -2875,6 +3001,7 @@ class MongoDBRepository:
                 operation.operation_id,
                 operation,
                 claim_id=operation.claim_id,
+                session=mongo_session,
             )
             return
 
@@ -2917,7 +3044,24 @@ class MongoDBRepository:
             operation.operation_id,
             operation,
             claim_id=operation.claim_id,
+            session=mongo_session,
         )
+
+    def save_assessor_routing_settlement(
+        self,
+        operation: AssessorRoutingOperation,
+        task: ExternalTaskRecord,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Atomically persist an assessor outcome and its task attempt in MongoDB."""
+
+        def persist(mongo_session: Any) -> None:
+            self._save_assessor_routing_operation(operation, mongo_session)
+            self._save_external_task(task, customer_id, mongo_session)
+            self._save_external_task_attempt(attempt, customer_id, mongo_session)
+
+        self._atomic(persist)
 
     def save_assessor_reconciliation(
         self,
@@ -3655,6 +3799,111 @@ class MongoDBRepository:
             mongo_session=mongo_session,
         )
 
+    def save_external_task_attempt(
+        self,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Append one immutable claim-owned external-task attempt."""
+        self._atomic(
+            lambda mongo_session: self._save_external_task_attempt(
+                attempt,
+                customer_id,
+                mongo_session,
+            )
+        )
+
+    def save_external_task_settlement(
+        self,
+        task: ExternalTaskRecord,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+    ) -> None:
+        """Atomically persist a generic task outcome and its attempt in MongoDB."""
+
+        def persist(mongo_session: Any) -> None:
+            self._save_external_task(task, customer_id, mongo_session)
+            self._save_external_task_attempt(attempt, customer_id, mongo_session)
+
+        self._atomic(persist)
+
+    def _save_external_task_attempt(
+        self,
+        attempt: ExternalTaskAttempt,
+        customer_id: str,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            attempt.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        task = self._get(
+            'external_task',
+            attempt.task_id,
+            ExternalTaskRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        request = self._get(
+            'external_task_request',
+            attempt.task_id,
+            ExternalTaskRequest,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        if (
+            claim is None
+            or task is None
+            or task.claim_id != attempt.claim_id
+            or request is None
+            or request.operation_id != attempt.operation_id
+        ):
+            raise KeyError(attempt.operation_id)
+        existing = self._get(
+            'external_task_attempt',
+            attempt.attempt_id,
+            ExternalTaskAttempt,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        if existing is not None:
+            if existing != attempt:
+                raise IdempotencyConflict(attempt.attempt_id)
+            return
+        prior = self._list(
+            'external_task_attempt',
+            ExternalTaskAttempt,
+            {'claim_id': attempt.claim_id, 'task_id': attempt.task_id},
+            'attempt_number',
+            session=mongo_session,
+        )
+        expected_number = max((item.attempt_number for item in prior), default=0) + 1
+        if attempt.attempt_number != expected_number:
+            raise IdempotencyConflict(attempt.attempt_id)
+        document = {
+            **attempt.model_dump(mode='json'),
+            '_id': self._record_id('external_task_attempt', attempt.attempt_id),
+            'record_type': 'external_task_attempt',
+            'customer_id': customer_id,
+            'claim_id': attempt.claim_id,
+        }
+        try:
+            self._collection.insert_one(document, session=mongo_session)
+        except DuplicateKeyError as error:
+            winner = self._get(
+                'external_task_attempt',
+                attempt.attempt_id,
+                ExternalTaskAttempt,
+                customer_id=customer_id,
+                session=mongo_session,
+            )
+            if winner == attempt:
+                return
+            raise IdempotencyConflict(attempt.attempt_id) from error
+
     def reserve_external_dispatch(
         self,
         claim_id: str,
@@ -4301,6 +4550,18 @@ class MongoDBRepository:
             ExternalTaskRecord,
             {'claim_id': claim_id},
             'created_at',
+        )
+
+    def list_external_task_attempts_internal(
+        self,
+        claim_id: str,
+    ) -> list[ExternalTaskAttempt]:
+        """List immutable task attempts in stable sequence order."""
+        return self._list(
+            'external_task_attempt',
+            ExternalTaskAttempt,
+            {'claim_id': claim_id},
+            'attempt_number',
         )
 
     def list_external_task_results_internal(self, claim_id: str) -> list[ExternalTaskResult]:

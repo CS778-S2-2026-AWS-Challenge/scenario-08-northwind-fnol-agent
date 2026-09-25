@@ -36,7 +36,10 @@ from backend.domain.claim_creation import (
     classify_claim_creation_failure,
     evidence_snapshot_fingerprint,
 )
-from backend.domain.external_services import ExternalTaskResultVerification
+from backend.domain.external_services import (
+    ExternalTaskOperationStatus,
+    ExternalTaskResultVerification,
+)
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -68,6 +71,7 @@ from backend.domain.models import (
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
 from backend.repositories.protocols import IdempotencyConflict, PersistenceRepository
+from backend.services.integrations import assessor_operation_id
 from backend.services.support import now_utc, request_fingerprint
 
 INTEGRATION_AUTH = {'Authorization': 'Bearer synthetic-integration'}
@@ -1091,6 +1095,68 @@ def test_assessor_routing_requires_explicit_authorisation_and_is_idempotent(
     assert stored.claim_state.workflow_state is WorkflowState.CREATED
     assert stored.assessor_routing is not None
     assert stored.assessor_routing.routing_status is AssessorRoutingStatus.ASSIGNED
+
+
+def test_assessor_routing_retries_one_atomic_settlement_after_storage_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = FixtureRepository()
+    adapter = CountingAssessorAdapter()
+    with TestClient(
+        create_app(repository=repository, assessor_service_adapter=adapter),
+        raise_server_exceptions=False,
+    ) as client:
+        payload, _ = prepare_assessor_request(
+            client,
+            repository,
+            key='assessor-settlement-retry',
+        )
+        original = repository.save_assessor_routing_settlement
+        failed = False
+
+        def fail_once(*args: Any, **kwargs: Any) -> None:
+            nonlocal failed
+            if not failed:
+                failed = True
+                raise RuntimeError('simulated settlement persistence failure')
+            original(*args, **kwargs)
+
+        monkeypatch.setattr(repository, 'save_assessor_routing_settlement', fail_once)
+        first = client.post(
+            '/internal/v1/assessors/route',
+            headers=INTEGRATION_AUTH,
+            json=payload,
+        )
+
+        claim_id = str(payload['claim_id'])
+        operation_id = assessor_operation_id(RouteAssessorRequest.model_validate(payload))
+        prepared_operation = repository.get_assessor_routing_operation(operation_id)
+        prepared_tasks = repository.list_external_tasks_internal(claim_id)
+        assert first.status_code == 500
+        assert prepared_operation is not None
+        assert prepared_operation.status is AssessorRoutingOperationStatus.PREPARED
+        assert len(prepared_tasks) == 1
+        assert prepared_tasks[0].status is ExternalTaskOperationStatus.PREPARED
+        assert repository.list_external_task_attempts_internal(claim_id) == []
+
+        replay = client.post(
+            '/internal/v1/assessors/route',
+            headers=INTEGRATION_AUTH,
+            json=payload,
+        )
+
+    accepted_operation = repository.get_assessor_routing_operation(operation_id)
+    accepted_tasks = repository.list_external_tasks_internal(claim_id)
+    attempts = repository.list_external_task_attempts_internal(claim_id)
+    assert replay.status_code == 200
+    assert adapter.invocations == 2
+    assert accepted_operation is not None
+    assert accepted_operation.status is AssessorRoutingOperationStatus.ACCEPTED
+    assert len(accepted_tasks) == 1
+    assert accepted_tasks[0].status is ExternalTaskOperationStatus.ACCEPTED
+    assert len(attempts) == 1
+    assert attempts[0].operation_id == operation_id
+    assert attempts[0].outcome is ExternalTaskOperationStatus.ACCEPTED
 
 
 def test_assessor_result_runs_through_runtime_storage_and_verification() -> None:

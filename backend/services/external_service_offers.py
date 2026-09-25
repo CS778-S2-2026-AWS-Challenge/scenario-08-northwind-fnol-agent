@@ -62,6 +62,7 @@ from backend.services.branching import build_applied_branch_evaluation
 from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.external_capability_dispatcher import ExternalCapabilityDispatcher
 from backend.services.external_service_entry import ExternalServiceEntryDecision
+from backend.services.integrations import _build_external_attempt
 from backend.services.support import (
     now_utc,
     parse_if_match,
@@ -882,16 +883,25 @@ def _dispatch_generic_offer(
         failed_at = now_utc()
         if failed_at <= task.updated_at:
             failed_at = task.updated_at + timedelta(microseconds=1)
-        repository.save_external_task(
-            task.model_copy(
-                update={
-                    'status': ExternalTaskOperationStatus.RETRYABLE_FAILURE,
-                    'failure_code': ExternalTaskFailureCode.UNAVAILABLE,
-                    'updated_at': failed_at,
-                }
-            ),
-            claim.customer_id,
+        failed = task.model_copy(
+            update={
+                'status': ExternalTaskOperationStatus.RETRYABLE_FAILURE,
+                'failure_code': ExternalTaskFailureCode.UNAVAILABLE,
+                'updated_at': failed_at,
+            }
         )
+        attempt = _build_external_attempt(
+            repository,
+            task=task,
+            request=reserved,
+            customer_id=claim.customer_id,
+            claim_revision=claim.revision,
+            outcome=failed.status,
+            failure_code=ExternalTaskFailureCode.UNAVAILABLE,
+            delivery=failed.delivery,
+            delivery_evidence=failed.delivery_evidence,
+        )
+        repository.save_external_task_settlement(failed, attempt, claim.customer_id)
         repository.release_external_dispatch(claim.claim_id, request_id, claim.customer_id)
         logger.exception(
             'external_capability_dispatch_failed',
@@ -938,18 +948,27 @@ def _dispatch_generic_offer(
                 reserved.model_copy(update={'sent_at': failed_at}),
                 claim.customer_id,
             )
-        repository.save_external_task(
-            task.model_copy(
-                update={
-                    'status': classification.operation_status,
-                    'delivery': delivery,
-                    'delivery_evidence': delivery_evidence if delivery_evidence else None,
-                    'failure_code': failure_code,
-                    'updated_at': failed_at,
-                }
-            ),
-            claim.customer_id,
+        failed = task.model_copy(
+            update={
+                'status': classification.operation_status,
+                'delivery': delivery,
+                'delivery_evidence': delivery_evidence if delivery_evidence else None,
+                'failure_code': failure_code,
+                'updated_at': failed_at,
+            }
         )
+        attempt = _build_external_attempt(
+            repository,
+            task=task,
+            request=reserved,
+            customer_id=claim.customer_id,
+            claim_revision=claim.revision,
+            outcome=failed.status,
+            failure_code=failure_code,
+            delivery=delivery,
+            delivery_evidence=(str(delivery_evidence) if delivery_evidence is not None else None),
+        )
+        repository.save_external_task_settlement(failed, attempt, claim.customer_id)
         if classification.operation_status is not ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
             repository.release_external_dispatch(claim.claim_id, request_id, claim.customer_id)
         logger.info(
@@ -980,15 +999,24 @@ def _dispatch_generic_offer(
         reserved.model_copy(update={'sent_at': sent_at}),
         claim.customer_id,
     )
-    repository.save_external_task(
-        task.model_copy(
-            update={
-                'status': ExternalTaskOperationStatus.ACCEPTED,
-                'delivery': ExternalTaskDelivery.SUBMITTED,
-                'delivery_evidence': f'operation:{operation_id}',
-                'provider_reference': str(result.payload['provider_reference']),
-                'updated_at': sent_at,
-            }
-        ),
-        claim.customer_id,
+    accepted = task.model_copy(
+        update={
+            'status': ExternalTaskOperationStatus.ACCEPTED,
+            'delivery': ExternalTaskDelivery.SUBMITTED,
+            'delivery_evidence': f'operation:{operation_id}',
+            'provider_reference': str(result.payload['provider_reference']),
+            'updated_at': sent_at,
+        }
     )
+    attempt = _build_external_attempt(
+        repository,
+        task=task,
+        request=reserved,
+        customer_id=claim.customer_id,
+        claim_revision=claim.revision,
+        outcome=ExternalTaskOperationStatus.ACCEPTED,
+        failure_code=None,
+        delivery=accepted.delivery,
+        delivery_evidence=accepted.delivery_evidence,
+    )
+    repository.save_external_task_settlement(accepted, attempt, claim.customer_id)

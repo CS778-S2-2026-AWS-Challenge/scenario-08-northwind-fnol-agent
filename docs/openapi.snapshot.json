@@ -85,6 +85,9 @@
       },
       "AccountProjection": {
         "properties": {
+          "claim_auto_fill_preferences": {
+            "$ref": "#/components/schemas/ClaimAutoFillPreferences"
+          },
           "customer_id": {
             "title": "Customer Id",
             "type": "string"
@@ -115,6 +118,7 @@
           "customer_id",
           "profile",
           "preferences",
+          "claim_auto_fill_preferences",
           "revision",
           "updated_at"
         ],
@@ -1996,6 +2000,156 @@
           "source_refs"
         ],
         "title": "ClaimAssetSnapshotProjection",
+        "type": "object"
+      },
+      "ClaimAutoFillAction": {
+        "enum": [
+          "review_and_confirm",
+          "select_policy",
+          "select_asset",
+          "confirm_separately"
+        ],
+        "title": "ClaimAutoFillAction",
+        "type": "string"
+      },
+      "ClaimAutoFillCategory": {
+        "enum": [
+          "personal_details",
+          "policy_number",
+          "saved_assets",
+          "payment_details",
+          "identity_information"
+        ],
+        "title": "ClaimAutoFillCategory",
+        "type": "string"
+      },
+      "ClaimAutoFillPreferences": {
+        "properties": {
+          "identity_information": {
+            "default": false,
+            "title": "Identity Information",
+            "type": "boolean"
+          },
+          "payment_details": {
+            "default": false,
+            "title": "Payment Details",
+            "type": "boolean"
+          },
+          "personal_details": {
+            "default": false,
+            "title": "Personal Details",
+            "type": "boolean"
+          },
+          "policy_number": {
+            "default": false,
+            "title": "Policy Number",
+            "type": "boolean"
+          },
+          "saved_assets": {
+            "default": false,
+            "title": "Saved Assets",
+            "type": "boolean"
+          }
+        },
+        "title": "ClaimAutoFillPreferences",
+        "type": "object"
+      },
+      "ClaimAutoFillPreferencesPatchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "identity_information": {
+            "title": "Identity Information",
+            "type": "boolean"
+          },
+          "payment_details": {
+            "title": "Payment Details",
+            "type": "boolean"
+          },
+          "personal_details": {
+            "title": "Personal Details",
+            "type": "boolean"
+          },
+          "policy_number": {
+            "title": "Policy Number",
+            "type": "boolean"
+          },
+          "saved_assets": {
+            "title": "Saved Assets",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "personal_details",
+          "policy_number",
+          "saved_assets",
+          "payment_details",
+          "identity_information"
+        ],
+        "title": "ClaimAutoFillPreferencesPatchRequest",
+        "type": "object"
+      },
+      "ClaimAutoFillSuggestion": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ClaimAutoFillAction"
+          },
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "category": {
+            "$ref": "#/components/schemas/ClaimAutoFillCategory"
+          },
+          "eligible": {
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "category",
+          "enabled",
+          "available",
+          "eligible",
+          "action"
+        ],
+        "title": "ClaimAutoFillSuggestion",
+        "type": "object"
+      },
+      "ClaimAutoFillSuggestionManifest": {
+        "properties": {
+          "account_revision": {
+            "minimum": 1.0,
+            "title": "Account Revision",
+            "type": "integer"
+          },
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "claim_revision": {
+            "minimum": 1.0,
+            "title": "Claim Revision",
+            "type": "integer"
+          },
+          "suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimAutoFillSuggestion"
+            },
+            "title": "Suggestions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "claim_id",
+          "claim_revision",
+          "account_revision",
+          "suggestions"
+        ],
+        "title": "ClaimAutoFillSuggestionManifest",
         "type": "object"
       },
       "ClaimCollaborationRequest": {
@@ -5440,6 +5594,12 @@
       "CreatePaymentDestinationRequest": {
         "additionalProperties": false,
         "properties": {
+          "account_holder_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Account Holder Name",
+            "type": "string"
+          },
           "account_number": {
             "maxLength": 80,
             "minLength": 4,
@@ -5451,11 +5611,19 @@
             "minLength": 1,
             "title": "Account Type",
             "type": "string"
+          },
+          "bank_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Bank Name",
+            "type": "string"
           }
         },
         "required": [
           "account_type",
-          "account_number"
+          "account_number",
+          "bank_name",
+          "account_holder_name"
         ],
         "title": "CreatePaymentDestinationRequest",
         "type": "object"
@@ -7491,6 +7659,93 @@
           "decision"
         ],
         "title": "ExternalServiceOfferDecisionRequest",
+        "type": "object"
+      },
+      "ExternalTaskAttempt": {
+        "additionalProperties": false,
+        "description": "One recorded attempt at an external task, kept whether it succeeded or not.\n\nA failure that leaves nothing behind is the same as one that never happened,\nand the claim then cannot explain why it is waiting. Each attempt records its\nplace in the sequence, when it ran, the claim revision it ran against, and\nwhat came back, so a claimant or staff reader can see the history rather than\nonly the current state.\n\nThe operation identity is the same across every attempt for one request. That\nis what makes a retry the same request rather than a second one, so it is\nrecorded here as well and checked before another attempt is permitted.\n\nDelivery follows the same contract as the task record it belongs to: an\naccepted attempt must have reached the provider, and reaching the provider\nmust be evidenced rather than asserted. Without that an attempt could record\na provider acceptance for a request that was never sent.",
+        "properties": {
+          "attempt_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "attempt_number": {
+            "minimum": 1.0,
+            "title": "Attempt Number",
+            "type": "integer"
+          },
+          "claim_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "claim_revision": {
+            "minimum": 1.0,
+            "title": "Claim Revision",
+            "type": "integer"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/ExternalTaskDelivery",
+            "default": "not_submitted"
+          },
+          "delivery_evidence": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery Evidence"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalTaskFailureCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/ExternalTaskOperationStatus"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "task_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt_id",
+          "task_id",
+          "claim_id",
+          "operation_id",
+          "attempt_number",
+          "claim_revision",
+          "started_at",
+          "outcome"
+        ],
+        "title": "ExternalTaskAttempt",
         "type": "object"
       },
       "ExternalTaskAuthorisation": {
@@ -10533,6 +10788,17 @@
       "PaymentDestinationProjection": {
         "additionalProperties": false,
         "properties": {
+          "account_holder_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Holder Name"
+          },
           "account_type": {
             "title": "Account Type",
             "type": "string"
@@ -10541,10 +10807,26 @@
             "title": "Active",
             "type": "boolean"
           },
+          "bank_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Name"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "is_common": {
+            "default": false,
+            "title": "Is Common",
+            "type": "boolean"
           },
           "masked_account_number": {
             "title": "Masked Account Number",
@@ -14109,6 +14391,19 @@
       "UpdatePaymentDestinationRequest": {
         "additionalProperties": false,
         "properties": {
+          "account_holder_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Holder Name"
+          },
           "account_number": {
             "maxLength": 80,
             "minLength": 4,
@@ -14120,6 +14415,24 @@
             "minLength": 1,
             "title": "Account Type",
             "type": "string"
+          },
+          "bank_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Name"
+          },
+          "is_common": {
+            "const": true,
+            "title": "Is Common",
+            "type": "boolean"
           }
         },
         "title": "UpdatePaymentDestinationRequest",
@@ -15577,6 +15890,13 @@
       "WorkbenchExternalRequest": {
         "additionalProperties": false,
         "properties": {
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalTaskAttempt"
+            },
+            "title": "Attempts",
+            "type": "array"
+          },
           "lifecycle": {
             "$ref": "#/components/schemas/WorkbenchExternalLifecycle"
           },
@@ -18108,6 +18428,81 @@
         ]
       }
     },
+    "/api/v1/account/claim-auto-fill-preferences": {
+      "patch": {
+        "operationId": "patch_account_claim_auto_fill_preferences_api_v1_account_claim_auto_fill_preferences_patch",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimAutoFillPreferencesPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Account Claim Auto Fill Preferences",
+        "tags": [
+          "claimant identity"
+        ]
+      }
+    },
     "/api/v1/account/identity-documents": {
       "get": {
         "operationId": "get_identity_documents_api_v1_account_identity_documents_get",
@@ -20126,6 +20521,64 @@
         "tags": [
           "claimant",
           "claimant assets"
+        ]
+      }
+    },
+    "/api/v1/claims/{claim_id}/auto-fill-suggestions": {
+      "get": {
+        "operationId": "read_claim_auto_fill_suggestions_api_v1_claims__claim_id__auto_fill_suggestions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimAutoFillSuggestionManifest"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Claim Auto Fill Suggestions",
+        "tags": [
+          "claimant"
         ]
       }
     },

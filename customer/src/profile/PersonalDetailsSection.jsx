@@ -41,7 +41,8 @@ function ProfileHeader({ account, controller }) {
         <span className="profile-account-name-label">Preferred name</span>
         <strong>{account.profile.preferred_name || 'Not provided'}</strong>
         <p className="profile-header-meta">
-          <span>Saved account Profile</span>
+          <span>Customer ID:</span>
+          <strong>{account.customer_id || 'Not provided'}</strong>
         </p>
       </div>
       <button
@@ -60,7 +61,11 @@ function ProfileHeader({ account, controller }) {
   )
 }
 
-export default function PersonalDetailsSection({ account, controller, headingAs: Heading = 'h1' }) {
+export default function PersonalDetailsSection({
+  account,
+  controller,
+  headingAs: Heading = 'h1',
+}) {
   const profile = account.profile || {}
   return (
     <section className="profile-section" aria-label="Personal details">

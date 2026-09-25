@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event'
 import UserProfile from './UserProfile.jsx'
 
 const account = {
+  customer_id: 'cus_iris_profile',
   profile: {
     display_name: 'Iris',
     legal_name: 'Iris Zhang',
@@ -91,10 +92,14 @@ describe('UserProfile', () => {
     expect(screen.queryByText('Account summary')).not.toBeInTheDocument()
     expect(screen.queryByText('Review the information Northwind can currently show for this account.')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'My profile' })).not.toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: 'Policies' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Personal details' })).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: 'Policies' })).not.toBeInTheDocument()
     expect(screen.getByText('i•••@gmail.com')).toBeInTheDocument()
     expect(screen.getByText('••• ••• 123')).toBeInTheDocument()
-    expect(screen.queryByText('Policy number')).not.toBeInTheDocument()
+    expect(screen.getByText('Customer ID:', { selector: '.profile-header-meta > span' })).toBeInTheDocument()
+    expect(screen.getByText('cus_iris_profile', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Profile header' })).not.toHaveTextContent(/policy/i)
+    expect(screen.queryByRole('button', { name: /policy number/i })).not.toBeInTheDocument()
     expect(screen.queryByText(/^Saved$/)).not.toBeInTheDocument()
     expect(screen.getByText('Iris', { selector: '.profile-header-copy > strong' }).closest('.profile-header')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Edit profile' }).closest('.profile-header')).toBeInTheDocument()
@@ -169,6 +174,15 @@ describe('UserProfile', () => {
     expect(onSaveAutoFillChoices).toHaveBeenCalledTimes(1)
   })
 
+  it('shows Not provided for a missing preferred name or customer ID', () => {
+    renderProfile({
+      account: { ...account, customer_id: undefined, profile: { ...account.profile, preferred_name: null } },
+    }, 'personal-details')
+
+    expect(screen.getByText('Not provided', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
+    expect(screen.getByText('Not provided', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
+  })
+
   it('updates the preferred name without changing the legal name', async () => {
     const user = userEvent.setup()
     const updatedAccount = {
@@ -188,7 +202,7 @@ describe('UserProfile', () => {
     await user.click(screen.getByRole('button', { name: 'Save profile' }))
 
     expect(onSaveProfile).toHaveBeenCalledWith({ preferred_name: 'Iris Liu' })
-    expect(await screen.findByRole('status')).toHaveTextContent('updated in your saved Northwind account')
+    expect(await screen.findByText(/updated in your saved Northwind account/)).toBeInTheDocument()
     expect(screen.getByText('Iris Liu', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
     expect(screen.getByText('Iris Zhang', { selector: '.profile-summary-row > dd' })).toBeInTheDocument()
     expect(screen.queryByLabelText('Preferred name')).not.toBeInTheDocument()
@@ -269,7 +283,7 @@ describe('UserProfile', () => {
       phone: '+64 21 555 123',
       residential_address: '22 Harbour Road, Auckland',
     })
-    expect(await screen.findByRole('status')).toHaveTextContent('Profile information was updated')
+    expect(await screen.findByText(/Profile information was updated/)).toBeInTheDocument()
     expect(screen.getByText('Iris', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
     expect(screen.getByText('Iris Zhang-Smith', { selector: '.profile-summary-row > dd' })).toBeInTheDocument()
     expect(screen.getByText('22 Harbour Road, Auckland')).toBeInTheDocument()
@@ -315,7 +329,7 @@ describe('UserProfile', () => {
     await user.click(saveButton)
 
     expect(onSaveProfile).toHaveBeenCalledTimes(2)
-    expect(await screen.findByRole('status')).toHaveTextContent('Profile information was updated')
+    expect(await screen.findByText(/Profile information was updated/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Edit personal information' })).toBeInTheDocument()
   })
 
