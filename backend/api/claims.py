@@ -517,6 +517,7 @@ def decide_external_offer(
         payload,
         idempotency_key,
         if_match,
+        identity_repository_for(request),
     )
     current = repository_for(request).get_claim(claim_id, principal.subject)
     if current is not None:
