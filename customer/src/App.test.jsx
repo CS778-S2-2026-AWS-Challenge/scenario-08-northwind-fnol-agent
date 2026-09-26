@@ -3438,9 +3438,9 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
     await user.click(screen.getByRole('button', { name: 'Claim history' }))
-    expect(await screen.findByRole('heading', { name: 'No created Claims yet' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Your report is underway' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Continue your report' }))
+    await user.click(screen.getByRole('button', { name: 'Continue report' }))
 
     expect(screen.queryByRole('heading', { name: 'Claim history' })).not.toBeInTheDocument()
     expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
@@ -3485,9 +3485,14 @@ describe('claimant intake projection', () => {
     // The desktop navigation and the mobile index both render the same Claim history entry.
     const [claimHistoryEntry] = await screen.findAllByRole('button', { name: 'Claim history' })
     await user.click(claimHistoryEntry)
+    expect(await screen.findByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
+    expect(screen.getByText('Track open claims and review your previous submissions.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Account' })).toHaveAttribute('href', '/profile')
+    expect(screen.getByRole('button', { name: 'Start a new claim' })).toBeInTheDocument()
     const row = await screen.findByRole('button', { name: 'Open Home claim, Claim NWF-2026-000973' })
-    // Only the created Claim is listed; the reports still in progress stay out of Claim history.
-    expect(screen.getByText('1 saved Claim')).toBeInTheDocument()
+    // Only the created Claim is listed; the report in progress is promoted separately.
+    expect(screen.getByText('1 claim')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Your report is underway' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /clm_in_progress_history|clm_ui_vp/ })).not.toBeInTheDocument()
     await user.click(row)
 
