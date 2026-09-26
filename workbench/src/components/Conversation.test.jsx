@@ -1,11 +1,23 @@
+import { readFileSync } from 'node:fs'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { useState } from 'react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../api.js'
 import { formatDate, formatTime } from '../format.js'
 import Conversation from './Conversation.jsx'
+
+const workbenchStyles = readFileSync('src/styles.css', 'utf8')
+let styleElement
+
+beforeAll(() => {
+  styleElement = document.createElement('style')
+  styleElement.textContent = workbenchStyles
+  document.head.append(styleElement)
+})
+
+afterAll(() => styleElement.remove())
 
 const detail = { claim_id: 'clm_1', active_session_id: 'ses_1', revision: 1, allowed_actions: [] }
 
@@ -138,6 +150,10 @@ describe('Conversation', () => {
     expect(screen.getByText('AI Agent')).toBeVisible()
     expect(screen.getByText('Northwind staff')).toBeVisible()
     expect(screen.getByText('System')).toBeVisible()
+    expect(getComputedStyle(screen.getByText('I need help.').closest('.message')).alignSelf).toBe('flex-start')
+    expect(getComputedStyle(screen.getByText('I have sent your request.').closest('.message')).alignSelf).toBe('flex-end')
+    expect(getComputedStyle(screen.getByText('I can review this.').closest('.message')).alignSelf).toBe('flex-end')
+    expect(getComputedStyle(screen.getByText('Conversation updated.').closest('.message')).alignSelf).toBe('center')
     expect(screen.getAllByText(formatDate('2026-09-14T10:00:00Z'))).toHaveLength(1)
     expect(screen.getByText(formatTime('2026-09-14T10:01:00Z'))).toBeVisible()
     expect(screen.getByLabelText('Message to claimant')).toBeDisabled()
@@ -529,7 +545,11 @@ describe('Conversation', () => {
       </MemoryRouter>,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Use voice input' }))
+    const voiceButton = screen.getByRole('button', { name: 'Use voice input' })
+    expect(getComputedStyle(voiceButton).gridColumn).toBe('2')
+    expect(getComputedStyle(screen.getByLabelText('Message to claimant')).gridColumn).toBe('1')
+
+    await user.click(voiceButton)
 
     const recognition = recognitionFor()
     expect(recognition.start).toHaveBeenCalledOnce()

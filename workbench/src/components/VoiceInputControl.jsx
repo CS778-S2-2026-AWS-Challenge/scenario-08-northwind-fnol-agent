@@ -159,8 +159,8 @@ const VoiceInputControl = forwardRef(function VoiceInputControl({
         onClick={startVoiceInput}
       >
         {voiceState === 'listening'
-          ? <Square size={16} aria-hidden="true" />
-          : <Mic size={18} aria-hidden="true" />}
+          ? <Square size={14} aria-hidden="true" />
+          : <Mic size={16} aria-hidden="true" />}
       </button>
       {voiceStatus && (
         <div
