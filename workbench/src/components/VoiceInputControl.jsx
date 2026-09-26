@@ -154,7 +154,6 @@ const VoiceInputControl = forwardRef(function VoiceInputControl({
         type="button"
         disabled={!available || voiceState === 'stopping'}
         aria-label={voiceState === 'listening' ? 'Stop voice input' : 'Use voice input'}
-        aria-pressed={voiceState === 'listening'}
         title={voiceState === 'listening' ? 'Stop voice input' : 'Use voice input'}
         onClick={startVoiceInput}
       >
