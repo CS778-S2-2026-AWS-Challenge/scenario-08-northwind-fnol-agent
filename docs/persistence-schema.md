@@ -1365,3 +1365,14 @@ The `claim.reopen` mutation is staff-scoped and stores, in one Fixture lock or M
 Only a primary owner with an exact non-blocked action may call this boundary. `completed`, a created
 external Claim, or an underlying `created` workflow cannot be reopened. Failed authorization,
 validation, revision, idempotency, or ownership checks write none of the bundle.
+
+### Claim agreement acceptance
+
+`WorkingClaim.agreement_acceptances` is append-only Claim-scoped history. Each acceptance
+binds the authenticated claimant, Claim, agreement identifier/version, exact confirmation
+results, reviewed Claim revision, resulting Claim revision, and server timestamp.
+
+Agreement acceptance uses the existing atomic Claim mutation boundary, so Claim revision,
+acceptance history, idempotency metadata, audit facts, and claimant realtime publication
+commit together in Fixture and MongoDB persistence. No separate legal-document repository
+or second Claim-submission lifecycle is introduced.

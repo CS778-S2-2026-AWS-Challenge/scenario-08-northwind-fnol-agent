@@ -226,3 +226,13 @@ Before a configured provider can be described as production-capable, verify endp
 identity, authorised matching keys, schema and null semantics, retry and timeout
 behaviour, idempotency, service limits, ownership, visibility, retention, audit,
 reconciliation, rollback, and operational support.
+
+### Final claimant agreement gate
+
+Issue #928 adds a claimant-owned precondition before a new Claim-creation provider operation:
+the server-owned payout/contact selection must remain current and the claimant must have
+explicitly accepted the current versioned submission agreement for the current Claim revision.
+
+The gate does not replace the creation operation record, provider reservation, idempotent replay,
+unknown-outcome handling, reconciliation, or settlement behaviour. Existing creation replay and
+recovery remain authoritative before this precondition is evaluated.

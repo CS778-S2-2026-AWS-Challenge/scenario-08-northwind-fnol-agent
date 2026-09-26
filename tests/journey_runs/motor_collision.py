@@ -651,7 +651,10 @@ def _drive_to_assessor_consent(
             {'next_step_status': expected_confirm['next_step']['status']},
             {'next_step_status': (confirmed.get('customer_next_step') or {}).get('status')},
         )
-    created = journey.step('create the claim', 'POST', f'{claim}/creation', 201, 'claimant')
+    created = None
+    if not journey.stopped:
+        journey.prepare_submission(key='motor-journey-submit')
+        created = journey.step('create the claim', 'POST', f'{claim}/creation', 201, 'claimant')
     if created:
         external_claim = created.get('external_claim') or {}
         journey.record_oracle(

@@ -4,6 +4,8 @@ from typing import Any, cast
 
 from fastapi.testclient import TestClient
 
+from tests.issue_928_support import prepare_claim_submission
+
 FIXTURE_PATH = Path(__file__).parent / 'fixtures' / 'journeys' / 'AT-01-clear-motor-creation.json'
 
 
@@ -172,12 +174,19 @@ def _run_clear_claim_journey(
     assert current_body['form']['incident.location']['source_refs']
     assert current_body['form']['loss.description']['source_refs']
 
+    submission_revision = prepare_claim_submission(
+        client,
+        auth_headers,
+        claim_id,
+        int(corrected_body['revision']),
+        key=f'{run_id}-submit',
+    )
     created_external = client.post(
         f'/api/v1/claims/{claim_id}/creation',
         headers={
             **auth_headers,
             'Idempotency-Key': f'{run_id}-proceed',
-            'If-Match': str(corrected_body['revision']),
+            'If-Match': str(submission_revision),
         },
     )
     assert created_external.status_code == 201

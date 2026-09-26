@@ -34,6 +34,7 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -41,12 +42,11 @@ from backend.repositories.protocols import (
     RevisionConflict,
 )
 from backend.services.branching import build_applied_branch_evaluation
-from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.evidence_handoff import (
     assemble_evidence_handoff_packet,
     default_handoff_visibility,
 )
-from backend.services.external_services import claimant_assessor_action, claimant_next_step
+from backend.services.external_services import claimant_current_action_projection
 from backend.services.handoff_audit import build_handoff_audit_event
 from backend.services.handoff_context import build_handoff_transfer_context
 from backend.services.runtime_integrations import RuntimeIntegrationPolicy
@@ -102,19 +102,18 @@ def _response(
     handoff: HandoffRecord,
     claim: WorkingClaim,
     receipt: HandoffDispatchReceipt,
+    identity_repository: IdentityRepository | None = None,
 ) -> SupportRequestResponse:
-    external_service_action = claimant_assessor_action(repository, claim)
-    next_step = claimant_next_step(repository, claim, external_service_action)
+    _external_action, next_step, primary_action = claimant_current_action_projection(
+        repository,
+        claim,
+        identity_repository=identity_repository,
+    )
     return SupportRequestResponse(
         handoff=claimant_handoff(handoff),
         revision=claim.revision,
         customer_next_step=next_step,
-        primary_action=project_claimant_primary_action(
-            claim_id=claim.claim_id,
-            claim_revision=claim.revision,
-            next_step=next_step,
-            external_service_action=external_service_action,
-        ),
+        primary_action=primary_action,
         delivery=HandoffDelivery(
             state=receipt.state,
             limitations=list(receipt.limitations),
@@ -510,6 +509,7 @@ def create_support_request(
     idempotency_key: str | None,
     if_match: str | None,
     runtime_integration_policy: RuntimeIntegrationPolicy,
+    identity_repository: IdentityRepository | None = None,
 ) -> SupportRequestResponse:
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
@@ -545,6 +545,7 @@ def create_support_request(
             handoff,
             claim,
             _notify_staff_queue(runtime_integration_policy, dispatch, handoff),
+            identity_repository,
         )
 
     claim = repository.get_claim(claim_id, principal.subject)
@@ -583,6 +584,7 @@ def create_support_request(
             handoff,
             claim,
             _notify_staff_queue(runtime_integration_policy, dispatch, handoff),
+            identity_repository,
         )
     updated_claim = updated_claim_for_handoff(claim, handoff, next_step)
     from backend.services.turn_reducer import apply_progress
@@ -646,6 +648,7 @@ def create_support_request(
         handoff,
         updated_claim,
         _notify_staff_queue(runtime_integration_policy, dispatch, handoff),
+        identity_repository,
     )
 
 
