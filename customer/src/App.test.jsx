@@ -730,9 +730,9 @@ describe('claimant intake projection', () => {
 
     const documentsTab = screen.getByRole('tab', { name: 'What to provide' })
     await user.click(documentsTab)
-    const trigger = screen.getByRole('button', { name: /Third-party support/ })
+    const trigger = screen.getByRole('button', { name: /Use a third-party service/ })
     expect(trigger.closest('[role="tabpanel"]')).toHaveAccessibleName('What to provide')
-    expect(trigger).toHaveTextContent('2 services available')
+    expect(trigger).toHaveTextContent('View 2 options')
     await user.click(trigger)
     expect(await screen.findByRole('dialog', { name: 'Third-party services' })).toBeVisible()
     await user.click(screen.getByRole('button', { name: 'Close third-party services' }))
@@ -779,7 +779,7 @@ describe('claimant intake projection', () => {
     expect(screen.queryByRole('dialog', { name: 'Third-party services' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: 'What to provide' }))
-    await user.click(screen.getByRole('button', { name: /Third-party support/ }))
+    await user.click(screen.getByRole('button', { name: /Use a third-party service/ }))
     expect(await screen.findByRole('dialog', { name: 'Third-party services' })).toBeVisible()
   })
 
@@ -3106,6 +3106,7 @@ describe('claimant intake projection', () => {
       status: 'received',
       file_status: 'ready',
       original_filename: 'repair-quote.pdf',
+      media_type: 'application/pdf',
     }
     const processingEvidence = {
       ...receivedEvidence,
@@ -3145,8 +3146,10 @@ describe('claimant intake projection', () => {
     await user.keyboard('{ArrowRight}')
     expect(documentsTab).toHaveFocus()
     expect(documentsTab).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('Repair Quote')).toBeInTheDocument()
-    expect(screen.getByText('1 item needs your attention')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Documents and evidence' })).toBeInTheDocument()
+    expect(screen.getByText('Repair quote')).toBeInTheDocument()
+    expect(screen.getByText('0 of 1 provided')).toBeInTheDocument()
+    expect(screen.queryByText(/needs your attention/)).not.toBeInTheDocument()
 
     await user.keyboard('{Home}')
     expect(summaryTab).toHaveFocus()
@@ -3155,7 +3158,7 @@ describe('claimant intake projection', () => {
 
     await user.click(screen.getByRole('button', { name: 'What to provide, 1 outstanding' }))
     expect(documentsTab).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('Repair Quote')).toBeInTheDocument()
+    expect(screen.getByText('Repair quote')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Evidence history' })).not.toBeInTheDocument()
 
     const documentsPanel = screen.getByRole('tabpanel', { name: 'What to provide' })
@@ -3175,7 +3178,10 @@ describe('claimant intake projection', () => {
     await waitFor(() => expect(pushEvidenceUpdate).toBeTypeOf('function'))
     await act(async () => pushEvidenceUpdate(realtimeChange(5, ['evidence'])))
     await waitFor(() => expect(api.getClaimEvidence).toHaveBeenCalledTimes(2))
-    expect(await screen.findByText('Received')).toBeInTheDocument()
+    expect(await within(documentsPanel).findByText('repair-quote.pdf')).toBeInTheDocument()
+    expect(within(documentsPanel).getByText('PDF · Upload complete')).toBeInTheDocument()
+    expect(within(documentsPanel).getByText('1 of 1 provided')).toBeInTheDocument()
+    expect(within(documentsPanel).queryByRole('button', { name: /Replace|Remove/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'What to provide' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /What to provide, .* outstanding/ })).not.toBeInTheDocument()
   })
