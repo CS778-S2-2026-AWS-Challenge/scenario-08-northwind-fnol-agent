@@ -1,13 +1,44 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { useState } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../api.js'
 import { formatDate, formatTime } from '../format.js'
 import Conversation from './Conversation.jsx'
 
 const detail = { claim_id: 'clm_1', active_session_id: 'ses_1', revision: 1, allowed_actions: [] }
+
+let activeSpeechRecognition = null
+
+function installSpeechRecognition() {
+  class FakeSpeechRecognition {
+    constructor() {
+      this.start = vi.fn()
+      this.stop = vi.fn()
+      this.abort = vi.fn()
+      activeSpeechRecognition = this
+    }
+  }
+
+  vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+  vi.stubGlobal('webkitSpeechRecognition', undefined)
+  return () => activeSpeechRecognition
+}
+
+function emitFinalTranscript(recognition, transcript) {
+  act(() => {
+    recognition.onresult?.({
+      resultIndex: 0,
+      results: [{ 0: { transcript }, isFinal: true }],
+    })
+  })
+}
+
+afterEach(() => {
+  activeSpeechRecognition = null
+  vi.unstubAllGlobals()
+})
 
 function assistanceHandoff(status, overrides = {}) {
   return {
@@ -486,6 +517,210 @@ describe('Conversation', () => {
       expect(textarea).toHaveValue('Follow-up draft written while sending')
       expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled()
     })
+  })
+
+  it('adds final voice transcripts to the editable draft and stops without sending', async () => {
+    const recognitionFor = installSpeechRecognition()
+    const onSend = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/workbench/claims/clm_1/conversation?session=ses_1']}>
+        <DraftConversation onSend={onSend} />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Use voice input' }))
+
+    const recognition = recognitionFor()
+    expect(recognition.start).toHaveBeenCalledOnce()
+    expect(recognition.lang).toBe('en-NZ')
+    expect(recognition.continuous).toBe(true)
+    expect(screen.getByText(/Listening… Speak naturally/)).toBeVisible()
+
+    emitFinalTranscript(recognition, 'The vehicle is safely parked')
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Message to claimant')).toHaveValue(
+        'First staff message The vehicle is safely parked',
+      )
+    })
+    expect(onSend).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Stop voice input' }))
+    expect(recognition.stop).toHaveBeenCalledOnce()
+    expect(screen.getByText('Finishing voice input…')).toBeVisible()
+
+    act(() => recognition.onend?.())
+
+    expect(screen.getByText('Voice input stopped. Review the transcript before sending.')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Use voice input' })).toBeEnabled()
+    expect(screen.getByLabelText('Message to claimant')).toHaveFocus()
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('ends active voice capture before sending the reviewed transcript', async () => {
+    const recognitionFor = installSpeechRecognition()
+    const onSend = vi.fn().mockResolvedValue({ delivery: { message_id: 'msg_voice_staff' } })
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/workbench/claims/clm_1/conversation?session=ses_1']}>
+        <DraftConversation onSend={onSend} />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Use voice input' }))
+    const recognition = recognitionFor()
+    emitFinalTranscript(recognition, 'Please upload the invoice')
+    await waitFor(() => expect(screen.getByLabelText('Message to claimant')).toHaveValue(
+      'First staff message Please upload the invoice',
+    ))
+
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+    expect(recognition.abort).toHaveBeenCalledOnce()
+    expect(onSend).toHaveBeenCalledWith({
+      draft: 'First staff message Please upload the invoice',
+      message: 'First staff message Please upload the invoice',
+      sessionId: 'ses_1',
+    })
+  })
+
+  it('cancels active capture while keeping transcript text editable', async () => {
+    const recognitionFor = installSpeechRecognition()
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/workbench/claims/clm_1/conversation?session=ses_1']}>
+        <DraftConversation onSend={vi.fn()} />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Use voice input' }))
+    const recognition = recognitionFor()
+    emitFinalTranscript(recognition, 'Please send the repair estimate')
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(recognition.abort).toHaveBeenCalledOnce()
+    expect(screen.getByLabelText('Message to claimant')).toHaveValue(
+      'First staff message Please send the repair estimate',
+    )
+    expect(screen.getByText(
+      'Voice input cancelled. Any text already added remains in your draft.',
+    )).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Use voice input' })).toBeEnabled()
+  })
+
+  it('keeps typed input available when browser speech recognition is unsupported', async () => {
+    vi.stubGlobal('SpeechRecognition', undefined)
+    vi.stubGlobal('webkitSpeechRecognition', undefined)
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/workbench/claims/clm_1/conversation?session=ses_1']}>
+        <DraftConversation onSend={vi.fn()} />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Use voice input' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Voice input is not available in this browser. You can continue typing your message.',
+    )
+    await user.type(screen.getByLabelText('Message to claimant'), ' by typing')
+    expect(screen.getByLabelText('Message to claimant')).toHaveValue(
+      'First staff message by typing',
+    )
+  })
+
+  it.each([
+    ['not-allowed', 'Microphone permission was denied. Allow microphone access and try again.'],
+    ['no-speech', 'No speech was detected. Try again when you are ready.'],
+    ['audio-capture', 'No working microphone was found. Check your device and try again.'],
+    ['network', 'Voice recognition could not reach the browser speech service. Check your connection and try again.'],
+  ])('explains the %s voice failure without disabling text input', async (error, message) => {
+    const recognitionFor = installSpeechRecognition()
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/workbench/claims/clm_1/conversation?session=ses_1']}>
+        <DraftConversation onSend={vi.fn()} />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Use voice input' }))
+    act(() => recognitionFor().onerror?.({ error }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent(message)
+    expect(screen.getByLabelText('Message to claimant')).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Use voice input' })).toBeEnabled()
+  })
+
+  it('reports an unexpected recognition stop and allows retry', async () => {
+    const recognitionFor = installSpeechRecognition()
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/workbench/claims/clm_1/conversation?session=ses_1']}>
+        <DraftConversation onSend={vi.fn()} />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Use voice input' }))
+    act(() => recognitionFor().onend?.())
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Voice input stopped unexpectedly. Review your draft and try again.',
+    )
+    expect(screen.getByRole('button', { name: 'Use voice input' })).toBeEnabled()
+  })
+
+  it('aborts voice capture when messaging becomes unavailable and on unmount', async () => {
+    const recognitionFor = installSpeechRecognition()
+    const user = userEvent.setup()
+    const availableProps = {
+      detail: {
+        ...detail,
+        allowed_actions: [{
+          action_code: 'conversation.send_claimant_message',
+          target_ref: 'ses_1',
+          based_on_revision: 1,
+          availability: 'available',
+        }],
+      },
+      resource: { items: [], resolved_session_id: 'ses_1' },
+      draft: '',
+      onDraft: vi.fn(),
+      onSend: vi.fn(),
+    }
+    const unavailableProps = {
+      ...availableProps,
+      detail: { ...detail, allowed_actions: [] },
+    }
+    const view = render(
+      <MemoryRouter initialEntries={['/workbench/claims/clm_1/conversation?session=ses_1']}>
+        <Conversation {...availableProps} />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Use voice input' }))
+    const firstRecognition = recognitionFor()
+    view.rerender(
+      <MemoryRouter initialEntries={['/workbench/claims/clm_1/conversation?session=ses_1']}>
+        <Conversation {...unavailableProps} />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(firstRecognition.abort).toHaveBeenCalledOnce())
+    expect(screen.queryByRole('button', { name: 'Use voice input' })).not.toBeInTheDocument()
+
+    view.rerender(
+      <MemoryRouter initialEntries={['/workbench/claims/clm_1/conversation?session=ses_1']}>
+        <Conversation {...availableProps} />
+      </MemoryRouter>,
+    )
+    await user.click(screen.getByRole('button', { name: 'Use voice input' }))
+    const secondRecognition = recognitionFor()
+
+    view.unmount()
+
+    expect(secondRecognition.abort).toHaveBeenCalledOnce()
   })
 
   it.each([
