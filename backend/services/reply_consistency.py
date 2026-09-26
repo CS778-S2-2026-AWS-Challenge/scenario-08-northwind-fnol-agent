@@ -89,20 +89,22 @@ def review_reply(validated: ValidatedTurn) -> ConsistencyReview:
                     detail=f'{identity}: {", ".join(sorted(hits))}',
                 )
             )
-    if not validated.service_identities:
-        # An arrangement claim is a problem only when it asserts a third-party
-        # service was set up. Submitting the report is the model's own job, and
-        # a question ("Shall I send it?") asserts nothing.
-        for sentence in re.split(r'(?<=[.!?])\s+', validated.reply.strip()):
-            if sentence.rstrip().endswith('?'):
-                continue
-            match = _EXECUTION_CLAIM.search(sentence)
-            if match is None or _SUBMISSION_INTENT_VERB.search(sentence):
-                continue
-            problems.append(
-                ReplyInconsistency(kind='claims_arrangement_without_service', detail=match.group(0))
-            )
-            break
+    # An arrangement claim is never true within this turn, offered service or not: the model's
+    # offer_service only creates a pending card, and arranging, booking, approving, completing
+    # or contacting only happens after the claimant grants that card their own consent -- a
+    # separate turn this validator has no visibility into. Submitting the report is the model's
+    # own future job, so "I'll send it" is exempt; a question ("Shall I send it?") asserts
+    # nothing either way.
+    for sentence in re.split(r'(?<=[.!?])\s+', validated.reply.strip()):
+        if sentence.rstrip().endswith('?'):
+            continue
+        match = _EXECUTION_CLAIM.search(sentence)
+        if match is None or _SUBMISSION_INTENT_VERB.search(sentence):
+            continue
+        problems.append(
+            ReplyInconsistency(kind='claims_arrangement_without_service', detail=match.group(0))
+        )
+        break
     if validated.action == 'summarize' and not validated.summary_fields:
         problems.append(
             ReplyInconsistency(

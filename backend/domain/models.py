@@ -905,6 +905,65 @@ class ExternalServiceConsent(ContractModel):
         return self
 
 
+class ClaimAgreementConfirmationDefinition(ContractModel):
+    """One explicit confirmation required before formal Claim submission."""
+
+    key: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r'^[a-z][a-z0-9_]*$',
+    )
+    label: str = Field(min_length=1, max_length=500)
+    required: bool = True
+
+
+class ClaimSubmissionAgreement(ContractModel):
+    """One claimant-safe versioned agreement definition."""
+
+    agreement_id: str = Field(min_length=1, max_length=100)
+    version: str = Field(min_length=1, max_length=50)
+    display_copy: str = Field(min_length=1, max_length=4000)
+    confirmations: list[ClaimAgreementConfirmationDefinition] = Field(
+        min_length=1,
+        max_length=20,
+    )
+
+    @model_validator(mode='after')
+    def validate_confirmations(self) -> 'ClaimSubmissionAgreement':
+        keys = [item.key for item in self.confirmations]
+        if len(keys) != len(set(keys)):
+            raise ValueError('Agreement confirmation keys must be unique.')
+        if not any(item.required for item in self.confirmations):
+            raise ValueError('Submission agreement requires at least one confirmation.')
+        return self
+
+
+class ClaimAgreementAcceptance(ContractModel):
+    """Append-only Claim-scoped fact recording one explicit claimant acceptance."""
+
+    acceptance_id: str = Field(pattern=r'^aga_[A-Za-z0-9_-]{1,96}$')
+    customer_id: str = Field(min_length=1, max_length=100)
+    claim_id: str = Field(min_length=1, max_length=100)
+    agreement_id: str = Field(min_length=1, max_length=100)
+    agreement_version: str = Field(min_length=1, max_length=50)
+    confirmations: dict[str, bool] = Field(default_factory=dict)
+    accepted_against_claim_revision: int = Field(ge=1)
+    resulting_claim_revision: int = Field(ge=2)
+    accepted_at: datetime
+
+    @model_validator(mode='after')
+    def validate_revision_link(self) -> 'ClaimAgreementAcceptance':
+        if self.resulting_claim_revision != self.accepted_against_claim_revision + 1:
+            raise ValueError('Agreement acceptance must advance exactly one Claim revision.')
+        return self
+
+
+class AcceptClaimAgreementRequest(ContractModel):
+    agreement_id: str = Field(min_length=1, max_length=100)
+    version: str = Field(min_length=1, max_length=50)
+    confirmations: dict[str, bool] = Field(min_length=1, max_length=20)
+
+
 class WorkingClaim(ContractModel):
     claim_id: str
     customer_id: str
@@ -920,6 +979,7 @@ class WorkingClaim(ContractModel):
     assignee_id: str | None = Field(default=None, min_length=1, max_length=100)
     active_session_id: str | None = None
     payment_destination_id: str | None = Field(default=None, pattern=r'^pyd_[a-f0-9]{20}$')
+    agreement_acceptances: list[ClaimAgreementAcceptance] = Field(default_factory=list)
     external_claim: ExternalClaimResult | None = None
     external_claim_source_revision: int | None = Field(default=None, ge=1)
     external_claim_fingerprint: str | None = None
@@ -939,6 +999,18 @@ class WorkingClaim(ContractModel):
         item_ids = [item.item_id for item in self.contents_items]
         if len(item_ids) != len(set(item_ids)):
             raise ValueError('Contents item identifiers must be unique within a Claim.')
+        acceptance_ids = [acceptance.acceptance_id for acceptance in self.agreement_acceptances]
+        if len(acceptance_ids) != len(set(acceptance_ids)):
+            raise ValueError('Agreement acceptance identifiers must be unique within a Claim.')
+        for acceptance in self.agreement_acceptances:
+            if (
+                acceptance.claim_id != self.claim_id
+                or acceptance.customer_id != self.customer_id
+                or acceptance.resulting_claim_revision > self.revision
+            ):
+                raise ValueError(
+                    'Agreement acceptance must remain bound to its owning Claim and revision.'
+                )
         terminal = self.terminal_disposition
         if terminal is None:
             return self
@@ -2099,6 +2171,25 @@ class ClaimantIncompleteContext(ContractModel):
     follow_up_status: FollowUpStatus
 
 
+class ClaimAgreementAcceptanceProjection(ContractModel):
+    """Claimant-safe receipt for one recorded agreement acceptance."""
+
+    acceptance_id: str
+    agreement_id: str
+    version: str
+    confirmations: dict[str, bool]
+    accepted_at: datetime
+
+
+class AgreementAcceptanceResponse(ContractModel):
+    claim_id: str
+    revision: int = Field(ge=1)
+    agreement: ClaimSubmissionAgreement
+    acceptance: ClaimAgreementAcceptanceProjection
+    customer_next_step: CustomerNextStep
+    primary_action: ClaimantPrimaryAction
+
+
 class ClaimantClaim(ContractModel):
     claim_id: str
     revision: int
@@ -2109,6 +2200,7 @@ class ClaimantClaim(ContractModel):
     motor_other_driver: MotorOtherDriverProjection | None = None
     evidence_summary: EvidenceSummary
     payment_destination_id: str | None = Field(default=None, pattern=r'^pyd_[a-f0-9]{20}$')
+    submission_agreement: ClaimSubmissionAgreement | None = None
     external_claim: ExternalClaimResult | None = None
     external_service_action: ClaimantExternalServiceAction | None = None
     external_capabilities: list[ExternalCapabilityProjection] = Field(default_factory=list)

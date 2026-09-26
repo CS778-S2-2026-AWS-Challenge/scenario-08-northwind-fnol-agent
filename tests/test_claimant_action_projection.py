@@ -157,12 +157,28 @@ def test_ready_to_create_projects_payout_contact_as_the_authoritative_step() -> 
     assert projection.execution_boundary == 'conversation'
 
 
-def test_agreement_required_opens_claim_creation_directly() -> None:
+def test_agreement_required_opens_agreement_review_until_accepted() -> None:
     projection = project_claimant_primary_action(
         claim_id='clm_2',
         claim_revision=4,
         next_step=next_step('agreement_required'),
         external_service_action=None,
+    )
+
+    assert projection.action_type == 'conversation'
+    assert projection.action_code == 'claimant.review_agreement'
+    assert projection.available is True
+    assert projection.required_inputs == []
+    assert projection.execution_boundary == 'conversation'
+
+
+def test_current_agreement_acceptance_opens_claim_creation() -> None:
+    projection = project_claimant_primary_action(
+        claim_id='clm_2',
+        claim_revision=5,
+        next_step=next_step('agreement_required'),
+        external_service_action=None,
+        agreement_accepted=True,
     )
 
     assert projection.action_type == 'claim_creation'

@@ -65,6 +65,10 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.agreement import (
+    agreement_acceptance_is_current,
+    current_submission_agreement,
+)
 from backend.services.branching import (
     build_applied_branch_evaluation,
     claimant_dynamic_form_projection,
@@ -73,10 +77,9 @@ from backend.services.claim_data import (
     project_contents_item_evidence_association,
     project_motor_other_driver,
 )
-from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.claimant_form_projection import project_claimant_form_fields
 from backend.services.evidence_visibility import claimant_visible_evidence
-from backend.services.external_services import claimant_assessor_action, claimant_next_step
+from backend.services.external_services import claimant_current_action_projection
 from backend.services.fact_resolution import (
     confirm_contents_item,
     confirm_form_field,
@@ -270,14 +273,8 @@ def claimant_claim(
     claimant_evidence = claimant_visible_evidence(
         repository.list_evidence(claim.claim_id, claim.customer_id)
     )
-    # Derived once and passed to both fields: the next step is corrected against the
-    # action, so reading the action twice could let the two disagree again.
-    external_service_action = claimant_assessor_action(repository, claim)
-    legacy_external_service_action = (
-        external_service_action
-        if external_service_action is None or external_service_action.offer_id is None
-        else None
-    )
+    # Read and write boundaries share one current-action derivation so a
+    # message-bound service offer cannot reorder the claimant intake journey.
     handoff: ClaimantHandoff | None = None
     resolved_support_handoff: ClaimantResolvedSupportHandoff | None = None
     if claim.active_session_id is not None:
@@ -331,11 +328,11 @@ def claimant_claim(
                     if customer_update is not None
                     else None,
                 )
-    next_step = claimant_next_step(
+    legacy_external_service_action, next_step, primary_action = claimant_current_action_projection(
         repository,
         claim,
-        legacy_external_service_action,
         identity_repository=identity_repository,
+        agreement_accepted=agreement_acceptance_is_current(claim),
     )
     motor_other_driver = repository.get_motor_other_driver(claim.claim_id, claim.customer_id)
     return ClaimantClaim(
@@ -352,17 +349,15 @@ def claimant_claim(
         ),
         evidence_summary=evidence_summary_for(claimant_evidence),
         payment_destination_id=claim.payment_destination_id,
+        submission_agreement=(
+            current_submission_agreement() if next_step.status == 'agreement_required' else None
+        ),
         external_claim=claim.external_claim,
         external_service_action=legacy_external_service_action,
         external_capabilities=list(capability_catalogue(claim.incident_type)),
         dynamic_form=claimant_dynamic_form_projection(repository, claim),
         customer_next_step=next_step,
-        primary_action=project_claimant_primary_action(
-            claim_id=claim.claim_id,
-            claim_revision=claim.revision,
-            next_step=next_step,
-            external_service_action=legacy_external_service_action,
-        ),
+        primary_action=primary_action,
         incomplete_context=_claimant_incomplete_context(repository, claim),
         handoff=handoff,
         resolved_support_handoff=resolved_support_handoff,
@@ -1043,6 +1038,7 @@ def update_form(
     claim_id: str,
     payload: FormPatchRequest,
     if_match: str | None,
+    identity_repository: IdentityRepository | None = None,
 ) -> FormPatchResponse:
     expected_revision = parse_if_match(if_match)
     claim = repository.get_claim(claim_id, principal.subject)
@@ -1169,7 +1165,6 @@ def update_form(
         candidate_branch_evaluation,
         open_handoffs=tuple(repository.list_handoffs(claim_id, principal.subject)),
     )
-    next_step = projected_claim.customer_next_step
     updated_claim = projected_claim.model_copy(
         update={
             'revision': claim.revision + 1,
@@ -1200,17 +1195,17 @@ def update_form(
         updated_claim,
         updated_fields,
     )
+    _external_action, next_step, primary_action = claimant_current_action_projection(
+        repository,
+        updated_claim,
+        identity_repository=identity_repository,
+    )
     return FormPatchResponse(
         claim_id=claim_id,
         revision=updated_claim.revision,
         updated_fields=claimant_updated_fields,
         customer_next_step=next_step,
-        primary_action=project_claimant_primary_action(
-            claim_id=updated_claim.claim_id,
-            claim_revision=updated_claim.revision,
-            next_step=next_step,
-            external_service_action=claimant_assessor_action(repository, updated_claim),
-        ),
+        primary_action=primary_action,
         dynamic_form=claimant_dynamic_form_projection(repository, updated_claim),
     )
 
@@ -1222,6 +1217,7 @@ def confirm_form_fields(
     payload: FormConfirmationRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    identity_repository: IdentityRepository | None = None,
 ) -> FormConfirmationResponse:
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
@@ -1379,7 +1375,6 @@ def confirm_form_fields(
         ),
         open_handoffs=tuple(repository.list_handoffs(claim_id, principal.subject)),
     )
-    next_step = updated_claim.customer_next_step
     try:
         repository.save_claim(
             updated_claim,
@@ -1405,19 +1400,18 @@ def confirm_form_fields(
         updated_claim,
         confirmed_fields,
     )
-    external_service_action = claimant_assessor_action(repository, updated_claim)
+    _external_action, next_step, primary_action = claimant_current_action_projection(
+        repository,
+        updated_claim,
+        identity_repository=identity_repository,
+    )
     response = FormConfirmationResponse(
         claim_id=claim_id,
         revision=updated_claim.revision,
         confirmed_fields=claimant_confirmed_fields,
         confirmed_contents_items=_claimant_contents_items(repository, updated_claim),
         customer_next_step=next_step,
-        primary_action=project_claimant_primary_action(
-            claim_id=updated_claim.claim_id,
-            claim_revision=updated_claim.revision,
-            next_step=next_step,
-            external_service_action=external_service_action,
-        ),
+        primary_action=primary_action,
         dynamic_form=claimant_dynamic_form_projection(repository, updated_claim),
     )
     repository.save_idempotency(

@@ -374,6 +374,8 @@ it('stops listening when the voice control is activated again', async () => {
 
   const voice = screen.getByRole('button', { name: 'Use voice input' })
   await user.click(voice)
+  // The claimant, not the browser's silence detection, decides when to stop.
+  expect(recognitionInstances[0].continuous).toBe(true)
   await user.click(voice)
 
   expect(recognitionInstances[0].stopCalls).toBe(1)

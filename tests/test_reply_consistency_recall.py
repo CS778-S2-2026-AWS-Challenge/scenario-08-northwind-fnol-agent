@@ -117,5 +117,24 @@ def test_consistent_reply_costs_one_call() -> None:
         confirms_batch=False,
         rejected=[],
     )
-    # An arrangement claim is only a problem when nothing was actually accepted.
-    assert review_reply(accepted_service).consistent
+    # offer_service only creates a pending card this turn; arranging still requires the
+    # claimant's own consent on that card in a later turn. An arrangement claim is a lie
+    # regardless of whether a service was accepted this turn.
+    review = review_reply(accepted_service)
+    assert not review.consistent
+    assert review.inconsistencies[0].kind == 'claims_arrangement_without_service'
+
+    offered_without_promise = ValidatedTurn(
+        reply="I've noted your request for a tow. Is anyone hurt?",
+        form_changes=[],
+        contents_item_changes=[],
+        next_question=None,
+        service_identities=('vehicle_recovery_request',),
+        state_changes=[],
+        escalation=None,
+        ready_to_create=False,
+        confirms_batch=False,
+        rejected=[],
+    )
+    # Describing the offer itself, without claiming it is already arranged, remains fine.
+    assert review_reply(offered_without_promise).consistent

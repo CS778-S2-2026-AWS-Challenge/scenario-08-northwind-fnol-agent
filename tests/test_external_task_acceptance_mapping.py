@@ -50,6 +50,7 @@ from backend.domain.models import (
 from backend.repositories.fixture import FixtureRepository
 from backend.services.integrations import reconcile_assessor_routing, route_assessor
 from backend.services.support import now_utc
+from tests.issue_928_support import prepare_claim_submission
 
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
@@ -100,12 +101,19 @@ def _create_assessor_ready_claim(client: TestClient, *, key: str) -> tuple[str, 
     )
     assert confirmation.status_code == 200
 
+    submission_revision = prepare_claim_submission(
+        client,
+        AUTH,
+        claim_id,
+        int(confirmation.json()['revision']),
+        key=f'{key}-submit',
+    )
     external = client.post(
         f'/api/v1/claims/{claim_id}/creation',
         headers={
             **AUTH,
             'Idempotency-Key': f'{key}-creation',
-            'If-Match': str(confirmation.json()['revision']),
+            'If-Match': str(submission_revision),
         },
     )
     assert external.status_code == 201

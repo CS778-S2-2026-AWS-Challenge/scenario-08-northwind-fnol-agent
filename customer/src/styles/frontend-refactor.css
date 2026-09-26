@@ -233,6 +233,7 @@
 .model-control { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
 .model-lock-note { color: var(--color-text-muted); font-size: var(--font-size-caption); white-space: nowrap; }
 .tool-voice { padding: 0; }
+.tool-voice.is-listening { color: var(--color-danger); background: var(--color-danger-soft); }
 
 .uploaded-files-list { display: grid; gap: var(--space-3); padding: 0; list-style: none; }
 .uploaded-file-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--color-divider); border-radius: var(--radius-md); background: var(--color-surface); }

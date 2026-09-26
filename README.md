@@ -89,20 +89,125 @@ The development requirements include `jsonschema` (MIT) and its typing package
 schemas in contract tests; Pydantic validation of a response alone cannot detect an
 unsatisfiable provider schema. They are not production runtime dependencies.
 
-Start the backend:
+### Run the app
+
+Start the complete system — MongoDB, MinIO with the approved knowledge corpus ingested, the
+backend on the `local_mvp` persistence profile talking to the shared model, and all three
+frontends — with one command:
 
 ```powershell
-py -3.12 -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+.\scripts\start-dev.ps1
 ```
 
-To run a configured model profile from the ignored project `.env`, load it explicitly:
+Requires Docker Desktop running and PowerShell 7.3+ (`pwsh`). One-time setup: the model
+credentials live on a team secrets endpoint, and the bearer token that unlocks it is itself a
+credential, so it is never stored in this repository. Get it from a teammate out of band and set
+it once for your Windows user, then open a new terminal:
 
 ```powershell
-py -3.12 -m uvicorn backend.main:app --env-file .env --reload --host 127.0.0.1 --port 8000
+[Environment]::SetEnvironmentVariable('NORTHWIND_SECRETS_TOKEN', '<token from a teammate>', 'User')
 ```
+
+The script refuses to start without it and tells you so. The script:
+
+1. pulls model credentials from the team secrets endpoint using that token, and hands them to
+   the backend process only — the three Vite frontends never receive them, and neither does the
+   token itself;
+2. brings up MongoDB and MinIO through `docker-compose.yml` and waits for each to report
+   healthy, then runs the one-shot `mongo-init`/`minio-init` containers and checks their real
+   exit codes;
+3. ingests the approved knowledge corpus into that MinIO so retrieval is real, not the fixture
+   stub;
+4. starts the backend on `DATA_RUNTIME_PROFILE=local_mvp` with the `model_gateway` runtime
+   profile against the shared `config/model-runtime-bindings.json` (currently OpenRouter
+   `openai/gpt-4o`), and polls `/health/ready` until it actually reports ready;
+5. starts the claimant, Workbench, and Admin frontends and polls each one's page until it
+   actually responds.
+
+Every step fails loudly on its real exit code or health check instead of printing a PID and
+moving on: a backend that crashes on startup is reported as failed, not as running. Open
+`http://127.0.0.1:5173/` for the claimant view, `http://127.0.0.1:5174/workbench/` for staff, and
+`http://127.0.0.1:5175/admin/` for the Control Plane console.
+
+Options: `-BackendOnly` starts only MongoDB/MinIO/backend and skips all three frontends.
+`-SkipDocker` falls back to the fixture data profile (no MongoDB, no MinIO, no persisted
+Evidence, no real knowledge retrieval) when Docker is genuinely unavailable. `-BackendPort` /
+`-CustomerPort` / `-WorkbenchPort` / `-AdminPort` move a process. `-ReadyTimeoutSeconds` extends
+the readiness wait on a slow machine.
+
+The script starts from a fresh Control Plane database each time (`var/dev/control-plane.sqlite3`,
+ignored by git). The backend only publishes the checked-in model catalogue into an empty Control
+Plane; a database left over from an earlier checkout keeps its old catalogue, so you would see an
+old default model or profiles that no longer exist and nothing would tell you why. Claims,
+sessions and accounts are in separate databases and are kept. Pass `-KeepControlPlane` if you
+have published a release locally through the Admin console and want to keep it.
+
+Nobody keeps a private `.env` or a local credential store any more. Which model the team talks to
+is decided by `config/model-runtime-bindings.json`; when that file is loaded the backend ignores
+`MODEL_PROVIDER`, `MODEL_BASE_URL`, `MODEL_IDENTIFIER`, `MODEL_API_KEY_ENV` and the
+`MODEL_SUPPORTS_*` variables, so change the model there, not in the environment.
+
+The same steps, one at a time, if you prefer to run them by hand:
+
+```powershell
+# 1. Pull the credentials with your NORTHWIND_SECRETS_TOKEN (set up above). The bundle is
+#    KEY=VALUE lines. Doing it by hand puts them in this shell's environment, so run the
+#    backend from this same shell and start the frontends from a different one.
+$bundle = Invoke-RestMethod -Uri 'https://ysoseri.us/secret/northwind-dev' `
+    -Headers @{ Authorization = "Bearer $env:NORTHWIND_SECRETS_TOKEN" }
+foreach ($line in ($bundle -split "`n")) {
+    if ($line -match '^([A-Z][A-Z0-9_]*)=(.*)$') { Set-Item -Path "env:$($Matches[1])" -Value $Matches[2] }
+}
+
+# 2. MongoDB and MinIO, then the real one-shot init containers.
+docker compose up -d --wait mongodb minio
+docker compose up --exit-code-from mongo-init mongo-init
+docker compose up --exit-code-from minio-init minio-init
+
+# 3. Ingest the approved knowledge corpus into that MinIO.
+$env:NORTHWIND_OBJECT_STORAGE_ENDPOINT = 'http://localhost:9000'
+$env:NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID = 'minioadmin'
+$env:NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY = 'minioadmin'
+$env:NORTHWIND_KNOWLEDGE_BUCKET = 'northwind-knowledge'
+py -3.12 scripts/upload_knowledge_sources.py config/knowledge-source-corpus
+Get-ChildItem config/knowledge-ingestion-requests/*.json | ForEach-Object {
+    py -3.12 scripts/ingest_knowledge_source.py $_.FullName
+}
+
+# 4. Fresh Control Plane (see above), then select local_mvp/model_gateway and the shared profile.
+New-Item -ItemType Directory -Force -Path var/dev | Out-Null
+Remove-Item -Force -ErrorAction SilentlyContinue var/dev/control-plane.sqlite3*
+$env:NORTHWIND_ENVIRONMENT = 'development'
+$env:NORTHWIND_IDENTITY_MODE = 'normal'
+$env:NORTHWIND_CONTROL_PLANE_DB_PATH = 'var/dev/control-plane.sqlite3'
+$env:DATA_RUNTIME_PROFILE = 'local_mvp'
+$env:NORTHWIND_OBJECT_STORAGE_ADAPTER = 's3_compatible'
+$env:NORTHWIND_MONGODB_URI = 'mongodb://localhost:27017/?directConnection=true&replicaSet=rs0'
+$env:NORTHWIND_MONGODB_DATABASE = 'northwind_fnol'
+$env:NORTHWIND_MONGODB_COLLECTION = 'northwind_records'
+$env:NORTHWIND_OBJECT_STORAGE_BUCKET = 'northwind-evidence'
+$env:AGENT_RUNTIME_PROFILE = 'model_gateway'
+$env:MODEL_RUNTIME_BINDINGS_PATH = 'config/model-runtime-bindings.json'
+$env:MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
+$env:MODEL_TIMEOUT_SECONDS = '180'
+
+# 5. Backend (in this shell). Poll http://127.0.0.1:8000/health/ready before trusting it.
+py -3.12 -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --log-config scripts/dev-logging.json
+
+# 6. Claimant frontend (in a second shell; it proxies /api to port 8000).
+npm run dev --prefix customer -- --host 127.0.0.1 --port 5173
+```
+
+The Workbench and Admin frontends start the same way from `workbench/` and `admin/` on ports
+5174 and 5175, each with `--prefix` and `--port` changed to match; set `WORKBENCH_API_TARGET`
+and `ADMIN_API_TARGET` to `http://127.0.0.1:8000` first if the backend is not on the default port.
+
+`AGENT_RUNTIME_PROFILE=controlled` is a deterministic agent that never calls a model.
+`DATA_RUNTIME_PROFILE=fixture` keeps no Evidence and answers knowledge queries from a fixed
+stub. Both exist for CI and the test suite only and are not a way to run the app.
 
 Deployment environments inject the same variable names through their secret and configuration
-mechanisms; they must not package the local `.env` file.
+mechanisms; they must not package a local `.env` file.
 
 ### Configure protected account data
 
@@ -125,47 +230,26 @@ protected writes fail closed with `503 PROTECTED_DATA_UNAVAILABLE`; the backend 
 plaintext as a fallback. Key custody, rotation, recovery, and retention remain deployment-security
 responsibilities.
 
-On Windows, private model credentials can instead be stored outside the repository with the
-current-user Data Protection API vault:
+Multimodal model input is declared per profile by the `image_input` and `document_input` flags in
+`config/model-runtime-bindings.json`. Those flags only enable image or PDF Evidence blocks for a
+provider profile that has repeatable adapter evidence; they do not grant access to object storage
+or bypass the Evidence authorization boundary.
 
-```powershell
-.\scripts\manage-local-secrets.ps1 set GEMINI_API_KEY
-.\scripts\manage-local-secrets.ps1 set NORTHWIND_MODEL_API_KEY
-.\scripts\manage-local-secrets.ps1 list
-.\scripts\manage-local-secrets.ps1 remove GEMINI_API_KEY
-```
-
-Start the native backend and all three frontends with:
-
-```powershell
-.\scripts\start-local.ps1
-```
-
-The launcher injects decrypted model credentials only into the backend process. The claimant,
-Workbench, and Admin processes do not inherit them. Docker remains optional for the native
-application processes and is used separately when MinIO is required.
-
-Multimodal model input is opt-in through `MODEL_SUPPORTS_IMAGE_INPUT` and
-`MODEL_SUPPORTS_DOCUMENT_INPUT`. These declarations only enable image or PDF Evidence blocks
-for a provider profile that has repeatable adapter evidence; they do not grant access to object
-storage or bypass the Evidence authorization boundary.
-
-The governed multi-model deployment allow-list is selected with
-`MODEL_RUNTIME_BINDINGS_PATH`. Private model endpoints remain environment-owned; the current
-Qwen binding resolves `NORTHWIND_QWEN_BASE_URL` at process startup rather than storing that
-address in source control. For the complete model publication contract, see
-[Provider-Neutral Model Gateway](docs/model-gateway.md).
+The governed multi-model deployment allow-list is the same bindings file. Private model endpoints
+remain environment-owned; the Qwen binding resolves `NORTHWIND_QWEN_BASE_URL` at process startup
+rather than storing that address in source control. For the complete model publication contract,
+see [Provider-Neutral Model Gateway](docs/model-gateway.md).
 
 The default object store remains the deterministic fixture adapter. To run the same
 FastAPI evidence flow against local MinIO, start the packaged service and configure the
 `s3_compatible` adapter as described in
 [MinIO Object-Storage Boundary](docs/minio-object-storage.md).
 
-To run the bounded local MVP persistence path, start the local MongoDB replica set and MinIO
-initialisers, then use `deploy/runtime/local-mvp.env.example`. The repeatable
-`py -3.12 scripts/run_local_mvp_smoke.py` check verifies MongoDB-backed claimant/staff recovery,
-revision and idempotency behaviour, protected MinIO evidence bytes, and governed knowledge
-retrieval. Policy/history remain synthetic. After those checks pass,
+`start-dev.ps1` above already runs the backend on this persistence path for interactive use. The
+following two smoke-test scripts verify it instead of running it: with the same MongoDB and MinIO
+from `docker-compose.yml` up, `py -3.12 scripts/run_local_mvp_smoke.py` checks MongoDB-backed
+claimant/staff recovery, revision and idempotency behaviour, protected MinIO evidence bytes, and
+governed knowledge retrieval. Policy/history remain synthetic. After those checks pass,
 `py -3.12 scripts/run_local_model_mvp_smoke.py` verifies the merged provider-neutral model path
 against the same MongoDB composition with a deterministic OpenAI-compatible transport. It covers
 accepted-turn provenance, restart recovery, replay without a second model call, stale revisions,

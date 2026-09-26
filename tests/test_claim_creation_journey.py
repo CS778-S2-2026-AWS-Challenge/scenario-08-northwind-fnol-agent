@@ -5,6 +5,7 @@ from typing import Any, cast
 from fastapi.testclient import TestClient
 
 from backend.repositories.fixture import FixtureRepository
+from tests.issue_928_support import _session_headers, prepare_claim_submission
 
 FIXTURE_PATH = Path(__file__).parent / 'fixtures' / 'journeys' / 'AT-01-clear-motor-creation.json'
 
@@ -103,10 +104,17 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
     assert ready_claim is not None
     assert ready_claim.claim_state.workflow_state.value == 'ready_for_next'
 
+    submission_revision = prepare_claim_submission(
+        client,
+        auth_headers,
+        claim_id,
+        confirmed_body['revision'],
+        key='at01-submit',
+    )
     creation_headers = {
         **auth_headers,
         'Idempotency-Key': 'at01-controlled-creation',
-        'If-Match': str(confirmed_body['revision']),
+        'If-Match': str(submission_revision),
     }
     created_external = client.post(
         f'/api/v1/claims/{claim_id}/creation',
@@ -139,7 +147,7 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
         headers={
             **auth_headers,
             'Idempotency-Key': 'at01-controlled-creation',
-            'If-Match': str(confirmed_body['revision'] + 1),
+            'If-Match': str(submission_revision + 1),
         },
     )
     assert conflicting_reuse.status_code == 409
@@ -188,6 +196,202 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
     projection = claimant_view.json()
     assert projection['workflow_state'] == 'created'
     assert projection['external_claim'] == result['external_claim']
+
+
+def test_assessor_offer_before_payout_does_not_block_step4_or_creation(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    journey = _fixture()
+    journey_input = cast(str, journey['input'])
+    assessment_request = 'Could you help me get a damage assessment for the repairs?'
+    created = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'issue928-ordering-claim'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+    assert created.status_code == 201
+    working = cast(dict[str, Any], created.json())
+    claim = cast(dict[str, Any], working['claim'])
+    claim_id = cast(str, claim['claim_id'])
+    session_id = cast(str, working['session']['session_id'])
+
+    def assert_matches_fresh_get(mutation: dict[str, Any]) -> dict[str, Any]:
+        projected = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
+        assert projected.status_code == 200, projected.text
+        current = cast(dict[str, Any], projected.json())
+        assert mutation['revision'] == current['revision']
+        assert mutation['customer_next_step'] == current['customer_next_step']
+        assert mutation['primary_action'] == current['primary_action']
+        return current
+
+    intake = client.post(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'issue928-ordering-intake',
+            'If-Match': str(claim['revision']),
+        },
+        json={
+            'client_message_id': 'issue928-ordering-intake',
+            'content': {'type': 'text', 'text': f'{journey_input} {assessment_request}'},
+            'evidence_refs': [],
+        },
+    )
+    assert intake.status_code == 200, intake.text
+    intake_body = cast(dict[str, Any], intake.json())
+    proposed = sorted(item['field_code'] for item in intake_body['form_changes'])
+    offer = next(
+        action
+        for action in intake_body['agent_message']['message_actions']
+        if action['service_identity'] == 'vehicle_damage_assessment_routing'
+    )
+    offer_id = cast(str, offer['offer_id'])
+
+    confirmed = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'issue928-ordering-confirm',
+            'If-Match': str(intake_body['claim_revision']),
+        },
+        json={'field_codes': proposed},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    confirmed_body = cast(dict[str, Any], confirmed.json())
+    assert_matches_fresh_get(confirmed_body)
+
+    ready = _complete_motor_requirements(
+        client,
+        auth_headers,
+        claim_id,
+        confirmed_body['revision'],
+        key='issue928-ordering-ready',
+    )
+    assert ready['customer_next_step']['status'] == 'ready_to_create'
+    assert_matches_fresh_get(ready)
+
+    granted = client.post(
+        f'/api/v1/claims/{claim_id}/external-service-offers/{offer_id}/decision',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'issue928-ordering-offer',
+            'If-Match': str(ready['revision']),
+        },
+        json={'decision': 'grant'},
+    )
+    assert granted.status_code == 201, granted.text
+    granted_body = cast(dict[str, Any], granted.json())
+    assert granted_body['action']['offer_id'] == offer_id
+    assert granted_body['action']['consent_status'] == 'granted'
+    granted_current = assert_matches_fresh_get(granted_body)
+    assert granted_current['primary_action']['action_code'] == 'claimant.review_payout_contact'
+
+    patched = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'issue928-ordering-post-offer-patch',
+            'If-Match': str(granted_body['revision']),
+        },
+        json={
+            'updates': [
+                {
+                    'field_code': 'vehicle.drivable',
+                    'value': True,
+                    'status': 'proposed',
+                }
+            ]
+        },
+    )
+    assert patched.status_code == 200, patched.text
+    patched_body = cast(dict[str, Any], patched.json())
+    assert_matches_fresh_get(patched_body)
+
+    reconfirmed = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'issue928-ordering-post-offer-confirm',
+            'If-Match': str(patched_body['revision']),
+        },
+        json={'field_codes': ['vehicle.drivable']},
+    )
+    assert reconfirmed.status_code == 200, reconfirmed.text
+    reconfirmed_body = cast(dict[str, Any], reconfirmed.json())
+    projected_body = assert_matches_fresh_get(reconfirmed_body)
+    assert projected_body['primary_action']['action_code'] == 'claimant.review_payout_contact'
+
+    session_headers = _session_headers(client, auth_headers)
+    destination = client.post(
+        '/api/v1/account/payment-destinations',
+        headers={**session_headers, 'Idempotency-Key': 'issue928-ordering-payment'},
+        json={
+            'account_type': 'cheque',
+            'account_number': '12-3456-7654321-00',
+            'bank_name': 'Northwind Test Bank',
+            'account_holder_name': 'Claimant One',
+        },
+    )
+    assert destination.status_code == 201, destination.text
+
+    payout = client.post(
+        f'/api/v1/claims/{claim_id}/payout-contact-selections',
+        headers={
+            **session_headers,
+            'Idempotency-Key': 'issue928-ordering-payout',
+            'If-Match': str(projected_body['revision']),
+        },
+        json={
+            'payment_destination_id': destination.json()['payment_destination_id'],
+            'contact_preference': 'in_app',
+        },
+    )
+    assert payout.status_code == 201, payout.text
+    payout_body = cast(dict[str, Any], payout.json())
+    assert payout_body['customer_next_step']['status'] == 'agreement_required'
+    assert payout_body['primary_action']['action_code'] == 'claimant.review_agreement'
+    detail_body = assert_matches_fresh_get(payout_body)
+
+    agreement = cast(dict[str, Any], detail_body['submission_agreement'])
+    confirmations = {
+        cast(str, item['key']): True
+        for item in cast(list[dict[str, Any]], agreement['confirmations'])
+        if item['required']
+    }
+
+    accepted = client.post(
+        f'/api/v1/claims/{claim_id}/agreement-acceptances',
+        headers={
+            **session_headers,
+            'Idempotency-Key': 'issue928-ordering-agreement',
+            'If-Match': str(detail_body['revision']),
+        },
+        json={
+            'agreement_id': agreement['agreement_id'],
+            'version': agreement['version'],
+            'confirmations': confirmations,
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+    accepted_body = cast(dict[str, Any], accepted.json())
+    assert accepted_body['primary_action']['action_code'] == 'claimant.create_claim'
+    assert_matches_fresh_get(accepted_body)
+
+    external = client.post(
+        f'/api/v1/claims/{claim_id}/creation',
+        headers={
+            **session_headers,
+            'Idempotency-Key': 'issue928-ordering-create',
+            'If-Match': str(accepted_body['revision']),
+        },
+    )
+    assert external.status_code == 201, external.text
+    external_body = cast(dict[str, Any], external.json())
+    assert external_body['external_claim']['creation_status'] == 'created'
+    assert external_body['external_claim']['claim_number']
+    assert external_body['customer_next_step']['status'] == 'claim_created'
+    assert_matches_fresh_get(external_body)
 
 
 def test_clear_motor_intake_classifies_missing_incident_type_before_creation(
@@ -249,12 +453,19 @@ def test_clear_motor_intake_classifies_missing_incident_type_before_creation(
     assert claimant_view.status_code == 200
     assert claimant_view.json()['incident_type'] == 'motor'
 
+    submission_revision = prepare_claim_submission(
+        client,
+        auth_headers,
+        claim['claim_id'],
+        confirmed_body['revision'],
+        key='unclassified-submit',
+    )
     created_external = client.post(
         f'/api/v1/claims/{claim["claim_id"]}/creation',
         headers={
             **auth_headers,
             'Idempotency-Key': 'unclassified-controlled-creation',
-            'If-Match': str(confirmed_body['revision']),
+            'If-Match': str(submission_revision),
         },
     )
     assert created_external.status_code == 201
@@ -342,12 +553,19 @@ def test_pending_later_evidence_does_not_block_controlled_claim_creation(
         },
     ).json()
 
+    submission_revision = prepare_claim_submission(
+        client,
+        auth_headers,
+        claim_id,
+        evidence_turn['claim_revision'],
+        key='pending-submit',
+    )
     response = client.post(
         f'/api/v1/claims/{claim_id}/creation',
         headers={
             **auth_headers,
             'Idempotency-Key': 'pending-controlled-creation',
-            'If-Match': str(evidence_turn['claim_revision']),
+            'If-Match': str(submission_revision),
         },
     )
 

@@ -28,14 +28,14 @@ def project_claimant_primary_action(
     claim_revision: int,
     next_step: CustomerNextStep,
     external_service_action: ClaimantExternalServiceAction | None,
+    agreement_accepted: bool = False,
 ) -> ClaimantPrimaryAction:
     """Project one deterministic action without frontend precedence rules.
 
     External-service state remains authoritative when it exists. Intake readiness
-    exposes the server-owned payout/contact step; once payout/contact is selected,
-    ``claimant.create_claim`` becomes available directly. Per the payout/contact
-    owner's authorisation, final submission no longer waits on Issue #928's
-    agreement/submission contract.
+    exposes the server-owned payout/contact step. A valid payout/contact selection
+    opens Step 4; formal Claim creation is exposed only after the current versioned
+    agreement has been explicitly accepted for this Claim revision.
     """
 
     if external_service_action is not None:
@@ -77,14 +77,16 @@ def project_claimant_primary_action(
         )
 
     if next_step.status == 'agreement_required':
-        definition = claimant_action_contract('claimant.create_claim')
+        definition = claimant_action_contract(
+            'claimant.create_claim' if agreement_accepted else 'claimant.review_agreement'
+        )
         return ClaimantPrimaryAction(
             action_type=definition.action_type,
             action_code=definition.action_code,
             action_id=f'customer-next-step:{next_step.status}',
             target_ref=claim_id,
             available=True,
-            required_inputs=[],
+            required_inputs=list(definition.required_inputs),
             claim_revision=claim_revision,
             registry_version=CLAIMANT_ACTION_REGISTRY_VERSION,
             execution_boundary=definition.execution_boundary,
