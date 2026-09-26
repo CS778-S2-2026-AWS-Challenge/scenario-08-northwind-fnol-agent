@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   acceptClaimAgreement: vi.fn(),
   confirmClaimFields: vi.fn(),
   createAccountAsset: vi.fn(),
+  createAccountPolicy: vi.fn(),
   createExternalClaim: vi.fn(),
   createPaymentDestination: vi.fn(),
   createClaim: vi.fn(),
@@ -46,6 +47,8 @@ const api = vi.hoisted(() => ({
   updateAccountAsset: vi.fn(),
   createAccountIdentityDocument: vi.fn(),
   updateAccountIdentityDocument: vi.fn(),
+  updateAccountPaymentDestination: vi.fn(),
+  updateAccountPolicy: vi.fn(),
   updateClaimField: vi.fn(),
 }))
 
@@ -604,7 +607,7 @@ describe('claimant intake projection', () => {
     expect(screen.queryByLabelText('Preferred name')).not.toBeInTheDocument()
   })
 
-  it('recovers the legacy Policies route into Personal details and restores Profile categories on popstate', async () => {
+  it('opens the Policies route and restores Profile categories on popstate', async () => {
     const user = userEvent.setup()
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue({
@@ -625,15 +628,23 @@ describe('claimant intake projection', () => {
       }],
       page: { next_cursor: null },
     })
+    api.listAccountPolicies.mockResolvedValue({
+      items: [
+        { policy_id: 'pol_11111111111111111111', policy_number: 'MOTOR-1234', revision: 1 },
+        { policy_id: 'pol_22222222222222222222', policy_number: 'HOME-5678', revision: 1 },
+      ],
+      page: { next_cursor: null },
+    })
     globalThis.history.replaceState({}, '', '/profile/policies')
 
     render(<App />)
 
-    expect(await screen.findByRole('region', { name: 'Personal details' })).toBeInTheDocument()
-    await waitFor(() => expect(globalThis.location.pathname).toBe('/profile/personal-details'))
-    expect(screen.queryByRole('button', { name: 'Policies' })).not.toBeInTheDocument()
-    expect(screen.getByText('Not provided', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
-    expect(api.listAccountPolicies).not.toHaveBeenCalled()
+    expect(await screen.findByRole('heading', { name: 'Policies' })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile/policies')
+    expect(screen.getAllByRole('button', { name: 'Policies' })).toHaveLength(2)
+    expect(await screen.findByText('••••1234')).toBeInTheDocument()
+    expect(screen.getByText('••••5678')).toBeInTheDocument()
+    expect(api.listAccountPolicies).toHaveBeenCalled()
 
     await user.click(screen.getAllByRole('button', { name: 'Insured assets' })[0])
     expect(await screen.findByRole('heading', { name: 'Insured assets' })).toBeInTheDocument()

@@ -42,33 +42,35 @@ async function main() {
   const page = await context.newPage()
 
   try {
-    console.log('[1/6] Sign in and recover the legacy Policies deep link')
+    console.log('[1/6] Sign in and open the Policies deep link')
     await login(page)
     await page.goto(`${CUSTOMER}/profile/policies`, { waitUntil: 'domcontentloaded' })
-    await page.getByRole('heading', { name: 'Personal information', exact: true }).waitFor({ state: 'visible', timeout: 30000 })
-    assert(new URL(page.url()).pathname === '/profile/personal-details', 'Legacy Policies deep link did not recover to Personal details.')
-    assert(await page.getByRole('button', { name: 'Policies', exact: true }).count() === 0, 'Removed Policies navigation is still visible.')
-    await page.locator('.profile-header-meta').getByText('Customer ID:', { exact: true }).waitFor({ state: 'visible' })
-    assert(await page.getByText(/policy number/i).count() === 0, 'Personal details still shows a policy number.')
-    assert(await hasNoHorizontalOverflow(page), 'Desktop Personal details page has horizontal overflow.')
-    result.checks.legacy_policies_deep_link_recovers = true
-    result.checks.desktop_customer_id_visible = true
+    await page.getByRole('heading', { name: 'Policies', exact: true }).waitFor({ state: 'visible', timeout: 30000 })
+    assert(new URL(page.url()).pathname === '/profile/policies', 'Policies deep link did not remain on the Policies page.')
+    assert(await page.getByRole('button', { name: 'Policies', exact: true }).count() >= 1, 'Policies navigation is missing.')
+    await page.getByRole('button', { name: 'Add policy number', exact: true }).waitFor({ state: 'visible' })
+    assert(await hasNoHorizontalOverflow(page), 'Desktop Policies page has horizontal overflow.')
+    result.checks.policies_deep_link_opens = true
+    result.checks.policy_add_control_visible = true
     result.checks.desktop_no_horizontal_overflow = true
-    await screenshot(page, 'pr1024-01-desktop-personal-details')
+    await screenshot(page, 'pr1049-01-desktop-policies')
 
-    console.log('[2/6] Refresh the recovered route and verify browser Back navigation')
+    console.log('[2/6] Refresh Policies and verify browser Back navigation')
     await page.reload({ waitUntil: 'domcontentloaded' })
-    await page.getByRole('heading', { name: 'Personal information', exact: true }).waitFor({ state: 'visible' })
-    assert(new URL(page.url()).pathname === '/profile/personal-details', 'Recovered Personal details route did not survive refresh.')
+    await page.getByRole('heading', { name: 'Policies', exact: true }).waitFor({ state: 'visible' })
+    assert(new URL(page.url()).pathname === '/profile/policies', 'Policies route did not survive refresh.')
     await page.locator('.profile-sidebar').getByRole('button', { name: 'Insured assets', exact: true }).click()
     await page.getByRole('heading', { name: 'Insured assets', exact: true }).waitFor({ state: 'visible' })
     await page.goBack()
-    await page.getByRole('heading', { name: 'Personal information', exact: true }).waitFor({ state: 'visible' })
-    assert(new URL(page.url()).pathname === '/profile/personal-details', 'Browser Back did not restore Personal details.')
-    result.checks.refresh_preserves_recovered_route = true
-    result.checks.browser_back_restores_personal_details = true
+    await page.getByRole('heading', { name: 'Policies', exact: true }).waitFor({ state: 'visible' })
+    assert(new URL(page.url()).pathname === '/profile/policies', 'Browser Back did not restore Policies.')
+    result.checks.refresh_preserves_policies_route = true
+    result.checks.browser_back_restores_policies = true
 
     console.log('[3/6] Verify preferred-name save focus and restore the fixture value')
+    await page.locator('.profile-sidebar').getByRole('button', { name: 'Personal details', exact: true }).click()
+    await page.getByRole('heading', { name: 'Personal information', exact: true }).waitFor({ state: 'visible' })
+    assert(await page.locator('.profile-header-copy').getByText('Preferred name', { exact: true }).count() === 0, 'Preferred name header label is still visible.')
     const editProfile = page.getByRole('button', { name: 'Edit profile', exact: true })
     await editProfile.click()
     const preferredName = page.getByLabel('Preferred name', { exact: true })
@@ -89,32 +91,40 @@ async function main() {
     result.checks.preferred_name_editor_receives_focus = true
     result.checks.preferred_name_save_returns_focus = true
     result.checks.preferred_name_fixture_restored = true
-    await screenshot(page, 'pr1024-02-desktop-personal-details')
+    await screenshot(page, 'pr1049-02-desktop-personal-details')
 
-    console.log('[4/6] Verify payment capabilities are rendered from the supported projection')
+    console.log('[4/6] Verify payment management uses one protected destination')
     await page.locator('.profile-sidebar').getByRole('button', { name: 'Payment details', exact: true }).click()
     await page.getByRole('heading', { name: 'Payment details', exact: true }).waitFor({ state: 'visible' })
-    await page.getByText('Adding or changing payment details remains unavailable in this Profile delivery.', { exact: true })
-      .waitFor({ state: 'visible', timeout: 30000 })
-    assert(await page.getByRole('button', { name: /add payment/i }).count() === 0, 'Unsupported payment mutation control is visible.')
-    result.checks.payment_read_projection_visible = true
-    result.checks.payment_mutation_controls_gated = true
+    assert(await page.getByText('Saved accounts', { exact: true }).count() === 0, 'Saved accounts summary is still visible.')
+    const editPayment = page.getByRole('button', { name: 'Edit payment details', exact: true })
+    const addPayment = page.getByRole('button', { name: 'Add payment details', exact: true })
+    assert(await editPayment.count() + await addPayment.count() === 1, 'Exactly one payment create/edit action was not available.')
+    if (await editPayment.count()) {
+      await editPayment.click()
+      const accountNumber = page.getByLabel(/Bank account number/)
+      await accountNumber.waitFor({ state: 'visible' })
+      assert(await accountNumber.inputValue() === '', 'Protected account number was prefilled in the editor.')
+      await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+    }
+    result.checks.payment_single_destination_action_visible = true
+    result.checks.payment_plaintext_not_prefilled = true
 
     console.log('[5/6] Verify the mobile category index, category Back action, and overflow')
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto(`${CUSTOMER}/profile`, { waitUntil: 'domcontentloaded' })
     const mobileIndex = page.locator('.profile-mobile-index')
     await mobileIndex.getByRole('button', { name: 'Personal details', exact: true }).waitFor({ state: 'visible', timeout: 30000 })
-    assert(await mobileIndex.getByRole('button', { name: 'Policies', exact: true }).count() === 0, 'Removed Policies category is visible in the mobile index.')
+    assert(await mobileIndex.getByRole('button', { name: 'Policies', exact: true }).count() === 1, 'Policies category is missing from the mobile index.')
     assert(await hasNoHorizontalOverflow(page), 'Mobile Profile index has horizontal overflow.')
-    await screenshot(page, 'pr1024-03-mobile-category-index')
+    await screenshot(page, 'pr1049-03-mobile-category-index')
 
     await mobileIndex.getByRole('button', { name: 'Personal details', exact: true }).click()
     await page.getByRole('heading', { name: 'Personal information', exact: true }).waitFor({ state: 'visible' })
     await page.locator('.profile-header-meta').getByText('Customer ID:', { exact: true }).waitFor({ state: 'visible' })
     assert(new URL(page.url()).pathname === '/profile/personal-details', 'Mobile Personal details route did not open.')
     assert(await hasNoHorizontalOverflow(page), 'Mobile Personal details page has horizontal overflow.')
-    await screenshot(page, 'pr1024-04-mobile-personal-details')
+    await screenshot(page, 'pr1049-04-mobile-personal-details')
 
     await page.getByRole('button', { name: 'Back to profile', exact: true }).click()
     await mobileIndex.getByRole('button', { name: 'Personal details', exact: true }).waitFor({ state: 'visible' })

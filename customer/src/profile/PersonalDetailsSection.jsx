@@ -38,7 +38,6 @@ function ProfileHeader({ account, controller }) {
     <header className="profile-header">
       <div className="profile-avatar" aria-hidden="true">{initials(account.profile.display_name)}</div>
       <div className="profile-header-copy">
-        <span className="profile-account-name-label">Preferred name</span>
         <strong>{account.profile.preferred_name || 'Not provided'}</strong>
         <p className="profile-header-meta">
           <span>Customer ID:</span>

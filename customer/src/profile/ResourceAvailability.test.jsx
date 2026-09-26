@@ -12,8 +12,11 @@ const identity = {
 }
 
 const payment = {
-  payment_destination_id: 'pay_11111111111111111111',
+  payment_destination_id: 'pyd_11111111111111111111',
   account_type: 'everyday',
+  bank_name: 'Northwind Bank',
+  account_holder_name: 'Synthetic Claimant',
+  is_common: true,
   masked_account_number: '•••• 4321',
   revision: 1,
 }
@@ -42,11 +45,12 @@ const resourceCases = [
   {
     label: 'Payment',
     records: [payment],
-    emptyText: 'No payment details saved.',
-    retainedText: '•••• 4321',
+    emptyText: 'No Claim payment destination saved.',
+    retainedText: 'Everyday •••• 4321',
     renderSection: (resource) => render(<PaymentDetailsSection {...commonProps} resource={resource} />),
     assertNoMutationControls: () => {
       expect(screen.queryByText('Saved accounts')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Edit payment details' })).not.toBeInTheDocument()
     },
   },
 ]
@@ -76,10 +80,6 @@ describe.each(resourceCases)('$label resource availability', ({ assertNoMutation
     expect(screen.getByRole('alert')).toHaveTextContent(/previously loaded .* may be out of date/i)
     expect(screen.getByText(retainedText)).toBeInTheDocument()
     expect(screen.queryByText(emptyText)).not.toBeInTheDocument()
-    if (records.length > 0 && emptyText === 'No payment details saved.') {
-      expect(screen.getByText('Saved accounts').nextSibling).toHaveTextContent('1')
-    } else {
-      assertNoMutationControls()
-    }
+    assertNoMutationControls()
   })
 })
