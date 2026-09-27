@@ -1,10 +1,11 @@
 import { CheckCircle2, Clock3, Info, MessageSquare, Send, UserRoundCheck } from 'lucide-react'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { forwardRef, useLayoutEffect, useRef, useState } from 'react'
 import { formatDate, formatTime, words } from '../format.js'
 import { canSubmitProjectedAction, findProjectedAction } from '../projected-action.js'
 import ResourceBoundary from './ResourceBoundary.jsx'
 import { ProjectedActionState } from './ProjectedAction.jsx'
 import { HandoffResolution } from './ReviewActions.jsx'
+import VoiceInputControl from './VoiceInputControl.jsx'
 
 export default function Conversation({
   detail,
@@ -27,6 +28,7 @@ export default function Conversation({
   const currentConversationKeyRef = useRef(null)
   const currentDraftRef = useRef(draft)
   const messageListRef = useRef(null)
+  const voiceInputRef = useRef(null)
   const resourceRequestedSessionId = resource?.requested_session_id || null
   const displayedSessionId = resource?.resolved_session_id || null
   const viewSessionId = requestedSessionId || resourceRequestedSessionId || displayedSessionId
@@ -87,6 +89,7 @@ export default function Conversation({
     (sendError?.key === conversationKey && sendError.readbackFailure)
     || pendingDelivery,
   )
+  const voiceInputAvailable = canSend && !sending && !readbackBlocksResend
   const viewResource = displayedSessionMatchesView
     ? resource
     : resourceTargetsView && (resource?.error || resource?.status === 'unavailable')
@@ -154,6 +157,7 @@ export default function Conversation({
   async function submit(event) {
     event.preventDefault()
     if (!draft.trim() || !canSend || !displayedSessionId) return
+    voiceInputRef.current?.cancel({ announce: false, restoreFocus: false })
     const sendKey = conversationIdentity(detail.claim_id, displayedSessionId)
     const submittedDraft = draft
     const submittedMessage = draft.trim()
@@ -183,6 +187,16 @@ export default function Conversation({
     } finally {
       setPendingSendKey((current) => current === sendKey ? null : current)
     }
+  }
+
+  function updateDraft(nextDraft) {
+    currentDraftRef.current = nextDraft
+    if (
+      sendError?.key === conversationKey
+      && !sendError.readbackFailure
+      && nextDraft.trim() !== sendError.sentDraft
+    ) setSendError(null)
+    onDraft(nextDraft)
   }
 
   const placeholder = historicalSession
@@ -256,46 +270,76 @@ export default function Conversation({
               </span>
             </div>
           )}
-          <div className="staff-composer__input">
-            <label className="sr-only" htmlFor="staff-reply">Message to claimant</label>
-            <textarea
-              id="staff-reply"
-              rows="1"
-              value={draft}
-              onChange={(event) => {
-                const nextDraft = event.target.value
-                if (
-                  sendError?.key === conversationKey
-                  && !sendError.readbackFailure
-                  && nextDraft.trim() !== sendError.sentDraft
-                ) setSendError(null)
-                onDraft(nextDraft)
-              }}
-              disabled={!canSend}
-              placeholder={placeholder}
-              aria-describedby={visibleSendError
-                ? 'staff-message-error'
-                : !canSend
-                  ? 'staff-message-status'
-                  : undefined}
-            />
-            <button
-              className="staff-composer__send"
-              type="submit"
-              disabled={!canSend || !draft.trim() || sending || readbackBlocksResend}
-              aria-label="Send message"
-              aria-busy={sending}
-              title={sending ? 'Sending message' : 'Send message'}
-            >
-              <Send size={18} aria-hidden="true" />
-            </button>
-          </div>
+          <StaffComposerInput
+            ref={voiceInputRef}
+            conversationKey={conversationKey}
+            canSend={canSend}
+            voiceInputAvailable={voiceInputAvailable}
+            draft={draft}
+            onDraft={updateDraft}
+            placeholder={placeholder}
+            describedBy={[
+              visibleSendError ? 'staff-message-error' : null,
+              !canSend ? 'staff-message-status' : null,
+            ].filter(Boolean).join(' ') || undefined}
+            sendDisabled={!canSend || !draft.trim() || sending || readbackBlocksResend}
+            sending={sending}
+          />
           {visibleSendError && <p className="form-error" id="staff-message-error" role="alert">{visibleSendError}</p>}
         </form>
       </section>
     </ResourceBoundary>
   )
 }
+
+const StaffComposerInput = forwardRef(function StaffComposerInput({
+  conversationKey,
+  canSend,
+  voiceInputAvailable,
+  draft,
+  onDraft,
+  placeholder,
+  describedBy,
+  sendDisabled,
+  sending,
+}, controllerRef) {
+  const textareaRef = useRef(null)
+  return (
+    <div className={`staff-composer__input${canSend ? ' staff-composer__input--voice' : ''}`}>
+      <label className="sr-only" htmlFor="staff-reply">Message to claimant</label>
+      {canSend && (
+        <VoiceInputControl
+          key={`${conversationKey}:${voiceInputAvailable}`}
+          ref={controllerRef}
+          available={voiceInputAvailable}
+          draft={draft}
+          onDraft={onDraft}
+          textareaRef={textareaRef}
+        />
+      )}
+      <textarea
+        ref={textareaRef}
+        id="staff-reply"
+        rows="1"
+        value={draft}
+        onChange={(event) => onDraft(event.target.value)}
+        disabled={!canSend}
+        placeholder={placeholder}
+        aria-describedby={describedBy}
+      />
+      <button
+        className="staff-composer__send"
+        type="submit"
+        disabled={sendDisabled}
+        aria-label="Send message"
+        aria-busy={sending}
+        title={sending ? 'Sending message' : 'Send message'}
+      >
+        <Send size={18} aria-hidden="true" />
+      </button>
+    </div>
+  )
+})
 
 function AssistanceStatus({ action, compact = false, handoff, detail, profile, state, revision, onAccept, resolveAction, onResolve }) {
   const [confirming, setConfirming] = useState(false)
