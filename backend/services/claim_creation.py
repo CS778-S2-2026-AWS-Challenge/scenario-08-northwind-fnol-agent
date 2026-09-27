@@ -26,14 +26,19 @@ from backend.domain.models import (
     StateChange,
     WorkflowState,
 )
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import IdempotencyRecord, PersistenceRepository
 from backend.services.agent_action_execution import (
     ClaimantRuntimeActionDispatcher,
     ClaimContextHandlerOutcome,
 )
 from backend.services.agent_action_mapping import map_claim_context_execution_to_api
-from backend.services.claimant_action_projection import project_claimant_primary_action
-from backend.services.external_services import claimant_assessor_action
+from backend.services.agreement import agreement_acceptance_is_current
+from backend.services.external_services import (
+    claimant_assessor_action,
+    claimant_current_action_projection,
+    payout_contact_is_complete,
+)
 from backend.services.integrations import create_external_claim
 from backend.services.support import (
     now_utc,
@@ -60,6 +65,7 @@ def create_claim_from_confirmed_report(
     claim_id: str,
     idempotency_key: str | None,
     if_match: str | None,
+    identity_repository: IdentityRepository | None = None,
 ) -> ClaimCreationResponse:
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
@@ -106,6 +112,13 @@ def create_claim_from_confirmed_report(
             and recovered_decision.authority.outcome is AuthorityOutcome.AUTHORISED
         ):
             external_service_action = claimant_assessor_action(repository, claim)
+            _current_external_action, projected_next_step, primary_action = (
+                claimant_current_action_projection(
+                    repository,
+                    claim,
+                    identity_repository=identity_repository,
+                )
+            )
             response = ClaimCreationResponse(
                 claim_id=claim_id,
                 revision=claim.revision,
@@ -114,17 +127,12 @@ def create_claim_from_confirmed_report(
                     action=recovered_decision.action,
                     reason_codes=recovered_decision.reason_codes,
                     customer_reason=recovered_decision.customer_reason,
-                    customer_next_step=claim.customer_next_step,
+                    customer_next_step=projected_next_step,
                 ),
                 external_claim=claim.external_claim,
                 external_service_action=external_service_action,
-                customer_next_step=claim.customer_next_step,
-                primary_action=project_claimant_primary_action(
-                    claim_id=claim_id,
-                    claim_revision=claim.revision,
-                    next_step=claim.customer_next_step,
-                    external_service_action=external_service_action,
-                ),
+                customer_next_step=projected_next_step,
+                primary_action=primary_action,
             )
             repository.save_idempotency(
                 IdempotencyRecord(
@@ -196,6 +204,25 @@ def create_claim_from_confirmed_report(
     ]
     if not claimant_messages:
         raise _invalid_state('A claimant message is required before claim creation.')
+
+    acceptance_current = agreement_acceptance_is_current(claim)
+    _external_action, _projected_next_step, current_action = claimant_current_action_projection(
+        repository,
+        claim,
+        identity_repository=identity_repository,
+        agreement_accepted=acceptance_current,
+    )
+    if (
+        identity_repository is None
+        or current_action.action_code != 'claimant.create_claim'
+        or not current_action.available
+        or not payout_contact_is_complete(repository, claim, identity_repository)
+        or not acceptance_current
+    ):
+        raise _invalid_state(
+            'Complete payout and contact selection and explicitly confirm the current '
+            'submission agreement before creating the Claim.'
+        )
 
     command = build_claim_context_command(
         'claim.create',
@@ -284,27 +311,29 @@ def create_claim_from_confirmed_report(
                 message='The created claim could not be restored.',
                 retryable=True,
             )
+        external_service_action = claimant_assessor_action(repository, updated)
+        _current_external_action, projected_next_step, primary_action = (
+            claimant_current_action_projection(
+                repository,
+                updated,
+                identity_repository=identity_repository,
+            )
+        )
         claimant_decision = ClaimantDecision(
             decision_id=decision.decision_id,
             action=decision.action,
             reason_codes=decision.reason_codes,
             customer_reason=decision.customer_reason,
-            customer_next_step=updated.customer_next_step,
+            customer_next_step=projected_next_step,
         )
-        external_service_action = claimant_assessor_action(repository, updated)
         live_response = ClaimCreationResponse(
             claim_id=claim_id,
             revision=updated.revision,
             decision=claimant_decision,
             external_claim=result,
             external_service_action=external_service_action,
-            customer_next_step=updated.customer_next_step,
-            primary_action=project_claimant_primary_action(
-                claim_id=claim_id,
-                claim_revision=updated.revision,
-                next_step=updated.customer_next_step,
-                external_service_action=external_service_action,
-            ),
+            customer_next_step=projected_next_step,
+            primary_action=primary_action,
         )
         repository.save_idempotency(
             IdempotencyRecord(

@@ -22,6 +22,7 @@ rules, or sprint commitments.
 
 The current time-bound direction and weekly execution records are maintained under `sprint/`:
 
+- [Sprint 5 Delivery Freeze, Evidence Validation, and Poster](../sprint/sprint5.md)
 - [Sprint 3 Validation Prototype Overview](../sprint/sprint3.md)
 - [Sprint 4 Execution Guide](../sprint/sprint4-execution-guide.md)
 - [Sprint 4 Governance and Week 7](../sprint/sprint4.md)

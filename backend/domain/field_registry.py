@@ -1,8 +1,36 @@
+from collections.abc import Sequence
+from typing import Protocol
+
 from backend.domain.models import FormSource, FormStatus, StructuredFormField
 
 AUTHORITY_SENSITIVE = frozenset(
     {'claim.product_family', 'incident.injury_or_danger', 'parties.other_parties', 'incident.type'}
 )
+
+
+class _SourcedAssertion(Protocol):
+    assertion_id: str
+    source_refs: list[str]
+    reported_text: str | None
+
+
+def trusted_origin_assertion(
+    current_assertion_id: str | None,
+    assertions: Sequence['_SourcedAssertion'],
+) -> '_SourcedAssertion | None':
+    """The current assertion behind a confirmed field or contents item, if it is a
+    trustworthy source for deriving a second fact from it.
+
+    A missing current assertion, or one recorded with no source refs of its own (a
+    legacy record, for instance), is not: nothing supports the claim that a specific
+    claimant message stated it. Shared by branch_registry (whether a derivable field
+    still needs to be asked for) and turn_reducer (what to actually derive), so both
+    agree on exactly the same origins.
+    """
+    origin = next((item for item in assertions if item.assertion_id == current_assertion_id), None)
+    if origin is None or not origin.source_refs:
+        return None
+    return origin
 
 
 def needs_confirmation(field: StructuredFormField, code: str) -> bool:

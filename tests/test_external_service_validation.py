@@ -36,6 +36,7 @@ from backend.domain.models import (
 from backend.domain.realtime import RealtimeResource
 from backend.repositories.fixture import FixtureRepository
 from backend.services.external_service_entry import MismatchedServiceAdapterError
+from tests.issue_928_support import prepare_claim_submission
 
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
@@ -85,12 +86,19 @@ def _create_assessor_ready_claim(client: TestClient, *, key: str) -> tuple[str, 
     assert confirmation.status_code == 200
     assert confirmation.json()['customer_next_step']['status'] == 'ready_to_create'
 
+    submission_revision = prepare_claim_submission(
+        client,
+        AUTH,
+        claim_id,
+        int(confirmation.json()['revision']),
+        key=f'{key}-submit',
+    )
     external = client.post(
         f'/api/v1/claims/{claim_id}/creation',
         headers={
             **AUTH,
             'Idempotency-Key': f'{key}-creation',
-            'If-Match': str(confirmation.json()['revision']),
+            'If-Match': str(submission_revision),
         },
     )
     assert external.status_code == 201

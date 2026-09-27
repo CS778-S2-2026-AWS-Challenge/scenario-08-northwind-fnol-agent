@@ -1,6 +1,39 @@
 {
   "components": {
     "schemas": {
+      "AcceptClaimAgreementRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "agreement_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Agreement Id",
+            "type": "string"
+          },
+          "confirmations": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "maxProperties": 20,
+            "minProperties": 1,
+            "title": "Confirmations",
+            "type": "object"
+          },
+          "version": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agreement_id",
+          "version",
+          "confirmations"
+        ],
+        "title": "AcceptClaimAgreementRequest",
+        "type": "object"
+      },
       "AcceptHandoffRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1470,6 +1503,42 @@
         "title": "AgentToolPolicyConfiguration",
         "type": "object"
       },
+      "AgreementAcceptanceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "acceptance": {
+            "$ref": "#/components/schemas/ClaimAgreementAcceptanceProjection"
+          },
+          "agreement": {
+            "$ref": "#/components/schemas/ClaimSubmissionAgreement"
+          },
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "customer_next_step": {
+            "$ref": "#/components/schemas/CustomerNextStep"
+          },
+          "primary_action": {
+            "$ref": "#/components/schemas/ClaimantPrimaryAction"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "claim_id",
+          "revision",
+          "agreement",
+          "acceptance",
+          "customer_next_step",
+          "primary_action"
+        ],
+        "title": "AgreementAcceptanceResponse",
+        "type": "object"
+      },
       "ApprovalDecision": {
         "enum": [
           "approved",
@@ -1879,6 +1948,75 @@
         ],
         "title": "Channel",
         "type": "string"
+      },
+      "ClaimAgreementAcceptanceProjection": {
+        "additionalProperties": false,
+        "description": "Claimant-safe receipt for one recorded agreement acceptance.",
+        "properties": {
+          "acceptance_id": {
+            "title": "Acceptance Id",
+            "type": "string"
+          },
+          "accepted_at": {
+            "format": "date-time",
+            "title": "Accepted At",
+            "type": "string"
+          },
+          "agreement_id": {
+            "title": "Agreement Id",
+            "type": "string"
+          },
+          "confirmations": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Confirmations",
+            "type": "object"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "acceptance_id",
+          "agreement_id",
+          "version",
+          "confirmations",
+          "accepted_at"
+        ],
+        "title": "ClaimAgreementAcceptanceProjection",
+        "type": "object"
+      },
+      "ClaimAgreementConfirmationDefinition": {
+        "additionalProperties": false,
+        "description": "One explicit confirmation required before formal Claim submission.",
+        "properties": {
+          "key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "ClaimAgreementConfirmationDefinition",
+        "type": "object"
       },
       "ClaimAssetSelectionResponse": {
         "additionalProperties": false,
@@ -2831,6 +2969,47 @@
         "title": "ClaimState",
         "type": "object"
       },
+      "ClaimSubmissionAgreement": {
+        "additionalProperties": false,
+        "description": "One claimant-safe versioned agreement definition.",
+        "properties": {
+          "agreement_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Agreement Id",
+            "type": "string"
+          },
+          "confirmations": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimAgreementConfirmationDefinition"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Confirmations",
+            "type": "array"
+          },
+          "display_copy": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Display Copy",
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agreement_id",
+          "version",
+          "display_copy",
+          "confirmations"
+        ],
+        "title": "ClaimSubmissionAgreement",
+        "type": "object"
+      },
       "ClaimTerminalDisposition": {
         "additionalProperties": false,
         "properties": {
@@ -3012,6 +3191,16 @@
           "revision": {
             "title": "Revision",
             "type": "integer"
+          },
+          "submission_agreement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimSubmissionAgreement"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "updated_at": {
             "format": "date-time",
@@ -20147,6 +20336,122 @@
           }
         },
         "summary": "Read Claim",
+        "tags": [
+          "claimant"
+        ]
+      }
+    },
+    "/api/v1/claims/{claim_id}/agreement-acceptances": {
+      "post": {
+        "operationId": "create_agreement_acceptance_api_v1_claims__claim_id__agreement_acceptances_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Northwind-Anonymous-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Northwind-Anonymous-Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptClaimAgreementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgreementAcceptanceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Agreement Acceptance",
         "tags": [
           "claimant"
         ]

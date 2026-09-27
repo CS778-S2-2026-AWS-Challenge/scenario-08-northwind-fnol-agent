@@ -1,11 +1,26 @@
 # Control Plane implementation status
 
-Updated: 2026-09-17
+Updated: 2026-09-28 (implementation reconciliation; repeatable run evidence remains dated below)
 
 This status record reports what is currently backed by the repository and what
 still requires implementation. It is evidence, not a replacement for the
 Control Plane contract in `docs/control-plane-governance.md` or the API schema
 in `docs/api.md`.
+
+## Current-main reconciliation
+
+This document was reconciled against
+`main@fad552f83a6ebae409f2677bed80a8c9899d206c` without rerunning its historical full-suite or
+browser evidence.
+
+- PR #977 now persists the claimant Runtime v8 `TurnPlan`, `AgentProposal`, `ExecutionPlan`,
+  `ActionEnvelope`, `ToolResult`, and `TurnResult` family on Fixture and MongoDB paths. The earlier
+  statement that the complete claimant target record family was unfinished is superseded.
+- PR #1038 adds the claimant final agreement/submission projection on top of that Runtime path.
+- Admin trace projection, broader external action execution/reconciliation, and dynamic policy
+  grants remain separate boundaries; the merged claimant records do not imply those capabilities.
+- Real AWS data-profile migration and integration remain Sprint 5 work. Third-party service
+  behavior is intentionally simulation-backed and remains valid when its provenance is explicit.
 
 ## Implemented and server-backed
 
@@ -91,9 +106,9 @@ in `docs/api.md`.
   boundary. Published access policies can only restrict those scopes; dynamic
   role assignment and policy-driven scope grants are not implemented.
 - Runtime resolution is shared by model, claimant Agent policy, staff-model, knowledge, data
-  profile, access-policy, and Integration paths. Complete target `TurnPlan`, `ExecutionPlan`, tool
-  execution, usage, and trajectory persistence remain unfinished; the four Agent configuration
-  domains do not claim those target records.
+  profile, access-policy, and Integration paths. The claimant target turn-record family is now
+  persisted; Admin projection, broader external action execution and reconciliation, and complete
+  trajectory evaluation remain unfinished.
 - Cloud data-profile adapters, production secret-manager integration, and
   provider connection verification remain deployment-specific.
 - Cross-resource audit search is implemented against the existing audit

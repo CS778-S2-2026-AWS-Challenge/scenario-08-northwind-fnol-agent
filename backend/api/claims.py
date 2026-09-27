@@ -18,6 +18,8 @@ from backend.domain.external_service_registry import capability_catalogue
 from backend.domain.identity import ClaimAutoFillSuggestionManifest
 from backend.domain.model_gateway import ModelGatewayError
 from backend.domain.models import (
+    AcceptClaimAgreementRequest,
+    AgreementAcceptanceResponse,
     ClaimantClaim,
     ClaimantExternalServiceResponse,
     ClaimantSession,
@@ -52,6 +54,7 @@ from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider
 from backend.services.agent_action_execution import ClaimantRuntimeActionDispatcher
 from backend.services.agent_turn_progress import AgentTurnProgressReporter
+from backend.services.agreement import accept_claim_agreement
 from backend.services.claim_auto_fill import claim_auto_fill_suggestions
 from backend.services.claim_creation import create_claim_from_confirmed_report
 from backend.services.claim_data import (
@@ -60,7 +63,6 @@ from backend.services.claim_data import (
     get_motor_other_driver,
     list_contents_item_evidence_associations,
 )
-from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.claimant_events import claimant_event_revision
 from backend.services.claims import (
     confirm_form_fields,
@@ -82,7 +84,11 @@ from backend.services.external_service_offers import (
     decide_external_service_offer,
     message_external_actions,
 )
-from backend.services.external_services import grant_assessor_consent, request_assessor_routing
+from backend.services.external_services import (
+    claimant_current_action_projection,
+    grant_assessor_consent,
+    request_assessor_routing,
+)
 from backend.services.message_history import list_claim_messages
 from backend.services.messages import submit_message
 from backend.services.model_profiles import select_model_profile
@@ -385,6 +391,33 @@ def promote_claim(
 
 
 @router.post(
+    '/{claim_id}/agreement-acceptances',
+    response_model=AgreementAcceptanceResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_agreement_acceptance(
+    claim_id: str,
+    payload: AcceptClaimAgreementRequest,
+    request: Request,
+    response: Response,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> AgreementAcceptanceResponse:
+    result, replayed = accept_claim_agreement(
+        repository_for(request),
+        identity_repository_for(request),
+        principal,
+        claim_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )
+    response.status_code = status.HTTP_200_OK if replayed else status.HTTP_201_CREATED
+    return result
+
+
+@router.post(
     '/{claim_id}/creation',
     response_model=ClaimCreationResponse,
     status_code=status.HTTP_201_CREATED,
@@ -404,6 +437,7 @@ def create_external_claim(
         claim_id,
         idempotency_key,
         if_match,
+        identity_repository_for(request),
     )
 
 
@@ -428,6 +462,7 @@ def create_assessor_consent(
         payload,
         idempotency_key,
         if_match,
+        identity_repository_for(request),
     )
     response.status_code = status.HTTP_200_OK if replayed else status.HTTP_201_CREATED
     return result
@@ -454,6 +489,7 @@ def create_assessor_routing(
         claim_id,
         idempotency_key,
         if_match,
+        identity_repository_for(request),
     )
     response.status_code = status.HTTP_200_OK if replayed else status.HTTP_201_CREATED
     return result
@@ -481,6 +517,7 @@ def decide_external_offer(
         payload,
         idempotency_key,
         if_match,
+        identity_repository_for(request),
     )
     current = repository_for(request).get_claim(claim_id, principal.subject)
     if current is not None:
@@ -501,17 +538,19 @@ def decide_external_offer(
             (candidate for candidate in actions if candidate.offer_id == offer_id),
             result.action,
         )
+        _current_external_action, current_next_step, current_primary_action = (
+            claimant_current_action_projection(
+                repository_for(request),
+                current,
+                identity_repository=identity_repository_for(request),
+            )
+        )
         result = result.model_copy(
             update={
                 'revision': current.revision,
                 'action': action,
-                'customer_next_step': current.customer_next_step,
-                'primary_action': project_claimant_primary_action(
-                    claim_id=claim_id,
-                    claim_revision=current.revision,
-                    next_step=current.customer_next_step,
-                    external_service_action=None,
-                ),
+                'customer_next_step': current_next_step,
+                'primary_action': current_primary_action,
             }
         )
     response.status_code = status.HTTP_200_OK if replayed else status.HTTP_201_CREATED
@@ -794,7 +833,14 @@ def patch_form(
     principal: Principal = Depends(require_claimant),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> FormPatchResponse:
-    return update_form(repository_for(request), principal, claim_id, payload, if_match)
+    return update_form(
+        repository_for(request),
+        principal,
+        claim_id,
+        payload,
+        if_match,
+        identity_repository_for(request),
+    )
 
 
 @router.post('/{claim_id}/form/confirmations', response_model=FormConfirmationResponse)
@@ -813,4 +859,5 @@ def confirm_form(
         payload,
         idempotency_key,
         if_match,
+        identity_repository_for(request),
     )

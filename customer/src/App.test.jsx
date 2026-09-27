@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 const api = vi.hoisted(() => ({
   ApiRequestError: class ApiRequestError extends Error {},
+  acceptClaimAgreement: vi.fn(),
   confirmClaimFields: vi.fn(),
   createAccountAsset: vi.fn(),
   createExternalClaim: vi.fn(),
@@ -297,6 +298,40 @@ describe('claimant intake projection', () => {
     expect(screen.queryByRole('listbox', { name: 'Model' })).not.toBeInTheDocument()
   })
 
+  it('renders directional chat bubbles without duplicate claimant time metadata', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    const { container } = render(<App />)
+    const app = container.querySelector('.customer-app')
+    expect(app).toHaveClass('entry-shell')
+    expect(app).not.toHaveClass('workspace-shell')
+    await user.type(
+      screen.getByPlaceholderText('Tell us what happened…'),
+      claimantMessage.content.text,
+    )
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+
+    expect(app).toHaveClass('workspace-shell')
+    expect(app).not.toHaveClass('entry-shell')
+
+    const claimantArticle = screen.getByText(claimantMessage.content.text).closest('.msg-user')
+    const agentArticle = screen.getByText(agentMessage.content.text).closest('.msg-agent')
+
+    expect(claimantArticle.querySelector('.chat-message-row > .user-message-body + .claimant-message-avatar'))
+      .toHaveTextContent('YU')
+    expect(claimantArticle.querySelector('.user-bubble')).toHaveClass('chat-bubble')
+    expect(claimantArticle.querySelector('time.message-timestamp')).not.toBeInTheDocument()
+    const agentRow = agentArticle.querySelector('.chat-message-row')
+    expect(agentRow.querySelector('.agent-avatar')).toHaveTextContent('N')
+    expect(agentRow.querySelector('.agent-body')).toBeInTheDocument()
+    expect(agentArticle.querySelector('.agent-bubble')).toHaveClass('chat-bubble')
+    expect(agentArticle.querySelector('time.message-timestamp'))
+      .toHaveAttribute('datetime', agentMessage.created_at)
+    expect(container.querySelectorAll('.message-list time.message-timestamp')).toHaveLength(1)
+  })
+
   it('shows one truthful Agent placeholder for the first claimant turn', async () => {
     const user = userEvent.setup()
     let pushLiveUpdate
@@ -334,7 +369,9 @@ describe('claimant intake projection', () => {
         ordinal: 3,
       },
     }))
-    expect(screen.getByRole('status')).toHaveTextContent('Checking relevant policy information')
+    expect(screen.getByText('Checking relevant policy information', {
+      selector: '[role="status"]',
+    })).toBeInTheDocument()
 
     await act(async () => resolveTurn(initialTurn()))
     expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
@@ -702,6 +739,50 @@ describe('claimant intake projection', () => {
     await waitFor(() => expect(trigger).toHaveFocus())
   })
 
+  it('keeps third-party support closed when reopening a claim from conversation history', async () => {
+    const user = userEvent.setup()
+    const resumedClaim = {
+      ...initialClaim,
+      external_capabilities: [
+        {
+          service_identity: 'vehicle-recovery',
+          service_name: 'Vehicle recovery',
+          purpose: 'Arrange recovery when a vehicle cannot be driven safely.',
+          result_semantics: 'Availability depends on location and provider confirmation.',
+        },
+      ],
+    }
+    globalThis.sessionStorage.setItem(
+      'northwind.anonymousConversationHistory.v1.anonymous-session-test',
+      JSON.stringify([{ ...resumedClaim, can_resume: true }]),
+    )
+    api.getClaim.mockResolvedValue(resumedClaim)
+    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_resumed_with_services',
+      model_profile_id: 'qwen-local',
+      started_at: '2026-09-16T01:06:00Z',
+      resume: {
+        summary: 'A pipe burst in the kitchen.',
+        unresolved_questions: [],
+        pending_items: [],
+        prior_commitments: [],
+        customer_next_step: resumedClaim.customer_next_step,
+      },
+    })
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
+
+    expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
+    expect(screen.queryByRole('dialog', { name: 'Third-party services' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'What to provide' }))
+    await user.click(screen.getByRole('button', { name: /Third-party support/ }))
+    expect(await screen.findByRole('dialog', { name: 'Third-party services' })).toBeVisible()
+  })
+
   it.each([false, true])('retries a saved unanswered message with its original identity and a new request key (safety notice: %s)', async (hasSafetyNotice) => {
     const user = userEvent.setup()
     let requestSequence = 0
@@ -790,8 +871,11 @@ describe('claimant intake projection', () => {
     expect(profileButton).toHaveAccessibleName(
       'Open Profile for Alexandria Montgomery-Sinclair (alexandria.montgomery-sinclair@example.invalid)',
     )
-    expect(container.querySelector('.intake-profile-name')).toHaveAttribute('title', 'Alexandria Montgomery-Sinclair')
-    expect(container.querySelector('.intake-profile-name')).toHaveTextContent('Alexand…inclair')
+    const profileName = container.querySelector('.intake-profile-name')
+    expect(profileName).toHaveAttribute('title', 'Alexandria Montgomery-Sinclair')
+    expect(profileName).toHaveTextContent('Alexandria Montgomery-Sinclair')
+    expect(profileName.querySelector('.intake-profile-name-start')).toHaveTextContent('Alexandria Montgomery-Si')
+    expect(profileName.querySelector('.intake-profile-name-end')).toHaveTextContent('nclair')
     expect(container.querySelector('.intake-profile-email')).toHaveAttribute(
       'title',
       'alexandria.montgomery-sinclair@example.invalid',
@@ -1108,7 +1192,11 @@ describe('claimant intake projection', () => {
     await act(async () => pushLiveUpdate(realtimeChange(5)))
 
     expect(await screen.findByRole('status', { name: /Your response is needed/ })).toBeInTheDocument()
-    expect(screen.getByText(staffMessage.content.text)).toBeInTheDocument()
+    const staffArticle = screen.getByText(staffMessage.content.text).closest('.msg-staff')
+    expect(staffArticle.querySelector('.staff-mark')).toHaveTextContent('N')
+    expect(staffArticle.querySelector('.staff-bubble')).toHaveClass('chat-bubble')
+    expect(staffArticle.querySelector('time.message-timestamp'))
+      .toHaveAttribute('datetime', staffMessage.created_at)
     expect(screen.getByText('Northwind staff')).toBeInTheDocument()
     const replyBox = screen.getByPlaceholderText('Reply to Northwind staff...')
     await user.type(replyBox, claimantReply.content.text)
@@ -1314,14 +1402,18 @@ describe('claimant intake projection', () => {
 
     expect(api.createClaim).toHaveBeenCalledTimes(1)
     expect(api.startClaimSession).not.toHaveBeenCalled()
-    expect(screen.getByPlaceholderText('Tell us what happened…')).toHaveValue('')
+    expect(screen.getByRole('heading', { name: 'New conversation' })).toBeVisible()
+    expect(screen.getByText('Ready to start')).toBeVisible()
+    expect(screen.getByPlaceholderText('Write the details you know...')).toHaveValue('')
+    expect(screen.queryByRole('button', { name: 'Start claim' })).not.toBeInTheDocument()
     expect(screen.queryByText('clm_ui_second')).not.toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/claims/new')
 
     await user.type(
-      screen.getByPlaceholderText('Tell us what happened…'),
+      screen.getByPlaceholderText('Write the details you know...'),
       'A second incident happened today.',
     )
-    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await user.click(screen.getByRole('button', { name: 'Send' }))
 
     expect(api.createClaim).toHaveBeenCalledTimes(2)
     expect(await screen.findByText('clm_ui_second')).toBeInTheDocument()
@@ -1346,6 +1438,16 @@ describe('claimant intake projection', () => {
     expect(input).toHaveValue('')
     expect(api.createClaim).not.toHaveBeenCalled()
     expect(globalThis.location.pathname).toBe('/')
+  })
+
+  it('restores the empty conversation workspace from its draft route', () => {
+    globalThis.history.replaceState({}, '', '/claims/new')
+
+    render(<App />)
+
+    expect(screen.getByRole('heading', { name: 'New conversation' })).toBeVisible()
+    expect(screen.getByPlaceholderText('Write the details you know...')).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Start your insurance claim' })).not.toBeInTheDocument()
   })
 
   it('restores anonymous session-local history through the existing Claim APIs after reload', async () => {
@@ -1374,11 +1476,8 @@ describe('claimant intake projection', () => {
     unmount()
 
     render(<App />)
-    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
-
-    expect(screen.queryByText('Sign in to view saved conversations')).not.toBeInTheDocument()
-    expect(screen.getByText('Saved in this browser session.')).toBeVisible()
-    await user.click(screen.getByRole('button', { name: /Open Home claim/ }))
+    expect(screen.getByRole('heading', { name: 'New conversation' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: /home.*Continue this conversation/i }))
 
     expect(api.listClaims).not.toHaveBeenCalled()
     expect(api.resumeClaimSession).toHaveBeenCalledWith({ claimId: initialClaim.claim_id })
@@ -1830,8 +1929,9 @@ describe('claimant intake projection', () => {
     })
 
     expect(
-      screen.getByRole('textbox', { name: 'Incident description' }),
+      screen.getByRole('textbox', { name: 'Add more information' }),
     ).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'New conversation' })).toBeVisible()
     expect(screen.queryByText(initialClaim.claim_id)).not.toBeInTheDocument()
     expect(api.getClaim).not.toHaveBeenCalled()
 
@@ -1933,7 +2033,7 @@ describe('claimant intake projection', () => {
   })
 
 
-  it('completes payout and contact Step 3 from backend action and opens claim creation directly', async () => {
+  it('completes payout and contact Step 3 then requires Step 4 before creation', async () => {
     const user = userEvent.setup()
     const paymentDestination = {
       payment_destination_id: 'pyd_1234567890abcdef1234',
@@ -1948,12 +2048,28 @@ describe('claimant intake projection', () => {
       requiredInputs: ['payment_destination_id', 'claimant.contact_preference'],
       revision: 2,
     })
+    const reviewAgreementAction = primaryAction({
+      actionCode: 'claimant.review_agreement',
+      available: true,
+      revision: 3,
+    })
     const createClaimAction = primaryAction({
       actionCode: 'claimant.create_claim',
       actionType: 'claim_creation',
       available: true,
-      revision: 3,
+      revision: 4,
     })
+    const agreement = {
+      agreement_id: 'northwind-fnol-claim-submission',
+      version: '1',
+      display_copy: 'I have reviewed the information shown for this claim.',
+      confirmations: [{
+        key: 'reviewed_and_confirmed',
+        label: 'I confirm this submission.',
+        required: true,
+      }],
+    }
+
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue({
       customer_id: 'cus_demo',
@@ -1996,12 +2112,13 @@ describe('claimant intake projection', () => {
         summary: 'Continue to agreement and confirmation.',
         required_items: [],
       },
-      primary_action: createClaimAction,
+      primary_action: reviewAgreementAction,
     })
     api.getClaim.mockResolvedValue({
       ...initialClaim,
       revision: 3,
       payment_destination_id: paymentDestination.payment_destination_id,
+      submission_agreement: agreement,
       form: {
         ...initialClaim.form,
         'claimant.contact_preference': {
@@ -2016,10 +2133,28 @@ describe('claimant intake projection', () => {
         summary: 'Continue to agreement and confirmation.',
         required_items: [],
       },
+      primary_action: reviewAgreementAction,
+    })
+    api.acceptClaimAgreement.mockResolvedValue({
+      claim_id: initialClaim.claim_id,
+      revision: 4,
+      agreement,
+      acceptance: {
+        acceptance_id: 'aga_test',
+        agreement_id: agreement.agreement_id,
+        version: agreement.version,
+        confirmations: { reviewed_and_confirmed: true },
+        accepted_at: '2026-09-23T10:00:00Z',
+      },
+      customer_next_step: {
+        status: 'agreement_required',
+        summary: 'Continue to agreement and confirmation.',
+        required_items: [],
+      },
       primary_action: createClaimAction,
     })
     api.createExternalClaim.mockResolvedValue({
-      revision: 4,
+      revision: 5,
       external_claim: {
         claim_number: 'NWF-2026-16ECDD',
         creation_status: 'created',
@@ -2036,160 +2171,185 @@ describe('claimant intake projection', () => {
       primary_action: primaryAction({
         actionCode: 'claimant.continue_conversation',
         available: false,
-        revision: 4,
+        revision: 5,
       }),
     })
 
     render(<App />)
-    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'My claim details are complete.')
+    await user.type(
+      screen.getByPlaceholderText('Tell us what happened…'),
+      'My claim details are complete.',
+    )
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    expect(await screen.findByRole('heading', { name: 'Payout & contact' })).toBeInTheDocument()
-    expect(screen.getByText('***************6700')).toBeInTheDocument()
-    expect(screen.queryByText('12-3456-1234567-00')).not.toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: 'Payout & contact' }),
+    ).toBeInTheDocument()
 
     await user.click(screen.getByRole('radio', { name: /cheque .*6700/i }))
     await user.click(screen.getByRole('radio', { name: /Email test@example.test/i }))
-    const continueButton = screen.getByRole('button', { name: 'Continue to agreement' })
-    expect(continueButton).toBeEnabled()
-    await user.click(continueButton)
+    await user.click(screen.getByRole('button', { name: 'Continue to agreement' }))
 
-    await waitFor(() => expect(api.selectClaimPayoutContact).toHaveBeenCalledWith(
+    expect(
+      await screen.findByText(agreement.display_copy),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole('checkbox', {
+      name: 'I confirm this submission.',
+    }))
+    await user.click(screen.getByRole('button', { name: 'Submit claim' }))
+
+    await waitFor(() => expect(api.acceptClaimAgreement).toHaveBeenCalledWith(
       expect.objectContaining({
         claimId: initialClaim.claim_id,
-        revision: 2,
-        paymentDestinationId: paymentDestination.payment_destination_id,
-        contactPreference: 'email',
+        revision: 3,
+        agreementId: agreement.agreement_id,
+        version: agreement.version,
+        confirmations: { reviewed_and_confirmed: true },
       }),
     ))
-    expect(api.getClaim).toHaveBeenCalledWith(initialClaim.claim_id)
-
-    const createAction = await screen.findByRole('button', { name: /Create your claim/i })
-    expect(createAction).toHaveTextContent('Ready')
-    await user.click(createAction)
 
     await waitFor(() => expect(api.createExternalClaim).toHaveBeenCalledWith(
       expect.objectContaining({
         claimId: initialClaim.claim_id,
-        revision: 3,
+        revision: 4,
       }),
     ))
-    expect(await screen.findByRole('status', {
-      name: 'Claim NWF-2026-16ECDD created',
-    })).toBeInTheDocument()
+
+    const successHeading = await screen.findByRole('heading', { name: 'Claim submitted' })
+    const successPanel = successHeading.closest('section')
+    expect(successPanel).not.toBeNull()
+    expect(within(successPanel).getByText('NWF-2026-16ECDD')).toBeInTheDocument()
+    expect(
+      within(successPanel).getByText('A claims specialist will review the submitted details.'),
+    ).toBeInTheDocument()
+    expect(within(successPanel).getByText('2026-09-16T01:00:00Z')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Submit claim' })).not.toBeInTheDocument()
+
+    await user.click(
+      within(successPanel).getByRole('button', { name: 'Back to conversation' }),
+    )
+    expect(screen.queryByRole('heading', { name: 'Claim submitted' })).not.toBeInTheDocument()
   })
 
-  it('keeps creation and assessment actions in the Agent message flow', async () => {
+  it('keeps agreement review in the Agent message flow before final submission', async () => {
     const user = userEvent.setup()
+
     api.submitClaimMessage.mockResolvedValue({
-      claimant_message: claimantMessage,
-      agent_message: {
-        ...agentMessage,
-        content: { type: 'text', text: 'Everything required is ready.' },
-      },
-      form_changes: [],
-      contents_item_changes: [],
+      ...initialTurn(),
       dynamic_form: readyDynamicForm(),
       claim_revision: 2,
       decision: {
         customer_next_step: {
-          status: 'ready_to_create',
-          summary: 'Ready to create',
+          status: 'agreement_required',
+          summary: 'Continue to agreement and confirmation.',
           required_items: [],
         },
       },
       primary_action: primaryAction({
-        actionCode: 'claimant.create_claim',
-        actionType: 'claim_creation',
+        actionCode: 'claimant.review_agreement',
         available: true,
         revision: 2,
       }),
     })
-    api.createExternalClaim.mockResolvedValue({
-      revision: 3,
-      external_claim: {
-        claim_number: 'NWF-2026-16ECDD',
-        creation_status: 'created',
-        route: 'Claims intake review',
-        next_step: 'A claims specialist will review the submitted details.',
-        expected_by: '2026-09-16T01:00:00Z',
-      },
-      external_service_action: {
-        service_identity: 'vehicle_damage_assessment_routing',
-        service_name: 'Vehicle damage assessment',
-        provider: 'Controlled assessment fixture',
-        purpose: 'Request an assessor for the vehicle damage recorded in this claim.',
-        shared_data_summary: ['Your confirmed incident region'],
-        consent_status: 'not_recorded',
-        status: 'consent_required',
-        routing: null,
-        failure_code: null,
-        can_request: true,
-      },
-      customer_next_step: {
-        status: 'claim_created',
-        summary: 'Claims intake review',
-        required_items: [],
-      },
-      primary_action: primaryAction({
-        actionCode: 'claimant.request_assessment',
-        actionType: 'external_service',
-        available: true,
-        requiredInputs: ['claimant_consent'],
-        revision: 3,
-        targetRef: 'vehicle_damage_assessment_routing',
-      }),
-    })
 
     render(<App />)
-    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'My car was damaged.')
+    await user.type(
+      screen.getByPlaceholderText('Tell us what happened…'),
+      'My car was damaged.',
+    )
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    const progress = await screen.findByRole('button', {
-      name: /Claim progress: 9 of 9 required details complete\. Ready to create/i,
+    await screen.findByText(agentMessage.content.text)
+
+    const agreementAction = screen.getByRole('button', {
+      name: /Agreement & confirmation/i,
     })
-    expect(progress).toHaveAttribute('aria-expanded', 'false')
-    const createAction = screen.getByRole('button', { name: /Create your claim/i })
-    expect(createAction.closest('.msg-agent')).toBeInTheDocument()
-
-    await user.click(createAction)
-
-    expect(await screen.findByRole('status', {
-      name: 'Claim NWF-2026-16ECDD created',
-    })).toBeInTheDocument()
-    expect(screen.getByText('Claim created')).toBeInTheDocument()
-    expect(screen.getByRole('button', {
-      name: /Claim progress: 9 of 9 required details complete\. Claims intake review/i,
-    })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Claim progress:.*Ready to create/i })).not.toBeInTheDocument()
-    const claimDetails = screen.getByRole('button', { name: /Claim details/i })
-    expect(claimDetails).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.getByText('A claims specialist will review the submitted details.')).not.toBeVisible()
-    await user.click(claimDetails)
-    expect(screen.getByText('A claims specialist will review the submitted details.')).toBeVisible()
-
-    const assessmentAction = screen.getByRole('button', {
+    expect(agreementAction.closest('.msg-agent')).toBeInTheDocument()
+    expect(screen.queryByRole('button', {
       name: /Request a vehicle damage assessment/i,
-    })
-    expect(assessmentAction).toHaveAttribute('aria-expanded', 'false')
-    expect(assessmentAction.closest('.msg-agent')).toBeInTheDocument()
-    expect(api.createExternalClaim).toHaveBeenCalledWith(expect.objectContaining({
-      claimId: initialClaim.claim_id,
-      revision: 2,
-    }))
+    })).not.toBeInTheDocument()
   })
 
-  it('uses the backend primary action when supporting projections could imply another action', async () => {
+  it('renders boolean field values as Yes/No and shows a human label for every registered field', async () => {
+    const user = userEvent.setup()
+    const claimWithBooleanFields = {
+      ...initialClaim,
+      revision: 2,
+      form: {
+        'incident.injury_or_danger': { value: false, status: 'confirmed', source: 'claimant' },
+        'vehicle.drivable': { value: true, status: 'confirmed', source: 'claimant' },
+        'incident.cause': { value: 'Hit the guardrail while reversing.', status: 'confirmed', source: 'claimant' },
+      },
+      dynamic_form: {
+        selected_family: 'motor',
+        claim_revision: 2,
+        requirements: {
+          ready: false,
+          current_action_total: 3,
+          current_action_satisfied: 3,
+          satisfied: ['incident.injury_or_danger', 'vehicle.drivable', 'incident.cause'],
+          next_required_item: null,
+          pending_later: [],
+          missing_required_now: [],
+        },
+        fields: [],
+        form: {},
+      },
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({
+      items: [{ ...claimWithBooleanFields, can_resume: true }],
+      page: { next_cursor: null },
+    })
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_ui_vp',
+      model_profile_id: 'qwen-local',
+      started_at: '2026-09-10T01:00:02Z',
+      resume: {
+        customer_next_step: claimWithBooleanFields.customer_next_step,
+        summary: 'My car was rear-ended.',
+        pending_items: [],
+        prior_commitments: [],
+      },
+    })
+    api.getClaim.mockResolvedValue(claimWithBooleanFields)
+    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
+
+    await screen.findByRole('heading', { name: 'Claim details' })
+
+    // A boolean value must read as Yes/No, never the raw JavaScript "true"/"false" string.
+    expect(screen.getByText('Yes')).toBeVisible()
+    expect(screen.getByText('No')).toBeVisible()
+    expect(screen.queryByText('true')).not.toBeInTheDocument()
+    expect(screen.queryByText('false')).not.toBeInTheDocument()
+
+    // A registered field without an explicit label must still show something readable,
+    // not the bare last segment of its field code.
+    expect(screen.getAllByText('Cause').length).toBeGreaterThan(0)
+  })
+
+
+  it('uses the backend agreement primary action when supporting projections disagree', async () => {
     const user = userEvent.setup()
     const externalServiceAction = {
       service_identity: 'vehicle_damage_assessment_routing',
       service_name: 'Vehicle damage assessment',
       provider: 'Controlled assessment fixture',
-      purpose: 'Request an assessor for the vehicle damage recorded in this claim.',
+      purpose: 'Request a vehicle damage assessment.',
       shared_data_summary: ['Your confirmed incident region'],
       status: 'consent_required',
       can_request: true,
     }
+
     api.createClaim.mockResolvedValue({
       claim: {
         ...initialClaim,
@@ -2204,30 +2364,35 @@ describe('claimant intake projection', () => {
       },
       session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
     })
+
     api.submitClaimMessage.mockResolvedValue({
       ...initialTurn(),
-      dynamic_form: readyDynamicForm(),
       decision: {
         customer_next_step: {
-          status: 'ready_to_create',
-          summary: 'Ready to create',
+          status: 'agreement_required',
+          summary: 'Continue to agreement and confirmation.',
           required_items: [],
         },
       },
       primary_action: primaryAction({
-        actionCode: 'claimant.create_claim',
-        actionType: 'claim_creation',
+        actionCode: 'claimant.review_agreement',
         available: true,
         revision: 2,
       }),
     })
 
     render(<App />)
-    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'My car was damaged.')
+    await user.type(
+      screen.getByPlaceholderText('Tell us what happened…'),
+      'My car was damaged.',
+    )
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
 
-    expect(screen.getByRole('button', { name: /Create your claim/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', {
+      name: /Agreement & confirmation/i,
+    })).toBeInTheDocument()
+
     expect(screen.queryByRole('button', {
       name: /Request a vehicle damage assessment/i,
     })).not.toBeInTheDocument()
@@ -2311,6 +2476,28 @@ describe('claimant intake projection', () => {
     expect(screen.getByText('2 to review')).toBeInTheDocument()
   })
 
+  it('uses the claimant-safe Incident type label in the details review', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      form_changes: [{
+        field_code: 'incident.type',
+        field: {
+          value: 'water',
+          status: 'proposed',
+          source: 'claimant',
+        },
+      }],
+    })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    expect(await screen.findByText('Incident type needs your review.')).toBeVisible()
+    expect(screen.queryByText('type needs your review.')).not.toBeInTheDocument()
+  })
+
   it('renders backend dynamic requirements and re-renders a corrected field', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage.mockResolvedValue({
@@ -2385,7 +2572,7 @@ describe('claimant intake projection', () => {
       revision: 2,
     })))
     expect(await screen.findByText('9pm')).toBeInTheDocument()
-    expect(screen.getByText('Add the affected property address')).toBeInTheDocument()
+    expect(screen.queryByText('Add the affected property address')).not.toBeInTheDocument()
     expect(screen.getByRole('button', {
       name: /Claim progress: 1 of 2 required details complete/i,
     })).toHaveAttribute('aria-expanded', 'false')
