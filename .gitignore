@@ -42,6 +42,7 @@ htmlcov/
 .nox/
 .coverage
 .coverage.*
+/coverage*.json
 .cache
 nosetests.xml
 coverage.xml
@@ -211,6 +212,10 @@ cython_debug/
 # .vscode/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
+
+# Repository-root local development and PR drafting artifacts
+/node_modules/
+/.pr-*-body.md
 
 # Ruff stuff:
 .ruff_cache/

@@ -7,6 +7,23 @@ actual connectivity and temporary-container results observed on 26-28 August 202
 another contributor can repeat. It does not promote an incomplete profile or claim production
 deployment, AWS access, Cloudflare access, or a complete MongoDB runtime.
 
+## Current-main reconciliation
+
+Reconciled on 2026-09-28 against
+`main@fad552f83a6ebae409f2677bed80a8c9899d206c`. The dated classifications and commands below are
+historical run evidence and were not rerun by this documentation change.
+
+- The current supported development path composes `local_mvp` with `model_gateway`; PR #977 has
+  merged the claimant Runtime v8 model-backed path. Statements below that a named historical run
+  used the controlled Agent remain true only for that run.
+- The profile selector added in PR #988 can request `model_gateway` without silently falling back,
+  but issue #962 still lacks its first recorded model-backed 5/3/2 journey batch.
+- Real AWS migration and integration are Sprint 5 work. The historical `aws: unavailable`
+  classification remains evidence for the named earlier environment, not a permanent product
+  decision.
+- Third-party participant behavior is intentionally simulation-backed and is independent of the
+  AWS data-profile migration.
+
 The validation branch was synchronized with `main@4c90e2a` before the latest checks below. The temporary
 containers use one image built from the final reviewed branch head; the pull-request evidence names
 that exact head after the configured remote quality checks pass.
