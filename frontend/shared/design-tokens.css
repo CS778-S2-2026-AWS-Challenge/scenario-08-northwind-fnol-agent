@@ -149,6 +149,28 @@
   --claimant-history-rail-blur: var(--blur-floating);
   --claimant-history-panel-blur: var(--blur-overlay);
 
+  /* Standalone Claim history uses a quieter editorial account-page contract.
+     The component consumes these roles instead of reconstructing reference
+     colours and geometry locally. */
+  --claimant-claims-page-surface: hsl(42 24% 94%);
+  --claimant-claims-content-surface: hsl(48 100% 99%);
+  --claimant-claims-text: hsl(144 8% 12%);
+  --claimant-claims-text-muted: hsl(137 3% 44%);
+  --claimant-claims-divider: hsl(69 9% 85%);
+  --claimant-claims-accent: hsl(158 21% 36%);
+  --claimant-claims-accent-soft: hsl(144 21% 91%);
+  --claimant-claims-accent-strong: hsl(159 33% 21%);
+  --claimant-claims-progress-border: color-mix(in srgb, var(--claimant-claims-accent) 24%, transparent);
+  --claimant-claims-row-hover: color-mix(in srgb, var(--claimant-claims-content-surface) 68%, transparent);
+  --claimant-claims-divider-rule: 1px solid var(--claimant-claims-divider);
+  --claimant-claims-progress-border-rule: 1px solid var(--claimant-claims-progress-border);
+  --claimant-claims-header-height: calc(var(--space-16) + var(--space-2));
+  --claimant-claims-content-measure: var(--claimant-entry-content-measure);
+  --claimant-claims-progress-copy-measure: 620px;
+  --claimant-claims-empty-copy-measure: 440px;
+  --claimant-claims-title-size: 54px;
+  --claimant-claims-card-radius: var(--space-3);
+
   /* Claimant workspace glass contract. The centre stays more opaque than the
      sidebars so long-form conversation and Claim details retain strong contrast. */
   --claimant-workspace-background-wash: color-mix(in srgb, var(--color-page) 8%, transparent);
