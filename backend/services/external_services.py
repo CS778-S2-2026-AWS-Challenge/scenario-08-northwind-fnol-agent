@@ -44,6 +44,7 @@ from backend.domain.models import (
     ClaimantExternalServiceAction,
     ClaimantExternalServiceResponse,
     ClaimantExternalServiceStatus,
+    ClaimantPrimaryAction,
     ClaimCreationStatus,
     CustomerNextStep,
     ExternalServiceConsent,
@@ -416,7 +417,7 @@ def _assessment_has_come_back(
     )
 
 
-def _payout_contact_is_complete(
+def payout_contact_is_complete(
     repository: PersistenceRepository,
     claim: WorkingClaim,
     identity_repository: IdentityRepository | None,
@@ -485,7 +486,7 @@ def claimant_next_step(
     """
 
     if action is None:
-        if claim.customer_next_step.status == 'ready_to_create' and _payout_contact_is_complete(
+        if claim.customer_next_step.status == 'ready_to_create' and payout_contact_is_complete(
             repository, claim, identity_repository
         ):
             return claim.customer_next_step.model_copy(
@@ -580,25 +581,65 @@ def claimant_next_step(
     )
 
 
+def claimant_current_action_projection(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    identity_repository: IdentityRepository | None = None,
+    *,
+    agreement_accepted: bool | None = None,
+) -> tuple[ClaimantExternalServiceAction | None, CustomerNextStep, ClaimantPrimaryAction]:
+    """Derive the one authoritative claimant action used by reads and writes.
+
+    Message-bound service offers remain actions on their originating Agent message.
+    They must not replace the normal intake Step 3/Step 4 primary action, regardless
+    of whether the offer has already been accepted or dispatched.
+    """
+
+    if agreement_accepted is None:
+        # Import lazily because the agreement service itself consumes this projection.
+        from backend.services.agreement import agreement_acceptance_is_current
+
+        agreement_accepted = agreement_acceptance_is_current(claim)
+
+    external_action = claimant_assessor_action(repository, claim)
+    primary_external_action = external_action
+    if external_action is not None and external_action.offer_id is not None:
+        primary_external_action = None
+    next_step = claimant_next_step(
+        repository,
+        claim,
+        primary_external_action,
+        identity_repository=identity_repository,
+    )
+    primary_action = project_claimant_primary_action(
+        claim_id=claim.claim_id,
+        claim_revision=claim.revision,
+        next_step=next_step,
+        external_service_action=primary_external_action,
+        agreement_accepted=agreement_accepted,
+    )
+    return primary_external_action, next_step, primary_action
+
+
 def _response(
     repository: PersistenceRepository,
     claim: WorkingClaim,
+    identity_repository: IdentityRepository | None = None,
 ) -> ClaimantExternalServiceResponse:
     action = claimant_assessor_action(repository, claim)
     if action is None:
         raise _invalid_state('A vehicle damage assessment is not a relevant next step.')
-    next_step = claimant_next_step(repository, claim, action)
+    _current_external_action, next_step, primary_action = claimant_current_action_projection(
+        repository,
+        claim,
+        identity_repository=identity_repository,
+    )
     return ClaimantExternalServiceResponse(
         claim_id=claim.claim_id,
         revision=claim.revision,
         action=action,
         customer_next_step=next_step,
-        primary_action=project_claimant_primary_action(
-            claim_id=claim.claim_id,
-            claim_revision=claim.revision,
-            next_step=next_step,
-            external_service_action=action,
-        ),
+        primary_action=primary_action,
     )
 
 
@@ -637,6 +678,7 @@ def grant_assessor_consent(
     payload: GrantAssessorConsentRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    identity_repository: IdentityRepository | None = None,
 ) -> tuple[ClaimantExternalServiceResponse, bool]:
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
@@ -677,7 +719,7 @@ def grant_assessor_consent(
 
     active_consent = _active_assessor_consent(claim)
     if active_consent is not None:
-        response = _response(repository, claim)
+        response = _response(repository, claim, identity_repository)
         _save_idempotency(
             repository,
             actor_id=principal.subject,
@@ -715,7 +757,7 @@ def grant_assessor_consent(
         ),
         open_handoffs=tuple(repository.list_handoffs(claim_id, principal.subject)),
     )
-    response = _response(repository, updated)
+    response = _response(repository, updated, identity_repository)
     idempotency = IdempotencyRecord(
         actor_id=principal.subject,
         route=route,
@@ -828,6 +870,7 @@ def request_assessor_routing(
     claim_id: str,
     idempotency_key: str | None,
     if_match: str | None,
+    identity_repository: IdentityRepository | None = None,
 ) -> tuple[ClaimantExternalServiceResponse, bool]:
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
@@ -897,7 +940,7 @@ def request_assessor_routing(
                 message='The assessment result could not be restored.',
                 retryable=True,
             )
-        response = _response(repository, restored)
+        response = _response(repository, restored, identity_repository)
         _save_idempotency(
             repository,
             actor_id=principal.subject,
@@ -991,7 +1034,7 @@ def request_assessor_routing(
             message='The assessment result could not be restored.',
             retryable=True,
         )
-    response = _response(repository, updated)
+    response = _response(repository, updated, identity_repository)
     _save_idempotency(
         repository,
         actor_id=principal.subject,

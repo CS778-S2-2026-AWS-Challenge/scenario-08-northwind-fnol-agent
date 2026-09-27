@@ -7,9 +7,33 @@ exists on `main@61e21cdb` as observed on 2026-09-07. It identifies reusable reco
 relationship and visibility boundaries, and unresolved inputs for issue #583 and later Week 6
 cards. It does not define a second schema, promote candidate fields, or prove a runnable journey.
 
-The principal finding is that the repository has a durable, source-aware Claim graph and a
-working 20-code Field Registry, but it does not yet have one coherent runnable seed graph for
-normal-mode identities, online staff, and representative motor, home, and contents Claims.
+At that historical head, the principal finding was that the repository had a durable,
+source-aware Claim graph but did not yet have one coherent runnable seed graph for normal-mode
+identities, online staff, and representative motor, home, and contents Claims. The detailed
+inventory and gap ledger below remain evidence for that named head, not a current schema snapshot.
+
+## Current-main reconciliation
+
+Reconciled on 2026-09-28 against
+`main@fad552f83a6ebae409f2677bed80a8c9899d206c`. No new seed or provider run was performed.
+
+- The executable Field Registry is now version `6` with 28 registered scalar field codes.
+- Contents items are typed `WorkingClaim.contents_items` records. Claimant and Workbench
+  projections, Runtime v8 proposal/reduction/confirmation, and Fixture/Mongo persistence consume
+  that record boundary.
+- Immutable `ContentsItemEvidenceAssociation` records and claimant/Workbench projections now link
+  items to existing Evidence without copying Evidence metadata into the item.
+- The demonstration catalogue now includes explicit motor, home, and contents field-state
+  scenarios (`AT-14`, `AT-15`, and `AT-16`). This does not by itself prove a normal-mode seeded
+  three-family browser journey.
+- PR #977 implemented the model-backed claimant Runtime v8 path, and PR #1038 completed the final
+  agreement/submission projection. The last recorded post-#977 journey evidence created motor in
+  the claimant UI and home through the claimant API; its contents run used the controlled Runtime
+  and stopped before item extraction.
+
+The older issue ownership and `DATA-*` rows below must therefore be read as a 2026-09-07 planning
+inventory. Current implementation work must re-derive a gap from the contracts and code above
+rather than treating an open historical card as proof that the gap still exists.
 
 ## Authority and evidence
 

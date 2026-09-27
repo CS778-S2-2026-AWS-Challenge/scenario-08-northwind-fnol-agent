@@ -250,6 +250,13 @@ def test_fresh_v8_release_publishes_atomic_prompt_schema_and_default_model() -> 
     assert model is not None
     assert model.values['prompt_version'] == 'northwind-fnol-claimant-v8'
     assert model.values['model_identifier'] == 'openai/gpt-4o-mini'
+    # Governance labels must track the actual published prompt generation, not a
+    # suffix baked in when this composer only ever served v7 releases.
+    assert policy.tool_policy.policy_version == 'northwind-fnol-agent-tools-v8'
+    assert policy.controlled_rules.rules_version == 'northwind-fnol-controlled-rules-v8'
+    assert policy.controlled_rules.route_policy_version == 'northwind-turn-router-v8'
+    assert policy.controlled_rules.context_catalogue_version == 'northwind-context-catalogue-v8'
+    assert policy.features.feature_version == 'northwind-fnol-agent-features-v8'
 
 
 def test_v8_startup_preserves_existing_v7_release_for_explicit_publication() -> None:

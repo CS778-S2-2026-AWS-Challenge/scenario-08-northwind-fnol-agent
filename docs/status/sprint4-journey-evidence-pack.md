@@ -16,6 +16,25 @@ no contract and does not claim that any product-acceptance category is complete;
 ten categories in #733, and [the rubric anchors](sprint4-rubric-anchors.md) give one named run per
 category.
 
+## Current-main reconciliation
+
+Reconciled on 2026-09-28 against
+`main@fad552f83a6ebae409f2677bed80a8c9899d206c`. This section does not alter the 105 historical
+records or claim that they were rerun.
+
+- PR #977 merged the claimant Runtime v8 model-backed implementation; PR #1038 later merged final
+  agreement/submission projection.
+- #771 records a post-#977 run at `main@bf5599fd`: motor reached Claim creation in the Claimant UI,
+  home reached Claim creation through the claimant API, and contents stopped because that run
+  still selected the controlled Runtime.
+- Current code implements typed contents-item proposal, confirmation, persistence, Evidence
+  association, and role projections. A current-head model-backed contents journey is still needed
+  to replace the historical unavailable result with run evidence.
+- The first model-backed journey batch in #962 and the all-family rerun after #1038 remain
+  unrecorded. Sprint 5 poster screenshots and metrics should be generated only after those runs.
+- Simulated third-party participants are the intended project boundary and remain valid evidence
+  when labelled honestly. Real AWS migration and integration remain Sprint 5 work.
+
 **Restated on 2026-09-21.** The first statement of this record was made at
 `main@6fe149ecba9c95179fed8e895b68a460d0f53145` on 2026-09-18. Three things have changed since, and
 this record now states the current head instead:
@@ -165,7 +184,10 @@ browser, and #964 tracks capturing them.
 | Workbench (@jxu316-arch) | Reconcile | `external.reconcile_response` for an unknown outcome | `unknown-outcome` or `interrupted-dispatch` |
 | Workbench (@jxu316-arch) | Missing information | Responsible party per item | Any failure journey |
 
-## Week 8 gaps
+## Historical Week 8 gaps
+
+This table records the gaps as understood at the evidence head. The current-main reconciliation
+above supersedes implementation-status statements that changed after PR #977 and PR #1038.
 
 | Gap | Effect on this evidence | Tracking | Owner |
 | --- | --- | --- | --- |

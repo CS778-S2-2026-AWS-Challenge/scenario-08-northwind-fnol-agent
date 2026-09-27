@@ -853,13 +853,13 @@ def test_payout_contact_selection_is_atomic_masked_and_resumable(adapter: str) -
     assert body['contact_preference']['value'] == 'email'
     assert body['contact_preference']['status'] == 'confirmed'
     assert body['customer_next_step']['status'] == 'agreement_required'
-    assert body['primary_action']['action_code'] == 'claimant.create_claim'
+    assert body['primary_action']['action_code'] == 'claimant.review_agreement'
     assert body['primary_action']['available'] is True
     assert detail.status_code == 200
     assert detail.json()['payment_destination_id'] == payment['payment_destination_id']
     assert detail.json()['form']['claimant.contact_preference']['value'] == 'email'
     assert detail.json()['customer_next_step']['status'] == 'agreement_required'
-    assert detail.json()['primary_action']['action_code'] == 'claimant.create_claim'
+    assert detail.json()['primary_action']['action_code'] == 'claimant.review_agreement'
     assert bank_number not in selected.text
     assert bank_number not in detail.text
 
@@ -935,12 +935,12 @@ def test_payout_contact_in_app_progresses_to_agreement(
     assert selected.status_code == 201, selected.text
     assert selected.json()['contact_preference']['value'] == 'in_app'
     assert selected.json()['customer_next_step']['status'] == 'agreement_required'
-    assert selected.json()['primary_action']['action_code'] == 'claimant.create_claim'
+    assert selected.json()['primary_action']['action_code'] == 'claimant.review_agreement'
     assert selected.json()['primary_action']['available'] is True
 
     assert detail.status_code == 200, detail.text
     assert detail.json()['customer_next_step']['status'] == 'agreement_required'
-    assert detail.json()['primary_action']['action_code'] == 'claimant.create_claim'
+    assert detail.json()['primary_action']['action_code'] == 'claimant.review_agreement'
     assert detail.json()['primary_action']['available'] is True
 
 

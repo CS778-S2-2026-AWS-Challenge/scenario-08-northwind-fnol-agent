@@ -31,6 +31,7 @@ from fastapi.testclient import TestClient
 
 from backend.adapters.evidence_storage import MockEvidenceStorage
 from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
+from tests.issue_928_support import prepare_claim_submission
 
 from .metrics import QuestionEffort, metric_coverage
 from .record import (
@@ -270,6 +271,29 @@ class Journey:
 
     def revision(self) -> int:
         return cast(int, self.read(f'/api/v1/claims/{self.claim_id}', 'claimant')['revision'])
+
+    def prepare_submission(self, *, key: str) -> int:
+        """Satisfy the claimant-owned #928 prerequisites before valid creation.
+
+        The journey runners are evidence for the surrounding business path, not
+        duplicate implementations of Step 3 or Step 4. Reuse the focused #928
+        test helper so payout/contact selection and agreement acceptance follow
+        the same real API contract exercised by the dedicated #928 tests.
+        """
+        prepared_revision = prepare_claim_submission(
+            self.client,
+            PRINCIPALS['claimant'],
+            self.claim_id,
+            self.revision(),
+            key=key,
+        )
+        current_revision = self.revision()
+        if prepared_revision != current_revision:
+            raise AssertionError(
+                'Submission preparation returned a revision that does not match '
+                'the authoritative Claim readback.'
+            )
+        return current_revision
 
     def read(self, path: str, actor: str) -> dict[str, Any]:
         return cast(dict[str, Any], self.client.get(path, headers=PRINCIPALS[actor]).json())

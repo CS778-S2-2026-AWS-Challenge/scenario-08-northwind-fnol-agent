@@ -1132,7 +1132,11 @@ def test_assessor_routing_retries_one_atomic_settlement_after_storage_failure(
         operation_id = assessor_operation_id(RouteAssessorRequest.model_validate(payload))
         prepared_operation = repository.get_assessor_routing_operation(operation_id)
         prepared_tasks = repository.list_external_tasks_internal(claim_id)
-        assert first.status_code == 500
+        assert first.status_code == 503, first.text
+        error = first.json()['error']
+        assert error['code'] == 'DEPENDENCY_UNAVAILABLE'
+        assert error['retryable'] is True
+        assert 'simulated settlement persistence failure' not in first.text
         assert prepared_operation is not None
         assert prepared_operation.status is AssessorRoutingOperationStatus.PREPARED
         assert len(prepared_tasks) == 1

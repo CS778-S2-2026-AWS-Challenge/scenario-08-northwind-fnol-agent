@@ -116,6 +116,7 @@ from backend.services.runtime_configuration import (
     RuntimeConfigurationSnapshot,
 )
 from backend.services.workbench import get_workbench_claim_detail
+from tests.issue_928_support import prepare_claim_submission
 
 
 def gateway_config(
@@ -4524,12 +4525,19 @@ def test_legacy_model_motor_journey_is_rejected_before_side_effects() -> None:
             ('police_report', 'pending_generation')
         ]
 
+        submission_revision = prepare_claim_submission(
+            client,
+            claimant,
+            claim_id,
+            int(pending_body['claim_revision']),
+            key='motor-mvp-submit',
+        )
         external_claim = client.post(
             f'/api/v1/claims/{claim_id}/creation',
             headers={
                 **claimant,
                 'Idempotency-Key': 'motor-mvp-create',
-                'If-Match': str(pending_body['claim_revision']),
+                'If-Match': str(submission_revision),
             },
         )
         assert external_claim.status_code == 201, external_claim.text

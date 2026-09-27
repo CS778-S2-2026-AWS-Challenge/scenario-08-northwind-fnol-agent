@@ -20,6 +20,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.issue_928_support import prepare_claim_submission
+
 os.environ.setdefault('DATA_RUNTIME_PROFILE', 'fixture')
 
 from backend.app import create_app
@@ -129,7 +131,31 @@ def _drive(client: TestClient, *, route: bool) -> str:
         )
         if response.status_code < 400:
             break
-        details = (response.json().get('error') or {}).get('details') or []
+        error = response.json().get('error') or {}
+        details = error.get('details') or []
+        if (
+            not details
+            and error.get('code') == 'INVALID_STATE_TRANSITION'
+            and 'submission agreement' in error.get('message', '')
+        ):
+            submission_revision = prepare_claim_submission(
+                client,
+                CLAIMANT,
+                claim_id,
+                _revision(client, claim_id),
+                key='aw-submit',
+            )
+            response = client.post(
+                f'/api/v1/claims/{claim_id}/creation',
+                headers={
+                    **CLAIMANT,
+                    'Idempotency-Key': f'aw-create-{attempt}-after-submit',
+                    'If-Match': str(submission_revision),
+                },
+                json={},
+            )
+            assert response.status_code == 201, response.text
+            break
         assert details, response.json()
         client.patch(
             f'/api/v1/claims/{claim_id}/form',
@@ -450,17 +476,16 @@ def test_a_write_that_returns_quietly_is_not_taken_as_proof(
     assert response.status_code == 409, response.text
 
 
-def test_a_task_left_behind_by_an_interrupted_acceptance_is_carried_forward(
+def test_interrupted_acceptance_rolls_back_before_clean_retry(
     client: TestClient, repository: FixtureRepository, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The other partial-write shape: the operation advanced, the task did not.
+    """An interrupted atomic settlement returns a retryable API error, then retries cleanly.
 
-    Acceptance is three writes — the routing operation, the task transition, then the
-    owed material. An interruption at the second leaves the operation `accepted` while
-    its task is still `prepared`, which is the state the recovery branch exists for.
-    Nothing exercised it, so this states what recovery owes: finish the transition it
-    finds unfinished, and record what the task then owes, rather than reporting a
-    request whose task never left `prepared`.
+    Assessor acceptance persists the operation, task transition, and attempt through one
+    atomic settlement. If task persistence fails inside that boundary, fixture storage
+    rolls the settlement back and the claimant boundary receives a stable retryable
+    dependency error. Retrying the same request then completes the transition and records
+    the material owed by the accepted task.
     """
 
     claim_id = _consented_claim(client)
@@ -484,7 +509,11 @@ def test_a_task_left_behind_by_an_interrupted_acceptance_is_carried_forward(
         },
         json={},
     )
-    assert interrupted.status_code == 409
+    assert interrupted.status_code == 503, interrupted.text
+    error = interrupted.json()['error']
+    assert error['code'] == 'DEPENDENCY_UNAVAILABLE'
+    assert error['retryable'] is True
+    assert 'task store unavailable' not in interrupted.text
 
     stranded = repository.list_external_tasks_internal(claim_id)[0]
     assert stranded.status is ExternalTaskOperationStatus.PREPARED

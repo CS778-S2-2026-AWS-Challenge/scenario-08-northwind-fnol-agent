@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Header, Request, status
 from backend.adapters.handoff_dispatch import HandoffDispatchAdapter
 from backend.core.auth import Principal, require_claimant
 from backend.domain.models import CreateSupportRequest, SupportRequestResponse
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.handoffs import create_support_request
 from backend.services.runtime_integrations import RuntimeIntegrationPolicy
@@ -18,6 +19,10 @@ def repository_for(request: Request) -> PersistenceRepository:
 
 def dispatch_for(request: Request) -> HandoffDispatchAdapter:
     return cast(HandoffDispatchAdapter, request.app.state.handoff_dispatch_adapter)
+
+
+def identity_repository_for(request: Request) -> IdentityRepository:
+    return cast(IdentityRepository, request.app.state.identity_repository)
 
 
 def runtime_integration_policy_for(request: Request) -> RuntimeIntegrationPolicy:
@@ -46,4 +51,5 @@ def request_support(
         idempotency_key,
         if_match,
         runtime_integration_policy_for(request),
+        identity_repository_for(request),
     )

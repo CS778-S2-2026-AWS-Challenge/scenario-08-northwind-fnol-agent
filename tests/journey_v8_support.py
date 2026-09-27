@@ -19,6 +19,7 @@ from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import AgentProposal, AgentTurnContext
 from backend.services.model_agent import GatewayAgent
 from backend.services.provider_capability_registry import provider_capability
+from tests.issue_928_support import prepare_claim_submission
 from tests.test_agent_context_runtime_v7 import _RecordingGateway
 from tests.test_claim_api import create_claim, submit_message
 from tests.test_turn_proposal_v8 import v8_context
@@ -241,6 +242,13 @@ class Journey:
         return measurements
 
     def create(self) -> dict[str, Any]:
+        self.revision = prepare_claim_submission(
+            self.client,
+            CLAIMANT,
+            self.claim_id,
+            self.revision,
+            key=f'{self.key}-submit',
+        )
         response = self.client.post(
             f'/api/v1/claims/{self.claim_id}/creation',
             headers={

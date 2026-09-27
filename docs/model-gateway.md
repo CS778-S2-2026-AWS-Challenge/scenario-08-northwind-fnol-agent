@@ -249,17 +249,18 @@ profile registers it without making it selectable or allowing provider transport
 model identifier, endpoint, prompt, evaluation status, capability, or credential-reference mismatch
 fails validation with `PROVIDER_CONFIGURATION_UNAVAILABLE`.
 
-The native `scripts/start-local.ps1` launcher supplies the checked-in binding manifest path to the
-backend process and restores the caller's environment after launch. It does not construct or inject
-model records: the backend still validates, publishes, and resolves the version-controlled manifest
-through the same Control Plane release boundary used by other deployments.
+The development launcher `scripts/start-dev.ps1` pulls model credentials from the team secrets
+endpoint, selects the `model_gateway` runtime profile and supplies the checked-in binding manifest
+path to the backend process. It does not construct or inject model records: the backend still
+validates, publishes, and resolves the version-controlled manifest through the same Control Plane
+release boundary used by other deployments.
 
 The published claimant profiles use this adapter contract:
 
 | Profile | Model | Role | Required capabilities |
 | --- | --- | --- | --- |
 | `qwen-local` | `qwen3.8-27b` through the environment-owned Qwen endpoint | deployment default through `MODEL_PROFILE_ID` | structured output (`json_object`) and tools |
-| `openrouter-gpt4o-mini` | `openai/gpt-4o-mini` through OpenRouter | deployment default | structured output, tools, and image input |
+| `openrouter-gpt4o-mini` | `openai/gpt-4o` through OpenRouter | deployment default | structured output, tools, and image input |
 | `bedrock-nova2-lite` | `global.amazon.nova-2-lite-v1:0` through Bedrock Sydney | published but unavailable until AWS account verification completes | structured output and image input |
 | `google-gemini35-flash-lite` | `gemini-3.5-flash-lite` through Google AI Studio | selectable | structured output, tools, image input, and PDF document input |
 
@@ -296,7 +297,7 @@ the other providers during continuation. The Runtime still validates every retur
 against the exact claimant schema before applying a proposal; this changes only the wire-level
 grammar and does not weaken field, permission, or state validation.
 
-The OpenRouter `openai/gpt-4o-mini` profile is the current default claimant model. The
+The OpenRouter `openai/gpt-4o` profile is the current default claimant model. The
 credential reference is stored as an environment-variable name only. A Release Set binds each selectable model in a keyed
 `model:<profile_id>` slot. The selected profile is the default for a Session, but each message may
 explicitly select another published profile in the same conversation. The Runtime persists the

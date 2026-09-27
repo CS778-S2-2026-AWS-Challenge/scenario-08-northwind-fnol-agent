@@ -2231,8 +2231,12 @@ only a queue accepted the request.
 Timeout and unavailable responses use `503 DEPENDENCY_UNAVAILABLE` with `retryable: true`.
 Access-denied and malformed responses use `502 DEPENDENCY_FAILED` with `retryable: false`. All
 four leave the consented Working Claim revision unchanged and do not report assignment.
-Automatic retry counts remain unapproved; the claimant client offers only an explicit retry for
-retryable failures.
+If the provider returns a known, replayable routing result but the atomic operation/task/attempt
+settlement cannot be persisted, the endpoint also returns `503 DEPENDENCY_UNAVAILABLE` with
+`retryable: true`; repository exception types are not exposed. The settlement rolls back to the
+prepared operation/task state, releases the dispatch hold, and an unchanged retry settles the same
+operation identity. Automatic retry counts remain unapproved; the claimant client offers only an
+explicit retry for retryable failures.
 
 A permitted retry continues the same operation, task, and request record. The operation identity
 is derived from the claim, the active claimant permission, and the requested action, so it does
@@ -4464,3 +4468,24 @@ These decisions do not prevent continued MVP implementation, but production beha
     and TurnResult contracts.
 12. Production model-profile capabilities, privacy classes, fallback groups, evaluation
     thresholds, and validity periods for each Agent purpose.
+
+## Issue #928 final agreement and Claim submission
+
+After the server-owned payout/contact step remains valid, claimant Claim detail projects
+`customer_next_step.status=agreement_required` and
+`primary_action.action_code=claimant.review_agreement`.
+
+The same claimant-safe Claim projection exposes one versioned `submission_agreement`.
+The claimant client renders the exact server-projected copy and confirmation definitions;
+it does not invent declaration wording or send declaration copy as claimant free text.
+
+`POST /api/v1/claims/{claim_id}/agreement-acceptances` requires claimant authentication,
+`If-Match`, and `Idempotency-Key`. The body supplies the projected `agreement_id`,
+`version`, and explicit confirmation results. Successful acceptance advances the Claim
+revision atomically with the acceptance history, idempotency metadata, audit fact, and
+claimant realtime publication. The resulting projection exposes `claimant.create_claim`.
+
+`POST /api/v1/claims/{claim_id}/creation` remains the existing Claim-creation boundary.
+Existing exact replay and accepted-result recovery execute before the new Issue #928 gate.
+Before any new provider operation, current payout/contact authority and a current
+revision-bound agreement acceptance are required.
