@@ -1564,6 +1564,7 @@ function App() {
       return {
         revision: Math.max(uploadRevision, latestEvidenceRevision.current),
         succeeded: false,
+        message: requestError?.message || 'Northwind could not upload this file.',
       }
     } finally {
       if (evidenceUploadControllers.current.get(localId) === uploadController) {
@@ -1578,11 +1579,19 @@ function App() {
     requestedKind = null,
     requestedEvidenceId = null,
   ) {
-    if (isBusy) return
+    if (isBusy) {
+      return {
+        succeeded: false,
+        message: 'Another claim update is still in progress. Wait a moment, then choose Replace and try again.',
+      }
+    }
     if (!hasClaimantAccessToken()) {
       setError('Sign in before uploading a file. Your anonymous conversation is still available, and you can resume it after signing in.')
       setStatus('error')
-      return
+      return {
+        succeeded: false,
+        message: 'Sign in, then choose Replace to upload this file.',
+      }
     }
     setError('')
     const attempt = existingAttempt || {
@@ -1605,10 +1614,10 @@ function App() {
           uploadAttempt: attempt,
         },
       ])
-      return
+      return { succeeded: true }
     }
 
-    await uploadAttachment(file, attempt, claim, {
+    return uploadAttachment(file, attempt, claim, {
       existingAttachment: Boolean(existingAttempt),
       checkExistingEvidence: Boolean(existingAttempt),
     })
@@ -2542,13 +2551,6 @@ function App() {
     } else {
       setPage('claim-evidence')
     }
-  }
-
-  function openCurrentClaimEvidence() {
-    if (!claim?.claim_id) return
-    setSelectedHistoryClaimId(claim.claim_id)
-    setWorkspaceView('claim-evidence')
-    setMobileView('chat')
   }
 
   function openCurrentClaimDocuments() {
@@ -3755,6 +3757,18 @@ function App() {
               tabIndex="0"
               hidden={detailsTab !== 'documents'}
             >
+              {detailsTab === 'documents' && workspaceView === 'chat' && (
+                <ClaimDocuments
+                  items={evidenceItems}
+                  loadStatus={evidenceLoadStatus}
+                  onUpload={(item, file) => handleFileSelected(
+                    file,
+                    null,
+                    item.kind,
+                    item.evidence_id,
+                  )}
+                />
+              )}
               {claim?.external_capabilities?.length > 0 && (
                 <button
                   ref={externalCapabilitiesTriggerRef}
@@ -3763,26 +3777,13 @@ function App() {
                   aria-haspopup="dialog"
                   onClick={() => setExternalCapabilitiesOpen(true)}
                 >
+                  <strong>Use a third-party service</strong>
                   <span>
-                    <strong>Third-party support</strong>
-                    <small>{claim.external_capabilities.length} services available</small>
+                    View {claim.external_capabilities.length}{' '}
+                    {claim.external_capabilities.length === 1 ? 'option' : 'options'}
+                    <span aria-hidden="true">›</span>
                   </span>
-                  <span aria-hidden="true">View</span>
                 </button>
-              )}
-              {detailsTab === 'documents' && workspaceView === 'chat' && (
-                <ClaimDocuments
-                  items={evidenceItems}
-                  loadStatus={evidenceLoadStatus}
-                  busy={isBusy}
-                  onUpload={(item, file) => handleFileSelected(
-                    file,
-                    null,
-                    item.kind,
-                    item.evidence_id,
-                  )}
-                  onView={openCurrentClaimEvidence}
-                />
               )}
             </div>
             </div>

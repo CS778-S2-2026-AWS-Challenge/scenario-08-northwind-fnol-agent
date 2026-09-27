@@ -110,6 +110,7 @@
   --claimant-profile-sidebar-width: 216px;
   --claimant-profile-label-width: 160px;
   --claimant-profile-address-min-height: 96px;
+  --claimant-details-panel-width: 400px;
 
   /* Claimant entry semantic contract. Component CSS consumes these roles
      without reconstructing translucent states or page geometry. */
