@@ -2,6 +2,7 @@ import { PROFILE_CATEGORIES } from '../profileRoutes.js'
 import AssetsSection from '../profile/AssetsSection.jsx'
 import PaymentDetailsSection from '../profile/PaymentDetailsSection.jsx'
 import PersonalDetailsSection from '../profile/PersonalDetailsSection.jsx'
+import PoliciesSection from '../profile/PoliciesSection.jsx'
 import { SectionHeading, SummaryRow } from '../profile/ProfilePrimitives.jsx'
 import usePersonalDetailsEditor from '../profile/usePersonalDetailsEditor.js'
 import ClaimAutoFillChoices from './ClaimAutoFillChoices.jsx'
@@ -89,6 +90,7 @@ export default function UserProfile({
   const resolvedController = controller || {
     resources: {
       assets: { items: assets, error: assetsError, loading: assets === null, stale: false },
+      policies: { items: [], error: '', loading: false, stale: false },
       payments: { items: [], error: '', loading: false, stale: false },
       identities: { items: [], error: '', loading: false, stale: false },
     },
@@ -99,9 +101,14 @@ export default function UserProfile({
     savePreferences: onSavePreferences,
     createAsset: ({ asset }) => onCreateAsset(asset),
     saveAsset: onUpdateAsset,
+    createPolicy: async () => {},
+    savePolicy: async () => {},
+    createPayment: async () => {},
+    savePayment: async () => {},
     createIdentity: async () => {},
     saveIdentity: async () => {},
     reloadAssets: onReloadAssets,
+    reloadPolicies: async () => [],
     reloadPayments: async () => [],
     reloadIdentities: async () => [],
   }
@@ -139,8 +146,33 @@ export default function UserProfile({
         />
       )
     }
+    if (currentSection === 'policies') {
+      return (
+        <PoliciesSection
+          resource={resolvedController.resources.policies}
+          pending={resolvedController.pending}
+          headingAs={SectionTitle}
+          onBeginCreate={resolvedController.beginCreate}
+          onAbandonCreate={resolvedController.abandonCreate}
+          onCreate={resolvedController.createPolicy}
+          onReload={resolvedController.reloadPolicies}
+          onUpdate={resolvedController.savePolicy}
+        />
+      )
+    }
     if (currentSection === 'payment-details') {
-      return <PaymentDetailsSection resource={resolvedController.resources.payments} headingAs={SectionTitle} onReload={resolvedController.reloadPayments} />
+      return (
+        <PaymentDetailsSection
+          resource={resolvedController.resources.payments}
+          pending={resolvedController.pending}
+          headingAs={SectionTitle}
+          onBeginCreate={resolvedController.beginCreate}
+          onAbandonCreate={resolvedController.abandonCreate}
+          onCreate={resolvedController.createPayment}
+          onReload={resolvedController.reloadPayments}
+          onUpdate={resolvedController.savePayment}
+        />
+      )
     }
     if (currentSection === 'identity-verification') {
       return (
