@@ -10,7 +10,6 @@ from backend.core.auth import (
     require_claimant,
     require_claimant_session,
     require_integration_service,
-    require_staff,
     require_staff_identity,
     require_workbench_read,
     require_workbench_write,
@@ -68,7 +67,11 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
         elif route.path.startswith('/api/v1/staff/'):
             expected = require_staff_identity
         elif route.path.startswith('/api/v1/workbench/agent/'):
-            expected = require_staff
+            expected = (
+                require_workbench_read
+                if route.methods == {'GET'} or route.path == '/api/v1/workbench/agent/sessions'
+                else require_workbench_write
+            )
         elif route.path.startswith('/api/v1/workbench/'):
             expected = (
                 require_workbench_read if route.methods == {'GET'} else require_workbench_write

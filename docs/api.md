@@ -2670,6 +2670,12 @@ Workbench pages and browser refreshes. They are not Claim conversation sessions 
 exposed through claimant routes. `GET /api/v1/workbench/conversations` includes them with
 `kind: "staff_agent"` so the staff member can resume them from Claim conversations.
 
+Staff Agent session creation, model capabilities, session lists, and message history require the
+server-derived `workbench:read` capability. Message submission and confirmed draft execution require
+`workbench:write`. The same capability checks run at the application-service boundary before session
+or Claim lookup, so an authenticated operations-only identity receives `403 ACCESS_DENIED` without
+revealing whether a supplied session or Claim identifier exists.
+
 `POST /api/v1/workbench/agent/sessions` accepts an optional `title` and published
 `model_profile_id`, and creates a `sas_` session. The selected profile is persisted on that
 session; omitting it selects the published default. A message cannot override the session's

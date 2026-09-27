@@ -5,8 +5,20 @@ from fastapi.testclient import TestClient
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.domain.models import CreateStaffMessageRequest
+from backend.domain.staff_agent import (
+    CreateStaffAgentMessageRequest,
+    CreateStaffAgentSessionRequest,
+    ExecuteStaffAgentDraftRequest,
+)
 from backend.repositories.fixture import FixtureRepository
 from backend.services.staff_actions import send_staff_message
+from backend.services.staff_agent import (
+    create_staff_agent_session,
+    execute_staff_agent_draft,
+    list_staff_agent_messages,
+    list_staff_agent_sessions,
+    submit_staff_agent_message,
+)
 from backend.services.workbench import get_workbench_claim_detail
 
 
@@ -142,6 +154,52 @@ def test_operations_staff_is_denied_before_workbench_resource_existence(
     assert response.json()['error']['code'] == 'ACCESS_DENIED'
 
 
+@pytest.mark.parametrize(
+    ('method', 'path', 'payload'),
+    (
+        ('POST', '/api/v1/workbench/agent/sessions', {'title': 'Blocked session'}),
+        ('GET', '/api/v1/workbench/agent/capabilities', None),
+        ('GET', '/api/v1/workbench/agent/sessions', None),
+        ('GET', '/api/v1/workbench/agent/sessions/sas_protected/messages', None),
+        (
+            'POST',
+            '/api/v1/workbench/agent/sessions/sas_protected/messages',
+            {
+                'client_message_id': 'blocked-message',
+                'content': 'Read a protected Claim.',
+                'claim_ids': ['clm_protected'],
+            },
+        ),
+        (
+            'POST',
+            '/api/v1/workbench/agent/sessions/sas_protected/messages/'
+            'sam_protected/drafts/sdr_protected/execute',
+            {'confirmed': True},
+        ),
+    ),
+)
+def test_operations_staff_is_denied_from_staff_agent_routes(
+    app: FastAPI,
+    client: TestClient,
+    method: str,
+    path: str,
+    payload: dict[str, object] | None,
+) -> None:
+    response = client.request(
+        method,
+        path,
+        headers={
+            **_login_operations_staff(app, client),
+            'Idempotency-Key': 'blocked-staff-agent-action',
+            'If-Match': '1',
+        },
+        json=payload,
+    )
+
+    assert response.status_code == 403
+    assert response.json()['error']['code'] == 'ACCESS_DENIED'
+
+
 def test_claims_professional_retains_workbench_read_access(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -210,6 +268,64 @@ def test_service_authorization_runs_before_repository_access(operation: str) -> 
                     content={'type': 'text', 'text': 'This must not reach persistence.'}
                 ),
                 'blocked-write',
+                '1',
+            )
+
+    assert error.value.status_code == 403
+    assert error.value.code == 'ACCESS_DENIED'
+
+
+@pytest.mark.parametrize(
+    'operation',
+    ('create_session', 'list_sessions', 'list_messages', 'submit_message', 'execute_draft'),
+)
+def test_staff_agent_service_authorization_runs_before_repository_access(
+    operation: str,
+) -> None:
+    repository = _RepositoryThatMustNotBeRead()
+    principal = Principal(
+        subject='stf_operations',
+        actor_type='staff',
+        roles=frozenset({'operations'}),
+    )
+
+    with pytest.raises(ApiError) as error:
+        if operation == 'create_session':
+            create_staff_agent_session(
+                repository,  # type: ignore[arg-type]
+                principal,
+                CreateStaffAgentSessionRequest(title='Blocked session'),
+            )
+        elif operation == 'list_sessions':
+            list_staff_agent_sessions(repository, principal)  # type: ignore[arg-type]
+        elif operation == 'list_messages':
+            list_staff_agent_messages(
+                repository,  # type: ignore[arg-type]
+                principal,
+                'sas_protected',
+            )
+        elif operation == 'submit_message':
+            submit_staff_agent_message(
+                repository,  # type: ignore[arg-type]
+                None,  # type: ignore[arg-type]
+                None,
+                principal,
+                'sas_protected',
+                CreateStaffAgentMessageRequest(
+                    client_message_id='blocked-message',
+                    content='Read a protected Claim.',
+                    claim_ids=['clm_protected'],
+                ),
+            )
+        else:
+            execute_staff_agent_draft(
+                repository,  # type: ignore[arg-type]
+                principal,
+                'sas_protected',
+                'sam_protected',
+                'sdr_protected',
+                ExecuteStaffAgentDraftRequest(confirmed=True),
+                'blocked-draft',
                 '1',
             )
 
