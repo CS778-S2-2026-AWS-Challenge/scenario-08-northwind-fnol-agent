@@ -95,6 +95,8 @@ pre { white-space: pre-wrap; overflow: auto; background: var(--color-page); padd
 .metric-strip > div { display: grid; }
 .metric-strip strong { font-size: var(--font-size-section); }
 .metric-strip span { color: var(--color-text-muted); text-transform: capitalize; }
+.pagination-controls { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-4); flex-wrap: wrap; }
+.pagination-controls span { color: var(--color-text-muted); }
 .notice { padding: var(--space-6); }
 .notice.error { border-color: var(--color-danger); }
 .notice button, .notice a { margin-top: var(--space-4); }

@@ -1,10 +1,12 @@
+import { translate as t } from '../i18n.js'
+
 export function ProjectedActionState({ action, absentMessage }) {
   if (!action) return <p className="record-note">{absentMessage}</p>
   if (action.availability !== 'blocked') return null
   return (
     <p className="record-note record-note--blocked" role="status">
-      <strong>{action.label} is blocked</strong>
-      {action.blocked_reason || 'This action is not available for the current Claim state.'}
+      <strong>{t('{action} is blocked', { action: action.label })}</strong>
+      {action.blocked_reason || t('This action is not available for the current Claim state.')}
     </p>
   )
 }
@@ -16,7 +18,7 @@ export function ProjectedActionInput({ input, required = input.required, onChang
       <label>
         {input.label}
         <select ref={inputRef} name={input.field_code} required={required} onChange={onChange} onKeyDown={onKeyDown} {...controlled}>
-          {required && <option value="" disabled>Select an option</option>}
+          {required && <option value="" disabled>{t('Select an option')}</option>}
           {input.choices.map((choice) => <option value={choice.value} key={choice.value}>{choice.label}</option>)}
         </select>
       </label>
@@ -32,14 +34,14 @@ export function ActionDetails({ action }) {
   if (!action) return null
   return (
     <details className="action-details">
-      <summary>Action details</summary>
+      <summary>{t('Action details')}</summary>
       <dl>
-        <dt>Target</dt><dd>{action.target_ref}</dd>
-        <dt>Availability</dt><dd>{action.availability.replaceAll('_', ' ')}</dd>
-        <dt>Result state</dt><dd>{action.result_state?.replaceAll('_', ' ') || 'Not recorded'}</dd>
-        <dt>Based on revision</dt><dd>{action.based_on_revision ?? 'Not recorded'}</dd>
-        <dt>Expected effects</dt><dd>{action.expected_effects?.join(', ') || 'None recorded'}</dd>
-        <dt>Sources</dt><dd>{action.source_refs?.join(', ') || 'None recorded'}</dd>
+        <dt>{t('Target')}</dt><dd>{action.target_ref}</dd>
+        <dt>{t('Availability')}</dt><dd>{action.availability.replaceAll('_', ' ')}</dd>
+        <dt>{t('Result state')}</dt><dd>{action.result_state ? action.result_state.replaceAll('_', ' ') : t('Not recorded')}</dd>
+        <dt>{t('Based on revision')}</dt><dd>{action.based_on_revision ?? t('Not recorded')}</dd>
+        <dt>{t('Expected effects')}</dt><dd>{action.expected_effects?.join(', ') || t('None recorded')}</dd>
+        <dt>{t('Sources')}</dt><dd>{action.source_refs?.join(', ') || t('None recorded')}</dd>
       </dl>
     </details>
   )

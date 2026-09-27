@@ -6,6 +6,7 @@ import {
   ProjectedActionState,
 } from './ProjectedAction.jsx'
 import { canSubmitProjectedAction, findProjectedAction, isProjectedInputRequired } from '../projected-action.js'
+import { translate as t } from '../i18n.js'
 
 export function HandoffResolution({
   handoff,
@@ -45,13 +46,13 @@ export function HandoffResolution({
 
   const controls = (
     <>
-      <ProjectedActionState action={allowedAction} absentMessage="No handoff-resolution action is projected for this handoff." />
-      {!open && executable && <button className={`button ${inline ? 'button--quiet' : 'button--secondary'}`} type="button" onClick={() => setOpen(true)}>{actionLabel}</button>}
+      <ProjectedActionState action={allowedAction} absentMessage={t('No handoff-resolution action is projected for this handoff.')} />
+      {!open && executable && <button className={`button ${inline ? 'button--quiet' : 'button--secondary'}`} type="button" onClick={() => setOpen(true)}>{t(actionLabel)}</button>}
       {open && executable && (
         <form className="action-form" onSubmit={submit}>
           {allowedAction.inputs.map((input) => <ProjectedActionInput input={input} key={input.field_code} />)}
           <p>{allowedAction.confirmation?.message}</p>
-          <div className="form-actions"><button className="button button--ghost" type="button" onClick={() => setOpen(false)}>Cancel</button><button className={compact ? 'button button--secondary' : 'button button--primary'} type="submit" disabled={busy}>{busy ? 'Recording...' : submitLabel}</button></div>
+          <div className="form-actions"><button className="button button--ghost" type="button" onClick={() => setOpen(false)}>{t('Cancel')}</button><button className={compact ? 'button button--secondary' : 'button button--primary'} type="submit" disabled={busy}>{busy ? t('Recording...') : t(submitLabel)}</button></div>
           {error && <p className="form-error" role="alert">{error}</p>}
         </form>
       )}
@@ -63,7 +64,7 @@ export function HandoffResolution({
   return (
     <section className={`action-panel${compact ? ' action-panel--compact' : ''}`} aria-labelledby="handoff-resolution-title">
       <div className="action-panel__heading">
-        <div><p className="eyebrow">{eyebrow}</p><h2 id="handoff-resolution-title">{title}</h2></div>
+        <div><p className="eyebrow">{t(eyebrow)}</p><h2 id="handoff-resolution-title">{t(title)}</h2></div>
         {allowedAction && <span className="assigned-chip">{allowedAction.label}</span>}
       </div>
       <p>{handoff.requested_action}</p>
@@ -76,9 +77,9 @@ export function HandoffResolution({
 export function SignalReviews({ signals, allowedActions = [], onDecision }) {
   return (
     <section className="resource-view">
-      <header className="content-header"><div><p className="eyebrow">Internal review only</p><h2>Signals</h2></div><span>{signals.length} records</span></header>
+      <header className="content-header"><div><p className="eyebrow">{t('Internal review only')}</p><h2>{t('Signals')}</h2></div><span>{t('{count} records', { count: signals.length })}</span></header>
       <div className="record-list">
-        {signals.length ? signals.map((signal, index) => <SignalRecord key={signal.signal_id || signal.code || index} signal={signal} allowedAction={findProjectedAction(allowedActions, 'signal.record_decision', signal.signal_id || signal.code)} onDecision={onDecision} />) : <p className="empty-note">No review signals are recorded for this Claim.</p>}
+        {signals.length ? signals.map((signal, index) => <SignalRecord key={signal.signal_id || signal.code || index} signal={signal} allowedAction={findProjectedAction(allowedActions, 'signal.record_decision', signal.signal_id || signal.code)} onDecision={onDecision} />) : <p className="empty-note">{t('No review signals are recorded for this Claim.')}</p>}
       </div>
     </section>
   )
@@ -113,16 +114,16 @@ function SignalRecord({ signal, allowedAction, onDecision }) {
 
   return (
     <details className="record-row">
-      <summary><span><strong>{words(signal.label || signal.code || signalId)}</strong><small>{signalId}</small></span><span className="record-status record-status--attention">{latest ? words(latest.decision) : 'Needs decision'}</span></summary>
+      <summary><span><strong>{words(signal.label || signal.code || signalId)}</strong><small>{signalId}</small></span><span className="record-status record-status--attention">{latest ? words(latest.decision) : t('Needs decision')}</span></summary>
       <div className="record-body">
-        <p className="record-summary">{signal.summary || signal.reason || 'Review the source-linked signal before recording a decision.'}</p>
+        <p className="record-summary">{signal.summary || signal.reason || t('Review the source-linked signal before recording a decision.')}</p>
         {latest && <p className="decision-history"><CheckCircle2 size={16} /><span><strong>{words(latest.decision)}</strong>{latest.summary} · {formatDateTime(latest.created_at)}</span></p>}
         {executable ? <form className="action-form" onSubmit={submit}>
           {allowedAction.inputs.map((input) => <ProjectedActionInput input={input} key={input.field_code} />)}
           <p>{allowedAction.confirmation?.message}</p>
-          <div className="form-actions"><span>This decision is internal and source-linked.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Recording...' : 'Record decision'}</button></div>
+          <div className="form-actions"><span>{t('This decision is internal and source-linked.')}</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? t('Recording...') : t('Record decision')}</button></div>
           {error && <p className="form-error" role="alert">{error}</p>}
-        </form> : <ProjectedActionState action={allowedAction} absentMessage="No signal-decision action is projected for this signal." />}
+        </form> : <ProjectedActionState action={allowedAction} absentMessage={t('No signal-decision action is projected for this signal.')} />}
       </div>
     </details>
   )
@@ -132,9 +133,9 @@ export function StaffActions({ actions, hasMore = false, allowedActions = [], on
   return (
     <section className="action-ledger activity-section" aria-labelledby="staff-actions-title">
       <header className="content-header activity-section__header">
-        <p className="eyebrow">Audited work</p>
-        <h2 id="staff-actions-title">Staff actions</h2>
-        <span className="activity-section__count">{actions.length}{hasMore ? '+' : ''} {actions.length === 1 && !hasMore ? 'record' : 'records'}</span>
+        <p className="eyebrow">{t('Audited work')}</p>
+        <h2 id="staff-actions-title">{t('Staff actions')}</h2>
+        <span className="activity-section__count">{t('{count} {noun}', { count: `${actions.length}${hasMore ? '+' : ''}`, noun: t(actions.length === 1 && !hasMore ? 'record' : 'records') })}</span>
       </header>
       {actions.length ? (
         <div className="record-list staff-action-list">
@@ -144,8 +145,8 @@ export function StaffActions({ actions, hasMore = false, allowedActions = [], on
         <div className="activity-empty activity-empty--compact">
           <span className="activity-empty__marker" aria-hidden="true" />
           <div>
-            <strong>No staff actions yet</strong>
-            <p>Audited work items will appear here after they are recorded.</p>
+            <strong>{t('No staff actions yet')}</strong>
+            <p>{t('Audited work items will appear here after they are recorded.')}</p>
           </div>
         </div>
       )}
@@ -192,9 +193,9 @@ function StaffActionRecord({ action, allowedAction, onUpdate }) {
     <details className="record-row">
       <summary><span><strong>{words(action.action_type)}</strong><small>{action.requested_outcome}</small></span><span className={`record-status record-status--${action.status}`}>{words(action.status)}</span></summary>
       <div className="record-body">
-        <dl><dt>Assigned to</dt><dd>{action.assigned_to}</dd><dt>Sources</dt><dd>{action.source_refs?.join(', ') || 'None recorded'}</dd><dt>Created</dt><dd>{formatDateTime(action.created_at)}</dd>{action.result && <><dt>Outcome</dt><dd>{words(action.result.outcome)}</dd><dt>Result</dt><dd>{action.result.summary}</dd></>}</dl>
-        {!final && executable && <form className="action-form" onSubmit={update}>{allowedAction.inputs.map((input) => <ProjectedActionInput input={input} key={input.field_code} required={isProjectedInputRequired(input, { status: selectedStatus })} onChange={input.field_code === 'status' ? (event) => setSelectedStatus(event.target.value) : undefined} />)}<p>{allowedAction.confirmation?.message}</p><div className="form-actions"><span>Completion writes the registered audited result.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Recording...' : 'Update action'}</button></div>{error && <p className="form-error" role="alert">{error}</p>}</form>}
-        {!final && !executable && <ProjectedActionState action={allowedAction} absentMessage="No work-item update action is projected for this exact record." />}
+        <dl><dt>{t('Assigned to')}</dt><dd>{action.assigned_to}</dd><dt>{t('Sources')}</dt><dd>{action.source_refs?.join(', ') || t('None recorded')}</dd><dt>{t('Created')}</dt><dd>{formatDateTime(action.created_at)}</dd>{action.result && <><dt>{t('Outcome')}</dt><dd>{words(action.result.outcome)}</dd><dt>{t('Result')}</dt><dd>{action.result.summary}</dd></>}</dl>
+        {!final && executable && <form className="action-form" onSubmit={update}>{allowedAction.inputs.map((input) => <ProjectedActionInput input={input} key={input.field_code} required={isProjectedInputRequired(input, { status: selectedStatus })} onChange={input.field_code === 'status' ? (event) => setSelectedStatus(event.target.value) : undefined} />)}<p>{allowedAction.confirmation?.message}</p><div className="form-actions"><span>{t('Completion writes the registered audited result.')}</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? t('Recording...') : t('Update action')}</button></div>{error && <p className="form-error" role="alert">{error}</p>}</form>}
+        {!final && !executable && <ProjectedActionState action={allowedAction} absentMessage={t('No work-item update action is projected for this exact record.')} />}
       </div>
     </details>
   )
@@ -204,17 +205,17 @@ function HandoffContext({ handoff }) {
   const packet = handoff.packet || {}
   return (
     <details className="handoff-context">
-      <summary>Review handoff context</summary>
+      <summary>{t('Review handoff context')}</summary>
       <dl>
-        <dt>Reason</dt><dd>{handoff.reason}</dd>
-        <dt>Priority</dt><dd>{words(handoff.priority)}</dd>
-        <dt>Incident</dt><dd>{packet.incident_summary || 'No incident summary recorded'}</dd>
-        <dt>Missing items</dt><dd>{packet.missing_items?.join(', ') || 'None recorded'}</dd>
-        <dt>Pending items</dt><dd>{packet.pending_items?.join(', ') || 'None recorded'}</dd>
-        <dt>Conflicts</dt><dd>{packet.conflicts?.join(', ') || 'None recorded'}</dd>
-        <dt>Promised next step</dt><dd>{packet.promised_next_step}</dd>
+        <dt>{t('Reason')}</dt><dd>{handoff.reason}</dd>
+        <dt>{t('Priority')}</dt><dd>{words(handoff.priority)}</dd>
+        <dt>{t('Incident')}</dt><dd>{packet.incident_summary || t('No incident summary recorded')}</dd>
+        <dt>{t('Missing items')}</dt><dd>{packet.missing_items?.join(', ') || t('None recorded')}</dd>
+        <dt>{t('Pending items')}</dt><dd>{packet.pending_items?.join(', ') || t('None recorded')}</dd>
+        <dt>{t('Conflicts')}</dt><dd>{packet.conflicts?.join(', ') || t('None recorded')}</dd>
+        <dt>{t('Promised next step')}</dt><dd>{packet.promised_next_step}</dd>
       </dl>
-      {(packet.conflicts?.length || packet.low_confidence_items?.length) ? <p className="attention-note"><ShieldAlert size={16} />Review uncertainty before resolving this handoff.</p> : null}
+      {(packet.conflicts?.length || packet.low_confidence_items?.length) ? <p className="attention-note"><ShieldAlert size={16} />{t('Review uncertainty before resolving this handoff.')}</p> : null}
     </details>
   )
 }

@@ -1,24 +1,24 @@
-import { Bot, BriefcaseBusiness, LogOut, MessageSquareText } from 'lucide-react'
+import { Bot, BriefcaseBusiness, MessageSquareText } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
-import { initials } from '../format.js'
+import { storedProfileOverrides } from '../account/settings-gateway.js'
+import { translate as t, useLanguage } from '../i18n.js'
+import AccountMenu from './AccountMenu.jsx'
 
 export default function NavigationRail({ profile, onLogout, onAgent }) {
+  useLanguage()
+  const effectiveProfile = storedProfileOverrides(profile)
   return (
     <aside className="navigation-rail">
-      <div className="navigation-brand" aria-label="Northwind Claims">
+      <div className="navigation-brand" aria-label={t('Northwind Claims')}>
         <BriefcaseBusiness size={22} />
         <span>Northwind</span>
       </div>
-      <nav aria-label="Workbench navigation">
-        <NavLink to="/workbench" end><BriefcaseBusiness size={19} /><span>Workbench</span></NavLink>
-        <NavLink to="/workbench/conversations"><MessageSquareText size={19} /><span>Claim conversations</span></NavLink>
-        <button type="button" onClick={onAgent}><Bot size={19} /><span>Staff Agent</span></button>
+      <nav aria-label={t('Workbench navigation')}>
+        <NavLink to="/workbench" end><BriefcaseBusiness size={19} /><span>{t('Workbench')}</span></NavLink>
+        <NavLink to="/workbench/conversations"><MessageSquareText size={19} /><span>{t('Claim conversations')}</span></NavLink>
+        <button type="button" onClick={onAgent}><Bot size={19} /><span>{t('Staff Agent')}</span></button>
       </nav>
-      <div className="navigation-profile">
-        <span className="profile-avatar">{initials(profile?.display_name)}</span>
-        <div><strong>{profile?.display_name || 'Claims professional'}</strong><small>{profile?.roles?.[0]?.replaceAll('_', ' ') || 'Staff'}</small></div>
-        <button className="icon-button" type="button" onClick={onLogout} aria-label="Sign out"><LogOut size={17} /></button>
-      </div>
+      <AccountMenu profile={effectiveProfile} onLogout={onLogout} />
     </aside>
   )
 }

@@ -62,6 +62,22 @@
   --color-risk-review-soft: #F4E1DC;
   --color-info: #536670;
   --color-info-soft: #E5EBED;
+  --color-workbench-dark-page: hsl(32 10% 10%);
+  --color-workbench-dark-surface: hsl(32 9% 14%);
+  --color-workbench-dark-sidebar: hsl(32 8% 18%);
+  --color-workbench-dark-panel: hsl(32 7% 23%);
+  --color-workbench-dark-divider: hsl(32 6% 34%);
+  --color-workbench-dark-text-primary: hsl(38 20% 94%);
+  --color-workbench-dark-text-secondary: hsl(36 13% 82%);
+  --color-workbench-dark-text-muted: hsl(34 9% 67%);
+  --color-workbench-dark-text-faint: hsl(34 7% 54%);
+  --color-workbench-dark-accent: hsl(153 20% 67%);
+  --color-workbench-dark-accent-strong: hsl(153 24% 76%);
+  --color-workbench-dark-accent-soft: hsl(153 16% 22%);
+  --color-workbench-dark-danger: hsl(5 70% 72%);
+  --color-workbench-dark-danger-soft: hsl(5 26% 20%);
+  --color-workbench-dark-warning: hsl(32 70% 72%);
+  --color-workbench-dark-warning-soft: hsl(32 26% 20%);
   --border-region: 2px solid var(--color-divider);
   --border-component: 1.5px solid var(--color-divider);
   --border-focus: 1.5px solid var(--color-accent);
@@ -94,6 +110,7 @@
   --density-workbench-agent-width: 400px;
   --density-workbench-agent-height: 600px;
   --density-workbench-record-label-width: 160px;
+  --measure-workbench-settings: 720px;
   --density-workbench-list-max-height: 70vh;
   --measure-reading: 75ch;
   --viewport-min-width: 320px;
@@ -166,4 +183,35 @@
      inverse text remains readable without changing other accent controls. */
   --claimant-message-surface: hsl(154 14% 38%);
   --claimant-message-text: var(--color-on-accent);
+}
+
+html[data-workbench-theme='dark'] {
+  color-scheme: dark;
+  --color-page: var(--color-workbench-dark-page);
+  --color-surface: var(--color-workbench-dark-surface);
+  --color-sidebar: var(--color-workbench-dark-sidebar);
+  --color-panel: var(--color-workbench-dark-panel);
+  --color-divider: var(--color-workbench-dark-divider);
+  --color-text-primary: var(--color-workbench-dark-text-primary);
+  --color-text-secondary: var(--color-workbench-dark-text-secondary);
+  --color-text-muted: var(--color-workbench-dark-text-muted);
+  --color-text-faint: var(--color-workbench-dark-text-faint);
+  --color-accent: var(--color-workbench-dark-accent);
+  --color-accent-strong: var(--color-workbench-dark-accent-strong);
+  --color-accent-soft: var(--color-workbench-dark-accent-soft);
+  --color-accent-light: var(--color-workbench-dark-accent);
+  --color-danger: var(--color-workbench-dark-danger);
+  --color-danger-soft: var(--color-workbench-dark-danger-soft);
+  --color-warning: var(--color-workbench-dark-warning);
+  --color-warning-soft: var(--color-workbench-dark-warning-soft);
+  --color-on-accent: var(--color-workbench-dark-page);
+  --color-workbench-nav: var(--color-workbench-dark-page);
+  --color-workbench-nav-muted: var(--color-workbench-dark-text-muted);
+  --color-workbench-nav-active: var(--color-workbench-dark-text-primary);
+  --color-info: var(--color-workbench-dark-text-secondary);
+  --color-info-soft: var(--color-workbench-dark-panel);
+  --color-risk-notice: var(--color-workbench-dark-warning);
+  --color-risk-notice-soft: var(--color-workbench-dark-warning-soft);
+  --color-risk-review: var(--color-workbench-dark-danger);
+  --color-risk-review-soft: var(--color-workbench-dark-danger-soft);
 }

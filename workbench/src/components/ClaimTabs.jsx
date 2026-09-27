@@ -1,5 +1,6 @@
 import { ChevronDown, X } from 'lucide-react'
 import { useState } from 'react'
+import { translate as t } from '../i18n.js'
 
 export default function ClaimTabs({ tabs, activeId, onActivate, onClose }) {
   const [showList, setShowList] = useState(false)
@@ -7,7 +8,7 @@ export default function ClaimTabs({ tabs, activeId, onActivate, onClose }) {
 
   return (
     <div className="claim-tabs-wrap">
-      <div className="claim-tabs" role="tablist" aria-label="Open claims">
+      <div className="claim-tabs" role="tablist" aria-label={t('Open claims')}>
         {tabs.map((tab, index) => (
           <div className={`claim-tab${tab.claimId === activeId ? ' is-active' : ''}`} key={tab.claimId}>
             <button
@@ -21,15 +22,15 @@ export default function ClaimTabs({ tabs, activeId, onActivate, onClose }) {
               onKeyDown={(event) => moveClaimTabFocus(event, tabs, index, onActivate, onClose)}
             >
               <span className="claim-tab__label" title={tab.label}>{tab.label}</span>
-              {tab.draft && <span className="draft-dot" title="Unsent draft" />}
+              {tab.draft && <span className="draft-dot" title={t('Unsent draft')} />}
             </button>
-            <button type="button" className="icon-button icon-button--small" onClick={() => onClose(tab.claimId)} aria-label={`Close ${tab.label}, Claim ${tab.referenceLabel || tab.reference || tab.claimId}`}>
+            <button type="button" className="icon-button icon-button--small" onClick={() => onClose(tab.claimId)} aria-label={t('Close {label}, Claim {reference}', { label: tab.label, reference: tab.referenceLabel || tab.reference || tab.claimId })}>
               <X size={14} />
             </button>
           </div>
         ))}
       </div>
-      <button className="icon-button tab-overflow" type="button" onClick={() => setShowList((value) => !value)} aria-expanded={showList} aria-controls="open-claim-list" aria-label="Show all open claims">
+      <button className="icon-button tab-overflow" type="button" onClick={() => setShowList((value) => !value)} aria-expanded={showList} aria-controls="open-claim-list" aria-label={t('Show all open claims')}>
         <ChevronDown size={17} />
       </button>
       {showList && (

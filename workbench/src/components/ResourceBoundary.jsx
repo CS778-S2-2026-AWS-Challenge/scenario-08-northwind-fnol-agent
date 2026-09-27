@@ -1,10 +1,11 @@
 import { AlertTriangle, RefreshCw } from 'lucide-react'
 import { failureReason, failureReference } from '../failure.js'
+import { translate as t } from '../i18n.js'
 
 export default function ResourceBoundary({ resource, children, onRetry, contentAvailable = false, quietRefresh = false }) {
   const hasRecords = contentAvailable || Boolean(resource?.items?.length)
   if (!resource || (resource.loading && !hasRecords)) {
-    return <div className="claim-state" role="status"><span className="loading-mark" /><p>Loading current records...</p></div>
+    return <div className="claim-state" role="status"><span className="loading-mark" /><p>{t('Loading current records...')}</p></div>
   }
   if ((resource.error || resource.status === 'unavailable') && !hasRecords) {
     return <ResourceNotice resource={resource} onRetry={onRetry} />
@@ -41,12 +42,12 @@ function ResourceNotice({ resource, onRetry, stale = false }) {
     <div className={`resource-notice${error ? ' resource-notice--error' : ''}`} role={error ? 'alert' : 'status'}>
       {error ? <AlertTriangle size={18} aria-hidden="true" /> : <RefreshCw size={18} aria-hidden="true" />}
       <div>
-        <strong>{title}</strong>
-        <p>{message}</p>
+        <strong>{t(title)}</strong>
+        <p>{t(message)}</p>
         {!loading && <small>{resource.limitation || failureReason(error)}</small>}
         {failureReference(error) && <small>{failureReference(error)}</small>}
       </div>
-      {!loading && onRetry && <button className="button button--quiet" type="button" onClick={onRetry}>Retry section</button>}
+      {!loading && onRetry && <button className="button button--quiet" type="button" onClick={onRetry}>{t('Retry section')}</button>}
     </div>
   )
 }
