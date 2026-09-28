@@ -22,11 +22,19 @@ through `GET /health/ready`; it never reports credentials, endpoints, or physica
 | `deploy/runtime/local-mvp.env.example` | Ready when local MongoDB, MinIO, and the governed indexes are healthy | MongoDB persistence, MinIO evidence/knowledge, explicitly synthetic policy/history, and developer-only synthetic identity |
 | `deploy/runtime/mongodb.env.example` | Refused | Connection primitives exist, but the complete MongoDB bundle is not verified |
 | `deploy/runtime/cloudflare.env.example` | Refused | Provider services and bindings remain unconfirmed |
-| `deploy/runtime/aws.env.example` | Refused | AWS services, permissions, and credentials remain unconfirmed |
+| `deploy/runtime/aws.env.example` | Refused | Private S3-to-CloudFront static delivery is verified, but the complete AWS data-runtime profile, runtime identity, and Backend service connections remain unimplemented |
 
 The local credentials in the MinIO examples are published development defaults, not deployment
 secrets. Atlas, cloud, and production credentials must be supplied through protected process
 configuration and must never be committed in an environment file.
+
+The fixed first AWS deployment direction does not select the `aws` data-runtime profile. It runs
+the existing MongoDB and MinIO Validation Prototype composition on one EC2 host, publishes built
+static clients from a private Sydney S3 bucket through CloudFront, and retains the configured
+external Model Gateway. This host target still requires bounded EC2, networking, restart,
+persistence, and secret-injection evidence. It does not activate DynamoDB, Bedrock, ECS/Fargate,
+or an S3 Evidence adapter. For the verified evidence and stop conditions, see
+[Verified AWS Deployment Plan](design/aws-verified-deployment-plan.md).
 
 The `vp` profile in `docker-compose.yml` is the deployable single-host form of `local_mvp`. It
 uses normal identity mode, mounts the three SQLite identity and Control Plane repositories under
