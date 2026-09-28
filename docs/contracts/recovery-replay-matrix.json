@@ -1,0 +1,1879 @@
+{
+  "evidence_level": "pure reducer replay; integration journey evidence is in tests/test_incomplete_claim_recovery.py",
+  "vectors": [
+    {
+      "event": {
+        "event_id": "replay:claimant_turn.model_dependency_failure",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "legacy_model_dependency_failure",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "model"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "claimant_turn.model_dependency_failure",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "AGENT_TURN_RECOVERY",
+        "authoritative_records": [
+          "claim",
+          "message",
+          "audit"
+        ],
+        "blocks_action": null,
+        "claim_effect": "revision_unchanged_no_unapproved_write",
+        "claimant_projection": "Your message is saved, but I could not respond just now. You can try again.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "fail_safe",
+        "event_id": "replay:claimant_turn.model_dependency_failure",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "message.preserve_checkpoint",
+          "claim.preserve_revision",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "claimant",
+        "resume_entrypoint": "submit_message",
+        "resume_triggers": [
+          "explicit_retry_request",
+          "claimant_reply"
+        ],
+        "retry_mode": "claimant_initiated",
+        "rule_id": "claimant_turn.model_dependency_failure",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:claimant_turn.model_dependency_failure@v1"
+        ],
+        "staff_projection": null,
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:claimant_turn.model_timeout",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "timeout",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "model"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "recovery.model_timeout",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "AGENT_TURN_RECOVERY",
+        "authoritative_records": [
+          "claim",
+          "message",
+          "audit"
+        ],
+        "blocks_action": null,
+        "claim_effect": "revision_unchanged_no_unapproved_write",
+        "claimant_projection": "Your message is saved, but I could not respond just now. You can try again.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "fail_safe",
+        "event_id": "replay:claimant_turn.model_timeout",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "message.preserve_checkpoint",
+          "claim.preserve_revision",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "claimant",
+        "resume_entrypoint": "submit_message",
+        "resume_triggers": [
+          "explicit_retry_request",
+          "claimant_reply"
+        ],
+        "retry_mode": "claimant_initiated",
+        "rule_id": "claimant_turn.model_timeout",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:claimant_turn.model_timeout@v1"
+        ],
+        "staff_projection": "The model timed out before an approved Claim mutation was committed.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:claimant_turn.model_invalid_response",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "incomplete_response",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "model"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "recovery.model_malformed_response",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "AGENT_TURN_RECOVERY",
+        "authoritative_records": [
+          "claim",
+          "message",
+          "audit"
+        ],
+        "blocks_action": null,
+        "claim_effect": "revision_unchanged_no_unapproved_write",
+        "claimant_projection": "Your message is saved, but I could not produce a safe response. You can try again.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "fail_safe",
+        "event_id": "replay:claimant_turn.model_invalid_response",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "message.preserve_checkpoint",
+          "claim.preserve_revision",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "claimant",
+        "resume_entrypoint": "submit_message",
+        "resume_triggers": [
+          "explicit_retry_request",
+          "claimant_reply"
+        ],
+        "retry_mode": "claimant_initiated",
+        "rule_id": "claimant_turn.model_invalid_response",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:claimant_turn.model_invalid_response@v1"
+        ],
+        "staff_projection": "The model result was incomplete, refused or malformed and no proposed fact was accepted.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:claimant_turn.model_rate_limited",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "rate_limit",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "model"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "claimant_turn.model_rate_limited",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "AGENT_TURN_RECOVERY",
+        "authoritative_records": [
+          "claim",
+          "message",
+          "audit"
+        ],
+        "blocks_action": null,
+        "claim_effect": "revision_unchanged_no_unapproved_write",
+        "claimant_projection": "Your message is saved, but the service is temporarily busy. You can try again.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "fail_safe",
+        "event_id": "replay:claimant_turn.model_rate_limited",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "message.preserve_checkpoint",
+          "claim.preserve_revision",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "claimant",
+        "resume_entrypoint": "submit_message",
+        "resume_triggers": [
+          "explicit_retry_request",
+          "claimant_reply"
+        ],
+        "retry_mode": "claimant_initiated",
+        "rule_id": "claimant_turn.model_rate_limited",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:claimant_turn.model_rate_limited@v1"
+        ],
+        "staff_projection": "The model provider rate-limited this turn before Claim mutation.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:claimant_turn.model_provider_retryable",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "provider",
+          "retryable": true,
+          "side_effect_may_have_happened": false,
+          "source": "model"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "claimant_turn.model_provider_retryable",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "AGENT_TURN_RECOVERY",
+        "authoritative_records": [
+          "claim",
+          "message",
+          "audit"
+        ],
+        "blocks_action": null,
+        "claim_effect": "revision_unchanged_no_unapproved_write",
+        "claimant_projection": "Your message is saved, but the service is temporarily unavailable. You can try again.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "fail_safe",
+        "event_id": "replay:claimant_turn.model_provider_retryable",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "message.preserve_checkpoint",
+          "claim.preserve_revision",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "claimant",
+        "resume_entrypoint": "submit_message",
+        "resume_triggers": [
+          "explicit_retry_request",
+          "claimant_reply"
+        ],
+        "retry_mode": "claimant_initiated",
+        "rule_id": "claimant_turn.model_provider_retryable",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:claimant_turn.model_provider_retryable@v1"
+        ],
+        "staff_projection": "A retryable model-provider failure occurred before Claim mutation.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:claimant_turn.model_dependency_terminal",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "authentication",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "model"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "claimant_turn.model_dependency_terminal",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "AGENT_TURN_RECOVERY",
+        "authoritative_records": [
+          "claim",
+          "message",
+          "audit"
+        ],
+        "blocks_action": "runtime.continue",
+        "claim_effect": "revision_unchanged_no_unapproved_write",
+        "claimant_projection": "Your message is saved, but this step is currently unavailable.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "fail_safe",
+        "event_id": "replay:claimant_turn.model_dependency_terminal",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "message.preserve_checkpoint",
+          "claim.preserve_revision",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "system",
+        "resume_entrypoint": "submit_message",
+        "resume_triggers": [],
+        "retry_mode": "none",
+        "rule_id": "claimant_turn.model_dependency_terminal",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:claimant_turn.model_dependency_terminal@v1"
+        ],
+        "staff_projection": "The model dependency cannot safely continue without system remediation.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:claimant_turn.model_provider_terminal",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "provider",
+          "retryable": false,
+          "side_effect_may_have_happened": false,
+          "source": "model"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "claimant_turn.model_provider_terminal",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "AGENT_TURN_RECOVERY",
+        "authoritative_records": [
+          "claim",
+          "message",
+          "audit"
+        ],
+        "blocks_action": "runtime.continue",
+        "claim_effect": "revision_unchanged_no_unapproved_write",
+        "claimant_projection": "Your message is saved, but this step is currently unavailable.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "fail_safe",
+        "event_id": "replay:claimant_turn.model_provider_terminal",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "message.preserve_checkpoint",
+          "claim.preserve_revision",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "system",
+        "resume_entrypoint": "submit_message",
+        "resume_triggers": [],
+        "retry_mode": "none",
+        "rule_id": "claimant_turn.model_provider_terminal",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:claimant_turn.model_provider_terminal@v1"
+        ],
+        "staff_projection": "The provider returned a non-retryable model failure.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:runtime.tool_unavailable.non_blocking",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": false,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "unavailable",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "tool"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "runtime.tool_unavailable.non_blocking",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "action.failed",
+        "authoritative_records": [
+          "claim",
+          "audit"
+        ],
+        "blocks_action": null,
+        "claim_effect": "existing_authority_only",
+        "claimant_projection": "One supporting capability is unavailable, but the safe parts of your Claim can continue.",
+        "continuation": "runtime.continue",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "continue_with_limitation",
+        "event_id": "replay:runtime.tool_unavailable.non_blocking",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "claim.preserve_revision",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "system",
+        "resume_entrypoint": "reload_authoritative_state",
+        "resume_triggers": [],
+        "retry_mode": "none",
+        "rule_id": "runtime.tool_unavailable.non_blocking",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:runtime.tool_unavailable.non_blocking@v1"
+        ],
+        "staff_projection": "A non-blocking tool dependency is unavailable.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:runtime.tool_unavailable.blocking",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": true,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "unavailable",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "tool"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "recovery.tool_unavailable",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "action.failed",
+        "authoritative_records": [
+          "claim",
+          "work_item",
+          "audit"
+        ],
+        "blocks_action": "runtime.continue",
+        "claim_effect": "existing_authority_only",
+        "claimant_projection": "A required capability is unavailable, so this step cannot safely continue yet.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "fail_safe",
+        "event_id": "replay:runtime.tool_unavailable.blocking",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "claim.preserve_revision",
+          "work_item.ensure",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "system",
+        "resume_entrypoint": "reload_authoritative_state",
+        "resume_triggers": [
+          "system_recovered",
+          "staff_retry"
+        ],
+        "retry_mode": "staff_authorised",
+        "rule_id": "runtime.tool_unavailable.blocking",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:runtime.tool_unavailable.blocking@v1"
+        ],
+        "staff_projection": "A blocking tool dependency requires recovery before continuation.",
+        "work_item_kind": "system"
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:runtime.retrieval_unavailable.non_blocking",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": false,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "unavailable",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "retrieval"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "runtime.retrieval_unavailable.non_blocking",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "action.failed",
+        "authoritative_records": [
+          "claim",
+          "audit"
+        ],
+        "blocks_action": null,
+        "claim_effect": "existing_authority_only",
+        "claimant_projection": "Some supporting information is unavailable, but the safe parts of your Claim can continue.",
+        "continuation": "runtime.continue",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "continue_with_limitation",
+        "event_id": "replay:runtime.retrieval_unavailable.non_blocking",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "claim.preserve_revision",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "system",
+        "resume_entrypoint": "reload_authoritative_state",
+        "resume_triggers": [],
+        "retry_mode": "none",
+        "rule_id": "runtime.retrieval_unavailable.non_blocking",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:runtime.retrieval_unavailable.non_blocking@v1"
+        ],
+        "staff_projection": "A non-blocking retrieval dependency is unavailable.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:runtime.retrieval_unavailable.blocking",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": true,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "unavailable",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "retrieval"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "recovery.retrieval_unavailable",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "action.failed",
+        "authoritative_records": [
+          "claim",
+          "work_item",
+          "audit"
+        ],
+        "blocks_action": "runtime.continue",
+        "claim_effect": "existing_authority_only",
+        "claimant_projection": "Required supporting information is unavailable, so this step cannot safely continue yet.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "fail_safe",
+        "event_id": "replay:runtime.retrieval_unavailable.blocking",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "claim.preserve_revision",
+          "work_item.ensure",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "system",
+        "resume_entrypoint": "reload_authoritative_state",
+        "resume_triggers": [
+          "system_recovered",
+          "staff_retry"
+        ],
+        "retry_mode": "staff_authorised",
+        "rule_id": "runtime.retrieval_unavailable.blocking",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:runtime.retrieval_unavailable.blocking@v1"
+        ],
+        "staff_projection": "A blocking retrieval dependency requires recovery before continuation.",
+        "work_item_kind": "system"
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:runtime.revision_conflict",
+        "expected_claim_revision": 6,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "revision_conflict",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "repository"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "recovery.revision_conflict",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "action.failed",
+        "authoritative_records": [
+          "claim",
+          "audit",
+          "session"
+        ],
+        "blocks_action": null,
+        "claim_effect": "reload_authoritative_state",
+        "claimant_projection": "Your Claim changed while this step was being processed. The latest state must be reloaded.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "reload_authoritative_state",
+        "event_id": "replay:runtime.revision_conflict",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "claim.reload",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "system",
+        "resume_entrypoint": "reload_authoritative_state",
+        "resume_triggers": [
+          "authoritative_state_reloaded"
+        ],
+        "retry_mode": "reload_authoritative",
+        "rule_id": "runtime.revision_conflict",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:runtime.revision_conflict@v1"
+        ],
+        "staff_projection": "Discard the stale proposal and recompute from the current authoritative revision.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:external.not_submitted_retryable",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_submitted",
+          "outcome_code": "retryable_failure",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "external"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "recovery.external_not_submitted_retryable",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "action.failed",
+        "authoritative_records": [
+          "claim",
+          "external_task",
+          "audit"
+        ],
+        "blocks_action": null,
+        "claim_effect": "existing_authority_only",
+        "claimant_projection": "The request was not submitted. You can retry the same request safely.",
+        "continuation": "runtime.wait_for_user",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "retry_same_operation",
+        "event_id": "replay:external.not_submitted_retryable",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "external.retry_same_operation",
+          "audit.append"
+        ],
+        "requires_operation_identity": true,
+        "requires_reconciliation": false,
+        "responsibility": "claimant",
+        "resume_entrypoint": "external_retry",
+        "resume_triggers": [
+          "staff_retry",
+          "claimant_retry"
+        ],
+        "retry_mode": "same_operation",
+        "rule_id": "external.not_submitted_retryable",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:external.not_submitted_retryable@v1"
+        ],
+        "staff_projection": "Retry is permitted only under the existing external operation identity.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:external.submitted_unknown",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "submitted",
+          "outcome_code": "unknown_outcome",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "external"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "recovery.external_submitted_unknown",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "action.unknown_outcome",
+        "authoritative_records": [
+          "claim",
+          "work_item",
+          "external_task",
+          "audit"
+        ],
+        "blocks_action": "external.retry",
+        "claim_effect": "existing_authority_only",
+        "claimant_projection": "The provider may already have received the request. Northwind is checking the existing request before anything is sent again.",
+        "continuation": "runtime.wait_for_external",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "reconcile_existing_operation",
+        "event_id": "replay:external.submitted_unknown",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "external.reconcile",
+          "work_item.ensure",
+          "audit.append"
+        ],
+        "requires_operation_identity": true,
+        "requires_reconciliation": true,
+        "responsibility": "staff",
+        "resume_entrypoint": "external_reconcile",
+        "resume_triggers": [
+          "provider_reconciled",
+          "staff_reconciled",
+          "staff_action",
+          "scheduled_reconciliation",
+          "provider_result"
+        ],
+        "retry_mode": "reconcile_before_retry",
+        "rule_id": "external.submitted_unknown",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:external.submitted_unknown@v1"
+        ],
+        "staff_projection": "Reconcile the existing external operation. Blind resubmission is prohibited.",
+        "work_item_kind": "external"
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:external.terminal_failure",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_submitted",
+          "outcome_code": "terminal_failure",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "external"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "recovery.external_terminal_failure",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "action.failed",
+        "authoritative_records": [
+          "claim",
+          "work_item",
+          "external_task",
+          "audit"
+        ],
+        "blocks_action": "external.retry",
+        "claim_effect": "existing_authority_only",
+        "claimant_projection": "The external service could not complete this request. Northwind needs to review the next step.",
+        "continuation": "runtime.pause_for_review",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "pause_for_review",
+        "event_id": "replay:external.terminal_failure",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "work_item.ensure",
+          "audit.append"
+        ],
+        "requires_operation_identity": true,
+        "requires_reconciliation": false,
+        "responsibility": "staff",
+        "resume_entrypoint": "staff_review",
+        "resume_triggers": [
+          "staff_decision"
+        ],
+        "retry_mode": "staff_authorised",
+        "rule_id": "external.terminal_failure",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:external.terminal_failure@v1"
+        ],
+        "staff_projection": "The external operation ended terminally and requires authorised review.",
+        "work_item_kind": "external"
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:runtime.high_impact_review_required",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "high_impact_review_required",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "human"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "recovery.high_impact_review_required",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "action.prepared",
+        "authoritative_records": [
+          "claim",
+          "handoff",
+          "audit"
+        ],
+        "blocks_action": "high_impact_action",
+        "claim_effect": "existing_authority_only",
+        "claimant_projection": "This step needs authorised staff review before it can continue.",
+        "continuation": "runtime.pause_for_review",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "pause_for_review",
+        "event_id": "replay:runtime.high_impact_review_required",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "handoff.ensure",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "staff",
+        "resume_entrypoint": "staff_review",
+        "resume_triggers": [
+          "staff_rejected",
+          "staff_approved"
+        ],
+        "retry_mode": "staff_authorised",
+        "rule_id": "runtime.high_impact_review_required",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:runtime.high_impact_review_required@v1"
+        ],
+        "staff_projection": "Review the proposed high-impact action and its supporting evidence.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:incomplete_claim_follow_up.due",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "follow_up_due",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "timer"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "incomplete_claim_follow_up",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "action.completed",
+        "authoritative_records": [
+          "claim",
+          "follow_up",
+          "audit",
+          "session"
+        ],
+        "blocks_action": null,
+        "claim_effect": "existing_authority_only",
+        "claimant_projection": "Your incomplete Claim can still be resumed.",
+        "continuation": "runtime.wait_for_user",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "execute_follow_up",
+        "event_id": "replay:incomplete_claim_follow_up.due",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 3,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "follow_up.execute",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "system",
+        "resume_entrypoint": "follow_up_worker",
+        "resume_triggers": [
+          "claimant_resumed",
+          "next_policy_due"
+        ],
+        "retry_mode": "scheduled_policy",
+        "rule_id": "incomplete_claim_follow_up.due",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:incomplete_claim_follow_up.due@v1"
+        ],
+        "staff_projection": "The published P17 follow-up obligation is due.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:incomplete_claim_follow_up.contact_withdrawal",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "contact_authority_withdrawn",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "human"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "recovery.contact_withdrawal",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "permission.rejected",
+        "authoritative_records": [
+          "claim",
+          "follow_up",
+          "audit",
+          "session"
+        ],
+        "blocks_action": null,
+        "claim_effect": "existing_authority_only",
+        "claimant_projection": "Automatic follow-up contact is no longer authorised.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "block_follow_up",
+        "event_id": "replay:incomplete_claim_follow_up.contact_withdrawal",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "follow_up.block",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "claimant",
+        "resume_entrypoint": "start_session",
+        "resume_triggers": [],
+        "retry_mode": "none",
+        "rule_id": "incomplete_claim_follow_up.contact_withdrawal",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:incomplete_claim_follow_up.contact_withdrawal@v1"
+        ],
+        "staff_projection": "The recovery obligation remains open but automatic contact is blocked.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:incomplete_claim_follow_up.attempt_exhaustion",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "attempt_limit_reached",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "timer"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "recovery.attempt_exhaustion",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "action.completed",
+        "authoritative_records": [
+          "claim",
+          "follow_up",
+          "audit",
+          "session"
+        ],
+        "blocks_action": null,
+        "claim_effect": "existing_authority_only",
+        "claimant_projection": "Automatic follow-up has stopped, but the Claim may still be resumed.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "block_follow_up",
+        "event_id": "replay:incomplete_claim_follow_up.attempt_exhaustion",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "follow_up.block",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "claimant",
+        "resume_entrypoint": "start_session",
+        "resume_triggers": [
+          "claimant_resumed",
+          "staff_abandoned"
+        ],
+        "retry_mode": "none",
+        "rule_id": "incomplete_claim_follow_up.attempt_exhaustion",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:incomplete_claim_follow_up.attempt_exhaustion@v1"
+        ],
+        "staff_projection": "Automatic contact attempts are exhausted; the Claim is not abandoned.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:incomplete_claim_follow_up.recovery_expiry",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "recovery_expired",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "timer"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "recovery.incomplete_claim_expiry",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "action.completed",
+        "authoritative_records": [
+          "claim",
+          "follow_up",
+          "audit",
+          "session"
+        ],
+        "blocks_action": null,
+        "claim_effect": "terminal_transition_via_existing_contract",
+        "claimant_projection": "This recovery window has expired.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "expire_recovery",
+        "event_id": "replay:incomplete_claim_follow_up.recovery_expiry",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "claim.expire",
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "system",
+        "resume_entrypoint": "claim.reopen",
+        "resume_triggers": [
+          "claim_reopened"
+        ],
+        "retry_mode": "none",
+        "rule_id": "incomplete_claim_follow_up.recovery_expiry",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:incomplete_claim_follow_up.recovery_expiry@v1"
+        ],
+        "staff_projection": "Recovery expiry must use the existing terminal-disposition contract.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:retention.eligible",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "eligible",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "retention"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "retention.eligible",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "RETENTION_ELIGIBLE",
+        "authoritative_records": [
+          "claim",
+          "retention_operation",
+          "audit",
+          "session"
+        ],
+        "blocks_action": null,
+        "claim_effect": "existing_authority_only",
+        "claimant_projection": "This Claim is no longer available through the previous recovery session.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "retention_eligible",
+        "event_id": "replay:retention.eligible",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "system",
+        "resume_entrypoint": "retention_worker",
+        "resume_triggers": [],
+        "retry_mode": "none",
+        "rule_id": "retention.eligible",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:retention.eligible@v1"
+        ],
+        "staff_projection": "Retention is eligible only from the authoritative expiry/terminal source.",
+        "work_item_kind": "system"
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:retention.hold",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "hold",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "retention"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "retention.hold",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "RETENTION_HELD",
+        "authoritative_records": [
+          "claim",
+          "retention_operation",
+          "audit",
+          "session"
+        ],
+        "blocks_action": null,
+        "claim_effect": "existing_authority_only",
+        "claimant_projection": "This Claim is not available through the previous recovery session.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "retention_hold",
+        "event_id": "replay:retention.hold",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "staff",
+        "resume_entrypoint": "retention_worker",
+        "resume_triggers": [],
+        "retry_mode": "staff_authorised",
+        "rule_id": "retention.hold",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:retention.hold@v1"
+        ],
+        "staff_projection": "A source-linked retention hold blocks destructive cleanup.",
+        "work_item_kind": "system"
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:retention.reconciliation_required",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "failed",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "retention"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "retention.reconciliation_required",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "RETENTION_RECONCILIATION_REQUIRED",
+        "authoritative_records": [
+          "claim",
+          "retention_operation",
+          "audit",
+          "session"
+        ],
+        "blocks_action": null,
+        "claim_effect": "existing_authority_only",
+        "claimant_projection": "This Claim is not available through the previous recovery session.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "retention_reconcile",
+        "event_id": "replay:retention.reconciliation_required",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": true,
+        "responsibility": "system",
+        "resume_entrypoint": "retention_reconcile",
+        "resume_triggers": [],
+        "retry_mode": "reconcile_before_retry",
+        "rule_id": "retention.reconciliation_required",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:retention.reconciliation_required@v1"
+        ],
+        "staff_projection": "Retention is incomplete; reconcile and retry only unfinished steps.",
+        "work_item_kind": "system"
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "event_id": "replay:retention.old_session_denied",
+        "expected_claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "event:original"
+        ],
+        "trigger": {
+          "blocking": null,
+          "delivery_certain": null,
+          "delivery_state": "not_applicable",
+          "outcome_code": "old_session_denied",
+          "retryable": null,
+          "side_effect_may_have_happened": false,
+          "source": "retention"
+        }
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "retention.old_session_denied",
+      "replay_equal": true,
+      "snapshot": {
+        "accepted_state_preserved": true,
+        "claim_id": "clm_replay",
+        "claim_revision": 7,
+        "operation_id": "existing_operation",
+        "source_refs": [
+          "claim:clm_replay:revision:7"
+        ],
+        "terminal": false
+      },
+      "source_unchanged": true,
+      "transition": {
+        "audit_event_type": "RETENTION_ACCESS_DENIED",
+        "authoritative_records": [
+          "claim",
+          "retention_operation",
+          "audit",
+          "session"
+        ],
+        "blocks_action": null,
+        "claim_effect": "existing_authority_only",
+        "claimant_projection": "This previous recovery session is no longer available.",
+        "continuation": "runtime.fail_safe",
+        "decided_at": "2026-09-28T12:00:00Z",
+        "decision_code": "deny_access",
+        "event_id": "replay:retention.old_session_denied",
+        "expected_claim_revision": 7,
+        "max_auto_retry": 0,
+        "operation_id": "existing_operation",
+        "policy_version": "v1",
+        "required_actions": [
+          "audit.append"
+        ],
+        "requires_operation_identity": false,
+        "requires_reconciliation": false,
+        "responsibility": "system",
+        "resume_entrypoint": "none",
+        "resume_triggers": [],
+        "retry_mode": "none",
+        "rule_id": "retention.old_session_denied",
+        "source_refs": [
+          "claim:clm_replay:revision:7",
+          "event:original",
+          "recovery-policy:retention.old_session_denied@v1"
+        ],
+        "staff_projection": "Retention access closure denied the stale session or recovery credential.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "code": "recovery_deadline",
+        "expected_claim_revision": 7,
+        "source_refs": []
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "incomplete_claim_follow_up",
+      "replay_equal": true,
+      "snapshot": {
+        "access_closed": false,
+        "claim_revision": 7,
+        "contact_authorised": true,
+        "deadline_at": "2026-09-28T11:59:59Z",
+        "due_at": "2026-09-27T12:00:00Z",
+        "external_operation_state": null,
+        "follow_up_attempt_count": 0,
+        "follow_up_status": "pending",
+        "retention_hold": false,
+        "source_refs": [],
+        "terminal": false
+      },
+      "transition": {
+        "attempt_count_delta": 0,
+        "audit_event_type": "action.completed",
+        "blocked_reason": null,
+        "blocks_action": null,
+        "claimant_projection": "Your incomplete Claim can still be resumed.",
+        "decision": "expire",
+        "next_due_at": null,
+        "next_follow_up_status": "resolved",
+        "operation_action": "cancel_pending",
+        "policy_id": "incomplete_claim_follow_up",
+        "policy_version": "v1",
+        "preserve_claim_revision": 7,
+        "resolution_code": "recovery_expired",
+        "responsibility": "system",
+        "runtime_directive": "runtime.wait_for_user",
+        "source_refs": [],
+        "staff_projection": "The published P17 follow-up obligation is due.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "code": "recovery_deadline",
+        "expected_claim_revision": 7,
+        "source_refs": []
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "incomplete_claim_follow_up",
+      "replay_equal": true,
+      "snapshot": {
+        "access_closed": false,
+        "claim_revision": 7,
+        "contact_authorised": true,
+        "deadline_at": "2026-09-28T12:00:00Z",
+        "due_at": "2026-09-27T12:00:00Z",
+        "external_operation_state": null,
+        "follow_up_attempt_count": 0,
+        "follow_up_status": "pending",
+        "retention_hold": false,
+        "source_refs": [],
+        "terminal": false
+      },
+      "transition": {
+        "attempt_count_delta": 0,
+        "audit_event_type": "action.completed",
+        "blocked_reason": null,
+        "blocks_action": null,
+        "claimant_projection": "Your incomplete Claim can still be resumed.",
+        "decision": "expire",
+        "next_due_at": null,
+        "next_follow_up_status": "resolved",
+        "operation_action": "cancel_pending",
+        "policy_id": "incomplete_claim_follow_up",
+        "policy_version": "v1",
+        "preserve_claim_revision": 7,
+        "resolution_code": "recovery_expired",
+        "responsibility": "system",
+        "runtime_directive": "runtime.wait_for_user",
+        "source_refs": [],
+        "staff_projection": "The published P17 follow-up obligation is due.",
+        "work_item_kind": null
+      },
+      "version": "v1"
+    },
+    {
+      "event": {
+        "code": "recovery_deadline",
+        "expected_claim_revision": 7,
+        "source_refs": []
+      },
+      "now": "2026-09-28T12:00:00+00:00",
+      "policy_id": "incomplete_claim_follow_up",
+      "rejected": "deadline_not_reached",
+      "snapshot": {
+        "access_closed": false,
+        "claim_revision": 7,
+        "contact_authorised": true,
+        "deadline_at": "2026-09-28T12:00:01Z",
+        "due_at": "2026-09-27T12:00:00Z",
+        "external_operation_state": null,
+        "follow_up_attempt_count": 0,
+        "follow_up_status": "pending",
+        "retention_hold": false,
+        "source_refs": [],
+        "terminal": false
+      }
+    }
+  ]
+}

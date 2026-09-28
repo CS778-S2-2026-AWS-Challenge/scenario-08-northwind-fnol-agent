@@ -1304,7 +1304,7 @@ Follow-up IDs use the `fup_` prefix. The minimum P17.1 record persists stable id
 source Session, purpose, source references, responsible party, channel, due time, status, attempt
 count, contact-permission condition, optional outcome, and timestamps. `pending` means P17.1 has
 an authorised current channel; `blocked` means contact is not authorised and therefore has no
-channel or schedule; `resolved` records that the claimant resumed. An authenticated in-app
+executable channel or schedule (a legacy historical due time may remain); `resolved` records the typed resolution. An authenticated in-app
 recovery record does not grant email, SMS, or phone authority. An anonymous browser interruption
 is persisted as `blocked` / `not_authorised` rather than as executable outbound work.
 
@@ -1352,7 +1352,7 @@ projection never has to infer lifecycle state from free text. Legacy records wit
 fields remain readable and are not silently rewritten; an inconsistent binding fails closed.
 
 Each committed in-app execution has one durable `FollowUpOperation`, identified by operation ID
-and by the `(follow_up_id, sequence)` pair. Its status is `reserved`, `committed`, or `cancelled`.
+and by the `(follow_up_id, sequence)` pair. Its status is `reserved`, `committed`, `settled`, or `cancelled`.
 Fixture and MongoDB enforce the same identity, policy binding, and immutable replay rules.
 Bounded due and expiry scans are ordered by `(due_at|deadline_at, follow_up_id)` and use the
 corresponding adapter indexes and cursor contract. The current transaction-local in-app path
@@ -1361,8 +1361,12 @@ reconciliation authority.
 
 The claimant and Workbench projections expose the persisted Follow-up deadline; Workbench also
 exposes the authoritative attempt count. Retention cleanup remains a separate cross-store
-operation and is not inferred from this Follow-up record. Its durable schema must be added only
-after the approved data-classification and retention-hold inputs are available.
+operation and is not inferred from this Follow-up record. Its durable RetentionOperation schema stores source terminal ref/revision, immutable policy
+coordinate, CAS revision, monotonic access closure, frozen record/storage inventory, append-only
+step evidence, hold references, verification and completion timestamps. Object outcomes distinguish
+deleted/already_absent/failed/unknown; failed or unknown results require reconciliation.
+Approved classifications, source-linked holds and scalar tombstone authority fields are defined
+in `backend/domain/retention.py`. Holds block destruction without reopening claimant access.
 
 Deployments with legacy P17.1 records use `scripts/backfill_follow_up_policy.py`. The command is
 read-only by default, derives the deadline only from the source Session's persisted interruption
@@ -1420,3 +1424,23 @@ Agreement acceptance uses the existing atomic Claim mutation boundary, so Claim 
 acceptance history, idempotency metadata, audit facts, and claimant realtime publication
 commit together in Fixture and MongoDB persistence. No separate legal-document repository
 or second Claim-submission lifecycle is introduced.
+
+
+### Final #1076 persistence coordinates
+
+FollowUp `blocked_reason` and `resolution_code` are distinct persisted fields;
+legacy `reason_code` inputs map once to the appropriate canonical field. The
+read-only compatibility property is not serialized. `active_operation_id` points
+to existing execution history and is cleared when resolved or reconciled.
+Operation `result_code` is canonical; legacy `result` is a read adapter.
+
+The repositories use bounded cursor pagination for both due and expiry discovery,
+with `follow_up_due_ordered`, `follow_up_deadline_ordered`, logical-operation
+uniqueness, `(follow_up_id, sequence)` uniqueness, `retention_operation_claim_unique`,
+and `retention_hold_claim_state` indexes. All execution and cleanup commits
+revalidate authoritative source/revision immediately before mutation.
+
+Claimant access closure is checked before historical idempotency replay. Cleanup
+retires claimant retry records and preserves staff/internal source evidence and
+minimum Audit/tombstones. Cross-store deletion uses the durable RetentionOperation
+step ledger; database completion alone cannot prove object bytes were removed.

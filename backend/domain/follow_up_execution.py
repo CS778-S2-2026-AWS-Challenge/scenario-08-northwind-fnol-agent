@@ -3,9 +3,9 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from hashlib import sha256
 from typing import NoReturn
 
+from backend.domain.ids import stable_operation_id
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -27,12 +27,13 @@ from backend.domain.models import (
     WorkingClaim,
     assert_follow_up_operation_transition,
 )
+from backend.domain.recovery import reduce_owned_recovery
 from backend.domain.recovery_policy_registry import (
-    INCOMPLETE_CLAIM_FOLLOW_UP_MAX_AUTO_ATTEMPTS,
     INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_ID,
     INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION,
     INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE,
     INCOMPLETE_CLAIM_FOLLOW_UP_RETRY_INTERVAL,
+    RecoveryTrigger,
 )
 
 
@@ -57,15 +58,10 @@ def _operation_id(
     follow_up: FollowUpRecord,
     sequence: int,
 ) -> str:
-    digest = sha256(
-        (
-            f'{follow_up.follow_up_id}:'
-            f'{follow_up.policy_id}:'
-            f'{follow_up.policy_version}:'
-            f'{sequence}'
-        ).encode()
-    ).hexdigest()[:24]
-    return f'fuo_{digest}'
+    return stable_operation_id(
+        'fuo',
+        f'{follow_up.follow_up_id}:{follow_up.policy_id}:{follow_up.policy_version}:{sequence}',
+    )
 
 
 def _countable_attempts(
@@ -73,8 +69,6 @@ def _countable_attempts(
 ) -> int:
     """Committed delivery evidence is the sole attempt aggregate authority."""
     return sum(operation.committed_at is not None for operation in operations)
-
-
 
 
 class FollowUpExpiryExecutionRejected(ValueError):
@@ -88,7 +82,6 @@ class FollowUpExpiryTransition:
     claim: WorkingClaim
     follow_up: FollowUpRecord
     reconciled_operation: FollowUpOperation | None
-
 
 
 def reduce_due_follow_up(
@@ -146,8 +139,7 @@ def reduce_due_follow_up(
     if (
         follow_up.policy_id != INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_ID
         or follow_up.policy_version != INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION
-        or deadline_at
-        != recovery.interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
+        or deadline_at != recovery.interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
     ):
         _reject('The Follow-up is not bound to the published P17 policy.')
 
@@ -178,10 +170,7 @@ def reduce_due_follow_up(
     ):
         _reject('Follow-up execution history does not match the obligation.')
 
-    if any(
-        operation.status is FollowUpOperationStatus.SCHEDULED
-        for operation in ordered
-    ):
+    if any(operation.status is FollowUpOperationStatus.SCHEDULED for operation in ordered):
         _reject('A reserved Follow-up operation already requires reconciliation.')
 
     countable_attempts = _countable_attempts(ordered)
@@ -189,20 +178,25 @@ def reduce_due_follow_up(
     if follow_up.attempt_count != countable_attempts:
         _reject('Follow-up attempt aggregate disagrees with committed operation history.')
 
-    if countable_attempts >= INCOMPLETE_CLAIM_FOLLOW_UP_MAX_AUTO_ATTEMPTS:
+    policy_plan = reduce_owned_recovery(
+        RecoveryTrigger(source='timer', outcome_code='follow_up_due'),
+        claim.claim_id,
+        claim.revision,
+        follow_up.follow_up_id,
+        now,
+        follow_up.source_refs,
+    )
+    if countable_attempts >= policy_plan.max_auto_retry:
         _reject('The automatic Follow-up attempt limit is already exhausted.')
 
     expected_due = (
-        recovery.interrupted_at
-        + INCOMPLETE_CLAIM_FOLLOW_UP_RETRY_INTERVAL * countable_attempts
+        recovery.interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RETRY_INTERVAL * countable_attempts
     )
     if due_at != expected_due:
         _reject('Follow-up due time does not match the immutable v1 cadence.')
 
     outstanding = [
-        operation
-        for operation in ordered
-        if operation.status is FollowUpOperationStatus.COMMITTED
+        operation for operation in ordered if operation.status is FollowUpOperationStatus.COMMITTED
     ]
 
     if len(outstanding) > 1:
@@ -232,10 +226,13 @@ def reduce_due_follow_up(
             settled_previous,
         )
 
-    next_sequence = max(
-        (operation.sequence for operation in ordered),
-        default=0,
-    ) + 1
+    next_sequence = (
+        max(
+            (operation.sequence for operation in ordered),
+            default=0,
+        )
+        + 1
+    )
 
     scheduled = FollowUpOperation(
         operation_id=_operation_id(follow_up, next_sequence),
@@ -267,10 +264,21 @@ def reduce_due_follow_up(
 
     next_attempt_count = countable_attempts + 1
 
-    if next_attempt_count >= INCOMPLETE_CLAIM_FOLLOW_UP_MAX_AUTO_ATTEMPTS:
+    if next_attempt_count >= policy_plan.max_auto_retry:
+        exhaustion_plan = reduce_owned_recovery(
+            RecoveryTrigger(source='timer', outcome_code='attempt_limit_reached'),
+            claim.claim_id,
+            claim.revision,
+            follow_up.follow_up_id,
+            now,
+            follow_up.source_refs,
+        )
+        if exhaustion_plan.decision_code != 'block_follow_up':
+            _reject('Published policy does not permit attempt exhaustion.')
         updated_follow_up = follow_up.model_copy(
             update={
                 'attempt_count': next_attempt_count,
+                'active_operation_id': committed.operation_id,
                 'status': FollowUpStatus.BLOCKED,
                 'reason_code': FollowUpReasonCode.ATTEMPT_LIMIT_REACHED,
                 'due_at': None,
@@ -279,8 +287,7 @@ def reduce_due_follow_up(
         )
     else:
         next_due = (
-            recovery.interrupted_at
-            + INCOMPLETE_CLAIM_FOLLOW_UP_RETRY_INTERVAL * next_attempt_count
+            recovery.interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RETRY_INTERVAL * next_attempt_count
         )
 
         if next_due >= deadline_at:
@@ -289,6 +296,7 @@ def reduce_due_follow_up(
         updated_follow_up = follow_up.model_copy(
             update={
                 'attempt_count': next_attempt_count,
+                'active_operation_id': committed.operation_id,
                 'status': FollowUpStatus.PENDING,
                 'reason_code': None,
                 'due_at': next_due,
@@ -301,9 +309,6 @@ def reduce_due_follow_up(
         operation=committed,
         settled_previous_operation=settled_previous,
     )
-
-
-
 
 
 class FollowUpContactWithdrawalRejected(ValueError):
@@ -328,14 +333,10 @@ def reduce_follow_up_contact_withdrawal(
     """Block automatic recovery contact without terminating the Claim."""
 
     if now.tzinfo is None:
-        raise FollowUpContactWithdrawalRejected(
-            'Contact withdrawal time must be timezone-aware.'
-        )
+        raise FollowUpContactWithdrawalRejected('Contact withdrawal time must be timezone-aware.')
 
     if claim.claim_id != follow_up.claim_id:
-        raise FollowUpContactWithdrawalRejected(
-            'Follow-up Claim ownership is inconsistent.'
-        )
+        raise FollowUpContactWithdrawalRejected('Follow-up Claim ownership is inconsistent.')
 
     if claim.terminal_disposition is not None:
         raise FollowUpContactWithdrawalRejected(
@@ -367,12 +368,9 @@ def reduce_follow_up_contact_withdrawal(
 
     if (
         follow_up.policy_id != INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_ID
-        or follow_up.policy_version
-        != INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION
+        or follow_up.policy_version != INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION
         or deadline_at is None
-        or deadline_at
-        != recovery.interrupted_at
-        + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
+        or deadline_at != recovery.interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
     ):
         raise FollowUpContactWithdrawalRejected(
             'The Follow-up is not bound to the published P17 policy.'
@@ -383,10 +381,7 @@ def reduce_follow_up_contact_withdrawal(
             'Recovery expiry has precedence over contact withdrawal.'
         )
 
-    if (
-        follow_up.contact_permission
-        is FollowUpContactPermission.NOT_AUTHORISED
-    ):
+    if follow_up.contact_permission is FollowUpContactPermission.NOT_AUTHORISED:
         raise FollowUpContactWithdrawalRejected(
             'Automatic recovery contact is already not authorised.'
         )
@@ -400,9 +395,7 @@ def reduce_follow_up_contact_withdrawal(
     )
 
     if len({operation.sequence for operation in ordered}) != len(ordered):
-        raise FollowUpContactWithdrawalRejected(
-            'Follow-up operation sequence is inconsistent.'
-        )
+        raise FollowUpContactWithdrawalRejected('Follow-up operation sequence is inconsistent.')
 
     if any(
         operation.follow_up_id != follow_up.follow_up_id
@@ -415,10 +408,7 @@ def reduce_follow_up_contact_withdrawal(
             'Follow-up execution history does not match the obligation.'
         )
 
-    committed_attempts = sum(
-        operation.committed_at is not None
-        for operation in ordered
-    )
+    committed_attempts = sum(operation.committed_at is not None for operation in ordered)
 
     if follow_up.attempt_count != committed_attempts:
         raise FollowUpContactWithdrawalRejected(
@@ -469,22 +459,32 @@ def reduce_follow_up_contact_withdrawal(
 
     updated_follow_up = follow_up.model_copy(
         update={
-            'contact_permission': (
-                FollowUpContactPermission.NOT_AUTHORISED
-            ),
+            'contact_permission': (FollowUpContactPermission.NOT_AUTHORISED),
             'channel': None,
             'status': FollowUpStatus.BLOCKED,
             'reason_code': FollowUpReasonCode.CONTACT_NOT_AUTHORISED,
+            'active_operation_id': None,
             'due_at': None,
             'updated_at': now,
         }
     )
 
+    policy_plan = reduce_owned_recovery(
+        RecoveryTrigger(source='human', outcome_code='contact_authority_withdrawn'),
+        claim.claim_id,
+        claim.revision,
+        follow_up.follow_up_id,
+        now,
+        follow_up.source_refs,
+    )
+    if policy_plan.decision_code != 'block_follow_up':
+        raise FollowUpContactWithdrawalRejected(
+            'Published policy does not permit contact blocking.'
+        )
     return FollowUpContactWithdrawalTransition(
         follow_up=updated_follow_up,
         reconciled_operation=reconciled,
     )
-
 
 
 def reduce_expired_follow_up(
@@ -497,19 +497,13 @@ def reduce_expired_follow_up(
     """Resolve an open P17 recovery obligation at its absolute deadline."""
 
     if now.tzinfo is None:
-        raise FollowUpExpiryExecutionRejected(
-            'Expiry time must be timezone-aware.'
-        )
+        raise FollowUpExpiryExecutionRejected('Expiry time must be timezone-aware.')
 
     if claim.claim_id != follow_up.claim_id:
-        raise FollowUpExpiryExecutionRejected(
-            'Follow-up Claim ownership is inconsistent.'
-        )
+        raise FollowUpExpiryExecutionRejected('Follow-up Claim ownership is inconsistent.')
 
     if claim.terminal_disposition is not None:
-        raise FollowUpExpiryExecutionRejected(
-            'The Claim is already terminal.'
-        )
+        raise FollowUpExpiryExecutionRejected('The Claim is already terminal.')
 
     if claim.active_session_id is not None:
         raise FollowUpExpiryExecutionRejected(
@@ -520,9 +514,7 @@ def reduce_expired_follow_up(
         FollowUpStatus.PENDING,
         FollowUpStatus.BLOCKED,
     }:
-        raise FollowUpExpiryExecutionRejected(
-            'Only an open recovery obligation may expire.'
-        )
+        raise FollowUpExpiryExecutionRejected('Only an open recovery obligation may expire.')
 
     recovery = source_session.recovery_context
 
@@ -541,21 +533,16 @@ def reduce_expired_follow_up(
 
     if (
         follow_up.policy_id != INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_ID
-        or follow_up.policy_version
-        != INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION
+        or follow_up.policy_version != INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION
         or deadline_at is None
-        or deadline_at
-        != recovery.interrupted_at
-        + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
+        or deadline_at != recovery.interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
     ):
         raise FollowUpExpiryExecutionRejected(
             'The Follow-up is not bound to the published P17 deadline.'
         )
 
     if now < deadline_at:
-        raise FollowUpExpiryExecutionRejected(
-            'The recovery deadline has not been reached.'
-        )
+        raise FollowUpExpiryExecutionRejected('The recovery deadline has not been reached.')
 
     ordered = sorted(
         operations,
@@ -566,9 +553,7 @@ def reduce_expired_follow_up(
     )
 
     if len({operation.sequence for operation in ordered}) != len(ordered):
-        raise FollowUpExpiryExecutionRejected(
-            'Follow-up operation sequence is inconsistent.'
-        )
+        raise FollowUpExpiryExecutionRejected('Follow-up operation sequence is inconsistent.')
 
     if any(
         operation.follow_up_id != follow_up.follow_up_id
@@ -581,10 +566,7 @@ def reduce_expired_follow_up(
             'Follow-up execution history does not match the obligation.'
         )
 
-    committed_attempts = sum(
-        operation.committed_at is not None
-        for operation in ordered
-    )
+    committed_attempts = sum(operation.committed_at is not None for operation in ordered)
 
     if follow_up.attempt_count != committed_attempts:
         raise FollowUpExpiryExecutionRejected(
@@ -602,9 +584,7 @@ def reduce_expired_follow_up(
     ]
 
     if len(open_operations) > 1:
-        raise FollowUpExpiryExecutionRejected(
-            'Multiple logical Follow-up operations remain open.'
-        )
+        raise FollowUpExpiryExecutionRejected('Multiple logical Follow-up operations remain open.')
 
     reconciled: FollowUpOperation | None = None
 
@@ -615,9 +595,7 @@ def reduce_expired_follow_up(
             reconciled = current_operation.model_copy(
                 update={
                     'status': FollowUpOperationStatus.CANCELLED,
-                    'result': (
-                        FollowUpOperationResult.EXPIRED_BEFORE_EXECUTION
-                    ),
+                    'result': (FollowUpOperationResult.EXPIRED_BEFORE_EXECUTION),
                     'cancelled_at': now,
                 }
             )
@@ -639,6 +617,7 @@ def reduce_expired_follow_up(
         update={
             'status': FollowUpStatus.RESOLVED,
             'reason_code': FollowUpReasonCode.RECOVERY_EXPIRED,
+            'active_operation_id': None,
             'outcome': 'recovery_expired',
             'due_at': None,
             'updated_at': now,
@@ -669,9 +648,7 @@ def reduce_expired_follow_up(
             'terminal_disposition': terminal,
             'customer_next_step': CustomerNextStep(
                 status='abandoned',
-                summary=(
-                    'The recovery window for this incomplete Claim has expired.'
-                ),
+                summary=('The recovery window for this incomplete Claim has expired.'),
                 responsible_party=ResponsibleParty.SYSTEM,
                 can_resume=False,
             ),
@@ -680,12 +657,21 @@ def reduce_expired_follow_up(
         }
     )
 
+    policy_plan = reduce_owned_recovery(
+        RecoveryTrigger(source='timer', outcome_code='recovery_expired'),
+        claim.claim_id,
+        claim.revision,
+        follow_up.follow_up_id,
+        now,
+        follow_up.source_refs,
+    )
+    if policy_plan.decision_code != 'expire_recovery':
+        raise FollowUpExpiryExecutionRejected('Published policy does not permit recovery expiry.')
     return FollowUpExpiryTransition(
         claim=updated_claim,
         follow_up=updated_follow_up,
         reconciled_operation=reconciled,
     )
-
 
 
 class FollowUpStaffAbandonmentRejected(ValueError):
@@ -712,9 +698,7 @@ def reduce_follow_up_staff_abandonment(
     """Abandon one incomplete Claim without confusing it with attempt exhaustion."""
 
     if now.tzinfo is None:
-        raise FollowUpStaffAbandonmentRejected(
-            'Staff abandonment time must be timezone-aware.'
-        )
+        raise FollowUpStaffAbandonmentRejected('Staff abandonment time must be timezone-aware.')
 
     if recorded_by.actor_type is not ActorType.STAFF:
         raise FollowUpStaffAbandonmentRejected(
@@ -722,14 +706,10 @@ def reduce_follow_up_staff_abandonment(
         )
 
     if claim.claim_id != follow_up.claim_id:
-        raise FollowUpStaffAbandonmentRejected(
-            'Follow-up Claim ownership is inconsistent.'
-        )
+        raise FollowUpStaffAbandonmentRejected('Follow-up Claim ownership is inconsistent.')
 
     if claim.terminal_disposition is not None:
-        raise FollowUpStaffAbandonmentRejected(
-            'The Claim is already terminal.'
-        )
+        raise FollowUpStaffAbandonmentRejected('The Claim is already terminal.')
 
     if claim.active_session_id is not None:
         raise FollowUpStaffAbandonmentRejected(
@@ -761,12 +741,9 @@ def reduce_follow_up_staff_abandonment(
 
     if (
         follow_up.policy_id != INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_ID
-        or follow_up.policy_version
-        != INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION
+        or follow_up.policy_version != INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION
         or deadline_at is None
-        or deadline_at
-        != recovery.interrupted_at
-        + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
+        or deadline_at != recovery.interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
     ):
         raise FollowUpStaffAbandonmentRejected(
             'The Follow-up is not bound to the published P17 policy.'
@@ -787,9 +764,7 @@ def reduce_follow_up_staff_abandonment(
     )
 
     if len({operation.sequence for operation in ordered}) != len(ordered):
-        raise FollowUpStaffAbandonmentRejected(
-            'Follow-up operation sequence is inconsistent.'
-        )
+        raise FollowUpStaffAbandonmentRejected('Follow-up operation sequence is inconsistent.')
 
     if any(
         operation.follow_up_id != follow_up.follow_up_id
@@ -802,10 +777,7 @@ def reduce_follow_up_staff_abandonment(
             'Follow-up execution history does not match the obligation.'
         )
 
-    committed_attempts = sum(
-        operation.committed_at is not None
-        for operation in ordered
-    )
+    committed_attempts = sum(operation.committed_at is not None for operation in ordered)
 
     if follow_up.attempt_count != committed_attempts:
         raise FollowUpStaffAbandonmentRejected(
@@ -823,9 +795,7 @@ def reduce_follow_up_staff_abandonment(
     ]
 
     if len(open_operations) > 1:
-        raise FollowUpStaffAbandonmentRejected(
-            'Multiple logical Follow-up operations remain open.'
-        )
+        raise FollowUpStaffAbandonmentRejected('Multiple logical Follow-up operations remain open.')
 
     reconciled: FollowUpOperation | None = None
 
@@ -867,6 +837,7 @@ def reduce_follow_up_staff_abandonment(
         update={
             'status': FollowUpStatus.RESOLVED,
             'reason_code': FollowUpReasonCode.STAFF_ABANDONED,
+            'active_operation_id': None,
             'outcome': 'staff_abandoned',
             'due_at': None,
             'updated_at': now,
@@ -877,9 +848,7 @@ def reduce_follow_up_staff_abandonment(
         update={
             'terminal_disposition': ClaimTerminalDisposition(
                 value=TerminalDispositionValue.ABANDONED,
-                reason_code=(
-                    TerminalDispositionReasonCode.AUTHORISED_STAFF_ABANDONMENT
-                ),
+                reason_code=(TerminalDispositionReasonCode.AUTHORISED_STAFF_ABANDONMENT),
                 source_refs=source_refs,
                 recorded_by=recorded_by,
                 recorded_at=now,

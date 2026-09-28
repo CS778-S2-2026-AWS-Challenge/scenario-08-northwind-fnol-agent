@@ -172,9 +172,7 @@ def test_revision_conflict_discards_stale_revision_and_requires_reload() -> None
     assert transition.required_actions == ('claim.reload', 'audit.append')
     assert transition.expected_claim_revision == 7
 
-    not_stale = stale.model_copy(
-        update={'expected_claim_revision': 7}
-    )
+    not_stale = stale.model_copy(update={'expected_claim_revision': 7})
 
     with pytest.raises(
         RecoveryReductionRejected,
@@ -277,3 +275,66 @@ def test_naive_reducer_time_fails_closed() -> None:
             _snapshot(),
             datetime(2026, 9, 28, 9, 0),
         )
+
+
+@pytest.mark.parametrize('decision_code', ['continue', 'wait_for_user'])
+def test_published_policy_coordinates_cannot_hide_modified_decisions(decision_code: str) -> None:
+    trigger = RecoveryTrigger(source='model', outcome_code='timeout', retryable=True)
+    policy = classify_recovery(trigger)
+    modified = policy.model_copy(update={'decision_code': decision_code})
+    event = NormalizedRecoveryEvent(event_id='tampered-policy', trigger=trigger)
+    with pytest.raises(RecoveryReductionRejected, match='published'):
+        reduce_recovery(modified, event, _snapshot(), NOW)
+
+
+def test_checked_in_replay_matrix_reduces_without_mutating_sources() -> None:
+    """The #1076 matrix is repeatable contract evidence, not a copied success label."""
+    import json
+    from pathlib import Path
+
+    from backend.domain.recovery import reduce_lifecycle_recovery
+    from backend.domain.recovery_policy_registry import (
+        RecoveryEvent,
+        RecoverySnapshot,
+        UnknownRecoveryTransition,
+        recovery_policy,
+    )
+
+    matrix = json.loads(
+        (
+            Path(__file__).resolve().parents[1] / 'docs/contracts/recovery-replay-matrix.json'
+        ).read_text(encoding='utf-8')
+    )
+    assert len(matrix['vectors']) >= 20
+    for vector in matrix['vectors']:
+        now = datetime.fromisoformat(vector['now'])
+        policy = recovery_policy(vector['policy_id'], vector.get('version', 'v1'))
+        if 'trigger' in vector['event']:
+            event = NormalizedRecoveryEvent.model_validate(vector['event'])
+            snapshot = RecoveryAuthoritativeSnapshot.model_validate(vector['snapshot'])
+            before = snapshot.model_dump_json()
+            first = reduce_recovery(policy, event, snapshot, now)
+            assert first == reduce_recovery(policy, event, snapshot, now)
+            assert first == type(first).model_validate(vector['transition'])
+            assert snapshot.model_dump_json() == before
+        else:
+            lifecycle_event = RecoveryEvent.model_validate(vector['event'])
+            lifecycle_snapshot = RecoverySnapshot.model_validate(vector['snapshot'])
+            if 'rejected' in vector:
+                with pytest.raises(UnknownRecoveryTransition):
+                    reduce_lifecycle_recovery(
+                        policy,
+                        lifecycle_snapshot,
+                        lifecycle_event,
+                        lifecycle_snapshot,
+                        now,
+                    )
+            else:
+                transition = reduce_lifecycle_recovery(
+                    policy,
+                    lifecycle_snapshot,
+                    lifecycle_event,
+                    lifecycle_snapshot,
+                    now,
+                )
+                assert transition == type(transition).model_validate(vector['transition'])

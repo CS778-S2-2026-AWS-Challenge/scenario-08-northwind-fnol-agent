@@ -55,6 +55,8 @@ from backend.domain.models import (
 from backend.domain.models import (
     retention_target_statuses as retention_target_statuses,
 )
+from backend.domain.recovery import reduce_owned_recovery
+from backend.domain.recovery_policy_registry import RecoveryTrigger
 
 INCOMPLETE_CLAIM_RETENTION_POLICY_ID = 'incomplete_claim_retention'
 INCOMPLETE_CLAIM_RETENTION_POLICY_VERSION = 'v1'
@@ -139,6 +141,17 @@ def retention_next_status(
         return RetentionOperationStatus.COMPLETED
 
     if active_hold:
+        plan = reduce_owned_recovery(
+            RecoveryTrigger(source='retention', outcome_code='hold'),
+            operation.claim_id,
+            operation.source_claim_revision,
+            operation.operation_id,
+            operation.updated_at,
+            operation.source_refs,
+            operation.operation_id,
+        )
+        if plan.decision_code != 'retention_hold':
+            raise ValueError('Published policy does not permit retention hold.')
         return RetentionOperationStatus.HELD
 
     current = retention_target_statuses(
@@ -154,6 +167,17 @@ def retention_next_status(
         }
         for status in current.values()
     ):
+        plan = reduce_owned_recovery(
+            RecoveryTrigger(source='retention', outcome_code='unknown'),
+            operation.claim_id,
+            operation.source_claim_revision,
+            operation.operation_id,
+            operation.updated_at,
+            operation.source_refs,
+            operation.operation_id,
+        )
+        if plan.decision_code != 'retention_reconcile':
+            raise ValueError('Published policy does not permit retention reconciliation.')
         return RetentionOperationStatus.RECONCILIATION_REQUIRED
 
     if (
@@ -171,7 +195,18 @@ def retention_access_closed(
 ) -> bool:
     """Access closure is monotonic once a retention operation is reserved."""
 
-    return operation is not None and operation.access_closed_at is not None
+    if operation is None or operation.access_closed_at is None:
+        return False
+    plan = reduce_owned_recovery(
+        RecoveryTrigger(source='retention', outcome_code='old_session_denied'),
+        operation.claim_id,
+        operation.source_claim_revision,
+        operation.operation_id,
+        operation.updated_at,
+        operation.source_refs,
+        operation.operation_id,
+    )
+    return plan.decision_code == 'deny_access'
 
 
 def validate_retention_operation_transition(
@@ -346,6 +381,21 @@ def validate_retention_source_authority(
         operation.policy_id != INCOMPLETE_CLAIM_RETENTION_POLICY_ID
         or operation.policy_version != INCOMPLETE_CLAIM_RETENTION_POLICY_VERSION
     ):
+        raise RetentionEligibilityRejected(
+            RetentionEligibilityReason.RETENTION_POLICY_MISMATCH,
+            claim.claim_id,
+        )
+
+    policy_plan = reduce_owned_recovery(
+        RecoveryTrigger(source='retention', outcome_code='eligible'),
+        claim.claim_id,
+        claim.revision,
+        operation.operation_id,
+        operation.updated_at,
+        operation.source_refs,
+        operation.operation_id,
+    )
+    if policy_plan.decision_code != 'retention_eligible':
         raise RetentionEligibilityRejected(
             RetentionEligibilityReason.RETENTION_POLICY_MISMATCH,
             claim.claim_id,

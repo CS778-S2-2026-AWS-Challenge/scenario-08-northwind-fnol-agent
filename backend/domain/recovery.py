@@ -29,6 +29,7 @@ from backend.domain.recovery_policy_registry import (
     RecoveryWorkItemKind,
     UnknownRecoveryTransition,
     classify_recovery,
+    recovery_policy,
 )
 from backend.domain.recovery_policy_registry import (
     RecoveryTransition as LifecycleRecoveryTransition,
@@ -111,7 +112,7 @@ def reduce_recovery(
 
     published = classify_recovery(event.trigger)
 
-    if published.rule_id != policy.rule_id or published.version != policy.version:
+    if published != policy:
         raise RecoveryReductionRejected(
             'The supplied policy coordinate does not match the published event policy.'
         )
@@ -236,7 +237,7 @@ def _reduce_incomplete_claim(
             next_follow_up_status='blocked',
             blocked_reason='policy_binding_invalid',
         )
-    if now >= snapshot.deadline_at or event.code == 'recovery_deadline':
+    if now >= snapshot.deadline_at:
         return _base_transition(
             rule,
             snapshot,
@@ -369,6 +370,10 @@ def reduce_lifecycle_recovery(
 
     if now.tzinfo is None:
         raise UnknownRecoveryTransition('Recovery decision time must be timezone-aware.')
+    if recovery_policy(policy.policy_id, policy.version) != policy:
+        raise UnknownRecoveryTransition(
+            'The supplied policy differs from its published definition.'
+        )
     if incoming_event.code not in policy.permitted_events:
         raise UnknownRecoveryTransition(
             f'Event {incoming_event.code} is not permitted by {policy.policy_id}.{policy.version}.'
@@ -482,4 +487,33 @@ def reduce_lifecycle_recovery(
         authoritative_snapshot,
         decision='wait',
         source_refs=source_refs,
+    )
+
+
+def reduce_owned_recovery(
+    trigger: RecoveryTrigger,
+    claim_id: str,
+    claim_revision: int,
+    event_id: str,
+    now: datetime,
+    source_refs: list[str],
+    operation_id: str | None = None,
+) -> RecoveryTransition:
+    """Route subsystem-owned lifecycle facts through the shared pure boundary."""
+    return reduce_recovery(
+        classify_recovery(trigger),
+        NormalizedRecoveryEvent(
+            event_id=event_id,
+            trigger=trigger,
+            expected_claim_revision=claim_revision,
+            operation_id=operation_id,
+            source_refs=source_refs,
+        ),
+        RecoveryAuthoritativeSnapshot(
+            claim_id=claim_id,
+            claim_revision=claim_revision,
+            operation_id=operation_id,
+            source_refs=source_refs,
+        ),
+        now,
     )

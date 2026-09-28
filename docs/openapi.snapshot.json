@@ -1,6 +1,22 @@
 {
   "components": {
     "schemas": {
+      "AbandonClaimRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "AbandonClaimRequest",
+        "type": "object"
+      },
       "AcceptClaimAgreementRequest": {
         "additionalProperties": false,
         "properties": {
@@ -12751,6 +12767,27 @@
         "title": "ResumePackage",
         "type": "object"
       },
+      "RetentionOperationStatus": {
+        "enum": [
+          "reserved",
+          "held",
+          "reconciliation_required",
+          "completed"
+        ],
+        "title": "RetentionOperationStatus",
+        "type": "string"
+      },
+      "RetentionProjectedContentState": {
+        "description": "Role-safe content outcome; never exposes physical cleanup coordinates.",
+        "enum": [
+          "unavailable",
+          "anonymised",
+          "retained_for_audit",
+          "deleted"
+        ],
+        "title": "RetentionProjectedContentState",
+        "type": "string"
+      },
       "RetrievalRecord": {
         "anyOf": [
           {
@@ -14120,6 +14157,90 @@
         "title": "StaffProfileProjection",
         "type": "object"
       },
+      "StaffRetentionProjection": {
+        "additionalProperties": false,
+        "description": "Safe Workbench view over durable retention authority.",
+        "properties": {
+          "access_closed_at": {
+            "format": "date-time",
+            "title": "Access Closed At",
+            "type": "string"
+          },
+          "claim_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "hold_active": {
+            "title": "Hold Active",
+            "type": "boolean"
+          },
+          "operation_status": {
+            "$ref": "#/components/schemas/RetentionOperationStatus"
+          },
+          "reconciliation_required": {
+            "title": "Reconciliation Required",
+            "type": "boolean"
+          },
+          "resources": {
+            "items": {
+              "$ref": "#/components/schemas/StaffRetentionResourceSummary"
+            },
+            "maxItems": 200,
+            "title": "Resources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "claim_id",
+          "operation_status",
+          "access_closed_at",
+          "hold_active",
+          "reconciliation_required"
+        ],
+        "title": "StaffRetentionProjection",
+        "type": "object"
+      },
+      "StaffRetentionResourceSummary": {
+        "additionalProperties": false,
+        "description": "Aggregate staff projection; deliberately omits record/storage identities.",
+        "properties": {
+          "content_state": {
+            "$ref": "#/components/schemas/RetentionProjectedContentState"
+          },
+          "count": {
+            "minimum": 1.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "record_type": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Record Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_type",
+          "content_state",
+          "count"
+        ],
+        "title": "StaffRetentionResourceSummary",
+        "type": "object"
+      },
       "StaffTag": {
         "additionalProperties": false,
         "description": "Typed Workbench projection of one active staff-facing tag.",
@@ -14580,6 +14701,8 @@
         "enum": [
           "CLAIM_CREATED",
           "ABANDONMENT_POLICY_APPLIED",
+          "RECOVERY_EXPIRED",
+          "AUTHORISED_STAFF_ABANDONMENT",
           "AUTHORISED_CLOSURE"
         ],
         "title": "TerminalDispositionReasonCode",
@@ -16514,6 +16637,17 @@
               }
             ],
             "title": "Follow Up Due At"
+          },
+          "follow_up_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up Reason"
           },
           "follow_up_status": {
             "title": "Follow Up Status",
@@ -25083,6 +25217,106 @@
         ]
       }
     },
+    "/api/v1/workbench/claims/{claim_id}/abandon": {
+      "post": {
+        "operationId": "abandon_workbench_claim_api_v1_workbench_claims__claim_id__abandon_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AbandonClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchClaimDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Abandon Workbench Claim",
+        "tags": [
+          "workbench"
+        ]
+      }
+    },
     "/api/v1/workbench/claims/{claim_id}/asset-snapshots": {
       "get": {
         "operationId": "read_workbench_claim_asset_snapshots_api_v1_workbench_claims__claim_id__asset_snapshots_get",
@@ -26839,6 +27073,64 @@
           }
         },
         "summary": "Return Claim To Queue",
+        "tags": [
+          "workbench"
+        ]
+      }
+    },
+    "/api/v1/workbench/claims/{claim_id}/retention": {
+      "get": {
+        "operationId": "read_workbench_retention_api_v1_workbench_claims__claim_id__retention_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffRetentionProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Workbench Retention",
         "tags": [
           "workbench"
         ]

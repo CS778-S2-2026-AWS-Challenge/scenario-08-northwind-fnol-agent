@@ -210,3 +210,7 @@ Demonstration:
 
 Static demonstrators and earlier scripts under `prototype/` and `pre_archive/` are also historical
 evidence. They must not silently override current requirements or contracts.
+
+
+- [Unified recovery policy manifest](contracts/recovery-policy-registry.json) — generated immutable policy coordinates.
+- [Recovery reducer replay matrix](contracts/recovery-replay-matrix.json) — deterministic source/event/transition vectors for #1076.

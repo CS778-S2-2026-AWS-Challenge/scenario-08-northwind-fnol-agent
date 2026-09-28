@@ -22,6 +22,7 @@ from backend.domain.audit import (
     AuditSubjectType,
     AuditVisibility,
 )
+from backend.domain.ids import stable_operation_id
 from backend.domain.models import ActorType
 from backend.domain.retention import (
     INCOMPLETE_CLAIM_RETENTION_POLICY_ID,
@@ -53,13 +54,7 @@ def _active_hold_ids(
     repository: PersistenceRepository,
     claim_id: str,
 ) -> list[str]:
-    return sorted(
-        hold.hold_id
-        for hold in repository.list_retention_holds(
-            claim_id
-        )
-        if hold.active
-    )
+    return sorted(hold.hold_id for hold in repository.list_retention_holds(claim_id) if hold.active)
 
 
 def _step_evidence_id(
@@ -67,11 +62,7 @@ def _step_evidence_id(
     target_id: str,
     attempt: int,
 ) -> str:
-    digest = sha256(
-        (
-            f'{operation_id}|{target_id}|{attempt}'
-        ).encode()
-    ).hexdigest()[:40]
+    digest = sha256((f'{operation_id}|{target_id}|{attempt}').encode()).hexdigest()[:40]
 
     return f'rse_{digest}'
 
@@ -82,11 +73,7 @@ def _next_attempt(
 ) -> int:
     return (
         max(
-            (
-                item.attempt
-                for item in operation.step_evidence
-                if item.target_id == target_id
-            ),
+            (item.attempt for item in operation.step_evidence if item.target_id == target_id),
             default=0,
         )
         + 1
@@ -113,18 +100,12 @@ def _candidate_after_step(
         RetentionStepStatus.FAILED,
         RetentionStepStatus.UNKNOWN,
     }:
-        status = (
-            RetentionOperationStatus.RECONCILIATION_REQUIRED
-        )
+        status = RetentionOperationStatus.RECONCILIATION_REQUIRED
         completed_at = None
     elif (
         operation.targets_frozen_at is not None
         and operation.targets
-        and all(
-            item_status
-            is RetentionStepStatus.SATISFIED
-            for item_status in statuses.values()
-        )
+        and all(item_status is RetentionStepStatus.SATISFIED for item_status in statuses.values())
     ):
         status = RetentionOperationStatus.COMPLETED
         completed_at = now
@@ -152,14 +133,9 @@ def _held_candidate(
     *,
     now: datetime,
 ) -> RetentionOperation:
-    combined = sorted(
-        set(operation.hold_refs).union(hold_ids)
-    )
+    combined = sorted(set(operation.hold_refs).union(hold_ids))
 
-    if (
-        operation.status is RetentionOperationStatus.HELD
-        and combined == operation.hold_refs
-    ):
+    if operation.status is RetentionOperationStatus.HELD and combined == operation.hold_refs:
         return operation
 
     payload = operation.model_dump(mode='python')
@@ -191,13 +167,9 @@ def execute_retention_object_cleanup(
     """
 
     if now.utcoffset() is None:
-        raise ValueError(
-            'Retention execution time must be timezone-aware.'
-        )
+        raise ValueError('Retention execution time must be timezone-aware.')
 
-    operation = repository.get_retention_operation(
-        operation_id
-    )
+    operation = repository.get_retention_operation(operation_id)
 
     if operation is None:
         raise KeyError(operation_id)
@@ -237,16 +209,11 @@ def execute_retention_object_cleanup(
         if target.kind is not RetentionTargetKind.OBJECT_BYTES:
             continue
 
-        if (
-            statuses[target.target_id]
-            is RetentionStepStatus.SATISFIED
-        ):
+        if statuses[target.target_id] is RetentionStepStatus.SATISFIED:
             continue
 
         if target.storage_key is None:
-            raise ValueError(
-                'Object retention target lost its storage key.'
-            )
+            raise ValueError('Object retention target lost its storage key.')
 
         attempt = _next_attempt(
             operation,
@@ -263,14 +230,10 @@ def execute_retention_object_cleanup(
             outcome = ObjectDeletionOutcome.FAILED
 
         status = {
-            ObjectDeletionOutcome.DELETED:
-                RetentionStepStatus.SATISFIED,
-            ObjectDeletionOutcome.ALREADY_ABSENT:
-                RetentionStepStatus.SATISFIED,
-            ObjectDeletionOutcome.FAILED:
-                RetentionStepStatus.FAILED,
-            ObjectDeletionOutcome.UNKNOWN:
-                RetentionStepStatus.UNKNOWN,
+            ObjectDeletionOutcome.DELETED: RetentionStepStatus.SATISFIED,
+            ObjectDeletionOutcome.ALREADY_ABSENT: RetentionStepStatus.SATISFIED,
+            ObjectDeletionOutcome.FAILED: RetentionStepStatus.FAILED,
+            ObjectDeletionOutcome.UNKNOWN: RetentionStepStatus.UNKNOWN,
         }[outcome]
 
         diagnostic_code = (
@@ -326,7 +289,6 @@ def execute_retention_object_cleanup(
     return operation
 
 
-
 def reserve_retention_from_terminal(
     repository: PersistenceRepository,
     claim_id: str,
@@ -340,13 +302,9 @@ def reserve_retention_from_terminal(
     """
 
     if now.utcoffset() is None:
-        raise ValueError(
-            'Retention reservation time must be timezone-aware.'
-        )
+        raise ValueError('Retention reservation time must be timezone-aware.')
 
-    claim = repository.get_claim_internal(
-        claim_id
-    )
+    claim = repository.get_claim_internal(claim_id)
 
     if claim is None:
         raise RetentionEligibilityRejected(
@@ -362,11 +320,9 @@ def reserve_retention_from_terminal(
             claim_id,
         )
 
-    source_terminal_ref = (
-        retention_terminal_source_ref(
-            claim.claim_id,
-            terminal.recorded_revision,
-        )
+    source_terminal_ref = retention_terminal_source_ref(
+        claim.claim_id,
+        terminal.recorded_revision,
     )
 
     source_refs = list(
@@ -388,21 +344,12 @@ def reserve_retention_from_terminal(
     )
 
     operation = RetentionOperation(
-        operation_id=(
-            'ret_'
-            + sha256(
-                operation_seed.encode()
-            ).hexdigest()[:24]
-        ),
+        operation_id=stable_operation_id('ret', operation_seed),
         claim_id=claim.claim_id,
         source_terminal_ref=source_terminal_ref,
         source_claim_revision=claim.revision,
-        policy_id=(
-            INCOMPLETE_CLAIM_RETENTION_POLICY_ID
-        ),
-        policy_version=(
-            INCOMPLETE_CLAIM_RETENTION_POLICY_VERSION
-        ),
+        policy_id=(INCOMPLETE_CLAIM_RETENTION_POLICY_ID),
+        policy_version=(INCOMPLETE_CLAIM_RETENTION_POLICY_VERSION),
         revision=1,
         status=RetentionOperationStatus.RESERVED,
         access_closed_at=now,
@@ -411,12 +358,7 @@ def reserve_retention_from_terminal(
         updated_at=now,
     )
 
-    return (
-        repository.reserve_eligible_retention_operation(
-            operation
-        )
-    )
-
+    return repository.reserve_eligible_retention_operation(operation)
 
 
 def freeze_retention_cleanup_targets(
@@ -428,13 +370,9 @@ def freeze_retention_cleanup_targets(
     """Freeze the exact cleanup inventory before any destructive operation."""
 
     if now.utcoffset() is None:
-        raise ValueError(
-            'Retention target freeze time must be timezone-aware.'
-        )
+        raise ValueError('Retention target freeze time must be timezone-aware.')
 
-    operation = repository.get_retention_operation(
-        operation_id
-    )
+    operation = repository.get_retention_operation(operation_id)
 
     if operation is None:
         raise RetentionTargetFreezeRejected(
@@ -459,7 +397,6 @@ def freeze_retention_cleanup_targets(
     )
 
     return operation
-
 
 
 _RETENTION_DATABASE_ORDER = {
@@ -495,21 +432,14 @@ def execute_retention_cleanup(
     """Execute frozen cleanup and reconcile the same logical operation."""
 
     if now.utcoffset() is None:
-        raise ValueError(
-            'Retention execution time must be timezone-aware.'
-        )
+        raise ValueError('Retention execution time must be timezone-aware.')
 
-    operation = repository.get_retention_operation(
-        operation_id
-    )
+    operation = repository.get_retention_operation(operation_id)
 
     if operation is None:
         raise KeyError(operation_id)
 
-    if (
-        operation.status
-        is RetentionOperationStatus.COMPLETED
-    ):
+    if operation.status is RetentionOperationStatus.COMPLETED:
         assert operation.completed_at is not None
 
         _append_retention_audit(
@@ -522,9 +452,7 @@ def execute_retention_cleanup(
         return operation
 
     if operation.targets_frozen_at is None:
-        raise ValueError(
-            'Retention cleanup cannot execute before targets are frozen.'
-        )
+        raise ValueError('Retention cleanup cannot execute before targets are frozen.')
 
     # Cross-store order remains strict: object bytes first.
     operation = execute_retention_object_cleanup(
@@ -534,16 +462,10 @@ def execute_retention_cleanup(
         now=now,
     )
 
-    if (
-        operation.status
-        is RetentionOperationStatus.HELD
-    ):
+    if operation.status is RetentionOperationStatus.HELD:
         return operation
 
-    if (
-        operation.status
-        is RetentionOperationStatus.COMPLETED
-    ):
+    if operation.status is RetentionOperationStatus.COMPLETED:
         assert operation.completed_at is not None
 
         _append_retention_audit(
@@ -561,18 +483,13 @@ def execute_retention_cleanup(
     )
 
     object_incomplete = any(
-        target.kind
-        is RetentionTargetKind.OBJECT_BYTES
-        and statuses[target.target_id]
-        is not RetentionStepStatus.SATISFIED
+        target.kind is RetentionTargetKind.OBJECT_BYTES
+        and statuses[target.target_id] is not RetentionStepStatus.SATISFIED
         for target in operation.targets
     )
 
     if object_incomplete:
-        if (
-            operation.status
-            is RetentionOperationStatus.RECONCILIATION_REQUIRED
-        ):
+        if operation.status is RetentionOperationStatus.RECONCILIATION_REQUIRED:
             _audit_reconciliation(
                 repository,
                 operation,
@@ -581,12 +498,7 @@ def execute_retention_cleanup(
         return operation
 
     database_targets = sorted(
-        (
-            target
-            for target in operation.targets
-            if target.kind
-            is RetentionTargetKind.MONGO_RECORD
-        ),
+        (target for target in operation.targets if target.kind is RetentionTargetKind.MONGO_RECORD),
         key=lambda target: (
             _RETENTION_DATABASE_ORDER.get(
                 target.record_type,
@@ -604,69 +516,50 @@ def execute_retention_cleanup(
             operation.step_evidence,
         )
 
-        if (
-            statuses[target.target_id]
-            is RetentionStepStatus.SATISFIED
-        ):
+        if statuses[target.target_id] is RetentionStepStatus.SATISFIED:
             continue
 
         try:
-            operation = (
-                repository.apply_retention_record_target(
-                    operation.operation_id,
-                    target.target_id,
-                    operation.revision,
-                    now=now,
-                )
+            operation = repository.apply_retention_record_target(
+                operation.operation_id,
+                target.target_id,
+                operation.revision,
+                now=now,
             )
 
         except RetentionDatabaseStepError as error:
             # A Mongo commit response can be unknown even though the
             # transaction actually committed. Reload before recording
             # reconciliation so a committed target is never repeated.
-            refreshed = repository.get_retention_operation(
-                operation.operation_id
-            )
+            refreshed = repository.get_retention_operation(operation.operation_id)
 
             if refreshed is None:
                 raise
 
-            refreshed_statuses = (
-                retention_target_statuses(
-                    refreshed.targets,
-                    refreshed.step_evidence,
-                )
+            refreshed_statuses = retention_target_statuses(
+                refreshed.targets,
+                refreshed.step_evidence,
             )
 
-            if (
-                refreshed_statuses.get(
-                    target.target_id
-                )
-                is RetentionStepStatus.SATISFIED
-            ):
+            if refreshed_statuses.get(target.target_id) is RetentionStepStatus.SATISFIED:
                 operation = refreshed
 
-                if (
-                    operation.status
-                    is RetentionOperationStatus.COMPLETED
-                ):
+                if operation.status is RetentionOperationStatus.COMPLETED:
                     break
 
                 continue
 
-            operation = (
-                repository.record_retention_step_failure(
-                    refreshed.operation_id,
-                    target.target_id,
-                    refreshed.revision,
-                    status=(
-                        RetentionStepStatus.UNKNOWN
-                        if error.commit_unknown
-                        else RetentionStepStatus.FAILED
-                    ),
-                    diagnostic_code=error.diagnostic_code,
-                    now=now,
-                )
+            operation = repository.record_retention_step_failure(
+                refreshed.operation_id,
+                target.target_id,
+                refreshed.revision,
+                status=(
+                    RetentionStepStatus.UNKNOWN
+                    if error.commit_unknown
+                    else RetentionStepStatus.FAILED
+                ),
+                diagnostic_code=error.diagnostic_code,
+                now=now,
             )
 
             _audit_reconciliation(
@@ -676,10 +569,7 @@ def execute_retention_cleanup(
 
             return operation
 
-        if (
-            operation.status
-            is RetentionOperationStatus.RECONCILIATION_REQUIRED
-        ):
+        if operation.status is RetentionOperationStatus.RECONCILIATION_REQUIRED:
             _audit_reconciliation(
                 repository,
                 operation,
@@ -687,16 +577,10 @@ def execute_retention_cleanup(
 
             return operation
 
-        if (
-            operation.status
-            is RetentionOperationStatus.COMPLETED
-        ):
+        if operation.status is RetentionOperationStatus.COMPLETED:
             break
 
-    if (
-        operation.status
-        is RetentionOperationStatus.COMPLETED
-    ):
+    if operation.status is RetentionOperationStatus.COMPLETED:
         assert operation.completed_at is not None
 
         _append_retention_audit(
@@ -707,7 +591,6 @@ def execute_retention_cleanup(
         )
 
     return operation
-
 
 
 def _append_retention_audit(
@@ -722,22 +605,14 @@ def _append_retention_audit(
     if phase == 'prepared':
         event_type = AuditEventType.ACTION_PREPARED
         outcome = AuditOutcome.SUCCEEDED
-        reason = (
-            'Retention cleanup target set was frozen from the '
-            'authoritative terminal source.'
-        )
+        reason = 'Retention cleanup target set was frozen from the authoritative terminal source.'
     elif phase == 'completed':
         event_type = AuditEventType.ACTION_COMPLETED
         outcome = AuditOutcome.SUCCEEDED
-        reason = (
-            'Retention cleanup completed with every required '
-            'frozen target satisfied.'
-        )
+        reason = 'Retention cleanup completed with every required frozen target satisfied.'
     elif phase == 'reconciliation':
         if unknown:
-            event_type = (
-                AuditEventType.ACTION_UNKNOWN_OUTCOME
-            )
+            event_type = AuditEventType.ACTION_UNKNOWN_OUTCOME
             outcome = AuditOutcome.UNKNOWN
             reason = (
                 'Retention cleanup requires reconciliation '
@@ -746,14 +621,9 @@ def _append_retention_audit(
         else:
             event_type = AuditEventType.ACTION_FAILED
             outcome = AuditOutcome.FAILED
-            reason = (
-                'Retention cleanup requires reconciliation '
-                'after a database step failure.'
-            )
+            reason = 'Retention cleanup requires reconciliation after a database step failure.'
     else:
-        raise ValueError(
-            f'Unsupported retention audit phase: {phase}'
-        )
+        raise ValueError(f'Unsupported retention audit phase: {phase}')
 
     material = '|'.join(
         (
@@ -764,12 +634,7 @@ def _append_retention_audit(
         )
     )
 
-    event_id = (
-        'aud_ret_'
-        + sha256(
-            material.encode()
-        ).hexdigest()[:32]
-    )
+    event_id = 'aud_ret_' + sha256(material.encode()).hexdigest()[:32]
 
     refs = list(
         dict.fromkeys(
@@ -777,11 +642,7 @@ def _append_retention_audit(
                 f'retention-operation:{operation.operation_id}',
                 operation.source_terminal_ref,
                 *operation.source_refs,
-                *(
-                    [f'retention-target:{target_id}']
-                    if target_id is not None
-                    else []
-                ),
+                *([f'retention-target:{target_id}'] if target_id is not None else []),
             ]
         )
     )[:100]
@@ -804,26 +665,18 @@ def _append_retention_audit(
         source_refs=refs,
         visibility=AuditVisibility.AUDIT_ONLY,
         correlation_id=None,
-        claim_revision=(
-            operation.source_claim_revision
-        ),
+        claim_revision=(operation.source_claim_revision),
         created_at=event_at,
     )
 
-    repository.append_audit_event(
-        event
-    )
+    repository.append_audit_event(event)
 
 
 def _audit_reconciliation(
     repository: PersistenceRepository,
     operation: RetentionOperation,
 ) -> None:
-    latest = (
-        operation.step_evidence[-1]
-        if operation.step_evidence
-        else None
-    )
+    latest = operation.step_evidence[-1] if operation.step_evidence else None
 
     if latest is None:
         return
@@ -840,12 +693,8 @@ def _audit_reconciliation(
         phase='reconciliation',
         event_at=latest.recorded_at,
         target_id=latest.target_id,
-        unknown=(
-            latest.status
-            is RetentionStepStatus.UNKNOWN
-        ),
+        unknown=(latest.status is RetentionStepStatus.UNKNOWN),
     )
-
 
 
 def project_claimant_retention(
@@ -854,11 +703,7 @@ def project_claimant_retention(
 ) -> ClaimantRetentionProjection | None:
     """Return only the generic closed-resource claimant projection."""
 
-    operation = (
-        repository.get_retention_operation_for_claim(
-            claim_id
-        )
-    )
+    operation = repository.get_retention_operation_for_claim(claim_id)
 
     if not retention_access_closed(operation):
         return None
@@ -870,29 +715,19 @@ def _retention_projected_content_state(
     classification: RetentionClassification,
     step_status: RetentionStepStatus,
 ) -> RetentionProjectedContentState:
-    if (
-        step_status
-        is not RetentionStepStatus.SATISFIED
-    ):
+    if step_status is not RetentionStepStatus.SATISFIED:
         return RetentionProjectedContentState.UNAVAILABLE
 
-    if (
-        classification
-        is RetentionClassification.DELETE
-    ):
+    if classification is RetentionClassification.DELETE:
         return RetentionProjectedContentState.DELETED
 
     if classification in {
         RetentionClassification.ANONYMISE,
         RetentionClassification.TOMBSTONE,
     }:
-        return (
-            RetentionProjectedContentState.ANONYMISED
-        )
+        return RetentionProjectedContentState.ANONYMISED
 
-    return (
-        RetentionProjectedContentState.RETAINED_FOR_AUDIT
-    )
+    return RetentionProjectedContentState.RETAINED_FOR_AUDIT
 
 
 def project_staff_retention(
@@ -901,11 +736,7 @@ def project_staff_retention(
 ) -> StaffRetentionProjection | None:
     """Project retention state without raw target IDs, storage keys or diagnostics."""
 
-    operation = (
-        repository.get_retention_operation_for_claim(
-            claim_id
-        )
-    )
+    operation = repository.get_retention_operation_for_claim(claim_id)
 
     if operation is None:
         return None
@@ -927,11 +758,9 @@ def project_staff_retention(
     ] = {}
 
     for target in operation.targets:
-        content_state = (
-            _retention_projected_content_state(
-                target.classification,
-                statuses[target.target_id],
-            )
+        content_state = _retention_projected_content_state(
+            target.classification,
+            statuses[target.target_id],
         )
 
         key = (
@@ -948,9 +777,7 @@ def project_staff_retention(
         RetentionProjectedContentState.RETAINED_FOR_AUDIT,
     )
 
-    counts[operation_key] = (
-        counts.get(operation_key, 0) + 1
-    )
+    counts[operation_key] = counts.get(operation_key, 0) + 1
 
     resources = [
         StaffRetentionResourceSummary(
@@ -970,22 +797,16 @@ def project_staff_retention(
         )
     ]
 
-    holds = repository.list_retention_holds(
-        claim_id
-    )
+    holds = repository.list_retention_holds(claim_id)
 
     return StaffRetentionProjection(
         claim_id=claim_id,
         operation_status=operation.status,
         access_closed_at=operation.access_closed_at,
         completed_at=operation.completed_at,
-        hold_active=any(
-            hold.active
-            for hold in holds
-        ),
+        hold_active=any(hold.active for hold in holds),
         reconciliation_required=(
-            operation.status
-            is RetentionOperationStatus.RECONCILIATION_REQUIRED
+            operation.status is RetentionOperationStatus.RECONCILIATION_REQUIRED
         ),
         resources=resources,
     )
