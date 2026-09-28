@@ -1425,7 +1425,6 @@ acceptance history, idempotency metadata, audit facts, and claimant realtime pub
 commit together in Fixture and MongoDB persistence. No separate legal-document repository
 or second Claim-submission lifecycle is introduced.
 
-
 ### Final #1076 persistence coordinates
 
 FollowUp `blocked_reason` and `resolution_code` are distinct persisted fields;

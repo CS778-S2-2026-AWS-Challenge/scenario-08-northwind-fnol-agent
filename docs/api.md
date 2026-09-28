@@ -4491,7 +4491,6 @@ Existing exact replay and accepted-result recovery execute before the new Issue 
 Before any new provider operation, current payout/contact authority and a current
 revision-bound agreement acceptance are required.
 
-
 ### Complete P17 recovery and retention projection (#1076)
 
 The existing pause/resume routes retain their ownership, Idempotency-Key and
