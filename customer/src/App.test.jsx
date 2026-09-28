@@ -44,6 +44,7 @@ const api = vi.hoisted(() => ({
   setClaimantAccessToken: vi.fn(),
   updateAccountPreferences: vi.fn(),
   updateAccountProfile: vi.fn(),
+  updateClaimAutoFillPreferences: vi.fn(),
   updateAccountAsset: vi.fn(),
   createAccountIdentityDocument: vi.fn(),
   updateAccountIdentityDocument: vi.fn(),
@@ -53,6 +54,7 @@ const api = vi.hoisted(() => ({
 }))
 
 vi.mock('./api.js', () => api)
+vi.mock('./runtimeConfig.js', () => ({ WORKBENCH_URL: '/workbench/' }))
 
 import App from './App.jsx'
 
@@ -694,6 +696,77 @@ describe('claimant intake projection', () => {
     expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeInTheDocument()
     await waitFor(() => expect(globalThis.location.pathname).toBe('/auth/login'))
     expect(api.getAuthenticatedAccount).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    '/account/claims',
+    '/account/claims/clm_guarded',
+    '/account/claims/clm_guarded/evidence',
+    '/files',
+  ])('guards the unauthenticated protected route %s without leaving an account-loading shell', async (path) => {
+    globalThis.history.replaceState({}, '', path)
+
+    render(<App />)
+
+    expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeInTheDocument()
+    expect(screen.queryByText('Checking your account…')).not.toBeInTheDocument()
+    await waitFor(() => expect(globalThis.location.pathname).toBe('/auth/login'))
+    expect(api.getAuthenticatedAccount).not.toHaveBeenCalled()
+  })
+
+  it('uses the configured Workbench route instead of a loopback-only employee link', () => {
+    globalThis.history.replaceState({}, '', '/auth/login')
+
+    render(<App />)
+
+    expect(screen.getByRole('link', { name: 'Employee access' })).toHaveAttribute('href', '/workbench/')
+  })
+
+  it('loads and saves all five Claim auto-fill choices from the Account projection', async () => {
+    const user = userEvent.setup()
+    const initialAccount = {
+      customer_id: 'cus_auto_fill',
+      revision: 4,
+      profile: { display_name: 'Iris Zhang', email: 'iris@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+      claim_auto_fill_preferences: {
+        personal_details: false,
+        policy_number: true,
+        saved_assets: false,
+        payment_details: false,
+        identity_information: false,
+      },
+    }
+    const updatedAccount = {
+      ...initialAccount,
+      revision: 5,
+      claim_auto_fill_preferences: {
+        ...initialAccount.claim_auto_fill_preferences,
+        saved_assets: true,
+      },
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue(initialAccount)
+    api.updateClaimAutoFillPreferences.mockResolvedValue(updatedAccount)
+    globalThis.history.replaceState({}, '', '/profile/claim-auto-fill')
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Claim auto-fill' })).toBeInTheDocument()
+    expect(screen.queryByText(/could not load these choices from your account/i)).not.toBeInTheDocument()
+    expect(screen.getAllByRole('combobox')).toHaveLength(5)
+    expect(screen.getByRole('combobox', { name: 'Policy number' })).toHaveValue('show')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Saved assets' }), 'show')
+    await user.click(screen.getByRole('button', { name: 'Save Claim auto-fill choices' }))
+
+    expect(api.updateClaimAutoFillPreferences).toHaveBeenCalledWith({
+      personal_details: false,
+      policy_number: true,
+      saved_assets: true,
+      payment_details: false,
+      identity_information: false,
+    }, 4)
+    expect(await screen.findByText(/choices were updated/i)).toBeInTheDocument()
   })
 
   it('shows one server-confirmed delivery failure with retry guidance', async () => {
