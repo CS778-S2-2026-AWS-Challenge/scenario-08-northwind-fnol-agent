@@ -20,6 +20,7 @@ const api = vi.hoisted(() => ({
   updateAccountPolicy: vi.fn(),
   updateAccountPreferences: vi.fn(),
   updateAccountProfile: vi.fn(),
+  updateClaimAutoFillPreferences: vi.fn(),
 }))
 
 vi.mock('../api.js', () => api)
@@ -36,6 +37,13 @@ const account = {
     email: 'iris@example.com',
   },
   preferences: { email: true, sms: false },
+  claim_auto_fill_preferences: {
+    personal_details: false,
+    policy_number: false,
+    saved_assets: false,
+    payment_details: false,
+    identity_information: false,
+  },
 }
 
 const asset = {
@@ -188,6 +196,59 @@ describe('useProfileController mutation recovery', () => {
     })
 
     expect(api.updateAccountPreferences).toHaveBeenCalledWith({ email: false, sms: true }, 4)
+    expect(result.current.account).toEqual(savedAccount)
+  })
+
+  it('saves the complete Claim auto-fill choice set with the loaded account revision', async () => {
+    const preferences = {
+      personal_details: true,
+      policy_number: false,
+      saved_assets: true,
+      payment_details: false,
+      identity_information: true,
+    }
+    const savedAccount = {
+      ...account,
+      revision: 5,
+      claim_auto_fill_preferences: preferences,
+    }
+    api.updateClaimAutoFillPreferences.mockResolvedValue(savedAccount)
+    const { result } = renderController()
+
+    await waitFor(() => expect(api.listAccountAssets).toHaveBeenCalledOnce())
+    await act(async () => {
+      await result.current.controller.saveAutoFillPreferences(preferences)
+    })
+
+    expect(api.updateClaimAutoFillPreferences).toHaveBeenCalledWith(preferences, 4)
+    expect(result.current.account).toEqual(savedAccount)
+  })
+
+  it('reconciles an interrupted Claim auto-fill save from authoritative account readback', async () => {
+    const preferences = {
+      personal_details: true,
+      policy_number: true,
+      saved_assets: false,
+      payment_details: false,
+      identity_information: false,
+    }
+    const savedAccount = {
+      ...account,
+      revision: 5,
+      claim_auto_fill_preferences: preferences,
+    }
+    api.updateClaimAutoFillPreferences.mockRejectedValue({ code: 'NETWORK_ERROR' })
+    api.getAuthenticatedAccount.mockResolvedValue(savedAccount)
+    const { result } = renderController()
+
+    await waitFor(() => expect(api.listAccountAssets).toHaveBeenCalledOnce())
+    let saved
+    await act(async () => {
+      saved = await result.current.controller.saveAutoFillPreferences(preferences)
+    })
+
+    expect(saved).toEqual(savedAccount)
+    expect(api.getAuthenticatedAccount).toHaveBeenCalledOnce()
     expect(result.current.account).toEqual(savedAccount)
   })
 

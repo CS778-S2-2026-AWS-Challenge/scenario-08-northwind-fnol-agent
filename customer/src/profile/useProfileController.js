@@ -18,6 +18,7 @@ import {
   updateAccountPolicy,
   updateAccountPreferences,
   updateAccountProfile,
+  updateClaimAutoFillPreferences,
 } from '../api.js'
 import { ProfileMutationError } from './profileMutation.js'
 
@@ -102,6 +103,13 @@ function accountMatchesProfile(account, patch) {
 function accountMatchesPreferences(account, preferences) {
   return Boolean(account.preferences?.email) === Boolean(preferences.email)
     && Boolean(account.preferences?.sms) === Boolean(preferences.sms)
+}
+
+function accountMatchesAutoFillPreferences(account, preferences) {
+  return Boolean(account.claim_auto_fill_preferences)
+    && Object.entries(preferences).every(([key, value]) => (
+      Boolean(account.claim_auto_fill_preferences?.[key]) === Boolean(value)
+    ))
 }
 
 function objectContains(actual, expected) {
@@ -336,6 +344,13 @@ export default function useProfileController({ account, setAccount, enabled = tr
     matches: (latest) => accountMatchesPreferences(latest, preferences),
   }), [runAccountMutation])
 
+  const saveAutoFillPreferences = useCallback((preferences) => runAccountMutation({
+    scope: 'claim-auto-fill-preferences',
+    action: 'your Claim auto-fill choices',
+    execute: () => updateClaimAutoFillPreferences(preferences, accountRef.current?.revision),
+    matches: (latest) => accountMatchesAutoFillPreferences(latest, preferences),
+  }), [runAccountMutation])
+
   const createAsset = useCallback(async ({ asset, attemptId }) => {
     const saved = await runResourceMutation({
       scope: 'asset-create',
@@ -474,6 +489,7 @@ export default function useProfileController({ account, setAccount, enabled = tr
     abandonCreate,
     saveProfile,
     savePreferences,
+    saveAutoFillPreferences,
     createAsset,
     saveAsset,
     createPolicy,

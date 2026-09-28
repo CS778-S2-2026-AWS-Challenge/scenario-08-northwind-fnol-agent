@@ -58,7 +58,9 @@ import './styles/claim-history.css'
 import { profilePathForSection, profileSectionFromPath } from './profileRoutes.js'
 import { buildConversationTimeline, mergeMessagesById, orderMessages } from './conversationTimeline.js'
 import useProfileController from './profile/useProfileController.js'
+import useClaimAutoFillEditor from './profile/useClaimAutoFillEditor.js'
 import { documentAttentionCount } from './claimDocumentProjection.js'
+import { WORKBENCH_URL } from './runtimeConfig.js'
 import {
   forgetAnonymousConversation,
   readAnonymousConversationHistory,
@@ -367,6 +369,14 @@ function claimProgress(dynamicForm) {
   }
 }
 
+function protectedAccountPageForPath(pathname) {
+  if (pathname === '/account/claims') return 'claim-history'
+  if (/^\/account\/claims\/[^/]+\/evidence$/.test(pathname)) return 'claim-evidence'
+  if (/^\/account\/claims\/[^/]+$/.test(pathname)) return 'claim-features'
+  if (pathname === '/files') return 'files'
+  return null
+}
+
 function App() {
   const initialProfileSection = profileSectionFromPath(globalThis.location?.pathname)
   const initialDraftWorkspaceActive = globalThis.location?.pathname === '/claims/new'
@@ -377,10 +387,8 @@ function App() {
     if (path === '/profile' || path === '/account' || initialProfileSection) {
       return hasClaimantAccessToken() ? 'account' : 'login'
     }
-    if (/^\/account\/claims\/[^/]+\/evidence$/.test(path)) return 'claim-evidence'
-    if (/^\/account\/claims\/[^/]+$/.test(path)) return 'claim-features'
-    if (path === '/account/claims') return 'claim-history'
-    if (path === '/files') return 'files'
+    const protectedPage = protectedAccountPageForPath(path)
+    if (protectedPage) return hasClaimantAccessToken() ? protectedPage : 'login'
     if (path === '/how-it-works') return 'how-it-works'
     return 'home'
   })()
@@ -430,6 +438,10 @@ function App() {
     account,
     setAccount,
     enabled: page === 'account',
+  })
+  const autoFillEditor = useClaimAutoFillEditor({
+    account,
+    onSave: profileController.saveAutoFillPreferences,
   })
   const [runtimeCapabilities, setRuntimeCapabilities] = useState({
     claim_types: ['motor', 'home', 'contents'],
@@ -623,10 +635,8 @@ function App() {
     if (pathname === '/auth/login') return 'login'
     if (pathname === '/auth/register') return 'register'
     if (pathname === '/profile' || pathname === '/account' || profileSectionFromPath(pathname)) return account ? 'account' : 'login'
-    if (pathname === '/account/claims') return account ? 'claim-history' : 'login'
-    if (/^\/account\/claims\/[^/]+\/evidence$/.test(pathname)) return account ? 'claim-evidence' : 'login'
-    if (/^\/account\/claims\/[^/]+$/.test(pathname)) return account ? 'claim-features' : 'login'
-    if (pathname === '/files') return account ? 'files' : 'login'
+    const protectedPage = protectedAccountPageForPath(pathname)
+    if (protectedPage) return account ? protectedPage : 'login'
     if (pathname === '/how-it-works') return 'how-it-works'
     if (pathname.startsWith('/claims/')) return claim?.claim_id ? 'home' : 'home'
     return 'home'
@@ -2486,6 +2496,7 @@ function App() {
   async function signOut() {
     setAuthStatus('loading'); setAuthError('')
     try { await logoutClaimant() } catch (requestError) { setAuthError(requestError.message) }
+    autoFillEditor.reset()
     setAccount(null)
     setClaimHistory(readAnonymousConversationHistory())
     setClaimHistoryError('')
@@ -3092,8 +3103,15 @@ function App() {
             <UserProfile
               account={account}
               activeSection={profileSection}
+              autoFillChoices={autoFillEditor.choices}
+              autoFillDirty={autoFillEditor.dirty}
+              autoFillError={autoFillEditor.error}
+              autoFillNotice={autoFillEditor.notice}
+              autoFillSaving={autoFillEditor.saving}
               controller={profileController}
+              onChangeAutoFillChoice={autoFillEditor.changeChoice}
               onOpenClaims={openSavedClaims}
+              onSaveAutoFillChoices={autoFillEditor.saveChoices}
               onSelectSection={openProfileSection}
               onSignOut={signOut}
             />
@@ -3144,7 +3162,7 @@ function App() {
             </button>
             <div className="employee-access">
               <span>Northwind team member?</span>
-              <a href="http://127.0.0.1:8002/">Employee access</a>
+              <a href={WORKBENCH_URL}>Employee access</a>
             </div>
           </section>
         </main>

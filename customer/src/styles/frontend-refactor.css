@@ -6,6 +6,23 @@
   font-family: var(--font-family-base);
 }
 
+/* Claimant controls keep a usable touch target even when their visual treatment is compact. */
+.customer-app button {
+  min-width: var(--size-control-touch);
+  min-height: var(--size-control-touch);
+}
+.customer-app select,
+.customer-app textarea,
+.customer-app input:not([type='checkbox']):not([type='radio']):not([type='hidden']):not([type='file']) {
+  min-height: var(--size-control-touch);
+}
+.customer-app a[href] {
+  display: inline-flex;
+  min-width: var(--size-control-touch);
+  min-height: var(--size-control-touch);
+  align-items: center;
+}
+
 /* Claimant workspace: a quiet, stable top bar and a compressible three-column layout. */
 .product-header.is-intake-header {
   display: flex;
@@ -71,8 +88,8 @@
   top: var(--space-4);
   right: var(--space-4);
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: var(--size-control-touch);
+  height: var(--size-control-touch);
   place-items: center;
   border: var(--border-component);
   border-radius: var(--radius-round);
@@ -861,8 +878,8 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   stroke-linejoin: round;
 }
 .tool-divider { width: 1px; height: 22px; background: var(--color-divider); }
-.claim-type-select { min-height: 34px; border: var(--border-component); border-radius: var(--radius-md); color: var(--color-text-secondary); background: var(--color-surface); font-size: var(--font-size-caption); }
-.send-btn, .primary-button { min-height: 40px; padding: 0 var(--space-4); border: 0; border-radius: var(--radius-md); color: var(--color-on-accent); background: var(--color-accent-strong); font: inherit; font-weight: var(--font-weight-semibold); cursor: pointer; }
+.claim-type-select { min-height: var(--size-control-touch); border: var(--border-component); border-radius: var(--radius-md); color: var(--color-text-secondary); background: var(--color-surface); font-size: var(--font-size-caption); }
+.send-btn, .primary-button { min-height: var(--size-control-touch); padding: 0 var(--space-4); border: 0; border-radius: var(--radius-md); color: var(--color-on-accent); background: var(--color-accent-strong); font: inherit; font-weight: var(--font-weight-semibold); cursor: pointer; }
 .input-toolbar .send-btn { min-height: var(--size-control-touch); }
 .send-btn:hover:not(:disabled), .primary-button:hover:not(:disabled) { background: var(--color-accent); }
 .send-btn:disabled, .primary-button:disabled, .secondary-button:disabled { opacity: .55; cursor: not-allowed; }
@@ -953,7 +970,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 .workspace-utility-page.is-claim-record-page > p { margin-bottom: 0; color: var(--color-text-muted); font-size: var(--font-size-caption); line-height: var(--line-height-body); }
 .evidence-history-page-content > :not(.back-link), .workspace-utility-page.is-claim-record-page > :not(.back-link) { margin-left: var(--space-3); }
 .history-actions { display: grid; gap: var(--space-1); padding-bottom: var(--space-3); border-bottom: var(--border-component); border-bottom-color: var(--color-accent-strong); }
-.history-actions button { min-height: 36px; padding: 0 var(--space-3); border: 1px solid transparent; border-radius: var(--radius-md); color: var(--color-text-secondary); background: transparent; text-align: left; font: inherit; font-size: var(--font-size-caption); font-weight: var(--font-weight-medium); cursor: pointer; }
+.history-actions button { min-height: var(--size-control-touch); padding: 0 var(--space-3); border: 1px solid transparent; border-radius: var(--radius-md); color: var(--color-text-secondary); background: transparent; text-align: left; font: inherit; font-size: var(--font-size-caption); font-weight: var(--font-weight-medium); cursor: pointer; }
 .history-actions button:hover { border-color: var(--color-accent-light); background: var(--color-accent-soft); color: var(--color-text-primary); }
 .history-action-button { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .history-action-count { display: inline-grid; min-width: var(--space-6); min-height: var(--space-6); place-items: center; padding-inline: var(--space-1); border-radius: var(--radius-round); color: var(--color-text-primary); background: var(--color-warning-soft); font-size: var(--font-size-caption); font-weight: var(--font-weight-semibold); }
@@ -1653,7 +1670,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   .header-assistance-chip { padding-inline: var(--space-2); }
   .intake-page { display: flex; flex-direction: column; }
   .mobile-intake-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-1); padding: var(--space-2); border-bottom: 1px solid var(--claimant-workspace-divider-color); background: var(--claimant-workspace-sidebar-surface); backdrop-filter: var(--claimant-workspace-sidebar-blur); -webkit-backdrop-filter: var(--claimant-workspace-sidebar-blur); }
-  .mobile-intake-tabs button { min-height: 40px; border: 0; border-radius: var(--radius-md); color: var(--claimant-workspace-supporting-text); background: transparent; font: inherit; font-size: var(--font-size-caption); font-weight: var(--font-weight-semibold); }
+  .mobile-intake-tabs button { min-height: var(--size-control-touch); border: 0; border-radius: var(--radius-md); color: var(--claimant-workspace-supporting-text); background: transparent; font: inherit; font-size: var(--font-size-caption); font-weight: var(--font-weight-semibold); }
   .mobile-intake-tabs button[aria-selected="true"] { color: var(--color-text-primary); background: var(--color-surface); }
   .intake-history, .conversation-panel, .intake-details-panel { display: none; }
   .conversation-panel, .intake-details-panel { height: auto; }
@@ -1775,5 +1792,5 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 .auth-page .login-card .text-link, .auth-page .login-card .back-link { color: var(--color-accent-strong); }
 .auth-page .back-link { margin-bottom: var(--space-4); }
 .auth-page .login-form { gap: var(--space-2); }
-.auth-page .login-form input:not([type='checkbox']) { min-height: 42px; }
+.auth-page .login-form input:not([type='checkbox']) { min-height: var(--size-control-touch); }
 .auth-page .employee-access { margin-top: var(--space-4); padding-top: var(--space-3); }

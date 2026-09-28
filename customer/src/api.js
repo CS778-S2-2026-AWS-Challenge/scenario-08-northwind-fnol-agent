@@ -400,6 +400,14 @@ export function updateAccountPreferences(preferences, revision) {
   })
 }
 
+export function updateClaimAutoFillPreferences(preferences, revision) {
+  return apiRequest('/api/v1/account/claim-auto-fill-preferences', {
+    method: 'PATCH',
+    headers: revision == null ? undefined : { 'If-Match': String(revision) },
+    body: JSON.stringify(preferences),
+  })
+}
+
 export function listAccountPolicies({ cursor, limit = 25, signal } = {}) {
   const params = new URLSearchParams({ limit: String(limit) })
   if (cursor) params.set('cursor', cursor)

@@ -20,6 +20,7 @@ import {
   streamClaimUpdates,
   streamRealtimeEvents,
   updateAccountAsset,
+  updateClaimAutoFillPreferences,
   updateAccountProfile,
   updateAccountPreferences,
   updateAccountIdentityDocument,
@@ -788,6 +789,34 @@ describe('Account mutation contract', () => {
           'If-Match': '4',
         }),
         body: JSON.stringify({ email: false, sms: true }),
+      }),
+    )
+  })
+
+  it('replaces all five Claim auto-fill choices with account revision authority', async () => {
+    const preferences = {
+      personal_details: true,
+      policy_number: false,
+      saved_assets: true,
+      payment_details: false,
+      identity_information: true,
+    }
+    fetch.mockResolvedValue(new Response(JSON.stringify({
+      revision: 5,
+      claim_auto_fill_preferences: preferences,
+    }), { status: 200 }))
+
+    await updateClaimAutoFillPreferences(preferences, 4)
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/claim-auto-fill-preferences',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer claimant-session-token',
+          'If-Match': '4',
+        }),
+        body: JSON.stringify(preferences),
       }),
     )
   })

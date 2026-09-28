@@ -50,7 +50,7 @@ function AutoFillUnavailable({ headingAs }) {
       />
       <div className="profile-availability-note">
         <strong>Unavailable</strong>
-        <p>This information is not supported by the current account service.</p>
+        <p>Northwind could not load these choices from your account. Reload Profile and try again.</p>
       </div>
       <p className="profile-helper-copy">Saved Profile information may only be suggested or prefilled. You must review and confirm it before it becomes claim information.</p>
       <dl className="profile-summary-list profile-compact-summary-list">
