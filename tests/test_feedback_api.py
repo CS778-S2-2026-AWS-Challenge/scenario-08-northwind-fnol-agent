@@ -177,11 +177,12 @@ def test_sqlite_feedback_reads_use_parameterized_queries_without_file_io(
         lambda _path: connection,
     )
 
-    repository = SQLiteFeedbackRepository('/virtual/control-plane.sqlite3')
+    database_path = Path.cwd() / 'virtual' / 'control-plane.sqlite3'
+    repository = SQLiteFeedbackRepository(str(database_path))
 
     assert repository.get(record.feedback_id) == record
     assert repository.list(staff_id='stf_demo', limit=500, offset=-1) == [record]
-    make_directories.assert_called_once_with('/virtual', exist_ok=True)
+    make_directories.assert_called_once_with(str(database_path.parent), exist_ok=True)
     connection.executescript.assert_called_once()
     query, parameters = connection.execute.call_args_list[-1].args
     assert 'submitted_by_staff_id' in query
