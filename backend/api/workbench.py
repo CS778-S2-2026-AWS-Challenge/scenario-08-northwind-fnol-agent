@@ -34,6 +34,7 @@ from backend.domain.models import (
     UpdateStaffActionRequest,
     WorkflowState,
 )
+from backend.domain.retention import StaffRetentionProjection
 from backend.domain.workbench import (
     WorkbenchClaimDetail,
     WorkbenchClaimFilterMetadata,
@@ -63,6 +64,7 @@ from backend.services.ownership import (
     decide_collaboration_request,
     requeue_claim,
 )
+from backend.services.retention import project_staff_retention
 from backend.services.review_writeback import (
     decide_review_signal,
     get_review_connected_workbench_detail,
@@ -211,6 +213,32 @@ def read_workbench_claim_filter_metadata(
     principal: Principal = Depends(require_staff),
 ) -> WorkbenchClaimFilterMetadata:
     return get_workbench_claim_filter_metadata(principal)
+
+
+@router.get(
+    '/{claim_id}/retention',
+    response_model=StaffRetentionProjection,
+)
+def read_workbench_retention(
+    claim_id: str,
+    request: Request,
+    principal: Principal = Depends(require_staff),
+) -> StaffRetentionProjection:
+    del principal
+
+    projection = project_staff_retention(
+        repository_for(request),
+        claim_id,
+    )
+
+    if projection is None:
+        raise ApiError(
+            status_code=404,
+            code='RESOURCE_NOT_FOUND',
+            message='The claim was not found.',
+        )
+
+    return projection
 
 
 @router.get('/{claim_id}', response_model=WorkbenchClaimDetail)

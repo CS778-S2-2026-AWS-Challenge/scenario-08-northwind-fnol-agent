@@ -50,6 +50,12 @@ from backend.domain.realtime import (
     RealtimeEvent,
     RealtimePublication,
 )
+from backend.domain.retention import (
+    RetentionHoldRecord,
+    RetentionOperation,
+    RetentionRecordTombstone,
+    RetentionStepStatus,
+)
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 from backend.domain.runtime import RuntimeTurnRecords, RuntimeWorkItemRecord
 from backend.domain.staff_agent import (
@@ -371,6 +377,14 @@ class ClaimRepository(Protocol):
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
         raise NotImplementedError
 
+    def claimant_resource_access_open(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> bool:
+        """Return claimant resource eligibility without exposing existence details."""
+        raise NotImplementedError
+
     def get_claim(self, claim_id: str, customer_id: str) -> WorkingClaim | None:
         raise NotImplementedError
 
@@ -649,6 +663,99 @@ class ClaimRepository(Protocol):
 
 class PersistenceRepository(ClaimRepository, Protocol):
     """Provider-neutral persistence boundary for the full Sprint 1 record set."""
+
+    def get_retention_operation(
+        self,
+        operation_id: str,
+    ) -> RetentionOperation | None:
+        raise NotImplementedError
+
+    def get_retention_operation_for_claim(
+        self,
+        claim_id: str,
+    ) -> RetentionOperation | None:
+        """Read the monotonic resource-access closure for one Claim."""
+        raise NotImplementedError
+
+    def reserve_eligible_retention_operation(
+        self,
+        operation: RetentionOperation,
+    ) -> RetentionOperation:
+        """Atomically revalidate terminal authority and commit access closure."""
+        raise NotImplementedError
+
+    def reserve_retention_operation(
+        self,
+        operation: RetentionOperation,
+    ) -> bool:
+        """Reserve one logical destructive cleanup operation.
+
+        Returns True only for the first successful reservation. Exact replay
+        returns False. A different operation for the same Claim fails closed.
+        """
+        raise NotImplementedError
+
+    def freeze_retention_targets(
+        self,
+        operation_id: str,
+        expected_revision: int,
+        *,
+        frozen_at: datetime,
+    ) -> RetentionOperation:
+        """Atomically freeze the exact approved cleanup inventory."""
+        raise NotImplementedError
+
+    def get_retention_tombstone(
+        self,
+        target_id: str,
+    ) -> RetentionRecordTombstone | None:
+        """Return minimum retained evidence for one anonymised record."""
+        raise NotImplementedError
+
+    def record_retention_step_failure(
+        self,
+        operation_id: str,
+        target_id: str,
+        expected_revision: int,
+        *,
+        status: RetentionStepStatus,
+        diagnostic_code: str,
+        now: datetime,
+    ) -> RetentionOperation:
+        """Persist bounded failure/unknown evidence without repeating destruction."""
+        raise NotImplementedError
+
+    def apply_retention_record_target(
+        self,
+        operation_id: str,
+        target_id: str,
+        expected_revision: int,
+        *,
+        now: datetime,
+    ) -> RetentionOperation:
+        """Atomically mutate one frozen database target and append step evidence."""
+        raise NotImplementedError
+
+    def save_retention_operation(
+        self,
+        operation: RetentionOperation,
+        expected_revision: int,
+    ) -> None:
+        """CAS-persist one valid retention execution transition."""
+        raise NotImplementedError
+
+    def save_retention_hold(
+        self,
+        hold: RetentionHoldRecord,
+    ) -> None:
+        """Persist or monotonically release one source-linked retention hold."""
+        raise NotImplementedError
+
+    def list_retention_holds(
+        self,
+        claim_id: str,
+    ) -> list[RetentionHoldRecord]:
+        raise NotImplementedError
 
     def seed_validation_graph(self, graph: ValidationSeedGraph) -> IdempotencyRecord | None:
         """Persist the graph, returning an existing idempotent result on replay."""

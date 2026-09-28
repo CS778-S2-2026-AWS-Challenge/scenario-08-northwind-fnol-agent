@@ -102,6 +102,35 @@ from backend.domain.realtime import (
     realtime_publication_for,
     realtime_resources_for_records,
 )
+from backend.domain.retention import (
+    RETENTION_STORAGE_TARGETS,
+    ResourceAccessClosed,
+    RetentionClassification,
+    RetentionCleanupTarget,
+    RetentionEligibilityReason,
+    RetentionEligibilityRejected,
+    RetentionHoldRecord,
+    RetentionOperation,
+    RetentionOperationStatus,
+    RetentionRecordTombstone,
+    RetentionStepEvidence,
+    RetentionStepStatus,
+    RetentionTargetFreezeReason,
+    RetentionTargetFreezeRejected,
+    RetentionTargetKind,
+    build_retention_cleanup_target,
+    retention_access_closed,
+    retention_candidate_after_step,
+    retention_next_attempt,
+    retention_record_identity,
+    retention_step_evidence_id,
+    retention_target_statuses,
+    retention_tombstone_authority,
+    validate_retention_eligibility_source,
+    validate_retention_hold_transition,
+    validate_retention_operation_transition,
+    validate_retention_source_authority,
+)
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 from backend.domain.runtime import (
     RuntimeTurnRecords,
@@ -223,6 +252,1485 @@ class FixtureRepository(PersistenceRepository):
             expires_at=now + timedelta(minutes=5),
             updated_at=now,
         )
+
+        self._retention_operations: dict[str, RetentionOperation] = {}
+        self._retention_tombstones: dict[str, RetentionRecordTombstone] = {}
+        self._retention_operation_by_claim: dict[str, str] = {}
+        self._retention_holds: dict[str, RetentionHoldRecord] = {}
+
+    def get_retention_operation(
+        self,
+        operation_id: str,
+    ) -> RetentionOperation | None:
+        with self._claim_mutation_lock:
+            operation = self._retention_operations.get(
+                operation_id
+            )
+            return deepcopy(operation)
+
+    def get_retention_operation_for_claim(
+        self,
+        claim_id: str,
+    ) -> RetentionOperation | None:
+        with self._claim_mutation_lock:
+            operation_id = self._retention_operation_by_claim.get(
+                claim_id
+            )
+
+            if operation_id is None:
+                return None
+
+            return deepcopy(
+                self._retention_operations.get(operation_id)
+            )
+
+    def reserve_eligible_retention_operation(
+        self,
+        operation: RetentionOperation,
+    ) -> RetentionOperation:
+        """Atomically validate P17 retention authority and close claimant access."""
+
+        with self._claim_mutation_lock:
+            existing_id = self._retention_operation_by_claim.get(
+                operation.claim_id
+            )
+
+            if existing_id is not None:
+                existing = self._retention_operations.get(
+                    existing_id
+                )
+
+                if existing is None:
+                    raise KeyError(existing_id)
+
+                same_logical_operation = (
+                    existing.operation_id
+                    == operation.operation_id
+                    and existing.claim_id
+                    == operation.claim_id
+                    and existing.source_terminal_ref
+                    == operation.source_terminal_ref
+                    and existing.source_claim_revision
+                    == operation.source_claim_revision
+                    and existing.policy_id
+                    == operation.policy_id
+                    and existing.policy_version
+                    == operation.policy_version
+                    and existing.source_refs
+                    == operation.source_refs
+                )
+
+                if not same_logical_operation:
+                    raise IdempotencyConflict(
+                        operation.operation_id
+                    )
+
+                return deepcopy(existing)
+
+            claim = self._claims.get(
+                operation.claim_id
+            )
+
+            if claim is None:
+                raise RetentionEligibilityRejected(
+                    RetentionEligibilityReason.CLAIM_NOT_FOUND,
+                    operation.claim_id,
+                )
+
+            validate_retention_eligibility_source(
+                claim,
+                operation,
+            )
+
+            recovery_open = any(
+                item.claim_id == operation.claim_id
+                and item.status.value
+                in {
+                    'scheduled',
+                    'committed',
+                }
+                for item in self._follow_up_operations.values()
+            )
+
+            if recovery_open:
+                raise RetentionEligibilityRejected(
+                    RetentionEligibilityReason.RECOVERY_OPERATION_OPEN,
+                    operation.claim_id,
+                )
+
+            external_unknown = any(
+                item.claim_id == operation.claim_id
+                and item.status.value == 'unknown_outcome'
+                for item in self._external_tasks.values()
+            )
+
+            if external_unknown:
+                raise RetentionEligibilityRejected(
+                    RetentionEligibilityReason.EXTERNAL_OUTCOME_UNKNOWN,
+                    operation.claim_id,
+                )
+
+            runtime_items = [
+                item
+                for turn in self._runtime_turns.values()
+                for item in turn.work_items
+            ]
+            runtime_items.extend(
+                self._standalone_runtime_work_items.values()
+            )
+
+            staff_work_open = any(
+                item.claim_id == operation.claim_id
+                and item.status
+                in {
+                    'open',
+                    'in_progress',
+                }
+                and item.owner
+                in {
+                    'staff',
+                    'system',
+                    'external',
+                }
+                for item in runtime_items
+            )
+
+            handoff_open = any(
+                item.claim_id == operation.claim_id
+                and item.status.value
+                in {
+                    'requested',
+                    'queued',
+                    'accepted',
+                    'in_progress',
+                }
+                for item in self._handoffs.values()
+            )
+
+            if staff_work_open or handoff_open:
+                raise RetentionEligibilityRejected(
+                    RetentionEligibilityReason.STAFF_RESPONSIBILITY_OPEN,
+                    operation.claim_id,
+                )
+
+            active_hold_ids = sorted(
+                hold.hold_id
+                for hold in self._retention_holds.values()
+                if (
+                    hold.claim_id == operation.claim_id
+                    and hold.active
+                )
+            )
+
+            candidate = operation
+
+            if active_hold_ids:
+                payload = operation.model_dump(
+                    mode='python'
+                )
+                payload.update(
+                    {
+                        'status': (
+                            RetentionOperationStatus.HELD
+                        ),
+                        'hold_refs': sorted(
+                            set(operation.hold_refs).union(
+                                active_hold_ids
+                            )
+                        ),
+                    }
+                )
+                candidate = (
+                    RetentionOperation.model_validate(
+                        payload
+                    )
+                )
+
+            self._retention_operations[
+                candidate.operation_id
+            ] = deepcopy(candidate)
+
+            self._retention_operation_by_claim[
+                candidate.claim_id
+            ] = candidate.operation_id
+
+            for lookup, record in list(
+                self._idempotency.items()
+            ):
+                if (
+                    record.claim_id == candidate.claim_id
+                    and record.actor_id == claim.customer_id
+                    and not record.retired
+                ):
+                    self._idempotency[lookup] = replace(
+                        record,
+                        retired=True,
+                    )
+
+            return deepcopy(candidate)
+
+    def reserve_retention_operation(
+        self,
+        operation: RetentionOperation,
+    ) -> bool:
+        with self._claim_mutation_lock:
+            if (
+                operation.revision != 1
+                or operation.status
+                is not RetentionOperationStatus.RESERVED
+            ):
+                raise ValueError(
+                    'Initial retention reservation must be revision 1 '
+                    'and reserved.'
+                )
+
+            existing_id = self._retention_operation_by_claim.get(
+                operation.claim_id
+            )
+
+            if existing_id is not None:
+                existing = self._retention_operations[
+                    existing_id
+                ]
+
+                if (
+                    existing.operation_id == operation.operation_id
+                    and existing == operation
+                ):
+                    return False
+
+                raise IdempotencyConflict(
+                    operation.operation_id
+                )
+
+            self._retention_operations[
+                operation.operation_id
+            ] = deepcopy(operation)
+
+            self._retention_operation_by_claim[
+                operation.claim_id
+            ] = operation.operation_id
+
+            for lookup, record in list(
+                self._idempotency.items()
+            ):
+                if (
+                    record.claim_id == operation.claim_id
+                    and not record.retired
+                ):
+                    self._idempotency[lookup] = replace(
+                        record,
+                        retired=True,
+                    )
+
+            return True
+
+    def freeze_retention_targets(
+        self,
+        operation_id: str,
+        expected_revision: int,
+        *,
+        frozen_at: datetime,
+    ) -> RetentionOperation:
+        """Freeze one exact Claim-scoped cleanup inventory under the mutation lock."""
+
+        with self._claim_mutation_lock:
+            operation = self._retention_operations.get(
+                operation_id
+            )
+
+            if operation is None:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.OPERATION_NOT_FOUND,
+                    operation_id,
+                )
+
+            if operation.revision != expected_revision:
+                raise RevisionConflict(operation.revision)
+
+            if operation.targets_frozen_at is not None:
+                return deepcopy(operation)
+
+            claim = self._claims.get(
+                operation.claim_id
+            )
+
+            if claim is None:
+                raise RetentionEligibilityRejected(
+                    RetentionEligibilityReason.CLAIM_NOT_FOUND,
+                    operation.claim_id,
+                )
+
+            validate_retention_source_authority(
+                claim,
+                operation,
+            )
+
+            if (
+                operation.status
+                not in {
+                    RetentionOperationStatus.RESERVED,
+                    RetentionOperationStatus.HELD,
+                }
+                or operation.targets
+                or operation.step_evidence
+                or operation.completed_at is not None
+            ):
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.INVALID_OPERATION_SHAPE,
+                    operation.claim_id,
+                )
+
+            active_holds = [
+                hold
+                for hold in self._retention_holds.values()
+                if (
+                    hold.claim_id == operation.claim_id
+                    and hold.active
+                )
+            ]
+
+            if active_holds:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.ACTIVE_HOLD,
+                    operation.claim_id,
+                )
+
+            recovery_open = any(
+                item.claim_id == operation.claim_id
+                and item.status.value
+                in {
+                    'scheduled',
+                    'committed',
+                }
+                for item in self._follow_up_operations.values()
+            )
+
+            if recovery_open:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.RECOVERY_OPERATION_OPEN,
+                    operation.claim_id,
+                )
+
+            external_unknown = any(
+                item.claim_id == operation.claim_id
+                and item.status.value == 'unknown_outcome'
+                for item in self._external_tasks.values()
+            )
+
+            if external_unknown:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.EXTERNAL_OUTCOME_UNKNOWN,
+                    operation.claim_id,
+                )
+
+            runtime_items = [
+                item
+                for turn in self._runtime_turns.values()
+                for item in turn.work_items
+            ]
+            runtime_items.extend(
+                self._standalone_runtime_work_items.values()
+            )
+
+            open_responsibility = any(
+                item.claim_id == operation.claim_id
+                and item.status in {'open', 'in_progress'}
+                and item.owner in {'staff', 'system', 'external'}
+                for item in runtime_items
+            )
+
+            open_handoff = any(
+                item.claim_id == operation.claim_id
+                and item.status.value
+                in {
+                    'requested',
+                    'queued',
+                    'accepted',
+                    'in_progress',
+                }
+                for item in self._handoffs.values()
+            )
+
+            if open_responsibility or open_handoff:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.STAFF_RESPONSIBILITY_OPEN,
+                    operation.claim_id,
+                )
+
+            targets: dict[str, RetentionCleanupTarget] = {}
+
+            def add_record(
+                storage_type: str,
+                record_id: str,
+                *,
+                source_refs: tuple[str, ...] = (),
+            ) -> None:
+                selected = RETENTION_STORAGE_TARGETS.get(
+                    storage_type
+                )
+
+                if selected is None:
+                    raise RetentionTargetFreezeRejected(
+                        RetentionTargetFreezeReason.INVALID_RECORD_IDENTITY,
+                        operation.claim_id,
+                    )
+
+                logical_type, classification = selected
+
+                target = build_retention_cleanup_target(
+                    operation=operation,
+                    record_type=logical_type,
+                    record_id=record_id,
+                    classification=classification,
+                    source_refs=source_refs,
+                )
+
+                targets[target.target_id] = target
+
+            add_record(
+                'claim',
+                claim.claim_id,
+                source_refs=(f'claim:{claim.claim_id}',),
+            )
+
+            for session in self._sessions.values():
+                if session.claim_id == operation.claim_id:
+                    add_record(
+                        'session',
+                        session.session_id,
+                        source_refs=(
+                            f'session:{session.session_id}',
+                        ),
+                    )
+
+            for message in self._messages.values():
+                if message.claim_id == operation.claim_id:
+                    add_record(
+                        'message',
+                        message.message_id,
+                        source_refs=(
+                            f'message:{message.message_id}',
+                        ),
+                    )
+
+            for follow_up in self._follow_ups.values():
+                if follow_up.claim_id == operation.claim_id:
+                    add_record(
+                        'follow_up',
+                        follow_up.follow_up_id,
+                        source_refs=(
+                            f'follow-up:{follow_up.follow_up_id}',
+                        ),
+                    )
+
+            for follow_up_operation in self._follow_up_operations.values():
+                if follow_up_operation.claim_id == operation.claim_id:
+                    add_record(
+                        'follow_up_operation',
+                        follow_up_operation.operation_id,
+                        source_refs=(
+                            f'follow-up-operation:{follow_up_operation.operation_id}',
+                        ),
+                    )
+
+            for work_item in runtime_items:
+                if work_item.claim_id == operation.claim_id:
+                    add_record(
+                        'runtime_work_item',
+                        work_item.work_item_id,
+                        source_refs=(
+                            f'work-item:{work_item.work_item_id}',
+                        ),
+                    )
+
+            for handoff in self._handoffs.values():
+                if handoff.claim_id == operation.claim_id:
+                    add_record(
+                        'handoff',
+                        handoff.handoff_id,
+                        source_refs=(
+                            f'handoff:{handoff.handoff_id}',
+                        ),
+                    )
+
+            for evidence in self._evidence.values():
+                if evidence.claim_id != operation.claim_id:
+                    continue
+
+                add_record(
+                    'evidence',
+                    evidence.evidence_id,
+                    source_refs=(
+                        f'evidence:{evidence.evidence_id}',
+                    ),
+                )
+
+                storage_key = evidence.provenance.get(
+                    'storage_key'
+                )
+
+                if storage_key is not None:
+                    if (
+                        not isinstance(storage_key, str)
+                        or not storage_key.strip()
+                    ):
+                        raise RetentionTargetFreezeRejected(
+                            RetentionTargetFreezeReason.INVALID_STORAGE_REFERENCE,
+                            operation.claim_id,
+                        )
+
+                    object_target = build_retention_cleanup_target(
+                        operation=operation,
+                        record_type='EvidenceObjectBytes',
+                        record_id=evidence.evidence_id,
+                        classification=RetentionClassification.DELETE,
+                        kind=RetentionTargetKind.OBJECT_BYTES,
+                        storage_key=storage_key,
+                        source_refs=(
+                            f'evidence:{evidence.evidence_id}',
+                        ),
+                    )
+
+                    targets[
+                        object_target.target_id
+                    ] = object_target
+
+            for evidence_link in self._evidence_claim_links.values():
+                if (
+                    evidence_link.source_claim_id == operation.claim_id
+                    or evidence_link.target_claim_id == operation.claim_id
+                ):
+                    add_record(
+                        'evidence_claim_link',
+                        evidence_link.link_id,
+                        source_refs=(
+                            f'evidence:{evidence_link.evidence_id}',
+                            f'claim:{evidence_link.source_claim_id}',
+                            f'claim:{evidence_link.target_claim_id}',
+                        ),
+                    )
+
+            for task in self._external_tasks.values():
+                if task.claim_id == operation.claim_id:
+                    add_record(
+                        'external_task',
+                        task.task_id,
+                        source_refs=(
+                            f'external-task:{task.task_id}',
+                        ),
+                    )
+
+            for request in self._external_task_requests.values():
+                if request.claim_id == operation.claim_id:
+                    add_record(
+                        'external_task_request',
+                        request.request_id,
+                        source_refs=(
+                            f'external-request:{request.request_id}',
+                        ),
+                    )
+
+            for attempt in self._external_task_attempts.values():
+                if attempt.claim_id == operation.claim_id:
+                    add_record(
+                        'external_task_attempt',
+                        attempt.attempt_id,
+                        source_refs=(
+                            f'external-attempt:{attempt.attempt_id}',
+                        ),
+                    )
+
+            for result in self._external_task_results.values():
+                if result.claim_id == operation.claim_id:
+                    add_record(
+                        'external_task_result',
+                        result.result_id,
+                        source_refs=(
+                            f'external-result:{result.result_id}',
+                        ),
+                    )
+
+            for external_link in self._external_task_evidence_links.values():
+                if external_link.claim_id == operation.claim_id:
+                    link_id = retention_record_identity(
+                        'external_link',
+                        external_link.task_id,
+                        external_link.evidence_id,
+                    )
+
+                    add_record(
+                        'external_task_evidence_link',
+                        link_id,
+                        source_refs=(
+                            f'external-task:{external_link.task_id}',
+                            f'evidence:{external_link.evidence_id}',
+                        ),
+                    )
+
+            for record in self._idempotency.values():
+                if (
+                    record.claim_id != operation.claim_id
+                    or record.actor_id != claim.customer_id
+                ):
+                    continue
+
+                record_id = retention_record_identity(
+                    'idempotency',
+                    record.actor_id,
+                    record.route,
+                    record.key,
+                )
+
+                add_record(
+                    'idempotency',
+                    record_id,
+                    source_refs=(
+                        f'idempotency:{record_id}',
+                    ),
+                )
+
+            for event in self._audit_events.values():
+                if event.subject.claim_id == operation.claim_id:
+                    add_record(
+                        'audit_event',
+                        event.event_id,
+                        source_refs=(
+                            f'audit:{event.event_id}',
+                        ),
+                    )
+
+            for hold in self._retention_holds.values():
+                if hold.claim_id == operation.claim_id:
+                    add_record(
+                        'retention_hold',
+                        hold.hold_id,
+                        source_refs=(
+                            f'retention-hold:{hold.hold_id}',
+                        ),
+                    )
+
+            selected_targets = sorted(
+                targets.values(),
+                key=lambda target: (
+                    target.kind.value,
+                    target.record_type,
+                    target.record_id,
+                    target.target_id,
+                ),
+            )
+
+            if len(selected_targets) > 500:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.TARGET_LIMIT_EXCEEDED,
+                    operation.claim_id,
+                )
+
+            payload = operation.model_dump(
+                mode='python'
+            )
+            payload.update(
+                {
+                    'revision': operation.revision + 1,
+                    'status': RetentionOperationStatus.RESERVED,
+                    'targets_frozen_at': frozen_at,
+                    'targets': selected_targets,
+                    'updated_at': frozen_at,
+                    'completed_at': None,
+                }
+            )
+
+            candidate = RetentionOperation.model_validate(
+                payload
+            )
+
+            validate_retention_operation_transition(
+                operation,
+                candidate,
+            )
+
+            self._retention_operations[
+                operation.operation_id
+            ] = deepcopy(candidate)
+
+            return deepcopy(candidate)
+
+    def get_retention_tombstone(
+        self,
+        target_id: str,
+    ) -> RetentionRecordTombstone | None:
+        with self._claim_mutation_lock:
+            return deepcopy(
+                self._retention_tombstones.get(
+                    target_id
+                )
+            )
+
+    def record_retention_step_failure(
+        self,
+        operation_id: str,
+        target_id: str,
+        expected_revision: int,
+        *,
+        status: RetentionStepStatus,
+        diagnostic_code: str,
+        now: datetime,
+    ) -> RetentionOperation:
+        with self._claim_mutation_lock:
+            operation = self._retention_operations.get(
+                operation_id
+            )
+
+            if operation is None:
+                raise KeyError(operation_id)
+
+            if operation.revision != expected_revision:
+                raise RevisionConflict(
+                    operation.revision
+                )
+
+            if status not in {
+                RetentionStepStatus.FAILED,
+                RetentionStepStatus.UNKNOWN,
+            }:
+                raise ValueError(
+                    'Retention failure evidence must be failed or unknown.'
+                )
+
+            target = next(
+                (
+                    item
+                    for item in operation.targets
+                    if item.target_id == target_id
+                ),
+                None,
+            )
+
+            if target is None:
+                raise KeyError(target_id)
+
+            if (
+                target.kind
+                is not RetentionTargetKind.MONGO_RECORD
+            ):
+                raise ValueError(
+                    'Database failure evidence requires a MONGO_RECORD target.'
+                )
+
+            statuses = retention_target_statuses(
+                operation.targets,
+                operation.step_evidence,
+            )
+
+            if (
+                statuses[target_id]
+                is RetentionStepStatus.SATISFIED
+            ):
+                return deepcopy(operation)
+
+            attempt = retention_next_attempt(
+                operation,
+                target_id,
+            )
+
+            evidence = RetentionStepEvidence(
+                evidence_id=retention_step_evidence_id(
+                    operation.operation_id,
+                    target_id,
+                    attempt,
+                ),
+                target_id=target_id,
+                attempt=attempt,
+                status=status,
+                diagnostic_code=diagnostic_code,
+                source_refs=list(target.source_refs),
+                recorded_at=now,
+            )
+
+            candidate = retention_candidate_after_step(
+                operation,
+                evidence,
+                now=now,
+            )
+
+            validate_retention_operation_transition(
+                operation,
+                candidate,
+            )
+
+            self._retention_operations[
+                operation.operation_id
+            ] = deepcopy(candidate)
+
+            return deepcopy(candidate)
+
+    def apply_retention_record_target(
+        self,
+        operation_id: str,
+        target_id: str,
+        expected_revision: int,
+        *,
+        now: datetime,
+    ) -> RetentionOperation:
+        """Apply one frozen database cleanup step atomically under the fixture lock."""
+
+        with self._claim_mutation_lock:
+            operation = self._retention_operations.get(
+                operation_id
+            )
+
+            if operation is None:
+                raise KeyError(operation_id)
+
+            if operation.revision != expected_revision:
+                raise RevisionConflict(
+                    operation.revision
+                )
+
+            if (
+                operation.status
+                is RetentionOperationStatus.COMPLETED
+            ):
+                return deepcopy(operation)
+
+            active_holds = [
+                hold
+                for hold in self._retention_holds.values()
+                if (
+                    hold.claim_id == operation.claim_id
+                    and hold.active
+                )
+            ]
+
+            if active_holds:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.ACTIVE_HOLD,
+                    operation.claim_id,
+                )
+
+            statuses = retention_target_statuses(
+                operation.targets,
+                operation.step_evidence,
+            )
+
+            target = next(
+                (
+                    item
+                    for item in operation.targets
+                    if item.target_id == target_id
+                ),
+                None,
+            )
+
+            if target is None:
+                raise KeyError(target_id)
+
+            if (
+                target.kind
+                is not RetentionTargetKind.MONGO_RECORD
+            ):
+                raise ValueError(
+                    'Database cleanup may execute only frozen MONGO_RECORD targets.'
+                )
+
+            if (
+                statuses[target.target_id]
+                is RetentionStepStatus.SATISFIED
+            ):
+                return deepcopy(operation)
+
+            object_incomplete = any(
+                item.kind
+                is RetentionTargetKind.OBJECT_BYTES
+                and statuses[item.target_id]
+                is not RetentionStepStatus.SATISFIED
+                for item in operation.targets
+            )
+
+            if object_incomplete:
+                raise ValueError(
+                    'Database cleanup cannot begin before every object target is satisfied.'
+                )
+
+            # Recheck the blockers that must never be erased by retention.
+            recovery_open = any(
+                item.claim_id == operation.claim_id
+                and item.status.value
+                in {
+                    'scheduled',
+                    'committed',
+                }
+                for item in self._follow_up_operations.values()
+            )
+
+            external_unknown = any(
+                item.claim_id == operation.claim_id
+                and item.status.value == 'unknown_outcome'
+                for item in self._external_tasks.values()
+            )
+
+            runtime_items = [
+                work_item
+                for turn in self._runtime_turns.values()
+                for work_item in turn.work_items
+            ]
+            runtime_items.extend(
+                self._standalone_runtime_work_items.values()
+            )
+
+            staff_open = any(
+                work_item.claim_id == operation.claim_id
+                and work_item.status
+                in {'open', 'in_progress'}
+                and work_item.owner
+                in {'staff', 'system', 'external'}
+                for work_item in runtime_items
+            )
+
+            handoff_open = any(
+                handoff.claim_id == operation.claim_id
+                and handoff.status.value
+                in {
+                    'requested',
+                    'queued',
+                    'accepted',
+                    'in_progress',
+                }
+                for handoff in self._handoffs.values()
+            )
+
+            if recovery_open:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.RECOVERY_OPERATION_OPEN,
+                    operation.claim_id,
+                )
+
+            if external_unknown:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.EXTERNAL_OUTCOME_UNKNOWN,
+                    operation.claim_id,
+                )
+
+            if staff_open or handoff_open:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.STAFF_RESPONSIBILITY_OPEN,
+                    operation.claim_id,
+                )
+
+            def regular_record() -> Any | None:
+                record_type = target.record_type
+
+                if record_type == 'WorkingClaim':
+                    return self._claims.get(
+                        target.record_id
+                    )
+
+                if record_type == 'SessionRecord':
+                    return self._sessions.get(
+                        target.record_id
+                    )
+
+                if record_type == 'MessageRecord':
+                    return self._messages.get(
+                        target.record_id
+                    )
+
+                if record_type == 'FollowUpRecord':
+                    return self._follow_ups.get(
+                        target.record_id
+                    )
+
+                if record_type == 'FollowUpOperation':
+                    return self._follow_up_operations.get(
+                        target.record_id
+                    )
+
+                if record_type == 'HandoffRecord':
+                    return self._handoffs.get(
+                        target.record_id
+                    )
+
+                if record_type == 'EvidenceRecord':
+                    return self._evidence.get(
+                        target.record_id
+                    )
+
+                if record_type == 'EvidenceClaimLink':
+                    return next(
+                        (
+                            evidence_link
+                            for evidence_link
+                            in self._evidence_claim_links.values()
+                            if evidence_link.link_id
+                            == target.record_id
+                        ),
+                        None,
+                    )
+
+                if record_type == 'ExternalTaskRecord':
+                    return self._external_tasks.get(
+                        target.record_id
+                    )
+
+                if record_type == 'ExternalTaskRequest':
+                    return self._external_task_requests.get(
+                        target.record_id
+                    )
+
+                if record_type == 'ExternalTaskAttempt':
+                    return self._external_task_attempts.get(
+                        target.record_id
+                    )
+
+                if record_type == 'ExternalTaskResult':
+                    return self._external_task_results.get(
+                        target.record_id
+                    )
+
+                if record_type == 'AuditEventEnvelope':
+                    return self._audit_events.get(
+                        target.record_id
+                    )
+
+                if record_type == 'RetentionHoldRecord':
+                    return self._retention_holds.get(
+                        target.record_id
+                    )
+
+                if record_type == 'RuntimeWorkItemRecord':
+                    direct = (
+                        self._standalone_runtime_work_items.get(
+                            target.record_id
+                        )
+                    )
+
+                    if direct is not None:
+                        return direct
+
+                    return next(
+                        (
+                            work_item
+                            for turn in self._runtime_turns.values()
+                            for work_item in turn.work_items
+                            if work_item.work_item_id
+                            == target.record_id
+                        ),
+                        None,
+                    )
+
+                if record_type == 'ExternalTaskEvidenceLink':
+                    return next(
+                        (
+                            link
+                            for link
+                            in self._external_task_evidence_links.values()
+                            if retention_record_identity(
+                                'external_link',
+                                link.task_id,
+                                link.evidence_id,
+                            )
+                            == target.record_id
+                        ),
+                        None,
+                    )
+
+                return None
+
+            idempotency_match = None
+
+            if target.record_type == 'IdempotencyRecord':
+                idempotency_match = next(
+                    (
+                        (lookup, record)
+                        for lookup, record
+                        in self._idempotency.items()
+                        if (
+                            record.claim_id
+                            == operation.claim_id
+                            and retention_record_identity(
+                                'idempotency',
+                                record.actor_id,
+                                record.route,
+                                record.key,
+                            )
+                            == target.record_id
+                        )
+                    ),
+                    None,
+                )
+
+            existing_tombstone = (
+                self._retention_tombstones.get(
+                    target.target_id
+                )
+            )
+
+            source_record = (
+                None
+                if target.record_type
+                == 'IdempotencyRecord'
+                else regular_record()
+            )
+
+            step_status = (
+                RetentionStepStatus.SATISFIED
+            )
+            diagnostic_code = None
+            tombstone = None
+            sanitised_idempotency = None
+
+            if (
+                target.classification
+                is RetentionClassification.RETAIN
+            ):
+                if source_record is None:
+                    step_status = RetentionStepStatus.UNKNOWN
+                    diagnostic_code = (
+                        'RETAINED_RECORD_MISSING'
+                    )
+
+            elif (
+                target.record_type
+                == 'IdempotencyRecord'
+            ):
+                if idempotency_match is None:
+                    step_status = RetentionStepStatus.UNKNOWN
+                    diagnostic_code = (
+                        'IDEMPOTENCY_RECORD_MISSING'
+                    )
+                else:
+                    _, record = idempotency_match
+
+                    sanitised_idempotency = replace(
+                        record,
+                        message_id=None,
+                        agent_message_id=None,
+                        decision_id=None,
+                        runtime_trace_id=None,
+                        runtime_result_id=None,
+                        handoff_id=None,
+                        follow_up_id=None,
+                        action_registry_version=None,
+                        action_code=None,
+                        target_ref=None,
+                        staff_agent_session_id=None,
+                        staff_agent_message_id=None,
+                        staff_agent_draft_id=None,
+                        staff_agent_execution_id=None,
+                        message_turn_kind=None,
+                        message_turn_revision=None,
+                        response_payload=None,
+                        revision_before_message=None,
+                        confirmation_checkpoint=None,
+                        inbound_checkpoint=False,
+                        response_status=None,
+                        retired=True,
+                    )
+
+            elif (
+                target.classification
+                is RetentionClassification.DELETE
+            ):
+                if source_record is None:
+                    step_status = RetentionStepStatus.UNKNOWN
+                    diagnostic_code = (
+                        'DELETE_SOURCE_RECORD_MISSING'
+                    )
+
+            elif target.classification in {
+                RetentionClassification.ANONYMISE,
+                RetentionClassification.TOMBSTONE,
+            }:
+                if existing_tombstone is not None:
+                    if (
+                        existing_tombstone.operation_id
+                        != operation.operation_id
+                        or existing_tombstone.target_id
+                        != target.target_id
+                    ):
+                        raise IdempotencyConflict(
+                            target.target_id
+                        )
+                elif source_record is None:
+                    step_status = RetentionStepStatus.UNKNOWN
+                    diagnostic_code = (
+                        'ANONYMISE_SOURCE_RECORD_MISSING'
+                    )
+                else:
+                    payload = source_record.model_dump(
+                        mode='json'
+                    )
+
+                    tombstone = RetentionRecordTombstone(
+                        tombstone_id=(
+                            'rts_'
+                            + target.target_id[4:]
+                        ),
+                        operation_id=operation.operation_id,
+                        target_id=target.target_id,
+                        claim_id=operation.claim_id,
+                        source_record_type=target.record_type,
+                        source_record_id=target.record_id,
+                        classification=target.classification,
+                        authority=retention_tombstone_authority(
+                            target.record_type,
+                            payload,
+                        ),
+                        source_refs=list(
+                            target.source_refs
+                        ),
+                        created_at=now,
+                    )
+
+            else:
+                step_status = RetentionStepStatus.UNKNOWN
+                diagnostic_code = (
+                    'UNSUPPORTED_RETENTION_CLASSIFICATION'
+                )
+
+            attempt = retention_next_attempt(
+                operation,
+                target.target_id,
+            )
+
+            evidence = RetentionStepEvidence(
+                evidence_id=retention_step_evidence_id(
+                    operation.operation_id,
+                    target.target_id,
+                    attempt,
+                ),
+                target_id=target.target_id,
+                attempt=attempt,
+                status=step_status,
+                diagnostic_code=diagnostic_code,
+                source_refs=list(target.source_refs),
+                recorded_at=now,
+            )
+
+            candidate = retention_candidate_after_step(
+                operation,
+                evidence,
+                now=now,
+            )
+
+            validate_retention_operation_transition(
+                operation,
+                candidate,
+            )
+
+            # Every destructive assignment below is non-throwing after all
+            # models/transitions have already been validated.
+            if (
+                step_status
+                is RetentionStepStatus.SATISFIED
+            ):
+                if sanitised_idempotency is not None:
+                    assert idempotency_match is not None
+                    lookup, _ = idempotency_match
+
+                    self._idempotency[
+                        lookup
+                    ] = sanitised_idempotency
+
+                elif (
+                    target.classification
+                    is RetentionClassification.DELETE
+                ):
+                    if target.record_type == 'MessageRecord':
+                        message = self._messages.pop(
+                            target.record_id,
+                            None,
+                        )
+
+                        if message is not None:
+                            ids = self._message_ids_by_session.get(
+                                message.session_id
+                            )
+
+                            if ids is not None:
+                                ids[:] = [
+                                    message_id
+                                    for message_id in ids
+                                    if message_id
+                                    != target.record_id
+                                ]
+
+                elif tombstone is not None:
+                    self._retention_tombstones[
+                        target.target_id
+                    ] = tombstone
+
+                    if target.record_type == 'WorkingClaim':
+                        self._claims.pop(
+                            target.record_id,
+                            None,
+                        )
+
+                    elif target.record_type == 'SessionRecord':
+                        session = self._sessions.pop(
+                            target.record_id,
+                            None,
+                        )
+
+                        if session is not None:
+                            session_ids = (
+                                self._session_ids_by_claim.get(
+                                    (
+                                        operation.claim_id,
+                                        session.customer_id,
+                                    )
+                                )
+                            )
+
+                            if session_ids is not None:
+                                session_ids[:] = [
+                                    session_id
+                                    for session_id
+                                    in session_ids
+                                    if session_id
+                                    != target.record_id
+                                ]
+
+                    elif target.record_type == 'FollowUpRecord':
+                        self._follow_ups.pop(
+                            target.record_id,
+                            None,
+                        )
+
+                    elif target.record_type == 'HandoffRecord':
+                        self._handoffs.pop(
+                            target.record_id,
+                            None,
+                        )
+
+                    elif target.record_type == 'EvidenceRecord':
+                        self._evidence.pop(
+                            target.record_id,
+                            None,
+                        )
+
+                    elif target.record_type == 'EvidenceClaimLink':
+                        link_key = next(
+                            (
+                                key
+                                for key, evidence_link
+                                in self._evidence_claim_links.items()
+                                if evidence_link.link_id
+                                == target.record_id
+                            ),
+                            None,
+                        )
+
+                        if link_key is not None:
+                            self._evidence_claim_links.pop(
+                                link_key,
+                                None,
+                            )
+
+                    elif target.record_type == 'ExternalTaskRecord':
+                        self._external_tasks.pop(
+                            target.record_id,
+                            None,
+                        )
+
+                    elif target.record_type == 'ExternalTaskRequest':
+                        self._external_task_requests.pop(
+                            target.record_id,
+                            None,
+                        )
+
+                    elif target.record_type == 'ExternalTaskResult':
+                        self._external_task_results.pop(
+                            target.record_id,
+                            None,
+                        )
+
+            self._retention_operations[
+                operation.operation_id
+            ] = deepcopy(candidate)
+
+            return deepcopy(candidate)
+
+    def save_retention_operation(
+        self,
+        operation: RetentionOperation,
+        expected_revision: int,
+    ) -> None:
+        with self._claim_mutation_lock:
+            current = self._retention_operations.get(
+                operation.operation_id
+            )
+
+            if current is None:
+                raise KeyError(operation.operation_id)
+
+            if current == operation:
+                return
+
+            if current.revision != expected_revision:
+                raise RevisionConflict(current.revision)
+
+            validate_retention_operation_transition(
+                current,
+                operation,
+            )
+
+            self._retention_operations[
+                operation.operation_id
+            ] = deepcopy(operation)
+
+    def save_retention_hold(
+        self,
+        hold: RetentionHoldRecord,
+    ) -> None:
+        with self._claim_mutation_lock:
+            current = self._retention_holds.get(
+                hold.hold_id
+            )
+
+            if current is None:
+                if hold.released_at is not None:
+                    raise ValueError(
+                        'A retention hold must be persisted before release.'
+                    )
+
+                self._retention_holds[
+                    hold.hold_id
+                ] = deepcopy(hold)
+                return
+
+            if current == hold:
+                return
+
+            validate_retention_hold_transition(
+                current,
+                hold,
+            )
+
+            self._retention_holds[
+                hold.hold_id
+            ] = deepcopy(hold)
+
+    def list_retention_holds(
+        self,
+        claim_id: str,
+    ) -> list[RetentionHoldRecord]:
+        with self._claim_mutation_lock:
+            holds = [
+                hold
+                for hold in self._retention_holds.values()
+                if hold.claim_id == claim_id
+            ]
+
+            return deepcopy(
+                sorted(
+                    holds,
+                    key=lambda hold: (
+                        hold.applied_at,
+                        hold.hold_id,
+                    ),
+                )
+            )
 
     def connection_status(self) -> str:
         return 'using_fixture'
@@ -1202,11 +2710,58 @@ class FixtureRepository(PersistenceRepository):
             raise
         return None
 
-    def get_claim(self, claim_id: str, customer_id: str) -> WorkingClaim | None:
+    def _claim_access_closed(
+        self,
+        claim_id: str,
+    ) -> bool:
+        return claim_id in self._retention_operation_by_claim
+
+    def claimant_resource_access_open(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> bool:
         claim = self._claims.get(claim_id)
-        if claim is None or claim.customer_id != customer_id:
+
+        return (
+            claim is not None
+            and claim.customer_id == customer_id
+            and not self._claim_access_closed(claim_id)
+        )
+
+    def _ensure_claim_access_open(
+        self,
+        claim_id: str,
+    ) -> None:
+        if self._claim_access_closed(claim_id):
+            raise ResourceAccessClosed(claim_id)
+
+    def _claimant_actor_access_closed(
+        self,
+        claim_id: str,
+        actor_id: str,
+    ) -> bool:
+        claim = self._claims.get(claim_id)
+
+        return (
+            claim is not None
+            and claim.customer_id == actor_id
+            and self._claim_access_closed(claim_id)
+        )
+
+    def get_claim(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> WorkingClaim | None:
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
             return None
-        return deepcopy(claim)
+
+        return deepcopy(self._claims[claim_id])
+
 
     def promote_claim_owner(
         self,
@@ -1215,6 +2770,7 @@ class FixtureRepository(PersistenceRepository):
         customer_id: str,
     ) -> WorkingClaim | None:
         with self._claim_mutation_lock:
+            self._ensure_claim_access_open(claim_id)
             claim = self._claims.get(claim_id)
             if claim is None or claim.customer_id != anonymous_customer_id:
                 return None
@@ -1310,6 +2866,7 @@ class FixtureRepository(PersistenceRepository):
         allow_active_session_change: bool = False,
     ) -> WorkingClaim:
         """Validate the shared Claim State precondition before any child write."""
+        self._ensure_claim_access_open(claim.claim_id)
         stored_claim = self._claims.get(claim.claim_id)
         if stored_claim is None:
             raise KeyError(claim.claim_id)
@@ -1417,12 +2974,26 @@ class FixtureRepository(PersistenceRepository):
         session_id: str,
         customer_id: str,
     ) -> SessionRecord | None:
-        session = self._sessions.get(session_id)
-        if session is None or session.claim_id != claim_id or session.customer_id != customer_id:
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
             return None
+
+        session = self._sessions.get(session_id)
+
+        if (
+            session is None
+            or session.claim_id != claim_id
+            or session.customer_id != customer_id
+        ):
+            return None
+
         return deepcopy(session)
 
+
     def save_session(self, session: SessionRecord) -> None:
+        self._ensure_claim_access_open(session.claim_id)
         claim = self._claims.get(session.claim_id)
         if claim is None or claim.customer_id != session.customer_id:
             raise KeyError(session.claim_id)
@@ -2316,6 +3887,7 @@ class FixtureRepository(PersistenceRepository):
         )
 
         with self._claim_mutation_lock:
+            self._ensure_claim_access_open(claim.claim_id)
             stored_claim = self._claims.get(claim.claim_id)
 
             if stored_claim is None:
@@ -2627,8 +4199,42 @@ class FixtureRepository(PersistenceRepository):
         key: str,
     ) -> IdempotencyRecord | None:
         with self._claim_mutation_lock:
-            record = self._idempotency.get((actor_id, route, key))
-            return deepcopy(record) if record is not None else None
+            record = self._idempotency.get(
+                (actor_id, route, key)
+            )
+
+            if record is None:
+                return None
+
+            # Retention may already have tombstoned the WorkingClaim, so
+            # claimant replay closure cannot depend on the live Claim record.
+            # Only claimant idempotency is retired by retention.
+            if record.retired:
+                operation_id = (
+                    self._retention_operation_by_claim.get(
+                        record.claim_id
+                    )
+                )
+
+                operation = (
+                    self._retention_operations.get(
+                        operation_id
+                    )
+                    if operation_id is not None
+                    else None
+                )
+
+                if retention_access_closed(
+                    operation
+                ):
+                    raise ResourceAccessClosed(
+                        record.claim_id
+                    )
+
+            return deepcopy(record)
+
+
+
 
     def find_message_turn_idempotency(
         self,
@@ -2637,9 +4243,18 @@ class FixtureRepository(PersistenceRepository):
         claim_id: str,
         message_id: str,
     ) -> IdempotencyRecord | None:
-        from backend.repositories.protocols import message_turn_result_priority
+        from backend.repositories.protocols import (
+            message_turn_result_priority,
+        )
 
         with self._claim_mutation_lock:
+            if self._claimant_actor_access_closed(
+                claim_id,
+                actor_id,
+            ):
+                raise ResourceAccessClosed(claim_id)
+
+
             matches = [
                 record
                 for record in self._idempotency.values()
@@ -2649,7 +4264,18 @@ class FixtureRepository(PersistenceRepository):
                 and record.message_id == message_id
                 and not record.retired
             ]
-            return deepcopy(max(matches, key=message_turn_result_priority)) if matches else None
+
+            return (
+                deepcopy(
+                    max(
+                        matches,
+                        key=message_turn_result_priority,
+                    )
+                )
+                if matches
+                else None
+            )
+
 
     def reserve_message_turn_idempotency_alias(
         self,
@@ -2661,6 +4287,8 @@ class FixtureRepository(PersistenceRepository):
         request_fingerprint: str,
     ) -> IdempotencyRecord | None:
         with self._claim_mutation_lock:
+            if self._claimant_actor_access_closed(claim_id, actor_id):
+                raise ResourceAccessClosed(claim_id)
             original = self.find_message_turn_idempotency(
                 actor_id,
                 route,
@@ -2686,6 +4314,14 @@ class FixtureRepository(PersistenceRepository):
             return deepcopy(alias)
 
     def save_idempotency(self, record: IdempotencyRecord) -> None:
+        if (
+            record.claim_id
+            and self._claimant_actor_access_closed(
+                record.claim_id,
+                record.actor_id,
+            )
+        ):
+            raise ResourceAccessClosed(record.claim_id)
         with self._claim_mutation_lock:
             lookup = (record.actor_id, record.route, record.key)
             existing = self._idempotency.get(lookup)
@@ -2696,10 +4332,23 @@ class FixtureRepository(PersistenceRepository):
             self._idempotency[lookup] = deepcopy(record)
 
     def find_message_checkpoint(
-        self, claim_id: str, message_id: str, customer_id: str
+        self,
+        claim_id: str,
+        message_id: str,
+        customer_id: str,
     ) -> IdempotencyRecord | None:
-        if self.get_claim(claim_id, customer_id) is None:
+        if self._claimant_actor_access_closed(
+            claim_id,
+            customer_id,
+        ):
+            raise ResourceAccessClosed(claim_id)
+
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
             return None
+
         matches = [
             item
             for item in self._idempotency.values()
@@ -2709,11 +4358,19 @@ class FixtureRepository(PersistenceRepository):
             and item.revision_before_message is not None
             and item.inbound_checkpoint
         ]
+
         return (
-            deepcopy(min(matches, key=lambda item: item.revision_before_message or 0))
+            deepcopy(
+                min(
+                    matches,
+                    key=lambda item:
+                        item.revision_before_message or 0,
+                )
+            )
             if matches
             else None
         )
+
 
     def save_message_recovery(
         self,
@@ -2723,6 +4380,7 @@ class FixtureRepository(PersistenceRepository):
         agent_message: MessageRecord | None = None,
     ) -> None:
         with self._claim_mutation_lock:
+            self._ensure_claim_access_open(message.claim_id)
             stored = self.get_message(
                 message.claim_id, message.session_id, message.message_id, idempotency.actor_id
             )
@@ -2765,16 +4423,33 @@ class FixtureRepository(PersistenceRepository):
                 deepcopy(idempotency)
             )
 
-    def list_claims_for_customer(self, customer_id: str) -> list[WorkingClaim]:
+    def list_claims_for_customer(
+        self,
+        customer_id: str,
+    ) -> list[WorkingClaim]:
         claims = [
-            deepcopy(claim) for claim in self._claims.values() if claim.customer_id == customer_id
+            deepcopy(claim)
+            for claim in self._claims.values()
+            if claim.customer_id == customer_id
+            and not self._claim_access_closed(
+                claim.claim_id
+            )
         ]
-        return sorted(claims, key=lambda claim: claim.created_at)
+
+        return sorted(
+            claims,
+            key=lambda claim: claim.created_at,
+        )
+
 
     def freeze_message_response(
         self, idempotency: IdempotencyRecord, response_payload: dict[str, Any]
     ) -> dict[str, Any]:
         with self._claim_mutation_lock:
+            if idempotency.claim_id:
+                self._ensure_claim_access_open(
+                    idempotency.claim_id
+                )
             lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
             saved = self._idempotency.get(lookup)
             if (
@@ -4191,19 +5866,34 @@ class FixtureRepository(PersistenceRepository):
         ]
         return sorted(evidence_records, key=lambda evidence: evidence.created_at)
 
-    def list_evidence_for_customer(self, customer_id: str) -> list[EvidenceRecord]:
+    def list_evidence_for_customer(
+        self,
+        customer_id: str,
+    ) -> list[EvidenceRecord]:
         claims = {
-            claim.claim_id for claim in self._claims.values() if claim.customer_id == customer_id
+            claim.claim_id
+            for claim in self._claims.values()
+            if claim.customer_id == customer_id
+            and not self._claim_access_closed(
+                claim.claim_id
+            )
         }
+
         evidence_records = [
             deepcopy(evidence)
             for evidence in self._evidence.values()
-            if evidence.claim_id in claims and evidence.source.value == 'claimant'
+            if evidence.claim_id in claims
+            and evidence.source.value == 'claimant'
         ]
+
         return sorted(
             evidence_records,
-            key=lambda evidence: (evidence.created_at, evidence.evidence_id),
+            key=lambda evidence: (
+                evidence.created_at,
+                evidence.evidence_id,
+            ),
         )
+
 
     def get_motor_other_driver(
         self, claim_id: str, customer_id: str
@@ -4363,25 +6053,72 @@ class FixtureRepository(PersistenceRepository):
             self._commit_realtime_event(realtime_event)
 
     def get_evidence_claim_link(
-        self, target_claim_id: str, evidence_id: str, customer_id: str
+        self,
+        target_claim_id: str,
+        evidence_id: str,
+        customer_id: str,
     ) -> EvidenceClaimLink | None:
-        if self.get_claim(target_claim_id, customer_id) is None:
+        if not self.claimant_resource_access_open(
+            target_claim_id,
+            customer_id,
+        ):
             return None
-        link = self._evidence_claim_links.get((target_claim_id, evidence_id))
-        return deepcopy(link) if link is not None and link.customer_id == customer_id else None
+
+        link = self._evidence_claim_links.get(
+            (target_claim_id, evidence_id)
+        )
+
+        if (
+            link is None
+            or link.customer_id != customer_id
+            or not self.claimant_resource_access_open(
+                link.source_claim_id,
+                customer_id,
+            )
+        ):
+            return None
+
+        return deepcopy(link)
+
 
     def list_evidence_claim_links(
-        self, customer_id: str, target_claim_id: str | None = None
+        self,
+        customer_id: str,
+        target_claim_id: str | None = None,
     ) -> list[EvidenceClaimLink]:
+        if (
+            target_claim_id is not None
+            and not self.claimant_resource_access_open(
+                target_claim_id,
+                customer_id,
+            )
+        ):
+            return []
+
         return sorted(
             (
                 deepcopy(link)
                 for link in self._evidence_claim_links.values()
                 if link.customer_id == customer_id
-                and (target_claim_id is None or link.target_claim_id == target_claim_id)
+                and (
+                    target_claim_id is None
+                    or link.target_claim_id == target_claim_id
+                )
+                and self.claimant_resource_access_open(
+                    link.source_claim_id,
+                    customer_id,
+                )
+                and self.claimant_resource_access_open(
+                    link.target_claim_id,
+                    customer_id,
+                )
             ),
-            key=lambda link: (link.created_at, link.link_id),
+            key=lambda link: (
+                link.created_at,
+                link.link_id,
+            ),
         )
+
 
     def save_evidence_action_mutation(
         self,
