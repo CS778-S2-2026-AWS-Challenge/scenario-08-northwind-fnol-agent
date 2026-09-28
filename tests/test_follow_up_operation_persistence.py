@@ -6,6 +6,9 @@ import pytest
 from pymongo.collection import Collection
 
 from backend.domain.models import (
+    Channel,
+    ClaimState,
+    CustomerNextStep,
     FollowUpContactPermission,
     FollowUpOperation,
     FollowUpOperationStatus,
@@ -13,8 +16,12 @@ from backend.domain.models import (
     FollowUpStatus,
     PreferredChannel,
     ResponsibleParty,
+    RetentionOperation,
+    RetentionOperationStatus,
+    WorkingClaim,
 )
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.mongodb import MongoDBRepository
 from backend.repositories.protocols import IdempotencyConflict
 from scripts.backfill_follow_up_policy import backfill_follow_ups
 
@@ -133,3 +140,69 @@ def test_follow_up_policy_backfill_is_read_only_until_apply() -> None:
     assert stored['policy_id'] == 'incomplete_claim_follow_up'
     assert stored['deadline_at'] == (now + timedelta(days=7)).isoformat()
     assert stored['blocked_reason'] == 'contact_not_authorised'
+
+
+def test_mongo_due_deadline_and_operation_contracts() -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'recovery_test')
+    now = datetime(2026, 9, 9, 1, 0, tzinfo=UTC)
+    follow_up = _follow_up()
+    repository._collection.insert_one(
+        {
+            **follow_up.model_dump(mode='json'),
+            '_id': 'follow_up:fup_operation_test',
+            'record_type': 'follow_up',
+            'claim_id': follow_up.claim_id,
+            'customer_id': 'cus_operation_test',
+        }
+    )
+    assert repository.list_due_follow_ups(now, limit=10)[0].follow_up_id == follow_up.follow_up_id
+    assert (
+        repository.list_expiring_follow_ups(now + timedelta(days=7), limit=10)[0].follow_up_id
+        == follow_up.follow_up_id
+    )
+    operation = _operation()
+    repository.save_follow_up_operation(operation)
+    repository.save_follow_up_operation(operation)
+    assert repository.list_follow_up_operations(follow_up.follow_up_id) == [operation]
+    with pytest.raises(IdempotencyConflict):
+        repository.save_follow_up_operation(
+            operation.model_copy(update={'operation_id': 'fop_abcdef0123456789abcd'})
+        )
+
+
+def test_mongo_retention_operation_is_replay_safe() -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'retention_test')
+    follow_up = _follow_up()
+    now = datetime(2026, 9, 9, 1, 0, tzinfo=UTC)
+    claim = WorkingClaim(
+        claim_id=follow_up.claim_id,
+        customer_id='cus_operation_test',
+        channel=Channel.WEB_AGENT,
+        locale='en-NZ',
+        claim_state=ClaimState(),
+        customer_next_step=CustomerNextStep(
+            status='describe_incident',
+            summary='Continue describing the incident.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+        ),
+        created_at=now,
+        updated_at=now,
+    )
+    repository._collection.insert_one(
+        {
+            **claim.model_dump(mode='json'),
+            '_id': f'claim:{claim.claim_id}',
+            'record_type': 'claim',
+        }
+    )
+    operation = RetentionOperation(
+        operation_id='rop_0123456789abcdef0123',
+        claim_id=claim.claim_id,
+        target_refs=['claim:clm_operation_test'],
+        status=RetentionOperationStatus.ELIGIBLE,
+        created_at=now,
+        updated_at=now,
+    )
+    repository.save_retention_operation(operation)
+    repository.save_retention_operation(operation)
+    assert repository.get_retention_operation(operation.operation_id) == operation
