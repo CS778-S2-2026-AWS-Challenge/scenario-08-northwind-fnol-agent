@@ -468,6 +468,23 @@ describe('claimant intake projection', () => {
     expect(screen.queryByText(initialClaim.claim_id)).not.toBeInTheDocument()
   })
 
+  it('keeps registration content on the document scroll surface', async () => {
+    const user = userEvent.setup()
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+
+    const authPage = screen.getByRole('main')
+    const card = authPage.querySelector('.login-card')
+    expect(card).not.toBeNull()
+    expect(getComputedStyle(authPage).overflowY).not.toBe('hidden')
+    expect(getComputedStyle(card).maxHeight).toBe('none')
+    expect(getComputedStyle(card).overflowY).toBe('visible')
+
+    await user.click(screen.getByRole('button', { name: 'Start a claim without logging in' }))
+    expect(screen.getByRole('heading', { level: 1, name: 'Start your insurance claim' })).toBeVisible()
+  })
+
   it('reloads the published model catalogue after login when the initial request was unauthorized', async () => {
     const user = userEvent.setup()
     api.getRuntimeCapabilities.mockRejectedValueOnce(new api.ApiRequestError('Sign in again.'))

@@ -1743,14 +1743,9 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   /* Match the conversation panel's quiet structural surface, while keeping
      the form card legible as the focused action. */
   background: var(--color-panel);
-  overflow: hidden;
-  scrollbar-width: none;
 }
-.auth-page::-webkit-scrollbar { display: none; }
 .auth-page .login-card {
   width: min(100%, 440px);
-  max-height: calc(100svh - 96px);
-  overflow: hidden;
   padding: var(--space-5);
   border: var(--border-component);
   border-radius: var(--radius-xl);
