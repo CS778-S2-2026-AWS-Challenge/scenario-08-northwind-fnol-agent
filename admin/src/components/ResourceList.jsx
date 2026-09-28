@@ -12,6 +12,7 @@ export default function ResourceList({ title, items, selectedId, onSelect, empty
           {items.map((item) => {
             const id = resourceId(item)
             const name = resourceName(item)
+            const status = item.state || item.health
             return (
               <li key={id}>
                 <button type="button" aria-pressed={id === selectedId} className={id === selectedId ? 'resource-row selected' : 'resource-row'} onClick={() => onSelect(item)}>
@@ -19,7 +20,7 @@ export default function ResourceList({ title, items, selectedId, onSelect, empty
                     <strong>{name}</strong>
                     <small>{id}</small>
                   </span>
-                  <StatusBadge value={item.state || item.health} />
+                  {status && <StatusBadge value={status} />}
                 </button>
               </li>
             )

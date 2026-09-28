@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   acceptClaimAgreement: vi.fn(),
   confirmClaimFields: vi.fn(),
   createAccountAsset: vi.fn(),
+  createAccountPolicy: vi.fn(),
   createExternalClaim: vi.fn(),
   createPaymentDestination: vi.fn(),
   createClaim: vi.fn(),
@@ -46,6 +47,8 @@ const api = vi.hoisted(() => ({
   updateAccountAsset: vi.fn(),
   createAccountIdentityDocument: vi.fn(),
   updateAccountIdentityDocument: vi.fn(),
+  updateAccountPaymentDestination: vi.fn(),
+  updateAccountPolicy: vi.fn(),
   updateClaimField: vi.fn(),
 }))
 
@@ -604,7 +607,7 @@ describe('claimant intake projection', () => {
     expect(screen.queryByLabelText('Preferred name')).not.toBeInTheDocument()
   })
 
-  it('recovers the legacy Policies route into Personal details and restores Profile categories on popstate', async () => {
+  it('opens the Policies route and restores Profile categories on popstate', async () => {
     const user = userEvent.setup()
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue({
@@ -625,15 +628,23 @@ describe('claimant intake projection', () => {
       }],
       page: { next_cursor: null },
     })
+    api.listAccountPolicies.mockResolvedValue({
+      items: [
+        { policy_id: 'pol_11111111111111111111', policy_number: 'MOTOR-1234', revision: 1 },
+        { policy_id: 'pol_22222222222222222222', policy_number: 'HOME-5678', revision: 1 },
+      ],
+      page: { next_cursor: null },
+    })
     globalThis.history.replaceState({}, '', '/profile/policies')
 
     render(<App />)
 
-    expect(await screen.findByRole('region', { name: 'Personal details' })).toBeInTheDocument()
-    await waitFor(() => expect(globalThis.location.pathname).toBe('/profile/personal-details'))
-    expect(screen.queryByRole('button', { name: 'Policies' })).not.toBeInTheDocument()
-    expect(screen.getByText('Not provided', { selector: '.profile-header-meta > strong' })).toBeInTheDocument()
-    expect(api.listAccountPolicies).not.toHaveBeenCalled()
+    expect(await screen.findByRole('heading', { name: 'Policies' })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile/policies')
+    expect(screen.getAllByRole('button', { name: 'Policies' })).toHaveLength(2)
+    expect(await screen.findByText('••••1234')).toBeInTheDocument()
+    expect(screen.getByText('••••5678')).toBeInTheDocument()
+    expect(api.listAccountPolicies).toHaveBeenCalled()
 
     await user.click(screen.getAllByRole('button', { name: 'Insured assets' })[0])
     expect(await screen.findByRole('heading', { name: 'Insured assets' })).toBeInTheDocument()
@@ -730,9 +741,9 @@ describe('claimant intake projection', () => {
 
     const documentsTab = screen.getByRole('tab', { name: 'What to provide' })
     await user.click(documentsTab)
-    const trigger = screen.getByRole('button', { name: /Third-party support/ })
+    const trigger = screen.getByRole('button', { name: /Use a third-party service/ })
     expect(trigger.closest('[role="tabpanel"]')).toHaveAccessibleName('What to provide')
-    expect(trigger).toHaveTextContent('2 services available')
+    expect(trigger).toHaveTextContent('View 2 options')
     await user.click(trigger)
     expect(await screen.findByRole('dialog', { name: 'Third-party services' })).toBeVisible()
     await user.click(screen.getByRole('button', { name: 'Close third-party services' }))
@@ -779,7 +790,7 @@ describe('claimant intake projection', () => {
     expect(screen.queryByRole('dialog', { name: 'Third-party services' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: 'What to provide' }))
-    await user.click(screen.getByRole('button', { name: /Third-party support/ }))
+    await user.click(screen.getByRole('button', { name: /Use a third-party service/ }))
     expect(await screen.findByRole('dialog', { name: 'Third-party services' })).toBeVisible()
   })
 
@@ -3106,6 +3117,7 @@ describe('claimant intake projection', () => {
       status: 'received',
       file_status: 'ready',
       original_filename: 'repair-quote.pdf',
+      media_type: 'application/pdf',
     }
     const processingEvidence = {
       ...receivedEvidence,
@@ -3145,8 +3157,10 @@ describe('claimant intake projection', () => {
     await user.keyboard('{ArrowRight}')
     expect(documentsTab).toHaveFocus()
     expect(documentsTab).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('Repair Quote')).toBeInTheDocument()
-    expect(screen.getByText('1 item needs your attention')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Documents and evidence' })).toBeInTheDocument()
+    expect(screen.getByText('Repair quote')).toBeInTheDocument()
+    expect(screen.getByText('0 of 1 provided')).toBeInTheDocument()
+    expect(screen.queryByText(/needs your attention/)).not.toBeInTheDocument()
 
     await user.keyboard('{Home}')
     expect(summaryTab).toHaveFocus()
@@ -3155,7 +3169,7 @@ describe('claimant intake projection', () => {
 
     await user.click(screen.getByRole('button', { name: 'What to provide, 1 outstanding' }))
     expect(documentsTab).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('Repair Quote')).toBeInTheDocument()
+    expect(screen.getByText('Repair quote')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Evidence history' })).not.toBeInTheDocument()
 
     const documentsPanel = screen.getByRole('tabpanel', { name: 'What to provide' })
@@ -3175,7 +3189,10 @@ describe('claimant intake projection', () => {
     await waitFor(() => expect(pushEvidenceUpdate).toBeTypeOf('function'))
     await act(async () => pushEvidenceUpdate(realtimeChange(5, ['evidence'])))
     await waitFor(() => expect(api.getClaimEvidence).toHaveBeenCalledTimes(2))
-    expect(await screen.findByText('Received')).toBeInTheDocument()
+    expect(await within(documentsPanel).findByText('repair-quote.pdf')).toBeInTheDocument()
+    expect(within(documentsPanel).getByText('PDF · Upload complete')).toBeInTheDocument()
+    expect(within(documentsPanel).getByText('1 of 1 provided')).toBeInTheDocument()
+    expect(within(documentsPanel).queryByRole('button', { name: /Replace|Remove/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'What to provide' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /What to provide, .* outstanding/ })).not.toBeInTheDocument()
   })
@@ -3438,9 +3455,9 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
     await user.click(screen.getByRole('button', { name: 'Claim history' }))
-    expect(await screen.findByRole('heading', { name: 'No created Claims yet' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Your report is underway' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Continue your report' }))
+    await user.click(screen.getByRole('button', { name: 'Continue report' }))
 
     expect(screen.queryByRole('heading', { name: 'Claim history' })).not.toBeInTheDocument()
     expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
@@ -3485,9 +3502,14 @@ describe('claimant intake projection', () => {
     // The desktop navigation and the mobile index both render the same Claim history entry.
     const [claimHistoryEntry] = await screen.findAllByRole('button', { name: 'Claim history' })
     await user.click(claimHistoryEntry)
+    expect(await screen.findByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
+    expect(screen.getByText('Track open claims and review your previous submissions.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Account' })).toHaveAttribute('href', '/profile')
+    expect(screen.getByRole('button', { name: 'Start a new claim' })).toBeInTheDocument()
     const row = await screen.findByRole('button', { name: 'Open Home claim, Claim NWF-2026-000973' })
-    // Only the created Claim is listed; the reports still in progress stay out of Claim history.
-    expect(screen.getByText('1 saved Claim')).toBeInTheDocument()
+    // Only the created Claim is listed; the report in progress is promoted separately.
+    expect(screen.getByText('1 claim')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Your report is underway' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /clm_in_progress_history|clm_ui_vp/ })).not.toBeInTheDocument()
     await user.click(row)
 

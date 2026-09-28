@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext.jsx'
 import ProtectedRoute from './auth/ProtectedRoute.jsx'
+import AccountSettingsPage from './pages/AccountSettingsPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import WorkbenchPage from './pages/WorkbenchPage.jsx'
 
@@ -8,11 +9,17 @@ function ProtectedWorkbench() {
   return <ProtectedRoute><WorkbenchPage /></ProtectedRoute>
 }
 
+function ProtectedSettings() {
+  return <ProtectedRoute><AccountSettingsPage /></ProtectedRoute>
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <Routes>
         <Route path="/workbench/login" element={<LoginPage />} />
+        <Route path="/workbench/settings" element={<Navigate to="/workbench/settings/profile" replace />} />
+        <Route path="/workbench/settings/:settingsSection" element={<ProtectedSettings />} />
         <Route path="/workbench" element={<ProtectedWorkbench />} />
         <Route path="/workbench/conversations" element={<ProtectedWorkbench />} />
         <Route path="/workbench/conversations/:conversationSessionId" element={<ProtectedWorkbench />} />

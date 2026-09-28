@@ -78,6 +78,7 @@ verification state, verification time, and checked Claim revision.
 | Claimant auth session | `ias_` session identity, hash of an opaque development/test token, authenticated customer reference, revision, creation, expiry, revocation, and update timestamps | `session_id`, linked to `customer_id`; token lookup uses `token_hash` |
 | Staff account | local/runtime staff identity, salted password hash, display name, roles, active state, revision, and update time | `staff_id` |
 | Staff auth session | `ias_` session identity, hash of an opaque staff token, authenticated staff reference, revision, creation, expiry, revocation, and update timestamps | `session_id`, linked to `staff_id`; token lookup uses `token_hash` |
+| Staff feedback | append-only bounded Workbench feedback message, authenticated staff reference and display-name snapshot, source, and creation time | `feedback_id` (`fdb_`), linked to `staff_id` |
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
 | Asset | account-owned typed vehicle, property, or contents details, revision, active state, and timestamps; Policy association is deferred until an owned `pol_` resource exists | `asset_id` (`ase_`), linked to `customer_id` |
 | Claim | Working Claim State, structured facts, independent attributes, lifecycle status, optional source-linked terminal disposition, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
@@ -1155,6 +1156,19 @@ versions, dataset and fixture versions, source versions, bounded scenario outcom
 threshold, and completion/error state. Evaluation records are evidence for publication and
 operations; they are not Claim State, do not contain prompts or provider payloads, and are never
 updated in place.
+
+Staff feedback uses `fdb_` identifiers and is stored append-only in
+`control_plane_feedback`. Each record contains the bounded message, authenticated submitting staff
+ID, display-name snapshot, fixed Workbench source, and server creation timestamp. Submission
+idempotency is scoped by authenticated staff actor and key in
+`control_plane_feedback_idempotency`, and the feedback row plus idempotency coordinate are written
+in one SQLite transaction. Idempotency coordinates expire after 24 hours; feedback records remain
+append-only after the coordinate expires. Feedback records never contain Claim State, claimant data, bearer
+tokens, password material, or unrestricted provider payloads as structured fields. Staff are
+instructed not to enter claimant or Claim identifiers in the free-text message; the repository
+does not claim automated personal-data detection. Developer/test mode uses the same
+repository contract in memory; the normal runtime stores these records in the configured
+`NORTHWIND_CONTROL_PLANE_DB_PATH` database.
 
 Knowledge source metadata uses `knw_` identifiers and is stored in
 `control_plane_knowledge_sources`. A row represents one immutable `(document_id, version)`

@@ -17,6 +17,17 @@ function claimReference(claim) {
   return claimNumber ? `Claim ${claimNumber}` : `Claim reference ${claim.claim_id}`
 }
 
+function reportUpdatedLabel(updatedAt) {
+  const updated = new Date(updatedAt)
+  const now = new Date()
+  const isToday = Number.isFinite(updated.getTime())
+    && updated.getFullYear() === now.getFullYear()
+    && updated.getMonth() === now.getMonth()
+    && updated.getDate() === now.getDate()
+
+  return isToday ? 'Updated today' : `Updated ${formatDateTime(updatedAt)}`
+}
+
 function ClaimHistoryRow({ claim, onSelect }) {
   const nextStep = claim.customer_next_step || {}
   const detailsId = `claim-history-${claim.claim_id}-details`
@@ -56,34 +67,51 @@ function ClaimHistoryRow({ claim, onSelect }) {
   )
 }
 
-function ClaimHistoryEmpty({ inProgress, onStartClaim, onContinueReport }) {
-  if (!inProgress.length) {
-    return (
-      <section className="claim-history-state" aria-labelledby="claim-history-empty-title">
-        <h2 id="claim-history-empty-title">No Claims yet</h2>
-        <p>When Northwind creates a Claim from your report, it appears here with its status and latest update.</p>
-        {onStartClaim && (
-          <button className="primary-button" type="button" onClick={onStartClaim}>Start a claim</button>
-        )}
-      </section>
-    )
-  }
+function ClaimHistoryProgress({ inProgress, onContinueReport }) {
+  if (!inProgress.length) return null
 
   const [latestReport] = sortClaimsByLatestUpdate(inProgress)
-  const reports = inProgress.length === 1 ? '1 report' : `${inProgress.length} reports`
   return (
-    <section className="claim-history-state" aria-labelledby="claim-history-in-progress-title">
-      <h2 id="claim-history-in-progress-title">No created Claims yet</h2>
-      <p>
-        You have {reports} in progress. A report appears here after Northwind creates its Claim; until
-        then, continue it from your conversation.
-      </p>
+    <section className="claim-history-progress" aria-labelledby="claim-history-in-progress-title">
+      <span className="claim-history-progress-icon" role="img" aria-label="Report in progress">↗</span>
+      <div className="claim-history-progress-copy">
+        <div className="claim-history-progress-meta">
+          <span>In progress</span>
+          <time dateTime={latestReport.updated_at}>{reportUpdatedLabel(latestReport.updated_at)}</time>
+        </div>
+        <h2 id="claim-history-in-progress-title">Your report is underway</h2>
+        <p>
+          Finish the remaining details in your conversation. It will appear in claim history once
+          Northwind creates the claim.
+        </p>
+      </div>
       {onContinueReport && (
-        <button className="primary-button" type="button" onClick={() => onContinueReport(latestReport.claim_id)}>
-          Continue your report
+        <button
+          className="claim-history-progress-action"
+          type="button"
+          onClick={() => onContinueReport(latestReport.claim_id)}
+        >
+          Continue report <span aria-hidden="true">→</span>
         </button>
       )}
     </section>
+  )
+}
+
+function ClaimHistoryEmpty({ onStartClaim, showStartAction }) {
+  return (
+    <div className="claim-history-empty">
+      <span className="claim-history-empty-icon" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+      <h3>No past claims yet</h3>
+      <p>Claims created by Northwind will be listed here with their latest status.</p>
+      {showStartAction && onStartClaim && (
+        <button className="primary-button" type="button" onClick={onStartClaim}>Start a claim</button>
+      )}
+    </div>
   )
 }
 
@@ -96,54 +124,63 @@ export default function ClaimHistory({
   onSelect,
   onStartClaim,
   onContinueReport,
+  showEmptyStartAction = true,
 }) {
-  if (loading) {
-    return <p className="claim-history-state" role="status">Loading your Claim history…</p>
-  }
-
-  const created = (claims || []).filter(isCreatedClaim)
-
-  if (error && !created.length) {
-    return (
-      <section className="claim-history-state is-error" role="alert">
-        <h2>Claim history could not be loaded</h2>
-        <p>{error} Your Claims have not been changed, and you can try loading them again.</p>
-        <button className="secondary-button" type="button" onClick={onRetry}>Try again</button>
-      </section>
-    )
-  }
-
-  if (!created.length) {
-    return (
-      <ClaimHistoryEmpty
-        inProgress={(claims || []).filter((claim) => !isCreatedClaim(claim))}
-        onStartClaim={onStartClaim}
-        onContinueReport={onContinueReport}
-      />
-    )
-  }
+  const allClaims = claims || []
+  const created = allClaims.filter(isCreatedClaim)
+  const inProgress = allClaims.filter((claim) => !isCreatedClaim(claim))
+  const claimCount = created.length === 1 ? '1 claim' : `${created.length} claims`
 
   return (
-    <>
-      <div className="claim-history-toolbar">
-        <p>{created.length} saved {created.length === 1 ? 'Claim' : 'Claims'}</p>
-        <button className="secondary-button" type="button" onClick={onRetry} disabled={refreshing}>
-          {refreshing ? 'Refreshing…' : 'Refresh'}
-        </button>
-      </div>
-      {error && (
-        <div className="claim-history-stale" role="status">
-          <strong>Showing earlier Claim records</strong>
-          <p>{error} The list below may be out of date; try again to load the latest updates.</p>
-          <button className="secondary-button" type="button" onClick={onRetry}>Try again</button>
-        </div>
+    <div className="claim-history-overview">
+      {!loading && (
+        <ClaimHistoryProgress inProgress={inProgress} onContinueReport={onContinueReport} />
       )}
-      <ol className="claim-history-list" aria-label="Your Claims, most recently updated first">
-        {sortClaimsByLatestUpdate(created).map((claim) => (
-          <ClaimHistoryRow key={claim.claim_id} claim={claim} onSelect={onSelect} />
-        ))}
-      </ol>
-    </>
+      <section className="claim-history-past" aria-labelledby="claim-history-past-title">
+        <header className="claim-history-past-header">
+          <h2 id="claim-history-past-title">Past claims</h2>
+          <div className="claim-history-past-actions">
+            <span>{loading ? 'Loading…' : claimCount}</span>
+            {!loading && created.length > 0 && onRetry && (
+              <button type="button" onClick={onRetry} disabled={refreshing}>
+                {refreshing ? 'Refreshing…' : 'Refresh'}
+              </button>
+            )}
+          </div>
+        </header>
+        {loading ? (
+          <p className="claim-history-state" role="status">Loading your Claim history…</p>
+        ) : error && !created.length ? (
+          <section className="claim-history-state is-error" role="alert">
+            <h3>Claim history could not be loaded</h3>
+            <p>{error} Your Claims have not been changed, and you can try loading them again.</p>
+            <button className="secondary-button" type="button" onClick={onRetry}>Try again</button>
+          </section>
+        ) : (
+          <>
+            {error && (
+              <div className="claim-history-stale" role="status">
+                <strong>Showing earlier Claim records</strong>
+                <p>{error} The list below may be out of date; try again to load the latest updates.</p>
+                <button className="secondary-button" type="button" onClick={onRetry}>Try again</button>
+              </div>
+            )}
+            {created.length ? (
+              <ol className="claim-history-list" aria-label="Your Claims, most recently updated first">
+                {sortClaimsByLatestUpdate(created).map((claim) => (
+                  <ClaimHistoryRow key={claim.claim_id} claim={claim} onSelect={onSelect} />
+                ))}
+              </ol>
+            ) : (
+              <ClaimHistoryEmpty
+                onStartClaim={onStartClaim}
+                showStartAction={showEmptyStartAction && !inProgress.length}
+              />
+            )}
+          </>
+        )}
+      </section>
+    </div>
   )
 }
 

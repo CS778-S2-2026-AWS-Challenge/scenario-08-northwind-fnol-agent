@@ -10,6 +10,7 @@ import {
 import { useState } from 'react'
 import { failureReason, failureReference } from '../failure.js'
 import { formatDateTime, words } from '../format.js'
+import { translate as t } from '../i18n.js'
 
 const AGENT_CONVERSATIONS_PER_PAGE = 5
 const GENERIC_AGENT_TITLES = new Set([
@@ -82,22 +83,22 @@ export default function ConversationsPage({
     <main className="conversations-page">
       <header className="content-header">
         <div>
-          <p className="eyebrow">Sessions</p>
-          <h1>Claim conversations</h1>
-          <p>Claim-bound conversations remain attached to their Claim workspace. Staff Agent sessions are kept separate.</p>
+          <p className="eyebrow">{t('Sessions')}</p>
+          <h1>{t('Claim conversations')}</h1>
+          <p>{t('Claim-bound conversations remain attached to their Claim workspace. Staff Agent sessions are kept separate.')}</p>
         </div>
       </header>
       <div className="conversation-groups">
         <section aria-labelledby="assistance-requests-title">
           <div className="section-heading">
-            <div><p className="eyebrow">Needs attention</p><h2 id="assistance-requests-title">Human assistance requests</h2></div>
+            <div><p className="eyebrow">{t('Needs attention')}</p><h2 id="assistance-requests-title">{t('Human assistance requests')}</h2></div>
             <span className="count-badge">{assistanceRequests.length}</span>
           </div>
-          {assistanceLoading && <p className="empty-note" aria-live="polite">Loading assistance requests...</p>}
+          {assistanceLoading && <p className="empty-note" aria-live="polite">{t('Loading assistance requests...')}</p>}
           {assistanceError && (
             <div className="form-error" role="alert">
-              <strong>Assistance requests are unavailable.</strong> {failureReason(assistanceError)}{' '}
-              <button className="button button--quiet" type="button" onClick={onRetryAssistance}>Retry</button>
+              <strong>{t('Assistance requests are unavailable.')}</strong> {failureReason(assistanceError)}{' '}
+              <button className="button button--quiet" type="button" onClick={onRetryAssistance}>{t('Retry')}</button>
               {failureReference(assistanceError) && <small>{failureReference(assistanceError)}</small>}
             </div>
           )}
@@ -111,17 +112,17 @@ export default function ConversationsPage({
               />
             ))}
             {!assistanceLoading && !assistanceError && !assistanceRequests.length && (
-              <p className="empty-note">No customer assistance request is waiting for you.</p>
+              <p className="empty-note">{t('No customer assistance request is waiting for you.')}</p>
             )}
           </div>
         </section>
 
         <section aria-labelledby="active-conversations-title">
           <div className="section-heading">
-            <div><p className="eyebrow">Assigned work</p><h2 id="active-conversations-title">My active conversations</h2></div>
+            <div><p className="eyebrow">{t('Assigned work')}</p><h2 id="active-conversations-title">{t('My active conversations')}</h2></div>
             <span className="count-badge">{activeClaimConversations.length}</span>
           </div>
-          {loading && <p className="empty-note" aria-live="polite">Loading conversations...</p>}
+          {loading && <p className="empty-note" aria-live="polite">{t('Loading conversations...')}</p>}
           {error && <ConversationFailure error={error} onRetry={onRetry} />}
           <div className="conversation-cards">
             {activeClaimConversations.map((conversation) => (
@@ -131,14 +132,14 @@ export default function ConversationsPage({
                 onOpen={onOpenConversation}
               />
             ))}
-            {!loading && !error && !activeClaimConversations.length && <p className="empty-note">No active Claim conversation is assigned to you.</p>}
+            {!loading && !error && !activeClaimConversations.length && <p className="empty-note">{t('No active Claim conversation is assigned to you.')}</p>}
           </div>
         </section>
 
         {completedClaimConversations.length > 0 && (
           <section aria-labelledby="completed-conversations-title">
             <div className="section-heading">
-              <div><p className="eyebrow">History</p><h2 id="completed-conversations-title">Completed assistance</h2></div>
+              <div><p className="eyebrow">{t('History')}</p><h2 id="completed-conversations-title">{t('Completed assistance')}</h2></div>
               <span className="count-badge">{completedClaimConversations.length}</span>
             </div>
             <div className="conversation-cards">
@@ -155,37 +156,37 @@ export default function ConversationsPage({
 
         <section className="staff-agent-conversations" aria-labelledby="staff-agent-conversations-title">
           <div className="section-heading">
-            <div><p className="eyebrow">Internal assistance</p><h2 id="staff-agent-conversations-title">Staff Agent conversations</h2></div>
+            <div><p className="eyebrow">{t('Internal assistance')}</p><h2 id="staff-agent-conversations-title">{t('Staff Agent conversations')}</h2></div>
           </div>
 
-          {loading && <p className="staff-agent-conversations__state" role="status">Loading Staff Agent conversations...</p>}
+          {loading && <p className="staff-agent-conversations__state" role="status">{t('Loading Staff Agent conversations...')}</p>}
           {error && (
             <div className="staff-agent-conversations__error" role="alert">
-              <strong>Staff Agent conversations are unavailable.</strong>
+              <strong>{t('Staff Agent conversations are unavailable.')}</strong>
               <span>{failureReason(error)}</span>
-              <button className="button button--quiet" type="button" onClick={onRetry}>Retry</button>
+              <button className="button button--quiet" type="button" onClick={onRetry}>{t('Retry')}</button>
               {failureReference(error) && <small>{failureReference(error)}</small>}
             </div>
           )}
 
           {!loading && !error && !agentConversations.length && (
-            <p className="staff-agent-conversations__state" role="status">No Staff Agent conversations yet.</p>
+            <p className="staff-agent-conversations__state" role="status">{t('No Staff Agent conversations yet.')}</p>
           )}
 
           {!loading && !error && agentConversations.length > 0 && !previousAgentConversations.length && (
-            <p className="staff-agent-conversations__state" role="status">No previous conversations yet.</p>
+            <p className="staff-agent-conversations__state" role="status">{t('No previous conversations yet.')}</p>
           )}
 
           {previousAgentConversations.length > 0 && (
             <div className="staff-agent-conversations__history">
               <div className="staff-agent-conversations__tools">
                 <label className="staff-agent-conversations__search">
-                  <span className="sr-only">Search conversations</span>
+                  <span className="sr-only">{t('Search conversations')}</span>
                   <Search aria-hidden="true" />
                   <input
                     type="search"
                     value={agentSearch}
-                    placeholder="Search conversations"
+                    placeholder={t('Search conversations')}
                     onChange={(event) => updateAgentSearch(event.target.value)}
                   />
                 </label>
@@ -201,8 +202,8 @@ export default function ConversationsPage({
                   <div className="staff-agent-conversations__groups">
                     {groupedAgentConversations.map((group) => (
                       <section className="staff-agent-conversations__group" key={group.key}>
-                        <h4>{group.label}</h4>
-                        <ul aria-label={group.key === 'today' ? 'Previous conversations' : `${group.label} conversations`}>
+                        <h4>{t(group.label)}</h4>
+                        <ul aria-label={group.key === 'today' ? t('Previous conversations') : t('{group} conversations', { group: t(group.label) })}>
                           {group.items.map((conversation) => (
                             <li key={conversation.conversation_id}>
                               <AgentConversationButton conversation={conversation} onOpen={openAgentConversation} />
@@ -213,17 +214,17 @@ export default function ConversationsPage({
                     ))}
                   </div>
                   {agentPageCount > 1 && (
-                    <nav className="staff-agent-conversations__pagination" aria-label="Staff Agent conversation pages">
+                    <nav className="staff-agent-conversations__pagination" aria-label={t('Staff Agent conversation pages')}>
                       <small>
-                        Showing {agentPageStart + 1}–{Math.min(agentPageStart + AGENT_CONVERSATIONS_PER_PAGE, filteredAgentConversations.length)} of {filteredAgentConversations.length}
+                        {t('Showing {start}–{end} of {total}', { start: agentPageStart + 1, end: Math.min(agentPageStart + AGENT_CONVERSATIONS_PER_PAGE, filteredAgentConversations.length), total: filteredAgentConversations.length })}
                       </small>
                       <span className="staff-agent-conversations__page-controls">
                         <button className="button button--quiet" type="button" disabled={currentAgentPage === 1} onClick={() => setAgentPage(currentAgentPage - 1)}>
-                          <ArrowLeft aria-hidden="true" />Previous
+                          <ArrowLeft aria-hidden="true" />{t('Previous')}
                         </button>
-                        <span aria-live="polite" aria-atomic="true">Page {currentAgentPage} of {agentPageCount}</span>
+                        <span aria-live="polite" aria-atomic="true">{t('Page {page} of {total}', { page: currentAgentPage, total: agentPageCount })}</span>
                         <button className="button button--quiet" type="button" disabled={currentAgentPage === agentPageCount} onClick={() => setAgentPage(currentAgentPage + 1)}>
-                          Next<ArrowRight aria-hidden="true" />
+                          {t('Next')}<ArrowRight aria-hidden="true" />
                         </button>
                       </span>
                     </nav>
@@ -231,9 +232,9 @@ export default function ConversationsPage({
                 </>
               ) : (
                 <div className="staff-agent-conversations__no-results" role="status">
-                  <strong>No conversations match “{agentSearch.trim()}”.</strong>
-                  <span>Try another title, message preview, or updated time.</span>
-                  <button className="button button--quiet" type="button" onClick={() => updateAgentSearch('')}>Clear search</button>
+                  <strong>{t('No conversations match “{query}”.', { query: agentSearch.trim() })}</strong>
+                  <span>{t('Try another title, message preview, or updated time.')}</span>
+                  <button className="button button--quiet" type="button" onClick={() => updateAgentSearch('')}>{t('Clear search')}</button>
                 </div>
               )}
             </div>
@@ -269,25 +270,25 @@ function AssistanceRequestCard({ request, onReview, onTakeOver }) {
       <div className="assistance-request__summary">
         <span className="assistance-request__icon" aria-hidden="true"><MessageSquareText /></span>
         <div>
-          <span className="record-status">Waiting request</span>
+          <span className="record-status">{t('Waiting request')}</span>
           <h3>{request.display_reference || request.claim_id}</h3>
-          <p>{handoff.packet?.incident_summary || request.incident?.summary || 'No conversation summary is available.'}</p>
+          <p>{handoff.packet?.incident_summary || request.incident?.summary || t('No conversation summary is available.')}</p>
         </div>
       </div>
       <dl className="assistance-request__meta">
-        <div><dt>Requested</dt><dd>{handoff.created_at ? <time dateTime={handoff.created_at}>{formatDateTime(handoff.created_at)}</time> : 'Not recorded'}</dd></div>
-        <div><dt>Claim</dt><dd>{claimCreationLabel(creationStatus)}</dd></div>
-        <div><dt>Reason</dt><dd>{handoff.reason || 'No reason recorded'}</dd></div>
+        <div><dt>{t('Requested')}</dt><dd>{handoff.created_at ? <time dateTime={handoff.created_at}>{formatDateTime(handoff.created_at)}</time> : t('Not recorded')}</dd></div>
+        <div><dt>{t('Claim')}</dt><dd>{claimCreationLabel(creationStatus)}</dd></div>
+        <div><dt>{t('Reason')}</dt><dd>{handoff.reason || t('No reason recorded')}</dd></div>
       </dl>
       <div className="assistance-request__actions">
-        <button className="button button--quiet" type="button" onClick={() => onReview(request)}>Review</button>
+        <button className="button button--quiet" type="button" onClick={() => onReview(request)}>{t('Review')}</button>
         {!confirming ? (
-          <button className="button button--secondary" type="button" disabled={!request.canTakeOver} onClick={() => setConfirming(true)}>Take over</button>
+          <button className="button button--secondary" type="button" disabled={!request.canTakeOver} onClick={() => setConfirming(true)}>{t('Take over')}</button>
         ) : (
           <span className="assistance-request__confirm">
-            <span>Assign this conversation to you?</span>
-            <button className="button button--ghost" type="button" disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
-            <button className="button button--secondary" type="button" disabled={busy} onClick={takeOver}>{busy ? 'Taking over...' : 'Confirm take over'}</button>
+            <span>{t('Assign this conversation to you?')}</span>
+            <button className="button button--ghost" type="button" disabled={busy} onClick={() => setConfirming(false)}>{t('Cancel')}</button>
+            <button className="button button--secondary" type="button" disabled={busy} onClick={takeOver}>{t(busy ? 'Taking over...' : 'Confirm take over')}</button>
           </span>
         )}
       </div>
@@ -304,9 +305,9 @@ function ClaimConversationButton({ conversation, onOpen }) {
       {state.label === 'Completed' ? <CheckCircle2 size={18} /> : <UserRoundCheck size={18} />}
       <span>
         <strong>{conversation.title}</strong>
-        <small>{conversation.summary || 'No summary is available.'}</small>
+        <small>{conversation.summary || t('No summary is available.')}</small>
       </span>
-      <span className={`record-status${state.tone ? ` record-status--${state.tone}` : ''}`}>{state.label}</span>
+      <span className={`record-status${state.tone ? ` record-status--${state.tone}` : ''}`}>{t(state.label)}</span>
     </button>
   )
 }
@@ -314,8 +315,8 @@ function ClaimConversationButton({ conversation, onOpen }) {
 function ConversationFailure({ error, onRetry }) {
   return (
     <div className="form-error" role="alert">
-      <strong>Conversations are unavailable.</strong> {failureReason(error)}{' '}
-      <button className="button button--quiet" type="button" onClick={onRetry}>Retry</button>
+      <strong>{t('Conversations are unavailable.')}</strong> {failureReason(error)}{' '}
+      <button className="button button--quiet" type="button" onClick={onRetry}>{t('Retry')}</button>
       {failureReference(error) && <small>{failureReference(error)}</small>}
     </div>
   )
@@ -329,9 +330,9 @@ function claimConversationState(conversation) {
 }
 
 function claimCreationLabel(value) {
-  if (value === 'created') return 'Claim created'
-  if (value) return `Claim creation: ${words(value)}`
-  return 'Claim not yet created'
+  if (value === 'created') return t('Claim created')
+  if (value) return t('Claim creation: {status}', { status: words(value) })
+  return t('Claim not yet created')
 }
 
 function AgentConversationButton({ conversation, onOpen }) {
@@ -349,7 +350,7 @@ function AgentConversationButton({ conversation, onOpen }) {
       <span className="staff-agent-conversations__meta">
         {conversation.unread_count > 0 && (
           <span className="staff-agent-conversations__unread">
-            {conversation.unread_count} unread
+            {t('{count} unread', { count: conversation.unread_count })}
           </span>
         )}
         {conversation.updated_at
@@ -366,7 +367,7 @@ function agentSessionTitle(conversation) {
 
   const preview = conversation.summary?.trim()
   if (preview) return shortMessageTitle(preview)
-  return 'Empty conversation'
+  return t('Empty conversation')
 }
 
 function shortMessageTitle(value) {
@@ -376,15 +377,15 @@ function shortMessageTitle(value) {
 }
 
 function agentSessionPreview(conversation) {
-  return conversation.summary?.trim() || 'No messages yet.'
+  return conversation.summary?.trim() || t('No messages yet.')
 }
 
 function agentSessionUpdatedLabel(value) {
-  if (!value) return 'Update time not recorded'
+  if (!value) return t('Update time not recorded')
   try {
-    return `Updated ${formatDateTime(value)}`
+    return t('Updated {date}', { date: formatDateTime(value) })
   } catch {
-    return 'Update time not recorded'
+    return t('Update time not recorded')
   }
 }
 
@@ -422,5 +423,5 @@ function groupAgentConversations(conversations, now = new Date()) {
 }
 
 function matchingConversationCount(count) {
-  return `${count} matching conversation${count === 1 ? '' : 's'}`
+  return t(count === 1 ? '{count} matching conversation' : '{count} matching conversations', { count })
 }
