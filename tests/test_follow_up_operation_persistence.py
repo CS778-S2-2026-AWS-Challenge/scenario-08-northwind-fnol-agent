@@ -390,7 +390,7 @@ def backend_contract_retention(claim_id: str, now: datetime) -> RetentionOperati
         source_terminal_ref=f'claim-terminal:{claim_id}:revision:2',
         source_claim_revision=2,
         policy_id='incomplete_claim_retention',
-        policy_version='v1',
+        policy_version=1,
         status=RetentionOperationStatus.RESERVED,
         access_closed_at=now,
         source_refs=[f'claim:{claim_id}'],

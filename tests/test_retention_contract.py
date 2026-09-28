@@ -326,3 +326,18 @@ def test_hold_release_is_monotonic_in_time() -> None:
 
 def test_access_is_open_without_reserved_retention_operation() -> None:
     assert retention_access_closed(None) is False
+
+
+def test_retention_policy_coordinate_is_integer_and_reads_legacy_label() -> None:
+    operation = _operation()
+    assert operation.policy_version == 1
+
+    legacy = RetentionOperation.model_validate(
+        {**operation.model_dump(mode='json'), 'policy_version': 'v1'}
+    )
+    assert legacy == operation
+
+    with pytest.raises(ValueError):
+        RetentionOperation.model_validate(
+            {**operation.model_dump(mode='json'), 'policy_version': 'v2'}
+        )

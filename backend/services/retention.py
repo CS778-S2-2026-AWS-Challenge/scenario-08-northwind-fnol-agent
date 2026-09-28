@@ -339,7 +339,9 @@ def reserve_retention_from_terminal(
             claim.claim_id,
             source_terminal_ref,
             INCOMPLETE_CLAIM_RETENTION_POLICY_ID,
-            INCOMPLETE_CLAIM_RETENTION_POLICY_VERSION,
+            # The seed keeps the original ``v1`` label so operation identities
+            # derived before the integer coordinate stay stable on restart.
+            f'v{INCOMPLETE_CLAIM_RETENTION_POLICY_VERSION}',
         )
     )
 

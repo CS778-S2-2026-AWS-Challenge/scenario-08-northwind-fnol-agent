@@ -3092,7 +3092,7 @@ class RetentionOperation(ContractModel):
     source_claim_revision: int = Field(ge=1)
 
     policy_id: str = Field(min_length=1, max_length=120)
-    policy_version: str = Field(min_length=1, max_length=80)
+    policy_version: int = Field(ge=1)
 
     # CAS coordinate for the RetentionOperation itself.
     revision: int = Field(default=1, ge=1)
@@ -3125,6 +3125,14 @@ class RetentionOperation(ContractModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
+
+    @model_validator(mode='before')
+    @classmethod
+    def normalise_legacy_policy_version(cls, value: Any) -> Any:
+        # Pre-integration documents stored the prototype label ``'v1'``.
+        if isinstance(value, dict) and value.get('policy_version') == 'v1':
+            return {**value, 'policy_version': 1}
+        return value
 
     @model_validator(mode='after')
     def validate_operation(self) -> 'RetentionOperation':

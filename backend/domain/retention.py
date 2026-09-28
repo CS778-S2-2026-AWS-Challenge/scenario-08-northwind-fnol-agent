@@ -59,7 +59,7 @@ from backend.domain.recovery import reduce_owned_recovery
 from backend.domain.recovery_policy_registry import RecoveryTrigger
 
 INCOMPLETE_CLAIM_RETENTION_POLICY_ID = 'incomplete_claim_retention'
-INCOMPLETE_CLAIM_RETENTION_POLICY_VERSION = 'v1'
+INCOMPLETE_CLAIM_RETENTION_POLICY_VERSION = 1
 
 
 class ResourceAccessClosed(KeyError):
