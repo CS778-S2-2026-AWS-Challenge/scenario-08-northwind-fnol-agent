@@ -144,8 +144,8 @@ export default function WorkbenchPage() {
         ...tab,
         label: conversation?.detail?.claimant?.display_name || tab.label,
         unreadCount: conversation?.unread_count
-          || conversation?.detail?.work_summary?.unread_claimant_messages
-          || 0,
+          ?? conversation?.detail?.work_summary?.unread_claimant_messages
+          ?? 0,
       }
     })
 

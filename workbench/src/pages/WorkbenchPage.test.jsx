@@ -535,6 +535,58 @@ describe('WorkbenchPage queue routing', () => {
     ))
   })
 
+  it('preserves an authoritative zero unread count across the queue and open tab', async () => {
+    tabs.tabs = [{
+      claimId: claim.claim_id,
+      label: claim.display_reference,
+      reference: claim.display_reference,
+      section: 'conversation',
+      sessionId: 'ses_customer',
+      draft: '',
+      expandedRecords: [],
+      pendingAction: null,
+    }]
+    const conversationDetail = {
+      ...claim,
+      claimant: { customer_id: 'cus_demo', display_name: 'Alex Morgan' },
+      active_session_id: 'ses_customer',
+      ownership: {
+        state: 'assigned',
+        current_staff_access: 'primary',
+        primary_assignee: { staff_id: 'stf_demo', display_name: 'Demo Staff' },
+      },
+      work_summary: { ...claim.work_summary, unread_claimant_messages: 4 },
+    }
+    api.conversations.mockResolvedValue({
+      items: [{
+        conversation_id: 'claim:ses_customer',
+        kind: 'claim',
+        claim_id: claim.claim_id,
+        display_reference: claim.display_reference,
+        session_id: 'ses_customer',
+        status: 'active',
+        title: 'Claim NW-900',
+        summary: 'The latest customer message has already been read.',
+        unread_count: 0,
+        updated_at: '2026-09-14T02:00:00Z',
+      }],
+      page: { next_cursor: null },
+    })
+    api.claim.mockResolvedValue(conversationDetail)
+    api.sessionsForTarget.mockResolvedValue({
+      items: [{ session_id: 'ses_customer' }],
+      resolved_session: { session_id: 'ses_customer' },
+      page: { next_cursor: null },
+    })
+
+    renderPage('/workbench/conversations/ses_customer')
+
+    expect(await screen.findByRole('tab', { name: 'Action needed, 0 conversations' })).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: 'Alex Morgan' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('4 unread messages')).not.toBeInTheDocument()
+    expect(screen.queryByText('4 new customer messages', { selector: 'div' })).not.toBeInTheDocument()
+  })
+
   it('takes over a waiting assistance request with its exact projected target and revision', async () => {
     const user = userEvent.setup()
     let accepted = false

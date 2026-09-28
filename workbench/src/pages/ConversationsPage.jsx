@@ -659,8 +659,8 @@ function conversationIdentity(conversation) {
 
 function conversationUnreadCount(conversation) {
   return conversation?.unread_count
-    || conversation?.detail?.work_summary?.unread_claimant_messages
-    || 0
+    ?? conversation?.detail?.work_summary?.unread_claimant_messages
+    ?? 0
 }
 
 function conversationOwner(detail) {
