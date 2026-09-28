@@ -1115,6 +1115,1543 @@ class FollowUpRecord(ContractModel):
     source_refs: list[str] = Field(default_factory=list, max_length=20)
     contact_permission: FollowUpContactPermission = FollowUpContactPermission.NOT_AUTHORISED
     attempt_count: int = Field(default=0, ge=0)
+    active_operation_id: str | None = Field(default=None, pattern=r'^fop_[a-f0-9]{20}    outcome: str | None = Field(default=None, max_length=1000)
+    blocked_reason: FollowUpReasonCode | None = None
+    resolution_code: FollowUpResolutionCode | None = None
+    status: FollowUpStatus = FollowUpStatus.BLOCKED
+    due_at: datetime | None = None
+    deadline_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    @model_validator(mode='after')
+    def validate_recovery_follow_up(self) -> 'FollowUpRecord':
+        if self.updated_at < self.created_at:
+            raise ValueError('A Follow-up cannot be updated before it is created.')
+        if not self.source_refs:
+            self.source_refs = [f'session:{self.source_session_id}']
+        if len(self.source_refs) != len(set(self.source_refs)):
+            raise ValueError('Follow-up source references must be unique.')
+        if self.status is FollowUpStatus.PENDING:
+            if (
+                self.contact_permission is not FollowUpContactPermission.AUTHORISED
+                or self.channel is None
+                or self.due_at is None
+            ):
+                raise ValueError('A pending Follow-up requires an authorised channel and due time.')
+            if self.blocked_reason is not None or self.resolution_code is not None:
+                raise ValueError('A pending Follow-up cannot have a blocked or resolution reason.')
+        elif self.status is FollowUpStatus.BLOCKED:
+            if self.active_operation_id is not None:
+                raise ValueError('A blocked Follow-up cannot retain an active operation.')
+            if self.due_at is not None:
+                raise ValueError('A blocked Follow-up cannot retain an executable due time.')
+            if self.blocked_reason is FollowUpReasonCode.CONTACT_NOT_AUTHORISED and (
+                self.contact_permission is not FollowUpContactPermission.NOT_AUTHORISED
+                or self.channel is not None
+            ):
+                raise ValueError(
+                    'Contact withdrawal must remove both follow-up authority and channel.'
+                )
+            if self.resolution_code is not None:
+                raise ValueError('A blocked Follow-up cannot have a resolution code.')
+        if self.status is FollowUpStatus.RESOLVED:
+            if self.active_operation_id is not None or self.due_at is not None:
+                raise ValueError('A resolved Follow-up cannot retain scheduled recovery work.')
+            legacy_resolution_codes = {
+                'claimant_resumed': FollowUpResolutionCode.CLAIMANT_RESUMED,
+                'recovery_expired': FollowUpResolutionCode.RECOVERY_EXPIRED,
+                'staff_abandoned': FollowUpResolutionCode.STAFF_ABANDONED,
+                'authorised_closure': FollowUpResolutionCode.AUTHORISED_CLOSURE,
+            }
+            if self.resolution_code is None and self.outcome in legacy_resolution_codes:
+                self.resolution_code = legacy_resolution_codes[self.outcome]
+            if self.resolution_code is None:
+                raise ValueError('A resolved Follow-up requires a resolution code.')
+            if self.blocked_reason is not None:
+                raise ValueError('A resolved Follow-up cannot have a blocked reason.')
+        return self
+
+
+class FollowUpOperation(ContractModel):
+    """Immutable identity and bounded result for one in-app Follow-up operation."""
+
+    operation_id: str = Field(pattern=r'^fop_[a-f0-9]{20}$')
+    follow_up_id: str = Field(min_length=1, max_length=120)
+    claim_id: str = Field(min_length=1, max_length=120)
+    sequence: int = Field(ge=1)
+    policy_id: str = Field(min_length=1, max_length=120)
+    policy_version: int = Field(ge=1)
+    based_on_claim_revision: int = Field(ge=1)
+    scheduled_at: datetime
+    status: FollowUpOperationStatus
+    result_code: FollowUpOperationResult | None = None
+    committed_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    source_refs: list[str] = Field(default_factory=list, max_length=20)
+    created_at: datetime
+    updated_at: datetime
+
+    @model_validator(mode='after')
+    def validate_operation(self) -> 'FollowUpOperation':
+        if self.updated_at < self.created_at:
+            raise ValueError('Follow-up operation update cannot precede creation.')
+        if self.status is FollowUpOperationStatus.COMMITTED:
+            if self.result_code is not FollowUpOperationResult.IN_APP_COMMITTED:
+                raise ValueError('A committed operation requires in_app_committed.')
+            if self.committed_at is None or self.cancelled_at is not None:
+                raise ValueError('A committed operation requires only committed_at.')
+        elif self.status is FollowUpOperationStatus.CANCELLED:
+            if (
+                self.result_code is None
+                or self.result_code is FollowUpOperationResult.IN_APP_COMMITTED
+            ):
+                raise ValueError('A cancelled operation requires a cancellation result.')
+            if self.cancelled_at is None or self.committed_at is not None:
+                raise ValueError('A cancelled operation requires only cancelled_at.')
+        elif (
+            self.result_code is not None
+            or self.committed_at is not None
+            or self.cancelled_at is not None
+        ):
+            raise ValueError('A reserved operation cannot have a final result or timestamp.')
+        return self
+
+
+class RetentionOperation(ContractModel):
+    """Restart-safe record for an approved cross-store retention action.
+
+    The record tracks execution and reconciliation only; it does not select a
+    retention duration, classification, or deletion policy.
+    """
+
+    operation_id: str = Field(pattern=r'^rop_[a-f0-9]{20}$')
+    claim_id: str = Field(min_length=1, max_length=120)
+    target_refs: list[str] = Field(min_length=1, max_length=50)
+    status: RetentionOperationStatus
+    hold_reason: str | None = Field(default=None, max_length=500)
+    step_results: dict[str, str] = Field(default_factory=dict, max_length=50)
+    source_refs: list[str] = Field(default_factory=list, max_length=20)
+    created_at: datetime
+    updated_at: datetime
+
+    @model_validator(mode='after')
+    def validate_retention_operation(self) -> 'RetentionOperation':
+        if self.updated_at < self.created_at:
+            raise ValueError('Retention operation update cannot precede creation.')
+        if self.status is RetentionOperationStatus.HELD and not self.hold_reason:
+            raise ValueError('A held retention operation requires a hold reason.')
+        return self
+
+
+class SessionRecord(ContractModel):
+    session_id: str
+    claim_id: str
+    customer_id: str
+    model_profile_id: str = Field(default='openrouter-gpt4o-mini', min_length=1, max_length=100)
+    status: SessionStatus = SessionStatus.ACTIVE
+    summary: str | None = None
+    unresolved_questions: list[str] = Field(default_factory=list)
+    pending_items: list[str] = Field(default_factory=list)
+    prior_commitments: list[str] = Field(default_factory=list)
+    recovery_context: SessionRecoveryContext | None = None
+    context_revision: int = Field(default=1, ge=1)
+    question_budget: int = Field(default=9, ge=1)
+    question_turn_count: int = Field(default=0, ge=0)
+    requested_fact_count: int = Field(default=0, ge=0)
+    repeated_question_count: int = Field(default=0, ge=0)
+    post_session_follow_up_required: bool = False
+    question_history: list[QuestionRecord] = Field(default_factory=list)
+    started_at: datetime
+    last_active_at: datetime
+    closed_at: datetime | None = None
+
+
+class MessageRecord(ContractModel):
+    """Durable message record; visibility is enforced before claimant projection."""
+
+    message_id: str
+    claim_id: str
+    session_id: str
+    client_message_id: str | None = None
+    actor: ActorType
+    visibility: MessageVisibility
+    content: dict[str, Any]
+    evidence_refs: list[str] = Field(default_factory=list)
+    in_reply_to: str | None = None
+    recovery_rule_id: str | None = Field(default=None, max_length=120)
+    created_at: datetime
+
+
+class ConfirmationRequestRecord(ContractModel):
+    confirmation_id: str
+    claim_id: str
+    claim_revision: int = Field(ge=1)
+    field_codes: list[str]
+    shown_values_fingerprint: str
+    created_at: datetime
+
+
+class StateChange(ContractModel):
+    path: str = Field(min_length=1, max_length=200)
+    to: Any
+
+
+class DiscrepancyCandidate(ContractModel):
+    """Internal candidate only; it never constitutes a fraud decision."""
+
+    candidate_id: str = Field(min_length=1, max_length=120)
+    field_code: str = Field(min_length=1, max_length=100)
+    code: Literal['MATERIAL_VALUE_CONFLICT'] = 'MATERIAL_VALUE_CONFLICT'
+    source_refs: list[str] = Field(min_length=2, max_length=100)
+    created_at: datetime
+
+
+class ProposedFormChange(ContractModel):
+    field_code: str = Field(min_length=1, max_length=100)
+    value: Any
+    source: FormSource = FormSource.INFERENCE
+    status: FormStatus = FormStatus.PROPOSED
+    needed_for: NeededFor = NeededFor.CURRENT_ACTION
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    precision: FactPrecision = FactPrecision.EXACT
+    relation: AssertionRelation | None = None
+    reported_text: str | None = Field(default=None, max_length=5000)
+    source_evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class AgentAuthority(ContractModel):
+    proposed_by: str
+    validated_by: str
+    outcome: AuthorityOutcome
+
+
+class ModelDecisionProvenance(ContractModel):
+    runtime_profile: Literal['model_gateway'] = 'model_gateway'
+    provider_model: str | None = Field(default=None, max_length=300)
+    provider_request_id: str | None = Field(default=None, max_length=500)
+    prompt_id: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class RuntimeInvocationTrace(ContractModel):
+    """Bounded provider metadata for one staged Runtime invocation."""
+
+    ordinal: int = Field(ge=1, le=2)
+    provider_model: str | None = Field(default=None, max_length=300)
+    provider_request_id: str | None = Field(default=None, max_length=500)
+    finish_reason: str | None = Field(default=None, max_length=100)
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    cache_read_input_tokens: int | None = Field(default=None, ge=0)
+    cache_write_input_tokens: int | None = Field(default=None, ge=0)
+    first_token_latency_ms: float | None = Field(default=None, ge=0)
+    latency_ms: float = Field(ge=0)
+
+
+class RuntimeEvidenceTrace(ContractModel):
+    """Bounded Evidence identity recorded for one successful model turn."""
+
+    evidence_id: str = Field(min_length=1, max_length=100)
+    media_type: str = Field(min_length=1, max_length=100)
+    outcome: Literal['submitted'] = 'submitted'
+
+
+class RuntimeTraceRecord(ContractModel):
+    """Provider trace retained alongside the applied Runtime turn records."""
+
+    trace_id: str
+    claim_id: str
+    session_id: str
+    model_profile_id: str
+    trigger_message_id: str
+    evidence: list[RuntimeEvidenceTrace] = Field(default_factory=list, max_length=20)
+    invocations: list[RuntimeInvocationTrace] = Field(min_length=0, max_length=2)
+    deterministic_response_id: str | None = Field(default=None, max_length=120)
+    tool_call_id: str | None = None
+    tool_name: str | None = Field(
+        default=None,
+        pattern=r'^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$',
+    )
+    tool_arguments: dict[str, Any] = Field(default_factory=dict)
+    tool_output: dict[str, Any] = Field(default_factory=dict)
+    tool_result_status: Literal['succeeded', 'unavailable', 'failed'] | None = None
+    action_code: str
+    runtime_action_code: str
+    reason_codes: list[str] = Field(min_length=1)
+    release_set_id: str | None = Field(default=None, max_length=120)
+    request_profile_id: str | None = Field(default=None, max_length=120)
+    provider_capability_version: str | None = Field(default=None, max_length=120)
+    prompt_bundle_id: str | None = Field(default=None, max_length=300)
+    fragment_refs: list[str] = Field(default_factory=list, max_length=30)
+    schema_id: str | None = Field(default=None, max_length=120)
+    field_contract_id: str | None = Field(default=None, max_length=120)
+    field_registry_version: str | None = Field(default=None, max_length=160)
+    branch_evaluation_revision: int | None = Field(default=None, ge=1)
+    field_contract_violations: list[dict[str, str]] = Field(default_factory=list, max_length=50)
+    repair_attempted: bool = False
+    repair_outcome: Literal['corrected', 'failed'] | None = None
+    route: str | None = Field(default=None, max_length=160)
+    context_sections: list[str] = Field(default_factory=list, max_length=100)
+    context_load_decisions: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+    request_budget: dict[str, Any] = Field(default_factory=dict)
+    cache_layout_version: str | None = Field(default=None, max_length=120)
+    prefix_fingerprint: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
+    tool_manifest_id: str | None = Field(default=None, max_length=160)
+    resolved_ref_count: int = Field(default=0, ge=0, le=1)
+    model_invocations: int | None = Field(default=None, ge=0, le=2)
+    tool_calls: int | None = Field(default=None, ge=0, le=1)
+    output_tokens: int | None = Field(default=None, ge=0)
+    cache_read_tokens: int | None = Field(default=None, ge=0)
+    cache_write_tokens: int | None = Field(default=None, ge=0)
+    cache_miss_reason: str | None = Field(default=None, max_length=120)
+    first_token_latency_ms: float | None = Field(default=None, ge=0)
+    total_latency_ms: float | None = Field(default=None, ge=0)
+    summary_state_mismatch: bool = False
+    shadow_context_plan: dict[str, Any] = Field(default_factory=dict)
+    slo_met: bool | None = None
+    status: Literal['succeeded', 'rejected', 'unavailable', 'failed']
+    created_at: datetime
+    finished_at: datetime
+
+
+class ConfigurationRevisionReference(ContractModel):
+    configuration_id: str = Field(min_length=1, max_length=100)
+    revision: int = Field(ge=1)
+
+
+class KnowledgeRevisionReference(ContractModel):
+    knowledge_id: str = Field(min_length=1, max_length=100)
+    revision: int = Field(ge=1)
+    version: str = Field(min_length=1, max_length=100)
+
+
+class RuntimeConfigurationProvenance(ContractModel):
+    """Exact published Control Plane coordinates used for one Agent turn."""
+
+    release_set_id: str | None = Field(default=None, max_length=100)
+    environment: str = Field(min_length=1, max_length=50)
+    runtime_profile: str = Field(min_length=1, max_length=80)
+    configurations: dict[str, ConfigurationRevisionReference] = Field(default_factory=dict)
+    knowledge: dict[str, KnowledgeRevisionReference] = Field(default_factory=dict)
+
+
+class AgentDecisionRecord(ContractModel):
+    decision_id: str
+    claim_id: str
+    session_id: str
+    trigger_message_id: str
+    action: AgentAction
+    action_code: str | None = Field(default=None, pattern=r'^[a-z]+\.[a-z][a-z0-9_]*$')
+    reason_codes: list[str] = Field(min_length=1)
+    customer_reason: str = Field(min_length=1, max_length=1000)
+    customer_response: str = Field(min_length=1, max_length=5000)
+    state_changes: list[StateChange] = Field(default_factory=list)
+    proposed_signals: list[dict[str, Any]] = Field(default_factory=list)
+    required_tools: list[dict[str, Any]] = Field(default_factory=list)
+    tool_results: list[dict[str, Any]] = Field(default_factory=list)
+    next_action_requirements: list[str] = Field(default_factory=list)
+    handoff_priority: str | None = None
+    handoff_id: str | None = None
+    customer_next_step: CustomerNextStep
+    authority: AgentAuthority
+    proposal_source: AgentProposalSource = AgentProposalSource.CONTROLLED_AGENT
+    model_provenance: ModelDecisionProvenance | None = None
+    runtime_configuration: RuntimeConfigurationProvenance | None = None
+    form_changes: dict[str, StructuredFormField] = Field(default_factory=dict)
+    contents_item_changes: list[ContentsItem] = Field(default_factory=list)
+    resulting_revision: int = Field(ge=1)
+    created_at: datetime
+    discrepancy_candidates: list[DiscrepancyCandidate] = Field(default_factory=list)
+
+
+class EvidenceReference(ContractModel):
+    """What one record has to say about another record or a claim fact.
+
+    A conflict, a supersession, and an established unavailability are all statements
+    about a *second* thing, so each names it. Without that, staff cannot be shown what is
+    contested, a claimant cannot be told what replaced what, and an unavailability cannot
+    be distinguished from a request nobody answered.
+
+    `state` and `resolved_at` exist because a conflict is not settled by being recorded.
+    A supersession and an established unavailability happen once and stay true, so they
+    are recorded resolved at the moment they are raised; a conflict stays unresolved
+    until a person decides it, and both surfaces need to show which of those it is.
+    """
+
+    relation: EvidenceRelation
+    evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
+    field_code: str | None = Field(default=None, min_length=1, max_length=100)
+    state: EvidenceRelationState = EvidenceRelationState.UNRESOLVED
+    reason: str = Field(min_length=1, max_length=1000)
+    raised_at: datetime
+    resolved_at: datetime | None = None
+
+    @model_validator(mode='after')
+    def validate_reference(self) -> 'EvidenceReference':
+        if (self.evidence_id is None) == (self.field_code is None):
+            raise ValueError(
+                'An evidence reference must name exactly one of another evidence record '
+                'or a claim field.'
+            )
+        if self.relation is not EvidenceRelation.CONFLICTS_WITH and self.field_code is not None:
+            raise ValueError(
+                f'{self.relation.value} must name another evidence record, not a claim field.'
+            )
+        resolved = self.state is EvidenceRelationState.RESOLVED
+        if resolved != (self.resolved_at is not None):
+            raise ValueError(
+                'A resolved reference must record when it was resolved, and an unresolved '
+                'one must not.'
+            )
+        if self.resolved_at is not None and self.resolved_at < self.raised_at:
+            raise ValueError('An evidence reference cannot be resolved before it was raised.')
+        return self
+
+
+class EvidenceMaterialVersion(ContractModel):
+    """Immutable snapshot of one replaced material generation."""
+
+    version: int = Field(ge=1)
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    original_filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    references: list[EvidenceReference] = Field(default_factory=list, max_length=50)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    proposed_fields: dict[str, StructuredFormField] = Field(default_factory=dict)
+    wait_type: EvidenceWaitType | None = None
+    responsible_party: ResponsibleParty | None = None
+    expected_by: datetime | None = None
+    expected_timing: str | None = Field(default=None, max_length=200)
+    context_summary: str | None = Field(default=None, max_length=1000)
+    archived_at: datetime
+    reason: Literal['claimant_replacement']
+
+
+class EvidenceRecord(ContractModel):
+    """One piece of material on a claim, its condition, and what it says about others."""
+
+    evidence_id: str
+    claim_id: str
+    kind: str
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    original_filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    source: EvidenceSource
+    claimant_history_state: EvidenceHistoryState = EvidenceHistoryState.AVAILABLE
+    claimant_history_removed_at: datetime | None = None
+    references: list[EvidenceReference] = Field(default_factory=list, max_length=50)
+    material_version: int = Field(default=1, ge=1)
+    material_history: list[EvidenceMaterialVersion] = Field(default_factory=list)
+    related_fields: list[str] = Field(default_factory=list)
+    needed_for: list[str] = Field(default_factory=list)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    claimant_note: str | None = None
+    wait_type: EvidenceWaitType | None = None
+    responsible_party: ResponsibleParty | None = None
+    expected_by: datetime | None = None
+    expected_timing: str | None = Field(default=None, max_length=200)
+    context_summary: str | None = Field(default=None, max_length=1000)
+    created_at: datetime
+    updated_at: datetime
+
+    @model_validator(mode='after')
+    def validate_material_history(self) -> 'EvidenceRecord':
+        if (self.claimant_history_state is EvidenceHistoryState.REMOVED) != (
+            self.claimant_history_removed_at is not None
+        ):
+            raise ValueError('Removed claimant Evidence history must record when it was removed.')
+        versions = [item.version for item in self.material_history]
+        if versions != list(range(1, self.material_version)):
+            raise ValueError(
+                'Evidence material history must contain every prior version exactly once.'
+            )
+        if any(item.archived_at > self.updated_at for item in self.material_history):
+            raise ValueError(
+                'Evidence material history cannot be archived after the record update.'
+            )
+        return self
+
+
+class EvidenceClaimLink(ContractModel):
+    """Auditable attachment of one existing Evidence object to another Claim."""
+
+    link_id: str
+    evidence_id: str
+    source_claim_id: str
+    target_claim_id: str
+    customer_id: str
+    state: EvidenceClaimLinkState
+    created_at: datetime
+    updated_at: datetime
+    detached_at: datetime | None = None
+
+    @model_validator(mode='after')
+    def validate_link_state(self) -> 'EvidenceClaimLink':
+        if self.source_claim_id == self.target_claim_id:
+            raise ValueError('An Evidence reuse link must connect two different Claims.')
+        if (self.state is EvidenceClaimLinkState.DETACHED) != (self.detached_at is not None):
+            raise ValueError('A detached Evidence link must record when it was detached.')
+        if self.updated_at < self.created_at:
+            raise ValueError('An Evidence link cannot be updated before it was created.')
+        if self.detached_at is not None and self.detached_at != self.updated_at:
+            raise ValueError('An Evidence link detachment must be its latest update.')
+        return self
+
+
+class HandoffEvidenceItem(ContractModel):
+    """Staff handoff projection of evidence without copying storage provenance."""
+
+    evidence_id: str
+    kind: str
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    source: EvidenceSource
+    references: list[EvidenceReference] = Field(default_factory=list, max_length=50)
+    visibility: MessageVisibility
+    original_filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    related_fields: list[str] = Field(default_factory=list)
+    needed_for: list[str] = Field(default_factory=list)
+    claimant_note: str | None = None
+
+
+class HandoffPacket(ContractModel):
+    """Staff-only transfer context built from the authoritative working claim."""
+
+    incident_summary: str | None = None
+    form_revision: int = Field(ge=1)
+    form_snapshot: dict[str, StructuredFormField] = Field(default_factory=dict)
+    evidence_refs: list[str] = Field(default_factory=list)
+    evidence: list[HandoffEvidenceItem] = Field(default_factory=list)
+    missing_items: list[str] = Field(default_factory=list)
+    pending_items: list[str] = Field(default_factory=list)
+    conflicts: list[str] = Field(default_factory=list)
+    low_confidence_items: list[str] = Field(default_factory=list)
+    policy_citation_refs: list[str] = Field(default_factory=list)
+    history_evidence_refs: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+    prior_customer_updates: list[str] = Field(default_factory=list)
+    promised_next_step: str
+
+
+class HandoffRecord(ContractModel):
+    handoff_id: str
+    claim_id: str
+    type: HandoffType
+    status: HandoffStatus
+    priority: HandoffPriority
+    queue: str
+    # This is populated only for claimant-created support requests. Internal
+    # professional-review handoffs use ``trigger`` without asserting claimant intent.
+    support_need: SupportNeed | None = None
+    trigger: HandoffTrigger
+    preferred_channel: PreferredChannel | None = None
+    reason_codes: list[str] = Field(min_length=1)
+    reason: str = Field(min_length=1, max_length=1000)
+    requested_action: str = Field(min_length=1, max_length=1000)
+    applied_rule: str = Field(min_length=1, max_length=100)
+    packet: HandoffPacket
+    source_message_id: str | None = None
+    assigned_to: str | None = None
+    created_at: datetime
+    accepted_at: datetime | None = None
+    resolved_at: datetime | None = None
+    # Support handoffs temporarily interrupt the claimant workflow. These values
+    # preserve the authoritative continuation target without creating a second
+    # claim-state record.
+    # Legacy records may not have a continuation target; resolution then preserves
+    # the current Claim state rather than inventing a default.
+    resume_workflow_state: WorkflowState | None = None
+    resume_next_action: AgentAction | None = None
+
+
+class ClaimantHandoff(ContractModel):
+    """Customer-safe projection; internal routing and packet details are excluded."""
+
+    handoff_id: str
+    status: HandoffStatus
+    support_need: SupportNeed
+    summary: str
+    created_at: datetime
+
+
+class ClaimantResolvedSupportHandoff(ContractModel):
+    """Claimant-safe evidence that a support handoff was completed."""
+
+    handoff_id: str
+    type: HandoffType
+    status: Literal['resolved'] = 'resolved'
+    completed_at: datetime
+    customer_update: str | None = None
+
+
+class WorkbenchSession(ContractModel):
+    """Staff projection of saved resume context without repository ownership fields."""
+
+    session_id: str
+    claim_id: str
+    status: SessionStatus
+    summary: str | None = None
+    unresolved_questions: list[str] = Field(default_factory=list)
+    pending_items: list[str] = Field(default_factory=list)
+    prior_commitments: list[str] = Field(default_factory=list)
+    context_revision: int = Field(ge=1)
+    question_budget: int = Field(default=9, ge=1)
+    question_turn_count: int = Field(default=0, ge=0)
+    requested_fact_count: int = Field(default=0, ge=0)
+    repeated_question_count: int = Field(default=0, ge=0)
+    remaining_question_budget: int = Field(default=9, ge=0)
+    post_session_follow_up_required: bool = False
+    question_history: list[QuestionRecord] = Field(default_factory=list)
+    started_at: datetime
+    last_active_at: datetime
+    closed_at: datetime | None = None
+
+
+class StaffActionStatus(str, Enum):
+    OPEN = 'open'
+    IN_PROGRESS = 'in_progress'
+    COMPLETED = 'completed'
+    CANCELLED = 'cancelled'
+
+
+class SignalDecisionValue(str, Enum):
+    CONFIRMED = 'confirmed'
+    DISMISSED = 'dismissed'
+    OVERRIDDEN = 'overridden'
+    RESOLVED = 'resolved'
+
+
+class StaffActionResult(ContractModel):
+    outcome: str = Field(min_length=1, max_length=100)
+    summary: str = Field(min_length=1, max_length=1000)
+    reason_codes: list[str] = Field(min_length=1, max_length=20)
+    source_refs: list[str] = Field(default_factory=list, max_length=100)
+
+
+class CustomerUpdateInput(ContractModel):
+    summary: str = Field(min_length=1, max_length=1000)
+    responsible_party: ResponsibleParty
+    related_refs: list[str] = Field(default_factory=list, max_length=100)
+
+
+class CustomerUpdateRecord(CustomerUpdateInput):
+    update_id: str
+    claim_id: str
+    created_by: str
+    created_at: datetime
+
+
+class StaffActionRecord(ContractModel):
+    action_id: str
+    claim_id: str
+    action_type: str = Field(min_length=1, max_length=100)
+    status: StaffActionStatus
+    assigned_to: str
+    requested_outcome: str = Field(min_length=1, max_length=1000)
+    source_refs: list[str] = Field(default_factory=list, max_length=100)
+    result: StaffActionResult | None = None
+    completed_by: str | None = None
+    created_at: datetime
+    completed_at: datetime | None = None
+
+
+class CollaborationRequestKind(str, Enum):
+    COWORK = 'cowork'
+    TRANSFER = 'transfer'
+    REQUEUE = 'requeue'
+
+
+class CollaborationRequestStatus(str, Enum):
+    PENDING = 'pending'
+    ACCEPTED = 'accepted'
+    REJECTED = 'rejected'
+    CANCELLED = 'cancelled'
+
+
+class ClaimCollaborationRequest(ContractModel):
+    request_id: str
+    claim_id: str
+    kind: CollaborationRequestKind
+    status: CollaborationRequestStatus
+    requested_by: str
+    primary_owner_id: str | None = None
+    target_staff_id: str | None = None
+    reason: str = Field(min_length=1, max_length=1000)
+    created_at: datetime
+    resolved_by: str | None = None
+    resolved_at: datetime | None = None
+
+
+class ClaimCoworkerRecord(ContractModel):
+    coworker_id: str
+    claim_id: str
+    staff_id: str
+    granted_by: str
+    source_request_id: str
+    active: bool = True
+    granted_at: datetime
+    revoked_at: datetime | None = None
+
+
+class CreateCoworkRequest(ContractModel):
+    staff_id: str | None = Field(default=None, min_length=1, max_length=100)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class CreateTransferRequest(ContractModel):
+    target_staff_id: str = Field(min_length=1, max_length=100)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class DecideCollaborationRequest(ContractModel):
+    decision: CollaborationRequestStatus
+
+    @model_validator(mode='after')
+    def require_final_decision(self) -> 'DecideCollaborationRequest':
+        if self.decision not in {
+            CollaborationRequestStatus.ACCEPTED,
+            CollaborationRequestStatus.REJECTED,
+        }:
+            raise ValueError('A collaboration request can only be accepted or rejected.')
+        return self
+
+
+class RequeueClaimRequest(ContractModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class ReopenClaimRequest(ContractModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class CollaborationMutationResponse(ContractModel):
+    request: ClaimCollaborationRequest
+    revision: int = Field(ge=1)
+    coworker: ClaimCoworkerRecord | None = None
+
+
+class CreateStaffActionRequest(ContractModel):
+    action_type: str = Field(min_length=1, max_length=100)
+    assigned_to: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class UpdateStaffActionRequest(ContractModel):
+    status: StaffActionStatus
+    result: StaffActionResult | None = None
+    state_changes: list[StateChange] = Field(default_factory=list, max_length=20)
+    customer_update: CustomerUpdateInput | None = None
+
+
+class StaffActionMutationResponse(ContractModel):
+    action: StaffActionRecord
+    revision: int = Field(ge=1)
+    customer_update: CustomerUpdateRecord | None = None
+
+
+class ExternalTaskReconciliationResponse(ContractModel):
+    claim_id: str
+    task_id: str
+    revision: int = Field(ge=1)
+    routing: AssessorRoutingResult
+    staff_action: StaffActionRecord
+
+
+class SignalDecisionRequest(ContractModel):
+    decision: SignalDecisionValue
+    reason_codes: list[str] = Field(min_length=1, max_length=20)
+    summary: str = Field(min_length=1, max_length=1000)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=100)
+
+
+class SignalDecisionRecord(SignalDecisionRequest):
+    signal_decision_id: str
+    claim_id: str
+    signal_id: str
+    actor_id: str
+    created_at: datetime
+
+
+class SignalDecisionResponse(ContractModel):
+    signal_decision: SignalDecisionRecord
+    revision: int = Field(ge=1)
+
+
+class WorkbenchHandoff(ContractModel):
+    """Staff-only handoff projection including the complete transfer packet."""
+
+    handoff_id: str
+    claim_id: str
+    type: HandoffType
+    status: HandoffStatus
+    priority: HandoffPriority
+    queue: str
+    support_need: SupportNeed | None = None
+    trigger: HandoffTrigger
+    preferred_channel: PreferredChannel | None = None
+    reason_codes: list[str]
+    reason: str
+    requested_action: str
+    applied_rule: str
+    packet: HandoffPacket
+    source_message_id: str | None = None
+    assigned_to: str | None = None
+    created_at: datetime
+    accepted_at: datetime | None = None
+    resolved_at: datetime | None = None
+    resume_workflow_state: WorkflowState | None = None
+    resume_next_action: AgentAction | None = None
+
+
+class AcceptHandoffRequest(ContractModel):
+    assignee_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class ResolveHandoffRequest(ContractModel):
+    result: StaffActionResult
+    state_changes: list[StateChange] = Field(default_factory=list, max_length=20)
+    customer_update: CustomerUpdateInput
+
+
+class HandoffMutationResponse(ContractModel):
+    handoff: WorkbenchHandoff
+    revision: int = Field(ge=1)
+    staff_action: StaffActionRecord | None = None
+    customer_update: CustomerUpdateRecord | None = None
+
+
+class WorkbenchClaimDetail(ContractModel):
+    """Authorised internal projection assembled from the shared claim repository."""
+
+    claim_id: str
+    revision: int = Field(ge=1)
+    customer_reference: str
+    channel: Channel
+    locale: str
+    incident_type: str | None = None
+    claim_state: ClaimState
+    form: dict[str, StructuredFormField]
+    route: str | None = None
+    active_session_id: str | None = None
+    evidence_summary: EvidenceSummary
+    evidence: list[EvidenceRecord]
+    sessions: list[WorkbenchSession]
+    messages: list[MessageRecord]
+    decisions: list[AgentDecisionRecord]
+    retrievals: list[dict[str, Any]]
+    signals: list[dict[str, Any]]
+    tags: list[StaffTag] = Field(default_factory=list)
+    handoffs: list[WorkbenchHandoff]
+    staff_actions: list[dict[str, Any]]
+    customer_updates: list[dict[str, Any]]
+    external_claim: ExternalClaimResult | None = None
+    external_service_consents: list[ExternalServiceConsent] = Field(default_factory=list)
+    assessor_routing: AssessorRoutingResult | None = None
+    customer_next_step: CustomerNextStep
+    created_at: datetime
+    updated_at: datetime
+
+
+class PageInfo(ContractModel):
+    next_cursor: str | None = None
+
+
+class WorkbenchClaimListItem(ContractModel):
+    """Compact staff projection used to populate the workbench queue."""
+
+    claim_id: str
+    revision: int = Field(ge=1)
+    customer_reference: str
+    incident_type: str | None = None
+    workflow_state: WorkflowState
+    queue: str
+    priority: HandoffPriority
+    next_action: AgentAction
+    route: str | None = None
+    evidence_state: EvidenceState
+    evidence_summary: EvidenceSummary
+    pending_evidence: list[EvidenceRecord] = Field(default_factory=list)
+    pending_evidence_count: int = Field(default=0, ge=0)
+    pending_wait_types: list[EvidenceWaitType] = Field(default_factory=list)
+    next_action_summary: str
+    responsible_party: ResponsibleParty
+    claim_creation_status: ClaimCreationStatus | None = None
+    assessor_routing_status: AssessorRoutingStatus | None = None
+    open_handoff_count: int = Field(ge=0)
+    assignee_id: str | None = None
+    tags: list[StaffTag] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkbenchClaimListResponse(ContractModel):
+    items: list[WorkbenchClaimListItem]
+    page: PageInfo
+
+
+class PendingEvidenceReference(ContractModel):
+    evidence_id: str = Field(min_length=1, max_length=100)
+    kind: str = Field(min_length=1, max_length=100)
+    needed_for: list[str] = Field(default_factory=list, max_length=20)
+
+
+class CreateExternalClaimRequest(ContractModel):
+    working_claim_id: str = Field(min_length=1, max_length=100)
+    claim_revision: int = Field(ge=1)
+    authorised_decision_id: str = Field(min_length=1, max_length=100)
+    evidence_snapshot_fingerprint: str = Field(min_length=64, max_length=64)
+    confirmed_form: dict[str, StructuredFormField] = Field(default_factory=dict)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=100)
+    pending_evidence: list[PendingEvidenceReference] = Field(
+        default_factory=list,
+        max_length=100,
+    )
+    route: str = Field(min_length=1, max_length=100)
+
+
+class AssessorLocation(ContractModel):
+    region: str = Field(min_length=1, max_length=100)
+
+
+class RouteAssessorRequest(ContractModel):
+    claim_id: str = Field(min_length=1, max_length=100)
+    external_claim_id: str = Field(min_length=1, max_length=100)
+    authorisation_ref: str = Field(min_length=1, max_length=100)
+    claimant_consent_ref: str = Field(min_length=1, max_length=100)
+    requested_action: str = Field(min_length=1, max_length=100)
+    location: AssessorLocation
+
+
+class GrantAssessorConsentRequest(ContractModel):
+    consent: Literal[True]
+
+
+class ExternalServiceOfferDecisionRequest(ContractModel):
+    decision: Literal['grant', 'decline', 'withdraw']
+
+
+class ClaimantExternalServiceResponse(ContractModel):
+    claim_id: str
+    revision: int = Field(ge=1)
+    action: ClaimantExternalServiceAction
+    customer_next_step: CustomerNextStep
+    primary_action: ClaimantPrimaryAction
+
+
+class ClaimantEvidence(ContractModel):
+    """Claimant-safe evidence projection with storage and extraction details removed."""
+
+    evidence_id: str
+    claim_id: str
+    source_claim_id: str | None = None
+    kind: str
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    original_filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = None
+    source: EvidenceSource
+    related_fields: list[str] = Field(default_factory=list)
+    needed_for: list[str] = Field(default_factory=list)
+    claimant_note: str | None = None
+    reused: bool = False
+    can_remove: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class RegisterEvidenceRequest(ContractModel):
+    kind: str = Field(min_length=1, max_length=100)
+    status: EvidenceStatus
+    related_fields: list[str] = Field(default_factory=list, max_length=50)
+    needed_for: list[str] = Field(default_factory=list, max_length=20)
+    claimant_note: str | None = Field(default=None, max_length=1000)
+
+
+class RequestEvidenceUploadRequest(ContractModel):
+    evidence_id: str | None = Field(default=None, min_length=1, max_length=120)
+    kind: str = Field(min_length=1, max_length=100)
+    original_filename: str = Field(min_length=1, max_length=255)
+    media_type: str = Field(min_length=1, max_length=100)
+    size_bytes: int = Field(gt=0)
+
+
+class CompleteEvidenceUploadRequest(ContractModel):
+    upload_checksum: str = Field(pattern=r'^sha256:[0-9a-fA-F]{64}$')
+
+
+class EvidenceFactProposal(ContractModel):
+    field_code: str = Field(min_length=1, max_length=100)
+    value: Any
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class CompleteEvidenceProcessingRequest(ContractModel):
+    outcome: Literal['ready', 'failed', 'retry'] = 'ready'
+    facts: list[EvidenceFactProposal] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode='after')
+    def validate_outcome(self) -> 'CompleteEvidenceProcessingRequest':
+        if self.outcome == 'ready' and not self.facts:
+            raise ValueError('A ready processing result must contain at least one fact.')
+        if self.outcome != 'ready' and self.facts:
+            raise ValueError('Failed or retry processing results must not contain facts.')
+        return self
+
+
+class EvidenceFactDecisionRequest(ContractModel):
+    field_codes: list[str] = Field(min_length=1, max_length=50)
+    decision: Literal['confirmed', 'rejected']
+
+
+class CreateSupportRequest(ContractModel):
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
+    support_need: SupportNeed
+    preferred_channel: PreferredChannel | None = None
+
+
+class HandoffDeliveryState(str, Enum):
+    DELIVERED = 'delivered'
+    QUEUED_LOCALLY = 'queued_locally'
+
+
+class HandoffDelivery(ContractModel):
+    """Claimant-safe statement of whether the staff queue system was notified.
+
+    `queued_locally` means the notification service could not be reached. The
+    handoff is still saved and still in the staff queue, so the request is not
+    lost; only the push notification is missing.
+    """
+
+    state: HandoffDeliveryState
+    limitations: list[str] = Field(default_factory=list, max_length=10)
+
+
+class SupportRequestResponse(ContractModel):
+    handoff: ClaimantHandoff
+    revision: int
+    customer_next_step: CustomerNextStep
+    primary_action: ClaimantPrimaryAction
+    delivery: HandoffDelivery
+
+
+class EvidenceListResponse(ContractModel):
+    claim_id: str
+    revision: int
+    items: list[ClaimantEvidence]
+    customer_next_step: CustomerNextStep
+
+
+class ClaimantEvidenceHistoryItem(ContractModel):
+    """Claimant-safe metadata for Evidence retained across Claims."""
+
+    evidence_id: str
+    source_claim_id: str
+    kind: str
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    original_filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = None
+    source: EvidenceSource
+    provenance_summary: list[str] = Field(default_factory=list, max_length=20)
+    can_reuse: bool = False
+    can_remove: bool = False
+    linked_claim_ids: list[str] = Field(default_factory=list, max_length=100)
+    created_at: datetime
+    updated_at: datetime
+
+
+class ClaimantEvidenceHistoryResponse(ContractModel):
+    """Account-scoped claimant Evidence history projection."""
+
+    items: list[ClaimantEvidenceHistoryItem]
+    page: PageInfo
+
+
+class EvidenceActionRequestPayload(ContractModel):
+    source_claim_id: str = Field(min_length=1, max_length=120)
+    proposal_ref: str = Field(min_length=1, max_length=200)
+    confirmation_ref: str = Field(min_length=1, max_length=200)
+
+
+class ClaimantEvidenceActionResponse(ContractModel):
+    action: Literal['reuse', 'remove']
+    status: Literal['succeeded', 'rejected', 'unavailable', 'failed', 'unknown']
+    reason_code: str = Field(min_length=1, max_length=100)
+    evidence_id: str
+    source_claim_id: str
+    target_claim_id: str
+    revision: int | None = Field(default=None, ge=1)
+    state_change_refs: list[str] = Field(default_factory=list, max_length=20)
+    retryable: bool = False
+    message: str
+
+
+class EvidenceMutationResponse(ContractModel):
+    evidence: ClaimantEvidence
+    revision: int
+    customer_next_step: CustomerNextStep
+
+
+class UploadTarget(ContractModel):
+    method: Literal['PUT'] = 'PUT'
+    url: str
+    headers: dict[str, str]
+    expires_at: datetime
+
+
+class UploadConstraints(ContractModel):
+    max_size_bytes: int
+    allowed_media_types: list[str]
+
+
+class EvidenceUploadResponse(ContractModel):
+    evidence_id: str
+    revision: int
+    upload: UploadTarget
+    constraints: UploadConstraints
+    customer_next_step: CustomerNextStep
+
+
+class EvidenceCompleteResponse(ContractModel):
+    evidence: ClaimantEvidence
+    revision: int
+    status_url: str
+    customer_next_step: CustomerNextStep
+
+
+class EvidenceProcessingResponse(ContractModel):
+    evidence_id: str
+    revision: int
+    file_status: EvidenceFileStatus
+    proposed_fields: dict[str, StructuredFormField]
+
+
+class EvidenceFactDecisionResponse(ContractModel):
+    evidence_id: str
+    revision: int
+    decision: Literal['confirmed', 'rejected']
+    updated_fields: dict[str, StructuredFormField]
+
+
+class CreateClaimRequest(ContractModel):
+    channel: Channel = Channel.WEB_AGENT
+    locale: str = Field(default='en-NZ', min_length=2, max_length=35)
+    incident_type: str | None = Field(default=None, max_length=100)
+    model_profile_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class StartSessionRequest(ContractModel):
+    intent: str = Field(default='resume', min_length=1, max_length=50)
+    model_profile_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+NonEmptyText = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=5000)
+]
+
+
+class TextMessageContent(ContractModel):
+    type: Literal['text'] = 'text'
+    text: NonEmptyText
+
+
+class CreateMessageRequest(ContractModel):
+    client_message_id: str = Field(min_length=1, max_length=200)
+    content: TextMessageContent | None = None
+    evidence_refs: list[str] = Field(default_factory=list, max_length=20)
+    # ChatGPT-style model selection: the selected published profile applies to
+    # this turn only and is persisted with the session/Runtime provenance.
+    model_profile_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+    @model_validator(mode='after')
+    def require_content_or_evidence(self) -> 'CreateMessageRequest':
+        if self.content is None and not self.evidence_refs:
+            raise ValueError('A text message or evidence reference is required.')
+        return self
+
+
+class CreateStaffMessageRequest(ContractModel):
+    content: TextMessageContent
+    in_reply_to: str | None = None
+
+
+class FormUpdate(ContractModel):
+    field_code: str = Field(min_length=1, max_length=100)
+    value: Any
+    status: FormStatus = FormStatus.CONFIRMED
+    correction_reason: str | None = Field(default=None, max_length=500)
+
+
+class FormPatchRequest(ContractModel):
+    updates: list[FormUpdate] = Field(min_length=1, max_length=50)
+
+
+class FormConfirmationRequest(ContractModel):
+    field_codes: list[str] = Field(min_length=1, max_length=50)
+
+
+class ClaimantIncompleteContext(ContractModel):
+    interrupted_at: datetime
+    last_meaningful_activity_at: datetime
+    resume_point: str
+    follow_up_due_at: datetime | None = None
+    expires_at: datetime | None = None
+    follow_up_status: FollowUpStatus
+
+
+class ClaimAgreementAcceptanceProjection(ContractModel):
+    """Claimant-safe receipt for one recorded agreement acceptance."""
+
+    acceptance_id: str
+    agreement_id: str
+    version: str
+    confirmations: dict[str, bool]
+    accepted_at: datetime
+
+
+class AgreementAcceptanceResponse(ContractModel):
+    claim_id: str
+    revision: int = Field(ge=1)
+    agreement: ClaimSubmissionAgreement
+    acceptance: ClaimAgreementAcceptanceProjection
+    customer_next_step: CustomerNextStep
+    primary_action: ClaimantPrimaryAction
+
+
+class ClaimantClaim(ContractModel):
+    claim_id: str
+    revision: int
+    incident_type: str | None = None
+    workflow_state: WorkflowState
+    form: dict[str, StructuredFormField]
+    contents_items: list[ClaimantContentsItem] = Field(default_factory=list)
+    motor_other_driver: MotorOtherDriverProjection | None = None
+    evidence_summary: EvidenceSummary
+    payment_destination_id: str | None = Field(default=None, pattern=r'^pyd_[a-f0-9]{20}$')
+    submission_agreement: ClaimSubmissionAgreement | None = None
+    external_claim: ExternalClaimResult | None = None
+    external_service_action: ClaimantExternalServiceAction | None = None
+    external_capabilities: list[ExternalCapabilityProjection] = Field(default_factory=list)
+    dynamic_form: 'DynamicFormProjection | None' = None
+    customer_next_step: CustomerNextStep
+    primary_action: ClaimantPrimaryAction
+    incomplete_context: ClaimantIncompleteContext | None = None
+    handoff: ClaimantHandoff | None = None
+    resolved_support_handoff: ClaimantResolvedSupportHandoff | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ClaimantChangeEvent(ContractModel):
+    """Claimant-safe notification that authorised projections should be reloaded."""
+
+    event_id: str
+    claim_id: str
+    session_id: str
+    claim_revision: int = Field(ge=1)
+    resources: list[Literal['claim', 'messages']]
+    emitted_at: datetime
+
+
+class ClaimListItem(ContractModel):
+    claim_id: str
+    revision: int
+    incident_type: str | None = None
+    workflow_state: WorkflowState
+    external_claim: ExternalClaimResult | None = None
+    customer_next_step: CustomerNextStep
+    incomplete_context: ClaimantIncompleteContext | None = None
+    created_at: datetime
+    updated_at: datetime
+    can_resume: bool
+
+
+class ClaimListResponse(ContractModel):
+    items: list[ClaimListItem]
+    page: PageInfo
+
+
+class ClaimantSession(ContractModel):
+    session_id: str
+    claim_id: str
+    status: SessionStatus
+    model_profile_id: str = Field(default='openrouter-gpt4o-mini', min_length=1, max_length=100)
+    resume: ResumePackage
+    started_at: datetime
+    last_active_at: datetime
+    closed_at: datetime | None = None
+
+
+class PauseSessionResponse(ContractModel):
+    claim: ClaimantClaim
+    session: ClaimantSession
+
+
+class CreateClaimResponse(ContractModel):
+    claim: ClaimantClaim
+    session: ClaimantSession
+
+
+class FormPatchResponse(ContractModel):
+    claim_id: str
+    revision: int
+    updated_fields: dict[str, StructuredFormField]
+    customer_next_step: CustomerNextStep
+    primary_action: ClaimantPrimaryAction
+    dynamic_form: 'DynamicFormProjection | None' = None
+
+
+class ClaimantMessage(ContractModel):
+    message_id: str
+    actor: ActorType
+    content: dict[str, Any]
+    evidence_refs: list[str] = Field(default_factory=list)
+    in_reply_to: str | None = None
+    client_message_id: str | None = None
+    recovery: 'ClaimantTurnRecovery | None' = None
+    message_actions: list[ClaimantExternalServiceAction] = Field(default_factory=list)
+    created_at: datetime
+
+
+class FormChange(ContractModel):
+    field_code: str
+    field: StructuredFormField
+
+
+class ClaimantDecision(ContractModel):
+    decision_id: str
+    action: AgentAction
+    action_code: str | None = Field(default=None, pattern=r'^[a-z]+\.[a-z][a-z0-9_]*$')
+    reason_codes: list[str]
+    customer_reason: str
+    customer_next_step: CustomerNextStep
+
+
+class ClaimantTurnRecovery(ContractModel):
+    rule_id: str
+    continuation: Literal['runtime.fail_safe']
+    claimant_projection: str
+    resume_triggers: list[str]
+    resume_entrypoint: Literal['submit_message']
+
+
+class MessageTurnResponse(ContractModel):
+    claim_id: str
+    session_id: str
+    # The revision at which this message turn was committed. On replay this
+    # remains historical even when later Claim mutations have advanced state.
+    claim_revision: int
+    # The current Claim revision used by a continuation action or retry.
+    current_claim_revision: int
+    # Authoritative current state. Historical deltas below remain turn evidence and
+    # must not be merged into this snapshot when the revisions differ.
+    current_claim: ClaimantClaim
+    claimant_message: ClaimantMessage
+    agent_message: ClaimantMessage | None = None
+    form_changes: list[FormChange]
+    contents_item_changes: list[ClaimantContentsItem] = Field(default_factory=list)
+    decision: ClaimantDecision | None = None
+    handoff: ClaimantHandoff | None = None
+    dynamic_form: 'DynamicFormProjection | None' = None
+    primary_action: ClaimantPrimaryAction
+    recovery: ClaimantTurnRecovery | None = None
+
+
+class MessageListResponse(ContractModel):
+    items: list[ClaimantMessage]
+    page: PageInfo
+
+
+class StaffMessageResponse(ContractModel):
+    claim_id: str
+    session_id: str
+    claim_revision: int
+    message: MessageRecord
+
+
+class FormConfirmationResponse(ContractModel):
+    claim_id: str
+    revision: int
+    confirmed_fields: dict[str, StructuredFormField]
+    confirmed_contents_items: list[ClaimantContentsItem] = Field(default_factory=list)
+    decision: ClaimantDecision | None = None
+    customer_next_step: CustomerNextStep
+    primary_action: ClaimantPrimaryAction
+    dynamic_form: 'DynamicFormProjection | None' = None
+
+
+class ClaimCreationResponse(ContractModel):
+    claim_id: str
+    revision: int = Field(ge=1)
+    decision: ClaimantDecision
+    external_claim: ExternalClaimResult
+    external_service_action: ClaimantExternalServiceAction | None = None
+    customer_next_step: CustomerNextStep
+    primary_action: ClaimantPrimaryAction
+
+
+class DemoResetResponse(ContractModel):
+    status: Literal['reset']
+    cleared: dict[str, int]
+
+
+class DemoSeedResponse(ContractModel):
+    status: Literal['seeded']
+    scenario_ids: list[str]
+    claim_ids: list[str]
+
+
+class FieldSelectionState(str, Enum):
+    """Runtime relevance of a registered field for the current safe action."""
+
+    REQUIRED_NOW = 'required_now'
+    CANDIDATE_NOW = 'candidate_now'
+    PENDING_LATER = 'pending_later'
+    INACTIVE = 'inactive'
+    SYSTEM_OWNED = 'system_owned'
+
+
+class BranchEvaluationStatus(str, Enum):
+    EVALUATED = 'evaluated'
+    APPLIED = 'applied'
+    STALE = 'stale'
+    SUPERSEDED = 'superseded'
+
+
+class BranchResult(ContractModel):
+    """Deterministic result for one registered content branch."""
+
+    branch_id: str
+    rule_id: str = Field(min_length=1)
+    source_refs: list[str] = Field(default_factory=list)
+    status: Literal['active', 'candidate', 'suspended', 'exited']
+    reason: str
+    registered_fields: list[str] = Field(default_factory=list)
+
+
+class FieldSelectionResult(ContractModel):
+    """Selection state kept separate from a field's stored value state."""
+
+    field_code: str
+    selection_state: FieldSelectionState
+    value_state: FormStatus
+    source: FormSource | None = None
+    reason: str
+
+
+class RequirementResolution(ContractModel):
+    """Deterministic information needed for the current safe action."""
+
+    satisfied: list[str] = Field(default_factory=list)
+    recorded: list[str] = Field(default_factory=list)
+    missing_required_now: list[str] = Field(default_factory=list)
+    missing_by_branch: list[dict[str, object]] = Field(default_factory=list)
+    pending_later: list[str] = Field(default_factory=list)
+    # Every required field lands in exactly one bucket. Only ``missing`` blocks
+    # creation: a fact the claimant cannot supply yet, a fact awaiting a third
+    # party, a disputed fact, or a recorded-but-unconfirmed fact all travel to
+    # the Workbench with their state rather than holding the report hostage.
+    by_state: dict[str, list[str]] = Field(default_factory=dict)
+    unresolved: list[str] = Field(default_factory=list)
+    next_required_item: str | None = None
+    ready: bool = False
+    ready_pending_confirmation: bool = False
+    current_action_total: int = Field(default=0, ge=0)
+    current_action_satisfied: int = Field(default=0, ge=0)
+
+
+class BranchEvaluationResult(ContractModel):
+    """Provider-neutral proposal produced by the branch evaluator."""
+
+    claim_id: str
+    evaluated_against_claim_revision: int = Field(ge=1)
+    field_registry_version: str = Field(min_length=1)
+    branch_rules_version: str = Field(min_length=1)
+    selected_family: Literal['motor', 'home', 'contents'] | None = None
+    unresolved_family_conflict: list[str] = Field(default_factory=list)
+    active_branches: list[str] = Field(default_factory=list)
+    candidate_branches: list[str] = Field(default_factory=list)
+    suspended_branches: list[str] = Field(default_factory=list)
+    exited_branches: list[str] = Field(default_factory=list)
+    branch_results: list[BranchResult] = Field(default_factory=list)
+    field_selection: list[FieldSelectionResult] = Field(default_factory=list)
+    work_item_intents: list[dict[str, Any]] = Field(default_factory=list)
+    handoff_intents: list[dict[str, Any]] = Field(default_factory=list)
+    evidence_intents: list[dict[str, Any]] = Field(default_factory=list)
+    consent_intents: list[dict[str, Any]] = Field(default_factory=list)
+    integration_intents: list[dict[str, Any]] = Field(default_factory=list)
+    interruption_result: dict[str, Any] = Field(default_factory=dict)
+    permitted_actions: list[AgentAction] = Field(default_factory=list)
+    permitted_tools: list[str] = Field(default_factory=list)
+    requirements: RequirementResolution = Field(default_factory=RequirementResolution)
+    recomputation_reason: str = Field(min_length=1)
+
+
+class BranchEvaluationRecord(ContractModel):
+    """Immutable audit record for one material branch/form calculation."""
+
+    evaluation_id: str
+    claim_id: str
+    session_id: str | None = None
+    turn_id: str | None = None
+    evaluated_against_claim_revision: int = Field(ge=1)
+    resulting_claim_revision: int | None = Field(default=None, ge=1)
+    field_registry_version: str = Field(min_length=1)
+    branch_rules_version: str = Field(min_length=1)
+    selected_family: Literal['motor', 'home', 'contents'] | None = None
+    unresolved_family_conflict: list[str] = Field(default_factory=list)
+    branch_results: list[BranchResult] = Field(default_factory=list)
+    field_selection_results: list[FieldSelectionResult] = Field(default_factory=list)
+    work_item_intents: list[dict[str, Any]] = Field(default_factory=list)
+    handoff_intents: list[dict[str, Any]] = Field(default_factory=list)
+    evidence_intents: list[dict[str, Any]] = Field(default_factory=list)
+    consent_intents: list[dict[str, Any]] = Field(default_factory=list)
+    integration_intents: list[dict[str, Any]] = Field(default_factory=list)
+    interruption_result: dict[str, Any] = Field(default_factory=dict)
+    permitted_actions: list[AgentAction] = Field(default_factory=list)
+    permitted_tools: list[str] = Field(default_factory=list)
+    requirements: RequirementResolution = Field(default_factory=RequirementResolution)
+    recomputation_reason: str = Field(min_length=1)
+    status: BranchEvaluationStatus = BranchEvaluationStatus.EVALUATED
+    created_at: datetime
+
+    @model_validator(mode='after')
+    def require_revision_coordinates(self) -> 'BranchEvaluationRecord':
+        if self.status is BranchEvaluationStatus.APPLIED:
+            if self.resulting_claim_revision != self.evaluated_against_claim_revision:
+                raise ValueError(
+                    'An applied branch evaluation must describe its resulting Claim revision.'
+                )
+        elif self.resulting_claim_revision is not None:
+            raise ValueError('Only an applied branch evaluation may name a resulting revision.')
+        return self
+
+
+class DynamicFormProjection(ContractModel):
+    """Claimant-safe projection of the latest valid branch evaluation."""
+
+    claim_id: str
+    claim_revision: int = Field(ge=1)
+    field_registry_version: str = Field(min_length=1)
+    branch_rules_version: str = Field(min_length=1)
+    selected_family: Literal['motor', 'home', 'contents'] | None = None
+    active_branches: list[str] = Field(default_factory=list)
+    fields: list[FieldSelectionResult] = Field(default_factory=list)
+    requirements: RequirementResolution = Field(default_factory=RequirementResolution)
+
+
+ClaimantClaim.model_rebuild()
+MessageTurnResponse.model_rebuild()
+ContentsItemEvidenceAssociationListResponse.model_rebuild()
+)
     channel: PreferredChannel | None = None
     outcome: str | None = Field(default=None, max_length=1000)
     blocked_reason: FollowUpReasonCode | None = None
