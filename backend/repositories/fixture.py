@@ -38,6 +38,9 @@ from backend.domain.external_services import (
     assert_result_matches_task,
     assert_task_transition_is_permitted,
 )
+from backend.domain.follow_up_migration import (
+    backfill_legacy_follow_up_record,
+)
 from backend.domain.message import (
     DuplicateClientMessage,
     order_messages,
@@ -58,6 +61,9 @@ from backend.domain.models import (
     CustomerUpdateRecord,
     EvidenceClaimLink,
     EvidenceRecord,
+    FollowUpOperation,
+    FollowUpOperationStatus,
+    FollowUpReasonCode,
     FollowUpRecord,
     FollowUpStatus,
     HandoffRecord,
@@ -71,6 +77,7 @@ from backend.domain.models import (
     StaffActionRecord,
     StaffActionStatus,
     WorkingClaim,
+    assert_follow_up_operation_transition,
 )
 from backend.domain.realtime import (
     AgentTurnProgressPublication,
@@ -160,6 +167,7 @@ class FixtureRepository(PersistenceRepository):
         self._session_ids_by_claim: dict[tuple[str, str], list[str]] = {}
         self._message_ids_by_session: dict[str, list[str]] = {}
         self._follow_ups: dict[str, FollowUpRecord] = {}
+        self._follow_up_operations: dict[str, FollowUpOperation] = {}
         self._messages: dict[str, MessageRecord] = {}
         self._conversation_summaries: dict[str, VerifiedConversationSummary] = {}
         self._runtime_traces: dict[str, RuntimeTraceRecord] = {}
@@ -1431,6 +1439,347 @@ class FixtureRepository(PersistenceRepository):
         ]
         return sorted(records, key=lambda record: (record.created_at, record.follow_up_id))
 
+    def backfill_incomplete_claim_recovery(
+        self,
+        *,
+        recorded_at: datetime | None = None,
+    ) -> tuple[int, int]:
+        migration_time = recorded_at or datetime.now(UTC)
+
+        if migration_time.tzinfo is None:
+            raise ValueError(
+                'Backfill audit time must be timezone-aware.'
+            )
+
+        bound_count = 0
+        failed_count = 0
+
+        with self._claim_mutation_lock:
+            for follow_up_id in list(self._follow_ups):
+                current = self._follow_ups[follow_up_id]
+
+                decision = backfill_legacy_follow_up_record(
+                    current,
+                    self._sessions.get(current.source_session_id),
+                    recorded_at=migration_time,
+                )
+
+                if decision.outcome == 'noop':
+                    continue
+
+                assert decision.audit_event is not None
+
+                existing_audit = self._audit_events.get(
+                    decision.audit_event.event_id
+                )
+
+                if (
+                    existing_audit is not None
+                    and existing_audit != decision.audit_event
+                ):
+                    raise IdempotencyConflict(
+                        decision.audit_event.event_id
+                    )
+
+                self._follow_ups[follow_up_id] = deepcopy(
+                    decision.record
+                )
+                self._audit_events[
+                    decision.audit_event.event_id
+                ] = deepcopy(decision.audit_event)
+
+                if decision.outcome == 'bound':
+                    bound_count += 1
+                else:
+                    failed_count += 1
+
+        return bound_count, failed_count
+
+    def list_due_follow_ups(
+        self,
+        due_before: datetime,
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> tuple[list[FollowUpRecord], str | None]:
+        from backend.repositories.pagination import (
+            FOLLOW_UP_DISCOVERY_MAX_LIMIT,
+            FollowUpDiscoveryCursor,
+            decode_follow_up_discovery_cursor,
+            encode_follow_up_discovery_cursor,
+        )
+
+        if due_before.tzinfo is None:
+            raise ValueError(
+                'Follow-up discovery boundary must be timezone-aware.'
+            )
+        if not 1 <= limit <= FOLLOW_UP_DISCOVERY_MAX_LIMIT:
+            raise ValueError(
+                'Follow-up discovery limit must be between '
+                f'1 and {FOLLOW_UP_DISCOVERY_MAX_LIMIT}.'
+            )
+
+        after = (
+            decode_follow_up_discovery_cursor(
+                cursor,
+                scope='due',
+                boundary=due_before,
+            )
+            if cursor is not None
+            else None
+        )
+
+        records = sorted(
+            (
+                deepcopy(record)
+                for record in self._follow_ups.values()
+                if record.status is FollowUpStatus.PENDING
+                and record.due_at is not None
+                and record.deadline_at is not None
+                and record.due_at <= due_before
+                and record.deadline_at > due_before
+                and (
+                    after is None
+                    or (
+                        record.due_at,
+                        record.follow_up_id,
+                    )
+                    > (
+                        after.ordered_at,
+                        after.follow_up_id,
+                    )
+                )
+            ),
+            key=lambda record: (
+                record.due_at,
+                record.follow_up_id,
+            ),
+        )
+
+        page = records[: limit + 1]
+        selected = page[:limit]
+        next_cursor = None
+
+        if len(page) > limit:
+            final = selected[-1]
+            assert final.due_at is not None
+
+            next_cursor = encode_follow_up_discovery_cursor(
+                FollowUpDiscoveryCursor(
+                    scope='due',
+                    boundary=due_before,
+                    ordered_at=final.due_at,
+                    follow_up_id=final.follow_up_id,
+                )
+            )
+
+        return selected, next_cursor
+
+    def list_expiring_follow_ups(
+        self,
+        deadline_before: datetime,
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> tuple[list[FollowUpRecord], str | None]:
+        from backend.repositories.pagination import (
+            FOLLOW_UP_DISCOVERY_MAX_LIMIT,
+            FollowUpDiscoveryCursor,
+            decode_follow_up_discovery_cursor,
+            encode_follow_up_discovery_cursor,
+        )
+
+        if deadline_before.tzinfo is None:
+            raise ValueError(
+                'Follow-up discovery boundary must be timezone-aware.'
+            )
+        if not 1 <= limit <= FOLLOW_UP_DISCOVERY_MAX_LIMIT:
+            raise ValueError(
+                'Follow-up discovery limit must be between '
+                f'1 and {FOLLOW_UP_DISCOVERY_MAX_LIMIT}.'
+            )
+
+        after = (
+            decode_follow_up_discovery_cursor(
+                cursor,
+                scope='deadline',
+                boundary=deadline_before,
+            )
+            if cursor is not None
+            else None
+        )
+
+        records = sorted(
+            (
+                deepcopy(record)
+                for record in self._follow_ups.values()
+                if record.status
+                in {
+                    FollowUpStatus.PENDING,
+                    FollowUpStatus.BLOCKED,
+                }
+                and record.deadline_at is not None
+                and record.deadline_at <= deadline_before
+                and (
+                    after is None
+                    or (
+                        record.deadline_at,
+                        record.follow_up_id,
+                    )
+                    > (
+                        after.ordered_at,
+                        after.follow_up_id,
+                    )
+                )
+            ),
+            key=lambda record: (
+                record.deadline_at,
+                record.follow_up_id,
+            ),
+        )
+
+        page = records[: limit + 1]
+        selected = page[:limit]
+        next_cursor = None
+
+        if len(page) > limit:
+            final = selected[-1]
+            assert final.deadline_at is not None
+
+            next_cursor = encode_follow_up_discovery_cursor(
+                FollowUpDiscoveryCursor(
+                    scope='deadline',
+                    boundary=deadline_before,
+                    ordered_at=final.deadline_at,
+                    follow_up_id=final.follow_up_id,
+                )
+            )
+
+        return selected, next_cursor
+
+    def get_follow_up_operation(
+        self,
+        claim_id: str,
+        operation_id: str,
+        customer_id: str,
+    ) -> FollowUpOperation | None:
+        if self.get_claim(claim_id, customer_id) is None:
+            return None
+        operation = self._follow_up_operations.get(operation_id)
+        if operation is None or operation.claim_id != claim_id:
+            return None
+        return deepcopy(operation)
+
+    def list_follow_up_operations(
+        self,
+        claim_id: str,
+        follow_up_id: str,
+        customer_id: str,
+    ) -> list[FollowUpOperation]:
+        if self.get_claim(claim_id, customer_id) is None:
+            return []
+
+        follow_up = self._follow_ups.get(follow_up_id)
+        if follow_up is None or follow_up.claim_id != claim_id:
+            return []
+
+        operations = [
+            deepcopy(operation)
+            for operation in self._follow_up_operations.values()
+            if operation.claim_id == claim_id
+            and operation.follow_up_id == follow_up_id
+        ]
+
+        return sorted(
+            operations,
+            key=lambda operation: (
+                operation.sequence,
+                operation.operation_id,
+            ),
+        )
+
+    def save_follow_up_operation(
+        self,
+        operation: FollowUpOperation,
+        customer_id: str,
+    ) -> None:
+        with self._claim_mutation_lock:
+            claim = self._claims.get(operation.claim_id)
+            follow_up = self._follow_ups.get(operation.follow_up_id)
+
+            if (
+                claim is None
+                or claim.customer_id != customer_id
+                or follow_up is None
+                or follow_up.claim_id != operation.claim_id
+                or follow_up.policy_id is None
+                or follow_up.policy_version is None
+                or follow_up.deadline_at is None
+                or operation.policy_id != follow_up.policy_id
+                or operation.policy_version != follow_up.policy_version
+                or operation.scheduled_at < follow_up.created_at
+                or operation.scheduled_at >= follow_up.deadline_at
+                or operation.based_on_claim_revision > claim.revision
+            ):
+                raise KeyError(operation.operation_id)
+
+            existing = self._follow_up_operations.get(
+                operation.operation_id
+            )
+
+            if existing is not None:
+                if existing == operation:
+                    return
+
+                if (
+                    operation.status is FollowUpOperationStatus.COMMITTED
+                    and operation.based_on_claim_revision != claim.revision
+                ):
+                    raise IdempotencyConflict(operation.operation_id)
+
+                try:
+                    assert_follow_up_operation_transition(
+                        existing,
+                        operation,
+                    )
+                except ValueError as error:
+                    raise IdempotencyConflict(
+                        operation.operation_id
+                    ) from error
+
+                self._follow_up_operations[
+                    operation.operation_id
+                ] = deepcopy(operation)
+                return
+
+            if operation.status is not FollowUpOperationStatus.SCHEDULED:
+                raise IdempotencyConflict(operation.operation_id)
+
+            if operation.based_on_claim_revision != claim.revision:
+                raise IdempotencyConflict(operation.operation_id)
+
+            if any(
+                stored.follow_up_id == operation.follow_up_id
+                and stored.sequence == operation.sequence
+                for stored in self._follow_up_operations.values()
+            ):
+                raise IdempotencyConflict(operation.operation_id)
+
+            prior_sequences = [
+                stored.sequence
+                for stored in self._follow_up_operations.values()
+                if stored.follow_up_id == operation.follow_up_id
+            ]
+
+            expected_sequence = max(prior_sequences, default=0) + 1
+
+            if operation.sequence != expected_sequence:
+                raise IdempotencyConflict(operation.operation_id)
+
+            self._follow_up_operations[
+                operation.operation_id
+            ] = deepcopy(operation)
+
     def save_incomplete_checkpoint(
         self,
         claim: WorkingClaim,
@@ -1607,6 +1956,8 @@ class FixtureRepository(PersistenceRepository):
                     or stored_follow_up not in open_recovery
                     or resolved_follow_up.status is not FollowUpStatus.RESOLVED
                     or resolved_follow_up.outcome != 'claimant_resumed'
+                    or resolved_follow_up.reason_code
+                    is not FollowUpReasonCode.CLAIMANT_RESUMED
                     or resolved_follow_up.updated_at < stored_follow_up.updated_at
                 ):
                     raise KeyError(claim.claim_id)
@@ -1614,6 +1965,8 @@ class FixtureRepository(PersistenceRepository):
                     update={
                         'status': FollowUpStatus.RESOLVED,
                         'outcome': resolved_follow_up.outcome,
+                        'reason_code': resolved_follow_up.reason_code,
+                        'due_at': None,
                         'updated_at': resolved_follow_up.updated_at,
                     }
                 )

@@ -9,6 +9,7 @@ from datetime import datetime
 from pydantic import TypeAdapter
 
 _DATETIME_ADAPTER = TypeAdapter(datetime)
+FOLLOW_UP_DISCOVERY_MAX_LIMIT = 1000
 
 
 class InvalidRepositoryCursorError(ValueError):
@@ -22,6 +23,16 @@ class ContentsEvidenceAssociationCursor:
     item_id: str
     created_at: datetime
     association_id: str
+
+
+@dataclass(frozen=True)
+class FollowUpDiscoveryCursor:
+    """Stable keyset cursor for internal P17 due/deadline discovery."""
+
+    scope: str
+    boundary: datetime
+    ordered_at: datetime
+    follow_up_id: str
 
 
 def repository_datetime_value(value: datetime) -> str:
@@ -102,4 +113,77 @@ def decode_contents_evidence_association_cursor(
         or not cursor.association_id
     ):
         raise InvalidRepositoryCursorError
+    return cursor
+
+def encode_follow_up_discovery_cursor(
+    cursor: FollowUpDiscoveryCursor,
+) -> str:
+    """Encode a due/deadline Follow-up keyset as an opaque cursor."""
+
+    if cursor.scope not in {'due', 'deadline'}:
+        raise InvalidRepositoryCursorError
+    if (
+        cursor.boundary.tzinfo is None
+        or cursor.ordered_at.tzinfo is None
+        or not cursor.follow_up_id
+    ):
+        raise InvalidRepositoryCursorError
+
+    payload = {
+        'v': 1,
+        'resource': 'follow_up_discovery',
+        'scope': cursor.scope,
+        'boundary': repository_datetime_value(cursor.boundary),
+        'ordered_at': repository_datetime_value(cursor.ordered_at),
+        'follow_up_id': cursor.follow_up_id,
+    }
+    encoded = json.dumps(payload, separators=(',', ':'), sort_keys=True).encode()
+    return urlsafe_b64encode(encoded).decode().rstrip('=')
+
+
+def decode_follow_up_discovery_cursor(
+    value: str,
+    *,
+    scope: str,
+    boundary: datetime,
+) -> FollowUpDiscoveryCursor:
+    """Decode and scope-check a P17 due/deadline discovery cursor."""
+
+    if scope not in {'due', 'deadline'} or boundary.tzinfo is None:
+        raise InvalidRepositoryCursorError
+
+    try:
+        padded = value + '=' * (-len(value) % 4)
+        payload = json.loads(urlsafe_b64decode(padded).decode())
+        if (
+            not isinstance(payload, dict)
+            or payload.get('v') != 1
+            or payload.get('resource') != 'follow_up_discovery'
+        ):
+            raise ValueError
+
+        cursor = FollowUpDiscoveryCursor(
+            scope=str(payload['scope']),
+            boundary=datetime.fromisoformat(str(payload['boundary'])),
+            ordered_at=datetime.fromisoformat(str(payload['ordered_at'])),
+            follow_up_id=str(payload['follow_up_id']),
+        )
+    except (
+        Base64Error,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        KeyError,
+        ValueError,
+    ) as error:
+        raise InvalidRepositoryCursorError from error
+
+    if (
+        cursor.scope != scope
+        or cursor.boundary != boundary
+        or cursor.boundary.tzinfo is None
+        or cursor.ordered_at.tzinfo is None
+        or not cursor.follow_up_id
+    ):
+        raise InvalidRepositoryCursorError
+
     return cursor

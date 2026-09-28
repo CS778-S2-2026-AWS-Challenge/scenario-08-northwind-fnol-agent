@@ -110,6 +110,39 @@ class FollowUpStatus(str, Enum):
     RESOLVED = 'resolved'
 
 
+class FollowUpReasonCode(str, Enum):
+    """Typed reason for a P17 Follow-up condition or resolution."""
+
+    CONTACT_NOT_AUTHORISED = 'contact_not_authorised'
+    ATTEMPT_LIMIT_REACHED = 'attempt_limit_reached'
+    POLICY_BINDING_INVALID = 'policy_binding_invalid'
+    SOURCE_STATE_INCONSISTENT = 'source_state_inconsistent'
+    CLAIMANT_RESUMED = 'claimant_resumed'
+    RECOVERY_EXPIRED = 'recovery_expired'
+    STAFF_ABANDONED = 'staff_abandoned'
+    AUTHORISED_CLOSURE = 'authorised_closure'
+
+
+class FollowUpOperationStatus(str, Enum):
+    """Bounded lifecycle of one P17 recovery execution identity."""
+
+    SCHEDULED = 'scheduled'
+    COMMITTED = 'committed'
+    SETTLED = 'settled'
+    CANCELLED = 'cancelled'
+
+
+class FollowUpOperationResult(str, Enum):
+    """P17-local operation result; never ExternalTask delivery authority."""
+
+    DELIVERED_IN_APP = 'delivered_in_app'
+    NO_RESPONSE = 'no_response'
+    SUPERSEDED_BY_RESUME = 'superseded_by_resume'
+    EXPIRED_BEFORE_EXECUTION = 'expired_before_execution'
+    AUTHORITY_WITHDRAWN = 'authority_withdrawn'
+    STALE_REVISION = 'stale_revision'
+
+
 class FollowUpContactPermission(str, Enum):
     AUTHORISED = 'authorised'
     NOT_AUTHORISED = 'not_authorised'
@@ -1066,18 +1099,27 @@ class SessionRecoveryContext(ContractModel):
 
 
 class FollowUpRecord(ContractModel):
-    """Claim-scoped recovery work with an explicit contact-authority boundary."""
+    """Authoritative Claim-scoped P17 recovery obligation.
+
+    Policy coordinates and ``deadline_at`` are persisted when the obligation is
+    bound to a published recovery policy. Legacy P17.1 records may temporarily
+    lack that binding until deterministic migration/backfill is applied.
+    """
 
     follow_up_id: str
     claim_id: str
     source_session_id: str
     purpose: str = Field(default='resume_incomplete_claim', min_length=1, max_length=100)
+    policy_id: str | None = Field(default=None, min_length=1, max_length=120)
+    policy_version: str | None = Field(default=None, min_length=1, max_length=30)
+    deadline_at: datetime | None = None
     responsible_party: ResponsibleParty
     source_refs: list[str] = Field(default_factory=list, max_length=20)
     contact_permission: FollowUpContactPermission = FollowUpContactPermission.NOT_AUTHORISED
     attempt_count: int = Field(default=0, ge=0)
     channel: PreferredChannel | None = None
     outcome: str | None = Field(default=None, max_length=1000)
+    reason_code: FollowUpReasonCode | None = None
     status: FollowUpStatus = FollowUpStatus.BLOCKED
     due_at: datetime | None = None
     created_at: datetime
@@ -1087,26 +1129,305 @@ class FollowUpRecord(ContractModel):
     def validate_recovery_follow_up(self) -> 'FollowUpRecord':
         if self.updated_at < self.created_at:
             raise ValueError('A Follow-up cannot be updated before it is created.')
+
         if not self.source_refs:
             self.source_refs = [f'session:{self.source_session_id}']
+
         if len(self.source_refs) != len(set(self.source_refs)):
             raise ValueError('Follow-up source references must be unique.')
+
+        binding_values = (
+            self.policy_id,
+            self.policy_version,
+            self.deadline_at,
+        )
+        binding_count = sum(value is not None for value in binding_values)
+
+        if self.deadline_at is not None and self.deadline_at.tzinfo is None:
+            raise ValueError('A Follow-up recovery deadline must be timezone-aware.')
+
+        if (
+            0 < binding_count < len(binding_values)
+            and not (
+                self.status is FollowUpStatus.BLOCKED
+                and self.reason_code is FollowUpReasonCode.POLICY_BINDING_INVALID
+            )
+        ):
+            raise ValueError(
+                'A partial Follow-up policy binding must fail closed as policy_binding_invalid.'
+            )
+
+        blocked_reasons = {
+            FollowUpReasonCode.CONTACT_NOT_AUTHORISED,
+            FollowUpReasonCode.ATTEMPT_LIMIT_REACHED,
+            FollowUpReasonCode.POLICY_BINDING_INVALID,
+            FollowUpReasonCode.SOURCE_STATE_INCONSISTENT,
+        }
+        resolution_reasons = {
+            FollowUpReasonCode.CLAIMANT_RESUMED,
+            FollowUpReasonCode.RECOVERY_EXPIRED,
+            FollowUpReasonCode.STAFF_ABANDONED,
+            FollowUpReasonCode.AUTHORISED_CLOSURE,
+        }
+
         if self.status is FollowUpStatus.PENDING:
             if (
                 self.contact_permission is not FollowUpContactPermission.AUTHORISED
                 or self.channel is None
                 or self.due_at is None
             ):
-                raise ValueError('A pending Follow-up requires an authorised channel and due time.')
-        elif self.status is FollowUpStatus.BLOCKED and (
-            self.contact_permission is not FollowUpContactPermission.NOT_AUTHORISED
-            or self.channel is not None
-            or self.due_at is not None
+                raise ValueError(
+                    'A pending Follow-up requires an authorised channel and due time.'
+                )
+
+            if self.reason_code is not None:
+                raise ValueError('A pending Follow-up must not carry a blocked/resolution reason.')
+
+            if (
+                self.deadline_at is not None
+                and self.due_at >= self.deadline_at
+            ):
+                raise ValueError(
+                    'A pending Follow-up due time must be before its recovery deadline.'
+                )
+
+        elif self.status is FollowUpStatus.BLOCKED:
+            if self.reason_code is None:
+                # Legacy P17.1 compatibility until deterministic backfill.
+                if (
+                    self.contact_permission
+                    is not FollowUpContactPermission.NOT_AUTHORISED
+                    or self.channel is not None
+                ):
+                    raise ValueError(
+                        'A blocked Follow-up without a typed reason must not claim '
+                        'an authorised channel or schedule.'
+                    )
+
+            elif self.reason_code not in blocked_reasons:
+                raise ValueError('A blocked Follow-up requires a blocked reason code.')
+
+            elif self.reason_code is FollowUpReasonCode.CONTACT_NOT_AUTHORISED:
+                if (
+                    self.contact_permission
+                    is not FollowUpContactPermission.NOT_AUTHORISED
+                    or self.channel is not None
+                    or self.due_at is not None
+                ):
+                    raise ValueError(
+                        'contact_not_authorised must not claim an authorised contact '
+                        'channel or executable schedule.'
+                    )
+
+            elif (
+                self.reason_code is FollowUpReasonCode.ATTEMPT_LIMIT_REACHED
+                and (
+                    self.contact_permission
+                    is not FollowUpContactPermission.AUTHORISED
+                    or self.channel is None
+                    or self.due_at is not None
+                )
+            ):
+                raise ValueError(
+                    'attempt_limit_reached preserves the authorised contact path '
+                    'while stopping automatic scheduling.'
+                )
+
+        elif self.status is FollowUpStatus.RESOLVED:
+            if self.due_at is not None:
+                raise ValueError('A resolved Follow-up must not retain scheduled due work.')
+
+            if (
+                self.reason_code is not None
+                and self.reason_code not in resolution_reasons
+            ):
+                raise ValueError('A resolved Follow-up requires a resolution reason code.')
+
+        return self
+
+
+
+class FollowUpOperation(ContractModel):
+    """Durable P17-specific recovery execution identity and history."""
+
+    operation_id: str = Field(min_length=1, max_length=120)
+    follow_up_id: str = Field(min_length=1, max_length=120)
+    claim_id: str = Field(min_length=1, max_length=120)
+    sequence: int = Field(ge=1)
+    policy_id: str = Field(min_length=1, max_length=120)
+    policy_version: str = Field(min_length=1, max_length=30)
+    based_on_claim_revision: int = Field(ge=1)
+    scheduled_at: datetime
+    status: FollowUpOperationStatus = FollowUpOperationStatus.SCHEDULED
+    result: FollowUpOperationResult | None = None
+    committed_at: datetime | None = None
+    settled_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    source_refs: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode='after')
+    def validate_follow_up_operation(self) -> 'FollowUpOperation':
+        timestamps = (
+            self.scheduled_at,
+            self.committed_at,
+            self.settled_at,
+            self.cancelled_at,
+        )
+
+        if any(
+            value is not None and value.tzinfo is None
+            for value in timestamps
         ):
             raise ValueError(
-                'A blocked Follow-up must not claim an authorised channel or schedule.'
+                'Follow-up operation timestamps must be timezone-aware.'
             )
+
+        if not self.source_refs:
+            self.source_refs = [f'follow-up:{self.follow_up_id}']
+
+        if len(self.source_refs) != len(set(self.source_refs)):
+            raise ValueError(
+                'Follow-up operation source references must be unique.'
+            )
+
+        if (
+            self.committed_at is not None
+            and self.committed_at < self.scheduled_at
+        ):
+            raise ValueError(
+                'Follow-up operation commit cannot precede its schedule.'
+            )
+
+        if (
+            self.settled_at is not None
+            and (
+                self.committed_at is None
+                or self.settled_at < self.committed_at
+            )
+        ):
+            raise ValueError(
+                'Follow-up operation settlement requires a prior commit.'
+            )
+
+        if (
+            self.cancelled_at is not None
+            and self.cancelled_at < self.scheduled_at
+        ):
+            raise ValueError(
+                'Follow-up operation cancellation cannot precede its schedule.'
+            )
+
+        if self.status is FollowUpOperationStatus.SCHEDULED:
+            if (
+                self.result is not None
+                or self.committed_at is not None
+                or self.settled_at is not None
+                or self.cancelled_at is not None
+            ):
+                raise ValueError(
+                    'A scheduled Follow-up operation cannot carry execution evidence.'
+                )
+
+        elif self.status is FollowUpOperationStatus.COMMITTED:
+            if (
+                self.committed_at is None
+                or self.settled_at is not None
+                or self.cancelled_at is not None
+            ):
+                raise ValueError(
+                    'A committed Follow-up operation requires commit evidence only.'
+                )
+            if self.result not in {
+                None,
+                FollowUpOperationResult.DELIVERED_IN_APP,
+            }:
+                raise ValueError(
+                    'A committed Follow-up operation may only record in-app delivery.'
+                )
+
+        elif self.status is FollowUpOperationStatus.SETTLED:
+            if (
+                self.committed_at is None
+                or self.settled_at is None
+                or self.cancelled_at is not None
+                or self.result is None
+            ):
+                raise ValueError(
+                    'A settled Follow-up operation requires commit, settlement and result evidence.'
+                )
+
+        elif (
+            self.status is FollowUpOperationStatus.CANCELLED
+            and (
+                self.committed_at is not None
+                or self.settled_at is not None
+                or self.cancelled_at is None
+                or self.result not in {
+                    FollowUpOperationResult.SUPERSEDED_BY_RESUME,
+                    FollowUpOperationResult.EXPIRED_BEFORE_EXECUTION,
+                    FollowUpOperationResult.AUTHORITY_WITHDRAWN,
+                    FollowUpOperationResult.STALE_REVISION,
+                }
+            )
+        ):
+            raise ValueError(
+                'A cancelled Follow-up operation requires a pre-commit cancellation result.'
+            )
+
         return self
+
+
+def assert_follow_up_operation_transition(
+    current: FollowUpOperation,
+    incoming: FollowUpOperation,
+) -> None:
+    """Reject identity rewrites and invalid P17 operation lifecycle jumps."""
+
+    immutable_fields = (
+        'operation_id',
+        'follow_up_id',
+        'claim_id',
+        'sequence',
+        'policy_id',
+        'policy_version',
+        'based_on_claim_revision',
+        'scheduled_at',
+        'source_refs',
+    )
+
+    if any(
+        getattr(current, field) != getattr(incoming, field)
+        for field in immutable_fields
+    ):
+        raise ValueError(
+            'Follow-up operation immutable execution identity cannot change.'
+        )
+
+    allowed = {
+        FollowUpOperationStatus.SCHEDULED: {
+            FollowUpOperationStatus.COMMITTED,
+            FollowUpOperationStatus.CANCELLED,
+        },
+        FollowUpOperationStatus.COMMITTED: {
+            FollowUpOperationStatus.SETTLED,
+        },
+        FollowUpOperationStatus.SETTLED: set(),
+        FollowUpOperationStatus.CANCELLED: set(),
+    }
+
+    if incoming.status not in allowed[current.status]:
+        raise ValueError(
+            f'Follow-up operation cannot transition from '
+            f'{current.status.value} to {incoming.status.value}.'
+        )
+
+    if (
+        current.committed_at is not None
+        and incoming.committed_at != current.committed_at
+    ):
+        raise ValueError(
+            'Follow-up operation commit evidence cannot be rewritten.'
+        )
 
 
 class SessionRecord(ContractModel):

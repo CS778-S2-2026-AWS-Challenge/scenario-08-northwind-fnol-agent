@@ -51,6 +51,9 @@ from backend.domain.external_services import (
     assert_result_matches_task,
     assert_task_transition_is_permitted,
 )
+from backend.domain.follow_up_migration import (
+    backfill_legacy_follow_up_record,
+)
 from backend.domain.message import (
     DuplicateClientMessage,
     order_messages,
@@ -71,6 +74,9 @@ from backend.domain.models import (
     CustomerUpdateRecord,
     EvidenceClaimLink,
     EvidenceRecord,
+    FollowUpOperation,
+    FollowUpOperationStatus,
+    FollowUpReasonCode,
     FollowUpRecord,
     FollowUpStatus,
     HandoffRecord,
@@ -84,6 +90,7 @@ from backend.domain.models import (
     StaffActionRecord,
     StaffActionStatus,
     WorkingClaim,
+    assert_follow_up_operation_transition,
 )
 from backend.domain.realtime import (
     AgentTurnProgressPublication,
@@ -451,6 +458,55 @@ class MongoDBRepository:
             partialFilterExpression={
                 'record_type': 'follow_up',
                 'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
+            },
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('operation_id', 1)],
+            unique=True,
+            name='follow_up_operation_id_unique',
+            partialFilterExpression={
+                'record_type': 'follow_up_operation'
+            },
+        )
+        self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('follow_up_id', 1),
+                ('sequence', 1),
+            ],
+            unique=True,
+            name='follow_up_operation_sequence_unique',
+            partialFilterExpression={
+                'record_type': 'follow_up_operation'
+            },
+        )
+        self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('due_at', 1),
+                ('follow_up_id', 1),
+            ],
+            name='follow_up_due_order',
+            partialFilterExpression={
+                'record_type': 'follow_up',
+                'status': FollowUpStatus.PENDING.value,
+            },
+        )
+        self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('deadline_at', 1),
+                ('follow_up_id', 1),
+            ],
+            name='follow_up_deadline_order',
+            partialFilterExpression={
+                'record_type': 'follow_up',
+                'status': {
+                    '$in': [
+                        FollowUpStatus.PENDING.value,
+                        FollowUpStatus.BLOCKED.value,
+                    ]
+                },
             },
         )
         self._collection.create_index(
@@ -2239,6 +2295,572 @@ class MongoDBRepository:
             {'claim_id': claim_id, 'customer_id': customer_id},
             'created_at',
         )
+
+    def backfill_incomplete_claim_recovery(
+        self,
+        *,
+        recorded_at: datetime | None = None,
+    ) -> tuple[int, int]:
+        migration_time = recorded_at or datetime.now(UTC)
+
+        if migration_time.tzinfo is None:
+            raise ValueError(
+                'Backfill audit time must be timezone-aware.'
+            )
+
+        candidates = list(
+            self._collection.find(
+                {
+                    'record_type': 'follow_up',
+                    'status': {
+                        '$in': [
+                            FollowUpStatus.PENDING.value,
+                            FollowUpStatus.BLOCKED.value,
+                        ]
+                    },
+                    '$or': [
+                        {'policy_id': {'$exists': False}},
+                        {'policy_version': {'$exists': False}},
+                        {'deadline_at': {'$exists': False}},
+                        {'reason_code': {'$exists': False}},
+                    ],
+                },
+                projection={'_id': 1},
+            )
+        )
+
+        bound_count = 0
+        failed_count = 0
+
+        for candidate in candidates:
+            record_id_value = candidate.get('_id')
+
+            if not isinstance(record_id_value, str):
+                continue
+
+            record_id: str = record_id_value
+
+            def persist_record(
+                mongo_session: Any,
+                *,
+                target_record_id: str = record_id,
+            ) -> str:
+                return self._backfill_incomplete_claim_recovery_record(
+                    target_record_id,
+                    migration_time,
+                    mongo_session,
+                )
+
+            outcome = self._atomic(persist_record)
+
+            if outcome == 'bound':
+                bound_count += 1
+            elif outcome == 'failed':
+                failed_count += 1
+
+        return bound_count, failed_count
+
+    def _backfill_incomplete_claim_recovery_record(
+        self,
+        record_id: str,
+        recorded_at: datetime,
+        mongo_session: Any,
+    ) -> str:
+        document = self._collection.find_one(
+            {
+                '_id': record_id,
+                'record_type': 'follow_up',
+            },
+            session=mongo_session,
+        )
+
+        follow_up = self._model_from_document(
+            document,
+            FollowUpRecord,
+        )
+
+        if follow_up is None or document is None:
+            return 'noop'
+
+        customer_id = document.get('customer_id')
+
+        if not isinstance(customer_id, str):
+            source_session = None
+        else:
+            source_session = self._get(
+                'session',
+                follow_up.source_session_id,
+                SessionRecord,
+                customer_id=customer_id,
+                session=mongo_session,
+            )
+
+        decision = backfill_legacy_follow_up_record(
+            follow_up,
+            source_session,
+            recorded_at=recorded_at,
+        )
+
+        if decision.outcome == 'noop':
+            return 'noop'
+
+        assert decision.audit_event is not None
+
+        migrated = {
+            **decision.record.model_dump(mode='json'),
+            '_id': record_id,
+            'record_type': 'follow_up',
+            'customer_id': document.get('customer_id'),
+            'claim_id': follow_up.claim_id,
+        }
+
+        result = self._collection.replace_one(
+            {
+                '_id': record_id,
+                'record_type': 'follow_up',
+                'customer_id': document.get('customer_id'),
+                'claim_id': follow_up.claim_id,
+            },
+            migrated,
+            session=mongo_session,
+        )
+
+        if result.matched_count != 1:
+            raise IdempotencyConflict(
+                follow_up.follow_up_id
+            )
+
+        self._insert_audit_event(
+            decision.audit_event,
+            mongo_session=mongo_session,
+        )
+
+        return decision.outcome
+
+    def list_due_follow_ups(
+        self,
+        due_before: datetime,
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> tuple[list[FollowUpRecord], str | None]:
+        from backend.repositories.pagination import (
+            FOLLOW_UP_DISCOVERY_MAX_LIMIT,
+            FollowUpDiscoveryCursor,
+            decode_follow_up_discovery_cursor,
+            encode_follow_up_discovery_cursor,
+            repository_datetime_value,
+        )
+
+        if due_before.tzinfo is None:
+            raise ValueError(
+                'Follow-up discovery boundary must be timezone-aware.'
+            )
+        if not 1 <= limit <= FOLLOW_UP_DISCOVERY_MAX_LIMIT:
+            raise ValueError(
+                'Follow-up discovery limit must be between '
+                f'1 and {FOLLOW_UP_DISCOVERY_MAX_LIMIT}.'
+            )
+
+        after = (
+            decode_follow_up_discovery_cursor(
+                cursor,
+                scope='due',
+                boundary=due_before,
+            )
+            if cursor is not None
+            else None
+        )
+
+        boundary = repository_datetime_value(due_before)
+
+        query: dict[str, Any] = {
+            'record_type': 'follow_up',
+            'status': FollowUpStatus.PENDING.value,
+            'due_at': {'$lte': boundary},
+            'deadline_at': {'$gt': boundary},
+        }
+
+        if after is not None:
+            ordered_at = repository_datetime_value(
+                after.ordered_at
+            )
+            query['$or'] = [
+                {
+                    'due_at': {
+                        '$gt': ordered_at,
+                        '$lte': boundary,
+                    }
+                },
+                {
+                    'due_at': ordered_at,
+                    'follow_up_id': {
+                        '$gt': after.follow_up_id,
+                    },
+                },
+            ]
+
+        documents = (
+            self._collection.find(query)
+            .sort([
+                ('due_at', 1),
+                ('follow_up_id', 1),
+            ])
+            .limit(limit + 1)
+        )
+
+        records = [
+            record
+            for document in documents
+            if (
+                record := self._model_from_document(
+                    document,
+                    FollowUpRecord,
+                )
+            )
+            is not None
+        ]
+
+        selected = records[:limit]
+        next_cursor = None
+
+        if len(records) > limit:
+            final = selected[-1]
+            assert final.due_at is not None
+
+            next_cursor = encode_follow_up_discovery_cursor(
+                FollowUpDiscoveryCursor(
+                    scope='due',
+                    boundary=due_before,
+                    ordered_at=final.due_at,
+                    follow_up_id=final.follow_up_id,
+                )
+            )
+
+        return selected, next_cursor
+
+    def list_expiring_follow_ups(
+        self,
+        deadline_before: datetime,
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> tuple[list[FollowUpRecord], str | None]:
+        from backend.repositories.pagination import (
+            FOLLOW_UP_DISCOVERY_MAX_LIMIT,
+            FollowUpDiscoveryCursor,
+            decode_follow_up_discovery_cursor,
+            encode_follow_up_discovery_cursor,
+            repository_datetime_value,
+        )
+
+        if deadline_before.tzinfo is None:
+            raise ValueError(
+                'Follow-up discovery boundary must be timezone-aware.'
+            )
+        if not 1 <= limit <= FOLLOW_UP_DISCOVERY_MAX_LIMIT:
+            raise ValueError(
+                'Follow-up discovery limit must be between '
+                f'1 and {FOLLOW_UP_DISCOVERY_MAX_LIMIT}.'
+            )
+
+        after = (
+            decode_follow_up_discovery_cursor(
+                cursor,
+                scope='deadline',
+                boundary=deadline_before,
+            )
+            if cursor is not None
+            else None
+        )
+
+        boundary = repository_datetime_value(deadline_before)
+
+        query: dict[str, Any] = {
+            'record_type': 'follow_up',
+            'status': {
+                '$in': [
+                    FollowUpStatus.PENDING.value,
+                    FollowUpStatus.BLOCKED.value,
+                ]
+            },
+            'deadline_at': {'$lte': boundary},
+        }
+
+        if after is not None:
+            ordered_at = repository_datetime_value(
+                after.ordered_at
+            )
+            query['$or'] = [
+                {
+                    'deadline_at': {
+                        '$gt': ordered_at,
+                        '$lte': boundary,
+                    }
+                },
+                {
+                    'deadline_at': ordered_at,
+                    'follow_up_id': {
+                        '$gt': after.follow_up_id,
+                    },
+                },
+            ]
+
+        documents = (
+            self._collection.find(query)
+            .sort([
+                ('deadline_at', 1),
+                ('follow_up_id', 1),
+            ])
+            .limit(limit + 1)
+        )
+
+        records = [
+            record
+            for document in documents
+            if (
+                record := self._model_from_document(
+                    document,
+                    FollowUpRecord,
+                )
+            )
+            is not None
+        ]
+
+        selected = records[:limit]
+        next_cursor = None
+
+        if len(records) > limit:
+            final = selected[-1]
+            assert final.deadline_at is not None
+
+            next_cursor = encode_follow_up_discovery_cursor(
+                FollowUpDiscoveryCursor(
+                    scope='deadline',
+                    boundary=deadline_before,
+                    ordered_at=final.deadline_at,
+                    follow_up_id=final.follow_up_id,
+                )
+            )
+
+        return selected, next_cursor
+
+    def get_follow_up_operation(
+        self,
+        claim_id: str,
+        operation_id: str,
+        customer_id: str,
+    ) -> FollowUpOperation | None:
+        if not self._claim_owned(claim_id, customer_id):
+            return None
+
+        operation = self._get(
+            'follow_up_operation',
+            operation_id,
+            FollowUpOperation,
+            customer_id=customer_id,
+        )
+
+        if operation is None or operation.claim_id != claim_id:
+            return None
+
+        return operation
+
+    def list_follow_up_operations(
+        self,
+        claim_id: str,
+        follow_up_id: str,
+        customer_id: str,
+    ) -> list[FollowUpOperation]:
+        if not self._claim_owned(claim_id, customer_id):
+            return []
+
+        follow_up = self._get(
+            'follow_up',
+            follow_up_id,
+            FollowUpRecord,
+            customer_id=customer_id,
+        )
+
+        if follow_up is None or follow_up.claim_id != claim_id:
+            return []
+
+        return self._list(
+            'follow_up_operation',
+            FollowUpOperation,
+            {
+                'claim_id': claim_id,
+                'customer_id': customer_id,
+                'follow_up_id': follow_up_id,
+            },
+            'sequence',
+        )
+
+    def save_follow_up_operation(
+        self,
+        operation: FollowUpOperation,
+        customer_id: str,
+    ) -> None:
+        self._atomic(
+            lambda mongo_session: self._save_follow_up_operation(
+                operation,
+                customer_id,
+                mongo_session,
+            )
+        )
+
+    def _save_follow_up_operation(
+        self,
+        operation: FollowUpOperation,
+        customer_id: str,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            operation.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+
+        follow_up = self._get(
+            'follow_up',
+            operation.follow_up_id,
+            FollowUpRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+
+        if (
+            claim is None
+            or follow_up is None
+            or follow_up.claim_id != operation.claim_id
+            or follow_up.policy_id is None
+            or follow_up.policy_version is None
+            or follow_up.deadline_at is None
+            or operation.policy_id != follow_up.policy_id
+            or operation.policy_version != follow_up.policy_version
+            or operation.scheduled_at < follow_up.created_at
+            or operation.scheduled_at >= follow_up.deadline_at
+            or operation.based_on_claim_revision > claim.revision
+        ):
+            raise KeyError(operation.operation_id)
+
+        existing = self._get(
+            'follow_up_operation',
+            operation.operation_id,
+            FollowUpOperation,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+
+        document = {
+            **operation.model_dump(mode='json'),
+            '_id': self._record_id(
+                'follow_up_operation',
+                operation.operation_id,
+            ),
+            'record_type': 'follow_up_operation',
+            'customer_id': customer_id,
+            'claim_id': operation.claim_id,
+        }
+
+        if existing is not None:
+            if existing == operation:
+                return
+
+            if (
+                operation.status is FollowUpOperationStatus.COMMITTED
+                and operation.based_on_claim_revision != claim.revision
+            ):
+                raise IdempotencyConflict(operation.operation_id)
+
+            try:
+                assert_follow_up_operation_transition(
+                    existing,
+                    operation,
+                )
+            except ValueError as error:
+                raise IdempotencyConflict(
+                    operation.operation_id
+                ) from error
+
+            result = self._collection.replace_one(
+                {
+                    '_id': self._record_id(
+                        'follow_up_operation',
+                        operation.operation_id,
+                    ),
+                    'record_type': 'follow_up_operation',
+                    'customer_id': customer_id,
+                    'claim_id': operation.claim_id,
+                    'status': existing.status.value,
+                },
+                document,
+                session=mongo_session,
+            )
+
+            if result.matched_count == 1:
+                return
+
+            winner = self._get(
+                'follow_up_operation',
+                operation.operation_id,
+                FollowUpOperation,
+                customer_id=customer_id,
+                session=mongo_session,
+            )
+
+            if winner == operation:
+                return
+
+            raise IdempotencyConflict(operation.operation_id)
+
+        if operation.status is not FollowUpOperationStatus.SCHEDULED:
+            raise IdempotencyConflict(operation.operation_id)
+
+        if operation.based_on_claim_revision != claim.revision:
+            raise IdempotencyConflict(operation.operation_id)
+
+        latest = self._collection.find_one(
+            {
+                'record_type': 'follow_up_operation',
+                'follow_up_id': operation.follow_up_id,
+            },
+            projection={'sequence': 1},
+            sort=[('sequence', -1), ('_id', -1)],
+            session=mongo_session,
+        )
+
+        expected_sequence = (
+            int(latest['sequence']) + 1
+            if latest is not None
+            else 1
+        )
+
+        if operation.sequence != expected_sequence:
+            raise IdempotencyConflict(operation.operation_id)
+
+        try:
+            self._collection.insert_one(
+                document,
+                session=mongo_session,
+            )
+        except DuplicateKeyError as error:
+            winner = self._get(
+                'follow_up_operation',
+                operation.operation_id,
+                FollowUpOperation,
+                customer_id=customer_id,
+                session=mongo_session,
+            )
+
+            if winner == operation:
+                return
+
+            raise IdempotencyConflict(
+                operation.operation_id
+            ) from error
 
     def _reject_session_identity_conflict(
         self,
@@ -6688,6 +7310,8 @@ class MongoDBRepository:
                 or open_follow_up.follow_up_id != resolved_follow_up.follow_up_id
                 or resolved_follow_up.status is not FollowUpStatus.RESOLVED
                 or resolved_follow_up.outcome != 'claimant_resumed'
+                or resolved_follow_up.reason_code
+                is not FollowUpReasonCode.CLAIMANT_RESUMED
                 or resolved_follow_up.updated_at < open_follow_up.updated_at
             ):
                 raise KeyError(claim.claim_id)
@@ -6695,6 +7319,8 @@ class MongoDBRepository:
                 update={
                     'status': FollowUpStatus.RESOLVED,
                     'outcome': resolved_follow_up.outcome,
+                    'reason_code': resolved_follow_up.reason_code,
+                    'due_at': None,
                     'updated_at': resolved_follow_up.updated_at,
                 }
             )

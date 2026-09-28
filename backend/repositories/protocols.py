@@ -32,6 +32,7 @@ from backend.domain.models import (
     CustomerUpdateRecord,
     EvidenceClaimLink,
     EvidenceRecord,
+    FollowUpOperation,
     FollowUpRecord,
     HandoffRecord,
     MessageRecord,
@@ -448,6 +449,73 @@ class ClaimRepository(Protocol):
         claim_id: str,
         customer_id: str,
     ) -> list[FollowUpRecord]:
+        raise NotImplementedError
+
+    def get_follow_up_operation(
+        self,
+        claim_id: str,
+        operation_id: str,
+        customer_id: str,
+    ) -> FollowUpOperation | None:
+        raise NotImplementedError
+
+    def list_follow_up_operations(
+        self,
+        claim_id: str,
+        follow_up_id: str,
+        customer_id: str,
+    ) -> list[FollowUpOperation]:
+        raise NotImplementedError
+
+    def save_follow_up_operation(
+        self,
+        operation: FollowUpOperation,
+        customer_id: str,
+    ) -> None:
+        """Create or advance one durable P17 execution identity.
+
+        Exact replay is idempotent. Identity/sequence rewrites and invalid
+        lifecycle transitions are conflicts.
+        """
+        raise NotImplementedError
+
+    def backfill_incomplete_claim_recovery(
+        self,
+        *,
+        recorded_at: datetime | None = None,
+    ) -> tuple[int, int]:
+        """Deterministically bind open legacy P17.1 Follow-ups.
+
+        Returns ``(bound_count, failed_closed_count)``.
+        """
+        raise NotImplementedError
+
+    def list_due_follow_ups(
+        self,
+        due_before: datetime,
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> tuple[list[FollowUpRecord], str | None]:
+        """Return one bounded page of executable P17 Follow-ups.
+
+        This is candidate discovery only. Execution must revalidate the
+        authoritative Follow-up, Claim revision, contact authority and deadline.
+        """
+        raise NotImplementedError
+
+    def list_expiring_follow_ups(
+        self,
+        deadline_before: datetime,
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> tuple[list[FollowUpRecord], str | None]:
+        """Return one bounded page of open P17 obligations by deadline.
+
+        Deadline discovery is deliberately separate from due discovery so a
+        blocked obligation with no ``due_at`` remains globally discoverable.
+        """
         raise NotImplementedError
 
     def save_incomplete_checkpoint(

@@ -1,5 +1,6 @@
 """Provider-neutral recovery policy contracts used by claimant Runtime turns."""
 
+from datetime import timedelta
 from types import MappingProxyType
 from typing import Literal
 
@@ -7,6 +8,12 @@ from pydantic import ConfigDict, Field
 
 from backend.domain.model_gateway import ModelGatewayErrorCode
 from backend.domain.models import ClaimantTurnRecovery, ContractModel
+
+INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_ID = 'incomplete_claim_follow_up'
+INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION = 'v1'
+INCOMPLETE_CLAIM_FOLLOW_UP_MAX_AUTO_ATTEMPTS = 3
+INCOMPLETE_CLAIM_FOLLOW_UP_RETRY_INTERVAL = timedelta(hours=24)
+INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE = timedelta(days=7)
 
 
 class RecoveryTrigger(ContractModel):

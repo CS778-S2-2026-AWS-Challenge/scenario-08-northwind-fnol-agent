@@ -31,6 +31,7 @@ from backend.domain.models import (
     CustomerNextStep,
     FieldSelectionState,
     FollowUpContactPermission,
+    FollowUpReasonCode,
     FollowUpRecord,
     FollowUpStatus,
     FormConfirmationRequest,
@@ -56,6 +57,11 @@ from backend.domain.models import (
     StructuredFormField,
     WorkflowState,
     WorkingClaim,
+)
+from backend.domain.recovery_policy_registry import (
+    INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_ID,
+    INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION,
+    INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE,
 )
 from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import (
@@ -566,6 +572,12 @@ def pause_session(
         claim_id=claim_id,
         source_session_id=session_id,
         purpose='resume_incomplete_claim',
+        policy_id=INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_ID,
+        policy_version=INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION,
+        deadline_at=(
+            recovery.interrupted_at
+            + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
+        ),
         responsible_party=ResponsibleParty.SYSTEM,
         source_refs=[
             f'claim:{claim_id}:revision:{updated_claim.revision}',
@@ -580,6 +592,11 @@ def pause_session(
         attempt_count=0,
         channel=PreferredChannel.IN_APP if contact_authorised else None,
         outcome=None,
+        reason_code=(
+            None
+            if contact_authorised
+            else FollowUpReasonCode.CONTACT_NOT_AUTHORISED
+        ),
         status=FollowUpStatus.PENDING if contact_authorised else FollowUpStatus.BLOCKED,
         due_at=timestamp if contact_authorised else None,
         created_at=timestamp,
@@ -910,6 +927,8 @@ def start_session(
                     update={
                         'status': FollowUpStatus.RESOLVED,
                         'outcome': 'claimant_resumed',
+                        'reason_code': FollowUpReasonCode.CLAIMANT_RESUMED,
+                        'due_at': None,
                         'updated_at': timestamp,
                     }
                 )
