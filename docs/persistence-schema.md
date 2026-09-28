@@ -1367,7 +1367,8 @@ after the approved data-classification and retention-hold inputs are available.
 Deployments with legacy P17.1 records use `scripts/backfill_follow_up_policy.py`. The command is
 read-only by default, derives the deadline only from the source Session's persisted interruption
 time, conditionally updates records with missing policy/deadline fields under `--apply`, and
-reports records with missing or contradictory source state instead of guessing.
+reports records with missing or contradictory source state instead of guessing. It never derives
+a deadline from the migration execution time.
 
 ## P17.2 Bounded Terminal Disposition and Reopen Slice
 
