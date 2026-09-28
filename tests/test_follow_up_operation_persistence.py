@@ -144,6 +144,74 @@ def test_follow_up_policy_backfill_is_read_only_until_apply() -> None:
     assert stored['blocked_reason'] == 'contact_not_authorised'
 
 
+def test_follow_up_policy_backfill_missing_interruption_fails_closed_on_apply() -> None:
+    collection: Collection[dict[str, Any]] = mongomock.MongoClient().db.records
+    old_due = datetime(2026, 9, 28, 8, 0, tzinfo=UTC)
+    collection.insert_many(
+        [
+            {
+                '_id': 'session:ses_missing_interruption',
+                'record_type': 'session',
+                'session_id': 'ses_missing_interruption',
+                'claim_id': 'clm_missing_interruption',
+                'recovery_context': {},
+            },
+            {
+                '_id': 'follow_up:fup_missing_interruption',
+                'record_type': 'follow_up',
+                'follow_up_id': 'fup_missing_interruption',
+                'claim_id': 'clm_missing_interruption',
+                'source_session_id': 'ses_missing_interruption',
+                'status': 'pending',
+                'contact_permission': 'authorised',
+                'channel': 'in_app',
+                'due_at': old_due.isoformat(),
+            },
+        ]
+    )
+
+    dry_run = backfill_follow_ups(collection)
+    assert dry_run['eligible'] == []
+    assert dry_run['fail_closed'] == []
+    assert [item['follow_up_id'] for item in dry_run['rejected']] == [
+        'fup_missing_interruption'
+    ]
+    before = collection.find_one({'_id': 'follow_up:fup_missing_interruption'})
+    assert before is not None
+    assert before['due_at'] == old_due.isoformat()
+
+    applied = backfill_follow_ups(collection, apply=True)
+    assert applied['fail_closed'] == ['fup_missing_interruption']
+    stored = collection.find_one({'_id': 'follow_up:fup_missing_interruption'})
+    assert stored is not None
+    assert stored['policy_id'] == 'incomplete_claim_follow_up'
+    assert stored['policy_version'] == 1
+    assert stored['status'] == 'blocked'
+    assert stored['due_at'] is None
+    assert stored['blocked_reason'] == 'policy_binding_invalid'
+    assert stored['contact_permission'] == 'authorised'
+    assert stored['channel'] == 'in_app'
+    assert 'deadline_at' not in stored
+
+
+def test_attempt_limit_block_preserves_contact_authority_without_due_work() -> None:
+    follow_up = _follow_up().model_copy(
+        update={
+            'status': FollowUpStatus.BLOCKED,
+            'due_at': None,
+            'blocked_reason': FollowUpReasonCode.ATTEMPT_LIMIT_REACHED,
+            'attempt_count': 3,
+        }
+    )
+
+    validated = FollowUpRecord.model_validate(follow_up.model_dump())
+
+    assert validated.contact_permission is FollowUpContactPermission.AUTHORISED
+    assert validated.channel is PreferredChannel.IN_APP
+    assert validated.due_at is None
+    assert validated.blocked_reason is FollowUpReasonCode.ATTEMPT_LIMIT_REACHED
+
+
 def test_mongo_due_deadline_and_operation_contracts() -> None:
     repository = MongoDBRepository(mongomock.MongoClient(), 'recovery_test')
     now = datetime(2026, 9, 9, 1, 0, tzinfo=UTC)
