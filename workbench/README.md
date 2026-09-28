@@ -1,8 +1,7 @@
 # Northwind Claims Workbench
 
-This React/Vite application is the componentised staff client. It replaces the legacy static
-implementation under `employee/` progressively; the legacy files remain only until every required
-capability has been migrated and verified.
+This React/Vite application is the supported, componentised staff client. It replaces the retired
+static employee frontend.
 
 ## Local run
 
@@ -47,7 +46,7 @@ northwind-demo-staff
 
 It is available only in development and test and is not a deployment credential.
 
-## Current migration boundary
+## Current application boundary
 
 - The new client uses real staff login/session routes and never embeds the synthetic bearer token.
 - Queue and Claim detail tags are rendered only from the backend Staff Tag Registry projection;
@@ -74,7 +73,5 @@ It is available only in development and test and is not a deployment credential.
 - Staff Agent turns require the configured model-gateway runtime. In controlled mode the API
   returns `503 DEPENDENCY_UNAVAILABLE` rather than fabricating an answer.
 
-The legacy `employee/index.html` is now a redirect/deprecation shell. The accompanying
-`employee/app.js` and `employee/styles.css` remain only as migration inventory until the final
-acceptance checklist moves them to the external archive. Do not add new product functionality to
-any legacy file.
+The retired static employee frontend has been removed. Add all staff-facing product behaviour
+under `workbench/src/` and its tests.
