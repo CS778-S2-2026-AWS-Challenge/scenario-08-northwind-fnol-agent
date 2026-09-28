@@ -2,8 +2,10 @@ import { BriefcaseBusiness, LockKeyhole } from 'lucide-react'
 import { useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/auth-context.js'
+import { translate as t, useLanguage } from '../i18n.js'
 
 export default function LoginPage() {
+  useLanguage()
   const { session, login } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -36,28 +38,26 @@ export default function LoginPage() {
       <section className="staff-login__context" aria-labelledby="staff-login-heading">
         <div className="brand-lockup">
           <span className="brand-mark"><BriefcaseBusiness size={22} /></span>
-          <span>Northwind Claims</span>
+          <span>{t('Northwind Claims')}</span>
         </div>
         <div>
-          <p className="eyebrow">Claims operations</p>
-          <h1 id="staff-login-heading">Continue the work that matters now.</h1>
+          <p className="eyebrow">{t('Claims operations')}</p>
+          <h1 id="staff-login-heading">{t('Continue the work that matters now.')}</h1>
           <p className="staff-login__lead">
-            Review claimant needs, evidence, conversations, and next actions in one accountable
-            workspace.
+            {t('Review claimant needs, evidence, conversations, and next actions in one accountable workspace.')}
           </p>
         </div>
         <p className="staff-login__privacy">
-          Staff access is separate from claimant accounts and every business action remains
-          attributable.
+          {t('Staff access is separate from claimant accounts and every business action remains attributable.')}
         </p>
       </section>
-      <section className="staff-login__form-wrap" aria-label="Staff sign in">
+      <section className="staff-login__form-wrap" aria-label={t('Staff sign in')}>
         <form className="staff-login__form" onSubmit={submit}>
           <span className="form-icon"><LockKeyhole size={22} /></span>
-          <p className="eyebrow">Secure staff access</p>
-          <h2>Sign in to Workbench</h2>
+          <p className="eyebrow">{t('Secure staff access')}</p>
+          <h2>{t('Sign in to Workbench')}</h2>
           <label>
-            Work email
+            {t('Work email')}
             <input
               type="email"
               autoComplete="username"
@@ -67,7 +67,7 @@ export default function LoginPage() {
             />
           </label>
           <label>
-            Password
+            {t('Password')}
             <input
               type="password"
               autoComplete="current-password"
@@ -78,7 +78,7 @@ export default function LoginPage() {
           </label>
           {error && <p className="form-error" role="alert">{error}</p>}
           <button className="button button--primary button--wide" type="submit" disabled={submitting}>
-            {submitting ? 'Signing in...' : 'Sign in'}
+            {t(submitting ? 'Signing in...' : 'Sign in')}
           </button>
         </form>
       </section>

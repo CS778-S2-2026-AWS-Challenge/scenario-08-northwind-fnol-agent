@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Activity, BookOpen, Boxes, ClipboardList, DatabaseZap, FileClock, Gauge, LogOut, Settings2, ShieldCheck, Users } from 'lucide-react'
+import { Activity, BookOpen, Boxes, ClipboardList, DatabaseZap, FileClock, Gauge, LogOut, MessageSquareText, Settings2, ShieldCheck, Users } from 'lucide-react'
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ADMIN_ACCESS_DENIED_EVENT, adminFetch, getToken, setToken } from './api.js'
 import AccountsPage from './pages/AccountsPage.jsx'
 import AuditPage from './pages/AuditPage.jsx'
 import ConfigurationPage from './pages/ConfigurationPage.jsx'
 import EvaluationPage from './pages/EvaluationPage.jsx'
+import FeedbackPage from './pages/FeedbackPage.jsx'
 import IntegrationsPage from './pages/IntegrationsPage.jsx'
 import KnowledgePage from './pages/KnowledgePage.jsx'
 import OperationsPage from './pages/OperationsPage.jsx'
@@ -23,6 +24,7 @@ const navigation = [
   { path: '/admin/audit', label: 'Audit', icon: FileClock },
   { path: '/admin/customers', label: 'Customers', icon: Users },
   { path: '/admin/staff', label: 'Staff', icon: ShieldCheck },
+  { path: '/admin/feedback', label: 'Staff Feedback', icon: MessageSquareText },
 ]
 
 const accessProbe = '/internal/v1/admin/configurations?limit=1'
@@ -177,6 +179,7 @@ function ProtectedRoutes() {
           <Route path="/admin/audit" element={<AuditPage />} />
           <Route path="/admin/customers" element={<AccountsPage kind="customers" />} />
           <Route path="/admin/staff" element={<AccountsPage kind="staff" />} />
+          <Route path="/admin/feedback" element={<FeedbackPage />} />
           <Route path="*" element={<Navigate to="/admin" replace />} />
         </Routes>
       </Shell>

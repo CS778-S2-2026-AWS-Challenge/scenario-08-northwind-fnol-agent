@@ -232,6 +232,13 @@ export const workbenchApi = {
   profile(token) {
     return request('/api/v1/staff/me', { token })
   },
+  submitFeedback(token, message) {
+    return mutationRequest('/api/v1/staff/feedback', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ message }),
+    })
+  },
   logout(token) {
     return request('/api/v1/staff/auth/session', { method: 'DELETE', token })
   },
