@@ -2365,7 +2365,14 @@ def test_online_staff_presence_is_leased_and_visible_only_while_claimable(
 def test_presence_projection_handles_unknown_staff_and_rejects_non_staff_pool_reads(
     repository: FixtureRepository,
 ) -> None:
-    unknown = read_presence(repository, Principal(subject='stf_unknown', actor_type='staff'))
+    unknown = read_presence(
+        repository,
+        Principal(
+            subject='stf_unknown',
+            actor_type='staff',
+            scopes=frozenset({'workbench:read'}),
+        ),
+    )
     assert unknown.online is False
     assert unknown.available is False
     with pytest.raises(ApiError) as error:
@@ -2385,7 +2392,11 @@ def test_presence_update_maps_repository_revision_conflict(
     with pytest.raises(ApiError) as error:
         update_presence(
             repository,
-            Principal(subject='stf_demo', actor_type='staff'),
+            Principal(
+                subject='stf_demo',
+                actor_type='staff',
+                scopes=frozenset({'workbench:read', 'workbench:write'}),
+            ),
             StaffPresenceUpdate(online=True, available=True),
         )
     assert error.value.code == 'REVISION_CONFLICT'

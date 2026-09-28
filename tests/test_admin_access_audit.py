@@ -167,6 +167,10 @@ def test_published_access_policy_can_only_restrict_existing_staff_scope() -> Non
             configuration_repository=repository,
         )
     ) as client:
+        queue = client.get(
+            '/api/v1/workbench/claims',
+            headers={'Authorization': 'Bearer synthetic-staff'},
+        )
         response = client.post(
             '/api/v1/workbench/claims/clm_missing/messages',
             headers={
@@ -181,4 +185,5 @@ def test_published_access_policy_can_only_restrict_existing_staff_scope() -> Non
                 }
             },
         )
+        assert queue.status_code == 200
         assert response.status_code == 403

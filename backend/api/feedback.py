@@ -3,7 +3,7 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request, status
 
-from backend.core.auth import Principal, require_administrator, require_staff
+from backend.core.auth import Principal, require_administrator, require_staff_identity
 from backend.core.errors import ApiError
 from backend.domain.feedback import (
     FeedbackCreate,
@@ -34,7 +34,7 @@ def submit_feedback(
     payload: FeedbackCreate,
     request: Request,
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_staff_identity),
 ) -> FeedbackReceipt:
     key = require_idempotency_key(idempotency_key)
     staff_repository = cast(
