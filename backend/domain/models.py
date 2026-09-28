@@ -1142,16 +1142,18 @@ class FollowUpRecord(ContractModel):
                 raise ValueError('A pending Follow-up requires an authorised channel and due time.')
             if self.blocked_reason is not None or self.resolution_code is not None:
                 raise ValueError('A pending Follow-up cannot have a blocked or resolution reason.')
-        elif self.status is FollowUpStatus.BLOCKED and (
-            self.contact_permission is not FollowUpContactPermission.NOT_AUTHORISED
-            or self.channel is not None
-            or self.due_at is not None
-        ):
-            raise ValueError(
-                'A blocked Follow-up must not claim an authorised channel or schedule.'
-            )
-        if self.status is FollowUpStatus.BLOCKED and self.resolution_code is not None:
-            raise ValueError('A blocked Follow-up cannot have a resolution code.')
+        elif self.status is FollowUpStatus.BLOCKED:
+            if self.due_at is not None:
+                raise ValueError('A blocked Follow-up cannot retain an executable due time.')
+            if self.blocked_reason is FollowUpReasonCode.CONTACT_NOT_AUTHORISED and (
+                self.contact_permission is not FollowUpContactPermission.NOT_AUTHORISED
+                or self.channel is not None
+            ):
+                raise ValueError(
+                    'Contact withdrawal must remove both follow-up authority and channel.'
+                )
+            if self.resolution_code is not None:
+                raise ValueError('A blocked Follow-up cannot have a resolution code.')
         if self.status is FollowUpStatus.RESOLVED:
             legacy_resolution_codes = {
                 'claimant_resumed': FollowUpResolutionCode.CLAIMANT_RESUMED,
