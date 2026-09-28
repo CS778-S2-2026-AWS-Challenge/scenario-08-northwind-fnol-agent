@@ -81,6 +81,9 @@ The static result proves only private S3-to-CloudFront delivery. A console
 login, local MongoDB or MinIO result, fixture, mock, or external model response
 does not upgrade any other row to `validated`.
 
+This evidence is supplied to #786 for prerequisite verification. It is not
+deployment-readiness evidence for the EC2 application stack or its API origin.
+
 ## Verification labels and stop conditions
 
 Use these labels in the AWS verification record.
