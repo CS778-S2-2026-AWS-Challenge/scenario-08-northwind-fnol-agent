@@ -380,6 +380,7 @@ def test_reopen_persists_terminal_clear_staff_idempotency_and_audit(
     principal = Principal(
         subject='stf_demo',
         actor_type='staff',
+        scopes=frozenset({'workbench:read', 'workbench:write'}),
         auth_source='test:staff_session',
     )
 

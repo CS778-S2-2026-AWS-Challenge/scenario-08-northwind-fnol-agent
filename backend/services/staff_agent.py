@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, Protocol
 
-from backend.core.auth import Principal
+from backend.core.auth import Principal, require_staff_capability
 from backend.core.errors import ApiError
 from backend.domain.ids import new_id
 from backend.domain.knowledge import (
@@ -221,9 +221,12 @@ def _knowledge_retrieval_timed_out(code: str) -> bool:
     return code.strip().casefold() in {'timeout', 'provider_timeout', 'request_timeout'}
 
 
-def _require_staff(principal: Principal) -> None:
-    if principal.actor_type != 'staff':
-        raise ApiError(status_code=403, code='ACCESS_DENIED', message='Staff access is required.')
+def _require_workbench_read(principal: Principal) -> None:
+    require_staff_capability(principal, 'workbench:read')
+
+
+def _require_workbench_write(principal: Principal) -> None:
+    require_staff_capability(principal, 'workbench:write')
 
 
 def _session(
@@ -245,7 +248,7 @@ def create_staff_agent_session(
     payload: CreateStaffAgentSessionRequest,
     model_profile_selector: Callable[[str | None], str] | None = None,
 ) -> StaffAgentSession:
-    _require_staff(principal)
+    _require_workbench_read(principal)
     timestamp = now_utc()
     selected_profile = (
         model_profile_selector(payload.model_profile_id)
@@ -282,7 +285,7 @@ def create_staff_agent_session(
 def list_staff_agent_sessions(
     repository: PersistenceRepository, principal: Principal
 ) -> StaffAgentSessionsResponse:
-    _require_staff(principal)
+    _require_workbench_read(principal)
     sessions = [
         session
         for session in repository.list_staff_agent_sessions(principal.subject)
@@ -295,7 +298,7 @@ def list_staff_agent_sessions(
 def list_staff_agent_messages(
     repository: PersistenceRepository, principal: Principal, session_id: str
 ) -> StaffAgentMessagesResponse:
-    _require_staff(principal)
+    _require_workbench_read(principal)
     _session(repository, principal, session_id)
     messages = repository.list_staff_agent_messages(session_id, principal.subject)
     messages.sort(
@@ -431,7 +434,7 @@ def submit_staff_agent_message(
     *,
     knowledge_version_for: Callable[[str], str | None] | None = None,
 ) -> StaffAgentTurnResponse:
-    _require_staff(principal)
+    _require_workbench_write(principal)
     session = _session(repository, principal, session_id)
     existing = repository.find_staff_agent_message_by_client_id(
         session_id, principal.subject, payload.client_message_id
@@ -635,7 +638,7 @@ def execute_staff_agent_draft(
     permission, idempotency, audit and Claim State persistence.
     """
 
-    _require_staff(principal)
+    _require_workbench_write(principal)
     _session(repository, principal, session_id)
     message = next(
         (

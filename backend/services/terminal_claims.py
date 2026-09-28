@@ -3,7 +3,7 @@
 from hashlib import sha256
 from typing import Any
 
-from backend.core.auth import Principal
+from backend.core.auth import Principal, require_staff_capability
 from backend.core.errors import ApiError
 from backend.domain.audit import (
     AuditActor,
@@ -80,12 +80,7 @@ def _claim(
     principal: Principal,
     claim_id: str,
 ) -> WorkingClaim:
-    if principal.actor_type != 'staff':
-        raise ApiError(
-            status_code=403,
-            code='ACCESS_DENIED',
-            message='Staff Workbench access is required.',
-        )
+    require_staff_capability(principal, 'workbench:write')
     claim = repository.get_claim_internal(claim_id)
     if claim is None:
         raise ApiError(
@@ -344,12 +339,7 @@ def reopen_claim(
     Raises:
         ApiError: Authentication, action, input, revision, or persistence checks fail.
     """
-    if principal.actor_type != 'staff':
-        raise ApiError(
-            status_code=403,
-            code='ACCESS_DENIED',
-            message='Staff Workbench access is required.',
-        )
+    require_staff_capability(principal, 'workbench:write')
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
     reason = payload.reason.strip()
