@@ -8,7 +8,12 @@ from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 
 from backend.adapters.claims_service import AssessorServiceAdapter
 from backend.adapters.evidence_storage import EvidenceStorage, EvidenceStorageUnavailable
-from backend.core.auth import Principal, require_workbench_read, require_workbench_write
+from backend.core.auth import (
+    Principal,
+    require_staff_capability,
+    require_workbench_read,
+    require_workbench_write,
+)
 from backend.core.errors import ApiError
 from backend.domain.assets import ClaimAssetSnapshotListResponse, project_snapshot
 from backend.domain.models import (
@@ -222,9 +227,9 @@ def read_workbench_claim_filter_metadata(
 def read_workbench_retention(
     claim_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
 ) -> StaffRetentionProjection:
-    del principal
+    require_staff_capability(principal, 'workbench:read')
 
     projection = project_staff_retention(
         repository_for(request),
@@ -285,7 +290,7 @@ def abandon_workbench_claim(
     claim_id: str,
     payload: AbandonClaimRequest,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> WorkbenchClaimDetail:

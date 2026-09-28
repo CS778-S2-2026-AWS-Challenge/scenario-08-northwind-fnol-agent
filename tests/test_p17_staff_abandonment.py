@@ -164,6 +164,7 @@ def test_staff_abandonment_is_atomic_terminal_and_audited(
         subject='stf_demo',
         actor_type='staff',
         auth_source='test:staff_session',
+        scopes=frozenset({'workbench:read', 'workbench:write'}),
     )
 
     response = abandon_incomplete_claim(
@@ -298,6 +299,7 @@ def test_terminal_claim_cannot_start_session_without_reopen(
         subject='stf_demo',
         actor_type='staff',
         auth_source='test:staff_session',
+        scopes=frozenset({'workbench:read', 'workbench:write'}),
     )
 
     abandon_incomplete_claim(
@@ -334,3 +336,29 @@ def test_terminal_claim_cannot_start_session_without_reopen(
     assert stored is not None
     assert stored.terminal_disposition is not None
     assert stored.active_session_id is None
+
+
+def test_read_only_staff_cannot_abandon_incomplete_claim() -> None:
+    repository = _repository('fixture')
+    claim, follow_up, _ = _checkpoint(repository, claim_id='clm_read_only_abandon')
+    read_only = Principal(
+        subject='stf_read_only',
+        actor_type='staff',
+        auth_source='test:staff_session',
+        scopes=frozenset({'workbench:read'}),
+    )
+
+    with pytest.raises(ApiError) as denied:
+        abandon_incomplete_claim(
+            repository,
+            read_only,
+            claim.claim_id,
+            AbandonClaimRequest(reason='Read-only staff must not end this intake.'),
+            'abandon-read-only',
+            str(claim.revision),
+        )
+
+    assert denied.value.status_code == 403
+    stored = repository.get_claim_internal(claim.claim_id)
+    assert stored is not None and stored.terminal_disposition is None
+    assert stored.revision == claim.revision

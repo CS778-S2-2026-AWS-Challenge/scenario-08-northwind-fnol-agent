@@ -137,12 +137,7 @@ def abandon_incomplete_claim(
 ) -> WorkbenchClaimDetail:
     """Authoritatively abandon an incomplete Claim through the Workbench."""
 
-    if principal.actor_type != 'staff':
-        raise ApiError(
-            status_code=403,
-            code='ACCESS_DENIED',
-            message='Staff Workbench access is required.',
-        )
+    require_staff_capability(principal, 'workbench:write')
 
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
