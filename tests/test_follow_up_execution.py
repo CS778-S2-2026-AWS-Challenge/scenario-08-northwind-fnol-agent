@@ -92,9 +92,7 @@ def _checkpoint(
     recovery = SessionRecoveryContext(
         interrupted_at=interrupted_at,
         last_meaningful_activity_at=interrupted_at,
-        last_meaningful_activity_source_ref=(
-            f'claim:{claim.claim_id}:revision:{claim.revision}'
-        ),
+        last_meaningful_activity_source_ref=(f'claim:{claim.claim_id}:revision:{claim.revision}'),
         resume_point='Continue describing the incident.',
     )
 
@@ -120,10 +118,7 @@ def _checkpoint(
         purpose='resume_incomplete_claim',
         policy_id='incomplete_claim_follow_up',
         policy_version='v1',
-        deadline_at=(
-            interrupted_at
-            + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
-        ),
+        deadline_at=(interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE),
         responsible_party=ResponsibleParty.SYSTEM,
         source_refs=[
             f'claim:{claim.claim_id}:revision:{paused_claim.revision}',
@@ -145,10 +140,7 @@ def _checkpoint(
         follow_up=follow_up,
         idempotency=IdempotencyRecord(
             actor_id=claim.customer_id,
-            route=(
-                f'/api/v1/claims/{claim.claim_id}/'
-                f'sessions/{session.session_id}/pause'
-            ),
+            route=(f'/api/v1/claims/{claim.claim_id}/sessions/{session.session_id}/pause'),
             key='p17-execution-pause',
             request_fingerprint='p17-execution-pause-fingerprint',
             claim_id=claim.claim_id,
@@ -197,14 +189,8 @@ def test_due_attempts_reschedule_settle_no_response_and_exhaust(
     assert second is not None
     assert second.operation.sequence == 2
     assert second.settled_previous_operation is not None
-    assert (
-        second.settled_previous_operation.status
-        is FollowUpOperationStatus.SETTLED
-    )
-    assert (
-        second.settled_previous_operation.result
-        is FollowUpOperationResult.NO_RESPONSE
-    )
+    assert second.settled_previous_operation.status is FollowUpOperationStatus.SETTLED
+    assert second.settled_previous_operation.result is FollowUpOperationResult.NO_RESPONSE
 
     stored = repository.get_follow_up(
         claim.claim_id,
@@ -214,15 +200,9 @@ def test_due_attempts_reschedule_settle_no_response_and_exhaust(
     assert stored is not None
     assert stored.attempt_count == 2
     assert stored.status is FollowUpStatus.PENDING
-    assert stored.due_at == (
-        interrupted_at
-        + INCOMPLETE_CLAIM_FOLLOW_UP_RETRY_INTERVAL * 2
-    )
+    assert stored.due_at == (interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RETRY_INTERVAL * 2)
 
-    third_at = (
-        interrupted_at
-        + INCOMPLETE_CLAIM_FOLLOW_UP_RETRY_INTERVAL * 2
-    )
+    third_at = interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RETRY_INTERVAL * 2
     third = process_due_follow_up(
         repository,
         stored,
@@ -367,7 +347,6 @@ def test_due_attempt_exact_repository_replay_does_not_double_count(
     assert operations[0] == transition.operation
 
 
-
 @pytest.mark.parametrize('kind', ['fixture', 'mongo'])
 def test_expiry_terminalises_recovery_and_settles_committed_attempt(
     kind: str,
@@ -389,10 +368,7 @@ def test_expiry_terminalises_recovery_and_settles_committed_attempt(
     )
     assert current is not None
 
-    expiry_at = (
-        interrupted_at
-        + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
-    )
+    expiry_at = interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
     expired = process_expiring_follow_up(
         repository,
         current,
@@ -407,10 +383,7 @@ def test_expiry_terminalises_recovery_and_settles_committed_attempt(
     assert stored_claim is not None
     assert stored_claim.revision == claim.revision + 1
     assert stored_claim.terminal_disposition is not None
-    assert (
-        stored_claim.terminal_disposition.value
-        is TerminalDispositionValue.ABANDONED
-    )
+    assert stored_claim.terminal_disposition.value is TerminalDispositionValue.ABANDONED
     assert (
         stored_claim.terminal_disposition.reason_code
         is TerminalDispositionReasonCode.RECOVERY_EXPIRED
@@ -444,10 +417,7 @@ def test_deadline_boundary_expiry_wins_over_due_attempt(
     repository = _repository(kind)
     claim, _, follow_up, interrupted_at = _checkpoint(repository)
 
-    deadline = (
-        interrupted_at
-        + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
-    )
+    deadline = interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
 
     due_result = process_due_follow_up(
         repository,
@@ -474,11 +444,14 @@ def test_deadline_boundary_expiry_wins_over_due_attempt(
         is TerminalDispositionReasonCode.RECOVERY_EXPIRED
     )
 
-    assert repository.list_follow_up_operations(
-        claim.claim_id,
-        follow_up.follow_up_id,
-        claim.customer_id,
-    ) == []
+    assert (
+        repository.list_follow_up_operations(
+            claim.claim_id,
+            follow_up.follow_up_id,
+            claim.customer_id,
+        )
+        == []
+    )
 
 
 @pytest.mark.parametrize('kind', ['fixture', 'mongo'])
@@ -488,10 +461,7 @@ def test_duplicate_expiry_worker_is_idempotent_by_authoritative_state(
     repository = _repository(kind)
     claim, _, follow_up, interrupted_at = _checkpoint(repository)
 
-    deadline = (
-        interrupted_at
-        + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
-    )
+    deadline = interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
 
     first = process_expiring_follow_up(
         repository,
@@ -545,10 +515,7 @@ def test_attempt_before_deadline_can_commit_then_expiry_wins_later(
     )
     assert current is not None
 
-    deadline = (
-        interrupted_at
-        + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
-    )
+    deadline = interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
     expired = process_expiring_follow_up(
         repository,
         current,
@@ -564,7 +531,6 @@ def test_attempt_before_deadline_can_commit_then_expiry_wins_later(
     assert len(operations) == 1
     assert operations[0].status is FollowUpOperationStatus.SETTLED
     assert operations[0].result is FollowUpOperationResult.NO_RESPONSE
-
 
 
 @pytest.mark.parametrize('kind', ['fixture', 'mongo'])
@@ -604,14 +570,8 @@ def test_contact_withdrawal_blocks_contact_without_abandoning_claim(
     )
     assert stored is not None
     assert stored.status is FollowUpStatus.BLOCKED
-    assert (
-        stored.reason_code
-        is FollowUpReasonCode.CONTACT_NOT_AUTHORISED
-    )
-    assert (
-        stored.contact_permission
-        is FollowUpContactPermission.NOT_AUTHORISED
-    )
+    assert stored.reason_code is FollowUpReasonCode.CONTACT_NOT_AUTHORISED
+    assert stored.contact_permission is FollowUpContactPermission.NOT_AUTHORISED
     assert stored.channel is None
     assert stored.due_at is None
     assert stored.attempt_count == 1
@@ -630,10 +590,7 @@ def test_contact_withdrawal_blocks_contact_without_abandoning_claim(
     )
     assert len(operations) == 1
     assert operations[0].status is FollowUpOperationStatus.SETTLED
-    assert (
-        operations[0].result
-        is FollowUpOperationResult.AUTHORITY_WITHDRAWN
-    )
+    assert operations[0].result is FollowUpOperationResult.AUTHORITY_WITHDRAWN
 
 
 @pytest.mark.parametrize('kind', ['fixture', 'mongo'])
@@ -694,10 +651,7 @@ def test_expiry_appends_terminal_recovery_audit(
     repository = _repository(kind)
     claim, _, follow_up, interrupted_at = _checkpoint(repository)
 
-    deadline = (
-        interrupted_at
-        + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
-    )
+    deadline = interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
 
     result = process_expiring_follow_up(
         repository,
@@ -714,16 +668,11 @@ def test_expiry_appends_terminal_recovery_audit(
         )
     )
 
-    expiry_events = [
-        event
-        for event in events
-        if event.actor.actor_id == 'p17-recovery-expiry'
-    ]
+    expiry_events = [event for event in events if event.actor.actor_id == 'p17-recovery-expiry']
 
     assert len(expiry_events) == 1
     assert expiry_events[0].event_type is AuditEventType.ACTION_COMPLETED
     assert expiry_events[0].claim_revision == result.claim.revision
-
 
 
 @pytest.mark.parametrize(
@@ -750,19 +699,15 @@ def test_retention_reservation_closes_follow_up_operation_reads(
 
     assert due is not None
 
-    operations = (
-        repository.list_follow_up_operations(
-            claim.claim_id,
-            follow_up.follow_up_id,
-            claim.customer_id,
-        )
+    operations = repository.list_follow_up_operations(
+        claim.claim_id,
+        follow_up.follow_up_id,
+        claim.customer_id,
     )
 
     assert len(operations) == 1
 
-    operation_id = (
-        operations[0].operation_id
-    )
+    operation_id = operations[0].operation_id
 
     current = repository.get_follow_up(
         claim.claim_id,
@@ -783,17 +728,10 @@ def test_retention_reservation_closes_follow_up_operation_reads(
 
     assert expired is not None
 
-    terminal_claim = (
-        repository.get_claim_internal(
-            claim.claim_id
-        )
-    )
+    terminal_claim = repository.get_claim_internal(claim.claim_id)
 
     assert terminal_claim is not None
-    assert (
-        terminal_claim.terminal_disposition
-        is not None
-    )
+    assert terminal_claim.terminal_disposition is not None
 
     reserve_retention_from_terminal(
         repository,
@@ -803,12 +741,7 @@ def test_retention_reservation_closes_follow_up_operation_reads(
 
     # Claim still physically exists here; claimant visibility must nevertheless
     # close immediately from durable RetentionOperation authority.
-    assert (
-        repository.get_claim_internal(
-            claim.claim_id
-        )
-        is not None
-    )
+    assert repository.get_claim_internal(claim.claim_id) is not None
 
     assert (
         repository.get_follow_up_operation(

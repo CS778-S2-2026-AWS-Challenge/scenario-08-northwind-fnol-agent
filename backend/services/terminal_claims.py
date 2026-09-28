@@ -63,18 +63,13 @@ def _retry(
         raise ApiError(
             status_code=409,
             code='IDEMPOTENCY_CONFLICT',
-            message=(
-                f'The idempotency key was reused with different '
-                f'{operation_name} data.'
-            ),
+            message=(f'The idempotency key was reused with different {operation_name} data.'),
         )
     if record.response_payload is None:
         raise ApiError(
             status_code=500,
             code='INTERNAL_ERROR',
-            message=(
-                f'The {operation_name} Claim response could not be restored.'
-            ),
+            message=(f'The {operation_name} Claim response could not be restored.'),
             retryable=True,
         )
     return WorkbenchClaimDetail.model_validate(record.response_payload)
@@ -135,8 +130,6 @@ def _save(
             code='RESOURCE_NOT_FOUND',
             message='The Claim is no longer available.',
         ) from conflict
-
-
 
 
 def abandon_incomplete_claim(
@@ -258,10 +251,7 @@ def abandon_incomplete_claim(
 
     audit_event = AuditEventEnvelope(
         event_id=(
-            'aud_abandon_'
-            + sha256(
-                f'{principal.subject}:{route}:{key}'.encode()
-            ).hexdigest()[:20]
+            'aud_abandon_' + sha256(f'{principal.subject}:{route}:{key}'.encode()).hexdigest()[:20]
         ),
         event_type=AuditEventType.ACTION_COMPLETED,
         outcome=AuditOutcome.SUCCEEDED,
@@ -328,6 +318,7 @@ def abandon_incomplete_claim(
         ) from conflict
 
     return response
+
 
 def reopen_claim(
     repository: PersistenceRepository,

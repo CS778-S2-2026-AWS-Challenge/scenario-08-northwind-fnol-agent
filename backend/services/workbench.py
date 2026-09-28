@@ -920,9 +920,7 @@ def _incomplete_context(
         follow_up_due_at=follow_up.due_at,
         follow_up_status=follow_up.status.value,
         follow_up_reason=(
-            follow_up.reason_code.value
-            if follow_up.reason_code is not None
-            else None
+            follow_up.reason_code.value if follow_up.reason_code is not None else None
         ),
         follow_up_attempts=follow_up.attempt_count,
         expires_at=follow_up.deadline_at,

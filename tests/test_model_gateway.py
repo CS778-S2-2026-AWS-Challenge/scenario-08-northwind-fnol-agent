@@ -4144,15 +4144,9 @@ def test_model_gateway_failures_are_bounded_and_atomic_at_message_api(
         response,
         {
             ModelGatewayErrorCode.TIMEOUT: 'claimant_turn.model_timeout',
-            ModelGatewayErrorCode.RATE_LIMIT: (
-                'claimant_turn.model_rate_limited'
-            ),
-            ModelGatewayErrorCode.AUTHENTICATION: (
-                'claimant_turn.model_dependency_terminal'
-            ),
-            ModelGatewayErrorCode.CONFIGURATION: (
-                'claimant_turn.model_dependency_terminal'
-            ),
+            ModelGatewayErrorCode.RATE_LIMIT: ('claimant_turn.model_rate_limited'),
+            ModelGatewayErrorCode.AUTHENTICATION: ('claimant_turn.model_dependency_terminal'),
+            ModelGatewayErrorCode.CONFIGURATION: ('claimant_turn.model_dependency_terminal'),
         }[gateway_code],
     )
     assert 'model.example.test' not in response.text

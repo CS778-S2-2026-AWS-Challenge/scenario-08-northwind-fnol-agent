@@ -115,6 +115,7 @@ def decode_contents_evidence_association_cursor(
         raise InvalidRepositoryCursorError
     return cursor
 
+
 def encode_follow_up_discovery_cursor(
     cursor: FollowUpDiscoveryCursor,
 ) -> str:

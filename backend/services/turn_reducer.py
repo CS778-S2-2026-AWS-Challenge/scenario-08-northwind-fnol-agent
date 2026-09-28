@@ -1198,7 +1198,8 @@ def reduce_turn(
         if runtime_trace.tool_result_status == 'unavailable':
             tool_policy_ref = _recovery_policy_ref(
                 RecoveryTrigger(
-                    source='tool', outcome_code='unavailable',
+                    source='tool',
+                    outcome_code='unavailable',
                     blocking=runtime_trace.runtime_action_code == 'runtime.fail_safe',
                 )
             )

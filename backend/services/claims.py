@@ -590,10 +590,7 @@ def pause_session(
         purpose='resume_incomplete_claim',
         policy_id=INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_ID,
         policy_version=INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION,
-        deadline_at=(
-            recovery.interrupted_at
-            + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
-        ),
+        deadline_at=(recovery.interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE),
         responsible_party=ResponsibleParty.SYSTEM,
         source_refs=[
             f'claim:{claim_id}:revision:{updated_claim.revision}',
@@ -608,9 +605,7 @@ def pause_session(
         attempt_count=0,
         channel=PreferredChannel.IN_APP if contact_authorised else None,
         outcome=None,
-        blocked_reason=(
-            None if contact_authorised else FollowUpReasonCode.CONTACT_NOT_AUTHORISED
-        ),
+        blocked_reason=(None if contact_authorised else FollowUpReasonCode.CONTACT_NOT_AUTHORISED),
         status=FollowUpStatus.PENDING if contact_authorised else FollowUpStatus.BLOCKED,
         due_at=timestamp if contact_authorised else None,
         created_at=timestamp,
@@ -956,9 +951,7 @@ def start_session(
                     raise ApiError(
                         status_code=409,
                         code='INVALID_STATE_TRANSITION',
-                        message=(
-                            'The incomplete-Claim recovery window has expired.'
-                        ),
+                        message=('The incomplete-Claim recovery window has expired.'),
                     )
 
                 resolved_follow_up = current_follow_up.model_copy(
@@ -992,44 +985,27 @@ def start_session(
                     raise ApiError(
                         status_code=409,
                         code='INVALID_STATE_TRANSITION',
-                        message=(
-                            'The recovery operation history requires reconciliation.'
-                        ),
+                        message=('The recovery operation history requires reconciliation.'),
                     )
 
                 if open_operations:
                     current_operation = open_operations[0]
 
-                    if (
-                        current_operation.status
-                        is FollowUpOperationStatus.SCHEDULED
-                    ):
-                        reconciled_follow_up_operation = (
-                            current_operation.model_copy(
-                                update={
-                                    'status': (
-                                        FollowUpOperationStatus.CANCELLED
-                                    ),
-                                    'result': (
-                                        FollowUpOperationResult
-                                        .SUPERSEDED_BY_RESUME
-                                    ),
-                                    'cancelled_at': timestamp,
-                                }
-                            )
+                    if current_operation.status is FollowUpOperationStatus.SCHEDULED:
+                        reconciled_follow_up_operation = current_operation.model_copy(
+                            update={
+                                'status': (FollowUpOperationStatus.CANCELLED),
+                                'result': (FollowUpOperationResult.SUPERSEDED_BY_RESUME),
+                                'cancelled_at': timestamp,
+                            }
                         )
                     else:
-                        reconciled_follow_up_operation = (
-                            current_operation.model_copy(
-                                update={
-                                    'status': FollowUpOperationStatus.SETTLED,
-                                    'result': (
-                                        FollowUpOperationResult
-                                        .SUPERSEDED_BY_RESUME
-                                    ),
-                                    'settled_at': timestamp,
-                                }
-                            )
+                        reconciled_follow_up_operation = current_operation.model_copy(
+                            update={
+                                'status': FollowUpOperationStatus.SETTLED,
+                                'result': (FollowUpOperationResult.SUPERSEDED_BY_RESUME),
+                                'settled_at': timestamp,
+                            }
                         )
         session = SessionRecord(
             session_id=new_id('ses'),
@@ -1105,9 +1081,7 @@ def start_session(
             resume_audit_event = AuditEventEnvelope(
                 event_id=(
                     'aud_resume_'
-                    + sha256(
-                        f'{principal.subject}:{route}:{key}'.encode()
-                    ).hexdigest()[:20]
+                    + sha256(f'{principal.subject}:{route}:{key}'.encode()).hexdigest()[:20]
                 ),
                 event_type=AuditEventType.ACTION_COMPLETED,
                 outcome=AuditOutcome.SUCCEEDED,
@@ -1156,9 +1130,7 @@ def start_session(
                     idempotency=idempotency,
                     branch_evaluation=branch_evaluation,
                     resolved_follow_up=resolved_follow_up,
-                    reconciled_follow_up_operation=(
-                        reconciled_follow_up_operation
-                    ),
+                    reconciled_follow_up_operation=(reconciled_follow_up_operation),
                     replaced_active_session=replaced_active_session,
                     audit_event=resume_audit_event,
                 )

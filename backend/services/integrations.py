@@ -1035,7 +1035,6 @@ def _record_external_failure(
     return failed
 
 
-
 def _persist_external_recovery_work_item(
     repository: PersistenceRepository,
     *,
@@ -1049,22 +1048,15 @@ def _persist_external_recovery_work_item(
             claim_revision=claim.revision,
             operation_id=operation_id,
             delivery_state=(
-                'submitted'
-                if task.delivery is ExternalTaskDelivery.SUBMITTED
-                else 'unknown'
+                'submitted' if task.delivery is ExternalTaskDelivery.SUBMITTED else 'unknown'
             ),
             event_id=(
-                f'external-recovery:{task.task_id}:'
-                f'{operation_id}:{task.updated_at.isoformat()}'
+                f'external-recovery:{task.task_id}:{operation_id}:{task.updated_at.isoformat()}'
             ),
             source_refs=[
                 task.task_id,
                 operation_id,
-                *(
-                    [task.delivery_evidence]
-                    if task.delivery_evidence is not None
-                    else []
-                ),
+                *([task.delivery_evidence] if task.delivery_evidence is not None else []),
             ],
             now=task.updated_at,
         )
@@ -1074,8 +1066,7 @@ def _persist_external_recovery_work_item(
             claim_revision=claim.revision,
             operation_id=operation_id,
             event_id=(
-                f'external-terminal:{task.task_id}:'
-                f'{operation_id}:{task.updated_at.isoformat()}'
+                f'external-terminal:{task.task_id}:{operation_id}:{task.updated_at.isoformat()}'
             ),
             source_refs=[
                 task.task_id,
@@ -1094,10 +1085,7 @@ def _persist_external_recovery_work_item(
     )
 
     if work_item is None:
-        raise RuntimeError(
-            'External Recovery policy did not materialise '
-            'its required WorkItem.'
-        )
+        raise RuntimeError('External Recovery policy did not materialise its required WorkItem.')
 
     repository.save_runtime_work_item(
         work_item,
@@ -1124,11 +1112,7 @@ def _complete_external_recovery_work_item(
         source_refs=[
             task.task_id,
             operation_id,
-            *(
-                [task.provider_reference]
-                if task.provider_reference is not None
-                else []
-            ),
+            *([task.provider_reference] if task.provider_reference is not None else []),
         ],
         now=task.updated_at,
     )
@@ -1142,10 +1126,7 @@ def _complete_external_recovery_work_item(
     )
 
     if work_item is None:
-        raise RuntimeError(
-            'External reconciliation did not materialise '
-            'its completion WorkItem.'
-        )
+        raise RuntimeError('External reconciliation did not materialise its completion WorkItem.')
 
     repository.save_runtime_work_item(
         work_item,
@@ -1512,15 +1493,8 @@ def reconcile_assessor_routing(
         claim_id=claim_id,
         claim_revision=claim.revision,
         operation_id=operation.operation_id,
-        delivery_state=(
-            'submitted'
-            if settled_unknown
-            else 'unknown'
-        ),
-        event_id=(
-            f'external-reconciliation:'
-            f'{task.task_id}:{operation.operation_id}'
-        ),
+        delivery_state=('submitted' if settled_unknown else 'unknown'),
+        event_id=(f'external-reconciliation:{task.task_id}:{operation.operation_id}'),
         source_refs=[
             task.task_id,
             external_request.request_id,
@@ -1530,12 +1504,10 @@ def reconcile_assessor_routing(
     )
 
     if (
-        recovery_transition.decision_code
-        != 'reconcile_existing_operation'
+        recovery_transition.decision_code != 'reconcile_existing_operation'
         or not recovery_transition.requires_reconciliation
         or recovery_transition.operation_id != operation.operation_id
-        or 'external.reconcile'
-        not in recovery_transition.required_actions
+        or 'external.reconcile' not in recovery_transition.required_actions
     ):
         raise RuntimeError(
             'Published external recovery policy does not authorise '
@@ -2352,11 +2324,8 @@ def route_assessor(
         terminal_task = next(
             (
                 item
-                for item in repository.list_external_tasks_internal(
-                    operation.claim_id
-                )
-                if item.task_id
-                == _external_task_id(operation.operation_id)
+                for item in repository.list_external_tasks_internal(operation.claim_id)
+                if item.task_id == _external_task_id(operation.operation_id)
             ),
             None,
         )
@@ -2386,18 +2355,13 @@ def route_assessor(
         unresolved_request = next(
             (
                 item
-                for item in repository.list_external_task_requests_internal(
-                    payload.claim_id
-                )
+                for item in repository.list_external_task_requests_internal(payload.claim_id)
                 if item.task_id == unresolved_task.task_id
             ),
             None,
         )
 
-        if (
-            unresolved_request is not None
-            and unresolved_request.operation_id is not None
-        ):
+        if unresolved_request is not None and unresolved_request.operation_id is not None:
             _persist_external_recovery_work_item(
                 repository,
                 claim=claim,

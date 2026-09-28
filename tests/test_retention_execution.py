@@ -46,10 +46,7 @@ def _target(
         record_type='EvidenceObjectBytes',
         record_id=f'evd-{suffix}',
         classification=RetentionClassification.DELETE,
-        storage_key=(
-            f'claims/clm-retention/evidence/'
-            f'evd-{suffix}/finalised/abc{suffix}'
-        ),
+        storage_key=(f'claims/clm-retention/evidence/evd-{suffix}/finalised/abc{suffix}'),
         source_refs=[f'evd-{suffix}'],
     )
 
@@ -62,9 +59,7 @@ def _operation(
     return RetentionOperation(
         operation_id=operation_id,
         claim_id='clm-retention',
-        source_terminal_ref=(
-            'claim-terminal:clm-retention:revision:7'
-        ),
+        source_terminal_ref=('claim-terminal:clm-retention:revision:7'),
         source_claim_revision=7,
         policy_id=INCOMPLETE_CLAIM_RETENTION_POLICY_ID,
         policy_version=INCOMPLETE_CLAIM_RETENTION_POLICY_VERSION,
@@ -73,9 +68,7 @@ def _operation(
         access_closed_at=NOW,
         targets_frozen_at=NOW,
         targets=targets or [_target()],
-        source_refs=[
-            'claim-terminal:clm-retention:revision:7'
-        ],
+        source_refs=['claim-terminal:clm-retention:revision:7'],
         created_at=NOW,
         updated_at=NOW,
     )
@@ -109,28 +102,16 @@ def test_retention_operation_repository_has_fixture_mongo_cas_parity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repository = _repository(kind, monkeypatch)
-    operation = _operation(
-        operation_id=f'ret-{kind}'
-    )
+    operation = _operation(operation_id=f'ret-{kind}')
 
-    assert repository.reserve_retention_operation(
-        operation
-    ) is True
+    assert repository.reserve_retention_operation(operation) is True
 
-    assert repository.reserve_retention_operation(
-        operation
-    ) is False
+    assert repository.reserve_retention_operation(operation) is False
 
-    stored = repository.get_retention_operation(
-        operation.operation_id
-    )
+    stored = repository.get_retention_operation(operation.operation_id)
     assert stored == operation
 
-    by_claim = (
-        repository.get_retention_operation_for_claim(
-            operation.claim_id
-        )
-    )
+    by_claim = repository.get_retention_operation_for_claim(operation.claim_id)
     assert by_claim == operation
 
     failed = RetentionStepEvidence(
@@ -148,30 +129,22 @@ def test_retention_operation_repository_has_fixture_mongo_cas_parity(
     payload.update(
         {
             'revision': 2,
-            'status': (
-                RetentionOperationStatus.RECONCILIATION_REQUIRED
-            ),
+            'status': (RetentionOperationStatus.RECONCILIATION_REQUIRED),
             'step_evidence': [failed],
             'updated_at': NOW + timedelta(minutes=1),
         }
     )
 
-    candidate = RetentionOperation.model_validate(
-        payload
-    )
+    candidate = RetentionOperation.model_validate(payload)
 
     repository.save_retention_operation(
         candidate,
         expected_revision=1,
     )
 
-    assert repository.get_retention_operation(
-        operation.operation_id
-    ) == candidate
+    assert repository.get_retention_operation(operation.operation_id) == candidate
 
-    stale_payload = candidate.model_dump(
-        mode='python'
-    )
+    stale_payload = candidate.model_dump(mode='python')
     stale_payload.update(
         {
             'revision': 3,
@@ -179,9 +152,7 @@ def test_retention_operation_repository_has_fixture_mongo_cas_parity(
         }
     )
 
-    stale = RetentionOperation.model_validate(
-        stale_payload
-    )
+    stale = RetentionOperation.model_validate(stale_payload)
 
     with pytest.raises(RevisionConflict):
         repository.save_retention_operation(
@@ -212,9 +183,7 @@ def test_retention_hold_repository_has_fixture_mongo_release_parity(
     repository.save_retention_hold(hold)
     repository.save_retention_hold(hold)
 
-    listed = repository.list_retention_holds(
-        hold.claim_id
-    )
+    listed = repository.list_retention_holds(hold.claim_id)
     assert listed == [hold]
     assert listed[0].active is True
 
@@ -226,9 +195,7 @@ def test_retention_hold_repository_has_fixture_mongo_release_parity(
 
     repository.save_retention_hold(released)
 
-    listed = repository.list_retention_holds(
-        hold.claim_id
-    )
+    listed = repository.list_retention_holds(hold.claim_id)
     assert listed == [released]
     assert listed[0].active is False
 
@@ -243,17 +210,23 @@ def test_mock_evidence_storage_delete_is_idempotent() -> None:
         media_type='application/pdf',
     )
 
-    assert storage.delete_upload(
-        claim_id='clm-retention',
-        evidence_id='evd-1',
-        storage_key=stored.storage_key,
-    ) is ObjectDeletionOutcome.DELETED
+    assert (
+        storage.delete_upload(
+            claim_id='clm-retention',
+            evidence_id='evd-1',
+            storage_key=stored.storage_key,
+        )
+        is ObjectDeletionOutcome.DELETED
+    )
 
-    assert storage.delete_upload(
-        claim_id='clm-retention',
-        evidence_id='evd-1',
-        storage_key=stored.storage_key,
-    ) is ObjectDeletionOutcome.ALREADY_ABSENT
+    assert (
+        storage.delete_upload(
+            claim_id='clm-retention',
+            evidence_id='evd-1',
+            storage_key=stored.storage_key,
+        )
+        is ObjectDeletionOutcome.ALREADY_ABSENT
+    )
 
 
 class _DeleteClient:
@@ -383,10 +356,7 @@ def test_minio_retention_delete_reports_bounded_outcome(
     outcome = storage.delete_upload(
         claim_id='clm-retention',
         evidence_id='evd-1',
-        storage_key=(
-            'claims/clm-retention/evidence/'
-            'evd-1/finalised/abc1'
-        ),
+        storage_key=('claims/clm-retention/evidence/evd-1/finalised/abc1'),
     )
 
     assert outcome is expected
@@ -426,9 +396,7 @@ def test_retention_restart_retries_only_unsatisfied_target() -> None:
         ]
     )
 
-    assert repository.reserve_retention_operation(
-        operation
-    )
+    assert repository.reserve_retention_operation(operation)
 
     first_storage = _ScriptedStorage(
         {
@@ -448,9 +416,7 @@ def test_retention_restart_retries_only_unsatisfied_target() -> None:
         now=NOW + timedelta(minutes=1),
     )
 
-    assert first.status is (
-        RetentionOperationStatus.RECONCILIATION_REQUIRED
-    )
+    assert first.status is (RetentionOperationStatus.RECONCILIATION_REQUIRED)
     assert first_storage.calls == [
         'evd-1',
         'evd-2',
@@ -472,21 +438,11 @@ def test_retention_restart_retries_only_unsatisfied_target() -> None:
         now=NOW + timedelta(minutes=2),
     )
 
-    assert second.status is (
-        RetentionOperationStatus.COMPLETED
-    )
+    assert second.status is (RetentionOperationStatus.COMPLETED)
     assert second_storage.calls == ['evd-2']
 
-    evd_1 = [
-        item
-        for item in second.step_evidence
-        if item.target_id == 'target-1'
-    ]
-    evd_2 = [
-        item
-        for item in second.step_evidence
-        if item.target_id == 'target-2'
-    ]
+    evd_1 = [item for item in second.step_evidence if item.target_id == 'target-1']
+    evd_2 = [item for item in second.step_evidence if item.target_id == 'target-2']
 
     assert len(evd_1) == 1
     assert [item.attempt for item in evd_2] == [1, 2]
@@ -496,9 +452,7 @@ def test_active_hold_prevents_any_destructive_call() -> None:
     repository = FixtureRepository()
     operation = _operation()
 
-    assert repository.reserve_retention_operation(
-        operation
-    )
+    assert repository.reserve_retention_operation(operation)
 
     hold = RetentionHoldRecord(
         hold_id='hold-active',

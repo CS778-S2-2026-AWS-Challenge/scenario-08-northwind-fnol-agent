@@ -212,9 +212,7 @@ class FixtureRepository(PersistenceRepository):
         self._conversation_summaries: dict[str, VerifiedConversationSummary] = {}
         self._runtime_traces: dict[str, RuntimeTraceRecord] = {}
         self._runtime_turns: dict[str, RuntimeTurnRecords] = {}
-        self._standalone_runtime_work_items: dict[
-            str, RuntimeWorkItemRecord
-        ] = {}
+        self._standalone_runtime_work_items: dict[str, RuntimeWorkItemRecord] = {}
         self._staff_agent_sessions: dict[str, StaffAgentSession] = {}
         self._staff_agent_messages: dict[str, StaffAgentMessage] = {}
         self._staff_agent_executions: dict[str, StaffAgentExecutionRecord] = {}
@@ -263,9 +261,7 @@ class FixtureRepository(PersistenceRepository):
         operation_id: str,
     ) -> RetentionOperation | None:
         with self._claim_mutation_lock:
-            operation = self._retention_operations.get(
-                operation_id
-            )
+            operation = self._retention_operations.get(operation_id)
             return deepcopy(operation)
 
     def get_retention_operation_for_claim(
@@ -273,16 +269,12 @@ class FixtureRepository(PersistenceRepository):
         claim_id: str,
     ) -> RetentionOperation | None:
         with self._claim_mutation_lock:
-            operation_id = self._retention_operation_by_claim.get(
-                claim_id
-            )
+            operation_id = self._retention_operation_by_claim.get(claim_id)
 
             if operation_id is None:
                 return None
 
-            return deepcopy(
-                self._retention_operations.get(operation_id)
-            )
+            return deepcopy(self._retention_operations.get(operation_id))
 
     def reserve_eligible_retention_operation(
         self,
@@ -291,45 +283,30 @@ class FixtureRepository(PersistenceRepository):
         """Atomically validate P17 retention authority and close claimant access."""
 
         with self._claim_mutation_lock:
-            existing_id = self._retention_operation_by_claim.get(
-                operation.claim_id
-            )
+            existing_id = self._retention_operation_by_claim.get(operation.claim_id)
 
             if existing_id is not None:
-                existing = self._retention_operations.get(
-                    existing_id
-                )
+                existing = self._retention_operations.get(existing_id)
 
                 if existing is None:
                     raise KeyError(existing_id)
 
                 same_logical_operation = (
-                    existing.operation_id
-                    == operation.operation_id
-                    and existing.claim_id
-                    == operation.claim_id
-                    and existing.source_terminal_ref
-                    == operation.source_terminal_ref
-                    and existing.source_claim_revision
-                    == operation.source_claim_revision
-                    and existing.policy_id
-                    == operation.policy_id
-                    and existing.policy_version
-                    == operation.policy_version
-                    and existing.source_refs
-                    == operation.source_refs
+                    existing.operation_id == operation.operation_id
+                    and existing.claim_id == operation.claim_id
+                    and existing.source_terminal_ref == operation.source_terminal_ref
+                    and existing.source_claim_revision == operation.source_claim_revision
+                    and existing.policy_id == operation.policy_id
+                    and existing.policy_version == operation.policy_version
+                    and existing.source_refs == operation.source_refs
                 )
 
                 if not same_logical_operation:
-                    raise IdempotencyConflict(
-                        operation.operation_id
-                    )
+                    raise IdempotencyConflict(operation.operation_id)
 
                 return deepcopy(existing)
 
-            claim = self._claims.get(
-                operation.claim_id
-            )
+            claim = self._claims.get(operation.claim_id)
 
             if claim is None:
                 raise RetentionEligibilityRejected(
@@ -359,8 +336,7 @@ class FixtureRepository(PersistenceRepository):
                 )
 
             external_unknown = any(
-                item.claim_id == operation.claim_id
-                and item.status.value == 'unknown_outcome'
+                item.claim_id == operation.claim_id and item.status.value == 'unknown_outcome'
                 for item in self._external_tasks.values()
             )
 
@@ -371,13 +347,9 @@ class FixtureRepository(PersistenceRepository):
                 )
 
             runtime_items = [
-                item
-                for turn in self._runtime_turns.values()
-                for item in turn.work_items
+                item for turn in self._runtime_turns.values() for item in turn.work_items
             ]
-            runtime_items.extend(
-                self._standalone_runtime_work_items.values()
-            )
+            runtime_items.extend(self._standalone_runtime_work_items.values())
 
             staff_work_open = any(
                 item.claim_id == operation.claim_id
@@ -416,47 +388,26 @@ class FixtureRepository(PersistenceRepository):
             active_hold_ids = sorted(
                 hold.hold_id
                 for hold in self._retention_holds.values()
-                if (
-                    hold.claim_id == operation.claim_id
-                    and hold.active
-                )
+                if (hold.claim_id == operation.claim_id and hold.active)
             )
 
             candidate = operation
 
             if active_hold_ids:
-                payload = operation.model_dump(
-                    mode='python'
-                )
+                payload = operation.model_dump(mode='python')
                 payload.update(
                     {
-                        'status': (
-                            RetentionOperationStatus.HELD
-                        ),
-                        'hold_refs': sorted(
-                            set(operation.hold_refs).union(
-                                active_hold_ids
-                            )
-                        ),
+                        'status': (RetentionOperationStatus.HELD),
+                        'hold_refs': sorted(set(operation.hold_refs).union(active_hold_ids)),
                     }
                 )
-                candidate = (
-                    RetentionOperation.model_validate(
-                        payload
-                    )
-                )
+                candidate = RetentionOperation.model_validate(payload)
 
-            self._retention_operations[
-                candidate.operation_id
-            ] = deepcopy(candidate)
+            self._retention_operations[candidate.operation_id] = deepcopy(candidate)
 
-            self._retention_operation_by_claim[
-                candidate.claim_id
-            ] = candidate.operation_id
+            self._retention_operation_by_claim[candidate.claim_id] = candidate.operation_id
 
-            for lookup, record in list(
-                self._idempotency.items()
-            ):
+            for lookup, record in list(self._idempotency.items()):
                 if (
                     record.claim_id == candidate.claim_id
                     and record.actor_id == claim.customer_id
@@ -474,50 +425,26 @@ class FixtureRepository(PersistenceRepository):
         operation: RetentionOperation,
     ) -> bool:
         with self._claim_mutation_lock:
-            if (
-                operation.revision != 1
-                or operation.status
-                is not RetentionOperationStatus.RESERVED
-            ):
-                raise ValueError(
-                    'Initial retention reservation must be revision 1 '
-                    'and reserved.'
-                )
+            if operation.revision != 1 or operation.status is not RetentionOperationStatus.RESERVED:
+                raise ValueError('Initial retention reservation must be revision 1 and reserved.')
 
-            existing_id = self._retention_operation_by_claim.get(
-                operation.claim_id
-            )
+            existing_id = self._retention_operation_by_claim.get(operation.claim_id)
 
             if existing_id is not None:
-                existing = self._retention_operations[
-                    existing_id
-                ]
+                existing = self._retention_operations[existing_id]
 
-                if (
-                    existing.operation_id == operation.operation_id
-                    and existing == operation
-                ):
+                if existing.operation_id == operation.operation_id and existing == operation:
                     return False
 
-                raise IdempotencyConflict(
-                    operation.operation_id
-                )
+                raise IdempotencyConflict(operation.operation_id)
 
-            self._retention_operations[
-                operation.operation_id
-            ] = deepcopy(operation)
+            self._retention_operations[operation.operation_id] = deepcopy(operation)
 
-            self._retention_operation_by_claim[
-                operation.claim_id
-            ] = operation.operation_id
+            self._retention_operation_by_claim[operation.claim_id] = operation.operation_id
 
-            claim = self._claims.get(
-                operation.claim_id
-            )
+            claim = self._claims.get(operation.claim_id)
 
-            for lookup, record in list(
-                self._idempotency.items()
-            ):
+            for lookup, record in list(self._idempotency.items()):
                 if (
                     record.claim_id == operation.claim_id
                     and claim is not None
@@ -541,9 +468,7 @@ class FixtureRepository(PersistenceRepository):
         """Freeze one exact Claim-scoped cleanup inventory under the mutation lock."""
 
         with self._claim_mutation_lock:
-            operation = self._retention_operations.get(
-                operation_id
-            )
+            operation = self._retention_operations.get(operation_id)
 
             if operation is None:
                 raise RetentionTargetFreezeRejected(
@@ -557,9 +482,7 @@ class FixtureRepository(PersistenceRepository):
             if operation.targets_frozen_at is not None:
                 return deepcopy(operation)
 
-            claim = self._claims.get(
-                operation.claim_id
-            )
+            claim = self._claims.get(operation.claim_id)
 
             if claim is None:
                 raise RetentionEligibilityRejected(
@@ -590,10 +513,7 @@ class FixtureRepository(PersistenceRepository):
             active_holds = [
                 hold
                 for hold in self._retention_holds.values()
-                if (
-                    hold.claim_id == operation.claim_id
-                    and hold.active
-                )
+                if (hold.claim_id == operation.claim_id and hold.active)
             ]
 
             if active_holds:
@@ -619,8 +539,7 @@ class FixtureRepository(PersistenceRepository):
                 )
 
             external_unknown = any(
-                item.claim_id == operation.claim_id
-                and item.status.value == 'unknown_outcome'
+                item.claim_id == operation.claim_id and item.status.value == 'unknown_outcome'
                 for item in self._external_tasks.values()
             )
 
@@ -631,13 +550,9 @@ class FixtureRepository(PersistenceRepository):
                 )
 
             runtime_items = [
-                item
-                for turn in self._runtime_turns.values()
-                for item in turn.work_items
+                item for turn in self._runtime_turns.values() for item in turn.work_items
             ]
-            runtime_items.extend(
-                self._standalone_runtime_work_items.values()
-            )
+            runtime_items.extend(self._standalone_runtime_work_items.values())
 
             open_responsibility = any(
                 item.claim_id == operation.claim_id
@@ -672,9 +587,7 @@ class FixtureRepository(PersistenceRepository):
                 *,
                 source_refs: tuple[str, ...] = (),
             ) -> None:
-                selected = RETENTION_STORAGE_TARGETS.get(
-                    storage_type
-                )
+                selected = RETENTION_STORAGE_TARGETS.get(storage_type)
 
                 if selected is None:
                     raise RetentionTargetFreezeRejected(
@@ -705,9 +618,7 @@ class FixtureRepository(PersistenceRepository):
                     add_record(
                         'session',
                         session.session_id,
-                        source_refs=(
-                            f'session:{session.session_id}',
-                        ),
+                        source_refs=(f'session:{session.session_id}',),
                     )
 
             for message in self._messages.values():
@@ -715,9 +626,7 @@ class FixtureRepository(PersistenceRepository):
                     add_record(
                         'message',
                         message.message_id,
-                        source_refs=(
-                            f'message:{message.message_id}',
-                        ),
+                        source_refs=(f'message:{message.message_id}',),
                     )
 
             for follow_up in self._follow_ups.values():
@@ -725,9 +634,7 @@ class FixtureRepository(PersistenceRepository):
                     add_record(
                         'follow_up',
                         follow_up.follow_up_id,
-                        source_refs=(
-                            f'follow-up:{follow_up.follow_up_id}',
-                        ),
+                        source_refs=(f'follow-up:{follow_up.follow_up_id}',),
                     )
 
             for follow_up_operation in self._follow_up_operations.values():
@@ -735,9 +642,7 @@ class FixtureRepository(PersistenceRepository):
                     add_record(
                         'follow_up_operation',
                         follow_up_operation.operation_id,
-                        source_refs=(
-                            f'follow-up-operation:{follow_up_operation.operation_id}',
-                        ),
+                        source_refs=(f'follow-up-operation:{follow_up_operation.operation_id}',),
                     )
 
             for work_item in runtime_items:
@@ -745,9 +650,7 @@ class FixtureRepository(PersistenceRepository):
                     add_record(
                         'runtime_work_item',
                         work_item.work_item_id,
-                        source_refs=(
-                            f'work-item:{work_item.work_item_id}',
-                        ),
+                        source_refs=(f'work-item:{work_item.work_item_id}',),
                     )
 
             for handoff in self._handoffs.values():
@@ -755,9 +658,7 @@ class FixtureRepository(PersistenceRepository):
                     add_record(
                         'handoff',
                         handoff.handoff_id,
-                        source_refs=(
-                            f'handoff:{handoff.handoff_id}',
-                        ),
+                        source_refs=(f'handoff:{handoff.handoff_id}',),
                     )
 
             for evidence in self._evidence.values():
@@ -767,20 +668,13 @@ class FixtureRepository(PersistenceRepository):
                 add_record(
                     'evidence',
                     evidence.evidence_id,
-                    source_refs=(
-                        f'evidence:{evidence.evidence_id}',
-                    ),
+                    source_refs=(f'evidence:{evidence.evidence_id}',),
                 )
 
-                storage_key = evidence.provenance.get(
-                    'storage_key'
-                )
+                storage_key = evidence.provenance.get('storage_key')
 
                 if storage_key is not None:
-                    if (
-                        not isinstance(storage_key, str)
-                        or not storage_key.strip()
-                    ):
+                    if not isinstance(storage_key, str) or not storage_key.strip():
                         raise RetentionTargetFreezeRejected(
                             RetentionTargetFreezeReason.INVALID_STORAGE_REFERENCE,
                             operation.claim_id,
@@ -793,14 +687,10 @@ class FixtureRepository(PersistenceRepository):
                         classification=RetentionClassification.DELETE,
                         kind=RetentionTargetKind.OBJECT_BYTES,
                         storage_key=storage_key,
-                        source_refs=(
-                            f'evidence:{evidence.evidence_id}',
-                        ),
+                        source_refs=(f'evidence:{evidence.evidence_id}',),
                     )
 
-                    targets[
-                        object_target.target_id
-                    ] = object_target
+                    targets[object_target.target_id] = object_target
 
             for evidence_link in self._evidence_claim_links.values():
                 if (
@@ -822,9 +712,7 @@ class FixtureRepository(PersistenceRepository):
                     add_record(
                         'external_task',
                         task.task_id,
-                        source_refs=(
-                            f'external-task:{task.task_id}',
-                        ),
+                        source_refs=(f'external-task:{task.task_id}',),
                     )
 
             for request in self._external_task_requests.values():
@@ -832,9 +720,7 @@ class FixtureRepository(PersistenceRepository):
                     add_record(
                         'external_task_request',
                         request.request_id,
-                        source_refs=(
-                            f'external-request:{request.request_id}',
-                        ),
+                        source_refs=(f'external-request:{request.request_id}',),
                     )
 
             for attempt in self._external_task_attempts.values():
@@ -842,9 +728,7 @@ class FixtureRepository(PersistenceRepository):
                     add_record(
                         'external_task_attempt',
                         attempt.attempt_id,
-                        source_refs=(
-                            f'external-attempt:{attempt.attempt_id}',
-                        ),
+                        source_refs=(f'external-attempt:{attempt.attempt_id}',),
                     )
 
             for result in self._external_task_results.values():
@@ -852,9 +736,7 @@ class FixtureRepository(PersistenceRepository):
                     add_record(
                         'external_task_result',
                         result.result_id,
-                        source_refs=(
-                            f'external-result:{result.result_id}',
-                        ),
+                        source_refs=(f'external-result:{result.result_id}',),
                     )
 
             for external_link in self._external_task_evidence_links.values():
@@ -875,10 +757,7 @@ class FixtureRepository(PersistenceRepository):
                     )
 
             for record in self._idempotency.values():
-                if (
-                    record.claim_id != operation.claim_id
-                    or record.actor_id != claim.customer_id
-                ):
+                if record.claim_id != operation.claim_id or record.actor_id != claim.customer_id:
                     continue
 
                 record_id = retention_record_identity(
@@ -891,9 +770,7 @@ class FixtureRepository(PersistenceRepository):
                 add_record(
                     'idempotency',
                     record_id,
-                    source_refs=(
-                        f'idempotency:{record_id}',
-                    ),
+                    source_refs=(f'idempotency:{record_id}',),
                 )
 
             for event in self._audit_events.values():
@@ -901,9 +778,7 @@ class FixtureRepository(PersistenceRepository):
                     add_record(
                         'audit_event',
                         event.event_id,
-                        source_refs=(
-                            f'audit:{event.event_id}',
-                        ),
+                        source_refs=(f'audit:{event.event_id}',),
                     )
 
             for hold in self._retention_holds.values():
@@ -911,9 +786,7 @@ class FixtureRepository(PersistenceRepository):
                     add_record(
                         'retention_hold',
                         hold.hold_id,
-                        source_refs=(
-                            f'retention-hold:{hold.hold_id}',
-                        ),
+                        source_refs=(f'retention-hold:{hold.hold_id}',),
                     )
 
             selected_targets = sorted(
@@ -932,9 +805,7 @@ class FixtureRepository(PersistenceRepository):
                     operation.claim_id,
                 )
 
-            payload = operation.model_dump(
-                mode='python'
-            )
+            payload = operation.model_dump(mode='python')
             payload.update(
                 {
                     'revision': operation.revision + 1,
@@ -946,18 +817,14 @@ class FixtureRepository(PersistenceRepository):
                 }
             )
 
-            candidate = RetentionOperation.model_validate(
-                payload
-            )
+            candidate = RetentionOperation.model_validate(payload)
 
             validate_retention_operation_transition(
                 operation,
                 candidate,
             )
 
-            self._retention_operations[
-                operation.operation_id
-            ] = deepcopy(candidate)
+            self._retention_operations[operation.operation_id] = deepcopy(candidate)
 
             return deepcopy(candidate)
 
@@ -966,11 +833,7 @@ class FixtureRepository(PersistenceRepository):
         target_id: str,
     ) -> RetentionRecordTombstone | None:
         with self._claim_mutation_lock:
-            return deepcopy(
-                self._retention_tombstones.get(
-                    target_id
-                )
-            )
+            return deepcopy(self._retention_tombstones.get(target_id))
 
     def record_retention_step_failure(
         self,
@@ -983,55 +846,37 @@ class FixtureRepository(PersistenceRepository):
         now: datetime,
     ) -> RetentionOperation:
         with self._claim_mutation_lock:
-            operation = self._retention_operations.get(
-                operation_id
-            )
+            operation = self._retention_operations.get(operation_id)
 
             if operation is None:
                 raise KeyError(operation_id)
 
             if operation.revision != expected_revision:
-                raise RevisionConflict(
-                    operation.revision
-                )
+                raise RevisionConflict(operation.revision)
 
             if status not in {
                 RetentionStepStatus.FAILED,
                 RetentionStepStatus.UNKNOWN,
             }:
-                raise ValueError(
-                    'Retention failure evidence must be failed or unknown.'
-                )
+                raise ValueError('Retention failure evidence must be failed or unknown.')
 
             target = next(
-                (
-                    item
-                    for item in operation.targets
-                    if item.target_id == target_id
-                ),
+                (item for item in operation.targets if item.target_id == target_id),
                 None,
             )
 
             if target is None:
                 raise KeyError(target_id)
 
-            if (
-                target.kind
-                is not RetentionTargetKind.MONGO_RECORD
-            ):
-                raise ValueError(
-                    'Database failure evidence requires a MONGO_RECORD target.'
-                )
+            if target.kind is not RetentionTargetKind.MONGO_RECORD:
+                raise ValueError('Database failure evidence requires a MONGO_RECORD target.')
 
             statuses = retention_target_statuses(
                 operation.targets,
                 operation.step_evidence,
             )
 
-            if (
-                statuses[target_id]
-                is RetentionStepStatus.SATISFIED
-            ):
+            if statuses[target_id] is RetentionStepStatus.SATISFIED:
                 return deepcopy(operation)
 
             attempt = retention_next_attempt(
@@ -1064,9 +909,7 @@ class FixtureRepository(PersistenceRepository):
                 candidate,
             )
 
-            self._retention_operations[
-                operation.operation_id
-            ] = deepcopy(candidate)
+            self._retention_operations[operation.operation_id] = deepcopy(candidate)
 
             return deepcopy(candidate)
 
@@ -1081,31 +924,21 @@ class FixtureRepository(PersistenceRepository):
         """Apply one frozen database cleanup step atomically under the fixture lock."""
 
         with self._claim_mutation_lock:
-            operation = self._retention_operations.get(
-                operation_id
-            )
+            operation = self._retention_operations.get(operation_id)
 
             if operation is None:
                 raise KeyError(operation_id)
 
             if operation.revision != expected_revision:
-                raise RevisionConflict(
-                    operation.revision
-                )
+                raise RevisionConflict(operation.revision)
 
-            if (
-                operation.status
-                is RetentionOperationStatus.COMPLETED
-            ):
+            if operation.status is RetentionOperationStatus.COMPLETED:
                 return deepcopy(operation)
 
             active_holds = [
                 hold
                 for hold in self._retention_holds.values()
-                if (
-                    hold.claim_id == operation.claim_id
-                    and hold.active
-                )
+                if (hold.claim_id == operation.claim_id and hold.active)
             ]
 
             if active_holds:
@@ -1120,36 +953,22 @@ class FixtureRepository(PersistenceRepository):
             )
 
             target = next(
-                (
-                    item
-                    for item in operation.targets
-                    if item.target_id == target_id
-                ),
+                (item for item in operation.targets if item.target_id == target_id),
                 None,
             )
 
             if target is None:
                 raise KeyError(target_id)
 
-            if (
-                target.kind
-                is not RetentionTargetKind.MONGO_RECORD
-            ):
-                raise ValueError(
-                    'Database cleanup may execute only frozen MONGO_RECORD targets.'
-                )
+            if target.kind is not RetentionTargetKind.MONGO_RECORD:
+                raise ValueError('Database cleanup may execute only frozen MONGO_RECORD targets.')
 
-            if (
-                statuses[target.target_id]
-                is RetentionStepStatus.SATISFIED
-            ):
+            if statuses[target.target_id] is RetentionStepStatus.SATISFIED:
                 return deepcopy(operation)
 
             object_incomplete = any(
-                item.kind
-                is RetentionTargetKind.OBJECT_BYTES
-                and statuses[item.target_id]
-                is not RetentionStepStatus.SATISFIED
+                item.kind is RetentionTargetKind.OBJECT_BYTES
+                and statuses[item.target_id] is not RetentionStepStatus.SATISFIED
                 for item in operation.targets
             )
 
@@ -1170,26 +989,19 @@ class FixtureRepository(PersistenceRepository):
             )
 
             external_unknown = any(
-                item.claim_id == operation.claim_id
-                and item.status.value == 'unknown_outcome'
+                item.claim_id == operation.claim_id and item.status.value == 'unknown_outcome'
                 for item in self._external_tasks.values()
             )
 
             runtime_items = [
-                work_item
-                for turn in self._runtime_turns.values()
-                for work_item in turn.work_items
+                work_item for turn in self._runtime_turns.values() for work_item in turn.work_items
             ]
-            runtime_items.extend(
-                self._standalone_runtime_work_items.values()
-            )
+            runtime_items.extend(self._standalone_runtime_work_items.values())
 
             staff_open = any(
                 work_item.claim_id == operation.claim_id
-                and work_item.status
-                in {'open', 'in_progress'}
-                and work_item.owner
-                in {'staff', 'system', 'external'}
+                and work_item.status in {'open', 'in_progress'}
+                and work_item.owner in {'staff', 'system', 'external'}
                 for work_item in runtime_items
             )
 
@@ -1227,88 +1039,56 @@ class FixtureRepository(PersistenceRepository):
                 record_type = target.record_type
 
                 if record_type == 'WorkingClaim':
-                    return self._claims.get(
-                        target.record_id
-                    )
+                    return self._claims.get(target.record_id)
 
                 if record_type == 'SessionRecord':
-                    return self._sessions.get(
-                        target.record_id
-                    )
+                    return self._sessions.get(target.record_id)
 
                 if record_type == 'MessageRecord':
-                    return self._messages.get(
-                        target.record_id
-                    )
+                    return self._messages.get(target.record_id)
 
                 if record_type == 'FollowUpRecord':
-                    return self._follow_ups.get(
-                        target.record_id
-                    )
+                    return self._follow_ups.get(target.record_id)
 
                 if record_type == 'FollowUpOperation':
-                    return self._follow_up_operations.get(
-                        target.record_id
-                    )
+                    return self._follow_up_operations.get(target.record_id)
 
                 if record_type == 'HandoffRecord':
-                    return self._handoffs.get(
-                        target.record_id
-                    )
+                    return self._handoffs.get(target.record_id)
 
                 if record_type == 'EvidenceRecord':
-                    return self._evidence.get(
-                        target.record_id
-                    )
+                    return self._evidence.get(target.record_id)
 
                 if record_type == 'EvidenceClaimLink':
                     return next(
                         (
                             evidence_link
-                            for evidence_link
-                            in self._evidence_claim_links.values()
-                            if evidence_link.link_id
-                            == target.record_id
+                            for evidence_link in self._evidence_claim_links.values()
+                            if evidence_link.link_id == target.record_id
                         ),
                         None,
                     )
 
                 if record_type == 'ExternalTaskRecord':
-                    return self._external_tasks.get(
-                        target.record_id
-                    )
+                    return self._external_tasks.get(target.record_id)
 
                 if record_type == 'ExternalTaskRequest':
-                    return self._external_task_requests.get(
-                        target.record_id
-                    )
+                    return self._external_task_requests.get(target.record_id)
 
                 if record_type == 'ExternalTaskAttempt':
-                    return self._external_task_attempts.get(
-                        target.record_id
-                    )
+                    return self._external_task_attempts.get(target.record_id)
 
                 if record_type == 'ExternalTaskResult':
-                    return self._external_task_results.get(
-                        target.record_id
-                    )
+                    return self._external_task_results.get(target.record_id)
 
                 if record_type == 'AuditEventEnvelope':
-                    return self._audit_events.get(
-                        target.record_id
-                    )
+                    return self._audit_events.get(target.record_id)
 
                 if record_type == 'RetentionHoldRecord':
-                    return self._retention_holds.get(
-                        target.record_id
-                    )
+                    return self._retention_holds.get(target.record_id)
 
                 if record_type == 'RuntimeWorkItemRecord':
-                    direct = (
-                        self._standalone_runtime_work_items.get(
-                            target.record_id
-                        )
-                    )
+                    direct = self._standalone_runtime_work_items.get(target.record_id)
 
                     if direct is not None:
                         return direct
@@ -1318,8 +1098,7 @@ class FixtureRepository(PersistenceRepository):
                             work_item
                             for turn in self._runtime_turns.values()
                             for work_item in turn.work_items
-                            if work_item.work_item_id
-                            == target.record_id
+                            if work_item.work_item_id == target.record_id
                         ),
                         None,
                     )
@@ -1328,8 +1107,7 @@ class FixtureRepository(PersistenceRepository):
                     return next(
                         (
                             link
-                            for link
-                            in self._external_task_evidence_links.values()
+                            for link in self._external_task_evidence_links.values()
                             if retention_record_identity(
                                 'external_link',
                                 link.task_id,
@@ -1348,11 +1126,9 @@ class FixtureRepository(PersistenceRepository):
                 idempotency_match = next(
                     (
                         (lookup, record)
-                        for lookup, record
-                        in self._idempotency.items()
+                        for lookup, record in self._idempotency.items()
                         if (
-                            record.claim_id
-                            == operation.claim_id
+                            record.claim_id == operation.claim_id
                             and retention_record_identity(
                                 'idempotency',
                                 record.actor_id,
@@ -1365,45 +1141,24 @@ class FixtureRepository(PersistenceRepository):
                     None,
                 )
 
-            existing_tombstone = (
-                self._retention_tombstones.get(
-                    target.target_id
-                )
-            )
+            existing_tombstone = self._retention_tombstones.get(target.target_id)
 
-            source_record = (
-                None
-                if target.record_type
-                == 'IdempotencyRecord'
-                else regular_record()
-            )
+            source_record = None if target.record_type == 'IdempotencyRecord' else regular_record()
 
-            step_status = (
-                RetentionStepStatus.SATISFIED
-            )
+            step_status = RetentionStepStatus.SATISFIED
             diagnostic_code = None
             tombstone = None
             sanitised_idempotency = None
 
-            if (
-                target.classification
-                is RetentionClassification.RETAIN
-            ):
+            if target.classification is RetentionClassification.RETAIN:
                 if source_record is None:
                     step_status = RetentionStepStatus.UNKNOWN
-                    diagnostic_code = (
-                        'RETAINED_RECORD_MISSING'
-                    )
+                    diagnostic_code = 'RETAINED_RECORD_MISSING'
 
-            elif (
-                target.record_type
-                == 'IdempotencyRecord'
-            ):
+            elif target.record_type == 'IdempotencyRecord':
                 if idempotency_match is None:
                     step_status = RetentionStepStatus.UNKNOWN
-                    diagnostic_code = (
-                        'IDEMPOTENCY_RECORD_MISSING'
-                    )
+                    diagnostic_code = 'IDEMPOTENCY_RECORD_MISSING'
                 else:
                     _, record = idempotency_match
 
@@ -1433,15 +1188,10 @@ class FixtureRepository(PersistenceRepository):
                         retired=True,
                     )
 
-            elif (
-                target.classification
-                is RetentionClassification.DELETE
-            ):
+            elif target.classification is RetentionClassification.DELETE:
                 if source_record is None:
                     step_status = RetentionStepStatus.UNKNOWN
-                    diagnostic_code = (
-                        'DELETE_SOURCE_RECORD_MISSING'
-                    )
+                    diagnostic_code = 'DELETE_SOURCE_RECORD_MISSING'
 
             elif target.classification in {
                 RetentionClassification.ANONYMISE,
@@ -1449,29 +1199,18 @@ class FixtureRepository(PersistenceRepository):
             }:
                 if existing_tombstone is not None:
                     if (
-                        existing_tombstone.operation_id
-                        != operation.operation_id
-                        or existing_tombstone.target_id
-                        != target.target_id
+                        existing_tombstone.operation_id != operation.operation_id
+                        or existing_tombstone.target_id != target.target_id
                     ):
-                        raise IdempotencyConflict(
-                            target.target_id
-                        )
+                        raise IdempotencyConflict(target.target_id)
                 elif source_record is None:
                     step_status = RetentionStepStatus.UNKNOWN
-                    diagnostic_code = (
-                        'ANONYMISE_SOURCE_RECORD_MISSING'
-                    )
+                    diagnostic_code = 'ANONYMISE_SOURCE_RECORD_MISSING'
                 else:
-                    payload = source_record.model_dump(
-                        mode='json'
-                    )
+                    payload = source_record.model_dump(mode='json')
 
                     tombstone = RetentionRecordTombstone(
-                        tombstone_id=(
-                            'rts_'
-                            + target.target_id[4:]
-                        ),
+                        tombstone_id=('rts_' + target.target_id[4:]),
                         operation_id=operation.operation_id,
                         target_id=target.target_id,
                         claim_id=operation.claim_id,
@@ -1482,17 +1221,13 @@ class FixtureRepository(PersistenceRepository):
                             target.record_type,
                             payload,
                         ),
-                        source_refs=list(
-                            target.source_refs
-                        ),
+                        source_refs=list(target.source_refs),
                         created_at=now,
                     )
 
             else:
                 step_status = RetentionStepStatus.UNKNOWN
-                diagnostic_code = (
-                    'UNSUPPORTED_RETENTION_CLASSIFICATION'
-                )
+                diagnostic_code = 'UNSUPPORTED_RETENTION_CLASSIFICATION'
 
             attempt = retention_next_attempt(
                 operation,
@@ -1526,22 +1261,14 @@ class FixtureRepository(PersistenceRepository):
 
             # Every destructive assignment below is non-throwing after all
             # models/transitions have already been validated.
-            if (
-                step_status
-                is RetentionStepStatus.SATISFIED
-            ):
+            if step_status is RetentionStepStatus.SATISFIED:
                 if sanitised_idempotency is not None:
                     assert idempotency_match is not None
                     lookup, _ = idempotency_match
 
-                    self._idempotency[
-                        lookup
-                    ] = sanitised_idempotency
+                    self._idempotency[lookup] = sanitised_idempotency
 
-                elif (
-                    target.classification
-                    is RetentionClassification.DELETE
-                ):
+                elif target.classification is RetentionClassification.DELETE:
                     if target.record_type == 'MessageRecord':
                         message = self._messages.pop(
                             target.record_id,
@@ -1549,22 +1276,17 @@ class FixtureRepository(PersistenceRepository):
                         )
 
                         if message is not None:
-                            ids = self._message_ids_by_session.get(
-                                message.session_id
-                            )
+                            ids = self._message_ids_by_session.get(message.session_id)
 
                             if ids is not None:
                                 ids[:] = [
                                     message_id
                                     for message_id in ids
-                                    if message_id
-                                    != target.record_id
+                                    if message_id != target.record_id
                                 ]
 
                 elif tombstone is not None:
-                    self._retention_tombstones[
-                        target.target_id
-                    ] = tombstone
+                    self._retention_tombstones[target.target_id] = tombstone
 
                     if target.record_type == 'WorkingClaim':
                         self._claims.pop(
@@ -1579,22 +1301,18 @@ class FixtureRepository(PersistenceRepository):
                         )
 
                         if session is not None:
-                            session_ids = (
-                                self._session_ids_by_claim.get(
-                                    (
-                                        operation.claim_id,
-                                        session.customer_id,
-                                    )
+                            session_ids = self._session_ids_by_claim.get(
+                                (
+                                    operation.claim_id,
+                                    session.customer_id,
                                 )
                             )
 
                             if session_ids is not None:
                                 session_ids[:] = [
                                     session_id
-                                    for session_id
-                                    in session_ids
-                                    if session_id
-                                    != target.record_id
+                                    for session_id in session_ids
+                                    if session_id != target.record_id
                                 ]
 
                     elif target.record_type == 'FollowUpRecord':
@@ -1619,10 +1337,8 @@ class FixtureRepository(PersistenceRepository):
                         link_key = next(
                             (
                                 key
-                                for key, evidence_link
-                                in self._evidence_claim_links.items()
-                                if evidence_link.link_id
-                                == target.record_id
+                                for key, evidence_link in self._evidence_claim_links.items()
+                                if evidence_link.link_id == target.record_id
                             ),
                             None,
                         )
@@ -1651,9 +1367,7 @@ class FixtureRepository(PersistenceRepository):
                             None,
                         )
 
-            self._retention_operations[
-                operation.operation_id
-            ] = deepcopy(candidate)
+            self._retention_operations[operation.operation_id] = deepcopy(candidate)
 
             return deepcopy(candidate)
 
@@ -1663,9 +1377,7 @@ class FixtureRepository(PersistenceRepository):
         expected_revision: int,
     ) -> None:
         with self._claim_mutation_lock:
-            current = self._retention_operations.get(
-                operation.operation_id
-            )
+            current = self._retention_operations.get(operation.operation_id)
 
             if current is None:
                 raise KeyError(operation.operation_id)
@@ -1681,28 +1393,20 @@ class FixtureRepository(PersistenceRepository):
                 operation,
             )
 
-            self._retention_operations[
-                operation.operation_id
-            ] = deepcopy(operation)
+            self._retention_operations[operation.operation_id] = deepcopy(operation)
 
     def save_retention_hold(
         self,
         hold: RetentionHoldRecord,
     ) -> None:
         with self._claim_mutation_lock:
-            current = self._retention_holds.get(
-                hold.hold_id
-            )
+            current = self._retention_holds.get(hold.hold_id)
 
             if current is None:
                 if hold.released_at is not None:
-                    raise ValueError(
-                        'A retention hold must be persisted before release.'
-                    )
+                    raise ValueError('A retention hold must be persisted before release.')
 
-                self._retention_holds[
-                    hold.hold_id
-                ] = deepcopy(hold)
+                self._retention_holds[hold.hold_id] = deepcopy(hold)
                 return
 
             if current == hold:
@@ -1713,20 +1417,14 @@ class FixtureRepository(PersistenceRepository):
                 hold,
             )
 
-            self._retention_holds[
-                hold.hold_id
-            ] = deepcopy(hold)
+            self._retention_holds[hold.hold_id] = deepcopy(hold)
 
     def list_retention_holds(
         self,
         claim_id: str,
     ) -> list[RetentionHoldRecord]:
         with self._claim_mutation_lock:
-            holds = [
-                hold
-                for hold in self._retention_holds.values()
-                if hold.claim_id == claim_id
-            ]
+            holds = [hold for hold in self._retention_holds.values() if hold.claim_id == claim_id]
 
             return deepcopy(
                 sorted(
@@ -2772,7 +2470,6 @@ class FixtureRepository(PersistenceRepository):
 
         return deepcopy(self._claims[claim_id])
 
-
     def promote_claim_owner(
         self,
         claim_id: str,
@@ -2992,15 +2689,10 @@ class FixtureRepository(PersistenceRepository):
 
         session = self._sessions.get(session_id)
 
-        if (
-            session is None
-            or session.claim_id != claim_id
-            or session.customer_id != customer_id
-        ):
+        if session is None or session.claim_id != claim_id or session.customer_id != customer_id:
             return None
 
         return deepcopy(session)
-
 
     def save_session(self, session: SessionRecord) -> None:
         self._ensure_claim_access_open(session.claim_id)
@@ -3042,9 +2734,7 @@ class FixtureRepository(PersistenceRepository):
         migration_time = recorded_at or datetime.now(UTC)
 
         if migration_time.tzinfo is None:
-            raise ValueError(
-                'Backfill audit time must be timezone-aware.'
-            )
+            raise ValueError('Backfill audit time must be timezone-aware.')
 
         bound_count = 0
         failed_count = 0
@@ -3064,24 +2754,13 @@ class FixtureRepository(PersistenceRepository):
 
                 assert decision.audit_event is not None
 
-                existing_audit = self._audit_events.get(
-                    decision.audit_event.event_id
-                )
+                existing_audit = self._audit_events.get(decision.audit_event.event_id)
 
-                if (
-                    existing_audit is not None
-                    and existing_audit != decision.audit_event
-                ):
-                    raise IdempotencyConflict(
-                        decision.audit_event.event_id
-                    )
+                if existing_audit is not None and existing_audit != decision.audit_event:
+                    raise IdempotencyConflict(decision.audit_event.event_id)
 
-                self._follow_ups[follow_up_id] = deepcopy(
-                    decision.record
-                )
-                self._audit_events[
-                    decision.audit_event.event_id
-                ] = deepcopy(decision.audit_event)
+                self._follow_ups[follow_up_id] = deepcopy(decision.record)
+                self._audit_events[decision.audit_event.event_id] = deepcopy(decision.audit_event)
 
                 if decision.outcome == 'bound':
                     bound_count += 1
@@ -3103,12 +2782,8 @@ class FixtureRepository(PersistenceRepository):
     ) -> None:
         with self._claim_mutation_lock:
             claim = self._claims.get(expected_follow_up.claim_id)
-            current_follow_up = self._follow_ups.get(
-                expected_follow_up.follow_up_id
-            )
-            source_session = self._sessions.get(
-                expected_follow_up.source_session_id
-            )
+            current_follow_up = self._follow_ups.get(expected_follow_up.follow_up_id)
+            source_session = self._sessions.get(expected_follow_up.source_session_id)
 
             if (
                 claim is None
@@ -3122,9 +2797,7 @@ class FixtureRepository(PersistenceRepository):
                 raise RevisionConflict(claim.revision)
 
             if current_follow_up != expected_follow_up:
-                raise IdempotencyConflict(
-                    expected_follow_up.follow_up_id
-                )
+                raise IdempotencyConflict(expected_follow_up.follow_up_id)
 
             lookup = (
                 idempotency.actor_id,
@@ -3140,8 +2813,7 @@ class FixtureRepository(PersistenceRepository):
                     deepcopy(operation)
                     for operation in self._follow_up_operations.values()
                     if operation.claim_id == claim.claim_id
-                    and operation.follow_up_id
-                    == current_follow_up.follow_up_id
+                    and operation.follow_up_id == current_follow_up.follow_up_id
                 ),
                 key=lambda operation: (
                     operation.sequence,
@@ -3163,28 +2835,19 @@ class FixtureRepository(PersistenceRepository):
                     terminal.recorded_by,
                 )
             except FollowUpStaffAbandonmentRejected as error:
-                raise IdempotencyConflict(
-                    current_follow_up.follow_up_id
-                ) from error
+                raise IdempotencyConflict(current_follow_up.follow_up_id) from error
 
             if (
                 transition.claim != updated_claim
                 or transition.follow_up != updated_follow_up
-                or transition.reconciled_operation
-                != reconciled_operation
+                or transition.reconciled_operation != reconciled_operation
             ):
-                raise IdempotencyConflict(
-                    current_follow_up.follow_up_id
-                )
+                raise IdempotencyConflict(current_follow_up.follow_up_id)
 
             if reconciled_operation is not None:
-                stored_operation = self._follow_up_operations.get(
-                    reconciled_operation.operation_id
-                )
+                stored_operation = self._follow_up_operations.get(reconciled_operation.operation_id)
                 if stored_operation is None:
-                    raise IdempotencyConflict(
-                        reconciled_operation.operation_id
-                    )
+                    raise IdempotencyConflict(reconciled_operation.operation_id)
 
                 try:
                     assert_follow_up_operation_transition(
@@ -3192,9 +2855,7 @@ class FixtureRepository(PersistenceRepository):
                         reconciled_operation,
                     )
                 except ValueError as error:
-                    raise IdempotencyConflict(
-                        reconciled_operation.operation_id
-                    ) from error
+                    raise IdempotencyConflict(reconciled_operation.operation_id) from error
 
             prepared_audit = self._prepare_audit_events(
                 updated_claim,
@@ -3209,17 +2870,13 @@ class FixtureRepository(PersistenceRepository):
             assert realtime_event is not None
 
             if reconciled_operation is not None:
-                self._follow_up_operations[
-                    reconciled_operation.operation_id
-                ] = deepcopy(reconciled_operation)
+                self._follow_up_operations[reconciled_operation.operation_id] = deepcopy(
+                    reconciled_operation
+                )
 
-            self._follow_ups[
-                updated_follow_up.follow_up_id
-            ] = deepcopy(updated_follow_up)
+            self._follow_ups[updated_follow_up.follow_up_id] = deepcopy(updated_follow_up)
 
-            self._claims[
-                updated_claim.claim_id
-            ] = deepcopy(updated_claim)
+            self._claims[updated_claim.claim_id] = deepcopy(updated_claim)
 
             self._idempotency[lookup] = deepcopy(idempotency)
 
@@ -3239,12 +2896,8 @@ class FixtureRepository(PersistenceRepository):
     ) -> None:
         with self._claim_mutation_lock:
             claim = self._claims.get(expected_follow_up.claim_id)
-            current_follow_up = self._follow_ups.get(
-                expected_follow_up.follow_up_id
-            )
-            source_session = self._sessions.get(
-                expected_follow_up.source_session_id
-            )
+            current_follow_up = self._follow_ups.get(expected_follow_up.follow_up_id)
+            source_session = self._sessions.get(expected_follow_up.source_session_id)
 
             if (
                 claim is None
@@ -3258,17 +2911,14 @@ class FixtureRepository(PersistenceRepository):
                 raise RevisionConflict(claim.revision)
 
             if current_follow_up != expected_follow_up:
-                raise IdempotencyConflict(
-                    expected_follow_up.follow_up_id
-                )
+                raise IdempotencyConflict(expected_follow_up.follow_up_id)
 
             operations = sorted(
                 (
                     deepcopy(operation)
                     for operation in self._follow_up_operations.values()
                     if operation.claim_id == claim.claim_id
-                    and operation.follow_up_id
-                    == current_follow_up.follow_up_id
+                    and operation.follow_up_id == current_follow_up.follow_up_id
                 ),
                 key=lambda operation: (
                     operation.sequence,
@@ -3285,36 +2935,25 @@ class FixtureRepository(PersistenceRepository):
                     updated_follow_up.updated_at,
                 )
             except FollowUpContactWithdrawalRejected as error:
-                raise IdempotencyConflict(
-                    current_follow_up.follow_up_id
-                ) from error
+                raise IdempotencyConflict(current_follow_up.follow_up_id) from error
 
             if (
                 transition.follow_up != updated_follow_up
-                or transition.reconciled_operation
-                != reconciled_operation
+                or transition.reconciled_operation != reconciled_operation
             ):
-                raise IdempotencyConflict(
-                    current_follow_up.follow_up_id
-                )
+                raise IdempotencyConflict(current_follow_up.follow_up_id)
 
             if reconciled_operation is not None:
-                stored_operation = self._follow_up_operations.get(
-                    reconciled_operation.operation_id
-                )
+                stored_operation = self._follow_up_operations.get(reconciled_operation.operation_id)
                 if stored_operation is None:
-                    raise IdempotencyConflict(
-                        reconciled_operation.operation_id
-                    )
+                    raise IdempotencyConflict(reconciled_operation.operation_id)
                 try:
                     assert_follow_up_operation_transition(
                         stored_operation,
                         reconciled_operation,
                     )
                 except ValueError as error:
-                    raise IdempotencyConflict(
-                        reconciled_operation.operation_id
-                    ) from error
+                    raise IdempotencyConflict(reconciled_operation.operation_id) from error
 
             prepared_audit = self._prepare_audit_events(
                 claim,
@@ -3324,20 +2963,16 @@ class FixtureRepository(PersistenceRepository):
             realtime_event = self._prepare_realtime_mutation(
                 RealtimeMutation.CLAIM_CHANGED,
                 claim,
-                operation_correlation=(
-                    f'follow-up-contact:{updated_follow_up.follow_up_id}'
-                ),
+                operation_correlation=(f'follow-up-contact:{updated_follow_up.follow_up_id}'),
             )
             assert realtime_event is not None
 
             if reconciled_operation is not None:
-                self._follow_up_operations[
-                    reconciled_operation.operation_id
-                ] = deepcopy(reconciled_operation)
+                self._follow_up_operations[reconciled_operation.operation_id] = deepcopy(
+                    reconciled_operation
+                )
 
-            self._follow_ups[
-                updated_follow_up.follow_up_id
-            ] = deepcopy(updated_follow_up)
+            self._follow_ups[updated_follow_up.follow_up_id] = deepcopy(updated_follow_up)
 
             for event in prepared_audit:
                 self._audit_events[event.event_id] = deepcopy(event)
@@ -3356,12 +2991,8 @@ class FixtureRepository(PersistenceRepository):
     ) -> None:
         with self._claim_mutation_lock:
             claim = self._claims.get(expected_follow_up.claim_id)
-            current_follow_up = self._follow_ups.get(
-                expected_follow_up.follow_up_id
-            )
-            source_session = self._sessions.get(
-                expected_follow_up.source_session_id
-            )
+            current_follow_up = self._follow_ups.get(expected_follow_up.follow_up_id)
+            source_session = self._sessions.get(expected_follow_up.source_session_id)
 
             if (
                 claim is None
@@ -3375,17 +3006,14 @@ class FixtureRepository(PersistenceRepository):
                 raise RevisionConflict(claim.revision)
 
             if current_follow_up != expected_follow_up:
-                raise IdempotencyConflict(
-                    expected_follow_up.follow_up_id
-                )
+                raise IdempotencyConflict(expected_follow_up.follow_up_id)
 
             operations = sorted(
                 (
                     deepcopy(operation)
                     for operation in self._follow_up_operations.values()
                     if operation.claim_id == claim.claim_id
-                    and operation.follow_up_id
-                    == current_follow_up.follow_up_id
+                    and operation.follow_up_id == current_follow_up.follow_up_id
                 ),
                 key=lambda operation: (
                     operation.sequence,
@@ -3406,37 +3034,26 @@ class FixtureRepository(PersistenceRepository):
                     terminal.recorded_at,
                 )
             except FollowUpExpiryExecutionRejected as error:
-                raise IdempotencyConflict(
-                    expected_follow_up.follow_up_id
-                ) from error
+                raise IdempotencyConflict(expected_follow_up.follow_up_id) from error
 
             if (
                 transition.claim != updated_claim
                 or transition.follow_up != updated_follow_up
-                or transition.reconciled_operation
-                != reconciled_operation
+                or transition.reconciled_operation != reconciled_operation
             ):
-                raise IdempotencyConflict(
-                    expected_follow_up.follow_up_id
-                )
+                raise IdempotencyConflict(expected_follow_up.follow_up_id)
 
             if reconciled_operation is not None:
-                stored_operation = self._follow_up_operations.get(
-                    reconciled_operation.operation_id
-                )
+                stored_operation = self._follow_up_operations.get(reconciled_operation.operation_id)
                 if stored_operation is None:
-                    raise IdempotencyConflict(
-                        reconciled_operation.operation_id
-                    )
+                    raise IdempotencyConflict(reconciled_operation.operation_id)
                 try:
                     assert_follow_up_operation_transition(
                         stored_operation,
                         reconciled_operation,
                     )
                 except ValueError as error:
-                    raise IdempotencyConflict(
-                        reconciled_operation.operation_id
-                    ) from error
+                    raise IdempotencyConflict(reconciled_operation.operation_id) from error
 
             prepared_audit = self._prepare_audit_events(
                 updated_claim,
@@ -3446,23 +3063,17 @@ class FixtureRepository(PersistenceRepository):
             realtime_event = self._prepare_realtime_mutation(
                 RealtimeMutation.CLAIM_CHANGED,
                 updated_claim,
-                operation_correlation=(
-                    f'recovery-expiry:{updated_follow_up.follow_up_id}'
-                ),
+                operation_correlation=(f'recovery-expiry:{updated_follow_up.follow_up_id}'),
             )
             assert realtime_event is not None
 
             if reconciled_operation is not None:
-                self._follow_up_operations[
-                    reconciled_operation.operation_id
-                ] = deepcopy(reconciled_operation)
+                self._follow_up_operations[reconciled_operation.operation_id] = deepcopy(
+                    reconciled_operation
+                )
 
-            self._follow_ups[
-                updated_follow_up.follow_up_id
-            ] = deepcopy(updated_follow_up)
-            self._claims[
-                updated_claim.claim_id
-            ] = deepcopy(updated_claim)
+            self._follow_ups[updated_follow_up.follow_up_id] = deepcopy(updated_follow_up)
+            self._claims[updated_claim.claim_id] = deepcopy(updated_claim)
 
             for event in prepared_audit:
                 self._audit_events[event.event_id] = deepcopy(event)
@@ -3480,12 +3091,8 @@ class FixtureRepository(PersistenceRepository):
     ) -> None:
         with self._claim_mutation_lock:
             claim = self._claims.get(expected_follow_up.claim_id)
-            current_follow_up = self._follow_ups.get(
-                expected_follow_up.follow_up_id
-            )
-            source_session = self._sessions.get(
-                expected_follow_up.source_session_id
-            )
+            current_follow_up = self._follow_ups.get(expected_follow_up.follow_up_id)
+            source_session = self._sessions.get(expected_follow_up.source_session_id)
 
             if (
                 claim is None
@@ -3495,17 +3102,13 @@ class FixtureRepository(PersistenceRepository):
             ):
                 raise KeyError(expected_follow_up.follow_up_id)
 
-            existing_operation = self._follow_up_operations.get(
-                operation.operation_id
-            )
+            existing_operation = self._follow_up_operations.get(operation.operation_id)
 
             if existing_operation is not None:
                 if (
                     existing_operation == operation
-                    and current_follow_up.attempt_count
-                    >= updated_follow_up.attempt_count
-                    and current_follow_up.updated_at
-                    >= updated_follow_up.updated_at
+                    and current_follow_up.attempt_count >= updated_follow_up.attempt_count
+                    and current_follow_up.updated_at >= updated_follow_up.updated_at
                 ):
                     return
                 raise IdempotencyConflict(operation.operation_id)
@@ -3539,15 +3142,12 @@ class FixtureRepository(PersistenceRepository):
                     committed_at,
                 )
             except FollowUpDueExecutionRejected as error:
-                raise IdempotencyConflict(
-                    operation.operation_id
-                ) from error
+                raise IdempotencyConflict(operation.operation_id) from error
 
             if (
                 transition.operation != operation
                 or transition.follow_up != updated_follow_up
-                or transition.settled_previous_operation
-                != settled_previous_operation
+                or transition.settled_previous_operation != settled_previous_operation
             ):
                 raise IdempotencyConflict(operation.operation_id)
 
@@ -3556,18 +3156,14 @@ class FixtureRepository(PersistenceRepository):
                     settled_previous_operation.operation_id
                 )
                 if stored_previous is None:
-                    raise IdempotencyConflict(
-                        settled_previous_operation.operation_id
-                    )
+                    raise IdempotencyConflict(settled_previous_operation.operation_id)
                 try:
                     assert_follow_up_operation_transition(
                         stored_previous,
                         settled_previous_operation,
                     )
                 except ValueError as error:
-                    raise IdempotencyConflict(
-                        settled_previous_operation.operation_id
-                    ) from error
+                    raise IdempotencyConflict(settled_previous_operation.operation_id) from error
 
             if any(
                 stored.follow_up_id == operation.follow_up_id
@@ -3582,17 +3178,13 @@ class FixtureRepository(PersistenceRepository):
             )
 
             if settled_previous_operation is not None:
-                self._follow_up_operations[
-                    settled_previous_operation.operation_id
-                ] = deepcopy(settled_previous_operation)
+                self._follow_up_operations[settled_previous_operation.operation_id] = deepcopy(
+                    settled_previous_operation
+                )
 
-            self._follow_up_operations[
-                operation.operation_id
-            ] = deepcopy(operation)
+            self._follow_up_operations[operation.operation_id] = deepcopy(operation)
 
-            self._follow_ups[
-                updated_follow_up.follow_up_id
-            ] = deepcopy(updated_follow_up)
+            self._follow_ups[updated_follow_up.follow_up_id] = deepcopy(updated_follow_up)
 
             for event in prepared_audit:
                 self._audit_events[event.event_id] = deepcopy(event)
@@ -3612,13 +3204,10 @@ class FixtureRepository(PersistenceRepository):
         )
 
         if due_before.tzinfo is None:
-            raise ValueError(
-                'Follow-up discovery boundary must be timezone-aware.'
-            )
+            raise ValueError('Follow-up discovery boundary must be timezone-aware.')
         if not 1 <= limit <= FOLLOW_UP_DISCOVERY_MAX_LIMIT:
             raise ValueError(
-                'Follow-up discovery limit must be between '
-                f'1 and {FOLLOW_UP_DISCOVERY_MAX_LIMIT}.'
+                f'Follow-up discovery limit must be between 1 and {FOLLOW_UP_DISCOVERY_MAX_LIMIT}.'
             )
 
         after = (
@@ -3692,13 +3281,10 @@ class FixtureRepository(PersistenceRepository):
         )
 
         if deadline_before.tzinfo is None:
-            raise ValueError(
-                'Follow-up discovery boundary must be timezone-aware.'
-            )
+            raise ValueError('Follow-up discovery boundary must be timezone-aware.')
         if not 1 <= limit <= FOLLOW_UP_DISCOVERY_MAX_LIMIT:
             raise ValueError(
-                'Follow-up discovery limit must be between '
-                f'1 and {FOLLOW_UP_DISCOVERY_MAX_LIMIT}.'
+                f'Follow-up discovery limit must be between 1 and {FOLLOW_UP_DISCOVERY_MAX_LIMIT}.'
             )
 
         after = (
@@ -3788,8 +3374,7 @@ class FixtureRepository(PersistenceRepository):
         operations = [
             deepcopy(operation)
             for operation in self._follow_up_operations.values()
-            if operation.claim_id == claim_id
-            and operation.follow_up_id == follow_up_id
+            if operation.claim_id == claim_id and operation.follow_up_id == follow_up_id
         ]
 
         return sorted(
@@ -3825,9 +3410,7 @@ class FixtureRepository(PersistenceRepository):
             ):
                 raise KeyError(operation.operation_id)
 
-            existing = self._follow_up_operations.get(
-                operation.operation_id
-            )
+            existing = self._follow_up_operations.get(operation.operation_id)
 
             if existing is not None:
                 if existing == operation:
@@ -3845,13 +3428,9 @@ class FixtureRepository(PersistenceRepository):
                         operation,
                     )
                 except ValueError as error:
-                    raise IdempotencyConflict(
-                        operation.operation_id
-                    ) from error
+                    raise IdempotencyConflict(operation.operation_id) from error
 
-                self._follow_up_operations[
-                    operation.operation_id
-                ] = deepcopy(operation)
+                self._follow_up_operations[operation.operation_id] = deepcopy(operation)
                 return
 
             if operation.status is not FollowUpOperationStatus.SCHEDULED:
@@ -3878,9 +3457,7 @@ class FixtureRepository(PersistenceRepository):
             if operation.sequence != expected_sequence:
                 raise IdempotencyConflict(operation.operation_id)
 
-            self._follow_up_operations[
-                operation.operation_id
-            ] = deepcopy(operation)
+            self._follow_up_operations[operation.operation_id] = deepcopy(operation)
 
     def save_incomplete_checkpoint(
         self,
@@ -4061,8 +3638,7 @@ class FixtureRepository(PersistenceRepository):
                     or stored_follow_up not in open_recovery
                     or resolved_follow_up.status is not FollowUpStatus.RESOLVED
                     or resolved_follow_up.outcome != 'claimant_resumed'
-                    or resolved_follow_up.reason_code
-                    is not FollowUpReasonCode.CLAIMANT_RESUMED
+                    or resolved_follow_up.reason_code is not FollowUpReasonCode.CLAIMANT_RESUMED
                     or resolved_follow_up.updated_at < stored_follow_up.updated_at
                 ):
                     raise KeyError(claim.claim_id)
@@ -4082,18 +3658,14 @@ class FixtureRepository(PersistenceRepository):
 
                 if (
                     stored_follow_up.deadline_at is not None
-                    and resolved_follow_up.updated_at
-                    >= stored_follow_up.deadline_at
+                    and resolved_follow_up.updated_at >= stored_follow_up.deadline_at
                 ):
-                    raise RecoveryDeadlineConflict(
-                        stored_follow_up.follow_up_id
-                    )
+                    raise RecoveryDeadlineConflict(stored_follow_up.follow_up_id)
 
                 open_operations = [
                     operation
                     for operation in self._follow_up_operations.values()
-                    if operation.follow_up_id
-                    == stored_follow_up.follow_up_id
+                    if operation.follow_up_id == stored_follow_up.follow_up_id
                     and operation.claim_id == claim.claim_id
                     and operation.status
                     in {
@@ -4154,9 +3726,9 @@ class FixtureRepository(PersistenceRepository):
             if resolved_follow_up is not None:
                 self._follow_ups[resolved_follow_up.follow_up_id] = deepcopy(resolved_follow_up)
             if reconciled_follow_up_operation is not None:
-                self._follow_up_operations[
-                    reconciled_follow_up_operation.operation_id
-                ] = deepcopy(reconciled_follow_up_operation)
+                self._follow_up_operations[reconciled_follow_up_operation.operation_id] = deepcopy(
+                    reconciled_follow_up_operation
+                )
             if branch_evaluation is not None:
                 self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(
                     branch_evaluation
@@ -4211,9 +3783,7 @@ class FixtureRepository(PersistenceRepository):
         key: str,
     ) -> IdempotencyRecord | None:
         with self._claim_mutation_lock:
-            record = self._idempotency.get(
-                (actor_id, route, key)
-            )
+            record = self._idempotency.get((actor_id, route, key))
 
             if record is None:
                 return None
@@ -4222,31 +3792,18 @@ class FixtureRepository(PersistenceRepository):
             # claimant replay closure cannot depend on the live Claim record.
             # Only claimant idempotency is retired by retention.
             if record.retired:
-                operation_id = (
-                    self._retention_operation_by_claim.get(
-                        record.claim_id
-                    )
-                )
+                operation_id = self._retention_operation_by_claim.get(record.claim_id)
 
                 operation = (
-                    self._retention_operations.get(
-                        operation_id
-                    )
+                    self._retention_operations.get(operation_id)
                     if operation_id is not None
                     else None
                 )
 
-                if retention_access_closed(
-                    operation
-                ):
-                    raise ResourceAccessClosed(
-                        record.claim_id
-                    )
+                if retention_access_closed(operation):
+                    raise ResourceAccessClosed(record.claim_id)
 
             return deepcopy(record)
-
-
-
 
     def find_message_turn_idempotency(
         self,
@@ -4265,7 +3822,6 @@ class FixtureRepository(PersistenceRepository):
                 actor_id,
             ):
                 raise ResourceAccessClosed(claim_id)
-
 
             matches = [
                 record
@@ -4287,7 +3843,6 @@ class FixtureRepository(PersistenceRepository):
                 if matches
                 else None
             )
-
 
     def reserve_message_turn_idempotency_alias(
         self,
@@ -4326,12 +3881,9 @@ class FixtureRepository(PersistenceRepository):
             return deepcopy(alias)
 
     def save_idempotency(self, record: IdempotencyRecord) -> None:
-        if (
-            record.claim_id
-            and self._claimant_actor_access_closed(
-                record.claim_id,
-                record.actor_id,
-            )
+        if record.claim_id and self._claimant_actor_access_closed(
+            record.claim_id,
+            record.actor_id,
         ):
             raise ResourceAccessClosed(record.claim_id)
         with self._claim_mutation_lock:
@@ -4375,14 +3927,12 @@ class FixtureRepository(PersistenceRepository):
             deepcopy(
                 min(
                     matches,
-                    key=lambda item:
-                        item.revision_before_message or 0,
+                    key=lambda item: item.revision_before_message or 0,
                 )
             )
             if matches
             else None
         )
-
 
     def save_message_recovery(
         self,
@@ -4442,10 +3992,7 @@ class FixtureRepository(PersistenceRepository):
         claims = [
             deepcopy(claim)
             for claim in self._claims.values()
-            if claim.customer_id == customer_id
-            and not self._claim_access_closed(
-                claim.claim_id
-            )
+            if claim.customer_id == customer_id and not self._claim_access_closed(claim.claim_id)
         ]
 
         return sorted(
@@ -4453,15 +4000,12 @@ class FixtureRepository(PersistenceRepository):
             key=lambda claim: claim.created_at,
         )
 
-
     def freeze_message_response(
         self, idempotency: IdempotencyRecord, response_payload: dict[str, Any]
     ) -> dict[str, Any]:
         with self._claim_mutation_lock:
             if idempotency.claim_id:
-                self._ensure_claim_access_open(
-                    idempotency.claim_id
-                )
+                self._ensure_claim_access_open(idempotency.claim_id)
             lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
             saved = self._idempotency.get(lookup)
             if (
@@ -5800,18 +5344,14 @@ class FixtureRepository(PersistenceRepository):
             if claim is None or claim.customer_id != customer_id:
                 raise KeyError(item.claim_id)
 
-            existing = self._standalone_runtime_work_items.get(
-                item.work_item_id
-            )
+            existing = self._standalone_runtime_work_items.get(item.work_item_id)
 
             if existing is not None:
                 if existing != item:
                     raise IdempotencyConflict(item.work_item_id)
                 return
 
-            self._standalone_runtime_work_items[
-                item.work_item_id
-            ] = deepcopy(item)
+            self._standalone_runtime_work_items[item.work_item_id] = deepcopy(item)
 
     def find_runtime_trace_for_trigger(
         self,
@@ -5885,17 +5425,13 @@ class FixtureRepository(PersistenceRepository):
         claims = {
             claim.claim_id
             for claim in self._claims.values()
-            if claim.customer_id == customer_id
-            and not self._claim_access_closed(
-                claim.claim_id
-            )
+            if claim.customer_id == customer_id and not self._claim_access_closed(claim.claim_id)
         }
 
         evidence_records = [
             deepcopy(evidence)
             for evidence in self._evidence.values()
-            if evidence.claim_id in claims
-            and evidence.source.value == 'claimant'
+            if evidence.claim_id in claims and evidence.source.value == 'claimant'
         ]
 
         return sorted(
@@ -5905,7 +5441,6 @@ class FixtureRepository(PersistenceRepository):
                 evidence.evidence_id,
             ),
         )
-
 
     def get_motor_other_driver(
         self, claim_id: str, customer_id: str
@@ -6076,9 +5611,7 @@ class FixtureRepository(PersistenceRepository):
         ):
             return None
 
-        link = self._evidence_claim_links.get(
-            (target_claim_id, evidence_id)
-        )
+        link = self._evidence_claim_links.get((target_claim_id, evidence_id))
 
         if (
             link is None
@@ -6092,18 +5625,14 @@ class FixtureRepository(PersistenceRepository):
 
         return deepcopy(link)
 
-
     def list_evidence_claim_links(
         self,
         customer_id: str,
         target_claim_id: str | None = None,
     ) -> list[EvidenceClaimLink]:
-        if (
-            target_claim_id is not None
-            and not self.claimant_resource_access_open(
-                target_claim_id,
-                customer_id,
-            )
+        if target_claim_id is not None and not self.claimant_resource_access_open(
+            target_claim_id,
+            customer_id,
         ):
             return []
 
@@ -6112,10 +5641,7 @@ class FixtureRepository(PersistenceRepository):
                 deepcopy(link)
                 for link in self._evidence_claim_links.values()
                 if link.customer_id == customer_id
-                and (
-                    target_claim_id is None
-                    or link.target_claim_id == target_claim_id
-                )
+                and (target_claim_id is None or link.target_claim_id == target_claim_id)
                 and self.claimant_resource_access_open(
                     link.source_claim_id,
                     customer_id,
@@ -6130,7 +5656,6 @@ class FixtureRepository(PersistenceRepository):
                 link.link_id,
             ),
         )
-
 
     def save_evidence_action_mutation(
         self,

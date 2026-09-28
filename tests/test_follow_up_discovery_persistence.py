@@ -86,9 +86,7 @@ def _seed_follow_up(
     recovery = SessionRecoveryContext(
         interrupted_at=created_at,
         last_meaningful_activity_at=created_at,
-        last_meaningful_activity_source_ref=(
-            f'claim:{claim_id}:revision:1'
-        ),
+        last_meaningful_activity_source_ref=(f'claim:{claim_id}:revision:1'),
         resume_point='Continue describing the incident.',
     )
 
@@ -124,11 +122,7 @@ def _seed_follow_up(
             else FollowUpContactPermission.AUTHORISED
         ),
         channel=None if blocked else PreferredChannel.IN_APP,
-        reason_code=(
-            FollowUpReasonCode.CONTACT_NOT_AUTHORISED
-            if blocked
-            else None
-        ),
+        reason_code=(FollowUpReasonCode.CONTACT_NOT_AUTHORISED if blocked else None),
         status=status,
         due_at=due_at,
         created_at=created_at,
@@ -218,9 +212,7 @@ def test_due_discovery_is_bounded_stable_and_excludes_expired(
         cursor=None,
     )
 
-    assert [item.follow_up_id for item in first] == [
-        due_a.follow_up_id
-    ]
+    assert [item.follow_up_id for item in first] == [due_a.follow_up_id]
     assert cursor is not None
 
     with pytest.raises(InvalidRepositoryCursorError):
@@ -236,9 +228,7 @@ def test_due_discovery_is_bounded_stable_and_excludes_expired(
         cursor=cursor,
     )
 
-    assert [item.follow_up_id for item in second] == [
-        due_b.follow_up_id
-    ]
+    assert [item.follow_up_id for item in second] == [due_b.follow_up_id]
     assert next_cursor is None
 
 
@@ -255,9 +245,7 @@ def test_deadline_discovery_includes_blocked_without_due_time(
         cursor=None,
     )
 
-    assert [item.follow_up_id for item in first] == [
-        blocked.follow_up_id
-    ]
+    assert [item.follow_up_id for item in first] == [blocked.follow_up_id]
     assert first[0].due_at is None
     assert cursor is not None
 
@@ -274,9 +262,7 @@ def test_deadline_discovery_includes_blocked_without_due_time(
         cursor=cursor,
     )
 
-    assert [item.follow_up_id for item in second] == [
-        pending.follow_up_id
-    ]
+    assert [item.follow_up_id for item in second] == [pending.follow_up_id]
     assert next_cursor is None
 
 

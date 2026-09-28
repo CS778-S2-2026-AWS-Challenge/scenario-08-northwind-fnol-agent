@@ -344,8 +344,6 @@ def test_follow_up_operation_sequence_policy_revision_and_deadline_parity(
 # Backend persistence and policy compatibility regression cases.
 
 
-
-
 def backend_contract_seed_claim(repository, follow_up: FollowUpRecord) -> None:
     claim = WorkingClaim(
         claim_id=follow_up.claim_id,
@@ -531,9 +529,7 @@ def test_follow_up_policy_backfill_missing_interruption_fails_closed_on_apply() 
     dry_run = backfill_follow_ups(collection)
     assert dry_run['eligible'] == []
     assert dry_run['fail_closed'] == []
-    assert [item['follow_up_id'] for item in dry_run['rejected']] == [
-        'fup_missing_interruption'
-    ]
+    assert [item['follow_up_id'] for item in dry_run['rejected']] == ['fup_missing_interruption']
     before = collection.find_one({'_id': 'follow_up:fup_missing_interruption'})
     assert before is not None
     assert before['due_at'] == old_due.isoformat()

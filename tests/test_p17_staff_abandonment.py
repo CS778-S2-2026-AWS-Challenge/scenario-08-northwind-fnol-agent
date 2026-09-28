@@ -90,9 +90,7 @@ def _checkpoint(
     recovery = SessionRecoveryContext(
         interrupted_at=timestamp,
         last_meaningful_activity_at=timestamp,
-        last_meaningful_activity_source_ref=(
-            f'claim:{claim.claim_id}:revision:{claim.revision}'
-        ),
+        last_meaningful_activity_source_ref=(f'claim:{claim.claim_id}:revision:{claim.revision}'),
         resume_point='Continue describing the incident.',
     )
 
@@ -118,10 +116,7 @@ def _checkpoint(
         purpose='resume_incomplete_claim',
         policy_id=INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_ID,
         policy_version=INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION,
-        deadline_at=(
-            timestamp
-            + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
-        ),
+        deadline_at=(timestamp + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE),
         responsible_party=ResponsibleParty.SYSTEM,
         source_refs=[
             f'claim:{claim.claim_id}:revision:{paused_claim.revision}',
@@ -175,9 +170,7 @@ def test_staff_abandonment_is_atomic_terminal_and_audited(
         repository,
         principal,
         claim.claim_id,
-        AbandonClaimRequest(
-            reason='The authorised claims owner ended this incomplete intake.'
-        ),
+        AbandonClaimRequest(reason='The authorised claims owner ended this incomplete intake.'),
         f'abandon-{kind}',
         str(claim.revision),
     )
@@ -186,10 +179,7 @@ def test_staff_abandonment_is_atomic_terminal_and_audited(
     assert stored_claim is not None
     assert stored_claim.revision == claim.revision + 1
     assert stored_claim.terminal_disposition is not None
-    assert (
-        stored_claim.terminal_disposition.value
-        is TerminalDispositionValue.ABANDONED
-    )
+    assert stored_claim.terminal_disposition.value is TerminalDispositionValue.ABANDONED
     assert (
         stored_claim.terminal_disposition.reason_code
         is TerminalDispositionReasonCode.AUTHORISED_STAFF_ABANDONMENT
@@ -202,19 +192,13 @@ def test_staff_abandonment_is_atomic_terminal_and_audited(
     )
     assert stored_follow_up is not None
     assert stored_follow_up.status is FollowUpStatus.RESOLVED
-    assert (
-        stored_follow_up.reason_code
-        is FollowUpReasonCode.STAFF_ABANDONED
-    )
+    assert stored_follow_up.reason_code is FollowUpReasonCode.STAFF_ABANDONED
     assert stored_follow_up.outcome == 'staff_abandoned'
     assert stored_follow_up.due_at is None
 
     assert response.terminal_disposition is not None
     assert response.work_summary.incomplete_context is None
-    assert any(
-        action.action_code == 'claim.reopen'
-        for action in response.allowed_actions
-    )
+    assert any(action.action_code == 'claim.reopen' for action in response.allowed_actions)
 
     idempotency = repository.find_idempotency(
         principal.subject,
@@ -233,11 +217,7 @@ def test_staff_abandonment_is_atomic_terminal_and_audited(
         )
     )
 
-    abandonment_events = [
-        event
-        for event in events
-        if event.idempotency_key == f'abandon-{kind}'
-    ]
+    abandonment_events = [event for event in events if event.idempotency_key == f'abandon-{kind}']
 
     assert len(abandonment_events) == 1
     assert abandonment_events[0].actor.actor_id == 'stf_demo'
@@ -285,10 +265,7 @@ def test_workbench_abandon_endpoint_requires_confirmation_and_replays(
     body = response.json()
 
     assert body['terminal_disposition']['value'] == 'abandoned'
-    assert (
-        body['terminal_disposition']['reason_code']
-        == 'AUTHORISED_STAFF_ABANDONMENT'
-    )
+    assert body['terminal_disposition']['reason_code'] == 'AUTHORISED_STAFF_ABANDONMENT'
     assert body['work_summary']['incomplete_context'] is None
 
     replay = client.post(
@@ -327,9 +304,7 @@ def test_terminal_claim_cannot_start_session_without_reopen(
         repository,
         staff_principal,
         claim.claim_id,
-        AbandonClaimRequest(
-            reason='Authorised staff abandonment for guard test.'
-        ),
+        AbandonClaimRequest(reason='Authorised staff abandonment for guard test.'),
         'guard-abandon',
         str(claim.revision),
     )

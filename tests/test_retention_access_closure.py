@@ -131,10 +131,7 @@ def _seed_claimant_message(
         created_at=timestamp,
     )
 
-    route = (
-        f'/api/v1/claims/{claim.claim_id}'
-        f'/sessions/{session.session_id}/messages'
-    )
+    route = f'/api/v1/claims/{claim.claim_id}/sessions/{session.session_id}/messages'
 
     idempotency = IdempotencyRecord(
         actor_id=claim.customer_id,
@@ -170,20 +167,14 @@ def _operation(
     return RetentionOperation(
         operation_id=f'ret_{claim.claim_id}',
         claim_id=claim.claim_id,
-        source_terminal_ref=(
-            f'claim-terminal:{claim.claim_id}:'
-            f'revision:{claim.revision}'
-        ),
+        source_terminal_ref=(f'claim-terminal:{claim.claim_id}:revision:{claim.revision}'),
         source_claim_revision=claim.revision,
         policy_id=INCOMPLETE_CLAIM_RETENTION_POLICY_ID,
         policy_version=INCOMPLETE_CLAIM_RETENTION_POLICY_VERSION,
         revision=1,
         status=RetentionOperationStatus.RESERVED,
         access_closed_at=NOW + timedelta(minutes=1),
-        source_refs=[
-            f'claim-terminal:{claim.claim_id}:'
-            f'revision:{claim.revision}'
-        ],
+        source_refs=[f'claim-terminal:{claim.claim_id}:revision:{claim.revision}'],
         created_at=NOW,
         updated_at=NOW,
     )
@@ -231,9 +222,7 @@ def test_retention_reservation_closes_claim_session_evidence_and_retry_access(
         claim.customer_id,
     )
 
-    route = (
-        f'/api/v1/claims/{claim.claim_id}/sessions'
-    )
+    route = f'/api/v1/claims/{claim.claim_id}/sessions'
     replay = IdempotencyRecord(
         actor_id=claim.customer_id,
         route=route,
@@ -252,31 +241,41 @@ def test_retention_reservation_closes_claim_session_evidence_and_retry_access(
         claim.claim_id,
         claim.customer_id,
     )
-    assert repository.get_claim(
-        claim.claim_id,
-        claim.customer_id,
-    ) == claim
-    assert repository.get_session(
-        claim.claim_id,
-        session.session_id,
-        claim.customer_id,
-    ) == session
-    assert repository.get_evidence(
-        claim.claim_id,
-        evidence.evidence_id,
-        claim.customer_id,
-    ) == evidence
-    assert repository.find_idempotency(
-        claim.customer_id,
-        route,
-        replay.key,
-    ) == replay
+    assert (
+        repository.get_claim(
+            claim.claim_id,
+            claim.customer_id,
+        )
+        == claim
+    )
+    assert (
+        repository.get_session(
+            claim.claim_id,
+            session.session_id,
+            claim.customer_id,
+        )
+        == session
+    )
+    assert (
+        repository.get_evidence(
+            claim.claim_id,
+            evidence.evidence_id,
+            claim.customer_id,
+        )
+        == evidence
+    )
+    assert (
+        repository.find_idempotency(
+            claim.customer_id,
+            route,
+            replay.key,
+        )
+        == replay
+    )
 
     operation = _operation(claim)
 
-    assert repository.reserve_retention_operation(
-        operation
-    )
+    assert repository.reserve_retention_operation(operation)
 
     assert not repository.claimant_resource_access_open(
         claim.claim_id,
@@ -285,31 +284,44 @@ def test_retention_reservation_closes_claim_session_evidence_and_retry_access(
 
     # Concealed absence: caller cannot tell whether the retained internal
     # records still physically exist.
-    assert repository.get_claim(
-        claim.claim_id,
-        claim.customer_id,
-    ) is None
-    assert repository.get_session(
-        claim.claim_id,
-        session.session_id,
-        claim.customer_id,
-    ) is None
-    assert repository.list_sessions_for_claim(
-        claim.claim_id,
-        claim.customer_id,
-    ) == []
-    assert repository.get_evidence(
-        claim.claim_id,
-        evidence.evidence_id,
-        claim.customer_id,
-    ) is None
-    assert repository.list_evidence(
-        claim.claim_id,
-        claim.customer_id,
-    ) == []
-    assert evidence not in repository.list_evidence_for_customer(
-        claim.customer_id
+    assert (
+        repository.get_claim(
+            claim.claim_id,
+            claim.customer_id,
+        )
+        is None
     )
+    assert (
+        repository.get_session(
+            claim.claim_id,
+            session.session_id,
+            claim.customer_id,
+        )
+        is None
+    )
+    assert (
+        repository.list_sessions_for_claim(
+            claim.claim_id,
+            claim.customer_id,
+        )
+        == []
+    )
+    assert (
+        repository.get_evidence(
+            claim.claim_id,
+            evidence.evidence_id,
+            claim.customer_id,
+        )
+        is None
+    )
+    assert (
+        repository.list_evidence(
+            claim.claim_id,
+            claim.customer_id,
+        )
+        == []
+    )
+    assert evidence not in repository.list_evidence_for_customer(claim.customer_id)
 
     # The old retry authority remains consumed. It must not be presented as
     # an unused key because that could recreate Claim state on replay.
@@ -321,12 +333,8 @@ def test_retention_reservation_closes_claim_session_evidence_and_retry_access(
         )
 
     # Internal retention/audit authority is still present.
-    assert repository.get_claim_internal(
-        claim.claim_id
-    ) == claim
-    assert repository.get_retention_operation_for_claim(
-        claim.claim_id
-    ) == operation
+    assert repository.get_claim_internal(claim.claim_id) == claim
+    assert repository.get_retention_operation_for_claim(claim.claim_id) == operation
 
 
 @pytest.mark.parametrize(
@@ -349,9 +357,7 @@ def test_delayed_claim_mutation_cannot_commit_after_access_closure(
 
     operation = _operation(claim)
 
-    assert repository.reserve_retention_operation(
-        operation
-    )
+    assert repository.reserve_retention_operation(operation)
 
     delayed = claim.model_copy(
         update={
@@ -366,9 +372,7 @@ def test_delayed_claim_mutation_cannot_commit_after_access_closure(
             expected_revision=claim.revision,
         )
 
-    internal = repository.get_claim_internal(
-        claim.claim_id
-    )
+    internal = repository.get_claim_internal(claim.claim_id)
     assert internal is not None
     assert internal.revision == claim.revision
 
@@ -391,9 +395,7 @@ def test_delayed_claimant_idempotency_write_cannot_recreate_retry_authority(
         _session(claim),
     )
 
-    assert repository.reserve_retention_operation(
-        _operation(claim)
-    )
+    assert repository.reserve_retention_operation(_operation(claim))
 
     stale = IdempotencyRecord(
         actor_id=claim.customer_id,
@@ -407,12 +409,14 @@ def test_delayed_claimant_idempotency_write_cannot_recreate_retry_authority(
     with pytest.raises(ResourceAccessClosed):
         repository.save_idempotency(stale)
 
-    assert repository.find_idempotency(
-        claim.customer_id,
-        stale.route,
-        stale.key,
-    ) is None
-
+    assert (
+        repository.find_idempotency(
+            claim.customer_id,
+            stale.route,
+            stale.key,
+        )
+        is None
+    )
 
 
 def test_closed_claim_create_replay_cannot_create_replacement_claim(
@@ -444,9 +448,7 @@ def test_closed_claim_create_replay_cannot_create_replacement_claim(
 
     assert claim is not None
 
-    assert repository.reserve_retention_operation(
-        _operation(claim)
-    )
+    assert repository.reserve_retention_operation(_operation(claim))
 
     # This is the dangerous case: if find_idempotency() returned None, the
     # same old create request could allocate a second Claim.
@@ -474,7 +476,6 @@ def test_closed_claim_create_replay_cannot_create_replacement_claim(
     assert fresh.status_code == 201
     assert fresh.json()['claim']['claim_id'] != claim_id
     assert repository.claim_count == 2
-
 
 
 @pytest.mark.parametrize(
@@ -508,70 +509,98 @@ def test_closed_message_replay_surfaces_have_fixture_mongo_parity(
         original_session,
     )
 
-    assert repository.get_message(
-        claim.claim_id,
-        session.session_id,
-        message.message_id,
-        claim.customer_id,
-    ) == message
-
-    assert repository.find_message_by_client_id(
-        claim.claim_id,
-        message.client_message_id or '',
-        claim.customer_id,
-    ) == message
-
-    assert repository.find_message_turn_idempotency(
-        claim.customer_id,
-        idempotency.route,
-        claim.claim_id,
-        message.message_id,
-    ) == idempotency
-
-    assert repository.find_message_checkpoint(
-        claim.claim_id,
-        message.message_id,
-        claim.customer_id,
-    ) == idempotency
-
-    assert repository.reserve_retention_operation(
-        _operation(claim)
+    assert (
+        repository.get_message(
+            claim.claim_id,
+            session.session_id,
+            message.message_id,
+            claim.customer_id,
+        )
+        == message
     )
 
-    assert repository.get_active_session(
-        claim.claim_id,
-        claim.customer_id,
-    ) is None
+    assert (
+        repository.find_message_by_client_id(
+            claim.claim_id,
+            message.client_message_id or '',
+            claim.customer_id,
+        )
+        == message
+    )
 
-    assert repository.get_message(
-        claim.claim_id,
-        session.session_id,
-        message.message_id,
-        claim.customer_id,
-    ) is None
+    assert (
+        repository.find_message_turn_idempotency(
+            claim.customer_id,
+            idempotency.route,
+            claim.claim_id,
+            message.message_id,
+        )
+        == idempotency
+    )
 
-    assert repository.find_message_by_client_id(
-        claim.claim_id,
-        message.client_message_id or '',
-        claim.customer_id,
-    ) is None
+    assert (
+        repository.find_message_checkpoint(
+            claim.claim_id,
+            message.message_id,
+            claim.customer_id,
+        )
+        == idempotency
+    )
 
-    assert repository.list_messages(
-        claim.claim_id,
-        session.session_id,
-        claim.customer_id,
-    ) == []
+    assert repository.reserve_retention_operation(_operation(claim))
 
-    assert repository.get_follow_up(
-        claim.claim_id,
-        'follow-up-does-not-matter',
-        claim.customer_id,
-    ) is None
+    assert (
+        repository.get_active_session(
+            claim.claim_id,
+            claim.customer_id,
+        )
+        is None
+    )
 
-    assert repository.list_follow_ups(
-        claim.claim_id,
-        claim.customer_id,
-    ) == []
+    assert (
+        repository.get_message(
+            claim.claim_id,
+            session.session_id,
+            message.message_id,
+            claim.customer_id,
+        )
+        is None
+    )
+
+    assert (
+        repository.find_message_by_client_id(
+            claim.claim_id,
+            message.client_message_id or '',
+            claim.customer_id,
+        )
+        is None
+    )
+
+    assert (
+        repository.list_messages(
+            claim.claim_id,
+            session.session_id,
+            claim.customer_id,
+        )
+        == []
+    )
+
+    assert (
+        repository.get_follow_up(
+            claim.claim_id,
+            'follow-up-does-not-matter',
+            claim.customer_id,
+        )
+        is None
+    )
+
+    assert (
+        repository.list_follow_ups(
+            claim.claim_id,
+            claim.customer_id,
+        )
+        == []
+    )
 
     with pytest.raises(ResourceAccessClosed):
         repository.find_message_turn_idempotency(
@@ -632,9 +661,7 @@ def test_closed_claimant_routes_use_concealed_absence(
 
     assert claim is not None
 
-    assert repository.reserve_retention_operation(
-        _operation(claim)
-    )
+    assert repository.reserve_retention_operation(_operation(claim))
 
     requests: list[tuple[str, Callable[[], Response]]] = [
         (
@@ -647,20 +674,14 @@ def test_closed_claimant_routes_use_concealed_absence(
         (
             'GET old session',
             lambda: client.get(
-                (
-                    f'/api/v1/claims/{claim_id}'
-                    f'/sessions/{session_id}'
-                ),
+                (f'/api/v1/claims/{claim_id}/sessions/{session_id}'),
                 headers=auth_headers,
             ),
         ),
         (
             'GET old message history',
             lambda: client.get(
-                (
-                    f'/api/v1/claims/{claim_id}'
-                    f'/sessions/{session_id}/messages'
-                ),
+                (f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'),
                 headers=auth_headers,
             ),
         ),
@@ -674,10 +695,7 @@ def test_closed_claimant_routes_use_concealed_absence(
         (
             'GET old session event stream',
             lambda: client.get(
-                (
-                    f'/api/v1/claims/{claim_id}'
-                    f'/sessions/{session_id}/events'
-                ),
+                (f'/api/v1/claims/{claim_id}/sessions/{session_id}/events'),
                 headers=auth_headers,
             ),
         ),
@@ -704,14 +722,10 @@ def test_closed_claimant_routes_use_concealed_absence(
             response.text,
         )
 
-        assert (
-            response.json()['error']['code']
-            == 'RESOURCE_NOT_FOUND'
-        ), (
+        assert response.json()['error']['code'] == 'RESOURCE_NOT_FOUND', (
             label,
             response.text,
         )
-
 
 
 @pytest.mark.parametrize(
@@ -727,9 +741,7 @@ def test_low_level_retention_reservation_retires_claimant_retry_only(
         monkeypatch,
     )
 
-    claim = _claim(
-        claim_id=f'clm_low_level_scope_{kind}'
-    )
+    claim = _claim(claim_id=f'clm_low_level_scope_{kind}')
 
     repository.create_claim(
         claim,
@@ -760,25 +772,15 @@ def test_low_level_retention_reservation_retires_claimant_retry_only(
         },
     )
 
-    repository.save_idempotency(
-        claimant_retry
-    )
+    repository.save_idempotency(claimant_retry)
 
-    repository.save_idempotency(
-        internal_retry
-    )
+    repository.save_idempotency(internal_retry)
 
-    reserved = (
-        repository.reserve_retention_operation(
-            _operation(claim)
-        )
-    )
+    reserved = repository.reserve_retention_operation(_operation(claim))
 
     assert reserved is True
 
-    with pytest.raises(
-        ResourceAccessClosed
-    ):
+    with pytest.raises(ResourceAccessClosed):
         repository.find_idempotency(
             claimant_retry.actor_id,
             claimant_retry.route,

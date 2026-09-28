@@ -181,7 +181,6 @@ def test_unknown_recovery_sources_fail_closed() -> None:
 # Backend persistence and policy compatibility regression cases.
 
 
-
 @pytest.mark.parametrize(
     ('trigger', 'policy_id'),
     [

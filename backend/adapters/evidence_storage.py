@@ -203,7 +203,6 @@ class EvidenceStorage(Protocol):
         """Delete one frozen Evidence object through a provider-neutral boundary."""
         raise NotImplementedError
 
-
     def store_generated_content(
         self,
         *,
@@ -344,16 +343,11 @@ class MockEvidenceStorage(EvidenceStorage):
         identity = (claim_id, evidence_id)
         completed = self._completed.get(identity)
 
-        if (
-            completed is not None
-            and completed.storage_key != storage_key
-        ):
+        if completed is not None and completed.storage_key != storage_key:
             return ObjectDeletionOutcome.UNKNOWN
 
         existed = (
-            identity in self._content
-            or identity in self._completed
-            or identity in self._pending
+            identity in self._content or identity in self._completed or identity in self._pending
         )
 
         if not existed:
@@ -364,7 +358,6 @@ class MockEvidenceStorage(EvidenceStorage):
         self._pending.pop(identity, None)
 
         return ObjectDeletionOutcome.DELETED
-
 
     def store_generated_content(
         self,
@@ -621,9 +614,7 @@ class MinioEvidenceStorage(EvidenceStorage):
             evidence_id,
         ).removesuffix('staging')
 
-        if not storage_key.startswith(
-            f'{expected_prefix}finalised/'
-        ):
+        if not storage_key.startswith(f'{expected_prefix}finalised/'):
             return ObjectDeletionOutcome.UNKNOWN
 
         try:
@@ -664,7 +655,6 @@ class MinioEvidenceStorage(EvidenceStorage):
 
         # The provider accepted DELETE but the object is still observable.
         return ObjectDeletionOutcome.FAILED
-
 
     def store_generated_content(
         self,

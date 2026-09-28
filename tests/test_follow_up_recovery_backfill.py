@@ -51,11 +51,7 @@ def _seed_legacy(
 ) -> FollowUpRecord:
     interrupted_at = NOW
 
-    created_at = (
-        NOW + timedelta(minutes=5)
-        if contradictory_created_at
-        else NOW
-    )
+    created_at = NOW + timedelta(minutes=5) if contradictory_created_at else NOW
 
     claim_id = f'clm_{suffix}'
     customer_id = f'cus_{suffix}'
@@ -95,9 +91,7 @@ def _seed_legacy(
     recovery = SessionRecoveryContext(
         interrupted_at=interrupted_at,
         last_meaningful_activity_at=NOW,
-        last_meaningful_activity_source_ref=(
-            f'claim:{claim_id}:revision:1'
-        ),
+        last_meaningful_activity_source_ref=(f'claim:{claim_id}:revision:1'),
         resume_point='Continue describing the incident.',
     )
 
@@ -182,14 +176,10 @@ def _seed_legacy(
             'claim_id': claim_id,
         }
 
-        repository._collection.insert_one(
-            legacy_document
-        )
+        repository._collection.insert_one(legacy_document)
 
     else:
-        raise TypeError(
-            f'Unsupported migration-test repository: {type(repository)!r}'
-        )
+        raise TypeError(f'Unsupported migration-test repository: {type(repository)!r}')
 
     return follow_up
 
@@ -225,15 +215,16 @@ def test_valid_p17_1_backfill_binds_from_original_interruption(
     assert migrated.attempt_count == 2
 
     # Migration must not fabricate historical execution records.
-    assert repository.list_follow_up_operations(
-        legacy.claim_id,
-        legacy.follow_up_id,
-        f'cus_valid-{kind}',
-    ) == []
-
-    events = repository.list_audit_events_internal(
-        follow_up_backfill_subject(migrated)
+    assert (
+        repository.list_follow_up_operations(
+            legacy.claim_id,
+            legacy.follow_up_id,
+            f'cus_valid-{kind}',
+        )
+        == []
     )
+
+    events = repository.list_audit_events_internal(follow_up_backfill_subject(migrated))
 
     assert len(events) == 1
     assert events[0].outcome.value == 'succeeded'
@@ -244,11 +235,7 @@ def test_valid_p17_1_backfill_binds_from_original_interruption(
         recorded_at=MIGRATION_TIME,
     ) == (0, 0)
 
-    assert len(
-        repository.list_audit_events_internal(
-            follow_up_backfill_subject(migrated)
-        )
-    ) == 1
+    assert len(repository.list_audit_events_internal(follow_up_backfill_subject(migrated))) == 1
 
 
 @pytest.mark.parametrize('kind', ['fixture', 'mongodb'])
@@ -280,10 +267,7 @@ def test_contradictory_p17_1_record_fails_closed_without_guessing(
 
     assert migrated is not None
     assert migrated.status is FollowUpStatus.BLOCKED
-    assert (
-        migrated.reason_code
-        is FollowUpReasonCode.SOURCE_STATE_INCONSISTENT
-    )
+    assert migrated.reason_code is FollowUpReasonCode.SOURCE_STATE_INCONSISTENT
 
     # No invented recovery clock/policy binding.
     assert migrated.policy_id is None
@@ -301,24 +285,22 @@ def test_contradictory_p17_1_record_fails_closed_without_guessing(
         limit=10,
         cursor=None,
     )
-    assert migrated.follow_up_id not in {
-        item.follow_up_id for item in due
-    }
+    assert migrated.follow_up_id not in {item.follow_up_id for item in due}
 
-    assert repository.list_follow_up_operations(
-        legacy.claim_id,
-        legacy.follow_up_id,
-        f'cus_invalid-{kind}',
-    ) == []
-
-    events = repository.list_audit_events_internal(
-        follow_up_backfill_subject(migrated)
+    assert (
+        repository.list_follow_up_operations(
+            legacy.claim_id,
+            legacy.follow_up_id,
+            f'cus_invalid-{kind}',
+        )
+        == []
     )
+
+    events = repository.list_audit_events_internal(follow_up_backfill_subject(migrated))
 
     assert len(events) == 1
     assert events[0].outcome.value == 'failed'
     assert 'failed closed' in events[0].reason.lower()
-
 
 
 @pytest.mark.parametrize(
@@ -345,10 +327,8 @@ def test_p17_1_backfill_replay_is_idempotent(
         tzinfo=UTC,
     )
 
-    first_counts = (
-        repository.backfill_incomplete_claim_recovery(
-            recorded_at=recorded_at,
-        )
+    first_counts = repository.backfill_incomplete_claim_recovery(
+        recorded_at=recorded_at,
     )
 
     assert first_counts == (1, 0)
@@ -366,25 +346,14 @@ def test_p17_1_backfill_replay_is_idempotent(
     assert first.policy_version is not None
     assert first.deadline_at is not None
 
-    subject = follow_up_backfill_subject(
-        legacy
-    )
+    subject = follow_up_backfill_subject(legacy)
 
-    first_events = (
-        repository.list_audit_events_internal(
-            subject
-        )
-    )
+    first_events = repository.list_audit_events_internal(subject)
 
     assert len(first_events) == 1
 
-    replay_counts = (
-        repository.backfill_incomplete_claim_recovery(
-            recorded_at=(
-                recorded_at
-                + timedelta(minutes=5)
-            ),
-        )
+    replay_counts = repository.backfill_incomplete_claim_recovery(
+        recorded_at=(recorded_at + timedelta(minutes=5)),
     )
 
     assert replay_counts == (0, 0)
@@ -397,14 +366,9 @@ def test_p17_1_backfill_replay_is_idempotent(
 
     assert replay == first
 
-    replay_events = (
-        repository.list_audit_events_internal(
-            subject
-        )
-    )
+    replay_events = repository.list_audit_events_internal(subject)
 
     assert replay_events == first_events
-
 
 
 @pytest.mark.parametrize(
@@ -444,23 +408,19 @@ def test_p17_1_missing_interruption_source_fails_closed(
         repository._collection.delete_many(
             {
                 'record_type': 'session',
-                'session_id': (
-                    legacy.source_session_id
-                ),
+                'session_id': (legacy.source_session_id),
             }
         )
 
-    counts = (
-        repository.backfill_incomplete_claim_recovery(
-            recorded_at=datetime(
-                2026,
-                9,
-                28,
-                8,
-                30,
-                tzinfo=UTC,
-            ),
-        )
+    counts = repository.backfill_incomplete_claim_recovery(
+        recorded_at=datetime(
+            2026,
+            9,
+            28,
+            8,
+            30,
+            tzinfo=UTC,
+        ),
     )
 
     assert counts == (0, 1)
@@ -473,10 +433,7 @@ def test_p17_1_missing_interruption_source_fails_closed(
 
     assert migrated is not None
 
-    assert (
-        migrated.status
-        is FollowUpStatus.BLOCKED
-    )
+    assert migrated.status is FollowUpStatus.BLOCKED
 
     assert migrated.reason_code in {
         FollowUpReasonCode.SOURCE_STATE_INCONSISTENT,
@@ -486,7 +443,7 @@ def test_p17_1_missing_interruption_source_fails_closed(
     # No guessed recovery clock / automatic work.
     assert migrated.deadline_at is None
     assert migrated.due_at is not None
-    assert migrated.due_at.isoformat() == "2026-09-28T08:00:00+00:00"
+    assert migrated.due_at.isoformat() == '2026-09-28T08:00:00+00:00'
 
     # The legacy schedule is historical evidence only.  A fail-closed
     # BLOCKED obligation must never become executable due work.
@@ -496,29 +453,15 @@ def test_p17_1_missing_interruption_source_fails_closed(
         cursor=None,
     )
 
-    assert migrated.follow_up_id not in {
-        item.follow_up_id
-        for item in due_page
-    }
+    assert migrated.follow_up_id not in {item.follow_up_id for item in due_page}
 
     # Historical provenance must survive fail-closed migration.
-    assert (
-        migrated.created_at
-        == original.created_at
-    )
-    assert (
-        migrated.source_refs
-        == original.source_refs
-    )
+    assert migrated.created_at == original.created_at
+    assert migrated.source_refs == original.source_refs
 
-    events = repository.list_audit_events_internal(
-        follow_up_backfill_subject(
-            legacy
-        )
-    )
+    events = repository.list_audit_events_internal(follow_up_backfill_subject(legacy))
 
     assert len(events) == 1
-
 
 
 @pytest.mark.parametrize(
@@ -536,17 +479,15 @@ def test_migrated_open_recovery_remains_deadline_discoverable(
         label,
     )
 
-    counts = (
-        repository.backfill_incomplete_claim_recovery(
-            recorded_at=datetime(
-                2026,
-                9,
-                28,
-                9,
-                0,
-                tzinfo=UTC,
-            ),
-        )
+    counts = repository.backfill_incomplete_claim_recovery(
+        recorded_at=datetime(
+            2026,
+            9,
+            28,
+            9,
+            0,
+            tzinfo=UTC,
+        ),
     )
 
     assert counts == (1, 0)
@@ -560,20 +501,15 @@ def test_migrated_open_recovery_remains_deadline_discoverable(
     assert migrated is not None
     assert migrated.deadline_at is not None
 
-    page, cursor = (
-        repository.list_expiring_follow_ups(
-            migrated.deadline_at,
-            limit=10,
-            cursor=None,
-        )
+    page, cursor = repository.list_expiring_follow_ups(
+        migrated.deadline_at,
+        limit=10,
+        cursor=None,
     )
 
     assert cursor is None
 
-    assert migrated.follow_up_id in {
-        item.follow_up_id
-        for item in page
-    }
+    assert migrated.follow_up_id in {item.follow_up_id for item in page}
 
     # Deadline discovery includes all open obligations, including BLOCKED,
     # and does not depend on an executable due_at.

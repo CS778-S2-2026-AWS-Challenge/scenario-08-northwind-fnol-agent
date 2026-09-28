@@ -81,10 +81,8 @@ class RevisionConflict(RepositoryConflict):
         self.current_revision = current_revision
 
 
-
 class RecoveryDeadlineConflict(RuntimeError):
     """A recovery mutation lost to the authoritative absolute deadline."""
-
 
 
 class IdempotencyConflict(RepositoryConflict):

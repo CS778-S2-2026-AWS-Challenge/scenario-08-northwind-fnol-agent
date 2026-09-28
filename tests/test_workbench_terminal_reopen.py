@@ -415,7 +415,6 @@ def test_reopen_persists_terminal_clear_staff_idempotency_and_audit(
     assert events[0].source_refs == terminal.source_refs
 
 
-
 def test_retention_workbench_projection_survives_working_claim_tombstone(
     client: TestClient,
     staff_auth_headers: dict[str, str],
@@ -448,12 +447,7 @@ def test_retention_workbench_projection_survives_working_claim_tombstone(
 
     assert completed.status.value == 'completed'
 
-    assert (
-        repository.get_claim_internal(
-            claim.claim_id
-        )
-        is None
-    )
+    assert repository.get_claim_internal(claim.claim_id) is None
 
     ordinary = client.get(
         f'/api/v1/workbench/claims/{claim.claim_id}',
@@ -463,8 +457,7 @@ def test_retention_workbench_projection_survives_working_claim_tombstone(
     assert ordinary.status_code == 404
 
     retention = client.get(
-        f'/api/v1/workbench/claims/'
-        f'{claim.claim_id}/retention',
+        f'/api/v1/workbench/claims/{claim.claim_id}/retention',
         headers=staff_auth_headers,
     )
 

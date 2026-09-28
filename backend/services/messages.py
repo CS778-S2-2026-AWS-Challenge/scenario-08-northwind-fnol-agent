@@ -1826,7 +1826,6 @@ def _settle_accepted_error(function: Callable[_Params, _Result]) -> Callable[_Pa
     return call
 
 
-
 def _message_revision_conflict_error(
     *,
     claim_id: str,
@@ -1838,10 +1837,7 @@ def _message_revision_conflict_error(
         claim_id=claim_id,
         expected_revision=expected_revision,
         current_revision=current_revision,
-        event_id=(
-            f'message-revision-conflict:'
-            f'{claim_id}:{expected_revision}:{current_revision}'
-        ),
+        event_id=(f'message-revision-conflict:{claim_id}:{expected_revision}:{current_revision}'),
         source_refs=[f'message-route:{route}'],
         now=now_utc(),
     )
@@ -1852,8 +1848,7 @@ def _message_revision_conflict_error(
         or transition.expected_claim_revision != current_revision
     ):
         raise RuntimeError(
-            'Published revision-conflict recovery policy produced '
-            'an invalid transition.'
+            'Published revision-conflict recovery policy produced an invalid transition.'
         )
 
     return ApiError(
@@ -1863,9 +1858,6 @@ def _message_revision_conflict_error(
         retryable=True,
         current_revision=current_revision,
     )
-
-
-
 
 
 def _merge_dependency_recovery_work_items(
@@ -1902,12 +1894,7 @@ def _merge_dependency_recovery_work_items(
         update={
             'work_items': merged,
             'result': runtime_records.result.model_copy(
-                update={
-                    'work_item_refs': [
-                        item.work_item_id
-                        for item in merged
-                    ]
-                }
+                update={'work_item_refs': [item.work_item_id for item in merged]}
             ),
         }
     )
@@ -1955,21 +1942,14 @@ def _validate_unavailable_context_recovery(
         blocking = result.get('blocking') is True
 
         raw_refs = result.get('source_refs')
-        source_refs = (
-            [str(item) for item in raw_refs]
-            if isinstance(raw_refs, list)
-            else []
-        )
+        source_refs = [str(item) for item in raw_refs] if isinstance(raw_refs, list) else []
 
         transition = reduce_dependency_unavailable_recovery(
             source=source,
             blocking=blocking,
             claim_id=claim_id,
             claim_revision=claim_revision,
-            event_id=(
-                f'context-unavailable:{tool_name}:'
-                f'{claim_revision}:{index}'
-            ),
+            event_id=(f'context-unavailable:{tool_name}:{claim_revision}:{index}'),
             source_refs=[
                 *source_refs,
                 f'context-tool:{tool_name}',
@@ -1981,12 +1961,10 @@ def _validate_unavailable_context_recovery(
             if (
                 transition.decision_code != 'fail_safe'
                 or transition.continuation != 'runtime.fail_safe'
-                or 'work_item.ensure'
-                not in transition.required_actions
+                or 'work_item.ensure' not in transition.required_actions
             ):
                 raise RuntimeError(
-                    'Published blocking dependency Recovery policy '
-                    'produced an invalid transition.'
+                    'Published blocking dependency Recovery policy produced an invalid transition.'
                 )
 
             work_item = build_recovery_work_item(
@@ -1998,8 +1976,7 @@ def _validate_unavailable_context_recovery(
 
             if work_item is None:
                 raise RuntimeError(
-                    'Blocking dependency Recovery policy did not '
-                    'materialise its required WorkItem.'
+                    'Blocking dependency Recovery policy did not materialise its required WorkItem.'
                 )
 
             recovery_work_items.append(work_item)
@@ -2010,12 +1987,11 @@ def _validate_unavailable_context_recovery(
             or 'work_item.ensure' in transition.required_actions
         ):
             raise RuntimeError(
-                'Published non-blocking dependency Recovery policy '
-                'produced an invalid transition.'
+                'Published non-blocking dependency Recovery policy produced an invalid transition.'
             )
 
-
     return recovery_work_items
+
 
 def _validate_professional_review_recovery(
     *,
@@ -2028,10 +2004,7 @@ def _validate_professional_review_recovery(
     transition = reduce_high_impact_review_recovery(
         claim_id=claim_id,
         claim_revision=claim_revision,
-        event_id=(
-            f'high-impact-review:{claim_revision}:'
-            f'{len(source_refs)}'
-        ),
+        event_id=(f'high-impact-review:{claim_revision}:{len(source_refs)}'),
         source_refs=source_refs,
         now=now_utc(),
     )
@@ -2044,8 +2017,7 @@ def _validate_professional_review_recovery(
         or 'handoff.ensure' not in transition.required_actions
     ):
         raise RuntimeError(
-            'Published high-impact Recovery policy produced '
-            'an invalid staff-review transition.'
+            'Published high-impact Recovery policy produced an invalid staff-review transition.'
         )
 
 
@@ -2981,19 +2953,16 @@ def submit_message(
     proposal = _validate_evidence_history_action(repository, claim, proposal)
     _validate_failed_retrieval_changes(proposal, message_text)
 
-    dependency_recovery_work_items = (
-        _validate_unavailable_context_recovery(
-            claim_id=claim_id,
-            claim_revision=claim.revision,
-            tool_results=list(proposal.tool_results),
-        )
+    dependency_recovery_work_items = _validate_unavailable_context_recovery(
+        claim_id=claim_id,
+        claim_revision=claim.revision,
+        tool_results=list(proposal.tool_results),
     )
 
     authority = validate_proposal(proposal)
 
-    if (
-        authority.outcome is AuthorityOutcome.AUTHORISED
-        and _professional_review_requested(proposal)
+    if authority.outcome is AuthorityOutcome.AUTHORISED and _professional_review_requested(
+        proposal
     ):
         _validate_professional_review_recovery(
             claim_id=claim_id,

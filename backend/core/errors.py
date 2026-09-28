@@ -81,15 +81,12 @@ async def api_error_handler(request: Request, exc: Exception) -> JSONResponse:
     )
 
 
-
 async def resource_access_closed_handler(
     request: Request,
     exc: Exception,
 ) -> JSONResponse:
     if not isinstance(exc, ResourceAccessClosed):
-        raise TypeError(
-            'resource_access_closed_handler requires ResourceAccessClosed.'
-        )
+        raise TypeError('resource_access_closed_handler requires ResourceAccessClosed.')
 
     return _response(
         request,

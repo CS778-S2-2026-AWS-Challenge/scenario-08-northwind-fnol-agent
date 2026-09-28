@@ -55,11 +55,7 @@ def _audit_id(
     outcome: str,
 ) -> str:
     digest = sha256(
-        (
-            f'{follow_up.claim_id}:'
-            f'{follow_up.follow_up_id}:'
-            f'{outcome}'
-        ).encode()
+        (f'{follow_up.claim_id}:{follow_up.follow_up_id}:{outcome}').encode()
     ).hexdigest()[:24]
     return f'aud_p17_backfill_{digest}'
 
@@ -84,15 +80,9 @@ def _audit_event(
     return AuditEventEnvelope(
         event_id=_audit_id(follow_up, outcome),
         event_type=(
-            AuditEventType.ACTION_COMPLETED
-            if outcome == 'bound'
-            else AuditEventType.ACTION_FAILED
+            AuditEventType.ACTION_COMPLETED if outcome == 'bound' else AuditEventType.ACTION_FAILED
         ),
-        outcome=(
-            AuditOutcome.SUCCEEDED
-            if outcome == 'bound'
-            else AuditOutcome.FAILED
-        ),
+        outcome=(AuditOutcome.SUCCEEDED if outcome == 'bound' else AuditOutcome.FAILED),
         subject=follow_up_backfill_subject(follow_up),
         actor=AuditActor(
             actor_type=ActorType.SYSTEM,
@@ -134,8 +124,7 @@ def backfill_legacy_follow_up_record(
     )
 
     blocked_reason_bound = (
-        follow_up.status is not FollowUpStatus.BLOCKED
-        or follow_up.reason_code is not None
+        follow_up.status is not FollowUpStatus.BLOCKED or follow_up.reason_code is not None
     )
 
     if already_bound and blocked_reason_bound:
@@ -145,11 +134,7 @@ def backfill_legacy_follow_up_record(
             outcome='noop',
         )
 
-    recovery = (
-        source_session.recovery_context
-        if source_session is not None
-        else None
-    )
+    recovery = source_session.recovery_context if source_session is not None else None
 
     source_consistent = (
         source_session is not None
@@ -160,8 +145,7 @@ def backfill_legacy_follow_up_record(
     )
 
     expected_deadline = (
-        recovery.interrupted_at
-        + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
+        recovery.interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
         if recovery is not None
         else None
     )
@@ -169,13 +153,11 @@ def backfill_legacy_follow_up_record(
     binding_conflict = (
         (
             follow_up.policy_id is not None
-            and follow_up.policy_id
-            != INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_ID
+            and follow_up.policy_id != INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_ID
         )
         or (
             follow_up.policy_version is not None
-            and follow_up.policy_version
-            != INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION
+            and follow_up.policy_version != INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION
         )
         or (
             follow_up.deadline_at is not None
@@ -184,21 +166,17 @@ def backfill_legacy_follow_up_record(
         )
     )
 
-    pending_schedule_conflict = (
-        follow_up.status is FollowUpStatus.PENDING
-        and (
-            follow_up.due_at is None
-            or expected_deadline is None
-            or follow_up.due_at >= expected_deadline
-        )
+    pending_schedule_conflict = follow_up.status is FollowUpStatus.PENDING and (
+        follow_up.due_at is None
+        or expected_deadline is None
+        or follow_up.due_at >= expected_deadline
     )
 
     legacy_blocked_shape_invalid = (
         follow_up.status is FollowUpStatus.BLOCKED
         and follow_up.reason_code is None
         and (
-            follow_up.contact_permission
-            is not FollowUpContactPermission.NOT_AUTHORISED
+            follow_up.contact_permission is not FollowUpContactPermission.NOT_AUTHORISED
             or follow_up.channel is not None
             or follow_up.due_at is not None
         )
@@ -224,9 +202,7 @@ def backfill_legacy_follow_up_record(
         )
 
         # Re-validate after model_copy, which intentionally skips validators.
-        failed = FollowUpRecord.model_validate(
-            failed.model_dump()
-        )
+        failed = FollowUpRecord.model_validate(failed.model_dump())
 
         audit = _audit_event(
             follow_up,
@@ -250,10 +226,7 @@ def backfill_legacy_follow_up_record(
 
     bound_reason_code: FollowUpReasonCode | None = follow_up.reason_code
 
-    if (
-        follow_up.status is FollowUpStatus.BLOCKED
-        and bound_reason_code is None
-    ):
+    if follow_up.status is FollowUpStatus.BLOCKED and bound_reason_code is None:
         bound_reason_code = FollowUpReasonCode.CONTACT_NOT_AUTHORISED
 
     bound = follow_up.model_copy(
@@ -265,9 +238,7 @@ def backfill_legacy_follow_up_record(
         }
     )
 
-    bound = FollowUpRecord.model_validate(
-        bound.model_dump()
-    )
+    bound = FollowUpRecord.model_validate(bound.model_dump())
 
     audit = _audit_event(
         follow_up,

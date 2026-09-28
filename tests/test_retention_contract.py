@@ -73,14 +73,10 @@ def _object_evidence(
     attempt: int = 1,
 ) -> RetentionStepEvidence:
     status = {
-        ObjectDeletionOutcome.DELETED:
-            RetentionStepStatus.SATISFIED,
-        ObjectDeletionOutcome.ALREADY_ABSENT:
-            RetentionStepStatus.SATISFIED,
-        ObjectDeletionOutcome.FAILED:
-            RetentionStepStatus.FAILED,
-        ObjectDeletionOutcome.UNKNOWN:
-            RetentionStepStatus.UNKNOWN,
+        ObjectDeletionOutcome.DELETED: RetentionStepStatus.SATISFIED,
+        ObjectDeletionOutcome.ALREADY_ABSENT: RetentionStepStatus.SATISFIED,
+        ObjectDeletionOutcome.FAILED: RetentionStepStatus.FAILED,
+        ObjectDeletionOutcome.UNKNOWN: RetentionStepStatus.UNKNOWN,
     }[outcome]
 
     return RetentionStepEvidence(
@@ -108,20 +104,20 @@ def test_retention_classification_baseline_preserves_authority_boundaries() -> N
         RetentionClassification.DELETE,
     )
 
-    assert RetentionClassification.RETAIN in (
-        RETENTION_CLASSIFICATION_BASELINE['FollowUpOperation']
+    assert (
+        RetentionClassification.RETAIN in (RETENTION_CLASSIFICATION_BASELINE['FollowUpOperation'])
     )
 
-    assert RetentionClassification.RETAIN in (
-        RETENTION_CLASSIFICATION_BASELINE['ExternalTaskRecord']
+    assert (
+        RetentionClassification.RETAIN in (RETENTION_CLASSIFICATION_BASELINE['ExternalTaskRecord'])
     )
 
-    assert RetentionClassification.RETAIN in (
-        RETENTION_CLASSIFICATION_BASELINE['AuditEventEnvelope']
+    assert (
+        RetentionClassification.RETAIN in (RETENTION_CLASSIFICATION_BASELINE['AuditEventEnvelope'])
     )
 
-    assert RetentionClassification.RETAIN in (
-        RETENTION_CLASSIFICATION_BASELINE['RetentionOperation']
+    assert (
+        RetentionClassification.RETAIN in (RETENTION_CLASSIFICATION_BASELINE['RetentionOperation'])
     )
 
 
@@ -138,10 +134,13 @@ def test_retention_hold_blocks_cleanup_but_is_independent_of_access_closure() ->
     operation = _operation()
 
     assert hold.active is True
-    assert retention_next_status(
-        operation,
-        active_hold=hold.active,
-    ) is RetentionOperationStatus.HELD
+    assert (
+        retention_next_status(
+            operation,
+            active_hold=hold.active,
+        )
+        is RetentionOperationStatus.HELD
+    )
 
     # A hold pauses destructive work.  It does not make stale claimant
     # credentials or old Sessions valid again.
@@ -169,10 +168,13 @@ def test_idempotent_object_deletion_success_satisfies_target(
         'target-object-1': RetentionStepStatus.SATISFIED,
     }
 
-    assert retention_next_status(
-        operation,
-        active_hold=False,
-    ) is RetentionOperationStatus.COMPLETED
+    assert (
+        retention_next_status(
+            operation,
+            active_hold=False,
+        )
+        is RetentionOperationStatus.COMPLETED
+    )
 
 
 @pytest.mark.parametrize(
@@ -192,10 +194,13 @@ def test_failed_or_unknown_object_deletion_requires_reconciliation(
         evidence=[evidence],
     )
 
-    assert retention_next_status(
-        operation,
-        active_hold=False,
-    ) is RetentionOperationStatus.RECONCILIATION_REQUIRED
+    assert (
+        retention_next_status(
+            operation,
+            active_hold=False,
+        )
+        is RetentionOperationStatus.RECONCILIATION_REQUIRED
+    )
 
 
 def test_unknown_object_deletion_cannot_be_presented_as_satisfied() -> None:
@@ -234,10 +239,13 @@ def test_retry_uses_latest_attempt_without_erasing_previous_evidence() -> None:
         'target-object-1': RetentionStepStatus.SATISFIED,
     }
 
-    assert retention_next_status(
-        operation,
-        active_hold=False,
-    ) is RetentionOperationStatus.COMPLETED
+    assert (
+        retention_next_status(
+            operation,
+            active_hold=False,
+        )
+        is RetentionOperationStatus.COMPLETED
+    )
 
 
 def test_completed_retention_requires_every_frozen_target_satisfied() -> None:

@@ -172,11 +172,7 @@ def test_pause_checkpoint_is_durable_visible_idempotent_and_resumable(
             claim_id=claim_id,
         )
     )
-    resume_events = [
-        event
-        for event in resume_events
-        if event.idempotency_key == 'p17-resume'
-    ]
+    resume_events = [event for event in resume_events if event.idempotency_key == 'p17-resume']
     assert len(resume_events) == 1
     assert resume_events[0].actor.actor_id == 'cus_demo'
     assert resume_events[0].claim_revision == final_claim.revision
@@ -416,7 +412,6 @@ def test_mongodb_stale_incomplete_checkpoint_has_no_partial_children() -> None:
     )
 
 
-
 def test_p17_full_journey_pause_resume_stops_future_recovery(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -434,26 +429,15 @@ def test_p17_full_journey_pause_resume_stops_future_recovery(
     assert isinstance(claim, dict)
     assert isinstance(session, dict)
 
-    claim_id = str(
-        claim['claim_id']
-    )
-    session_id = str(
-        session['session_id']
-    )
-    revision = int(
-        claim['revision']
-    )
+    claim_id = str(claim['claim_id'])
+    session_id = str(session['session_id'])
+    revision = int(claim['revision'])
 
     paused = client.post(
-        (
-            f'/api/v1/claims/{claim_id}'
-            f'/sessions/{session_id}/pause'
-        ),
+        (f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause'),
         headers={
             **auth_headers,
-            'Idempotency-Key': (
-                'p17-full-resume-pause'
-            ),
+            'Idempotency-Key': ('p17-full-resume-pause'),
             'If-Match': f'"{revision}"',
         },
     )
@@ -469,33 +453,23 @@ def test_p17_full_journey_pause_resume_stops_future_recovery(
 
     obligation = follow_ups[0]
 
-    assert (
-        obligation.status
-        is FollowUpStatus.PENDING
-    )
+    assert obligation.status is FollowUpStatus.PENDING
     assert obligation.due_at is not None
     assert obligation.deadline_at is not None
 
-    due_candidates, _ = (
-        repository.list_due_follow_ups(
-            obligation.due_at,
-            limit=10,
-            cursor=None,
-        )
+    due_candidates, _ = repository.list_due_follow_ups(
+        obligation.due_at,
+        limit=10,
+        cursor=None,
     )
 
-    assert obligation.follow_up_id in {
-        item.follow_up_id
-        for item in due_candidates
-    }
+    assert obligation.follow_up_id in {item.follow_up_id for item in due_candidates}
 
     resumed = client.post(
         f'/api/v1/claims/{claim_id}/sessions',
         headers={
             **auth_headers,
-            'Idempotency-Key': (
-                'p17-full-resume-return'
-            ),
+            'Idempotency-Key': ('p17-full-resume-return'),
         },
         json={
             'intent': 'resume',
@@ -511,10 +485,7 @@ def test_p17_full_journey_pause_resume_stops_future_recovery(
 
     assert final_claim is not None
     assert final_claim.terminal_disposition is None
-    assert (
-        final_claim.active_session_id
-        == resumed.json()['session_id']
-    )
+    assert final_claim.active_session_id == resumed.json()['session_id']
 
     resolved = repository.list_follow_ups(
         claim_id,
@@ -522,29 +493,16 @@ def test_p17_full_journey_pause_resume_stops_future_recovery(
     )
 
     assert len(resolved) == 1
-    assert (
-        resolved[0].status
-        is FollowUpStatus.RESOLVED
-    )
-    assert (
-        resolved[0].reason_code
-        is FollowUpReasonCode.CLAIMANT_RESUMED
-    )
+    assert resolved[0].status is FollowUpStatus.RESOLVED
+    assert resolved[0].reason_code is FollowUpReasonCode.CLAIMANT_RESUMED
 
-    future_due, _ = (
-        repository.list_due_follow_ups(
-            obligation.deadline_at
-            - timedelta(microseconds=1),
-            limit=10,
-            cursor=None,
-        )
+    future_due, _ = repository.list_due_follow_ups(
+        obligation.deadline_at - timedelta(microseconds=1),
+        limit=10,
+        cursor=None,
     )
 
-    assert obligation.follow_up_id not in {
-        item.follow_up_id
-        for item in future_due
-    }
-
+    assert obligation.follow_up_id not in {item.follow_up_id for item in future_due}
 
 
 def test_p17_full_journey_attempt_exhaustion_expiry_retention_denies_old_session(
@@ -564,26 +522,15 @@ def test_p17_full_journey_attempt_exhaustion_expiry_retention_denies_old_session
     assert isinstance(claim, dict)
     assert isinstance(session, dict)
 
-    claim_id = str(
-        claim['claim_id']
-    )
-    session_id = str(
-        session['session_id']
-    )
-    revision = int(
-        claim['revision']
-    )
+    claim_id = str(claim['claim_id'])
+    session_id = str(session['session_id'])
+    revision = int(claim['revision'])
 
     paused = client.post(
-        (
-            f'/api/v1/claims/{claim_id}'
-            f'/sessions/{session_id}/pause'
-        ),
+        (f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause'),
         headers={
             **auth_headers,
-            'Idempotency-Key': (
-                'p17-full-expiry-pause'
-            ),
+            'Idempotency-Key': ('p17-full-expiry-pause'),
             'If-Match': f'"{revision}"',
         },
     )
@@ -620,14 +567,8 @@ def test_p17_full_journey_attempt_exhaustion_expiry_retention_denies_old_session
         current = reloaded
 
     assert current.attempt_count == 3
-    assert (
-        current.status
-        is FollowUpStatus.BLOCKED
-    )
-    assert (
-        current.reason_code
-        is FollowUpReasonCode.ATTEMPT_LIMIT_REACHED
-    )
+    assert current.status is FollowUpStatus.BLOCKED
+    assert current.reason_code is FollowUpReasonCode.ATTEMPT_LIMIT_REACHED
     assert current.due_at is None
 
     deadline = current.deadline_at
@@ -641,34 +582,23 @@ def test_p17_full_journey_attempt_exhaustion_expiry_retention_denies_old_session
 
     assert expired is not None
 
-    terminal = repository.get_claim_internal(
-        claim_id
-    )
+    terminal = repository.get_claim_internal(claim_id)
 
     assert terminal is not None
     assert terminal.terminal_disposition is not None
     assert (
-        terminal.terminal_disposition.reason_code
-        is TerminalDispositionReasonCode.RECOVERY_EXPIRED
+        terminal.terminal_disposition.reason_code is TerminalDispositionReasonCode.RECOVERY_EXPIRED
     )
 
-    terminal_follow_up = (
-        repository.get_follow_up(
-            claim_id,
-            current.follow_up_id,
-            'cus_demo',
-        )
+    terminal_follow_up = repository.get_follow_up(
+        claim_id,
+        current.follow_up_id,
+        'cus_demo',
     )
 
     assert terminal_follow_up is not None
-    assert (
-        terminal_follow_up.status
-        is FollowUpStatus.RESOLVED
-    )
-    assert (
-        terminal_follow_up.reason_code
-        is FollowUpReasonCode.RECOVERY_EXPIRED
-    )
+    assert terminal_follow_up.status is FollowUpStatus.RESOLVED
+    assert terminal_follow_up.reason_code is FollowUpReasonCode.RECOVERY_EXPIRED
 
     retention = reserve_retention_from_terminal(
         repository,
@@ -689,23 +619,12 @@ def test_p17_full_journey_attempt_exhaustion_expiry_retention_denies_old_session
         now=deadline + timedelta(minutes=3),
     )
 
-    assert (
-        completed.status
-        is RetentionOperationStatus.COMPLETED
-    )
+    assert completed.status is RetentionOperationStatus.COMPLETED
 
-    assert (
-        repository.get_claim_internal(
-            claim_id
-        )
-        is None
-    )
+    assert repository.get_claim_internal(claim_id) is None
 
     old_session = client.get(
-        (
-            f'/api/v1/claims/{claim_id}'
-            f'/sessions/{session_id}'
-        ),
+        (f'/api/v1/claims/{claim_id}/sessions/{session_id}'),
         headers=auth_headers,
     )
 
@@ -719,21 +638,9 @@ def test_p17_full_journey_attempt_exhaustion_expiry_retention_denies_old_session
     assert old_claim.status_code == 404
 
     staff_retention = client.get(
-        (
-            f'/api/v1/workbench/claims/'
-            f'{claim_id}/retention'
-        ),
-        headers={
-            'Authorization': (
-                'Bearer synthetic-staff'
-            )
-        },
+        (f'/api/v1/workbench/claims/{claim_id}/retention'),
+        headers={'Authorization': ('Bearer synthetic-staff')},
     )
 
     assert staff_retention.status_code == 200
-    assert (
-        staff_retention.json()[
-            'operation_status'
-        ]
-        == 'completed'
-    )
+    assert staff_retention.json()['operation_status'] == 'completed'

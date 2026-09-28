@@ -108,9 +108,7 @@ def test_provider_result_cannot_overwrite_concurrent_mutation(
 
     import backend.services.messages as messages_service
 
-    real_reduce_revision_conflict = (
-        messages_service.reduce_revision_conflict_recovery
-    )
+    real_reduce_revision_conflict = messages_service.reduce_revision_conflict_recovery
     recovery_calls: list[dict[str, object]] = []
 
     def observe_revision_conflict(**kwargs: object):

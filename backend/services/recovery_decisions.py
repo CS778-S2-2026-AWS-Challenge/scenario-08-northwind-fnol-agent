@@ -98,7 +98,6 @@ def reduce_external_unknown_recovery(
     )
 
 
-
 def reduce_dependency_unavailable_recovery(
     *,
     source: Literal['tool', 'retrieval'],
@@ -172,7 +171,6 @@ def reduce_high_impact_review_recovery(
     )
 
 
-
 def reduce_external_terminal_recovery(
     *,
     claim_id: str,
@@ -230,9 +228,7 @@ def build_recovery_work_item(
         return None
 
     if transition.work_item_kind is None:
-        raise ValueError(
-            'A Recovery policy requiring a WorkItem must publish its kind.'
-        )
+        raise ValueError('A Recovery policy requiring a WorkItem must publish its kind.')
 
     owner = cast(
         Literal['claimant', 'staff', 'system', 'external'],
@@ -240,10 +236,7 @@ def build_recovery_work_item(
     )
 
     digest = sha256(
-        (
-            f'{claim_id}|{transition.event_id}|'
-            f'{transition.rule_id}|{subject_ref}'
-        ).encode()
+        (f'{claim_id}|{transition.event_id}|{transition.rule_id}|{subject_ref}').encode()
     ).hexdigest()[:24]
 
     completed = status in {'completed', 'cancelled'}
@@ -256,11 +249,7 @@ def build_recovery_work_item(
         subject_ref=subject_ref,
         owner=owner,
         status=status,
-        blocks_action=(
-            None
-            if completed
-            else transition.blocks_action
-        ),
+        blocks_action=(None if completed else transition.blocks_action),
         source_refs=list(transition.source_refs),
         created_at=now,
         updated_at=now,

@@ -136,9 +136,7 @@ def _terminalise(
 
     terminal = ClaimTerminalDisposition(
         value=TerminalDispositionValue.ABANDONED,
-        reason_code=(
-            TerminalDispositionReasonCode.RECOVERY_EXPIRED
-        ),
+        reason_code=(TerminalDispositionReasonCode.RECOVERY_EXPIRED),
         source_refs=[
             f'follow-up:fup_{claim.claim_id}',
             f'session:{claim.active_session_id}',
@@ -190,15 +188,9 @@ def _operation(
         operation_id=f'ret_manual_{claim.claim_id}',
         claim_id=claim.claim_id,
         source_terminal_ref=source_ref,
-        source_claim_revision=(
-            source_revision
-            if source_revision is not None
-            else claim.revision
-        ),
+        source_claim_revision=(source_revision if source_revision is not None else claim.revision),
         policy_id=INCOMPLETE_CLAIM_RETENTION_POLICY_ID,
-        policy_version=(
-            INCOMPLETE_CLAIM_RETENTION_POLICY_VERSION
-        ),
+        policy_version=(INCOMPLETE_CLAIM_RETENTION_POLICY_VERSION),
         revision=1,
         status=RetentionOperationStatus.RESERVED,
         access_closed_at=NOW + timedelta(minutes=2),
@@ -238,29 +230,24 @@ def test_terminal_retention_reservation_has_provider_parity(
         now=NOW + timedelta(minutes=2),
     )
 
-    assert (
-        operation.status
-        is RetentionOperationStatus.RESERVED
-    )
+    assert operation.status is RetentionOperationStatus.RESERVED
     assert operation.source_claim_revision == claim.revision
-    assert (
-        operation.source_terminal_ref
-        == retention_terminal_source_ref(
-            claim.claim_id,
-            claim.revision,
-        )
+    assert operation.source_terminal_ref == retention_terminal_source_ref(
+        claim.claim_id,
+        claim.revision,
     )
 
     # Access closes immediately at reservation.
-    assert repository.get_claim(
-        claim.claim_id,
-        claim.customer_id,
-    ) is None
+    assert (
+        repository.get_claim(
+            claim.claim_id,
+            claim.customer_id,
+        )
+        is None
+    )
 
     # Internal retention authority still sees the terminal Claim.
-    assert repository.get_claim_internal(
-        claim.claim_id
-    ) == claim
+    assert repository.get_claim_internal(claim.claim_id) == claim
 
     replay = reserve_retention_from_terminal(
         repository,
@@ -287,24 +274,22 @@ def test_non_terminal_claim_is_not_retention_eligible(
         _session(claim),
     )
 
-    with pytest.raises(
-        RetentionEligibilityRejected
-    ) as caught:
+    with pytest.raises(RetentionEligibilityRejected) as caught:
         reserve_retention_from_terminal(
             repository,
             claim.claim_id,
             now=NOW + timedelta(minutes=2),
         )
 
-    assert (
-        caught.value.reason
-        is RetentionEligibilityReason.TERMINAL_REQUIRED
-    )
+    assert caught.value.reason is RetentionEligibilityReason.TERMINAL_REQUIRED
 
-    assert repository.get_claim(
-        claim.claim_id,
-        claim.customer_id,
-    ) == claim
+    assert (
+        repository.get_claim(
+            claim.claim_id,
+            claim.customer_id,
+        )
+        == claim
+    )
 
 
 @pytest.mark.parametrize(
@@ -333,24 +318,12 @@ def test_stale_terminal_revision_fails_closed(
         source_revision=claim.revision - 1,
     )
 
-    with pytest.raises(
-        RetentionEligibilityRejected
-    ) as caught:
-        repository.reserve_eligible_retention_operation(
-            stale
-        )
+    with pytest.raises(RetentionEligibilityRejected) as caught:
+        repository.reserve_eligible_retention_operation(stale)
 
-    assert (
-        caught.value.reason
-        is RetentionEligibilityReason.SOURCE_REVISION_MISMATCH
-    )
+    assert caught.value.reason is RetentionEligibilityReason.SOURCE_REVISION_MISMATCH
 
-    assert (
-        repository.get_retention_operation_for_claim(
-            claim.claim_id
-        )
-        is None
-    )
+    assert repository.get_retention_operation_for_claim(claim.claim_id) is None
 
 
 @pytest.mark.parametrize(
@@ -393,17 +366,17 @@ def test_active_hold_closes_access_but_blocks_destructive_progress(
         now=NOW + timedelta(minutes=2),
     )
 
-    assert (
-        operation.status
-        is RetentionOperationStatus.HELD
-    )
+    assert operation.status is RetentionOperationStatus.HELD
     assert operation.hold_refs == [hold.hold_id]
 
     # A hold pauses destruction. It does not restore claimant access.
-    assert repository.get_claim(
-        claim.claim_id,
-        claim.customer_id,
-    ) is None
+    assert (
+        repository.get_claim(
+            claim.claim_id,
+            claim.customer_id,
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize(
@@ -425,9 +398,7 @@ def test_unknown_external_outcome_blocks_retention_reservation(
     task = ExternalTaskRecord(
         task_id=f'ext_{kind}',
         claim_id=base.claim_id,
-        service_identity=(
-            'vehicle_damage_assessment_routing'
-        ),
+        service_identity=('vehicle_damage_assessment_routing'),
         requested_action='vehicle_damage_assessment',
         integration_source=IntegrationSource.FIXTURE,
         status=ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
@@ -448,27 +419,16 @@ def test_unknown_external_outcome_blocks_retention_reservation(
         base,
     )
 
-    with pytest.raises(
-        RetentionEligibilityRejected
-    ) as caught:
+    with pytest.raises(RetentionEligibilityRejected) as caught:
         reserve_retention_from_terminal(
             repository,
             claim.claim_id,
             now=NOW + timedelta(minutes=2),
         )
 
-    assert (
-        caught.value.reason
-        is RetentionEligibilityReason.EXTERNAL_OUTCOME_UNKNOWN
-    )
+    assert caught.value.reason is RetentionEligibilityReason.EXTERNAL_OUTCOME_UNKNOWN
 
-    assert (
-        repository.get_retention_operation_for_claim(
-            claim.claim_id
-        )
-        is None
-    )
-
+    assert repository.get_retention_operation_for_claim(claim.claim_id) is None
 
 
 @pytest.mark.parametrize(
@@ -497,12 +457,7 @@ def test_cleanup_target_freeze_has_provider_parity(
         media_type='image/jpeg',
         size_bytes=7,
         source=EvidenceSource.CLAIMANT,
-        provenance={
-            'storage_key': (
-                f'claims/{base.claim_id}'
-                f'/evidence/evd_targets_{kind}'
-            )
-        },
+        provenance={'storage_key': (f'claims/{base.claim_id}/evidence/evd_targets_{kind}')},
         created_at=NOW + timedelta(seconds=10),
         updated_at=NOW + timedelta(seconds=10),
     )
@@ -530,10 +485,7 @@ def test_cleanup_target_freeze_has_provider_parity(
     )
 
     assert frozen.revision == operation.revision + 1
-    assert (
-        frozen.targets_frozen_at
-        == NOW + timedelta(minutes=3)
-    )
+    assert frozen.targets_frozen_at == NOW + timedelta(minutes=3)
 
     observed = {
         (
@@ -586,10 +538,7 @@ def test_cleanup_target_freeze_has_provider_parity(
     )
 
     assert replay == frozen
-    assert (
-        replay.targets_frozen_at
-        == frozen.targets_frozen_at
-    )
+    assert replay.targets_frozen_at == frozen.targets_frozen_at
 
 
 @pytest.mark.parametrize(
@@ -630,41 +579,25 @@ def test_active_hold_prevents_target_freeze_until_release(
         now=NOW + timedelta(minutes=2),
     )
 
-    assert (
-        operation.status
-        is RetentionOperationStatus.HELD
-    )
+    assert operation.status is RetentionOperationStatus.HELD
 
-    with pytest.raises(
-        RetentionTargetFreezeRejected
-    ) as caught:
+    with pytest.raises(RetentionTargetFreezeRejected) as caught:
         freeze_retention_cleanup_targets(
             repository,
             operation.operation_id,
             now=NOW + timedelta(minutes=3),
         )
 
-    assert (
-        caught.value.reason
-        is RetentionTargetFreezeReason.ACTIVE_HOLD
-    )
+    assert caught.value.reason is RetentionTargetFreezeReason.ACTIVE_HOLD
 
-    unchanged = repository.get_retention_operation(
-        operation.operation_id
-    )
+    unchanged = repository.get_retention_operation(operation.operation_id)
 
     assert unchanged is not None
     assert unchanged.targets_frozen_at is None
     assert unchanged.targets == []
 
     repository.save_retention_hold(
-        hold.model_copy(
-            update={
-                'released_at': (
-                    NOW + timedelta(minutes=4)
-                )
-            }
-        )
+        hold.model_copy(update={'released_at': (NOW + timedelta(minutes=4))})
     )
 
     frozen = freeze_retention_cleanup_targets(
@@ -673,13 +606,9 @@ def test_active_hold_prevents_target_freeze_until_release(
         now=NOW + timedelta(minutes=5),
     )
 
-    assert (
-        frozen.status
-        is RetentionOperationStatus.RESERVED
-    )
+    assert frozen.status is RetentionOperationStatus.RESERVED
     assert frozen.targets_frozen_at is not None
     assert frozen.hold_refs == [hold.hold_id]
-
 
 
 @pytest.mark.parametrize(
@@ -743,9 +672,7 @@ def test_full_retention_cleanup_is_object_first_and_provider_parity(
         },
     )
 
-    repository.save_idempotency(
-        idempotency
-    )
+    repository.save_idempotency(idempotency)
 
     claim = _terminalise(
         repository,
@@ -771,10 +698,7 @@ def test_full_retention_cleanup_is_object_first_and_provider_parity(
         now=NOW + timedelta(minutes=4),
     )
 
-    assert (
-        completed.status
-        is RetentionOperationStatus.COMPLETED
-    )
+    assert completed.status is RetentionOperationStatus.COMPLETED
 
     statuses = retention_target_statuses(
         completed.targets,
@@ -782,10 +706,7 @@ def test_full_retention_cleanup_is_object_first_and_provider_parity(
     )
 
     assert statuses
-    assert all(
-        status is RetentionStepStatus.SATISFIED
-        for status in statuses.values()
-    )
+    assert all(status is RetentionStepStatus.SATISFIED for status in statuses.values())
 
     # Bytes were destroyed before Evidence/Claim metadata disappeared.
     assert (
@@ -798,24 +719,13 @@ def test_full_retention_cleanup_is_object_first_and_provider_parity(
     )
 
     # The normal business authority is no longer returned internally.
-    assert (
-        repository.get_claim_internal(
-            claim.claim_id
-        )
-        is None
-    )
+    assert repository.get_claim_internal(claim.claim_id) is None
 
     claim_target = next(
-        target
-        for target in completed.targets
-        if target.record_type == 'WorkingClaim'
+        target for target in completed.targets if target.record_type == 'WorkingClaim'
     )
 
-    claim_tombstone = (
-        repository.get_retention_tombstone(
-            claim_target.target_id
-        )
-    )
+    claim_tombstone = repository.get_retention_tombstone(claim_target.target_id)
 
     assert claim_tombstone is not None
     assert claim_tombstone.authority == {
@@ -823,26 +733,14 @@ def test_full_retention_cleanup_is_object_first_and_provider_parity(
     }
 
     evidence_target = next(
-        target
-        for target in completed.targets
-        if target.record_type == 'EvidenceRecord'
+        target for target in completed.targets if target.record_type == 'EvidenceRecord'
     )
 
-    evidence_tombstone = (
-        repository.get_retention_tombstone(
-            evidence_target.target_id
-        )
-    )
+    evidence_tombstone = repository.get_retention_tombstone(evidence_target.target_id)
 
     assert evidence_tombstone is not None
-    assert (
-        'claimant_note'
-        not in evidence_tombstone.authority
-    )
-    assert (
-        'provenance'
-        not in evidence_tombstone.authority
-    )
+    assert 'claimant_note' not in evidence_tombstone.authority
+    assert 'provenance' not in evidence_tombstone.authority
 
     # The old retry identity still resolves to the retention closure rather
     # than looking unused and allowing resurrection.
@@ -942,18 +840,10 @@ def test_object_failure_stops_database_cleanup_and_restart_finishes_same_operati
         now=NOW + timedelta(minutes=4),
     )
 
-    assert (
-        failed.status
-        is RetentionOperationStatus.RECONCILIATION_REQUIRED
-    )
+    assert failed.status is RetentionOperationStatus.RECONCILIATION_REQUIRED
 
     # Database content remains intact because object cleanup did not succeed.
-    assert (
-        repository.get_claim_internal(
-            claim.claim_id
-        )
-        == claim
-    )
+    assert repository.get_claim_internal(claim.claim_id) == claim
 
     failed_statuses = retention_target_statuses(
         failed.targets,
@@ -961,11 +851,9 @@ def test_object_failure_stops_database_cleanup_and_restart_finishes_same_operati
     )
 
     assert all(
-        failed_statuses[target.target_id]
-        is RetentionStepStatus.PENDING
+        failed_statuses[target.target_id] is RetentionStepStatus.PENDING
         for target in failed.targets
-        if target.kind
-        is RetentionTargetKind.MONGO_RECORD
+        if target.kind is RetentionTargetKind.MONGO_RECORD
     )
 
     storage.set_outage(None)
@@ -977,40 +865,20 @@ def test_object_failure_stops_database_cleanup_and_restart_finishes_same_operati
         now=NOW + timedelta(minutes=5),
     )
 
-    assert (
-        completed.status
-        is RetentionOperationStatus.COMPLETED
-    )
-    assert (
-        repository.get_claim_internal(
-            claim.claim_id
-        )
-        is None
-    )
+    assert completed.status is RetentionOperationStatus.COMPLETED
+    assert repository.get_claim_internal(claim.claim_id) is None
 
     object_target = next(
-        target
-        for target in completed.targets
-        if target.kind
-        is RetentionTargetKind.OBJECT_BYTES
+        target for target in completed.targets if target.kind is RetentionTargetKind.OBJECT_BYTES
     )
 
     attempts = [
-        step
-        for step in completed.step_evidence
-        if step.target_id == object_target.target_id
+        step for step in completed.step_evidence if step.target_id == object_target.target_id
     ]
 
     assert [step.attempt for step in attempts] == [1, 2]
-    assert (
-        attempts[0].status
-        is RetentionStepStatus.FAILED
-    )
-    assert (
-        attempts[1].status
-        is RetentionStepStatus.SATISFIED
-    )
-
+    assert attempts[0].status is RetentionStepStatus.FAILED
+    assert attempts[1].status is RetentionStepStatus.SATISFIED
 
 
 @pytest.mark.parametrize(
@@ -1053,12 +921,8 @@ def test_retention_closes_claimant_retry_without_retiring_internal_retry(
         },
     )
 
-    repository.save_idempotency(
-        claimant_record
-    )
-    repository.save_idempotency(
-        internal_record
-    )
+    repository.save_idempotency(claimant_record)
+    repository.save_idempotency(internal_record)
 
     claim = _terminalise(
         repository,
@@ -1071,9 +935,7 @@ def test_retention_closes_claimant_retry_without_retiring_internal_retry(
         now=NOW + timedelta(minutes=2),
     )
 
-    with pytest.raises(
-        ResourceAccessClosed
-    ):
+    with pytest.raises(ResourceAccessClosed):
         repository.find_idempotency(
             claimant_record.actor_id,
             claimant_record.route,
@@ -1096,14 +958,10 @@ def test_retention_closes_claimant_retry_without_retiring_internal_retry(
     )
 
     idempotency_targets = [
-        target
-        for target in frozen.targets
-        if target.record_type
-        == 'IdempotencyRecord'
+        target for target in frozen.targets if target.record_type == 'IdempotencyRecord'
     ]
 
     assert len(idempotency_targets) == 1
-
 
 
 @pytest.mark.parametrize(
@@ -1138,9 +996,7 @@ def test_database_failure_requires_reconciliation_and_retries_same_operation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repository = _repository(kind, monkeypatch)
-    base = _claim(
-        f'clm_db_reconcile_{kind}_{int(commit_unknown)}'
-    )
+    base = _claim(f'clm_db_reconcile_{kind}_{int(commit_unknown)}')
 
     repository.create_claim(
         base,
@@ -1164,9 +1020,7 @@ def test_database_failure_requires_reconciliation_and_retries_same_operation(
         now=NOW + timedelta(minutes=3),
     )
 
-    original_apply = (
-        repository.apply_retention_record_target
-    )
+    original_apply = repository.apply_retention_record_target
 
     state = {
         'failed': False,
@@ -1216,10 +1070,7 @@ def test_database_failure_requires_reconciliation_and_retries_same_operation(
         now=NOW + timedelta(minutes=4),
     )
 
-    assert (
-        interrupted.status
-        is RetentionOperationStatus.RECONCILIATION_REQUIRED
-    )
+    assert interrupted.status is RetentionOperationStatus.RECONCILIATION_REQUIRED
 
     failed_target_id = state['target_id']
     assert isinstance(
@@ -1228,25 +1079,16 @@ def test_database_failure_requires_reconciliation_and_retries_same_operation(
     )
 
     failed_steps = [
-        step
-        for step in interrupted.step_evidence
-        if step.target_id == failed_target_id
+        step for step in interrupted.step_evidence if step.target_id == failed_target_id
     ]
 
     assert len(failed_steps) == 1
     assert failed_steps[0].status is (
-        RetentionStepStatus.UNKNOWN
-        if commit_unknown
-        else RetentionStepStatus.FAILED
+        RetentionStepStatus.UNKNOWN if commit_unknown else RetentionStepStatus.FAILED
     )
 
     # No destructive mutation was asserted successful for the failed target.
-    assert (
-        repository.get_claim_internal(
-            claim.claim_id
-        )
-        == claim
-    )
+    assert repository.get_claim_internal(claim.claim_id) == claim
 
     subject = AuditSubject(
         subject_type=AuditSubjectType.CLAIM,
@@ -1254,29 +1096,17 @@ def test_database_failure_requires_reconciliation_and_retries_same_operation(
         claim_id=claim.claim_id,
     )
 
-    events = repository.list_audit_events_internal(
-        subject
-    )
+    events = repository.list_audit_events_internal(subject)
 
     retention_events = [
         event
         for event in events
-        if (
-            f'retention-operation:{operation.operation_id}'
-            in event.source_refs
-        )
+        if (f'retention-operation:{operation.operation_id}' in event.source_refs)
     ]
 
-    assert any(
-        event.event_type
-        is AuditEventType.ACTION_PREPARED
-        for event in retention_events
-    )
+    assert any(event.event_type is AuditEventType.ACTION_PREPARED for event in retention_events)
 
-    assert any(
-        event.event_type is expected_event
-        for event in retention_events
-    )
+    assert any(event.event_type is expected_event for event in retention_events)
 
     monkeypatch.setattr(
         repository,
@@ -1291,45 +1121,23 @@ def test_database_failure_requires_reconciliation_and_retries_same_operation(
         now=NOW + timedelta(minutes=5),
     )
 
-    assert (
-        completed.status
-        is RetentionOperationStatus.COMPLETED
-    )
+    assert completed.status is RetentionOperationStatus.COMPLETED
 
-    retry_steps = [
-        step
-        for step in completed.step_evidence
-        if step.target_id == failed_target_id
-    ]
+    retry_steps = [step for step in completed.step_evidence if step.target_id == failed_target_id]
 
-    assert [
-        step.attempt
-        for step in retry_steps
-    ] == [1, 2]
+    assert [step.attempt for step in retry_steps] == [1, 2]
 
-    assert (
-        retry_steps[-1].status
-        is RetentionStepStatus.SATISFIED
-    )
+    assert retry_steps[-1].status is RetentionStepStatus.SATISFIED
 
-    events = repository.list_audit_events_internal(
-        subject
-    )
+    events = repository.list_audit_events_internal(subject)
 
     retention_events = [
         event
         for event in events
-        if (
-            f'retention-operation:{operation.operation_id}'
-            in event.source_refs
-        )
+        if (f'retention-operation:{operation.operation_id}' in event.source_refs)
     ]
 
-    assert any(
-        event.event_type
-        is AuditEventType.ACTION_COMPLETED
-        for event in retention_events
-    )
+    assert any(event.event_type is AuditEventType.ACTION_COMPLETED for event in retention_events)
 
     # Completion replay must not append a conflicting duplicate audit fact.
     replay = execute_retention_cleanup(
@@ -1340,7 +1148,6 @@ def test_database_failure_requires_reconciliation_and_retries_same_operation(
     )
 
     assert replay == completed
-
 
 
 @pytest.mark.parametrize(
@@ -1356,9 +1163,7 @@ def test_retention_projection_e2e_is_role_safe_after_cleanup(
         monkeypatch,
     )
 
-    base = _claim(
-        f'clm_projection_{kind}'
-    )
+    base = _claim(f'clm_projection_{kind}')
 
     repository.create_claim(
         base,
@@ -1388,9 +1193,7 @@ def test_retention_projection_e2e_is_role_safe_after_cleanup(
             'storage_key': stored.storage_key,
             'upload_checksum': stored.checksum,
         },
-        claimant_note=(
-            'must never appear in retention projection'
-        ),
+        claimant_note=('must never appear in retention projection'),
         created_at=NOW + timedelta(seconds=10),
         updated_at=NOW + timedelta(seconds=10),
     )
@@ -1411,22 +1214,15 @@ def test_retention_projection_e2e_is_role_safe_after_cleanup(
         now=NOW + timedelta(minutes=2),
     )
 
-    claimant_projection = (
-        project_claimant_retention(
-            repository,
-            terminal.claim_id,
-        )
+    claimant_projection = project_claimant_retention(
+        repository,
+        terminal.claim_id,
     )
 
     assert claimant_projection is not None
-    assert (
-        claimant_projection.availability
-        is RetentionProjectedContentState.UNAVAILABLE
-    )
+    assert claimant_projection.availability is RetentionProjectedContentState.UNAVAILABLE
 
-    claimant_json = (
-        claimant_projection.model_dump_json()
-    )
+    claimant_json = claimant_projection.model_dump_json()
 
     for forbidden in (
         'storage_key',
@@ -1454,8 +1250,7 @@ def test_retention_projection_e2e_is_role_safe_after_cleanup(
 
     assert any(
         item.record_type == 'WorkingClaim'
-        and item.content_state
-        is RetentionProjectedContentState.UNAVAILABLE
+        and item.content_state is RetentionProjectedContentState.UNAVAILABLE
         for item in before_cleanup.resources
     )
 
@@ -1466,17 +1261,9 @@ def test_retention_projection_e2e_is_role_safe_after_cleanup(
         now=NOW + timedelta(minutes=4),
     )
 
-    assert (
-        completed.status
-        is RetentionOperationStatus.COMPLETED
-    )
+    assert completed.status is RetentionOperationStatus.COMPLETED
 
-    assert (
-        repository.get_claim_internal(
-            terminal.claim_id
-        )
-        is None
-    )
+    assert repository.get_claim_internal(terminal.claim_id) is None
 
     final_projection = project_staff_retention(
         repository,
@@ -1485,10 +1272,7 @@ def test_retention_projection_e2e_is_role_safe_after_cleanup(
 
     assert final_projection is not None
 
-    assert (
-        final_projection.operation_status
-        is RetentionOperationStatus.COMPLETED
-    )
+    assert final_projection.operation_status is RetentionOperationStatus.COMPLETED
 
     assert final_projection.completed_at is not None
     assert not final_projection.hold_active
@@ -1518,8 +1302,7 @@ def test_retention_projection_e2e_is_role_safe_after_cleanup(
     ) in states
 
     assert any(
-        item.content_state
-        is RetentionProjectedContentState.DELETED
+        item.content_state is RetentionProjectedContentState.DELETED
         for item in final_projection.resources
     )
 
@@ -1528,9 +1311,7 @@ def test_retention_projection_e2e_is_role_safe_after_cleanup(
         RetentionProjectedContentState.RETAINED_FOR_AUDIT,
     ) in states
 
-    staff_json = (
-        final_projection.model_dump_json()
-    )
+    staff_json = final_projection.model_dump_json()
 
     for forbidden in (
         'storage_key',

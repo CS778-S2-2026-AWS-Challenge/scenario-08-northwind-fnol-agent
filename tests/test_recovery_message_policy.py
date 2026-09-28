@@ -12,9 +12,7 @@ def test_message_boundary_accepts_non_blocking_retrieval_recovery() -> None:
                 'tool': 'knowledge_search',
                 'status': 'unavailable',
                 'source_refs': [],
-                'limitations': [
-                    'Approved knowledge retrieval is temporarily unavailable.'
-                ],
+                'limitations': ['Approved knowledge retrieval is temporarily unavailable.'],
             }
         ],
     )
@@ -48,9 +46,7 @@ def test_message_boundary_does_not_reclassify_external_task_failure(
 
     def reject_if_called(**kwargs: object):
         calls.append(dict(kwargs))
-        raise AssertionError(
-            'ExternalTask recovery must not use generic tool policy.'
-        )
+        raise AssertionError('ExternalTask recovery must not use generic tool policy.')
 
     monkeypatch.setattr(
         messages_service,
@@ -81,7 +77,6 @@ def test_message_boundary_accepts_high_impact_review_policy() -> None:
     )
 
 
-
 def test_dependency_recovery_work_item_uses_owning_runtime_turn_id() -> None:
     from datetime import UTC, datetime
 
@@ -96,19 +91,17 @@ def test_dependency_recovery_work_item_uses_owning_runtime_turn_id() -> None:
 
     now = datetime(2026, 9, 28, 10, 0, tzinfo=UTC)
 
-    recovery_items = (
-        messages_service._validate_unavailable_context_recovery(
-            claim_id='clm_runtime_link',
-            claim_revision=5,
-            tool_results=[
-                {
-                    'tool': 'evidence.history',
-                    'status': 'unavailable',
-                    'blocking': True,
-                    'source_refs': [],
-                }
-            ],
-        )
+    recovery_items = messages_service._validate_unavailable_context_recovery(
+        claim_id='clm_runtime_link',
+        claim_revision=5,
+        tool_results=[
+            {
+                'tool': 'evidence.history',
+                'status': 'unavailable',
+                'blocking': True,
+                'source_refs': [],
+            }
+        ],
     )
 
     assert len(recovery_items) == 1
@@ -185,9 +178,7 @@ def test_dependency_recovery_work_item_uses_owning_runtime_turn_id() -> None:
 
     assert len(merged.work_items) == 1
     assert merged.work_items[0].turn_id == plan.turn_id
-    assert merged.result.work_item_refs == [
-        merged.work_items[0].work_item_id
-    ]
+    assert merged.result.work_item_refs == [merged.work_items[0].work_item_id]
 
     validate_runtime_turn_links(
         merged,

@@ -49,9 +49,7 @@ def _recovery_audit(
     created_at: datetime,
     permission: AuditPermission | None = None,
 ) -> AuditEventEnvelope:
-    identity = sha256(
-        f'{suffix}:{claim_id}'.encode()
-    ).hexdigest()[:24]
+    identity = sha256(f'{suffix}:{claim_id}'.encode()).hexdigest()[:24]
 
     return AuditEventEnvelope(
         event_id=f'aud_recovery_{identity}',
@@ -75,7 +73,6 @@ def _recovery_audit(
         claim_revision=claim_revision,
         created_at=created_at,
     )
-
 
 
 def process_due_follow_up(
@@ -156,7 +153,6 @@ def process_due_follow_up(
     return transition
 
 
-
 def process_expiring_follow_up(
     repository: PersistenceRepository,
     candidate: FollowUpRecord,
@@ -230,7 +226,6 @@ def process_expiring_follow_up(
         return None
 
     return transition
-
 
 
 def process_follow_up_contact_withdrawal(

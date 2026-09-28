@@ -67,7 +67,6 @@ def test_interrupted_external_dispatch_is_also_reconciliation_not_resend() -> No
     assert 'external.retry_same_operation' not in transition.required_actions
 
 
-
 def test_non_blocking_retrieval_unavailable_continues_with_limitation() -> None:
     from backend.services.recovery_decisions import (
         reduce_dependency_unavailable_recovery,
@@ -83,9 +82,7 @@ def test_non_blocking_retrieval_unavailable_continues_with_limitation() -> None:
         now=NOW,
     )
 
-    assert transition.rule_id == (
-        'runtime.retrieval_unavailable.non_blocking'
-    )
+    assert transition.rule_id == ('runtime.retrieval_unavailable.non_blocking')
     assert transition.decision_code == 'continue_with_limitation'
     assert transition.continuation == 'runtime.continue'
     assert 'work_item.ensure' not in transition.required_actions
@@ -133,7 +130,6 @@ def test_high_impact_review_requires_work_item_and_handoff_authority() -> None:
     assert transition.work_item_kind is None
     assert 'work_item.ensure' not in transition.required_actions
     assert 'handoff.ensure' in transition.required_actions
-
 
 
 def test_external_terminal_failure_materialises_staff_responsibility() -> None:
