@@ -350,7 +350,9 @@ export default function MessageComposer({
   return (
     <form className={`composer ${isWorkspace ? 'workspace-composer' : ''}`} onSubmit={onSubmit}>
       <label className="sr-only" htmlFor={isWorkspace ? 'workspace-incident-input' : 'incident-input'}>{inputLabel}</label>
-      <div className={isWorkspace ? 'composer-input-surface' : 'entry-composer-surface'}>
+      <div
+        className={`${isWorkspace ? 'composer-input-surface' : 'entry-composer-surface'} ${attachments.length > 0 ? 'has-attachments' : ''}`.trim()}
+      >
         {attachments.length > 0 && (
           <div className="composer-attachments" aria-label="Attached files">
             {attachments.map((attachment) => {

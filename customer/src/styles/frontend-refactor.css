@@ -153,10 +153,10 @@
   padding: var(--space-2) var(--space-3);
   border: 0;
   border-top: var(--border-component);
-  border-top-color: var(--color-warning);
+  border-top-color: var(--color-divider);
   border-radius: 0 0 var(--radius-xl) var(--radius-xl);
   color: var(--color-warning);
-  background: var(--color-warning-soft);
+  background: transparent;
   font-size: var(--font-size-caption);
   line-height: var(--line-height-body);
 }
@@ -448,6 +448,24 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 }
 .entry-page .composer { display: flex; flex: 1; flex-direction: column; }
 .entry-page .entry-composer-surface { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.entry-page .entry-composer-surface.has-attachments {
+  overflow: visible;
+  border: var(--border-component);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+}
+.entry-page .entry-composer-surface.has-attachments .composer-attachments {
+  padding-bottom: var(--space-2);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.entry-page .entry-composer-surface.has-attachments .report-text {
+  padding-inline: var(--space-3);
+}
+.entry-page .entry-composer-surface.has-attachments .input-toolbar {
+  padding: var(--space-2) var(--space-3);
+}
 .entry-page .report-text {
   min-height: calc(var(--space-16) + var(--space-4));
   flex: 1;
@@ -1784,12 +1802,17 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   border-radius: var(--radius-xl);
   background: var(--color-surface);
 }
+.composer-input-surface:focus-within { border-color: var(--color-accent); }
 .composer-input-surface .composer-attachments,
 .composer-input-surface .input-field,
 .composer-input-surface .input-toolbar {
   border: 0;
   border-radius: 0;
   background: transparent;
+}
+.composer-input-surface .input-field:focus {
+  outline: 0;
+  box-shadow: var(--shadow-none);
 }
 .composer-input-surface .composer-attachments { padding-bottom: 0; }
 .composer-input-surface .input-field { padding-bottom: var(--space-2); }

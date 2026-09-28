@@ -73,6 +73,7 @@ function ComposerHarness({
   previewFile = null,
   busy = false,
   disabled = false,
+  variant = 'workspace',
 }) {
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState([
@@ -95,7 +96,7 @@ function ComposerHarness({
       busy={busy}
       disabled={disabled}
       buttonLabel="Send"
-      variant="workspace"
+      variant={variant}
       attachments={attachments}
       onRemoveAttachment={(attachment) => {
         onRemoved(attachment)
@@ -177,6 +178,18 @@ function CapabilityHarness({ file, onSubmit = (event) => event.preventDefault() 
     />
   )
 }
+
+it('keeps the homepage composer in one framed surface while an attachment is selected', async () => {
+  const user = userEvent.setup()
+  const { container } = render(<ComposerHarness variant="default" />)
+
+  const surface = container.querySelector('.entry-composer-surface')
+  expect(surface).toHaveClass('has-attachments')
+
+  await user.click(screen.getByRole('button', { name: 'Remove kitchen-damage.jpg' }))
+
+  expect(surface).not.toHaveClass('has-attachments')
+})
 
 it('removes a selected draft attachment with Backspace without changing message text', async () => {
   const user = userEvent.setup()
