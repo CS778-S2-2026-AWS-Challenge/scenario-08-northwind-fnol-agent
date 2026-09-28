@@ -633,6 +633,21 @@ export function resumeClaimSession({
   })
 }
 
+export function pauseClaimSession({
+  claimId,
+  sessionId,
+  revision,
+  idempotencyKey = requestId('pause-session'),
+}) {
+  return apiRequest(`/api/v1/claims/${claimId}/sessions/${sessionId}/pause`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+  })
+}
+
 export function startClaimSession({ claimId, intent = 'new', idempotencyKey = requestId('session'), modelProfileId = null }) {
   return apiRequest(`/api/v1/claims/${claimId}/sessions`, {
     method: 'POST',

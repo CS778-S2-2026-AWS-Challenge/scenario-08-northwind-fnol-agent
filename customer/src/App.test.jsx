@@ -27,6 +27,7 @@ const api = vi.hoisted(() => ({
   listPaymentDestinations: vi.fn(),
   loginClaimant: vi.fn(),
   logoutClaimant: vi.fn(),
+  pauseClaimSession: vi.fn(),
   requestId: vi.fn((prefix) => `${prefix}-test`),
   requestHumanSupport: vi.fn(),
   promoteAnonymousClaim: vi.fn(),
@@ -266,6 +267,19 @@ describe('claimant intake projection', () => {
     api.createClaim.mockResolvedValue({
       claim: initialClaim,
       session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
+    })
+    api.pauseClaimSession.mockResolvedValue({
+      claim: {
+        ...initialClaim,
+        revision: 3,
+        active_session_id: null,
+        incomplete_context: {
+          interrupted_at: '2026-09-16T01:05:00Z',
+          resume_point: 'Describe what happened',
+          follow_up_status: 'blocked',
+        },
+      },
+      session: { session_id: 'ses_ui_vp', status: 'paused' },
     })
   })
 
@@ -1501,6 +1515,12 @@ describe('claimant intake projection', () => {
 
     await user.click(screen.getByRole('button', { name: 'New chat' }))
 
+    expect(api.pauseClaimSession).toHaveBeenCalledWith({
+      claimId: initialClaim.claim_id,
+      sessionId: 'ses_ui_vp',
+      revision: 2,
+      idempotencyKey: expect.stringMatching(/^pause-session-/),
+    })
     expect(api.createClaim).toHaveBeenCalledTimes(1)
     expect(api.startClaimSession).not.toHaveBeenCalled()
     expect(screen.getByRole('heading', { name: 'New conversation' })).toBeVisible()
@@ -1528,6 +1548,117 @@ describe('claimant intake projection', () => {
     }))
   })
 
+  it('keeps the active conversation visible when saving the interruption fails and retries with the same key', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.pauseClaimSession
+      .mockRejectedValueOnce(Object.assign(
+        new api.ApiRequestError('The interruption checkpoint could not be saved.'),
+        { code: 'DEPENDENCY_UNAVAILABLE', status: 503, retryable: true },
+      ))
+      .mockResolvedValueOnce({
+        claim: {
+          ...initialClaim,
+          revision: 3,
+          active_session_id: null,
+          incomplete_context: {
+            interrupted_at: '2026-09-16T01:05:00Z',
+            resume_point: 'Describe what happened',
+            follow_up_status: 'blocked',
+          },
+        },
+        session: { session_id: 'ses_ui_vp', status: 'paused' },
+      })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+
+    expect(screen.getByRole('heading', { name: initialClaim.claim_id })).toBeVisible()
+    expect(screen.getByText(agentMessage.content.text)).toBeVisible()
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Your current conversation is still open. Review the report and select New chat again.',
+    )
+
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+
+    expect(api.pauseClaimSession).toHaveBeenCalledTimes(2)
+    expect(api.pauseClaimSession.mock.calls[1][0].idempotencyKey).toBe(
+      api.pauseClaimSession.mock.calls[0][0].idempotencyKey,
+    )
+    expect(await screen.findByRole('heading', { name: 'New conversation' })).toBeVisible()
+  })
+
+  it('prevents duplicate interruption saves while New chat is pending', async () => {
+    const user = userEvent.setup()
+    let finishPause
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.pauseClaimSession.mockImplementation(() => new Promise((resolve) => {
+      finishPause = resolve
+    }))
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+
+    const newChat = screen.getByRole('button', { name: 'New chat' })
+    fireEvent.click(newChat)
+    fireEvent.click(newChat)
+
+    expect(api.pauseClaimSession).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled()
+
+    await act(async () => finishPause({
+      claim: {
+        ...initialClaim,
+        revision: 3,
+        active_session_id: null,
+        incomplete_context: {
+          interrupted_at: '2026-09-16T01:05:00Z',
+          resume_point: 'Describe what happened',
+          follow_up_status: 'blocked',
+        },
+      },
+      session: { session_id: 'ses_ui_vp', status: 'paused' },
+    }))
+
+    expect(await screen.findByRole('heading', { name: 'New conversation' })).toBeVisible()
+  })
+
+  it('uses authoritative Claim readback when the pause response is lost', async () => {
+    const user = userEvent.setup()
+    const pausedClaim = {
+      ...initialClaim,
+      revision: 3,
+      active_session_id: null,
+      incomplete_context: {
+        interrupted_at: '2026-09-16T01:05:00Z',
+        resume_point: 'Describe what happened',
+        follow_up_status: 'blocked',
+      },
+    }
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.pauseClaimSession.mockRejectedValueOnce(
+      new api.ApiRequestError('We could not reach the claim service.'),
+    )
+    api.getClaim.mockResolvedValue(pausedClaim)
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+
+    expect(api.getClaim).toHaveBeenCalledWith(initialClaim.claim_id)
+    expect(await screen.findByRole('heading', { name: 'New conversation' })).toBeVisible()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('uses the homepage rail to return to the existing empty conversation workspace', async () => {
     const user = userEvent.setup()
     render(<App />)
@@ -1538,6 +1669,7 @@ describe('claimant intake projection', () => {
 
     expect(input).toHaveValue('')
     expect(api.createClaim).not.toHaveBeenCalled()
+    expect(api.pauseClaimSession).not.toHaveBeenCalled()
     expect(globalThis.location.pathname).toBe('/')
   })
 

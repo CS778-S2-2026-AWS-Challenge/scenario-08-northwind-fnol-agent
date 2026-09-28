@@ -14,6 +14,7 @@ import {
   listEvidenceHistory,
   listClaims,
   listPaymentDestinations,
+  pauseClaimSession,
   requestEvidenceUpload,
   selectClaimPayoutContact,
   setClaimantAccessToken,
@@ -728,6 +729,32 @@ describe('Claim history contract', () => {
       expect.objectContaining({
         signal: controller.signal,
         headers: expect.objectContaining({ Authorization: 'Bearer claimant-session-token' }),
+      }),
+    )
+  })
+
+  it('pauses the active claimant session with revision and idempotency authority', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({
+      claim: { claim_id: 'clm_1', revision: 8 },
+      session: { session_id: 'ses_1', status: 'paused' },
+    }), { status: 200 }))
+
+    await pauseClaimSession({
+      claimId: 'clm_1',
+      sessionId: 'ses_1',
+      revision: 7,
+      idempotencyKey: 'pause-session-1',
+    })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/claims/clm_1/sessions/ses_1/pause',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer claimant-session-token',
+          'Idempotency-Key': 'pause-session-1',
+          'If-Match': '7',
+        }),
       }),
     )
   })
