@@ -213,7 +213,7 @@ def _rule(
     blocks_action: str | None = None,
     handoff_required: bool = False,
     staff_projection: str | None = None,
-    resume_triggers: frozenset[str] = frozenset(),
+    resume_triggers: frozenset[str] | None = None,
     audit_event_type: str = 'RECOVERY_DECISION',
 ) -> RecoveryRule:
     return RecoveryRule(
@@ -237,7 +237,7 @@ def _rule(
         handoff_required=handoff_required,
         claimant_projection=claimant_projection,
         staff_projection=staff_projection,
-        resume_triggers=resume_triggers,
+        resume_triggers=resume_triggers or frozenset(),
         resume_entrypoint=resume_entrypoint,
         permitted_events=permitted_events,
         audit_event_type=audit_event_type,
@@ -253,7 +253,9 @@ MODEL_TIMEOUT_RULE = _rule(
     continuation='runtime.fail_safe',
     retry_mode='claimant_initiated',
     responsibility='claimant',
-    claimant_projection='Your message is saved, but I could not respond just now. You can try again.',
+    claimant_projection=(
+        'Your message is saved, but I could not respond just now. You can try again.'
+    ),
     permitted_events=frozenset({'claimant_reply', 'explicit_retry_request'}),
     resume_triggers=frozenset({'claimant_reply', 'explicit_retry_request'}),
     resume_entrypoint='submit_message',
@@ -302,8 +304,12 @@ TOOL_UNAVAILABLE_RULE = _rule(
     retry_mode='none',
     responsibility='system',
     work_item_kind='system',
-    claimant_projection='A supporting service is unavailable. Your confirmed Claim information is saved.',
-    staff_projection='The requested tool is unavailable; inspect its source references and blocker.',
+    claimant_projection=(
+        'A supporting service is unavailable. Your confirmed Claim information is saved.'
+    ),
+    staff_projection=(
+        'The requested tool is unavailable; inspect its source references and blocker.'
+    ),
     permitted_events=frozenset({'tool_available', 'staff_action'}),
     resume_entrypoint='reload_authoritative_context',
 )
@@ -347,7 +353,9 @@ EXTERNAL_NOT_SUBMITTED_RULE = _rule(
     claimant_projection=(
         'The external request was not submitted. Northwind can retry the same request safely.'
     ),
-    staff_projection='Retry the same ExternalTask operation identity; do not allocate a second task.',
+    staff_projection=(
+        'Retry the same ExternalTask operation identity; do not allocate a second task.'
+    ),
     permitted_events=frozenset({'worker_retry', 'staff_action'}),
     resume_entrypoint='external_task_retry',
 )
