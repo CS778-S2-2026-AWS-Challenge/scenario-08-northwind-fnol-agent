@@ -967,6 +967,7 @@ def start_session(
                         'outcome': 'claimant_resumed',
                         'blocked_reason': None,
                         'resolution_code': FollowUpResolutionCode.CLAIMANT_RESUMED,
+                        'active_operation_id': None,
                         'due_at': None,
                         'updated_at': timestamp,
                     }

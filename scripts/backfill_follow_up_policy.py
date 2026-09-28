@@ -49,6 +49,7 @@ def backfill_follow_ups(
         'eligible': [],
         'applied': [],
         'rejected': [],
+        'fail_closed': [],
         'conflicts': [],
     }
     for follow_up in candidates:
@@ -69,6 +70,33 @@ def backfill_follow_ups(
             deadline_at = interrupted_at + timedelta(days=7)
         except (AttributeError, TypeError, ValidationError, ValueError) as error:
             report['rejected'].append({'follow_up_id': follow_up_id, 'reason': str(error)})
+            if not apply:
+                continue
+            fail_closed_update: dict[str, Any] = {
+                'policy_id': 'incomplete_claim_follow_up',
+                'policy_version': 1,
+                'status': 'blocked',
+                'blocked_reason': 'policy_binding_invalid',
+            }
+            result = collection.update_one(
+                {
+                    '_id': follow_up.get('_id'),
+                    'record_type': 'follow_up',
+                    '$or': [
+                        {'policy_id': {'$exists': False}},
+                        {'policy_version': {'$exists': False}},
+                        {'deadline_at': {'$exists': False}},
+                    ],
+                },
+                {
+                    '$set': fail_closed_update,
+                    '$unset': {'deadline_at': ''},
+                },
+            )
+            if result.matched_count != 1 or result.modified_count != 1:
+                report['conflicts'].append(follow_up_id)
+            else:
+                report['fail_closed'].append(follow_up_id)
             continue
 
         update: dict[str, Any] = {

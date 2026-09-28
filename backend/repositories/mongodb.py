@@ -10636,7 +10636,9 @@ class MongoDBRepository:
                 update={
                     'status': FollowUpStatus.RESOLVED,
                     'outcome': resolved_follow_up.outcome,
-                    'reason_code': resolved_follow_up.reason_code,
+                    'blocked_reason': None,
+                    'resolution_code': resolved_follow_up.resolution_code,
+                    'active_operation_id': None,
                     'due_at': None,
                     'updated_at': resolved_follow_up.updated_at,
                 }

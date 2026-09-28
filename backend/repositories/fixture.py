@@ -4072,6 +4072,7 @@ class FixtureRepository(PersistenceRepository):
                         'outcome': resolved_follow_up.outcome,
                         'blocked_reason': None,
                         'resolution_code': resolved_follow_up.resolution_code,
+                        'active_operation_id': None,
                         'due_at': None,
                         'updated_at': resolved_follow_up.updated_at,
                     }

@@ -1132,6 +1132,9 @@ class FollowUpRecord(ContractModel):
     source_refs: list[str] = Field(default_factory=list, max_length=20)
     contact_permission: FollowUpContactPermission = FollowUpContactPermission.NOT_AUTHORISED
     attempt_count: int = Field(default=0, ge=0)
+    active_operation_id: str | None = Field(
+        default=None, pattern=r'^(fop_[a-f0-9]{20}|fuo_[a-f0-9]{24})$'
+    )
     channel: PreferredChannel | None = None
     outcome: str | None = Field(default=None, max_length=1000)
     blocked_reason: FollowUpReasonCode | None = None
@@ -1297,6 +1300,8 @@ class FollowUpRecord(ContractModel):
                 )
 
         elif self.status is FollowUpStatus.RESOLVED:
+            if self.active_operation_id is not None:
+                raise ValueError('A resolved Follow-up cannot retain an active operation.')
             if self.resolution_code is None:
                 raise ValueError('A resolved Follow-up requires a resolution code.')
             if self.due_at is not None:
