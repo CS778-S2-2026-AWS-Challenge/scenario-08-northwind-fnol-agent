@@ -933,19 +933,28 @@ class MongoDBRepository:
                 session=mongo_session,
             )
 
-            self._collection.update_many(
-                {
-                    'record_type': 'idempotency',
-                    'payload.claim_id': operation.claim_id,
-                    'payload.retired': {'$ne': True},
-                },
-                {
-                    '$set': {
-                        'payload.retired': True,
-                    }
-                },
+            claim = self._get(
+                'claim',
+                operation.claim_id,
+                WorkingClaim,
                 session=mongo_session,
             )
+
+            if claim is not None:
+                self._collection.update_many(
+                    {
+                        'record_type': 'idempotency',
+                        'actor_id': claim.customer_id,
+                        'payload.claim_id': operation.claim_id,
+                        'payload.retired': {'$ne': True},
+                    },
+                    {
+                        '$set': {
+                            'payload.retired': True,
+                        }
+                    },
+                    session=mongo_session,
+                )
 
             return True
 
@@ -5610,7 +5619,10 @@ class MongoDBRepository:
         operation_id: str,
         customer_id: str,
     ) -> FollowUpOperation | None:
-        if not self._claim_owned(claim_id, customer_id):
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
             return None
 
         operation = self._get(
@@ -5631,7 +5643,10 @@ class MongoDBRepository:
         follow_up_id: str,
         customer_id: str,
     ) -> list[FollowUpOperation]:
-        if not self._claim_owned(claim_id, customer_id):
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
             return []
 
         follow_up = self._get(

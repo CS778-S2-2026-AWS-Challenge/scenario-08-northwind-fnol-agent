@@ -511,11 +511,17 @@ class FixtureRepository(PersistenceRepository):
                 operation.claim_id
             ] = operation.operation_id
 
+            claim = self._claims.get(
+                operation.claim_id
+            )
+
             for lookup, record in list(
                 self._idempotency.items()
             ):
                 if (
                     record.claim_id == operation.claim_id
+                    and claim is not None
+                    and record.actor_id == claim.customer_id
                     and not record.retired
                 ):
                     self._idempotency[lookup] = replace(

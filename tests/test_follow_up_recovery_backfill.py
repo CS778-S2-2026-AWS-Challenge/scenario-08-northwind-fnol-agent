@@ -29,7 +29,9 @@ NOW = datetime(2026, 9, 28, 6, 0, tzinfo=UTC)
 MIGRATION_TIME = NOW + timedelta(days=10)
 
 
-def _repository(kind: str):
+def _repository(
+    kind: str,
+) -> FixtureRepository | MongoDBRepository:
     if kind == 'fixture':
         return FixtureRepository()
 
@@ -42,11 +44,11 @@ def _repository(kind: str):
 
 
 def _seed_legacy(
-    repository,
+    repository: FixtureRepository | MongoDBRepository,
     suffix: str,
     *,
     contradictory_created_at: bool = False,
-):
+) -> FollowUpRecord:
     interrupted_at = NOW
 
     created_at = (
@@ -316,3 +318,266 @@ def test_contradictory_p17_1_record_fails_closed_without_guessing(
     assert len(events) == 1
     assert events[0].outcome.value == 'failed'
     assert 'failed closed' in events[0].reason.lower()
+
+
+
+@pytest.mark.parametrize(
+    'kind',
+    ['fixture', 'mongodb'],
+)
+def test_p17_1_backfill_replay_is_idempotent(
+    kind: str,
+) -> None:
+    repository = _repository(kind)
+    label = f'replay-{kind}'
+
+    legacy = _seed_legacy(
+        repository,
+        label,
+    )
+
+    recorded_at = datetime(
+        2026,
+        9,
+        28,
+        8,
+        0,
+        tzinfo=UTC,
+    )
+
+    first_counts = (
+        repository.backfill_incomplete_claim_recovery(
+            recorded_at=recorded_at,
+        )
+    )
+
+    assert first_counts == (1, 0)
+
+    customer_id = f'cus_{label}'
+
+    first = repository.get_follow_up(
+        legacy.claim_id,
+        legacy.follow_up_id,
+        customer_id,
+    )
+
+    assert first is not None
+    assert first.policy_id is not None
+    assert first.policy_version is not None
+    assert first.deadline_at is not None
+
+    subject = follow_up_backfill_subject(
+        legacy
+    )
+
+    first_events = (
+        repository.list_audit_events_internal(
+            subject
+        )
+    )
+
+    assert len(first_events) == 1
+
+    replay_counts = (
+        repository.backfill_incomplete_claim_recovery(
+            recorded_at=(
+                recorded_at
+                + timedelta(minutes=5)
+            ),
+        )
+    )
+
+    assert replay_counts == (0, 0)
+
+    replay = repository.get_follow_up(
+        legacy.claim_id,
+        legacy.follow_up_id,
+        customer_id,
+    )
+
+    assert replay == first
+
+    replay_events = (
+        repository.list_audit_events_internal(
+            subject
+        )
+    )
+
+    assert replay_events == first_events
+
+
+
+@pytest.mark.parametrize(
+    'kind',
+    ['fixture', 'mongodb'],
+)
+def test_p17_1_missing_interruption_source_fails_closed(
+    kind: str,
+) -> None:
+    repository = _repository(kind)
+    label = f'missing-source-{kind}'
+
+    legacy = _seed_legacy(
+        repository,
+        label,
+    )
+
+    original = deepcopy(legacy)
+
+    # There is deliberately no separate migration clock fallback.
+    # Removing the authoritative source Session also removes the only
+    # permitted source for SessionRecoveryContext.interrupted_at.
+    if isinstance(
+        repository,
+        FixtureRepository,
+    ):
+        repository._sessions.pop(
+            legacy.source_session_id,
+            None,
+        )
+    else:
+        assert isinstance(
+            repository,
+            MongoDBRepository,
+        )
+
+        repository._collection.delete_many(
+            {
+                'record_type': 'session',
+                'session_id': (
+                    legacy.source_session_id
+                ),
+            }
+        )
+
+    counts = (
+        repository.backfill_incomplete_claim_recovery(
+            recorded_at=datetime(
+                2026,
+                9,
+                28,
+                8,
+                30,
+                tzinfo=UTC,
+            ),
+        )
+    )
+
+    assert counts == (0, 1)
+
+    migrated = repository.get_follow_up(
+        legacy.claim_id,
+        legacy.follow_up_id,
+        f'cus_{label}',
+    )
+
+    assert migrated is not None
+
+    assert (
+        migrated.status
+        is FollowUpStatus.BLOCKED
+    )
+
+    assert migrated.reason_code in {
+        FollowUpReasonCode.SOURCE_STATE_INCONSISTENT,
+        FollowUpReasonCode.POLICY_BINDING_INVALID,
+    }
+
+    # No guessed recovery clock / automatic work.
+    assert migrated.deadline_at is None
+    assert migrated.due_at is not None
+    assert migrated.due_at.isoformat() == "2026-09-28T08:00:00+00:00"
+
+    # The legacy schedule is historical evidence only.  A fail-closed
+    # BLOCKED obligation must never become executable due work.
+    due_page, _ = repository.list_due_follow_ups(
+        migrated.due_at + timedelta(seconds=1),
+        limit=10,
+        cursor=None,
+    )
+
+    assert migrated.follow_up_id not in {
+        item.follow_up_id
+        for item in due_page
+    }
+
+    # Historical provenance must survive fail-closed migration.
+    assert (
+        migrated.created_at
+        == original.created_at
+    )
+    assert (
+        migrated.source_refs
+        == original.source_refs
+    )
+
+    events = repository.list_audit_events_internal(
+        follow_up_backfill_subject(
+            legacy
+        )
+    )
+
+    assert len(events) == 1
+
+
+
+@pytest.mark.parametrize(
+    'kind',
+    ['fixture', 'mongodb'],
+)
+def test_migrated_open_recovery_remains_deadline_discoverable(
+    kind: str,
+) -> None:
+    repository = _repository(kind)
+    label = f'deadline-discovery-{kind}'
+
+    legacy = _seed_legacy(
+        repository,
+        label,
+    )
+
+    counts = (
+        repository.backfill_incomplete_claim_recovery(
+            recorded_at=datetime(
+                2026,
+                9,
+                28,
+                9,
+                0,
+                tzinfo=UTC,
+            ),
+        )
+    )
+
+    assert counts == (1, 0)
+
+    migrated = repository.get_follow_up(
+        legacy.claim_id,
+        legacy.follow_up_id,
+        f'cus_{label}',
+    )
+
+    assert migrated is not None
+    assert migrated.deadline_at is not None
+
+    page, cursor = (
+        repository.list_expiring_follow_ups(
+            migrated.deadline_at,
+            limit=10,
+            cursor=None,
+        )
+    )
+
+    assert cursor is None
+
+    assert migrated.follow_up_id in {
+        item.follow_up_id
+        for item in page
+    }
+
+    # Deadline discovery includes all open obligations, including BLOCKED,
+    # and does not depend on an executable due_at.
+    assert migrated.status in {
+        FollowUpStatus.PENDING,
+        FollowUpStatus.BLOCKED,
+    }

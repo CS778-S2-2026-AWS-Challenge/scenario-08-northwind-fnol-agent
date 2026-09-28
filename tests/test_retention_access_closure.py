@@ -1,7 +1,10 @@
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import mongomock
 import pytest
+from fastapi.testclient import TestClient
+from httpx import Response
 
 from backend.domain.models import (
     ActorType,
@@ -413,7 +416,7 @@ def test_delayed_claimant_idempotency_write_cannot_recreate_retry_authority(
 
 
 def test_closed_claim_create_replay_cannot_create_replacement_claim(
-    client,
+    client: TestClient,
     auth_headers: dict[str, str],
     repository: FixtureRepository,
 ) -> None:
@@ -602,7 +605,7 @@ def test_closed_message_replay_surfaces_have_fixture_mongo_parity(
 
 
 def test_closed_claimant_routes_use_concealed_absence(
-    client,
+    client: TestClient,
     auth_headers: dict[str, str],
     repository: FixtureRepository,
 ) -> None:
@@ -633,7 +636,7 @@ def test_closed_claimant_routes_use_concealed_absence(
         _operation(claim)
     )
 
-    requests = [
+    requests: list[tuple[str, Callable[[], Response]]] = [
         (
             'GET claim',
             lambda: client.get(
@@ -708,3 +711,85 @@ def test_closed_claimant_routes_use_concealed_absence(
             label,
             response.text,
         )
+
+
+
+@pytest.mark.parametrize(
+    'kind',
+    ['fixture', 'mongodb'],
+)
+def test_low_level_retention_reservation_retires_claimant_retry_only(
+    kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _repository(
+        kind,
+        monkeypatch,
+    )
+
+    claim = _claim(
+        claim_id=f'clm_low_level_scope_{kind}'
+    )
+
+    repository.create_claim(
+        claim,
+        _session(claim),
+    )
+
+    claimant_retry = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route=f'/api/v1/claims/{claim.claim_id}/retry',
+        key=f'claimant-retry-{kind}',
+        request_fingerprint='claimant-retry',
+        claim_id=claim.claim_id,
+        session_id=claim.active_session_id or '',
+        response_payload={
+            'sensitive': 'claimant-result',
+        },
+    )
+
+    internal_retry = IdempotencyRecord(
+        actor_id='system-retention-reconciler',
+        route='/internal/retention/reconcile',
+        key=f'internal-retry-{kind}',
+        request_fingerprint='internal-retry',
+        claim_id=claim.claim_id,
+        session_id=claim.active_session_id or '',
+        response_payload={
+            'authority': 'internal-result',
+        },
+    )
+
+    repository.save_idempotency(
+        claimant_retry
+    )
+
+    repository.save_idempotency(
+        internal_retry
+    )
+
+    reserved = (
+        repository.reserve_retention_operation(
+            _operation(claim)
+        )
+    )
+
+    assert reserved is True
+
+    with pytest.raises(
+        ResourceAccessClosed
+    ):
+        repository.find_idempotency(
+            claimant_retry.actor_id,
+            claimant_retry.route,
+            claimant_retry.key,
+        )
+
+    assert (
+        repository.find_idempotency(
+            internal_retry.actor_id,
+            internal_retry.route,
+            internal_retry.key,
+        )
+        == internal_retry
+    )

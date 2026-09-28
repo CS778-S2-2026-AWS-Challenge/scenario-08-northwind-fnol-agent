@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import mongomock
 import pytest
@@ -42,6 +42,7 @@ from backend.services.follow_up_recovery import (
     process_expiring_follow_up,
     process_follow_up_contact_withdrawal,
 )
+from backend.services.retention import reserve_retention_from_terminal
 
 
 def _repository(kind: str) -> PersistenceRepository:
@@ -722,3 +723,107 @@ def test_expiry_appends_terminal_recovery_audit(
     assert len(expiry_events) == 1
     assert expiry_events[0].event_type is AuditEventType.ACTION_COMPLETED
     assert expiry_events[0].claim_revision == result.claim.revision
+
+
+
+@pytest.mark.parametrize(
+    'kind',
+    ['fixture', 'mongo'],
+)
+def test_retention_reservation_closes_follow_up_operation_reads(
+    kind: str,
+) -> None:
+    repository = _repository(kind)
+
+    (
+        claim,
+        _,
+        follow_up,
+        interrupted_at,
+    ) = _checkpoint(repository)
+
+    due = process_due_follow_up(
+        repository,
+        follow_up,
+        interrupted_at,
+    )
+
+    assert due is not None
+
+    operations = (
+        repository.list_follow_up_operations(
+            claim.claim_id,
+            follow_up.follow_up_id,
+            claim.customer_id,
+        )
+    )
+
+    assert len(operations) == 1
+
+    operation_id = (
+        operations[0].operation_id
+    )
+
+    current = repository.get_follow_up(
+        claim.claim_id,
+        follow_up.follow_up_id,
+        claim.customer_id,
+    )
+
+    assert current is not None
+    assert current.deadline_at is not None
+
+    deadline = current.deadline_at
+
+    expired = process_expiring_follow_up(
+        repository,
+        current,
+        deadline,
+    )
+
+    assert expired is not None
+
+    terminal_claim = (
+        repository.get_claim_internal(
+            claim.claim_id
+        )
+    )
+
+    assert terminal_claim is not None
+    assert (
+        terminal_claim.terminal_disposition
+        is not None
+    )
+
+    reserve_retention_from_terminal(
+        repository,
+        claim.claim_id,
+        now=deadline + timedelta(seconds=1),
+    )
+
+    # Claim still physically exists here; claimant visibility must nevertheless
+    # close immediately from durable RetentionOperation authority.
+    assert (
+        repository.get_claim_internal(
+            claim.claim_id
+        )
+        is not None
+    )
+
+    assert (
+        repository.get_follow_up_operation(
+            claim.claim_id,
+            operation_id,
+            claim.customer_id,
+        )
+        is None
+    )
+
+    assert (
+        repository.list_follow_up_operations(
+            claim.claim_id,
+            follow_up.follow_up_id,
+            claim.customer_id,
+        )
+        == []
+    )
