@@ -32,10 +32,12 @@ from backend.domain.models import (
     CustomerUpdateRecord,
     EvidenceClaimLink,
     EvidenceRecord,
+    FollowUpOperation,
     FollowUpRecord,
     HandoffRecord,
     MessageRecord,
     MotorOtherDriverRecord,
+    RetentionOperation,
     RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
@@ -448,6 +450,43 @@ class ClaimRepository(Protocol):
         claim_id: str,
         customer_id: str,
     ) -> list[FollowUpRecord]:
+        raise NotImplementedError
+
+    def list_due_follow_ups(
+        self,
+        due_before: datetime,
+        *,
+        limit: int,
+        cursor: tuple[datetime, str] | None = None,
+    ) -> list[FollowUpRecord]:
+        """Return bounded executable Follow-ups ordered by due time and ID."""
+        raise NotImplementedError
+
+    def list_expiring_follow_ups(
+        self,
+        deadline_before: datetime,
+        *,
+        limit: int,
+        cursor: tuple[datetime, str] | None = None,
+    ) -> list[FollowUpRecord]:
+        """Return bounded open Follow-ups ordered by deadline and ID."""
+        raise NotImplementedError
+
+    def get_follow_up_operation(self, operation_id: str) -> FollowUpOperation | None:
+        raise NotImplementedError
+
+    def list_follow_up_operations(self, follow_up_id: str) -> list[FollowUpOperation]:
+        raise NotImplementedError
+
+    def save_follow_up_operation(self, operation: FollowUpOperation) -> None:
+        """Persist one immutable logical operation with duplicate identity protection."""
+        raise NotImplementedError
+
+    def get_retention_operation(self, operation_id: str) -> RetentionOperation | None:
+        raise NotImplementedError
+
+    def save_retention_operation(self, operation: RetentionOperation) -> None:
+        """Persist one restart-safe cross-store retention operation."""
         raise NotImplementedError
 
     def save_incomplete_checkpoint(

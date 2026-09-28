@@ -1336,9 +1336,38 @@ atomic session-activation mutation marks the open recovery Follow-up `resolved`,
 longer exposes stale follow-up work after claimant recovery. The paused Session and recovery
 context remain historical continuity evidence and never supersede the latest Working Claim.
 
-P17.1 does not implement notification delivery, retry cadence, attempt processing, abandonment,
-escalation, purge, anonymisation, or retention transitions; those remain owned by later P17
-slices.
+The original P17.1 checkpoint remains deliberately free of notification delivery, provider
+delivery, escalation, purge, anonymisation, and retention policy selection. P17.3 adds only the
+durable execution records and bounded access patterns described below; Runtime/Agent policy and
+retention decisions remain outside this persistence contract.
+
+## P17.3 Durable Follow-up execution contract
+
+The recovery Follow-up binds to policy `incomplete_claim_follow_up` version `1`. New records
+persist an absolute `deadline_at`, derived once from the original
+`SessionRecoveryContext.interrupted_at` (seven days in the prototype policy). The deadline is
+never recomputed from deployment time or a later read. Open records remain `pending` or
+`blocked`; `resolved` is terminal. Typed blocked and resolution reasons are persisted so a
+projection never has to infer lifecycle state from free text. Legacy records without the new
+fields remain readable and are not silently rewritten; an inconsistent binding fails closed.
+
+Each committed in-app execution has one durable `FollowUpOperation`, identified by operation ID
+and by the `(follow_up_id, sequence)` pair. Its status is `reserved`, `committed`, or `cancelled`.
+Fixture and MongoDB enforce the same identity, policy binding, and immutable replay rules.
+Bounded due and expiry scans are ordered by `(due_at|deadline_at, follow_up_id)` and use the
+corresponding adapter indexes and cursor contract. The current transaction-local in-app path
+does not introduce a generic Inbox or Outbox, and ExternalTask keeps its existing operation and
+reconciliation authority.
+
+The claimant and Workbench projections expose the persisted Follow-up deadline; Workbench also
+exposes the authoritative attempt count. Retention cleanup remains a separate cross-store
+operation and is not inferred from this Follow-up record. Its durable schema must be added only
+after the approved data-classification and retention-hold inputs are available.
+
+Deployments with legacy P17.1 records use `scripts/backfill_follow_up_policy.py`. The command is
+read-only by default, derives the deadline only from the source Session's persisted interruption
+time, conditionally updates records with missing policy/deadline fields under `--apply`, and
+reports records with missing or contradictory source state instead of guessing.
 
 ## P17.2 Bounded Terminal Disposition and Reopen Slice
 
