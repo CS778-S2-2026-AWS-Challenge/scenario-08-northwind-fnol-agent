@@ -23,8 +23,8 @@
         "legacy_model_dependency_failure"
       ],
       "permitted_events": [
-        "explicit_retry_request",
-        "claimant_reply"
+        "claimant_reply",
+        "explicit_retry_request"
       ],
       "policy_id": "claimant_turn.model_dependency_failure",
       "preservation": "inbound_message_and_checkpoint",
@@ -77,8 +77,8 @@
       ],
       "permitted_events": [
         "authentication",
-        "evidence_unavailable",
         "configuration",
+        "evidence_unavailable",
         "unsupported_capability"
       ],
       "policy_id": "claimant_turn.model_dependency_terminal",
@@ -127,8 +127,8 @@
         "refused_response"
       ],
       "permitted_events": [
-        "explicit_retry_request",
-        "claimant_reply"
+        "claimant_reply",
+        "explicit_retry_request"
       ],
       "policy_id": "recovery.model_malformed_response",
       "preservation": "inbound_message_and_checkpoint",
@@ -177,8 +177,8 @@
         "provider"
       ],
       "permitted_events": [
-        "explicit_retry_request",
-        "claimant_reply"
+        "claimant_reply",
+        "explicit_retry_request"
       ],
       "policy_id": "claimant_turn.model_provider_retryable",
       "preservation": "inbound_message_and_checkpoint",
@@ -273,8 +273,8 @@
         "rate_limit"
       ],
       "permitted_events": [
-        "explicit_retry_request",
-        "claimant_reply"
+        "claimant_reply",
+        "explicit_retry_request"
       ],
       "policy_id": "claimant_turn.model_rate_limited",
       "preservation": "inbound_message_and_checkpoint",
@@ -323,8 +323,8 @@
         "timeout"
       ],
       "permitted_events": [
-        "explicit_retry_request",
-        "claimant_reply"
+        "claimant_reply",
+        "explicit_retry_request"
       ],
       "policy_id": "recovery.model_timeout",
       "preservation": "inbound_message_and_checkpoint",
@@ -373,8 +373,8 @@
         "retryable_failure"
       ],
       "permitted_events": [
-        "staff_retry",
-        "claimant_retry"
+        "claimant_retry",
+        "staff_retry"
       ],
       "policy_id": "recovery.external_not_submitted_retryable",
       "preservation": "external_operation_and_delivery_evidence",
@@ -425,10 +425,10 @@
       ],
       "permitted_events": [
         "provider_reconciled",
-        "staff_reconciled",
-        "staff_action",
+        "provider_result",
         "scheduled_reconciliation",
-        "provider_result"
+        "staff_action",
+        "staff_reconciled"
       ],
       "policy_id": "recovery.external_submitted_unknown",
       "preservation": "external_operation_and_delivery_evidence",
@@ -629,11 +629,11 @@
         "follow_up_due"
       ],
       "permitted_events": [
-        "recovery_deadline",
-        "follow_up_due",
-        "contact_withdrawn",
         "claimant_resume",
-        "follow_up_committed_no_response"
+        "contact_withdrawn",
+        "follow_up_committed_no_response",
+        "follow_up_due",
+        "recovery_deadline"
       ],
       "policy_id": "incomplete_claim_follow_up",
       "preservation": "follow_up_obligation_and_operation_history",
@@ -912,8 +912,8 @@
         "high_impact_review_required"
       ],
       "permitted_events": [
-        "staff_rejected",
-        "staff_approved"
+        "staff_approved",
+        "staff_rejected"
       ],
       "policy_id": "recovery.high_impact_review_required",
       "preservation": "review_request_and_evidence",
@@ -961,8 +961,8 @@
         "unavailable"
       ],
       "permitted_events": [
-        "system_recovered",
-        "staff_retry"
+        "staff_retry",
+        "system_recovered"
       ],
       "policy_id": "recovery.retrieval_unavailable",
       "preservation": "authoritative_records_only",
@@ -1102,8 +1102,8 @@
         "unavailable"
       ],
       "permitted_events": [
-        "system_recovered",
-        "staff_retry"
+        "staff_retry",
+        "system_recovered"
       ],
       "policy_id": "recovery.tool_unavailable",
       "preservation": "authoritative_records_only",
@@ -1199,8 +1199,8 @@
         "legacy_model_dependency_failure"
       ],
       "permitted_events": [
-        "explicit_retry_request",
-        "claimant_reply"
+        "claimant_reply",
+        "explicit_retry_request"
       ],
       "policy_id": "claimant_turn.model_dependency_failure",
       "preservation": "inbound_message_and_checkpoint",
@@ -1253,8 +1253,8 @@
       ],
       "permitted_events": [
         "authentication",
-        "evidence_unavailable",
         "configuration",
+        "evidence_unavailable",
         "unsupported_capability"
       ],
       "policy_id": "claimant_turn.model_dependency_terminal",
@@ -1303,8 +1303,8 @@
         "refused_response"
       ],
       "permitted_events": [
-        "explicit_retry_request",
-        "claimant_reply"
+        "claimant_reply",
+        "explicit_retry_request"
       ],
       "policy_id": "recovery.model_malformed_response",
       "preservation": "inbound_message_and_checkpoint",
@@ -1353,8 +1353,8 @@
         "provider"
       ],
       "permitted_events": [
-        "explicit_retry_request",
-        "claimant_reply"
+        "claimant_reply",
+        "explicit_retry_request"
       ],
       "policy_id": "claimant_turn.model_provider_retryable",
       "preservation": "inbound_message_and_checkpoint",
@@ -1449,8 +1449,8 @@
         "rate_limit"
       ],
       "permitted_events": [
-        "explicit_retry_request",
-        "claimant_reply"
+        "claimant_reply",
+        "explicit_retry_request"
       ],
       "policy_id": "claimant_turn.model_rate_limited",
       "preservation": "inbound_message_and_checkpoint",
@@ -1499,8 +1499,8 @@
         "timeout"
       ],
       "permitted_events": [
-        "explicit_retry_request",
-        "claimant_reply"
+        "claimant_reply",
+        "explicit_retry_request"
       ],
       "policy_id": "recovery.model_timeout",
       "preservation": "inbound_message_and_checkpoint",
@@ -1549,8 +1549,8 @@
         "retryable_failure"
       ],
       "permitted_events": [
-        "staff_retry",
-        "claimant_retry"
+        "claimant_retry",
+        "staff_retry"
       ],
       "policy_id": "recovery.external_not_submitted_retryable",
       "preservation": "external_operation_and_delivery_evidence",
@@ -1601,10 +1601,10 @@
       ],
       "permitted_events": [
         "provider_reconciled",
-        "staff_reconciled",
-        "staff_action",
+        "provider_result",
         "scheduled_reconciliation",
-        "provider_result"
+        "staff_action",
+        "staff_reconciled"
       ],
       "policy_id": "recovery.external_submitted_unknown",
       "preservation": "external_operation_and_delivery_evidence",
@@ -1805,11 +1805,11 @@
         "follow_up_due"
       ],
       "permitted_events": [
-        "recovery_deadline",
-        "follow_up_due",
-        "contact_withdrawn",
         "claimant_resume",
-        "follow_up_committed_no_response"
+        "contact_withdrawn",
+        "follow_up_committed_no_response",
+        "follow_up_due",
+        "recovery_deadline"
       ],
       "policy_id": "incomplete_claim_follow_up",
       "preservation": "follow_up_obligation_and_operation_history",
@@ -2088,8 +2088,8 @@
         "high_impact_review_required"
       ],
       "permitted_events": [
-        "staff_rejected",
-        "staff_approved"
+        "staff_approved",
+        "staff_rejected"
       ],
       "policy_id": "recovery.high_impact_review_required",
       "preservation": "review_request_and_evidence",
@@ -2137,8 +2137,8 @@
         "unavailable"
       ],
       "permitted_events": [
-        "system_recovered",
-        "staff_retry"
+        "staff_retry",
+        "system_recovered"
       ],
       "policy_id": "recovery.retrieval_unavailable",
       "preservation": "authoritative_records_only",
@@ -2278,8 +2278,8 @@
         "unavailable"
       ],
       "permitted_events": [
-        "system_recovered",
-        "staff_retry"
+        "staff_retry",
+        "system_recovered"
       ],
       "policy_id": "recovery.tool_unavailable",
       "preservation": "authoritative_records_only",

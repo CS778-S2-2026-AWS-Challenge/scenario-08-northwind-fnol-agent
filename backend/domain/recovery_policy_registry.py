@@ -1217,6 +1217,7 @@ def recovery_policy_manifest() -> dict[str, object]:
             'delivery_states',
             'authoritative_records',
             'resume_triggers',
+            'permitted_events',
         ):
             value = payload.get(key)
             if isinstance(value, list):

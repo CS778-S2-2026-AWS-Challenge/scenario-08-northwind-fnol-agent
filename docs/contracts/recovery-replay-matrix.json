@@ -36,9 +36,9 @@
       "transition": {
         "audit_event_type": "AGENT_TURN_RECOVERY",
         "authoritative_records": [
+          "audit",
           "claim",
-          "message",
-          "audit"
+          "message"
         ],
         "blocks_action": null,
         "claim_effect": "revision_unchanged_no_unapproved_write",
@@ -111,9 +111,9 @@
       "transition": {
         "audit_event_type": "AGENT_TURN_RECOVERY",
         "authoritative_records": [
+          "audit",
           "claim",
-          "message",
-          "audit"
+          "message"
         ],
         "blocks_action": null,
         "claim_effect": "revision_unchanged_no_unapproved_write",
@@ -186,9 +186,9 @@
       "transition": {
         "audit_event_type": "AGENT_TURN_RECOVERY",
         "authoritative_records": [
+          "audit",
           "claim",
-          "message",
-          "audit"
+          "message"
         ],
         "blocks_action": null,
         "claim_effect": "revision_unchanged_no_unapproved_write",
@@ -261,9 +261,9 @@
       "transition": {
         "audit_event_type": "AGENT_TURN_RECOVERY",
         "authoritative_records": [
+          "audit",
           "claim",
-          "message",
-          "audit"
+          "message"
         ],
         "blocks_action": null,
         "claim_effect": "revision_unchanged_no_unapproved_write",
@@ -336,9 +336,9 @@
       "transition": {
         "audit_event_type": "AGENT_TURN_RECOVERY",
         "authoritative_records": [
+          "audit",
           "claim",
-          "message",
-          "audit"
+          "message"
         ],
         "blocks_action": null,
         "claim_effect": "revision_unchanged_no_unapproved_write",
@@ -411,9 +411,9 @@
       "transition": {
         "audit_event_type": "AGENT_TURN_RECOVERY",
         "authoritative_records": [
+          "audit",
           "claim",
-          "message",
-          "audit"
+          "message"
         ],
         "blocks_action": "runtime.continue",
         "claim_effect": "revision_unchanged_no_unapproved_write",
@@ -483,9 +483,9 @@
       "transition": {
         "audit_event_type": "AGENT_TURN_RECOVERY",
         "authoritative_records": [
+          "audit",
           "claim",
-          "message",
-          "audit"
+          "message"
         ],
         "blocks_action": "runtime.continue",
         "claim_effect": "revision_unchanged_no_unapproved_write",
@@ -625,9 +625,9 @@
       "transition": {
         "audit_event_type": "action.failed",
         "authoritative_records": [
+          "audit",
           "claim",
-          "work_item",
-          "audit"
+          "work_item"
         ],
         "blocks_action": "runtime.continue",
         "claim_effect": "existing_authority_only",
@@ -650,8 +650,8 @@
         "responsibility": "system",
         "resume_entrypoint": "reload_authoritative_state",
         "resume_triggers": [
-          "system_recovered",
-          "staff_retry"
+          "staff_retry",
+          "system_recovered"
         ],
         "retry_mode": "staff_authorised",
         "rule_id": "runtime.tool_unavailable.blocking",
@@ -770,9 +770,9 @@
       "transition": {
         "audit_event_type": "action.failed",
         "authoritative_records": [
+          "audit",
           "claim",
-          "work_item",
-          "audit"
+          "work_item"
         ],
         "blocks_action": "runtime.continue",
         "claim_effect": "existing_authority_only",
@@ -795,8 +795,8 @@
         "responsibility": "system",
         "resume_entrypoint": "reload_authoritative_state",
         "resume_triggers": [
-          "system_recovered",
-          "staff_retry"
+          "staff_retry",
+          "system_recovered"
         ],
         "retry_mode": "staff_authorised",
         "rule_id": "runtime.retrieval_unavailable.blocking",
@@ -845,8 +845,8 @@
       "transition": {
         "audit_event_type": "action.failed",
         "authoritative_records": [
-          "claim",
           "audit",
+          "claim",
           "session"
         ],
         "blocks_action": null,
@@ -918,9 +918,9 @@
       "transition": {
         "audit_event_type": "action.failed",
         "authoritative_records": [
+          "audit",
           "claim",
-          "external_task",
-          "audit"
+          "external_task"
         ],
         "blocks_action": null,
         "claim_effect": "existing_authority_only",
@@ -942,8 +942,8 @@
         "responsibility": "claimant",
         "resume_entrypoint": "external_retry",
         "resume_triggers": [
-          "staff_retry",
-          "claimant_retry"
+          "claimant_retry",
+          "staff_retry"
         ],
         "retry_mode": "same_operation",
         "rule_id": "external.not_submitted_retryable",
@@ -992,10 +992,10 @@
       "transition": {
         "audit_event_type": "action.unknown_outcome",
         "authoritative_records": [
+          "audit",
           "claim",
           "work_item",
-          "external_task",
-          "audit"
+          "external_task"
         ],
         "blocks_action": "external.retry",
         "claim_effect": "existing_authority_only",
@@ -1020,8 +1020,8 @@
         "resume_triggers": [
           "provider_reconciled",
           "staff_reconciled",
-          "staff_action",
           "scheduled_reconciliation",
+          "staff_action",
           "provider_result"
         ],
         "retry_mode": "reconcile_before_retry",
@@ -1071,10 +1071,10 @@
       "transition": {
         "audit_event_type": "action.failed",
         "authoritative_records": [
+          "audit",
           "claim",
           "work_item",
-          "external_task",
-          "audit"
+          "external_task"
         ],
         "blocks_action": "external.retry",
         "claim_effect": "existing_authority_only",
@@ -1145,9 +1145,9 @@
       "transition": {
         "audit_event_type": "action.prepared",
         "authoritative_records": [
-          "claim",
           "handoff",
-          "audit"
+          "audit",
+          "claim"
         ],
         "blocks_action": "high_impact_action",
         "claim_effect": "existing_authority_only",
@@ -1169,8 +1169,8 @@
         "responsibility": "staff",
         "resume_entrypoint": "staff_review",
         "resume_triggers": [
-          "staff_rejected",
-          "staff_approved"
+          "staff_approved",
+          "staff_rejected"
         ],
         "retry_mode": "staff_authorised",
         "rule_id": "runtime.high_impact_review_required",
@@ -1219,9 +1219,9 @@
       "transition": {
         "audit_event_type": "action.completed",
         "authoritative_records": [
+          "audit",
           "claim",
           "follow_up",
-          "audit",
           "session"
         ],
         "blocks_action": null,
@@ -1294,9 +1294,9 @@
       "transition": {
         "audit_event_type": "permission.rejected",
         "authoritative_records": [
+          "audit",
           "claim",
           "follow_up",
-          "audit",
           "session"
         ],
         "blocks_action": null,
@@ -1366,9 +1366,9 @@
       "transition": {
         "audit_event_type": "action.completed",
         "authoritative_records": [
+          "audit",
           "claim",
           "follow_up",
-          "audit",
           "session"
         ],
         "blocks_action": null,
@@ -1441,9 +1441,9 @@
       "transition": {
         "audit_event_type": "action.completed",
         "authoritative_records": [
+          "audit",
           "claim",
           "follow_up",
-          "audit",
           "session"
         ],
         "blocks_action": null,
@@ -1515,10 +1515,10 @@
       "transition": {
         "audit_event_type": "RETENTION_ELIGIBLE",
         "authoritative_records": [
-          "claim",
-          "retention_operation",
           "audit",
-          "session"
+          "session",
+          "claim",
+          "retention_operation"
         ],
         "blocks_action": null,
         "claim_effect": "existing_authority_only",
@@ -1586,10 +1586,10 @@
       "transition": {
         "audit_event_type": "RETENTION_HELD",
         "authoritative_records": [
-          "claim",
-          "retention_operation",
           "audit",
-          "session"
+          "session",
+          "claim",
+          "retention_operation"
         ],
         "blocks_action": null,
         "claim_effect": "existing_authority_only",
@@ -1657,10 +1657,10 @@
       "transition": {
         "audit_event_type": "RETENTION_RECONCILIATION_REQUIRED",
         "authoritative_records": [
-          "claim",
-          "retention_operation",
           "audit",
-          "session"
+          "session",
+          "claim",
+          "retention_operation"
         ],
         "blocks_action": null,
         "claim_effect": "existing_authority_only",
@@ -1728,10 +1728,10 @@
       "transition": {
         "audit_event_type": "RETENTION_ACCESS_DENIED",
         "authoritative_records": [
-          "claim",
-          "retention_operation",
           "audit",
-          "session"
+          "session",
+          "claim",
+          "retention_operation"
         ],
         "blocks_action": null,
         "claim_effect": "existing_authority_only",

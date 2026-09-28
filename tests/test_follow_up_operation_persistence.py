@@ -408,6 +408,8 @@ def backend_contract__follow_up() -> FollowUpRecord:
         follow_up_id='fup_operation_test',
         claim_id='clm_operation_test',
         source_session_id='ses_operation_test',
+        policy_id='incomplete_claim_follow_up',
+        policy_version=1,
         responsible_party=ResponsibleParty.SYSTEM,
         contact_permission=FollowUpContactPermission.AUTHORISED,
         channel=PreferredChannel.IN_APP,
@@ -723,3 +725,20 @@ def test_backend_contract_fixture_query_and_operation_rejection_paths() -> None:
     retention = backend_contract_retention('missing', datetime.now(UTC))
     with pytest.raises(KeyError):
         repository.save_retention_operation(retention, expected_revision=1)
+
+
+def test_missing_policy_binding_is_readable_blocked_and_never_synthesized() -> None:
+    bound = backend_contract__follow_up()
+    payload = bound.model_dump(mode='json')
+    payload.pop('policy_id')
+    payload.pop('policy_version')
+    unbound = FollowUpRecord.model_validate(payload)
+    assert unbound.policy_id is None and unbound.policy_version is None
+    assert unbound.status is FollowUpStatus.BLOCKED
+    assert unbound.blocked_reason is FollowUpReasonCode.POLICY_BINDING_INVALID
+    assert unbound.due_at == bound.due_at
+    assert unbound.created_at == bound.created_at
+    repository = FixtureRepository()
+    backend_contract_seed_claim(repository, unbound)
+    repository._follow_ups[unbound.follow_up_id] = unbound
+    assert repository.list_due_follow_ups(unbound.created_at, limit=10) == ([], None)

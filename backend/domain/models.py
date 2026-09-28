@@ -1152,9 +1152,14 @@ class FollowUpRecord(ContractModel):
         data = dict(value)
         if data.get('policy_version') == 'v1':
             data['policy_version'] = 1
-        if data.get('deadline_at') is not None:
-            data.setdefault('policy_id', 'incomplete_claim_follow_up')
-            data.setdefault('policy_version', 1)
+        if (
+            data.get('deadline_at') is not None
+            and (data.get('policy_id') is None or data.get('policy_version') is None)
+            and data.get('status', FollowUpStatus.PENDING) != FollowUpStatus.RESOLVED
+        ):
+            data['status'] = FollowUpStatus.BLOCKED
+            data['blocked_reason'] = FollowUpReasonCode.POLICY_BINDING_INVALID
+            data['active_operation_id'] = None
         reason = data.pop('reason_code', None)
         if reason is not None:
             field = (
@@ -1226,6 +1231,7 @@ class FollowUpRecord(ContractModel):
         if (
             self.deadline_at is not None
             and binding_count < len(binding_values)
+            and self.status is not FollowUpStatus.RESOLVED
             and not (
                 self.status is FollowUpStatus.BLOCKED
                 and self.reason_code is FollowUpReasonCode.POLICY_BINDING_INVALID
