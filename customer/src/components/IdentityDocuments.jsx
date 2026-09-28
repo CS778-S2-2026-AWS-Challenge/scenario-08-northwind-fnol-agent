@@ -108,7 +108,6 @@ export default function IdentityDocuments({
 
   return (
     <div className="profile-identity-documents">
-      <p className="profile-helper-copy">Saved numbers are shown only in masked form. Saving a number does not verify your identity.</p>
       <FeatureNotice notice={notice} />
       <ResourceError
         message={resource.error}

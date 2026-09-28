@@ -26,7 +26,7 @@ const newerClaim = {
   updated_at: '2026-09-14T03:30:00Z',
 }
 
-// The most recently updated report is still in progress: it must stay out of Claim history.
+// The most recently updated report is still in progress: it is promoted separately from past Claims.
 const reportInProgress = {
   claim_id: 'clm_motor_in_progress',
   incident_type: 'motor',
@@ -56,7 +56,8 @@ it('lists only created Claims, latest update first, with their reference, status
     'Open Motor claim, Claim NWF-2026-001042',
     'Open Home claim, Claim reference clm_home_older',
   ])
-  expect(screen.getByText('2 saved Claims')).toBeInTheDocument()
+  expect(screen.getByText('2 claims')).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Your report is underway' })).toBeInTheDocument()
   expect(screen.queryByText(/clm_motor_in_progress/)).not.toBeInTheDocument()
 
   const newest = within(rows[0])
@@ -87,7 +88,7 @@ it('offers a route to start a Claim when the claimant has none', async () => {
   const onStartClaim = vi.fn()
   render(<ClaimHistory claims={[]} onSelect={vi.fn()} onStartClaim={onStartClaim} />)
 
-  expect(screen.getByRole('heading', { name: 'No Claims yet' })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'No past claims yet' })).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Start a claim' }))
 
   expect(onStartClaim).toHaveBeenCalledOnce()
@@ -105,10 +106,11 @@ it('tells a claimant with reports in progress where they are instead of calling 
     />,
   )
 
-  expect(screen.getByRole('heading', { name: 'No created Claims yet' })).toBeInTheDocument()
-  expect(screen.getByText(/You have 2 reports in progress\./)).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Your report is underway' })).toBeInTheDocument()
+  expect(screen.getByText('0 claims')).toBeInTheDocument()
+  expect(screen.getByText(/Finish the remaining details in your conversation\./)).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Start a claim' })).not.toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: 'Continue your report' }))
+  await user.click(screen.getByRole('button', { name: 'Continue report' }))
 
   expect(onContinueReport).toHaveBeenCalledWith('clm_motor_in_progress')
 })

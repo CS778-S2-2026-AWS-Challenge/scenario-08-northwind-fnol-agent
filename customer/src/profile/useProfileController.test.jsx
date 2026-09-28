@@ -6,13 +6,18 @@ const api = vi.hoisted(() => ({
   ApiRequestError: class ApiRequestError extends Error {},
   createAccountAsset: vi.fn(),
   createAccountIdentityDocument: vi.fn(),
+  createAccountPolicy: vi.fn(),
+  createPaymentDestination: vi.fn(),
   getAuthenticatedAccount: vi.fn(),
   listAccountAssets: vi.fn(),
   listAccountIdentityDocuments: vi.fn(),
   listAccountPaymentDestinations: vi.fn(),
+  listAccountPolicies: vi.fn(),
   requestId: vi.fn(),
   updateAccountAsset: vi.fn(),
   updateAccountIdentityDocument: vi.fn(),
+  updateAccountPaymentDestination: vi.fn(),
+  updateAccountPolicy: vi.fn(),
   updateAccountPreferences: vi.fn(),
   updateAccountProfile: vi.fn(),
 }))
@@ -42,9 +47,18 @@ const asset = {
 }
 
 const payment = {
-  payment_destination_id: 'pay_11111111111111111111',
+  payment_destination_id: 'pyd_11111111111111111111',
   account_type: 'everyday',
+  bank_name: 'Northwind Bank',
+  account_holder_name: 'Iris Zhang',
+  is_common: true,
   masked_account_number: '•••• 4321',
+  revision: 1,
+}
+
+const policy = {
+  policy_id: 'pol_11111111111111111111',
+  policy_number: 'MOTOR-1234',
   revision: 1,
 }
 
@@ -56,6 +70,13 @@ const identity = {
 }
 
 const resourceCases = [
+  {
+    label: 'Policies',
+    resource: 'policies',
+    listMethod: 'listAccountPolicies',
+    reloadMethod: 'reloadPolicies',
+    records: [policy],
+  },
   {
     label: 'Assets',
     resource: 'assets',
@@ -99,6 +120,7 @@ describe('useProfileController mutation recovery', () => {
     let requestNumber = 0
     api.requestId.mockImplementation((prefix) => `${prefix}-key-${requestNumber += 1}`)
     api.listAccountAssets.mockResolvedValue(emptyPage())
+    api.listAccountPolicies.mockResolvedValue(emptyPage())
     api.listAccountPaymentDestinations.mockResolvedValue(emptyPage())
     api.listAccountIdentityDocuments.mockResolvedValue(emptyPage())
   })
@@ -417,5 +439,77 @@ describe('useProfileController mutation recovery', () => {
       revision: 2,
       documentNumber: 'DIFFERENT-1234',
     })
+  })
+
+  it('replays an ambiguous protected payment create with the same idempotency key', async () => {
+    api.createPaymentDestination
+      .mockRejectedValueOnce({ code: 'NETWORK_ERROR' })
+      .mockResolvedValueOnce(payment)
+    const { result } = renderController()
+
+    await waitFor(() => expect(api.listAccountPaymentDestinations).toHaveBeenCalledOnce())
+    const attemptId = result.current.controller.beginCreate('payment')
+    let saved
+    await act(async () => {
+      saved = await result.current.controller.createPayment({
+        bankName: 'Northwind Bank',
+        accountHolderName: 'Iris Zhang',
+        accountType: 'everyday',
+        accountNumber: '12-3456-0789012-00',
+        attemptId,
+      })
+    })
+
+    expect(saved).toEqual(payment)
+    expect(api.createPaymentDestination).toHaveBeenCalledTimes(2)
+    expect(api.createPaymentDestination.mock.calls[1][0])
+      .toEqual(api.createPaymentDestination.mock.calls[0][0])
+    expect(result.current.controller.resources.payments.items).toEqual([payment])
+  })
+
+  it('replays an ambiguous policy create with the same idempotency key', async () => {
+    api.createAccountPolicy
+      .mockRejectedValueOnce({ code: 'NETWORK_ERROR' })
+      .mockResolvedValueOnce(policy)
+    const { result } = renderController()
+
+    await waitFor(() => expect(api.listAccountPolicies).toHaveBeenCalledOnce())
+    const attemptId = result.current.controller.beginCreate('policy')
+    let saved
+    await act(async () => {
+      saved = await result.current.controller.createPolicy({
+        policyNumber: ' MOTOR-1234 ',
+        attemptId,
+      })
+    })
+
+    expect(saved).toEqual(policy)
+    expect(api.createAccountPolicy).toHaveBeenCalledTimes(2)
+    expect(api.createAccountPolicy.mock.calls[1][0])
+      .toEqual(api.createAccountPolicy.mock.calls[0][0])
+    expect(api.createAccountPolicy).toHaveBeenCalledWith({
+      policyNumber: 'MOTOR-1234',
+      idempotencyKey: expect.any(String),
+    })
+    expect(result.current.controller.resources.policies.items).toEqual([policy])
+  })
+
+  it('updates a policy number with the selected record revision', async () => {
+    const updatedPolicy = { ...policy, policy_number: 'HOME-5678', revision: 2 }
+    api.listAccountPolicies.mockResolvedValueOnce(emptyPage([policy]))
+    api.updateAccountPolicy.mockResolvedValueOnce(updatedPolicy)
+    const { result } = renderController()
+
+    await waitFor(() => expect(result.current.controller.resources.policies.items).toEqual([policy]))
+    await act(async () => {
+      await result.current.controller.savePolicy(policy.policy_id, policy.revision, ' HOME-5678 ')
+    })
+
+    expect(api.updateAccountPolicy).toHaveBeenCalledWith({
+      policyId: policy.policy_id,
+      revision: 1,
+      policyNumber: 'HOME-5678',
+    })
+    expect(result.current.controller.resources.policies.items).toEqual([updatedPolicy])
   })
 })
