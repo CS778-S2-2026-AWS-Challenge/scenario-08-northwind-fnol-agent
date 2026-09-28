@@ -3939,7 +3939,11 @@ def test_model_signal_injection_is_rejected_before_workbench_persistence() -> No
     )
     detail = get_workbench_claim_detail(
         repository,
-        Principal(subject='stf_demo', actor_type='staff'),
+        Principal(
+            subject='stf_demo',
+            actor_type='staff',
+            scopes=frozenset({'workbench:read'}),
+        ),
         claim_id,
     )
     assert detail.work_summary.risk_signals == []

@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-from backend.core.auth import Principal
+from backend.core.auth import Principal, require_staff_capability
 from backend.core.errors import ApiError
 from backend.domain.staff_identity import (
     StaffPresencePage,
@@ -22,6 +22,7 @@ def update_presence(
     principal: Principal,
     payload: StaffPresenceUpdate,
 ) -> StaffPresenceRecord:
+    require_staff_capability(principal, 'workbench:write')
     now = _now()
     current = repository.get_staff_presence(principal.subject)
     record = StaffPresenceRecord(
@@ -64,6 +65,7 @@ def mark_staff_online(repository: PersistenceRepository, staff_id: str) -> Staff
 
 
 def read_presence(repository: PersistenceRepository, principal: Principal) -> StaffPresenceRecord:
+    require_staff_capability(principal, 'workbench:read')
     record = repository.get_staff_presence(principal.subject)
     if record is None:
         now = _now()
@@ -85,12 +87,7 @@ def list_online_staff(
     limit: int = 50,
     cursor: str | None = None,
 ) -> StaffPresencePage:
-    if principal.actor_type != 'staff':
-        raise ApiError(
-            status_code=403,
-            code='ACCESS_DENIED',
-            message='Staff Workbench access is required.',
-        )
+    require_staff_capability(principal, 'workbench:read')
     now = _now()
     records = [record for record in repository.list_staff_presence() if record.is_claimable(now)]
     items, page = paginate(records, limit, cursor)

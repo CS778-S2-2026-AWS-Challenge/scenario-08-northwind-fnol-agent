@@ -1104,7 +1104,11 @@ def test_staff_agent_dispatches_each_registered_action_with_durable_source(
 
     response = staff_agent_service.execute_staff_agent_draft(
         repository,
-        Principal(subject='stf_demo', actor_type='staff'),
+        Principal(
+            subject='stf_demo',
+            actor_type='staff',
+            scopes=frozenset({'workbench:read', 'workbench:write'}),
+        ),
         'sas_test',
         'sam_test',
         'sdr_test',
