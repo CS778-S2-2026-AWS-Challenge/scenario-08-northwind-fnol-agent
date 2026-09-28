@@ -729,8 +729,8 @@ class MongoDBRepository:
                         'claim_id': operation.claim_id,
                         'status': {
                             '$in': [
-                                'scheduled',
-                                'committed',
+                                FollowUpOperationStatus.RESERVED.value,
+                                FollowUpOperationStatus.COMMITTED.value,
                             ]
                         },
                     },
@@ -841,13 +841,9 @@ class MongoDBRepository:
                 )
                 candidate = RetentionOperation.model_validate(payload)
 
-            self._put(
-                'retention_operation',
-                candidate.operation_id,
-                candidate,
-                claim_id=candidate.claim_id,
-                session=mongo_session,
-            )
+            winner = self._insert_retention_operation(candidate, mongo_session)
+            if winner is not None:
+                return winner
 
             self._collection.update_many(
                 {
@@ -869,6 +865,39 @@ class MongoDBRepository:
             return candidate
 
         return self._atomic(reserve)
+
+    def _insert_retention_operation(
+        self,
+        operation: RetentionOperation,
+        mongo_session: Any,
+    ) -> RetentionOperation | None:
+        """Insert-only creation; never replaces an existing operation.
+
+        Returns ``None`` when this call created the operation, or the stored
+        operation when an identical concurrent reservation already won.
+        Any other stored operation for the same identity or Claim conflicts.
+        """
+        document = {
+            **operation.model_dump(mode='json'),
+            '_id': self._record_id('retention_operation', operation.operation_id),
+            'record_type': 'retention_operation',
+            'customer_id': None,
+            'claim_id': operation.claim_id,
+        }
+        try:
+            self._collection.insert_one(document, session=mongo_session)
+        except DuplicateKeyError as error:
+            stored = self._model_from_document(
+                self._collection.find_one(
+                    {'record_type': 'retention_operation', 'claim_id': operation.claim_id},
+                    session=mongo_session,
+                ),
+                RetentionOperation,
+            )
+            if stored == operation:
+                return stored
+            raise IdempotencyConflict(operation.operation_id) from error
+        return None
 
     def reserve_retention_operation(
         self,
@@ -897,13 +926,8 @@ class MongoDBRepository:
 
                 raise IdempotencyConflict(operation.operation_id)
 
-            self._put(
-                'retention_operation',
-                operation.operation_id,
-                operation,
-                claim_id=operation.claim_id,
-                session=mongo_session,
-            )
+            if self._insert_retention_operation(operation, mongo_session) is not None:
+                return False
 
             claim = self._get(
                 'claim',
@@ -1022,7 +1046,7 @@ class MongoDBRepository:
                         'claim_id': operation.claim_id,
                         'status': {
                             '$in': [
-                                'scheduled',
+                                FollowUpOperationStatus.RESERVED.value,
                                 'committed',
                             ]
                         },
@@ -1664,7 +1688,7 @@ class MongoDBRepository:
                         'claim_id': operation.claim_id,
                         'status': {
                             '$in': [
-                                'scheduled',
+                                FollowUpOperationStatus.RESERVED.value,
                                 'committed',
                             ]
                         },

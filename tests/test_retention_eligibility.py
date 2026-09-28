@@ -59,6 +59,7 @@ from backend.domain.retention import (
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
 from backend.repositories.protocols import (
+    IdempotencyConflict,
     IdempotencyRecord,
     PersistenceRepository,
 )
@@ -1340,3 +1341,89 @@ def test_retention_projection_e2e_is_role_safe_after_cleanup(
     )
 
     assert replay_projection == final_projection
+
+
+@pytest.mark.parametrize('kind', ['fixture', 'mongodb'])
+def test_reserved_recovery_operation_blocks_retention_reservation(
+    kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backend.domain.models import FollowUpOperation
+
+    repository = _repository(kind, monkeypatch)
+    base = _claim(f'clm_reserved_recovery_{kind}')
+    repository.create_claim(base, _session(base))
+    # A due attempt reserved but not yet settled is still open recovery work.
+    reserved = FollowUpOperation(
+        operation_id=f'fop_reserved_{kind}',
+        follow_up_id=f'fup_{base.claim_id}',
+        claim_id=base.claim_id,
+        sequence=1,
+        policy_id='incomplete_claim_follow_up',
+        policy_version=1,
+        based_on_claim_revision=base.revision,
+        scheduled_at=NOW,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    if isinstance(repository, FixtureRepository):
+        repository._follow_up_operations[reserved.operation_id] = reserved
+    else:
+        assert isinstance(repository, MongoDBRepository)
+        repository._collection.insert_one(
+            {
+                **reserved.model_dump(mode='json'),
+                '_id': repository._record_id('follow_up_operation', reserved.operation_id),
+                'record_type': 'follow_up_operation',
+                'customer_id': base.customer_id,
+            }
+        )
+    claim = _terminalise(repository, base)
+
+    with pytest.raises(RetentionEligibilityRejected) as caught:
+        reserve_retention_from_terminal(repository, claim.claim_id, now=NOW + timedelta(minutes=2))
+
+    assert caught.value.reason is RetentionEligibilityReason.RECOVERY_OPERATION_OPEN
+    assert repository.get_retention_operation_for_claim(claim.claim_id) is None
+
+
+def test_mongo_concurrent_same_identity_retention_reservation_never_overwrites(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _repository('mongodb', monkeypatch)
+    assert isinstance(repository, MongoDBRepository)
+    base = _claim('clm_retention_race')
+    repository.create_claim(base, _session(base))
+    claim = _terminalise(repository, base)
+    ours = _operation(claim)
+    # A competing reserver wins the insert between our read and our write,
+    # with the same identity but different immutable evidence.
+    theirs = ours.model_copy(update={'access_closed_at': ours.access_closed_at + timedelta(1)})
+    theirs = RetentionOperation.model_validate(
+        {**theirs.model_dump(), 'updated_at': theirs.access_closed_at}
+    )
+    original_find_one = repository._collection.find_one
+    raced = {'done': False}
+
+    def competing_insert(*args, **kwargs):  # type: ignore[no-untyped-def]
+        result = original_find_one(*args, **kwargs)
+        query = args[0] if args else {}
+        if query.get('record_type') == 'retention_operation' and not raced['done']:
+            raced['done'] = True
+            repository._collection.insert_one(
+                {
+                    **theirs.model_dump(mode='json'),
+                    '_id': repository._record_id('retention_operation', theirs.operation_id),
+                    'record_type': 'retention_operation',
+                    'customer_id': None,
+                    'claim_id': theirs.claim_id,
+                }
+            )
+        return result
+
+    monkeypatch.setattr(repository._collection, 'find_one', competing_insert)
+    with pytest.raises(IdempotencyConflict):
+        repository.reserve_retention_operation(ours)
+    monkeypatch.setattr(repository._collection, 'find_one', original_find_one)
+
+    assert repository.get_retention_operation_for_claim(claim.claim_id) == theirs

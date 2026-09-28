@@ -323,7 +323,7 @@ class FixtureRepository(PersistenceRepository):
                 item.claim_id == operation.claim_id
                 and item.status.value
                 in {
-                    'scheduled',
+                    FollowUpOperationStatus.RESERVED.value,
                     'committed',
                 }
                 for item in self._follow_up_operations.values()
@@ -526,7 +526,7 @@ class FixtureRepository(PersistenceRepository):
                 item.claim_id == operation.claim_id
                 and item.status.value
                 in {
-                    'scheduled',
+                    FollowUpOperationStatus.RESERVED.value,
                     'committed',
                 }
                 for item in self._follow_up_operations.values()
@@ -982,7 +982,7 @@ class FixtureRepository(PersistenceRepository):
                 item.claim_id == operation.claim_id
                 and item.status.value
                 in {
-                    'scheduled',
+                    FollowUpOperationStatus.RESERVED.value,
                     'committed',
                 }
                 for item in self._follow_up_operations.values()
