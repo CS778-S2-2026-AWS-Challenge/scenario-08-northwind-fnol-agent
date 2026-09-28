@@ -19,8 +19,8 @@ Console and Admin API use this inventory together with `docs/control-plane-gover
   protected secret references, safe capability metadata, and bounded connection results.
 - Fixture, configured, degraded, unavailable, and pending-confirmation capabilities stay
   distinguishable. Fixture success is not evidence of a production integration.
-- The first frontend should be an independently served Admin Console rather than a route
-  added to `employee/index.html`. Its exact directory and build setup are owned by #250.
+- The Admin Console is independently served rather than embedded in the Staff Workbench. Its
+  directory and build setup are owned by #250.
 
 ## Roles and Provisional Permissions
 

@@ -51,7 +51,6 @@ authorisation.
 | `customer/` | React and Vite claimant experience |
 | `workbench/` | React and Vite Claims Workbench with independent staff authentication |
 | `admin/` | React and Vite Control Plane console backed by the authenticated Admin API |
-| `employee/` | Deprecated redirect shell and legacy migration inventory; supported Workbench is `workbench/` |
 | `frontend/shared/` | Shared semantic design tokens consumed by claimant and staff clients |
 | `prototype/` | Historical static interaction demonstrators |
 | `tests/` | Backend unit, middleware, API, and fixture tests |
@@ -297,9 +296,8 @@ npm run dev --prefix workbench
 ```
 
 Configure the initial normal-mode staff account as documented in
-[workbench/README.md](workbench/README.md). The legacy files under `employee/` remain only until
-their still-valid capabilities have been migrated and verified; do not add new product behaviour
-to that client.
+[workbench/README.md](workbench/README.md). The React/Vite Workbench is the only supported
+employee-facing client.
 
 Start the Control Plane console separately when administrator access is required:
 
