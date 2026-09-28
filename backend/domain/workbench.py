@@ -26,6 +26,7 @@ from backend.domain.models import (
     ContractModel,
     CustomerNextStep,
     CustomerUpdateRecord,
+    DriverProjection,
     EvidenceFileStatus,
     EvidenceRecord,
     EvidenceStatus,
@@ -33,9 +34,11 @@ from backend.domain.models import (
     MessageRecord,
     MotorOtherDriverProjection,
     PageInfo,
+    PolicyholderProjection,
     StaffActionRecord,
     StateChange,
     StructuredFormField,
+    WitnessProjection,
     WorkbenchHandoff,
     WorkbenchSession,
     WorkflowState,
@@ -506,6 +509,9 @@ class WorkbenchClaimDetail(WorkbenchClaimListItem):
     active_session_id: str | None = None
     claim_state: ClaimState
     contents_items: list[ContentsItem] = Field(default_factory=list)
+    policyholder: PolicyholderProjection | None = None
+    driver: DriverProjection | None = None
+    witnesses: list[WitnessProjection] = Field(default_factory=list)
     contents_item_evidence_associations: list[ContentsItemEvidenceAssociationProjection] = Field(
         default_factory=list
     )

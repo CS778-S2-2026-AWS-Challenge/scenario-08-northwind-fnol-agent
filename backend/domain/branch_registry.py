@@ -57,15 +57,15 @@ CONDITIONAL_TRANSITION_STATUS = {
     'human_support': 'exited',
 }
 
-# Only fields already supported by the generic form contract are executable here.
-# The complete VP catalogue remains design input until each candidate or separate
-# record receives its typed domain, API, persistence, and visibility contracts.
 COMMON_FIELDS = frozenset(
     {
         'policy.policy_number',
         'claimant.client_number',
         'claimant.role',
         'claimant.contact_preference',
+        'claimant.relationship_to_policyholder',
+        'policyholder.identity_ref',
+        'policyholder.name',
         'claim.product_family',
         'incident.type',
         'incident.occurred_at',
@@ -76,6 +76,7 @@ COMMON_FIELDS = frozenset(
         'loss.description',
         'parties.other_parties',
         'authorities.emergency_services_notified',
+        'police.status',
     }
 )
 FAMILY_FIELDS = {
@@ -85,6 +86,24 @@ FAMILY_FIELDS = {
             'vehicle.registration',
             'vehicle.damage_description',
             'vehicle.drivable',
+            'vehicle.use',
+            'vehicle.towing_required',
+            'vehicle.towing_location',
+            'driver.identity_ref',
+            'driver.name',
+            'driver.phone',
+            'driver.email',
+            'driver.relationship_to_policyholder',
+            'driver.owner_permission',
+            'driver.licence_number',
+            'driver.licence_status',
+            'other_party.insurer_name',
+            'other_party.policy_number',
+            'other_party.claim_reference',
+            'witness.present',
+            'witness.name',
+            'witness.phone',
+            'witness.email',
         }
     ),
     'home': frozenset(
@@ -93,6 +112,8 @@ FAMILY_FIELDS = {
             'property.affected_areas',
             'property.ongoing_risk',
             'property.habitable',
+            'property.occupancy_relationship',
+            'property.occupancy',
         }
     ),
     'contents': frozenset(),
@@ -168,6 +189,12 @@ FIELD_VALUE_CONTRACTS: dict[str, tuple[str, frozenset[str]]] = {
         'enum',
         frozenset({'in_app', 'email', 'phone', 'sms'}),
     ),
+    'claimant.relationship_to_policyholder': (
+        'enum',
+        frozenset({'policyholder', 'spouse', 'partner', 'family', 'employee', 'other', 'unknown'}),
+    ),
+    'policyholder.identity_ref': ('text', frozenset()),
+    'policyholder.name': ('text', frozenset()),
     'claim.product_family': ('enum', frozenset(FAMILY_NAMES)),
     'incident.type': (
         'enum',
@@ -185,6 +212,52 @@ FIELD_VALUE_CONTRACTS: dict[str, tuple[str, frozenset[str]]] = {
     'vehicle.registration': ('text', frozenset()),
     'vehicle.damage_description': ('text', frozenset()),
     'vehicle.drivable': ('boolean', frozenset()),
+    'vehicle.use': (
+        'enum',
+        frozenset({'private', 'commuting', 'business', 'rideshare_delivery', 'other', 'unknown'}),
+    ),
+    'vehicle.towing_required': (
+        'enum',
+        frozenset({'required', 'not_required', 'already_towed', 'unknown'}),
+    ),
+    'vehicle.towing_location': ('location', frozenset()),
+    'driver.identity_ref': ('text', frozenset()),
+    'driver.name': ('text', frozenset()),
+    'driver.phone': ('text', frozenset()),
+    'driver.email': ('text', frozenset()),
+    'driver.relationship_to_policyholder': (
+        'enum',
+        frozenset({'policyholder', 'spouse', 'partner', 'family', 'employee', 'other', 'unknown'}),
+    ),
+    'driver.owner_permission': (
+        'enum',
+        frozenset({'confirmed', 'not_confirmed', 'unknown', 'not_applicable'}),
+    ),
+    'driver.licence_number': ('text', frozenset()),
+    'driver.licence_status': (
+        'enum',
+        frozenset({'valid', 'expired', 'suspended', 'learner', 'restricted', 'unknown'}),
+    ),
+    'other_party.insurer_name': ('text', frozenset()),
+    'other_party.policy_number': ('text', frozenset()),
+    'other_party.claim_reference': ('text', frozenset()),
+    'witness.present': ('enum', frozenset({'yes', 'no', 'unknown'})),
+    'witness.name': ('text', frozenset()),
+    'witness.phone': ('text', frozenset()),
+    'witness.email': ('text', frozenset()),
+    'police.status': (
+        'enum',
+        frozenset(
+            {
+                'not_reported',
+                'reported',
+                'reference_pending',
+                'reference_available',
+                'not_required',
+                'unknown',
+            }
+        ),
+    ),
     'property.address': ('location', frozenset()),
     'property.affected_areas': ('text_list', frozenset()),
     'property.ongoing_risk': (
@@ -192,6 +265,14 @@ FIELD_VALUE_CONTRACTS: dict[str, tuple[str, frozenset[str]]] = {
         frozenset({'none', 'active_leak', 'fire', 'collapse', 'exposure', 'other'}),
     ),
     'property.habitable': ('boolean', frozenset()),
+    'property.occupancy_relationship': (
+        'enum',
+        frozenset({'owner', 'tenant', 'landlord', 'authorised_representative', 'other'}),
+    ),
+    'property.occupancy': (
+        'enum',
+        frozenset({'occupied', 'vacant', 'partially_occupied', 'unknown'}),
+    ),
     'injury.persons_affected': ('text_list', frozenset()),
     'injury.severity_reported': (
         'enum',

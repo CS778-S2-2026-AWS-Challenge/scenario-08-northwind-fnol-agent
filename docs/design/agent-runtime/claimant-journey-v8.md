@@ -114,7 +114,7 @@ Text and lookup turns cap output at 4500 tokens; media turns at 5500. These are
 operating caps, not a guarantee covering every schema-legal output. Provider truncation
 is an incomplete response and enters the saved-message recovery path. Full-envelope
 v8 profiles reject estimated input above 6000 tokens and log, without rejecting, above
-the 3000-token soft threshold. The explicit v7 rollback uses 4549: measured maximum
+the 3000-token soft threshold. The explicit v7 rollback uses 5500: measured maximum
 3955 plus 15%, rounded up. Narrow Evidence-history and deep-review budgets are separate.
 JSON estimates use unescaped UTF-8 text, not ASCII escape sequences for non-Latin text.
 Provider failure telemetry records status and error type

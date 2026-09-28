@@ -765,6 +765,9 @@ The canonical backend record has these fields. API projections omit fields the c
 | `claim_state` | `ClaimState` | Yes | Canonical internal multi-dimensional state |
 | `form` | field map | Yes | Registered field code to `StructuredFormField`; initially empty |
 | `contents_items` | object array | Yes | Optional source-aware `ContentsItem` records; empty unless the Claim is a contents path |
+| `policyholder` | object/null | No | Claim-scoped policyholder record for a non-policyholder reporter; never duplicates account Profile data |
+| `driver` | object/null | No | Claim-scoped actual-driver record for Motor; licence number is protected and excluded from model/RAG and claimant projections |
+| `witnesses` | object array | Yes | Repeatable Claim-scoped witness records; empty when no witness is known |
 | `motor_other_driver` | object/null | Yes | Optional bounded other-driver name/contact/vehicle projection on Claim detail only; never included in Claim lists or model/RAG context |
 | `evidence_summary` | `EvidenceSummary` | Yes | Authoritative aggregate over the full persisted evidence set; claimant projections recompute it from claimant-visible evidence only |
 | `route` | string | No | Configured processing route, not a decision outcome |
@@ -979,6 +982,9 @@ Initial common field codes:
 | `claimant.client_number` | string | Staff-only Northwind client reference supplied by identity |
 | `claimant.role` | enum | Policyholder, authorised representative, or other reporter |
 | `claimant.contact_preference` | enum | `in_app`, `email`, `phone`, or `sms` when supported |
+| `claimant.relationship_to_policyholder` | enum | Reporter relationship to the policyholder |
+| `policyholder.identity_ref` | string | Claim-scoped policyholder identity reference when the reporter is not the policyholder |
+| `policyholder.name` | string | Policyholder fallback name when no durable identity reference is available |
 | `claim.product_family` | enum | `motor`, `home`, or `contents`; source-aware family field projected through top-level `incident_type` for compatibility |
 | `incident.type` | enum | `collision`, `fire`, `water`, `theft`, `weather`, or `other`; never the product family |
 | `incident.occurred_at` | timestamp | When the incident occurred |
@@ -993,10 +999,31 @@ Initial common field codes:
 | `vehicle.registration` | string | Motor-specific vehicle reference |
 | `vehicle.damage_description` | string | Motor-specific damage account |
 | `vehicle.drivable` | boolean | Motor-specific immediate status |
+| `vehicle.use` | enum | `private`, `commuting`, `business`, `rideshare_delivery`, `other`, or `unknown` |
+| `vehicle.towing_required` | enum | `required`, `not_required`, `already_towed`, or `unknown` |
+| `vehicle.towing_location` | object/string | Current or intended towing location |
+| `driver.identity_ref` | string | Actual-driver identity reference when available |
+| `driver.name` | string | Actual-driver name when no identity reference is available |
+| `driver.phone` | string | Actual-driver phone |
+| `driver.email` | string | Actual-driver email |
+| `driver.relationship_to_policyholder` | enum | Actual-driver relationship to the policyholder |
+| `driver.owner_permission` | enum | Permission fact: `confirmed`, `not_confirmed`, `unknown`, or `not_applicable` |
+| `driver.licence_number` | protected string | Protected licence value; never sent to model/RAG |
+| `driver.licence_status` | enum | `valid`, `expired`, `suspended`, `learner`, `restricted`, or `unknown` |
+| `other_party.insurer_name` | string | Other-party insurer on the existing Motor other-driver record |
+| `other_party.policy_number` | protected string | Other-party policy number; protected and masked in projections |
+| `other_party.claim_reference` | string | Other-party insurer claim reference |
+| `witness.present` | enum | `yes`, `no`, or `unknown` |
+| `witness.name` | string | Repeatable typed witness record name |
+| `witness.phone` | string | Repeatable typed witness record phone |
+| `witness.email` | string | Repeatable typed witness record email |
+| `police.status` | enum | `not_reported`, `reported`, `reference_pending`, `reference_available`, `not_required`, or `unknown` |
 | `property.address` | object | Home or contents risk location |
 | `property.affected_areas` | array | Home-specific affected areas |
 | `property.ongoing_risk` | enum | `none`, `active_leak`, `fire`, `collapse`, `exposure`, or `other`; current home safety condition |
 | `property.habitable` | boolean | Whether the home is currently safe to occupy; does not replace professional safety advice |
+| `property.occupancy_relationship` | enum | `owner`, `tenant`, `landlord`, `authorised_representative`, or `other` |
+| `property.occupancy` | enum | `occupied`, `vacant`, `partially_occupied`, or `unknown` |
 
 ### Contents items
 

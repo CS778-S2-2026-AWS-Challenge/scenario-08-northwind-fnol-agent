@@ -74,6 +74,7 @@ from backend.services.branching import (
     claimant_dynamic_form_projection,
 )
 from backend.services.claim_data import (
+    project_claim_participants,
     project_contents_item_evidence_association,
     project_motor_other_driver,
 )
@@ -335,6 +336,7 @@ def claimant_claim(
         agreement_accepted=agreement_acceptance_is_current(claim),
     )
     motor_other_driver = repository.get_motor_other_driver(claim.claim_id, claim.customer_id)
+    policyholder, driver, witnesses = project_claim_participants(claim)
     return ClaimantClaim(
         claim_id=claim.claim_id,
         revision=claim.revision,
@@ -342,6 +344,9 @@ def claimant_claim(
         workflow_state=claim.claim_state.workflow_state,
         form=_claimant_form(repository, claim),
         contents_items=_claimant_contents_items(repository, claim),
+        policyholder=policyholder,
+        driver=driver,
+        witnesses=witnesses,
         motor_other_driver=(
             project_motor_other_driver(motor_other_driver)
             if motor_other_driver is not None
