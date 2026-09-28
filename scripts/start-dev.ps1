@@ -118,6 +118,62 @@ function Invoke-TrackedStep {
     }
 }
 
+function Split-CredentialEnvironments {
+    # Credential boundary. Start-Process -Environment is an overlay on the inherited
+    # environment, not a clean slate: a child sees everything in this shell's $env: plus the
+    # overlay, and a $null overlay value removes a variable. BackendEnv is passed to the
+    # backend alone; every other child gets FrontendEnv, an overlay that removes every
+    # backend-only name, in case the developer's own environment already carries one (an
+    # earlier manual-steps run in this same shell, for instance).
+    #
+    # FrontendEnv's removal set is the union of three sources, each covering a different gap
+    # the other two miss:
+    #   - a fixed list for the infrastructure settings this script itself sets below;
+    #   - the model-credential names Python derived from config/model-runtime-bindings.json,
+    #     so a bindings change is picked up automatically instead of drifting from a separate
+    #     literal list;
+    #   - every name the endpoint actually returned this run (ModelSecretNames). This third
+    #     source is required, not redundant with the second: an endpoint-returned credential
+    #     name that is not yet in the bindings file (a new provider being trialled, for
+    #     instance) would otherwise stay out of the removal set entirely and reach every
+    #     frontend, since -Environment only overlays the inherited environment rather than
+    #     replacing it.
+    #
+    # Pure and process-free (no network call, no Start-Process) so it can be exercised
+    # directly by scripts/test-start-dev-credential-boundary.ps1 against the exact case above.
+    param([PSCustomObject]$Credentials)
+    $backendEnv = @{}
+    foreach ($property in $Credentials.secrets.PSObject.Properties) {
+        $backendEnv[$property.Name] = $property.Value
+    }
+    $modelSecretNames = @($Credentials.secrets.PSObject.Properties.Name)
+
+    $backendOnlyNames = @(
+        'NORTHWIND_SECRETS_TOKEN',
+        'NORTHWIND_ENVIRONMENT', 'NORTHWIND_IDENTITY_MODE', 'NORTHWIND_CONTROL_PLANE_DB_PATH',
+        'AGENT_RUNTIME_PROFILE', 'DATA_RUNTIME_PROFILE',
+        'MODEL_RUNTIME_BINDINGS_PATH', 'MODEL_PROFILE_ID', 'MODEL_TIMEOUT_SECONDS',
+        'NORTHWIND_OBJECT_STORAGE_ADAPTER', 'NORTHWIND_OBJECT_STORAGE_ENDPOINT',
+        'NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY',
+        'NORTHWIND_OBJECT_STORAGE_REGION', 'NORTHWIND_OBJECT_STORAGE_BUCKET', 'NORTHWIND_KNOWLEDGE_BUCKET',
+        'NORTHWIND_MONGODB_URI', 'NORTHWIND_MONGODB_DATABASE', 'NORTHWIND_MONGODB_COLLECTION'
+    )
+    $frontendEnv = @{}
+    foreach ($name in $backendOnlyNames) { $frontendEnv[$name] = $null }
+    foreach ($name in $Credentials.configured_credential_names) { $frontendEnv[$name] = $null }
+    foreach ($name in $modelSecretNames) { $frontendEnv[$name] = $null }
+    # The backend has no use for the bootstrap token itself, only for the model keys it already
+    # unlocked above; null it defensively in case this developer's own environment already has
+    # it set (-Environment overlays the inherited environment, it does not replace it).
+    $backendEnv.NORTHWIND_SECRETS_TOKEN = $null
+
+    return [PSCustomObject]@{
+        BackendEnv       = $backendEnv
+        FrontendEnv      = $frontendEnv
+        ModelSecretNames = $modelSecretNames
+    }
+}
+
 # 1. Pull model credentials from the team secrets endpoint. The fetch and parse logic is a
 #    Python function (backend/core/dev_secrets.py), a config-layer integration point this
 #    script calls through scripts/fetch_secrets.py but does not own or duplicate. The bearer
@@ -135,41 +191,10 @@ if ($LASTEXITCODE -ne 0) {
 # children the overlays cover.
 Remove-Item -ErrorAction SilentlyContinue env:NORTHWIND_SECRETS_TOKEN
 
-$credentials = $fetchOutput | ConvertFrom-Json
-$backendEnv = @{}
-foreach ($property in $credentials.secrets.PSObject.Properties) {
-    $backendEnv[$property.Name] = $property.Value
-}
-$modelSecretNames = @($credentials.secrets.PSObject.Properties.Name)
-
-# Credential boundary. Start-Process -Environment is an overlay on the inherited environment,
-# not a clean slate: a child sees everything in this shell's $env: plus the overlay, and a
-# $null overlay value removes a variable. $backendEnv is passed to the backend alone; every
-# other child gets $frontendEnv, an overlay that removes every backend-only name, in case the
-# developer's own environment already carries one (an earlier manual-steps run in this same
-# shell, for instance).
-#
-# A fixed name list for the infrastructure settings this script itself sets below, plus the
-# model-credential names Python derived from config/model-runtime-bindings.json -- not
-# hand-maintained here, so a bindings change is picked up automatically instead of silently
-# drifting from a separate literal list.
-$backendOnlyNames = @(
-    'NORTHWIND_SECRETS_TOKEN',
-    'NORTHWIND_ENVIRONMENT', 'NORTHWIND_IDENTITY_MODE', 'NORTHWIND_CONTROL_PLANE_DB_PATH',
-    'AGENT_RUNTIME_PROFILE', 'DATA_RUNTIME_PROFILE',
-    'MODEL_RUNTIME_BINDINGS_PATH', 'MODEL_PROFILE_ID', 'MODEL_TIMEOUT_SECONDS',
-    'NORTHWIND_OBJECT_STORAGE_ADAPTER', 'NORTHWIND_OBJECT_STORAGE_ENDPOINT',
-    'NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY',
-    'NORTHWIND_OBJECT_STORAGE_REGION', 'NORTHWIND_OBJECT_STORAGE_BUCKET', 'NORTHWIND_KNOWLEDGE_BUCKET',
-    'NORTHWIND_MONGODB_URI', 'NORTHWIND_MONGODB_DATABASE', 'NORTHWIND_MONGODB_COLLECTION'
-)
-$frontendEnv = @{}
-foreach ($name in $backendOnlyNames) { $frontendEnv[$name] = $null }
-foreach ($name in $credentials.configured_credential_names) { $frontendEnv[$name] = $null }
-# The backend has no use for the bootstrap token itself, only for the model keys it already
-# unlocked above; null it defensively in case this developer's own environment already has it
-# set (-Environment overlays the inherited environment, it does not replace it).
-$backendEnv.NORTHWIND_SECRETS_TOKEN = $null
+$credentials = Split-CredentialEnvironments -Credentials ($fetchOutput | ConvertFrom-Json)
+$backendEnv = $credentials.BackendEnv
+$frontendEnv = $credentials.FrontendEnv
+$modelSecretNames = $credentials.ModelSecretNames
 
 # 2. MongoDB and MinIO through docker-compose.yml, waited to healthy -- not started and
 #    assumed. `--wait` blocks until each service's own healthcheck passes. Docker is required;
