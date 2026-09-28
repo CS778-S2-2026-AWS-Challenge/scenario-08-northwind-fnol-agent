@@ -28,13 +28,13 @@ The local credentials in the MinIO examples are published development defaults, 
 secrets. Atlas, cloud, and production credentials must be supplied through protected process
 configuration and must never be committed in an environment file.
 
-The fixed first AWS deployment direction does not select the `aws` data-runtime profile. It runs
-the existing MongoDB and MinIO Validation Prototype composition on one EC2 host, publishes built
-static clients from a private Sydney S3 bucket through CloudFront, and retains the configured
-external Model Gateway. This host target still requires bounded EC2, networking, restart,
-persistence, and secret-injection evidence. It does not activate DynamoDB, Bedrock, ECS/Fargate,
-or an S3 Evidence adapter. For the verified evidence and stop conditions, see
-[Verified AWS Deployment Plan](design/aws-verified-deployment-plan.md).
+The first AWS deployment framework targets the existing MongoDB and MinIO Validation Prototype
+composition on one EC2 host, publishes built static clients from a private Sydney S3 bucket
+through CloudFront, and retains the configured external Model Gateway. The host target, HTTPS API
+origin, runtime identity, restart, persistence, and secret-injection paths still require bounded
+evidence. The framework does not activate DynamoDB, Bedrock, ECS/Fargate, or an S3 Evidence
+adapter. For the framework boundaries and evidence labels, see
+[First AWS deployment framework and evidence](design/aws-verified-deployment-plan.md).
 
 The `vp` profile in `docker-compose.yml` is the deployable single-host form of `local_mvp`. It
 uses normal identity mode, mounts the three SQLite identity and Control Plane repositories under
