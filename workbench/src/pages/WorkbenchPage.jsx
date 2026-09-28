@@ -52,8 +52,7 @@ export default function WorkbenchPage() {
   const [detail, setDetail] = useState(null)
   const detailRef = useRef(null)
   const rootRestoreAttemptedRef = useRef(false)
-  const currentClaimIdRef = useRef(claimId)
-  currentClaimIdRef.current = claimId
+  const currentClaimIdRef = useRef(null)
   const detailRequestId = useRef(0)
   const backgroundRefreshId = useRef(0)
   const realtimeCursorRef = useRef(null)
@@ -71,26 +70,43 @@ export default function WorkbenchPage() {
   const [detailError, setDetailError] = useState(null)
   const [detailStale, setDetailStale] = useState(false)
   const [queueVisible, setQueueVisible] = useState(true)
+  const [conversationQueueVisible, setConversationQueueVisible] = useState(true)
   const [agentOpen, setAgentOpen] = useState(false)
   const [agentSessionId, setAgentSessionId] = useState(null)
   const [revisionNotice, setRevisionNotice] = useState(null)
   const [externalActionRecoveries, setExternalActionRecoveries] = useState({})
   const externalRecoveryInFlight = useRef(new Set())
-  const isConversations = location.pathname === '/workbench/conversations' || location.pathname.startsWith('/workbench/conversations/')
   const isAgentRoute = Boolean(routeAgentSessionId)
+  const isConversations = location.pathname === '/workbench/conversations' || location.pathname.startsWith('/workbench/conversations/')
+  const isConversationWorkspace = isConversations || isAgentRoute
   const selectedSessionId = new URLSearchParams(location.search).get('session')
-  selectedConversationSessionIdRef.current = selectedSessionId
-  const currentTab = tabs.tabs.find((tab) => tab.claimId === claimId)
-  const currentSection = CLAIM_SECTIONS.has(routeSection)
-    ? routeSection
-    : currentTab?.section || 'summary'
+  const selectedConversation = isConversations
+    ? conversationRouteItem(
+        conversationSessionId,
+        conversations,
+        assistanceRequests,
+        tabs.tabs,
+      )
+    : null
+  const activeClaimId = isConversations ? selectedConversation?.claim_id || null : claimId
+  const activeConversationSessionId = isConversations
+    ? conversationSessionId || selectedConversation?.session_id || null
+    : selectedSessionId
+  currentClaimIdRef.current = activeClaimId
+  selectedConversationSessionIdRef.current = activeConversationSessionId
+  const currentTab = tabs.tabs.find((tab) => tab.claimId === activeClaimId)
+  const currentSection = isConversations
+    ? 'conversation'
+    : CLAIM_SECTIONS.has(routeSection)
+      ? routeSection
+      : currentTab?.section || 'summary'
   currentSectionRef.current = currentSection
   isConversationsRef.current = isConversations
-  const deliveryReadbackScope = currentSection === 'conversation' && claimId
+  const deliveryReadbackScope = currentSection === 'conversation' && activeClaimId
     ? JSON.stringify([
-        claimId,
-        selectedSessionId
-          || (detail?.claim_id === claimId ? detail.active_session_id : null)
+        activeClaimId,
+        activeConversationSessionId
+          || (detail?.claim_id === activeClaimId ? detail.active_session_id : null)
           || null,
       ])
     : null
@@ -112,9 +128,26 @@ export default function WorkbenchPage() {
   } = queueFilters
   const currentQueueKey = queueFilterKey(queueFilters)
   const visibleClaims = queueSnapshotKey === currentQueueKey ? claims : []
-  const activeExternalActionRecoveries = claimId
-    ? Object.values(externalActionRecoveries[claimId] || {})
+  const activeExternalActionRecoveries = activeClaimId
+    ? Object.values(externalActionRecoveries[activeClaimId] || {})
     : []
+  const openClaimConversationTabs = tabs.tabs
+    .filter((tab) => tab.section === 'conversation' && tab.sessionId)
+    .map((tab) => {
+      const conversation = conversationRouteItem(
+        tab.sessionId,
+        conversations,
+        assistanceRequests,
+        [],
+      )
+      return {
+        ...tab,
+        label: conversation?.detail?.claimant?.display_name || tab.label,
+        unreadCount: conversation?.unread_count
+          || conversation?.detail?.work_summary?.unread_claimant_messages
+          || 0,
+      }
+    })
 
   useEffect(() => {
     syncTabIdentities?.(claims)
@@ -135,8 +168,14 @@ export default function WorkbenchPage() {
       section: 'conversation',
       sessionId: conversation.session_id,
     })
-    navigate(queueRoute(`/workbench/claims/${conversation.claim_id}/conversation`, queueFilters, conversation.session_id))
-  }, [navigate, queueFilters, tabs])
+    navigate(queueRoute(
+      isConversations
+        ? `/workbench/conversations/${encodeURIComponent(conversation.session_id)}`
+        : `/workbench/claims/${conversation.claim_id}/conversation`,
+      queueFilters,
+      isConversations ? null : conversation.session_id,
+    ))
+  }, [isConversations, navigate, queueFilters, tabs])
 
   const applyDetailProjection = useCallback((response, {
     expectedClaimId,
@@ -646,10 +685,18 @@ export default function WorkbenchPage() {
       ],
     }
     if (section === 'conversation') {
-      const result = await loadConversationResources(
-        id,
-        selectedSessionId || detail?.active_session_id || null,
-      )
+      const [result] = await Promise.all([
+        loadConversationResources(
+          id,
+          activeConversationSessionId || detail?.active_session_id || null,
+        ),
+        loadResource(
+          'evidence',
+          id,
+          () => workbenchApi.evidence(token, id),
+          { propagateError },
+        ),
+      ])
       if (propagateError && result?.status !== 'applied') {
         throw result?.error || readbackSupersededError('messages', id)
       }
@@ -659,10 +706,10 @@ export default function WorkbenchPage() {
       loadResource(name, id, loader, { propagateError })
     )))
   }, [
+    activeConversationSessionId,
     detail?.active_session_id,
     loadConversationResources,
     loadResource,
-    selectedSessionId,
     token,
   ])
 
@@ -809,13 +856,26 @@ export default function WorkbenchPage() {
     loadClaims()
   }, [loadClaims])
   useEffect(() => {
-    if (isConversations) loadConversations()
-  }, [isConversations, loadConversations])
+    if (isConversationWorkspace) loadConversations()
+  }, [isConversationWorkspace, loadConversations])
   useEffect(() => {
-    if (!conversationSessionId || !conversations.length) return
-    const conversation = conversations.find((item) => item.session_id === conversationSessionId)
-    if (conversation) openConversation(conversation)
-  }, [conversationSessionId, conversations, openConversation])
+    if (!conversationSessionId || !selectedConversation?.claim_id) return
+    const existing = tabs.tabs.find((tab) => tab.claimId === selectedConversation.claim_id)
+    if (
+      existing?.section === 'conversation'
+      && existing.sessionId === selectedConversation.session_id
+    ) return
+    tabs.open({
+      claim_id: selectedConversation.claim_id,
+      display_reference: selectedConversation.display_reference,
+      claimant: selectedConversation.detail?.claimant,
+      incident: selectedConversation.detail?.incident,
+    })
+    tabs.update(selectedConversation.claim_id, {
+      section: 'conversation',
+      sessionId: selectedConversation.session_id,
+    })
+  }, [conversationSessionId, selectedConversation, tabs])
   useEffect(() => {
     if (isAgentRoute) {
       setAgentSessionId(routeAgentSessionId)
@@ -839,9 +899,9 @@ export default function WorkbenchPage() {
     }
   }, [])
   useEffect(() => {
-    if (claimId) {
-      loadDetail(claimId)
-    } else if (!isConversations) {
+    if (activeClaimId) {
+      loadDetail(activeClaimId)
+    } else {
       ++detailRequestId.current
       detailRef.current = null
       setDetail(null)
@@ -849,12 +909,12 @@ export default function WorkbenchPage() {
       setDetailStale(false)
       setResources({})
     }
-  }, [claimId, isConversations, loadDetail])
+  }, [activeClaimId, loadDetail])
   useEffect(() => {
-    if (claimId && detail?.claim_id === claimId) {
-      loadSectionResources(claimId, currentSection)
+    if (activeClaimId && detail?.claim_id === activeClaimId) {
+      loadSectionResources(activeClaimId, currentSection)
     }
-  }, [claimId, currentSection, detail?.claim_id, detail?.revision, loadSectionResources])
+  }, [activeClaimId, currentSection, detail?.claim_id, detail?.revision, loadSectionResources])
   realtimeHandlersRef.current = {
     loadClaims,
     loadConversationResources,
@@ -1183,7 +1243,7 @@ export default function WorkbenchPage() {
     tabs.open(request.detail || request)
     if (sessionId) {
       tabs.update(id, { section: 'conversation', sessionId })
-      navigate(queueRoute(`/workbench/claims/${id}/conversation`, queueFilters, sessionId))
+      navigate(queueRoute(`/workbench/conversations/${encodeURIComponent(sessionId)}`, queueFilters))
       return
     }
     navigate(queueRoute(`/workbench/claims/${id}`, queueFilters))
@@ -1242,6 +1302,37 @@ export default function WorkbenchPage() {
         : ''
       navigate(queueRoute(neighbour ? `/workbench/claims/${neighbour.claimId}${suffix}` : '/workbench', queueFilters))
     }
+  }
+
+  function activateConversationTab(id) {
+    const tab = tabs.tabs.find((item) => item.claimId === id)
+    if (!tab?.sessionId) return
+    tabs.activate(id)
+    navigate(queueRoute(`/workbench/conversations/${encodeURIComponent(tab.sessionId)}`, queueFilters))
+  }
+
+  function closeConversationTab(id) {
+    const conversationTabs = tabs.tabs.filter((item) => item.section === 'conversation' && item.sessionId)
+    const index = conversationTabs.findIndex((item) => item.claimId === id)
+    const wasActive = activeClaimId === id
+    const remaining = conversationTabs.filter((item) => item.claimId !== id)
+    tabs.update(id, { section: 'summary', sessionId: null })
+    if (!wasActive) return
+    const neighbour = remaining[Math.min(Math.max(index, 0), remaining.length - 1)]
+    navigate(queueRoute(
+      neighbour
+        ? `/workbench/conversations/${encodeURIComponent(neighbour.sessionId)}`
+        : '/workbench/conversations',
+      queueFilters,
+    ))
+  }
+
+  function openConversationClaim() {
+    if (!activeClaimId) return
+    navigate(queueRoute(
+      `/workbench/claims/${activeClaimId}/summary`,
+      queueFilters,
+    ))
   }
 
   function changeSection(section) {
@@ -1790,6 +1881,66 @@ export default function WorkbenchPage() {
     return latest
   }
 
+  function selectStaffAgentSession(sessionId) {
+    setAgentSessionId(sessionId)
+    if (!isAgentRoute || !sessionId || sessionId === routeAgentSessionId) return
+    navigate(queueRoute(
+      `/workbench/agent/sessions/${encodeURIComponent(sessionId)}`,
+      queueFilters,
+    ), { replace: true })
+  }
+
+  function closeEmbeddedStaffAgent(open) {
+    if (open) return
+    setAgentOpen(false)
+    setAgentSessionId(null)
+    navigate(queueRoute('/workbench/conversations', queueFilters))
+  }
+
+  async function refreshAfterStaffAgentAction(execution) {
+    const refreshes = [
+      ['Claim queue', loadClaims({ propagateError: true })],
+    ]
+    if (activeClaimId && execution.claim_id === activeClaimId) {
+      refreshes.push([
+        'open Claim',
+        loadDetail(activeClaimId, { propagateError: true }),
+      ])
+    }
+    if (isConversationWorkspace) {
+      refreshes.push([
+        'conversations',
+        loadConversations({ propagateError: true }),
+      ])
+    }
+
+    const results = await Promise.allSettled(
+      refreshes.map(([, refresh]) => refresh),
+    )
+    const failures = results.flatMap((result, index) => (
+      result.status === 'rejected'
+        ? [{ label: refreshes[index][0], error: result.reason }]
+        : []
+    ))
+    if (failures.length) {
+      const refreshError = new Error(
+        `Action executed, but refresh failed for ${failures.map(({ label }) => label).join(', ')}. Refresh before taking another action.`,
+      )
+      refreshError.requestId = failures.find(({ error }) => error?.requestId)?.error?.requestId || null
+      throw refreshError
+    }
+  }
+
+  const staffAgentProps = {
+    token,
+    requestedSessionId: routeAgentSessionId || agentSessionId,
+    onSessionChange: selectStaffAgentSession,
+    onConversationChanged: () => {
+      if (isConversationWorkspace) loadConversations()
+    },
+    onBusinessActionExecuted: refreshAfterStaffAgentAction,
+  }
+
   return (
     <div className="workbench-app">
       <NavigationRail profile={profile} onLogout={async () => { await logout(); navigate('/workbench/login', { replace: true }) }} onAgent={() => setAgentOpen(true)} />
@@ -1798,8 +1949,21 @@ export default function WorkbenchPage() {
           <button className="icon-button mobile-menu" type="button" aria-label={t('Open navigation')}><Menu size={19} /></button>
           <div><strong>{t('Claims Workbench')}</strong><span>{t('Source-linked operational view')}</span></div>
           <div className="topbar-actions">
-            {!isConversations && <button className="icon-button" type="button" onClick={() => setQueueVisible((value) => !value)} aria-label={queueVisible ? t('Hide Claim queue') : t('Show Claim queue')}>{queueVisible ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>}
-            <button className="icon-button" type="button" onClick={filterMetadata ? loadClaims : () => setFilterMetadataAttempt((attempt) => attempt + 1)} aria-label={t('Refresh Workbench projection')}><RefreshCw size={17} /></button>
+            {isConversationWorkspace ? (
+              <button
+                className="icon-button conversation-queue-toggle"
+                type="button"
+                aria-controls="conversation-queue-panel"
+                aria-expanded={conversationQueueVisible}
+                aria-label={t(conversationQueueVisible ? 'Hide conversation queue' : 'Show conversation queue')}
+                onClick={() => setConversationQueueVisible((value) => !value)}
+              >
+                {conversationQueueVisible ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+              </button>
+            ) : (
+              <button className="icon-button" type="button" onClick={() => setQueueVisible((value) => !value)} aria-label={queueVisible ? t('Hide Claim queue') : t('Show Claim queue')}>{queueVisible ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
+            )}
+            <button className="icon-button" type="button" onClick={isConversationWorkspace ? loadConversations : filterMetadata ? loadClaims : () => setFilterMetadataAttempt((attempt) => attempt + 1)} aria-label={t('Refresh Workbench projection')}><RefreshCw size={17} /></button>
           </div>
         </header>
         {queueNotice && <div className="global-error" role="status">{queueNotice}</div>}
@@ -1809,27 +1973,61 @@ export default function WorkbenchPage() {
             <button type="button" className="icon-button icon-button--small" aria-label={t('Dismiss Claim movement notice')} onClick={() => setMovementNotice(null)}>×</button>
           </div>
         )}
-        {revisionNotice && revisionNotice.claimId === claimId && (
+        {revisionNotice && revisionNotice.claimId === activeClaimId && (
           <div className="revision-notice" role="status">
             <span>{t('This Claim changed in another session (revision {revision}).', { revision: revisionNotice.revision })}</span>
-            <button type="button" onClick={() => { setRevisionNotice(null); loadDetail(claimId) }}>{t('Review the latest version')}</button>
+            <button type="button" onClick={() => { setRevisionNotice(null); loadDetail(activeClaimId) }}>{t('Review the latest version')}</button>
             <button type="button" className="icon-button icon-button--small" aria-label={t('Dismiss revision notice')} onClick={() => setRevisionNotice(null)}>×</button>
           </div>
         )}
-        {isConversations ? (
+        {isConversationWorkspace ? (
           <ConversationsPage
             conversations={conversations}
             loading={conversationsLoading}
             error={conversationsError}
             onRetry={loadConversations}
             onOpenConversation={openConversation}
-            selectedStaffAgentSessionId={agentSessionId}
+            queueVisible={conversationQueueVisible}
+            selectedConversationSessionId={activeConversationSessionId}
+            selectedStaffAgentSessionId={isAgentRoute ? routeAgentSessionId : null}
+            staffAgentDetail={isAgentRoute ? (
+              <StaffAgent
+                {...staffAgentProps}
+                embedded
+                open
+                onOpenChange={closeEmbeddedStaffAgent}
+              />
+            ) : null}
             assistanceRequests={assistanceRequests}
             assistanceLoading={assistanceRequestsLoading}
             assistanceError={assistanceRequestsError}
             onRetryAssistance={loadConversations}
             onReviewRequest={reviewAssistanceRequest}
             onTakeOver={takeOverAssistanceRequest}
+            openConversationTabs={openClaimConversationTabs}
+            onActivateConversation={activateConversationTab}
+            onCloseConversation={closeConversationTab}
+            onBackToList={() => navigate(queueRoute('/workbench/conversations', queueFilters))}
+            detail={detail}
+            detailLoading={detailLoading || Boolean(
+              activeConversationSessionId
+                && !selectedConversation
+                && (conversationsLoading || assistanceRequestsLoading),
+            )}
+            detailError={detailError}
+            detailStale={detailStale}
+            resources={resources}
+            profile={profile}
+            draft={currentTab?.draft || ''}
+            scrollPosition={currentTab?.conversationScrollTop ?? null}
+            onDraft={(draft) => activeClaimId && tabs.update(activeClaimId, { draft })}
+            onScrollPosition={(conversationScrollTop) => activeClaimId && tabs.update(activeClaimId, { conversationScrollTop })}
+            onOpenClaim={openConversationClaim}
+            onRetryDetail={() => loadDetail(activeClaimId)}
+            onRetryConversation={() => loadSectionResources(activeClaimId, 'conversation')}
+            onAccept={acceptHandoff}
+            onResolve={resolveHandoff}
+            onSend={sendMessage}
           />
         ) : (
           <div className={`workbench-layout${queueVisible ? '' : ' queue-hidden'}`}>
@@ -1847,49 +2045,13 @@ export default function WorkbenchPage() {
           </div>
         )}
       </div>
-      <StaffAgent
-        open={agentOpen}
-        onOpenChange={setAgentOpen}
-        requestedSessionId={agentSessionId}
-        token={token}
-        onSessionChange={(sessionId) => setAgentSessionId(sessionId)}
-        onConversationChanged={() => {
-          if (isConversations) loadConversations()
-        }}
-        onBusinessActionExecuted={async (execution) => {
-          const refreshes = [
-            ['Claim queue', loadClaims({ propagateError: true })],
-          ]
-          if (claimId && execution.claim_id === claimId) {
-            refreshes.push([
-              'open Claim',
-              loadDetail(claimId, { propagateError: true }),
-            ])
-          }
-          if (isConversations) {
-            refreshes.push([
-              'conversations',
-              loadConversations({ propagateError: true }),
-            ])
-          }
-
-          const results = await Promise.allSettled(
-            refreshes.map(([, refresh]) => refresh),
-          )
-          const failures = results.flatMap((result, index) => (
-            result.status === 'rejected'
-              ? [{ label: refreshes[index][0], error: result.reason }]
-              : []
-          ))
-          if (failures.length) {
-            const refreshError = new Error(
-              `Action executed, but refresh failed for ${failures.map(({ label }) => label).join(', ')}. Refresh before taking another action.`,
-            )
-            refreshError.requestId = failures.find(({ error }) => error?.requestId)?.error?.requestId || null
-            throw refreshError
-          }
-        }}
-      />
+      {!isAgentRoute && (
+        <StaffAgent
+          {...staffAgentProps}
+          open={agentOpen}
+          onOpenChange={setAgentOpen}
+        />
+      )}
     </div>
   )
 }
@@ -2112,6 +2274,40 @@ function confirmedDeliveryState(delivery) {
     ...delivery,
     status: 'confirmed',
   }
+}
+
+function conversationRouteItem(sessionId, conversations = [], assistanceRequests = [], tabs = []) {
+  if (!sessionId) return null
+  const conversation = conversations.find((item) => item.session_id === sessionId)
+  if (conversation) return conversation
+  const request = assistanceRequests.find((item) => (
+    item.detail?.active_session_id === sessionId || item.handoff?.session_id === sessionId
+  ))
+  if (request) {
+    return {
+      conversation_id: `assistance:${request.claim_id}`,
+      kind: 'claim',
+      claim_id: request.claim_id,
+      display_reference: request.display_reference,
+      session_id: sessionId,
+      status: request.handoff?.status || 'queued',
+      summary: request.handoff?.packet?.incident_summary || request.incident?.summary,
+      updated_at: request.handoff?.created_at || request.updated_at,
+      detail: request.detail,
+      assistance: request.handoff,
+    }
+  }
+  const tab = tabs.find((item) => item.sessionId === sessionId)
+  return tab ? {
+    conversation_id: `claim:${sessionId}`,
+    kind: 'claim',
+    claim_id: tab.claimId,
+    display_reference: tab.reference,
+    session_id: sessionId,
+    status: 'active',
+    title: tab.label,
+    summary: null,
+  } : null
 }
 
 function enrichConversation(conversation, context) {

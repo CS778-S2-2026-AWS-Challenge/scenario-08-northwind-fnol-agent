@@ -82,10 +82,10 @@ vi.mock('../components/ClaimWorkspace.jsx', () => ({
   </div>,
 }))
 vi.mock('../components/StaffAgent.jsx', () => ({
-  default: ({ open, requestedSessionId, onBusinessActionExecuted }) => {
+  default: ({ open, embedded = false, requestedSessionId, onBusinessActionExecuted }) => {
     staffAgent.onBusinessActionExecuted = onBusinessActionExecuted
     return open && (
-      <output data-testid="staff-agent-state">
+      <output data-testid="staff-agent-state" data-embedded={embedded ? 'true' : 'false'}>
         {requestedSessionId ? `Restoring ${requestedSessionId}` : 'New session model'}
       </output>
     )
@@ -186,6 +186,7 @@ function renderPage(initialEntry) {
       <Routes>
         <Route path="/workbench" element={page} />
         <Route path="/workbench/conversations" element={page} />
+        <Route path="/workbench/conversations/:conversationSessionId" element={page} />
         <Route path="/workbench/agent/sessions/:agentSessionId" element={page} />
         <Route path="/workbench/claims/:claimId" element={page} />
         <Route path="/workbench/claims/:claimId/:section" element={page} />
@@ -440,6 +441,28 @@ describe('WorkbenchPage queue routing', () => {
     expect(await screen.findByText('Handoff context unavailable')).toBeInTheDocument()
   })
 
+  it('collapses and restores the conversation queue from the Workbench top bar', async () => {
+    const user = userEvent.setup()
+    renderPage('/workbench/conversations')
+
+    const hideQueue = await screen.findByRole('button', { name: 'Hide conversation queue' })
+    const queue = document.getElementById('conversation-queue-panel')
+    const page = queue.closest('.conversations-page')
+    expect(hideQueue).toHaveAttribute('aria-expanded', 'true')
+    expect(page).not.toHaveClass('is-queue-collapsed')
+
+    await user.click(hideQueue)
+
+    const showQueue = screen.getByRole('button', { name: 'Show conversation queue' })
+    expect(showQueue).toHaveAttribute('aria-expanded', 'false')
+    expect(page).toHaveClass('is-queue-collapsed')
+    expect(screen.getByRole('region', { name: 'Current conversation' })).toBeInTheDocument()
+
+    await user.click(showQueue)
+    expect(screen.getByRole('button', { name: 'Hide conversation queue' })).toHaveAttribute('aria-expanded', 'true')
+    expect(page).not.toHaveClass('is-queue-collapsed')
+  })
+
   it('keeps the existing Staff Agent open and resume route for a history selection', async () => {
     const user = userEvent.setup()
     api.conversations.mockResolvedValue({
@@ -448,12 +471,68 @@ describe('WorkbenchPage queue routing', () => {
     })
     renderPage('/workbench/conversations')
 
+    await user.click(await screen.findByRole('tab', { name: 'Staff Agent, 1 conversations' }))
     await user.click(await screen.findByRole('button', { name: /Evidence review/ }))
 
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
       '/workbench/agent/sessions/sas_evidence',
     ))
     expect(screen.getByTestId('staff-agent-state')).toHaveTextContent('Restoring sas_evidence')
+    expect(screen.getByTestId('staff-agent-state')).toHaveAttribute('data-embedded', 'true')
+    expect(screen.getByRole('tab', { name: 'Staff Agent, 1 conversations' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByRole('heading', { name: 'Select a Claim to begin.' })).not.toBeInTheDocument()
+  })
+
+  it('opens a Claim conversation inside the master-detail workspace route', async () => {
+    const user = userEvent.setup()
+    const conversationDetail = {
+      ...claim,
+      claimant: { customer_id: 'cus_demo', display_name: 'Alex Morgan' },
+      active_session_id: 'ses_customer',
+      ownership: {
+        state: 'assigned',
+        current_staff_access: 'primary',
+        primary_assignee: { staff_id: 'stf_demo', display_name: 'Demo Staff' },
+      },
+      work_summary: { ...claim.work_summary, unread_claimant_messages: 1 },
+    }
+    api.conversations.mockResolvedValue({
+      items: [{
+        conversation_id: 'claim:ses_customer',
+        kind: 'claim',
+        claim_id: claim.claim_id,
+        display_reference: claim.display_reference,
+        session_id: 'ses_customer',
+        status: 'active',
+        title: 'Claim NW-900',
+        summary: 'I have a question about my Claim.',
+        updated_at: '2026-09-14T02:00:00Z',
+      }],
+      page: { next_cursor: null },
+    })
+    api.claim.mockResolvedValue(conversationDetail)
+    api.sessionsForTarget.mockResolvedValue({
+      items: [{ session_id: 'ses_customer' }],
+      resolved_session: { session_id: 'ses_customer' },
+      page: { next_cursor: null },
+    })
+
+    renderPage('/workbench/conversations')
+    await user.click(await screen.findByRole('button', { name: /Alex Morgan/ }))
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
+      '/workbench/conversations/ses_customer',
+    ))
+    await waitFor(() => expect(api.sessionsForTarget).toHaveBeenCalledWith(
+      'staff-token',
+      claim.claim_id,
+      'ses_customer',
+    ))
+    expect(await screen.findByRole('heading', { name: 'Alex Morgan' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Open claim' }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
+      `/workbench/claims/${claim.claim_id}/summary`,
+    ))
   })
 
   it('takes over a waiting assistance request with its exact projected target and revision', async () => {
@@ -563,7 +642,7 @@ describe('WorkbenchPage queue routing', () => {
       4,
     ))
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
-      '/workbench/claims/clm_help/conversation?session=ses_help',
+      '/workbench/conversations/ses_help',
     ))
   })
 
