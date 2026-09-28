@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { useState } from 'react'
@@ -497,6 +497,8 @@ describe('Conversation', () => {
     const click = user.click(screen.getByRole('button', { name: 'Send message' }))
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce())
     expect(screen.queryByText('Refreshing this section')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send message' })).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('button', { name: 'Send message' }).querySelector('.compact-composer__spinner')).toBeInTheDocument()
     finishSend()
     await click
     expect(onSend).toHaveBeenCalledWith({
@@ -505,6 +507,32 @@ describe('Conversation', () => {
       sessionId: 'ses_1',
     })
     await waitFor(() => expect(messageList.scrollTop).toBe(600))
+  })
+
+  it('sends with Enter while Shift + Enter keeps a multiline draft', async () => {
+    const onSend = vi.fn().mockResolvedValue({ delivery: { message_id: 'msg_keyboard' } })
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/workbench/claims/clm_1/conversation?session=ses_1']}>
+        <DraftConversation onSend={onSend} />
+      </MemoryRouter>,
+    )
+
+    const textarea = screen.getByLabelText('Message to claimant')
+    expect(textarea).toHaveAttribute('rows', '1')
+    await user.clear(textarea)
+    await user.type(textarea, 'First line')
+    await user.keyboard('{Shift>}{Enter}{/Shift}Second line')
+
+    expect(textarea).toHaveValue('First line\nSecond line')
+    expect(onSend).not.toHaveBeenCalled()
+
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith({
+      draft: 'First line\nSecond line',
+      message: 'First line\nSecond line',
+      sessionId: 'ses_1',
+    }))
   })
 
   it('preserves a follow-up draft typed while the first message is sending', async () => {
@@ -535,6 +563,52 @@ describe('Conversation', () => {
     })
   })
 
+  it('previews selected photos and files locally without pretending they were uploaded', async () => {
+    const user = userEvent.setup()
+    const onSend = vi.fn()
+    render(
+      <MemoryRouter initialEntries={['/workbench/claims/clm_1/conversation?session=ses_1']}>
+        <DraftConversation onSend={onSend} />
+      </MemoryRouter>,
+    )
+
+    const photo = new File(['photo-bytes'], 'damage-photo.png', { type: 'image/png', lastModified: 1 })
+    const document = new File(['pdf-bytes'], 'repair-quote.pdf', { type: 'application/pdf', lastModified: 2 })
+    await user.upload(screen.getByLabelText('Choose photos or files'), [photo, document])
+
+    expect(screen.getByRole('list', { name: 'Selected attachments' })).toHaveTextContent('damage-photo.png')
+    expect(screen.getByRole('list', { name: 'Selected attachments' })).toHaveTextContent('PNG · 11 B')
+    expect(screen.getByRole('list', { name: 'Selected attachments' })).toHaveTextContent('repair-quote.pdf')
+    expect(screen.getByRole('status')).toHaveTextContent('2 attachments selected locally')
+    expect(screen.getByRole('status')).toHaveTextContent('file delivery is not available yet')
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect(onSend).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Remove damage-photo.png' }))
+    expect(screen.queryByText('damage-photo.png')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('1 attachment selected locally')
+
+    await user.click(screen.getByRole('button', { name: 'Remove repair-quote.pdf' }))
+    expect(screen.queryByRole('list', { name: 'Selected attachments' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled()
+  })
+
+  it('rejects files larger than the temporary front-end attachment limit', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/workbench/claims/clm_1/conversation?session=ses_1']}>
+        <DraftConversation onSend={vi.fn()} />
+      </MemoryRouter>,
+    )
+    const oversized = new File(['x'], 'large-scan.pdf', { type: 'application/pdf' })
+    Object.defineProperty(oversized, 'size', { configurable: true, value: 10 * 1024 * 1024 + 1 })
+
+    await user.upload(screen.getByLabelText('Choose photos or files'), oversized)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('large-scan.pdf is larger than 10 MB.')
+    expect(screen.queryByRole('list', { name: 'Selected attachments' })).not.toBeInTheDocument()
+  })
+
   it('adds final voice transcripts to the editable draft and stops without sending', async () => {
     const recognitionFor = installSpeechRecognition()
     const onSend = vi.fn()
@@ -547,7 +621,7 @@ describe('Conversation', () => {
 
     const voiceButton = screen.getByRole('button', { name: 'Use voice input' })
     expect(getComputedStyle(voiceButton).gridColumn).toBe('2')
-    expect(getComputedStyle(screen.getByLabelText('Message to claimant')).gridColumn).toBe('1')
+    expect(getComputedStyle(screen.getByLabelText('Message to claimant')).gridColumn).toBe('3')
 
     await user.click(voiceButton)
 
@@ -929,6 +1003,57 @@ describe('Conversation', () => {
       'The requested claimant session is not available',
     )
     expect(screen.queryByLabelText('Message to claimant')).not.toBeInTheDocument()
+  })
+
+  it('renders existing evidence references as attachment cards without inventing upload actions', () => {
+    renderConversation({
+      detail,
+      resource: {
+        items: [{
+          message_id: 'msg_attachment',
+          session_id: 'ses_1',
+          actor: 'claimant',
+          content: { type: 'text', text: 'Here is the repair quote.' },
+          evidence_refs: ['evd_quote', 'evd_missing'],
+          created_at: '2026-09-14T10:00:00Z',
+        }],
+        resolved_session_id: 'ses_1',
+      },
+      evidenceRecords: [{
+        evidence_id: 'evd_quote',
+        original_filename: 'repair-quote.pdf',
+        kind: 'repair_quote',
+        status: 'received',
+      }],
+      draft: '',
+      onDraft: vi.fn(),
+      onSend: vi.fn(),
+    })
+
+    const attachments = screen.getByRole('list', { name: 'Message attachments' })
+    expect(attachments).toHaveTextContent('repair-quote.pdf')
+    expect(attachments).toHaveTextContent('Received')
+    expect(attachments).toHaveTextContent('evd_missing')
+    expect(screen.queryByRole('button', { name: /attach|upload/i })).not.toBeInTheDocument()
+  })
+
+  it('restores and reports the saved reading position for a conversation', () => {
+    const onScrollPosition = vi.fn()
+    renderConversation({
+      detail,
+      resource: { items: [], resolved_session_id: 'ses_1', loading: false },
+      draft: '',
+      scrollPosition: 125,
+      onDraft: vi.fn(),
+      onScrollPosition,
+      onSend: vi.fn(),
+    })
+
+    const messageList = screen.getByRole('log', { name: 'Claimant conversation messages' })
+    expect(messageList.scrollTop).toBe(125)
+    messageList.scrollTop = 280
+    fireEvent.scroll(messageList)
+    expect(onScrollPosition).toHaveBeenLastCalledWith(280)
   })
 
 })

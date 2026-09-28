@@ -1,11 +1,41 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, workbenchApi } from '../api.js'
 import StaffAgent from './StaffAgent.jsx'
 
-afterEach(() => vi.restoreAllMocks())
+let activeSpeechRecognition = null
+
+afterEach(() => {
+  activeSpeechRecognition = null
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
+
+function installSpeechRecognition() {
+  class FakeSpeechRecognition {
+    constructor() {
+      this.start = vi.fn()
+      this.stop = vi.fn()
+      this.abort = vi.fn()
+      activeSpeechRecognition = this
+    }
+  }
+
+  vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+  vi.stubGlobal('webkitSpeechRecognition', undefined)
+  return () => activeSpeechRecognition
+}
+
+function emitFinalTranscript(recognition, transcript) {
+  act(() => {
+    recognition.onresult?.({
+      resultIndex: 0,
+      results: [{ 0: { transcript }, isFinal: true }],
+    })
+  })
+}
 
 const claim = {
   claim_id: 'clm_1',
@@ -114,11 +144,101 @@ describe('StaffAgent', () => {
       }],
     })
 
-    renderAgent({ requestedSessionId: 'sas_1' })
+    const { container } = renderAgent({ requestedSessionId: 'sas_1', embedded: true })
 
     expect(await screen.findByText('Check the police report status.')).toBeInTheDocument()
     expect(workbenchApi.staffAgentMessages).toHaveBeenCalledWith('staff-token', 'sas_1')
     expect(screen.getByText('1 Claim attached')).toBeInTheDocument()
+    expect(container.querySelector('.staff-agent')).toHaveClass('staff-agent--embedded')
+    expect(screen.queryByRole('button', { name: 'Open Staff Agent' })).not.toBeInTheDocument()
+  })
+
+  it('previews attachment drafts in the Staff Agent composer without sending them', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({
+      models: [{ id: 'qwen-local', label: 'qwen3.8-27b' }],
+      default_model_profile_id: 'qwen-local',
+    })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    const send = vi.spyOn(workbenchApi, 'sendStaffAgentMessage')
+    renderAgent()
+
+    const attachmentInput = await screen.findByLabelText('Choose photos or files')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Attach photos or files' })).toBeEnabled())
+    const photo = new File(['photo'], 'inspection.jpg', { type: 'image/jpeg', lastModified: 1 })
+    const document = new File(['document'], 'assessment.pdf', { type: 'application/pdf', lastModified: 2 })
+    await user.upload(attachmentInput, [photo, document])
+    await user.type(screen.getByLabelText('Message Staff Agent'), 'Review these files')
+
+    expect(screen.getByRole('list', { name: 'Selected attachments' })).toHaveTextContent('inspection.jpg')
+    expect(screen.getByRole('list', { name: 'Selected attachments' })).toHaveTextContent('assessment.pdf')
+    expect(screen.getByRole('button', { name: 'Send to Staff Agent' })).toBeDisabled()
+    expect(send).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Remove inspection.jpg' }))
+    await user.click(screen.getByRole('button', { name: 'Remove assessment.pdf' }))
+    expect(screen.getByRole('button', { name: 'Send to Staff Agent' })).toBeEnabled()
+  })
+
+  it('adds voice transcripts to the editable Staff Agent draft', async () => {
+    const recognitionFor = installSpeechRecognition()
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({
+      models: [{ id: 'qwen-local', label: 'qwen3.8-27b' }],
+      default_model_profile_id: 'qwen-local',
+    })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    renderAgent()
+
+    const voiceButton = await screen.findByRole('button', { name: 'Use voice input' })
+    await waitFor(() => expect(voiceButton).toBeEnabled())
+    await user.click(voiceButton)
+    const recognition = recognitionFor()
+    emitFinalTranscript(recognition, 'Compare the repair estimates')
+
+    expect(screen.getByLabelText('Message Staff Agent')).toHaveValue('Compare the repair estimates')
+    expect(screen.getByRole('button', { name: 'Send to Staff Agent' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: 'Stop voice input' }))
+    expect(recognition.stop).toHaveBeenCalledOnce()
+  })
+
+  it('uses the compact prompt and sends with Enter while Shift + Enter adds a line', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({
+      models: [{ id: 'qwen-local', label: 'qwen3.8-27b' }],
+      default_model_profile_id: 'qwen-local',
+    })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    vi.spyOn(workbenchApi, 'createStaffAgentSession').mockResolvedValue({
+      session_id: 'sas_keyboard',
+      title: 'New Staff Agent session',
+      model_profile_id: 'qwen-local',
+    })
+    const send = vi.spyOn(workbenchApi, 'sendStaffAgentMessage').mockResolvedValue({
+      session: { session_id: 'sas_keyboard', title: 'Keyboard question' },
+      staff_message: { message_id: 'sam_staff', role: 'staff', content: 'Line one\nLine two', claim_ids: [], drafts: [], source_refs: [] },
+      assistant_message: { message_id: 'sam_agent', role: 'assistant', content: 'Answer', claim_ids: [], drafts: [], source_refs: [] },
+    })
+    renderAgent()
+
+    const composer = await screen.findByLabelText('Message Staff Agent')
+    expect(composer).toHaveAttribute('rows', '1')
+    expect(composer).toHaveAttribute('placeholder', 'Ask about selected Claims or policy…')
+    await user.type(composer, 'Line one')
+    await user.keyboard('{Shift>}{Enter}{/Shift}Line two')
+    expect(composer).toHaveValue('Line one\nLine two')
+    expect(send).not.toHaveBeenCalled()
+
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(send).toHaveBeenCalledWith(
+      'staff-token',
+      'sas_keyboard',
+      'Line one\nLine two',
+      [],
+    ))
   })
 
   it('sends only the Claims explicitly selected for the next question', async () => {
@@ -164,6 +284,7 @@ describe('StaffAgent', () => {
     await user.click(claimCheckbox)
     expect(claimCheckbox).toBeChecked()
     expect(scopeToggle).toHaveTextContent('1 Claim attached · NW-1042')
+    expect(screen.getByRole('button', { name: 'Claim NW-1042' })).toBeVisible()
     expect(screen.getByText('1 of 5')).toBeInTheDocument()
     expect(screen.getByText('1 Claim attached. Changes apply immediately.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Done' }))
@@ -178,6 +299,71 @@ describe('StaffAgent', () => {
       ['clm_1'],
     )
     expect(await screen.findByText('The police report is still pending.')).toBeInTheDocument()
+  })
+
+  it('restores a separate text draft when switching Staff Agent sessions', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({
+      items: [
+        { session_id: 'sas_1', title: 'Evidence review', model_profile_id: 'qwen-local' },
+        { session_id: 'sas_2', title: 'Policy review', model_profile_id: 'qwen-local' },
+      ],
+    })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({
+      models: [{ id: 'qwen-local', label: 'qwen3.8-27b' }],
+      default_model_profile_id: 'qwen-local',
+    })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    vi.spyOn(workbenchApi, 'staffAgentMessages').mockResolvedValue({ items: [] })
+    renderAgent()
+
+    const composer = await screen.findByLabelText('Message Staff Agent')
+    const sessionSelect = screen.getByLabelText('Session')
+    await waitFor(() => expect(sessionSelect).toHaveValue('sas_1'))
+    await user.type(composer, 'Draft for evidence review')
+
+    await user.selectOptions(sessionSelect, 'sas_2')
+    await waitFor(() => expect(composer).toHaveValue(''))
+    await user.type(composer, 'Draft for policy review')
+
+    await user.selectOptions(sessionSelect, 'sas_1')
+    await waitFor(() => expect(composer).toHaveValue('Draft for evidence review'))
+    await user.selectOptions(sessionSelect, 'sas_2')
+    await waitFor(() => expect(composer).toHaveValue('Draft for policy review'))
+  })
+
+  it('keeps a follow-up draft typed while a Staff Agent message is sending', async () => {
+    let finishSend
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({
+      items: [{ session_id: 'sas_1', title: 'Evidence review', model_profile_id: 'qwen-local' }],
+    })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({
+      models: [{ id: 'qwen-local', label: 'qwen3.8-27b' }],
+      default_model_profile_id: 'qwen-local',
+    })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    vi.spyOn(workbenchApi, 'staffAgentMessages').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'sendStaffAgentMessage').mockImplementation(() => new Promise((resolve) => {
+      finishSend = () => resolve({
+        session: { session_id: 'sas_1', title: 'Evidence review' },
+        staff_message: { message_id: 'sam_staff', role: 'staff', content: 'First question', claim_ids: [], drafts: [], source_refs: [] },
+        assistant_message: { message_id: 'sam_agent', role: 'assistant', content: 'First answer', claim_ids: [], drafts: [], source_refs: [] },
+      })
+    }))
+    renderAgent()
+
+    const composer = await screen.findByLabelText('Message Staff Agent')
+    await user.type(composer, 'First question')
+    await user.click(screen.getByRole('button', { name: 'Send to Staff Agent' }))
+    await waitFor(() => expect(workbenchApi.sendStaffAgentMessage).toHaveBeenCalledOnce())
+
+    await user.clear(composer)
+    await user.type(composer, 'Follow-up question')
+    finishSend()
+
+    await waitFor(() => expect(composer).toHaveValue('Follow-up question'))
+    expect(screen.getByRole('button', { name: 'Send to Staff Agent' })).toBeEnabled()
   })
 
   it('does not persist New until the first non-empty message and then uses the selected model', async () => {

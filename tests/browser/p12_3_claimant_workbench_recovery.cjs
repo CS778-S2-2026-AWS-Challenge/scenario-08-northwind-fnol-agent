@@ -210,11 +210,11 @@ async function main() {
     const conversationsLink = staff.getByRole('link', { name: 'Claim conversations', exact: true })
     await conversationsLink.waitFor({ state: 'visible', timeout: 30000 })
     await conversationsLink.click()
-    await staff.getByRole('heading', { name: 'Human assistance requests', exact: true })
+    await staff.getByRole('tab', { name: /Action needed, \d+ conversations/ })
       .waitFor({ state: 'visible', timeout: 30000 })
 
     const cardLabel = result.display_reference || result.claim_id
-    const card = staff.locator('article.assistance-request').filter({ hasText: cardLabel })
+    const card = staff.locator('article.conversation-queue-row').filter({ hasText: cardLabel })
     await card.waitFor({ state: 'visible', timeout: 30000 })
     await screenshot(staff, '02-workbench-queued-same-claim')
 
@@ -225,7 +225,7 @@ async function main() {
 
     await staff.waitForURL(
       (url) => (
-        url.pathname.includes(`/workbench/claims/${result.claim_id}/conversation`)
+        url.pathname === `/workbench/conversations/${result.session_id}`
       ),
       { timeout: 30000 },
     )

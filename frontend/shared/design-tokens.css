@@ -32,6 +32,7 @@
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-xl: 10px;
+  --radius-composer: 12px;
   --radius-round: 999px;
 
   --color-page: #F7F4EF;
@@ -107,6 +108,9 @@
   --density-workbench-inline-gap: 8px;
   --density-workbench-nav-width: 216px;
   --density-workbench-queue-width: 340px;
+  --density-workbench-conversation-queue-width: 38%;
+  --density-workbench-conversation-queue-min-width: 300px;
+  --density-workbench-conversation-queue-tablet-width: 320px;
   --density-workbench-agent-width: 400px;
   --density-workbench-agent-height: 600px;
   --density-workbench-record-label-width: 160px;
@@ -117,6 +121,7 @@
   --size-control-touch: 44px;
   --size-header-compact: 52px;
   --duration-standard: 200ms;
+  --duration-spinner: 800ms;
   --size-select-menu-min: 248px;
   --size-select-menu-max: 320px;
   --size-model-trigger-max: 200px;
