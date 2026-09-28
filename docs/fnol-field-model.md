@@ -25,6 +25,33 @@ claim-lifecycle states, work statuses, or risk conclusions.
 | `candidate` | VP design field needing a later contract decision. |
 | `record` | Separate durable record, not a Dynamic Form field. |
 
+### Current implementation reconciliation
+
+The executable source of truth currently contains 28 registered Dynamic Form field codes.
+This catalogue also names concepts that deliberately live in typed records or branch
+evaluations. Reconciliation of the 37 rows previously shown as unqualified `candidate`
+produces three distinct groups:
+
+- 9 are already covered by an equivalent canonical structure: Evidence availability,
+  agreement acceptance, vehicle Asset identity/make/model/year, collision branch evaluation,
+  the canonical incident discovery field, and receipt Evidence state. They must not be
+  duplicated in the Dynamic Form registry.
+- 10 are partially supported by an existing branch, related registered field, WorkItem,
+  Evidence record, or integration flow, but do not yet have the complete value contract named
+  by this catalogue: towing required/location, witness details, Police status, repairer details,
+  property cause source, accommodation required/details, weather event, and contents Police
+  status.
+- 18 remain design candidates with no executable field code or equivalent typed Claim value:
+  vehicle use; driver identity/relationship/licence status; collision impact area/movement;
+  road conditions; weather visibility; property occupancy relationship/occupancy/building
+  damage/fixture damage/severity/utilities; and contents item serial number/purchase date/
+  purchase source/replacement need.
+
+`authority.police_reference` is a catalogue label; the executable registry code is
+`authorities.police_report_reference`. `contents.discovery_at` is not a second field; contents
+uses the registered canonical code `incident.discovered_at`. These names are documented as
+aliases only and must not be registered in parallel.
+
 Table shorthand: `src` = claimant (`C`), staff (`S`), provider (`P`), evidence (`E`),
 workflow (`W`), or system (`Y`); `NL` = natural-language extraction; `conf` = claimant
 confirmation; `infer` = model may propose only; `safe` = affects current safe action;
@@ -112,8 +139,8 @@ make their boundary explicit.
 | `loss.description` | Damaged, lost, or stolen subject | common/scalar/no | C,E/y/y/y | y/c/registered | Registry + form | C/S; privacy |
 | `incident.injury_or_danger` | Bounded injury/continuing danger signal | common/boolean/no | C/y/y/y | urgent/y/registered | Registry + interruption rules | C/S; safety |
 | `parties.other_parties` | Whether another person or organisation is involved | conditional/boolean/no | C/y/y/y | handoff/c/registered | Participant details remain a separate record | C/S; consent/privacy |
-| `evidence.availability` | Available, missing, incomplete, pending | common/enum/no | C,E,W/y/y/y | next action/y/candidate | Evidence projection, not form | C/S; privacy |
-| `declaration.factual_accuracy` | Claimant factual declaration | common/enum/no | C/y/y/y | authority/y/candidate | No declaration contract | C/S; authority |
+| `evidence.availability` | Available, missing, incomplete, pending | common/enum/no | C,E,W/y/y/y | next action/y/record | Covered by `EvidenceRecord`, `EvidenceStatus`, and `EvidenceSummary`; not a form field | C/S; privacy |
+| `declaration.factual_accuracy` | Claimant factual declaration | common/enum/no | C/y/y/y | authority/y/record | Covered by `ClaimAgreementAcceptance` and the agreement service/API; not a form field | C/S; authority |
 | `consent.sharing_scope` | Purpose and fields allowed to share | conditional/structured/no | C/y/y/y | external/y/record | Consent record exists | C/S; consent/privacy |
 | `report.channel` | Entry channel | common/enum/no | Y/n/n/n | n/n/system-owned | Claim State | S; audit |
 | `claim.created_at` | System receipt time | common/date-time/no | Y/n/n/n | n/n/system-owned | Claim State | S; audit |
@@ -123,30 +150,30 @@ make their boundary explicit.
 
 | Code | Meaning | Type/multi | src/NL/conf/infer | safe/now/status | Current implementation / needed boundary | vis/auth |
 | --- | --- | --- | --- | --- | --- | --- |
-| `vehicle.identity` | Insured vehicle identity/reference | object/no | C,P/y/y/y | routing/c/candidate | New registry/domain/API/persistence | C/S; privacy |
+| `vehicle.identity` | Insured vehicle identity/reference | object/no | C,P/y/y/y | routing/c/record | Covered by `AssetRecord`, `VehicleAssetDetails`, and the immutable Claim asset snapshot | C/S; privacy |
 | `vehicle.registration` | Registration/plate | scalar/no | C,E/y/y/y | provider/c/registered | Registered; validation/masking alignment | C/S; privacy |
-| `vehicle.make` | Make | scalar/no | C,E/y/y/y | n/c/candidate | New registry/domain/API/fixtures | C/S; privacy |
-| `vehicle.model` | Model | scalar/no | C,E/y/y/y | n/c/candidate | New registry/domain/API/fixtures | C/S; privacy |
-| `vehicle.year` | Model year | scalar/no | C,E/y/y/y | n/c/candidate | New registry/domain/API/fixtures | C/S; privacy |
-| `vehicle.use` | Personal/business/commuting use | enum/no | C/y/y/y | routing/c/candidate | New bounded enum | C/S; policy/privacy |
+| `vehicle.make` | Make | scalar/no | C,E/y/y/y | n/c/record | Optional `VehicleAssetDetails` and immutable Claim snapshot member; not a form field | C/S; privacy |
+| `vehicle.model` | Model | scalar/no | C,E/y/y/y | n/c/record | Optional `VehicleAssetDetails` and immutable Claim snapshot member; not a form field | C/S; privacy |
+| `vehicle.year` | Model year | scalar/no | C,E/y/y/y | n/c/record | Optional `VehicleAssetDetails` and immutable Claim snapshot member; not a form field | C/S; privacy |
+| `vehicle.use` | Personal/business/commuting use | enum/no | C/y/y/y | routing/c/candidate | Not implemented; requires an approved bounded enum and consumer contract | C/S; policy/privacy |
 | `vehicle.damage_description` | Visible damage account | scalar/no | C,E/y/y/y | safety/y/registered | Registered; evidence link separate | C/S; privacy |
 | `vehicle.drivable` | Whether the vehicle is safe and able to be driven | boolean/no | C/y/y/y | safety/y/registered | Registered; towing rule gap | C/S; safety |
-| `vehicle.towing_required` | Need for towing | enum/no | C,S/y/y/y | safety/y/candidate | Registry + WorkItem rule | C/S; consent |
-| `vehicle.towing_location` | Safe tow destination/current location | location/no | C/y/y/y | safety/c/candidate | Registry/API; provider task separate | C/S; privacy/consent |
-| `driver.identity` | Driver identity/reference | object/no | C,S/y/y/y | authority/c/candidate | Restricted object + visibility | S; privacy/authority |
-| `driver.relationship` | Driver relationship to policyholder | enum/no | C/y/y/y | authority/c/candidate | Registry/domain/API | C/S; authority |
-| `driver.licence_status` | Bounded licence signal | enum/no | C,E/y/y/y | review/pending/candidate | Restricted field + review boundary | S; privacy/review |
-| `collision.occurred` | Collision branch fact | enum/no | C/y/y/y | routing/y/candidate | Branch registry, not lifecycle | C/S; privacy |
-| `collision.impact_area` | Front/rear/side/other impact | enum/list/yes | C,E/y/y/y | evidence/c/candidate | Registry/list validation | C/S; privacy |
-| `collision.movement` | Direction/manoeuvre at impact | object/no | C/y/y/y | review/c/candidate | Domain object; no liability inference | S; review |
+| `vehicle.towing_required` | Need for towing | enum/no | C,S/y/y/y | safety/y/candidate | Partial: `vehicle.drivable`, mitigation tags, and recovery services exist; no structured towing-required value | C/S; consent |
+| `vehicle.towing_location` | Safe tow destination/current location | location/no | C/y/y/y | safety/c/candidate | Partial: recovery service flow exists; no structured towing-location value | C/S; privacy/consent |
+| `driver.identity` | Driver identity/reference | object/no | C,S/y/y/y | authority/c/candidate | Not implemented as a Claim value; requires a restricted identity and visibility contract | S; privacy/authority |
+| `driver.relationship` | Driver relationship to policyholder | enum/no | C/y/y/y | authority/c/candidate | Not implemented; requires an approved enum and consumer contract | C/S; authority |
+| `driver.licence_status` | Bounded licence signal | enum/no | C,E/y/y/y | review/pending/candidate | Not implemented; requires a restricted value and review boundary | S; privacy/review |
+| `collision.occurred` | Collision branch fact | enum/no | C/y/y/y | routing/y/record | Covered by collision branch evaluation; not a lifecycle or form field | C/S; privacy |
+| `collision.impact_area` | Front/rear/side/other impact | enum/list/yes | C,E/y/y/y | evidence/c/candidate | Not implemented; requires approved values and list validation | C/S; privacy |
+| `collision.movement` | Direction/manoeuvre at impact | object/no | C/y/y/y | review/c/candidate | Not implemented; requires a bounded object without liability inference | S; review |
 | `other_vehicle.identity` | Other vehicle reference/details | object/yes | C,E/y/y/y | provider/pending/record | Bounded `MotorOtherDriverRecord.vehicle_registration`; zero or one per Motor Claim | C/S; privacy |
 | `other_party.contact` | Other party name, phone, and email | object/no | C/y/y/y | external/pending/record | Bounded `MotorOtherDriverRecord`; excluded from model/RAG context | C/S; privacy |
-| `witness.details` | Witness existence/contact | object/yes | C/y/y/y | evidence/pending/candidate | Participant record + consent | S; privacy/consent |
-| `road.conditions` | Surface, intersection, controls | object/no | C,E/y/y/y | review/c/candidate | Registry/domain/API | S; review |
-| `weather.visibility` | Weather, lighting, visibility | object/no | C,E/y/y/y | safety/c/candidate | Registry/domain/API | S; privacy |
-| `authority.police_status` | Police contacted/required/pending | enum/no | C,S/y/y/y | authority/y/candidate | Branch + authority record | C/S; authority |
-| `authority.police_reference` | Police file/reference | scalar/no | C,E/y/y/y | authority/c/registered | Bounded reference only | C/S; privacy/authority |
-| `repairer.details` | Repairer and quote status | object/no | C,S,P/y/y/y | external/pending/candidate | Integration/WorkItem record | S; consent |
+| `witness.details` | Witness existence/contact | object/yes | C/y/y/y | evidence/pending/candidate | Partial: branch evaluation reads this catalogue code, but no registered field or complete participant record contract exists | S; privacy/consent |
+| `road.conditions` | Surface, intersection, controls | object/no | C,E/y/y/y | review/c/candidate | Not implemented; requires a bounded value and review contract | S; review |
+| `weather.visibility` | Weather, lighting, visibility | object/no | C,E/y/y/y | safety/c/candidate | Not implemented; requires a bounded value and consumer contract | S; privacy |
+| `authority.police_status` | Police contacted/required/pending | enum/no | C,S/y/y/y | authority/y/candidate | Partial: Police branch and reference/Evidence handling exist; no unified status value | C/S; authority |
+| `authority.police_reference` | Police file/reference | scalar/no | C,E/y/y/y | authority/c/registered | Catalogue alias for registered `authorities.police_report_reference`; do not add a duplicate code | C/S; privacy/authority |
+| `repairer.details` | Repairer and quote status | object/no | C,S,P/y/y/y | external/pending/candidate | Partial: quote Evidence and integration/WorkItem flows exist; no canonical repairer-details value | S; consent |
 | `motor.evidence_refs` | Vehicle photo/video/estimate refs | list/yes | E,C/y/y/y | evidence/y/record | Evidence API + item links | C/S; privacy |
 
 ## Home field inventory
@@ -154,28 +181,28 @@ make their boundary explicit.
 | Code | Meaning | Type/multi | src/NL/conf/infer | safe/now/status | Current implementation / needed boundary | vis/auth |
 | --- | --- | --- | --- | --- | --- | --- |
 | `property.address` | Insured property address | location/no | C,P/y/y/y | routing/y/registered | Registry + form | C/S; privacy |
-| `property.occupancy_relationship` | Owner, tenant, landlord, other | enum/no | C/y/y/y | authority/c/candidate | Registry/domain/API | C/S; privacy |
-| `property.occupancy` | Occupied, vacant, partial | enum/no | C/y/y/y | safety/c/candidate | Registry/domain/API | C/S; safety |
+| `property.occupancy_relationship` | Owner, tenant, landlord, other | enum/no | C/y/y/y | authority/c/candidate | Not implemented; requires an approved enum and consumer contract | C/S; privacy |
+| `property.occupancy` | Occupied, vacant, partial | enum/no | C/y/y/y | safety/c/candidate | Not implemented; requires an approved enum and consumer contract | C/S; safety |
 | `property.affected_areas` | Rooms, structures, outdoor areas | list/yes | C,E/y/y/y | triage/y/registered | Registered; branch shape gap | C/S; privacy |
-| `property.building_damage` | Structural/building damage | scalar/no | C,E/y/y/y | safety/y/candidate | Registry/domain/API | C/S; safety/review |
-| `property.fixture_damage` | Fixtures and built-ins | list/yes | C,E/y/y/y | safety/c/candidate | Registry/domain/API | C/S; privacy |
-| `property.cause_source` | Water, fire, weather, impact source | enum/scalar/no | C,E/y/y/y | safety/y/candidate | Registry; no coverage inference | C/S; safety |
-| `property.severity` | Bounded extent/severity | enum/no | C,E/y/y/y | safety/c/candidate | Deterministic rules required | C/S; review |
+| `property.building_damage` | Structural/building damage | scalar/no | C,E/y/y/y | safety/y/candidate | Not implemented as a separate value; requires an approved boundary from affected areas and loss description | C/S; safety/review |
+| `property.fixture_damage` | Fixtures and built-ins | list/yes | C,E/y/y/y | safety/c/candidate | Not implemented; requires a bounded list and consumer contract | C/S; privacy |
+| `property.cause_source` | Water, fire, weather, impact source | enum/scalar/no | C,E/y/y/y | safety/y/candidate | Partial: `incident.cause` and home branches exist; no separate property-cause value | C/S; safety |
+| `property.severity` | Bounded extent/severity | enum/no | C,E/y/y/y | safety/c/candidate | Not implemented; deterministic values and rules are not approved | C/S; review |
 | `property.ongoing_risk` | Leak, fire, collapse, exposure | enum/no | C/y/y/y | urgent/y/registered | Registry + home family; may trigger emergency mitigation | C/S; safety |
 | `property.habitable` | Safe/usable to occupy | boolean/no | C,S/y/y/y | support/y/registered | Registry + home family; may trigger accommodation support | C/S; safety/review |
-| `property.utilities` | Power, gas, water, communications | object/no | C/y/y/y | safety/c/candidate | Structured value | C/S; safety |
+| `property.utilities` | Power, gas, water, communications | object/no | C/y/y/y | safety/c/candidate | Not implemented; requires an approved structured value | C/S; safety |
 | `mitigation.emergency_action` | Emergency/mitigation taken | list/yes | C,S,E/y/y/y | safety/y/record | WorkItem/evidence + projection | C/S; consent |
 | `mitigation.temporary_repair` | Temporary repair details | object/yes | C,S,E/y/y/y | safety/pending/record | WorkItem/Integration record | S; consent |
 | `mitigation.contractor` | Contractor identity/work status | object/yes | C,S,P/y/y/y | external/pending/record | Provider/task record | S; consent |
-| `accommodation.required` | Temporary accommodation need | enum/no | C,S/y/y/y | support/y/candidate | Branch + WorkItem | C/S; privacy/consent |
-| `accommodation.details` | Location/occupants/duration | object/no | C/y/y/y | support/pending/candidate | Restricted field/projection | C/S; privacy |
-| `weather.event` | Storm, flood, earthquake, etc. | enum/no | C,E/y/y/y | routing/c/candidate | Branch + evidence link | C/S; safety |
+| `accommodation.required` | Temporary accommodation need | enum/no | C,S/y/y/y | support/y/candidate | Partial: habitability, accommodation branch, and support WorkItem exist; no canonical required value | C/S; privacy/consent |
+| `accommodation.details` | Location/occupants/duration | object/no | C/y/y/y | support/pending/candidate | Partial: accommodation support workflow exists; no structured details value | C/S; privacy |
+| `weather.event` | Storm, flood, earthquake, etc. | enum/no | C,E/y/y/y | routing/c/candidate | Partial: incident type/cause, branches, and Evidence can carry context; no canonical weather-event value | C/S; safety |
 | `home.evidence_refs` | Property photos/invoices/reports | list/yes | E,C/y/y/y | evidence/y/record | Evidence API + area links | C/S; privacy |
 
 ## Contents field inventory
 
-Contents is intentionally explicit: the current registry has almost no contents-specific
-coverage. Repeated item facts belong to item records, not a flat claim form.
+Contents is intentionally explicit: the registry has a bounded contents subset while repeated
+item facts belong to typed item records, not a flat claim form.
 
 | Code | Meaning | Type/multi | src/NL/conf/infer | safe/now/status | Current implementation / needed boundary | vis/auth |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -185,18 +212,18 @@ coverage. Repeated item facts belong to item records, not a flat claim form.
 | `contents.item.quantity` | Count of similar items | scalar/no | C/y/y/y | evidence/c/record | Typed item field with minimum-one validation | C/S; privacy |
 | `contents.item.brand` | Brand | scalar/no | C,E/y/y/y | n/c/record | Optional typed item/assertion/Asset proposal member | C/S; privacy |
 | `contents.item.model` | Model/style | scalar/no | C,E/y/y/y | n/c/record | Optional typed item/assertion/Asset proposal member | C/S; privacy |
-| `contents.item.serial_number` | Serial/unique identifier | scalar/no | C,E/y/y/y | evidence/pending/candidate | Masked restricted field | S; privacy |
+| `contents.item.serial_number` | Serial/unique identifier | scalar/no | C,E/y/y/y | evidence/pending/candidate | Not implemented; requires a restricted storage, masking, and visibility contract | S; privacy |
 | `contents.item.ownership` | Owned, leased, borrowed, gifted, other | enum/no | C,E/y/y/y | authority/c/record | Typed item enum; wider authority rules remain follow-up work | C/S; privacy |
-| `contents.item.purchase_date` | Approximate/exact purchase date | date-time/no | C,E/y/y/y | evidence/pending/candidate | Item schema | C/S; privacy |
-| `contents.item.purchase_source` | Retailer, private sale, gift | enum/scalar/no | C,E/y/y/y | evidence/pending/candidate | Bounded values | C/S; privacy |
+| `contents.item.purchase_date` | Approximate/exact purchase date | date-time/no | C,E/y/y/y | evidence/pending/candidate | Not implemented; requires temporal precision and provenance semantics | C/S; privacy |
+| `contents.item.purchase_source` | Retailer, private sale, gift | enum/scalar/no | C,E/y/y/y | evidence/pending/candidate | Not implemented; requires approved bounded values | C/S; privacy |
 | `contents.item.estimated_value` | Claimant estimate, not settlement value | money/no | C,E/y/y/y | evidence/c/record | Optional currency-qualified money value; not settlement authority | C/S; review |
-| `contents.item.replacement_need` | Replace, repair, substitute | enum/no | C/y/y/y | next action/c/candidate | Item rule + WorkItem | C/S; privacy |
+| `contents.item.replacement_need` | Replace, repair, substitute | enum/no | C/y/y/y | next action/c/candidate | Not implemented; requires approved item and WorkItem semantics | C/S; privacy |
 | `contents.item.loss_type` | Damaged, lost, stolen, destroyed | enum/no | C,E/y/y/y | routing/y/record | Typed item enum; theft conditional behavior remains a separate branch | C/S; authority |
-| `contents.discovery_at` | When loss was discovered | date-time/no | C/y/y/y | safety/c/candidate | Registry/domain field | C/S; privacy |
+| `contents.discovery_at` | When loss was discovered | date-time/no | C/y/y/y | safety/c/registered | Catalogue alias for registered `incident.discovered_at`; do not add a duplicate code | C/S; privacy |
 | `theft.entry_context` | Forced entry/access/unknown | enum/scalar/no | C,E/y/y/y | authority/y/registered | Theft branch; required now; forced_entry, unlocked, unknown, not_applicable | C/S; authority/privacy |
-| `contents.receipt_availability` | Receipt/invoice status | enum/no | C,E/y/y/y | evidence/y/candidate | Evidence projection | C/S; privacy |
+| `contents.receipt_availability` | Receipt/invoice status | enum/no | C,E/y/y/y | evidence/y/record | Covered by receipt Evidence lifecycle/status projection; not a form field | C/S; privacy |
 | `contents.proof_of_ownership` | Ownership evidence references | list/yes | E,C/y/y/y | evidence/c/record | Item/evidence mapping | C/S; privacy |
-| `contents.police_status` | Police status for theft/burglary | enum/no | C,S/y/y/y | authority/y/candidate | Authority record + branch | C/S; authority |
+| `contents.police_status` | Police status for theft/burglary | enum/no | C,S/y/y/y | authority/y/candidate | Partial: theft/Police branches, references, and Evidence exist; no unified status value | C/S; authority |
 | `contents.police_reference` | Police file/reference | text/no | C,E/y/y/y | authority/pending/registered | Optional bounded reference in theft branch | C/S; privacy/authority |
 | `contents.item.evidence_refs` | Item photos/receipts/valuations | list/yes | E,C/y/y/y | evidence/y/record | Immutable item links | C/S; privacy |
 | `contents.item_group` | Similar-item grouping/provenance | record/yes | C,E,Y/y/y/y | evidence/c/record | Group record + provenance | S; privacy |
@@ -461,14 +488,14 @@ merely to make a Dynamic Form table appear complete.
 
 | Area | Current backend | Current API | Current persistence | Needed consumer | Owner candidate |
 | --- | --- | --- | --- | --- | --- |
-| Common subset | 22 executable registered codes; bounded form | Claim, message-turn, form, confirmation, and Dynamic Form projections | Generic `WorkingClaim.form` with assertion history | Agent, claimant, staff | Implemented VP baseline |
+| Common and conditional subset | 28 executable registered codes; bounded form | Claim, message-turn, form, confirmation, and Dynamic Form projections | Generic `WorkingClaim.form` with assertion history | Agent, claimant, staff | Implemented VP baseline |
 | Motor extensions | Registration, damage, drivable state, and common fields | Role-safe Dynamic Form and Claim projections | Generic registered fields | Agent, claimant, staff | Implemented VP baseline |
 | Home extensions | Address, affected areas, ongoing risk, habitability, and common fields | Role-safe Dynamic Form and Claim projections | Generic registered fields | Agent, claimant, staff | Implemented VP baseline |
 | Contents extensions | Typed source-aware item records plus optional brand/model and common fields | Role-safe item, Dynamic Form, confirmation, Claim, and Evidence-link projections | Embedded item/assertion records plus immutable item-to-Evidence associations | Dynamic Form, claimant, staff | Implemented bounded journey baseline |
 | Branch registry | Mutually exclusive families plus registered conditional branches | Embedded versioned Dynamic Form projection; no standalone public branch endpoint | Immutable applied Branch Evaluation history | Agent/runtime/projections | Implemented VP baseline |
 | Required-now projection | Deterministic current-action requirements and next-item selection | `requirements` on Dynamic Form responses | Selection and requirement result retained in Branch Evaluation | Agent, Dynamic Form, UI | Implemented VP baseline |
 | Item/evidence provenance | Evidence API plus same-Claim association validation | Item links on claimant and staff detail | Immutable `ContentsItemEvidenceAssociation` | Evidence, claimant, staff | Implemented bounded journey baseline |
-| Consent/declaration | External consent exists; declaration absent | Route-specific only | Consent record; catalogue scopes absent | Agent/integrations/UI | `liyang6620` + backend owner |
+| Consent/agreement | External consent and Claim agreement acceptance exist as separate records | Route-specific role-safe projections | Consent and agreement acceptance records; catalogue-wide scopes remain absent | Agent/integrations/UI | Implemented bounded records; broader scope remains an open decision |
 | Registry versioning | Constant exists | No publication API | Claim version not retained | Agent/audit/staff | `liyang6620` + Control Plane owner |
 
 ## API/domain/persistence/projection impact
@@ -497,12 +524,14 @@ merely to make a Dynamic Form table appear complete.
 
 ## Current implementation statement
 
-The backend implements a bounded VP baseline for motor, home, and contents. It includes the
-approved executable common and family fields, typed contents items, mutually exclusive family
-selection, conditional branches, deterministic current-action requirements, assertion history,
-role-safe projections, and claim creation for each family. The broader catalogue remains design
-input: a candidate is not implemented until its type, visibility, persistence boundary, Registry
-entry, consumers, and tests are approved together.
+The backend implements a bounded VP baseline for motor, home, and contents. It includes 28
+registered Dynamic Form codes, typed contents items, account Assets and immutable Claim asset
+snapshots, Evidence and agreement records, mutually exclusive family selection, conditional
+branches, deterministic current-action requirements, assertion history, role-safe projections,
+and claim creation for each family. The broader catalogue remains design input: partial support
+does not make a catalogue code executable, and a candidate is not implemented until its type,
+visibility, persistence boundary, registry or typed-record ownership, consumers, and tests are
+approved together.
 
 ## Requested-data inventory and ownership
 
